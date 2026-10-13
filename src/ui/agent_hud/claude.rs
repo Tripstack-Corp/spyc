@@ -4,17 +4,27 @@
 
 use crate::agent::claude_metrics::{Snapshot, ToolStatus};
 
-use super::{AgentRows, Field, HudView, Palette, Row, Tally, short_count, tools_row};
+use ratatui::text::Span;
+
+use super::{AgentRows, Field, HudView, Palette, Reported, Row, Tally, short_count, tools_row};
 
 pub(super) fn rows(
     snapshot: Option<&Snapshot>,
     tail_only: bool,
+    reported: Reported<'_>,
     view: &HudView<'_>,
     p: Palette,
 ) -> AgentRows {
     let Some(s) = snapshot else {
+        let mut usage = p.unavailable(view.availability, "transcript");
+        // Claude Code's own share needs no transcript.
+        if let Some(percent) = reported.context_percent {
+            let share = Field(vec![p.label("--"), Span::raw(" "), p.meter(percent)]);
+            usage.cells.insert(1, share);
+        }
+        usage.cells.extend(plan(reported, p));
         return AgentRows {
-            usage: p.unavailable(view.availability, "transcript"),
+            usage,
             tools: Row::new(vec![
                 Field(vec![p.label("tools")]),
                 Field(vec![p.label("--")]),
@@ -29,7 +39,7 @@ pub(super) fn rows(
     // A read that began part-way through can only have seen fewer.
     let at_least = if tail_only { "≥" } else { "" };
     AgentRows {
-        usage: usage(s, at_least, p),
+        usage: usage(s, at_least, reported, p),
         tools: tools(s, tail_only, p),
         mode: Row::new(vec![
             Field(vec![p.label("agents")]),
@@ -42,12 +52,17 @@ pub(super) fn rows(
     }
 }
 
-fn usage(s: &Snapshot, at_least: &str, p: Palette) -> Row {
+fn usage(s: &Snapshot, at_least: &str, reported: Reported<'_>, p: Palette) -> Row {
     // Occupancy holds until the next request, so an idle session's is current.
-    let context = s
-        .context_tokens
-        .as_ref()
-        .map_or_else(|| p.label("--"), |c| p.strong(&short_count(c.value)));
+    let mut context = vec![
+        s.context_tokens
+            .as_ref()
+            .map_or_else(|| p.label("--"), |c| p.strong(&short_count(c.value))),
+    ];
+    if let Some(percent) = reported.context_percent {
+        context.push(Span::raw(" "));
+        context.push(p.meter(percent));
+    }
     let t = s.totals;
     let sent = t.context();
     let hit = t
@@ -55,9 +70,9 @@ fn usage(s: &Snapshot, at_least: &str, p: Palette) -> Row {
         .saturating_mul(100)
         .checked_div(sent)
         .map_or_else(|| p.label("--"), |pct| p.value(&format!("{pct}%")));
-    Row::new(vec![
-        Field(vec![p.label("context")]),
-        Field(vec![context]),
+    let mut cells = vec![Field(vec![p.label("context")]), Field(context)];
+    cells.extend(plan(reported, p));
+    cells.extend([
         p.pair(
             "out",
             p.value(&format!("{at_least}{}", short_count(t.output))),
@@ -67,7 +82,19 @@ fn usage(s: &Snapshot, at_least: &str, p: Palette) -> Row {
             "compacted",
             p.value(&format!("{at_least}{}", s.compactions)),
         ),
-    ])
+    ]);
+    Row::new(cells)
+}
+
+/// The plan's five-hour and seven-day windows, those Claude Code reported.
+fn plan(reported: Reported<'_>, p: Palette) -> Vec<Field> {
+    let Some(plan) = reported.plan else {
+        return Vec::new();
+    };
+    [("5h", plan.five_hour), ("7d", plan.seven_day)]
+        .into_iter()
+        .filter_map(|(name, window)| Some(p.pair(name, p.meter(window?.used_percent))))
+        .collect()
 }
 
 /// Every tool called since the read began, most called first.
@@ -178,6 +205,7 @@ mod tests {
             metrics: Metrics::Claude {
                 snapshot,
                 tail_only,
+                reported: super::super::Reported::default(),
             },
             availability: snapshot.map(|_| Availability::Available),
             now: Some(at(10)),
@@ -313,6 +341,64 @@ mod tests {
         assert!(
             none[2].contains("0 calls") && none[2].contains("0 failed"),
             "{none:?}"
+        );
+    }
+
+    /// Claude Code's own figures, when its statusline reported them: this
+    /// session's context share beside the token count, then the plan's windows,
+    /// each coloured by how close it is to its limit.
+    #[test]
+    fn reported_shares_follow_the_context_and_are_coloured_by_level() {
+        use crate::agent::claude_statusline::{RateWindow, Statusline};
+        let theme = Theme::default();
+        let snapshot = session();
+        let plan = Statusline {
+            five_hour: Some(RateWindow {
+                used_percent: 23,
+                resets_at: None,
+            }),
+            seven_day: Some(RateWindow {
+                used_percent: 85,
+                resets_at: None,
+            }),
+            ..Statusline::default()
+        };
+        let mut v = view(Some(&snapshot), false);
+        v.metrics = Metrics::Claude {
+            snapshot: Some(&snapshot),
+            tail_only: false,
+            reported: super::super::Reported {
+                context_percent: Some(55),
+                plan: Some(&plan),
+            },
+        };
+        let line = lines(&v, AgentHudMode::Compact, 200, &theme).swap_remove(1);
+        let text = line.to_string();
+        assert!(text.starts_with("context     336.6k 55%"), "{text}");
+        assert!(
+            text.find("5h 23%").unwrap() < text.find("7d 85%").unwrap()
+                && text.find("7d 85%").unwrap() < text.find("out ").unwrap(),
+            "{text}"
+        );
+        let fg = |content: &str| {
+            line.spans
+                .iter()
+                .find(|s| s.content == content)
+                .unwrap()
+                .style
+                .fg
+        };
+        assert_eq!(fg("23%"), Some(theme.diff_add_fg));
+        assert_eq!(fg("55%"), Some(theme.prompt_prefix));
+        assert_eq!(fg("85%"), Some(theme.diff_del_fg));
+        let plain = rows(&view(Some(&snapshot), false), 200);
+        assert!(
+            !plain[1].contains('%') || plain[1].contains("hit "),
+            "{plain:?}"
+        );
+        assert!(
+            !plain[1].contains("5h") && !plain[1].contains("7d"),
+            "nothing reported, nothing shown"
         );
     }
 }

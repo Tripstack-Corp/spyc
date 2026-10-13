@@ -158,6 +158,12 @@ pub enum McpCommand {
     /// entry, rewrote this directory's entry and said so (`spyc/disconnected`).
     /// Nothing this version sends; the TUI tells the user who owns the entry.
     Disconnected { new_pid: u32 },
+    /// What Claude Code's statusline told `spyc --statusline` in a pane: the
+    /// plan's rate-limit windows and the context window. Fire-and-forget.
+    Statusline {
+        pane_id: String,
+        statusline: crate::agent::claude_statusline::Statusline,
+    },
     /// Fire-and-forget telemetry: an agent invoked the named MCP tool. Sent by
     /// the socket dispatch for EVERY `tools/call` (read tools included, which
     /// are otherwise served on the socket thread and never reach the main
@@ -182,6 +188,21 @@ pub enum McpCommand {
     /// unnoticed for days exactly because the drop was silent). `detail` is the
     /// parse error. The reply is ignored.
     MalformedSocketMessage { detail: String },
+}
+
+impl McpCommand {
+    /// A command that only records something: a connection's start or end, a
+    /// tool call's tally, a statusline report, an older spyc's word.
+    pub const fn is_notice(&self) -> bool {
+        matches!(
+            self,
+            Self::Statusline { .. }
+                | Self::Disconnected { .. }
+                | Self::ConnectionInitialized { .. }
+                | Self::ConnectionClosed { .. }
+                | Self::ToolCalled { .. }
+        )
+    }
 }
 
 /// Response sent back to the MCP thread after command execution.

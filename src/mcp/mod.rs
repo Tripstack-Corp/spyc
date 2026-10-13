@@ -133,6 +133,7 @@ mod protocol;
 /// gated by `mcp` being private.
 pub mod readers;
 mod server;
+pub mod statusline;
 mod tool_schemas;
 
 pub use config::{
@@ -277,7 +278,7 @@ fn report_stream(env_sock: &str, pane_id: Option<&str>, cwd: &Path) -> Option<Un
 /// Whether this process runs under codex's shared daemon, whose children
 /// inherit the `SPYC_PANE_ID` of whichever codex started it: an id naming some
 /// other tab, which a report would light or a connection would answer for.
-fn under_codex_shared_daemon() -> bool {
+pub fn under_codex_shared_daemon() -> bool {
     // From the parent: this process's own entry is the likeliest to be
     // unreadable while it starts, and it is never the daemon.
     crate::proc_group::has_ancestor(std::os::unix::process::parent_id(), |_, argv| {

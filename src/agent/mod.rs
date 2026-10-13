@@ -14,6 +14,7 @@
 
 pub mod chrome;
 pub mod claude_metrics;
+pub mod claude_statusline;
 pub mod codex_approval;
 pub mod codex_command;
 pub mod codex_home;

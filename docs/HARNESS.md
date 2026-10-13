@@ -555,7 +555,10 @@ until then it reads `awaiting metrics`. For a local round:
    `○ waiting` with what it waits on at its end.
 4. Check the columns: every row's cells start at the same x, at any pane width,
    and cells drop whole from the right as the pane narrows.
-5. `/clear` or `/resume` changes the reported session, and the strip starts a
+5. With claude wired, send a message: `context` gains a percentage and `5h` /
+   `7d` follow it, matching Claude Code's own statusline; a second Claude tab
+   shows the same plan windows. `:agent hud dump` names their reset times.
+6. `/clear` or `/resume` changes the reported session, and the strip starts a
    fresh generation on the new transcript. `:agent hud info` names each field's
    transcript record and its freshness.
 

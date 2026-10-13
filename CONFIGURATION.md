@@ -125,9 +125,15 @@ no recurring clock. Diagnostics contain source, identity, freshness and bounded
 metric observations, with no prompts, tool arguments or output.
 
 For a Claude Code tab, `context` is what its latest request sent, in tokens:
-input plus prompt-cache reads and writes. It is never a percentage, since the
-transcript has no window size, and after a compaction it reads `--` until the
-next request. `out` is the output of every distinct message since the read
+input plus prompt-cache reads and writes; after a compaction it reads `--` until
+the next request. The transcript has no window size, so a share of the window
+comes only from Claude Code itself: with spyc's statusline wrapper in place
+(below), `context` is followed by Claude Code's own percentage for this
+session, then `5h` and `7d`, the plan's five-hour and seven-day rate-limit
+windows. Those are the account's, so every Claude tab shows the newest any tab
+reported, and the dump names their reset times. A share is green below 50%,
+amber below 80% and red from there; nothing is shown before a report, or for an
+API-key session, which has no plan windows. `out` is the output of every distinct message since the read
 began, `hit` the share of input read from the prompt cache, and `compacted` the
 compactions seen; all three survive a compaction. When a long transcript was
 read from part-way through, these counts carry `≥` and the tools row reads
@@ -137,6 +143,16 @@ then the most recent 64 calls with their times and outcomes. The mode row counts
 subagent (`Agent`) and background calls; Claude Code's own footer already shows
 its permission mode. Only spyc's own MCP server keeps its name in a tool label,
 as `spyc:`; other servers' tools read `mcp`.
+
+Claude Code hands those figures only to its `statusLine` command, so when claude
+is wired (the first-launch `[Y/n]`, or `:hooks on claude`), spyc wraps that
+command: `spyc --statusline` forwards the window size, the shares and the reset
+times to its pane's spyc, then runs the command you had on the same input, so
+your statusline looks as it did. With no statusline configured, spyc's prints
+nothing. `:hooks off claude` puts your command back exactly, and a statusline
+set later is wrapped at the next startup. Each run costs a few milliseconds and
+happens only when Claude Code redraws its line, never at idle unless your
+`statusLine` sets a `refreshInterval`.
 
 The strip reads `projects/*/<session>.jsonl` in Claude Code's configuration
 directory, `$CLAUDE_CONFIG_DIR` or else `~/.claude`, as spyc's own environment

@@ -909,3 +909,109 @@ fn agent_hud_double_click_opens_the_dump_and_a_single_click_does_not() {
         assert!(!drag.iter().any(|e| matches!(e, Effect::SendToPane { .. })));
     });
 }
+
+/// A tab shows its own context share only for its own session, and the plan's
+/// windows from the newest report any tab sent, since the plan is the account's.
+#[test]
+fn statusline_reports_reach_the_strip_and_the_dump() {
+    use crate::agent::claude_statusline::{ContextWindow, RateWindow, Statusline};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (120, 32);
+        app.state.config.mouse.capture = false;
+        app.state.pane.pane_height_pct = 50;
+        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("claude-home"));
+        let older = claude_entry(&mut app, tmp.path(), None);
+        let older_id = older.info.id.clone();
+        app.runtime.pane_tabs = Some(PaneTabs::new(older));
+        let mine = claude_entry(&mut app, tmp.path(), Some(SESSION));
+        let mine_id = mine.info.id.clone();
+        app.runtime.pane_tabs.as_mut().unwrap().push(mine);
+        app.cmd_agent_hud("full");
+        let window = |used_percent| RateWindow {
+            used_percent,
+            resets_at: Some(1_791_900_000),
+        };
+        app.land_statusline(
+            &mine_id,
+            Statusline {
+                session_id: Some(SESSION.into()),
+                context: Some(ContextWindow {
+                    size: 1_000_000,
+                    used_percent: Some(34),
+                }),
+                five_hour: Some(window(10)),
+                seven_day: Some(window(20)),
+            },
+        );
+        app.land_statusline(
+            &older_id,
+            Statusline {
+                five_hour: Some(window(23)),
+                seven_day: Some(window(61)),
+                ..Statusline::default()
+            },
+        );
+        // Explicit times: two landings can share a clock tick.
+        for (id, second) in [(&mine_id, 0), (&older_id, 1)] {
+            let tabs = app.runtime.pane_tabs.as_mut().unwrap();
+            let entry = tabs
+                .tabs_mut()
+                .iter_mut()
+                .find(|e| &e.info.id == id)
+                .unwrap();
+            entry.info.claude_statusline.as_mut().unwrap().1 =
+                Timestamp::from_second(1_791_892_800 + second).unwrap();
+        }
+        app.land_statusline("no-such-pane", Statusline::default());
+        let codex = entry(&mut app, tmp.path(), tmp.path(), "cat");
+        let codex_id = codex.info.id.clone();
+        app.runtime.pane_tabs.as_mut().unwrap().push(codex);
+        app.land_statusline(&codex_id, Statusline::default());
+        let tabs = app.runtime.pane_tabs.as_mut().unwrap();
+        assert!(
+            tabs.active_info().claude_statusline.is_none(),
+            "only a Claude Code tab keeps a report"
+        );
+        tabs.switch_to(1);
+        let rect = app
+            .frame_layout(Rect::new(0, 0, 120, 32))
+            .agent_hud
+            .unwrap();
+        let usage = app.agent_hud_lines(rect)[1].to_string();
+        assert!(usage.contains("34%"), "its own session's share: {usage}");
+        assert!(
+            usage.contains("5h 23%") && usage.contains("7d 61%"),
+            "the newest plan: {usage}"
+        );
+        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        info.live_session_id = Some("c1a0de00-0000-4000-8000-000000000002".into());
+        let usage = app.agent_hud_lines(rect)[1].to_string();
+        assert!(
+            !usage.contains("34%"),
+            "another session's share is not this one's: {usage}"
+        );
+        app.cmd_agent_hud("info");
+        let dump: Vec<String> = app
+            .view
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        for expected in [
+            "statusline (spyc --statusline): reported at",
+            "context window: 1000000 tokens; 34% used",
+            "five-hour: 23% used; resets at",
+            "seven-day: 61% used",
+        ] {
+            assert!(
+                dump.iter().any(|l| l.contains(expected)),
+                "{expected:?} missing from {dump:?}"
+            );
+        }
+    });
+}

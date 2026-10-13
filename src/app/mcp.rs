@@ -184,6 +184,9 @@ impl App {
         cmd: crate::mcp_cmd::McpCommand,
     ) -> crate::mcp_cmd::McpResponse {
         use crate::mcp_cmd::{McpCommand, McpResponse};
+        if cmd.is_notice() {
+            return self.execute_notice(cmd);
+        }
         // Heavy worktree ops (create/remove/clean) go through the shared planner
         // + job. The production drain off-threads them (`spawn_worktree_job`); a
         // direct caller / test runs them synchronously here. Both share
@@ -448,6 +451,49 @@ impl App {
                     message: format!("no pane with id {pane_id} (closed?)"),
                 },
             },
+            // Notices, which `execute_notice` took before this match.
+            McpCommand::Statusline { .. }
+            | McpCommand::Disconnected { .. }
+            | McpCommand::ConnectionInitialized { .. }
+            | McpCommand::ConnectionClosed { .. }
+            | McpCommand::ToolCalled { .. } => McpResponse::Ok {
+                message: "ok".into(),
+            },
+            McpCommand::MalformedSocketMessage { detail } => {
+                // The socket server couldn't frame/parse a message and dropped
+                // it. Surface it — a silent drop hid the bare-newline
+                // report-status framing bug for days — and tally it under
+                // `malformed` in the `A`-overlay / `:activity dump` mcp counts.
+                *self
+                    .view
+                    .activity
+                    .mcp_tool_calls
+                    .entry("malformed".to_string())
+                    .or_insert(0) += 1;
+                self.state.flash_error(format!(
+                    "\u{26a0} MCP: dropped a malformed socket message ({detail}) — see mcp.log"
+                ));
+                McpResponse::Ok {
+                    message: "noted".into(),
+                }
+            }
+        }
+    }
+
+    /// A notice ([`crate::mcp_cmd::McpCommand::is_notice`]): it only records
+    /// something.
+    fn execute_notice(&mut self, cmd: crate::mcp_cmd::McpCommand) -> crate::mcp_cmd::McpResponse {
+        use crate::mcp_cmd::{McpCommand, McpResponse};
+        match cmd {
+            McpCommand::Statusline {
+                pane_id,
+                statusline,
+            } => {
+                self.land_statusline(&pane_id, statusline);
+                McpResponse::Ok {
+                    message: "acknowledged".into(),
+                }
+            }
             // Keep serving: agents this spyc launches still reach it through
             // their pane's env, and the next one it launches rewrites the entry
             // to pin nothing again.
@@ -495,24 +541,9 @@ impl App {
                     message: "ok".into(),
                 }
             }
-            McpCommand::MalformedSocketMessage { detail } => {
-                // The socket server couldn't frame/parse a message and dropped
-                // it. Surface it — a silent drop hid the bare-newline
-                // report-status framing bug for days — and tally it under
-                // `malformed` in the `A`-overlay / `:activity dump` mcp counts.
-                *self
-                    .view
-                    .activity
-                    .mcp_tool_calls
-                    .entry("malformed".to_string())
-                    .or_insert(0) += 1;
-                self.state.flash_error(format!(
-                    "\u{26a0} MCP: dropped a malformed socket message ({detail}) — see mcp.log"
-                ));
-                McpResponse::Ok {
-                    message: "noted".into(),
-                }
-            }
+            _ => McpResponse::Error {
+                message: "not a notice".into(),
+            },
         }
     }
 

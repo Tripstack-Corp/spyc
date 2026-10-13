@@ -68,6 +68,24 @@ impl App {
             .is_some_and(|strip| (strip.y..strip.bottom()).contains(&y))
     }
 
+    /// A statusline report from `pane_id`'s Claude Code. Only a live tab running
+    /// Claude Code keeps one.
+    pub(super) fn land_statusline(
+        &mut self,
+        pane_id: &str,
+        statusline: crate::agent::claude_statusline::Statusline,
+    ) {
+        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            return;
+        };
+        if let Some(entry) = tabs.tabs_mut().iter_mut().find(|e| e.info.id == pane_id)
+            && !entry.pane.is_closed()
+            && entry.info.agent().kind() == AgentKind::Claude
+        {
+            entry.info.claude_statusline = Some((statusline, Timestamp::now()));
+        }
+    }
+
     pub(super) fn active_agent_hud_update(&self) -> Option<&Update> {
         self.state
             .pane
