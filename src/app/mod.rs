@@ -171,6 +171,7 @@ mod startup_commands;
 mod startup_tabs;
 pub mod state;
 mod streaming;
+mod tab_completion;
 mod tasks;
 #[cfg(test)]
 mod test_harness;
