@@ -56,6 +56,13 @@ fn index_zip(archive: &Path, cap: usize) -> Result<Indexed> {
             builder.facts.unsupported_method += 1;
             continue;
         };
+        // Taken first so a dropped member counts as one oddity, not two. zip
+        // reads a non-UTF-8 name as CP437, which maps every byte, so a name it
+        // refuses is one nothing could decode.
+        let Ok(name) = member.name().map(String::from) else {
+            builder.facts.empty_names += 1;
+            continue;
+        };
         let kind = if member.is_dir() {
             ArchiveEntryKind::Dir
         } else if member.is_symlink() {
@@ -87,7 +94,6 @@ fn index_zip(archive: &Path, cap: usize) -> Result<Indexed> {
             locator: Locator::Zip { index: i },
             readable: readable && !member.encrypted(),
         };
-        let name = member.name().to_string();
         drop(member);
         if builder.push(&name, draft) == Pushed::Full {
             break;

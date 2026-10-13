@@ -1398,8 +1398,11 @@ fn an_understated_member_size_does_not_defeat_the_mcp_read_cap() {
     let out = super::readers::read_member_content(&archive.join("big.txt"), &ctx_path, &dir)
         .expect("recognised as a member");
     let err = out.expect_err("300 KB must not come back under a 100 KB cap");
+    // Since zip 9 the crate refuses the lie before the cap can.
     assert!(
-        err.contains("read limit") || err.contains("too large"),
+        err.contains("read limit")
+            || err.contains("too large")
+            || err.contains("declared uncompressed size"),
         "the refusal must name the limit: {err}"
     );
 
