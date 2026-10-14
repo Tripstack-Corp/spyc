@@ -1,9 +1,10 @@
 # Codex Support and Session HUD Plan
 
-**Status:** Track A implementation in progress, delivered through local-build
-acceptance before integration. The new HUD is proposed follow-up scope; its
-design review and telemetry spike remain open. This document does not change
-the accepted release gates.
+**Status:** The core A1–A6 changes and B1–B3 HUD delivery have shipped. Deferred
+native acceptance and remaining A3 onboarding/attention cases stay open.
+Async-question visible attention is implemented with native acceptance pending;
+semantic async-answer events and additional approval forms remain separate gaps.
+Historical assessments below preserve their original evidence and CLI versions.
 
 **Evidence date:** 2026-10-05. Assessment of the release-candidate code and current
 `main`, against the locally installed Codex CLI 0.160.0. These are historical
@@ -635,6 +636,22 @@ Two tracks keep the RC manageable:
   unchanged. Three production regressions and three actual TUI scenarios failed
   against the old implementation; final artifact acceptance is recorded with the
   PR. Native hook execution remains separate from these file-edit tests.
+
+### Async-question visible attention
+
+The visible-attention follow-up recognizes Codex `0.162.1`'s complete default async-question
+editor and collapsed summary through the existing bounded dirty-viewport scan.
+An unanswered visible view requires attention while preserving the latest semantic
+working/done report. Answering, skipping, queuing or native resolution retires
+only the fallback when the view clears; independent semantic blocks and report
+expiry remain intact. No new hook or content-bearing lifecycle store is added.
+
+Exact-version upstream snapshots supply the fixtures. Pure scanner and real-PTY
+App regressions reproduce missing attention and a semantic transition discarding
+an unanswered view. Native CLI capture was attempted twice, but its filesystem
+sandbox helper failed during startup before a question could be shown. Native
+acceptance remains distinct from fixture/replay coverage. Fresh trust onboarding,
+semantic async-answer events and other approval forms remain A3 follow-ups.
 
 ### Baseline
 

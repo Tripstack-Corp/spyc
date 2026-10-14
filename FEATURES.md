@@ -300,7 +300,11 @@ protocol, no image protocols, no OSC 52 clipboard.
     Known command, file-edit, MCP-tool and network forms require their default
     choices and complete footer at the viewport bottom; diagnostics identify
     this `scrape-fallback`. Missing required text and other forms produce no guess. Codex's `Interrupt` hook
-    reports `idle` after cancellation. Its `request_user_input` hooks report
+    reports `idle` after cancellation. Complete default async-question editors
+    and collapsed question summaries also show `blocked` while the tab needs an
+    answer, even if Codex keeps working. Clearing the native view retires that
+    fallback and resumes the latest live report; clipped/customized views are
+    not guessed. Its `request_user_input` hooks report
     `blocked` on start and recover `working` only for the same pending
     pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
     review are separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)

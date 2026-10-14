@@ -625,12 +625,12 @@ impl App {
             {
                 entry.info.reported = None;
             }
-            // Keep Codex's visible approval while preserving its silent-work
-            // report. Other live reports discard guesses so they cannot
-            // resurface stale after expiry.
+            // Retain Codex's current visible wait even behind a semantic block:
+            // a later working/done report need not repaint the unanswered view.
+            // Other agents discard guesses behind live reports.
             if entry.info.reported.is_some()
                 && !crate::agent::codex_approval::overrides_report(
-                    entry.info.reported.as_ref(),
+                    None,
                     entry.info.scrape_status.map(|(status, _)| status),
                     kind,
                 )

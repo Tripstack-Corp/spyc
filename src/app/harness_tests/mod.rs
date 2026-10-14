@@ -469,6 +469,7 @@ mod agent_waiting;
 mod archive;
 mod codex_home;
 mod codex_images;
+mod codex_questions;
 mod focused_column;
 mod history_editor;
 mod jump_default;
