@@ -350,8 +350,11 @@ pub(super) fn clear_blocked_for_input(
     // A new prompt takes over from the background work the agent is waiting
     // on. An interrupt does not: it stops nothing that is running in the
     // background, and that work still wakes the agent.
-    if !input.interrupts_agent() && reported(info, crate::pane::AgentActivity::Waiting) {
-        info.reported = None;
+    if !input.interrupts_agent() {
+        info.held_waiting = None;
+        if reported(info, crate::pane::AgentActivity::Waiting) {
+            info.reported = None;
+        }
     }
     let blocked = |status| status == crate::pane::AgentActivity::Blocked;
     if !question_waiting && reported(info, crate::pane::AgentActivity::Blocked) {

@@ -221,6 +221,13 @@ pub struct TabInfo {
     pub last_reported: Option<ReportedStatus>,
     /// Why the most recent received hook report was not applied, if any.
     pub last_report_ignored: Option<&'static str>,
+    /// A status hook reported the agent's turn starting and not yet ending
+    /// (`agent::waiting::turn_open_after`). Never set for an agent whose
+    /// hooks report no turn start.
+    pub turn_open: bool,
+    /// The agent's own `waiting`, sent while its turn was open: it becomes the
+    /// live report when the turn ends (`agent::waiting::held_for_turn_end`).
+    pub held_waiting: Option<ReportedStatus>,
     /// Bounded reported lifecycle metadata, oldest first. No arguments or
     /// conversation content; reset on spawn, not persisted or proof of trust.
     pub recent_hook_events: std::collections::VecDeque<(
@@ -384,6 +391,8 @@ impl TabInfo {
             reported: None,
             last_reported: None,
             last_report_ignored: None,
+            turn_open: false,
+            held_waiting: None,
             recent_hook_events: std::collections::VecDeque::new(),
             status_hooks_at_spawn: false,
             status_hooks_restart_needed: false,

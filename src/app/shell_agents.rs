@@ -49,6 +49,8 @@ fn forget_agent(info: &mut TabInfo) {
     info.reported = None;
     info.last_reported = None;
     info.last_report_ignored = None;
+    info.turn_open = false;
+    info.held_waiting = None;
     info.recent_hook_events.clear();
     info.scrape_status = None;
     info.scrape_dirty = false;
@@ -282,6 +284,24 @@ mod tests {
             argv: argv.iter().map(|a| (*a).to_string()).collect(),
             started_epoch_secs: started,
         }
+    }
+
+    /// An agent that leaves a shell tab takes its turn with it: a wait it held
+    /// would otherwise take over at the next agent's first turn end.
+    #[test]
+    fn a_departed_agent_leaves_no_open_turn_or_held_wait_behind() {
+        use crate::pane::{AgentActivity, ReportedStatus, tabs::TabInfo};
+        let now = std::time::Instant::now();
+        let mut info = TabInfo::new("zsh", "/tmp");
+        info.turn_open = true;
+        info.held_waiting = Some(ReportedStatus::new(
+            AgentActivity::Waiting,
+            now,
+            now + std::time::Duration::from_secs(60),
+        ));
+        super::forget_agent(&mut info);
+        assert!(!info.turn_open);
+        assert!(info.held_waiting.is_none());
     }
 
     #[test]
