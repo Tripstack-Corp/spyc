@@ -994,7 +994,9 @@ Code pane; `:agent hud full` adds a tools row and a mode row. Every agent shares
 one layout of aligned, coloured columns, led by the tab's own activity dot, its
 session and model, with a `waiting` agent's note at the end of the row. The
 tools row is a summary: every call, every failure, what is running and the
-three most called, each marked for its own failures. Usage scopes stay separate,
+three most called, each marked for its own failures. A Claude Code tab also
+gets a `todo` cell once `TodoWrite` or `TaskCreate`/`TaskUpdate` has reported:
+completed over total, with how many are in progress. Usage scopes stay separate,
 and unavailable context occupancy
 and limits stay explicit. A Claude Code tab's context is a token count, followed
 by Claude Code's own percentage and the plan's five-hour and seven-day usage

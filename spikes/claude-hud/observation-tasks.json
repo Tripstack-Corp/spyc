@@ -1,0 +1,139 @@
+{
+  "probe_version": 1,
+  "coverage": {
+    "file_bytes": 22549351,
+    "bytes_read": 16777216,
+    "tail_only": true,
+    "line_cap_bytes": 262144,
+    "skipped": {}
+  },
+  "records": {
+    "last-prompt": 400,
+    "ai-title": 399,
+    "agent-name": 399,
+    "mode": 399,
+    "permission-mode": 399,
+    "atis-latch": 399,
+    "pr-link": 419,
+    "user": 1189,
+    "attachment": 1463,
+    "assistant": 2237,
+    "system": 150,
+    "file-history-snapshot": 42,
+    "file-history-delta": 20,
+    "queue-operation": 162,
+    "cost-state": 1
+  },
+  "attachments": {
+    "total_tokens_reminder": 969,
+    "task_reminder": 117,
+    "silent_turn_reminder": 61,
+    "deferred_tools_record": 217,
+    "diagnostics": 13,
+    "edited_text_file": 16,
+    "file": 3,
+    "compact_file_reference": 3,
+    "deferred_tools_delta": 6,
+    "agent_listing_delta": 2,
+    "mcp_instructions_delta": 4,
+    "environment": 2,
+    "model": 2,
+    "instructions": 2,
+    "session_context": 2,
+    "date": 3,
+    "credential_org": 2,
+    "remote_session_change": 2,
+    "prompt_snapshot": 4,
+    "thinking_drop": 1,
+    "auto_mode": 2,
+    "queued_command": 30
+  },
+  "system_subtypes": {
+    "stop_hook_summary": 73,
+    "turn_duration": 73,
+    "compact_boundary": 2,
+    "away_summary": 2
+  },
+  "sidechain_records": 0,
+  "window": {
+    "first": "2026-10-12T07:16:58.289000+00:00",
+    "last": "2026-10-13T05:07:21.034000+00:00"
+  },
+  "identity": {
+    "claude_code_version": "2.1.296",
+    "model": "claude-opus-5-5",
+    "requested_model": "claude-opus-5-5",
+    "effort": "xhigh",
+    "permission_mode": "auto",
+    "mode": "normal"
+  },
+  "models": {
+    "claude-opus-5-5": 2237
+  },
+  "usage": {
+    "assistant_records": 2237,
+    "distinct_messages": 1001,
+    "messages_written_more_than_once": 713,
+    "repeats_with_differing_usage": 0,
+    "latest_message": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 2988,
+      "cache_read_input_tokens": 588571,
+      "output_tokens": 447
+    },
+    "latest_context_tokens": 591561,
+    "distinct_message_totals": {
+      "input_tokens": 2066,
+      "cache_creation_input_tokens": 3146017,
+      "cache_read_input_tokens": 507198522,
+      "output_tokens": 1045716
+    }
+  },
+  "stop_reasons": {
+    "tool_use": 2134,
+    "end_turn": 103
+  },
+  "context_management_records": 0,
+  "tools": {
+    "Bash": 843,
+    "mcp:spyc": 109,
+    "ToolSearch": 6,
+    "TaskCreate": 22,
+    "TaskUpdate": 42,
+    "Write": 13,
+    "Read": 14,
+    "Edit": 13,
+    "AskUserQuestion": 6,
+    "Agent": 3,
+    "Monitor": 22
+  },
+  "background_tool_calls": {
+    "Bash": 18
+  },
+  "tool_result_task_keys": {
+    "task": 22,
+    "taskId": 64,
+    "backgroundTaskId": 21,
+    "backgroundCwdHint": 6
+  },
+  "subagent_types": {
+    "Explore": 1,
+    "general-purpose": 1,
+    "Plan": 1
+  },
+  "latest_todos": null,
+  "task_events": {
+    "created": 22,
+    "pending->in_progress": 20,
+    "in_progress->completed": 20,
+    "pending->completed": 1
+  },
+  "compaction": {
+    "summaries": 2,
+    "latest_boundary": {
+      "trigger": "manual",
+      "pre_tokens": 956026,
+      "timestamp": "2026-10-12T19:43:46.981000+00:00"
+    }
+  }
+}

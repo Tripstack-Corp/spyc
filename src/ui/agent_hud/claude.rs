@@ -2,7 +2,7 @@
 //! transcript carries no window size, and the statusline input that does is
 //! the user's.
 
-use crate::agent::claude_metrics::{Snapshot, ToolStatus};
+use crate::agent::claude_metrics::{Plan, Sample, Snapshot, ToolStatus};
 
 use ratatui::text::Span;
 
@@ -41,15 +41,47 @@ pub(super) fn rows(
     AgentRows {
         usage: usage(s, at_least, reported, p),
         tools: tools(s, tail_only, p),
-        mode: Row::new(vec![
-            Field(vec![p.label("agents")]),
-            Field(vec![p.strong(&format!("{at_least}{}", s.subagent_calls))]),
-            p.pair(
-                "background",
-                p.value(&format!("{at_least}{}", s.background_calls)),
-            ),
-        ]),
+        mode: mode_row(s, at_least, p),
     }
+}
+
+fn mode_row(s: &Snapshot, at_least: &str, p: Palette) -> Row {
+    let mut cells = vec![
+        Field(vec![p.label("agents")]),
+        Field(vec![p.strong(&format!("{at_least}{}", s.subagent_calls))]),
+        p.pair(
+            "background",
+            p.value(&format!("{at_least}{}", s.background_calls)),
+        ),
+    ];
+    if let Some(cell) = todo_cell(s.plan.as_ref(), at_least, p) {
+        cells.push(cell);
+    }
+    Row::new(cells)
+}
+
+/// `TodoWrite`'s list, or `TaskCreate`/`TaskUpdate`'s tasks — named `todo`, not
+/// `plan`, since that already names the account's rate-limit windows here.
+/// Omitted, not `--`, until one has been seen: most sessions use neither tool.
+fn todo_cell(plan: Option<&Sample<Plan>>, at_least: &str, p: Palette) -> Option<Field> {
+    let plan = &plan?.value;
+    let total = plan
+        .pending
+        .saturating_add(plan.in_progress)
+        .saturating_add(plan.completed);
+    if total == 0 {
+        return None;
+    }
+    let mut field = p.pair(
+        "todo",
+        p.strong(&format!("{at_least}{}/{total}", plan.completed)),
+    );
+    if plan.in_progress > 0 {
+        field
+            .0
+            .push(p.label(&format!(" ({} active)", plan.in_progress)));
+    }
+    Some(field)
 }
 
 fn usage(s: &Snapshot, at_least: &str, reported: Reported<'_>, p: Palette) -> Row {
@@ -133,7 +165,7 @@ mod tests {
 
     use super::super::{Hooks, HudView, Metrics, lines};
     use crate::agent::claude_metrics::{
-        Availability, Compaction, Mode, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage,
+        Availability, Compaction, Mode, Plan, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage,
     };
     use crate::config::AgentHudMode;
     use crate::ui::theme::Theme;
@@ -290,6 +322,34 @@ mod tests {
         assert!(!model_style(&late).add_modifier.contains(Modifier::DIM));
         late.now = Some(at(62));
         assert!(model_style(&late).add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn the_todo_cell_shows_completed_over_total_and_in_progress_when_any() {
+        let mut snapshot = session();
+        snapshot.plan = Some(Sample {
+            at: at(1),
+            value: Plan {
+                pending: 1,
+                in_progress: 2,
+                completed: 4,
+            },
+        });
+        let full = rows(&view(Some(&snapshot), false), 200);
+        assert!(full[3].contains("todo 4/7 (2 active)"), "{full:?}");
+        snapshot.plan.as_mut().unwrap().value.in_progress = 0;
+        let idle = rows(&view(Some(&snapshot), false), 200);
+        assert!(
+            idle[3].contains("todo 4/5") && !idle[3].contains("active"),
+            "{idle:?}"
+        );
+        snapshot.plan.as_mut().unwrap().value = Plan::default();
+        let empty = rows(&view(Some(&snapshot), false), 200);
+        assert!(
+            !empty[3].contains("todo"),
+            "nothing reported is omitted, not shown as --: {empty:?}"
+        );
+        assert!(!rows(&view(None, false), 200)[3].contains("todo"));
     }
 
     #[test]

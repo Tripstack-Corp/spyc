@@ -32,6 +32,16 @@ class ProbeTests(unittest.TestCase):
             {"type": "user", "sessionId": SESSION, "cwd": "/PRIVATE_PATH_SENTINEL",
              "message": {"role": "user", "content": "PRIVATE_PROMPT_SENTINEL"},
              "toolUseResult": {"stdout": "PRIVATE_OUTPUT_SENTINEL", "backgroundTaskId": "PRIVATE_ID_SENTINEL"}},
+            {"type": "user", "sessionId": SESSION,
+             "toolUseResult": {"task": {"id": "9", "subject": "PRIVATE_SUBJECT_SENTINEL",
+                                        "description": "PRIVATE_DESC_SENTINEL"}}},
+            {"type": "user", "sessionId": SESSION,
+             "toolUseResult": {"success": True, "taskId": "9", "updatedFields": ["status"],
+                               "statusChange": {"from": "pending", "to": "in_progress"}}},
+            # Monitor's own result also carries a `taskId` (a background-job id,
+            # unrelated), but no `task.id` object or `from`/`to` pair.
+            {"type": "user", "sessionId": SESSION,
+             "toolUseResult": {"taskId": "PRIVATE_JOB_ID_SENTINEL", "timeoutMs": 600000, "persistent": False}},
             assistant(content=[
                 {"type": "thinking", "thinking": "PRIVATE_REASONING_SENTINEL"},
                 {"type": "text", "text": "PRIVATE_RESPONSE_SENTINEL"},
@@ -57,7 +67,10 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(output["background_tool_calls"], {"Bash": 1})
         self.assertEqual(output["latest_todos"], {"pending": 0, "in_progress": 1, "completed": 1})
         self.assertEqual(output["subagent_types"], {"general-purpose": 1})
-        self.assertEqual(output["tool_result_task_keys"], {"backgroundTaskId": 1})
+        self.assertEqual(
+            output["tool_result_task_keys"], {"backgroundTaskId": 1, "task": 1, "taskId": 2}
+        )
+        self.assertEqual(output["task_events"], {"created": 1, "pending->in_progress": 1})
         self.assertEqual(output["compaction"]["latest_boundary"]["pre_tokens"], 190000)
 
     def test_a_message_written_once_per_block_counts_once(self):

@@ -12,9 +12,11 @@ and prints only counts, token numbers and short labels. It never searches
 arguments and results, paths, ids and the names of MCP servers other than
 spyc's. [`observation.json`](observation.json) is its output for one transcript
 from Claude Code `2.1.291`, observed 2026-10-13: 591 assistant records over
-nine hours, one auto-compaction, four background shell commands. The hook
-fields below come from the hook-input schema compiled into Claude Code
-`2.1.296`.
+nine hours, one auto-compaction, four background shell commands.
+[`observation-tasks.json`](observation-tasks.json) is a second transcript, from
+`2.1.296`, that used the plan/subagent tools the first never touched: 22
+`TaskCreate` and 42 `TaskUpdate` calls, 3 `Agent` calls. The hook fields below
+come from the hook-input schema compiled into Claude Code `2.1.296`.
 
 ```sh
 python3 -I spikes/claude-hud/probe.py TRANSCRIPT --session SESSION_ID
@@ -31,8 +33,8 @@ python3 -m unittest discover -s spikes/claude-hud -p test_probe.py
 | Context occupancy | The latest message's input + cache creation + cache read: 441,725 tokens, just before the compaction, which no request followed. The boundary's `preTokens` (442,230) is that sum plus the message's 505 output tokens, so Claude Code's own count agrees with the arithmetic. The transcript has no window size, and a 1M window would not have compacted at 442k. | Forget the size at a compaction until the next request. Show `Context --` until a percentage is checked against `/context`: the window size lives in the statusline's input, which is the user's, not spyc's. |
 | Permission mode | A `permission-mode` record per turn (`auto`), and `permission_mode` in every hook payload. | Latest record; display only. |
 | Tools | `tool_use` blocks by name, with their results in the following user record. | Bounded counts. Collapse MCP tool names, which can name private servers. |
-| Plan | `TodoWrite`'s `todos[].status`. `2.1.296` also ships `TaskCreate`, `TaskUpdate` and `TaskList`. Neither appears in this transcript. | Unverified: omit the row until a transcript with one of them is probed. |
-| Subagents | The `Agent` tool's `subagent_type`, and `isSidechain` records. None in this transcript. | Count `Agent` calls, never parallel tool calls. |
+| Plan | `TodoWrite`'s `todos[].status` (first transcript: unused). The second transcript used `2.1.296`'s `TaskCreate`/`TaskUpdate`/`TaskList` instead: `TaskCreate`'s result carries `{task: {id, subject, ...}}`; `TaskUpdate`'s carries `{success, taskId, statusChange: {from, to}}`, naming the exact transition. `TaskList` was declared available but never called. Both tools share `TodoWrite`'s three-state enum (`TaskList`'s own description names it); no other value was observed, and the only *skipped* transition (`description`-only, no `status`) carried no `statusChange`. | Accumulate `created` as `pending`, each `statusChange` as `decrement(from)`, `increment(to)`, saturating. Never read `subject`/`description` — a transition's own `from`/`to` is enough. A result named `taskId` isn't always this family's: `Monitor`'s result also has one (an unrelated background-job id), with neither `task.id` nor a `from`/`to` pair, so matching on shape rather than the calling tool's name doesn't confuse them. |
+| Subagents | The `Agent` tool's `subagent_type`, and `isSidechain` records. None in the first transcript; the second's 3 `Agent` calls (`Explore`, `general-purpose`, `Plan`) confirm the existing `subagent_calls` counter, unchanged by this probe. | Count `Agent` calls, never parallel tool calls. |
 | Background work | `run_in_background` on a `Bash` call (4), with `backgroundTaskId` in its result. At a turn end, the `Stop` hook's `background_tasks` and `session_crons` lists. | The tab's `waiting` state comes from the hook (#645). The transcript only adds counts. |
 | Compaction | A `system` record of subtype `compact_boundary`, whose `compactMetadata` carries `trigger` (`auto`) and `preTokens`, then one `isCompactSummary` user record. | Invalidate occupancy at the boundary; keep lifetime totals. |
 | Turn timing | `system` records of subtype `turn_duration` (9) and `stop_hook_summary` (9). | Possible source for elapsed time; not yet inspected. |
@@ -61,4 +63,3 @@ Not HUD sources, though they look like it:
   442k suggests the window, or the compaction threshold, is not the 1M the
   model documentation lists. Compare the reducer's occupancy with `/context` on
   a live session before showing a percentage.
-- The plan and subagent rows, which need a transcript that has them.

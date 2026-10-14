@@ -302,10 +302,18 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
             )
         },
     ));
-    out.push(
-        "plan: not shown; no transcript with TodoWrite or the Task tools has been probed"
-            .to_owned(),
-    );
+    out.push(s.plan.as_ref().map_or_else(
+        || "plan (TodoWrite's todos, or TaskCreate/TaskUpdate's tasks): --".to_owned(),
+        |plan| {
+            format!(
+                "plan (TodoWrite's todos, or TaskCreate/TaskUpdate's tasks): {} pending; {} in progress; {} completed; {}",
+                plan.value.pending,
+                plan.value.in_progress,
+                plan.value.completed,
+                claude_freshness(plan, now)
+            )
+        },
+    ));
     out.push(format!(
         "subagent calls (Agent tool): {}; background calls (run_in_background): {}",
         s.subagent_calls, s.background_calls
@@ -424,6 +432,39 @@ fn claude_freshness<T>(sample: &claude_metrics::Sample<T>, now: Timestamp) -> St
 mod tests {
     use super::*;
     use crate::agent::claude_metrics::{Snapshot, Tool, ToolCount, ToolStatus};
+
+    /// The plan line names its two possible sources and says when nothing has
+    /// been reported, rather than claiming it was probed and found absent.
+    #[test]
+    fn the_dump_names_the_plans_source_and_freshness() {
+        let at: Timestamp = "2026-10-13T12:00:00Z".parse().unwrap();
+        let now = at.checked_add(std::time::Duration::from_secs(90)).unwrap();
+        let unreported = claude_lines(&Snapshot::default(), false, now);
+        assert!(
+            unreported
+                .iter()
+                .any(|l| l == "plan (TodoWrite's todos, or TaskCreate/TaskUpdate's tasks): --")
+        );
+        let snapshot = Snapshot {
+            plan: Some(claude_metrics::Sample {
+                at,
+                value: claude_metrics::Plan {
+                    pending: 1,
+                    in_progress: 2,
+                    completed: 4,
+                },
+            }),
+            ..Snapshot::default()
+        };
+        let reported = claude_lines(&snapshot, false, now);
+        assert!(reported.iter().any(|l| {
+            l.starts_with("plan (TodoWrite's todos, or TaskCreate/TaskUpdate's tasks): ")
+                && l.contains("1 pending")
+                && l.contains("2 in progress")
+                && l.contains("4 completed")
+                && l.contains("stale")
+        }));
+    }
 
     /// The dump names every tool counted, not only the recent calls the HUD
     /// keeps, and says whether the tally is the whole session.
