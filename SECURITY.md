@@ -236,8 +236,10 @@ What we do about it:
   before emitting a single link flag. A mismatch fails the build with both
   hashes printed. Verified by tampering with a byte, not by assuming.
 * **Reproducible by anyone.** `make vendor-ghostty` rebuilds all five from the
-  pinned source with a pinned Zig version and rewrites the checksums, so a third
-  party can confirm the committed bytes are what the pinned source produces.
+  pinned source with a pinned Zig version (ziglang.org's build of it) and
+  rewrites the checksums, so a third party can confirm the committed bytes are
+  what the pinned source produces. CI does exactly that before every release,
+  and the release is not published unless the bytes match.
 * **The alternative was worse.** The published `libghostty-vt-sys` bindings
   `git clone` ghostty *at build time* and run `zig build`. That fetches code
   from a URL during `cargo build`, is invisible to `cargo vendor` and

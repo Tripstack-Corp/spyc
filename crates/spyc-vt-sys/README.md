@@ -62,6 +62,22 @@ build fails with a message that says so.
 make vendor-ghostty              # needs zig 0.16.0 (see REQUIRED_ZIG)
 ```
 
+Use [ziglang.org's build](https://ziglang.org/download/) of that version, which
+is what CI installs. Another build of the same version number can compile
+different code. The script also uses a private global zig cache, because zig
+keys its cache on the version string: a shared cache would hand this build
+objects an earlier, different zig build made.
+
+The rebuild is byte-for-byte reproducible on any host, which the
+[`Vendored archives`](../../.github/workflows/vendored-archives.yml) workflow
+checks on every tag and on any PR that touches the archives, the pin or the
+recipe. What zig emits is not reproducible as it stands: a Linux archive names
+each member by its absolute path in the build cache, and a darwin one's symbol
+table records the build time and the builder's uid/gid. The objects inside are
+identical across runs, paths and caches, so the script re-archives the same
+members, in the same order, under their basenames, with this zig's own `ar` in
+deterministic mode.
+
 Zig cross-compiles all five from one host. The recipe uses `ReleaseSmall`,
 which is the size lever; it does **not** strip, because at `ReleaseSmall` the
 archives carry no debug sections and a strip step measurably changes nothing.
