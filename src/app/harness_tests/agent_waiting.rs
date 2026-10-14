@@ -174,6 +174,79 @@ fn a_self_reported_wait_outlasts_its_own_turn_end_but_not_the_next() {
     });
 }
 
+/// `waiting` is how a turn ends. Reported mid-turn (an agent starting a
+/// background watch and carrying on), the agent is still working: the dot
+/// says so until the turn ends, and the wait shows from then, in the agent's
+/// words. Claude Code's `Stop` names the pending work; codex's can't.
+#[test]
+#[ignore = "red: a waiting reported mid-turn shows at once while the agent keeps working"]
+fn a_wait_reported_mid_turn_shows_working_until_the_turn_ends() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for (name, turn_end_state, turn_end) in [
+            (
+                "claude",
+                "waiting",
+                json!({"hook_event_name":"Stop", "background_tasks":1, "session_crons":0}),
+            ),
+            (
+                "codex",
+                "done",
+                json!({"hook_event_name":"Stop", "turn_id":"turn-1"}),
+            ),
+        ] {
+            let mut app = agent_app(tmp.path(), name);
+            hook(
+                &mut app,
+                "working",
+                &json!({"hook_event_name":"UserPromptSubmit"}),
+            );
+            agent(&mut app, "waiting", Some("release run"), None);
+            assert_eq!(
+                settle(&mut app, Instant::now()),
+                (AgentActivity::Working, false),
+                "{name}: the turn is still going"
+            );
+
+            hook(&mut app, turn_end_state, &turn_end);
+            assert_eq!(
+                settle(&mut app, Instant::now()),
+                (AgentActivity::Waiting, false),
+                "{name}: the turn ended waiting"
+            );
+            assert_eq!(
+                reported(&app).unwrap().note.as_deref(),
+                Some("release run"),
+                "{name}"
+            );
+        }
+    });
+}
+
+/// A wait held for its turn's end is visible in the diagnostics, so a working
+/// dot doesn't hide that the agent said it will wait.
+#[test]
+#[ignore = "red: a waiting reported mid-turn is applied, not held"]
+fn diagnostics_name_a_wait_held_for_its_turn_end() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "claude");
+        hook(
+            &mut app,
+            "working",
+            &json!({"hook_event_name":"UserPromptSubmit"}),
+        );
+        agent(&mut app, "waiting", Some("release run"), None);
+        settle(&mut app, Instant::now());
+        let why = why_status(&mut app);
+        assert!(
+            why.contains("not applied: held until this turn ends"),
+            "{why}"
+        );
+        assert!(why.contains("release run"), "{why}");
+    });
+}
+
 /// A CI run outlasts the five-minute cap on other reports, so `waiting` holds
 /// for an hour; past that the agent has missed a re-report, and timing takes
 /// over. A larger request is clamped to the hour, and the others keep theirs.
