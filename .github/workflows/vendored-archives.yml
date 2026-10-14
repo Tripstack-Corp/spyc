@@ -1,0 +1,71 @@
+# spyc-vt-sys's vendored libghostty-vt archives must be what the pinned ghostty
+# source produces. This rebuilds all five and compares checksums.
+#
+# The archives are committed so `cargo install spyc` needs no Zig, which means
+# the only thing standing behind SECURITY.md's "reproducible by anyone" claim
+# is something actually reproducing them: this workflow.
+#
+# Runs:
+#   - from release.yml (`workflow_call`), gating the GitHub release;
+#   - on a PR that touches the archives, the pin or the recipe, so a change
+#     proves itself before any tag does;
+#   - on demand (`workflow_dispatch`).
+# It takes ~10 minutes, which is why it isn't on every PR.
+name: Vendored archives
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/spyc-vt-sys/vendor/**"
+      - "crates/spyc-vt-sys/src/pin.rs"
+      - "crates/spyc-vt-sys/REQUIRED_ZIG"
+      - "scripts/vendor-ghostty.sh"
+      - "scripts/vendor-ghostty-container.sh"
+      - "Makefile"
+      - ".github/workflows/vendored-archives.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: Verify vendored libghostty-vt archives reproduce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # NOTE this is a DIFFERENT zig from the one release.yml's `linux` job pins.
+      # That one is cargo-zigbuild's cross-linker (0.14.0). This one must match
+      # ghostty's `requireZig` at our pin EXACTLY — it compares major.minor for
+      # equality, so a newer zig is rejected, not tolerated. The two uses are
+      # independent and neither version constrains the other.
+      - name: Read the required zig version from the pin
+        id: zig
+        run: echo "version=$(cat crates/spyc-vt-sys/REQUIRED_ZIG)" >> "$GITHUB_OUTPUT"
+      # setup-zig installs ziglang.org's build of that version, the one the
+      # committed archives are made with. No cache: the recipe uses a private
+      # global cache, so a restored one would only be saved again unused.
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.zig.outputs.version }}
+          use-cache: false
+      - name: Rebuild from the pinned source and compare checksums
+        run: |
+          cp crates/spyc-vt-sys/vendor/CHECKSUMS /tmp/CHECKSUMS.committed
+          make vendor-ghostty
+          if ! diff -u /tmp/CHECKSUMS.committed crates/spyc-vt-sys/vendor/CHECKSUMS; then
+            echo "::error::the committed archives are not what the pinned ghostty source produces"
+            echo 'Either the pin moved without running: make vendor-ghostty'
+            echo 'or the committed archives were built some other way.'
+            exit 1
+          fi
+          echo "committed archives reproduce from the pin"
+      # The archives this run built, matching or not: on a mismatch, these are
+      # the canonical bytes to commit.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vendored-archives
+          path: crates/spyc-vt-sys/vendor/
+          if-no-files-found: error

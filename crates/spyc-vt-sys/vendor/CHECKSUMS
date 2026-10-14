@@ -1,5 +1,5 @@
-9274d97374cd028a1af6cd282528419ae97c5a4b4474b59069b91b8e1891218d  ./aarch64-apple-darwin/libghostty-vt.a
-c66c81c99db1412aea81d873981a1129c1831d5159b30d51862ea74d1e6a3f61  ./aarch64-unknown-linux-musl/libghostty-vt.a
-a132421fd9cdf6e614bb491523d4e10e03b2a42a43ddb8968d4494f2996bbe1e  ./x86_64-apple-darwin/libghostty-vt.a
-dc23759dcd9a2b0f310ec842545c969e6e6ee18d42a8d28a62cea38ea1367baa  ./x86_64-unknown-linux-gnu/libghostty-vt.a
-c34fa737af76db5ffb619314e4a1006152201741d42e4417c8b5042e386f792c  ./x86_64-unknown-linux-musl/libghostty-vt.a
+4fd6d8db8b2c639af022e081f4400449adfbe19e367283c477c80891905ccaac  ./aarch64-apple-darwin/libghostty-vt.a
+4f443a75d356811fe9346d24d3a4699a1547ba70abebe86ccb891fff910ba0ab  ./aarch64-unknown-linux-musl/libghostty-vt.a
+3d8abeb52854ba9108feeb26d8affa875f0b5ecfb0946552e22000d999d5eb43  ./x86_64-apple-darwin/libghostty-vt.a
+3cb575558a59ce08cd33494611ec3f1d6d47e1fc6170e62dd4750587cb26ac0d  ./x86_64-unknown-linux-gnu/libghostty-vt.a
+cda3c6629b48220ab8b9f4a2e77fb474e116cc6c5498f306393f572fb7aad42b  ./x86_64-unknown-linux-musl/libghostty-vt.a

@@ -136,7 +136,12 @@ vendor-ghostty: ## Rebuild spyc-vt-sys's vendored libghostty-vt archives at the 
 	@# Out-of-band on purpose: the archives are committed so that `cargo install
 	@# spyc` needs no Zig, no network and no git for this crate. Run this only on
 	@# a deliberate pin bump, and follow it with the full harness re-run that
-	@# `spyc-vt-sys/src/pin.rs` (BUMP_POLICY) describes.
+	@# `spyc-vt-sys/src/pin.rs` (BUMP_POLICY) describes. Linux only: see
+	@# `vendor-ghostty-container` for a Mac.
+	@if [ "$$(uname -s)" != Linux ]; then \
+		echo "build the archives on Linux; from a Mac: make vendor-ghostty-container"; \
+		exit 1; \
+	fi
 	@command -v zig >/dev/null 2>&1 || { \
 		echo "zig not found. The pin needs exactly zig $$(cat crates/spyc-vt-sys/REQUIRED_ZIG)"; \
 		echo "  ghostty's requireZig compares major.minor for EQUALITY, not as a floor."; \
@@ -149,6 +154,10 @@ vendor-ghostty: ## Rebuild spyc-vt-sys's vendored libghostty-vt archives at the 
 		exit 1; \
 	fi
 	scripts/vendor-ghostty.sh
+
+.PHONY: vendor-ghostty-container
+vendor-ghostty-container: ## Run vendor-ghostty in a Linux container (podman or docker), e.g. from a Mac
+	scripts/vendor-ghostty-container.sh
 
 .PHONY: deny
 deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)

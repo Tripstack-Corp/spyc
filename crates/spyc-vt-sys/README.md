@@ -59,8 +59,32 @@ build fails with a message that says so.
 ## Rebuilding the archives
 
 ```sh
-make vendor-ghostty              # needs zig 0.16.0 (see REQUIRED_ZIG)
+make vendor-ghostty              # on Linux; needs zig 0.16.0 (see REQUIRED_ZIG)
+make vendor-ghostty-container    # from a Mac: the same, in a podman/docker container
 ```
+
+**Build on Linux.** On a macOS host ghostty's build compiles the darwin targets
+against the installed Xcode SDK, so those archives would follow whatever Xcode
+is installed. From Linux it uses zig's bundled Darwin headers, which the pinned
+zig fixes, and any Linux host, arm64 or x86_64, builds the same five archives.
+`make vendor-ghostty` refuses to run anywhere else.
+
+Use [ziglang.org's build](https://ziglang.org/download/) of that version, which
+is what CI and the container target install. Another build of the same version
+number can compile different code. The script also uses a private global zig
+cache, because zig keys its cache on the version string: a shared cache would
+hand this build objects an earlier, different zig build made.
+
+The result is byte-for-byte reproducible, which the
+[`Vendored archives`](../../.github/workflows/vendored-archives.yml) workflow
+checks on every tag and on any PR that touches the archives, the pin or the
+recipe; it uploads the archives it built, so a mismatch hands over the bytes to
+commit. What zig emits is not reproducible as it stands: a Linux archive names
+each member by its absolute path in the build cache, and a darwin one's symbol
+table records the build time and the builder's uid/gid. The objects inside are
+identical across runs, paths and caches, so the script re-archives the same
+members, in the same order, under their basenames, with this zig's own `ar` in
+deterministic mode.
 
 Zig cross-compiles all five from one host. The recipe uses `ReleaseSmall`,
 which is the size lever; it does **not** strip, because at `ReleaseSmall` the
