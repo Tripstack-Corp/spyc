@@ -376,15 +376,50 @@ Real-CLI native question and quiet-after-answer checks passed through the
 automated TUI harness with already trusted hooks. Fresh hook trust onboarding
 remains a separate acceptance case.
 
-`request_user_input_async` is a separate question path. Its immediate completion
-acknowledges posting a question; it does not establish that the user answered.
-These native question hooks do not instrument that path. The
-[`0.160.1` async handler](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
-posts an async message and immediately returns `accepted`; the
-[TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
-handles the answer as a later user message. A blocked latch tied to the tool's
-completion would misrepresent an agent that continues working. Async-answer
-lifecycle coverage remains open in A3.
+`request_user_input_async` posts a question and returns immediately; its tool
+completion does not establish that the user answered. The
+[`0.162.1` async handler](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+and [question editor](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/tui/src/bottom_pane/async_questions/state.rs)
+keep posting, local answer delivery, skipping and native resolution separate.
+
+spyc recognizes the default native question editor's complete submit/skip/navigation
+footer, or its collapsed positive question count and answer hint, at the current
+viewport bottom. The dot reads `blocked` with `awaiting async question answer`;
+this means the tab needs you, even while Codex continues working. `:why-status`
+and `:activity dump` label the source `scrape-fallback`. The latest semantic report
+remains stored and resumes when the native view clears. An independent semantic
+block keeps precedence and is not retired by a disappearing async view. Expired
+reports are not revived, and another pane's view cannot supply attention.
+
+This follows visible attention, not semantic proof of an answer. Native skipping,
+queued answers, follow-up input, turn completion or auto-resolution can clear the
+view. Quoted history above the composer, clipped views and customized shortcut
+labels produce no guess. The existing dirty-viewport scan supplies the bounded
+delay; no new hook, question-content store or idle polling is added. Exact-version
+[fixture provenance](../tests/fixtures/codex-questions/README.md) and controlled
+PTY tests are separate from native CLI acceptance.
+
+For an async-attention test, stay in Default mode and ask Codex to post two
+`request_user_input_async` questions, then continue with a quiet `sleep 30`.
+While the complete question view is visible, check the red dot and
+`awaiting async question answer` in `:why-status`. Collapse and reopen the default
+question editor; answer or skip one question and check the remaining one still
+needs attention. After the last native view clears, the latest live semantic
+status resumes. Repeat in two tabs: clearing one leaves the other waiting.
+A customized/clipped editor or native auto-resolution is a separate case; no
+semantic answer claim is made from a disappearing view.
+
+The controlled terminal replay uses exact-version fixtures and pane-bound MCP
+reports, not native Codex or hook trust:
+
+```sh
+python3 scripts/codex-async-question-smoke.py --binary /absolute/path/to/spyc --output /tmp/spyc-async-question-run
+```
+
+It checks expanded/collapsed views, a semantic report transition without a child
+repaint, two-pane isolation, restoration of working/done and zero idle draws.
+Every run uses a new named Ghostty session and private home/state, closes only
+that session, and saves the binary hash, captures and result.
 
 For a native-hook test, restart Codex after any restart-needed diagnostic and
 review the new hooks in `/hooks`. Enter `/plan` as an actual CLI slash command

@@ -1,4 +1,4 @@
-//! Human-approval fallback for Codex's uncorrelated permission hook.
+//! Visible human waits in Codex: approval modals and async-question views.
 
 use super::detect_rules::{DetectionRule, Matcher, Region};
 use crate::pane::{AgentActivity, ReportedStatus};
@@ -7,7 +7,8 @@ use crate::state::sessions::AgentKind;
 /// Recorded Codex command, file-edit, MCP-tool and network approval forms:
 /// required choices and footer end the viewport. Permission hooks also run
 /// before automatic review, so only the visible form establishes a human wait.
-/// Missing required text or changed forms produce no guess.
+/// Async questions use their own complete native view. Missing required text or
+/// changed forms produce no guess.
 pub const RULES: &[DetectionRule] = &[
     DetectionRule {
         // Input is the current viewport, already bounded by the terminal geometry.
@@ -65,11 +66,17 @@ pub const RULES: &[DetectionRule] = &[
         state: AgentActivity::Blocked,
         visible_blocker: Some("awaiting network approval"),
     },
+    DetectionRule {
+        region: Region::BottomNonEmptyLines(usize::MAX),
+        matcher: Matcher::CodexAsyncQuestions,
+        state: AgentActivity::Blocked,
+        visible_blocker: Some("awaiting async question answer"),
+    },
 ];
 
-/// The modal takes precedence over a non-blocked report without discarding it:
-/// after approval the silent-work report resumes. Identified questions and
-/// explicit agent blocks remain authoritative until their own recovery.
+/// A visible wait takes precedence over a non-blocked report without discarding
+/// it: after the view clears the latest live report resumes. Identified questions
+/// and explicit agent blocks remain authoritative until their own recovery.
 pub fn overrides_report(
     reported: Option<&ReportedStatus>,
     scrape: Option<AgentActivity>,

@@ -157,6 +157,17 @@ with the first pending repaint rather than moving with every output event;
 continuous modal redraws therefore cannot postpone the scan indefinitely.
 Other agents retain the trailing quiet-window debounce.
 
+Codex's complete default async-question editor or collapsed positive question
+summary supplies the same temporary attention, through `codex_questions`.
+Its posting tool returns immediately, so neither that completion nor Enter alone
+establishes an answer. The current native view is the signal: answering, skipping,
+queuing, follow-up input or native resolution can clear it. A semantic block keeps
+precedence, but the visible wait stays cached behind it because a later working or
+done report need not repaint the child. Clearing the view retires only this fallback;
+the latest live report resumes, and expiry still applies. Unknown/customized or
+clipped footers produce no guess. No question content or answer ids are retained,
+and no new hook, subscription or idle timer is introduced.
+
 ## Update model: Elm-architecture (MVU)
 
 spyc follows the Elm/Model-View-Update pattern. The structural migration

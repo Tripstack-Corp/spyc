@@ -36,6 +36,8 @@ pub enum Matcher {
     /// discussing permissions, and a false red "needs me" square is worse than
     /// no detection at all.
     All(&'static [&'static str]),
+    /// Codex's verified collapsed summary or complete async-question footer.
+    CodexAsyncQuestions,
     /// Require the full conjunction and an exact footer at the viewport bottom.
     /// Native word wrapping may split phrases or the footer across rows. A
     /// quoted dialogue above the normal composer is not an open modal.
@@ -49,6 +51,7 @@ impl Matcher {
     fn matches(self, haystack: &str) -> bool {
         match self {
             Self::All(needles) => needles.iter().all(|n| haystack.contains(n)),
+            Self::CodexAsyncQuestions => super::codex_questions::matches(haystack),
             Self::AllAtBottom { needles, last_line } => {
                 if !footer_matches(haystack, last_line) {
                     return false;

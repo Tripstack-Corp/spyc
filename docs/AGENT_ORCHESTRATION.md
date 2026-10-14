@@ -219,15 +219,28 @@ Real-CLI native question and quiet-after-answer checks passed through the
 automated TUI harness with already trusted hooks. Fresh hook trust onboarding
 remains a separate acceptance case; see `docs/HARNESS.md` for the driver.
 
-`request_user_input_async` is a separate question path. Its immediate completion
-acknowledges posting a question; it does not establish that the user answered.
-These native question hooks do not instrument that path. The
-[`0.160.1` async handler](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
-posts an async message and immediately returns `accepted`; the
-[TUI reply parser](https://github.com/openai/codex/blob/rust-v0.160.1/codex-rs/tui/src/async_question_reply.rs)
-handles the answer as a later user message. A blocked latch tied to the tool's
-completion would misrepresent an agent that continues working. Async-answer
-lifecycle coverage remains open in A3.
+`request_user_input_async` posts a question and returns immediately; its tool
+completion does not establish that the user answered. The
+[`0.162.1` async handler](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/core/src/tools/handlers/request_user_input_async.rs)
+and [question editor](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/tui/src/bottom_pane/async_questions/state.rs)
+keep posting, local answer delivery, skipping and native resolution separate.
+
+spyc recognizes the default native question editor's complete submit/skip/navigation
+footer, or its collapsed positive question count and answer hint, at the current
+viewport bottom. The dot reads `blocked` with `awaiting async question answer`;
+this means the tab needs you, even while Codex continues working. `:why-status`
+and `:activity dump` label the source `scrape-fallback`. The latest semantic report
+remains stored and resumes when the native view clears. An independent semantic
+block keeps precedence and is not retired by a disappearing async view. Expired
+reports are not revived, and another pane's view cannot supply attention.
+
+This follows visible attention, not semantic proof of an answer. Native skipping,
+queued answers, follow-up input, turn completion or auto-resolution can clear the
+view. Quoted history above the composer, clipped views and customized shortcut
+labels produce no guess. The existing dirty-viewport scan supplies the bounded
+delay; no new hook, question-content store or idle polling is added. Exact-version
+[fixture provenance](../tests/fixtures/codex-questions/README.md) and controlled
+PTY tests are separate from native CLI acceptance.
 
 ### Duplicate Codex hook sources
 
