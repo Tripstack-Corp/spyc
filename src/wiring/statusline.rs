@@ -265,7 +265,12 @@ mod tests {
                 .stdout(std::process::Stdio::piped())
                 .spawn()
                 .unwrap();
-            child.stdin.take().unwrap().write_all(b"{\"x\":1}").unwrap();
+            match child.stdin.take().unwrap().write_all(b"{\"x\":1}") {
+                // A wrapper that never reads its input (no original, no spyc)
+                // can exit before this write, as it may under Claude Code too.
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+                other => other.unwrap(),
+            }
             String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
         };
         let present = run(&wrap(Some(original), fake.to_str().unwrap()));

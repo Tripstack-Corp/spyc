@@ -127,7 +127,7 @@ mod tests {
     use crate::agent::claude_statusline::RateWindow;
 
     /// What the forwarder puts on the socket is the framed method call, with
-    /// the pane it runs in and the projection; it returns once answered.
+    /// the pane it runs in and the projection.
     #[test]
     fn the_forwarder_sends_its_pane_and_projection_on_the_socket() {
         let dir = tempfile::tempdir().unwrap();
@@ -138,7 +138,9 @@ mod tests {
             let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
             let body = super::super::protocol::read_lsp_message(&mut reader).unwrap();
             let mut writer = stream;
-            send_result(&mut writer, &json!(1), json!({})).unwrap();
+            // The forwarder stops waiting at its timeout, and a loaded runner
+            // can get here later than that: the reply is not what's under test.
+            let _ = send_result(&mut writer, &json!(1), json!({}));
             serde_json::from_str::<Value>(&body).unwrap()
         });
         let statusline = Statusline {
@@ -156,13 +158,34 @@ mod tests {
             serde_json::from_value::<Statusline>(sent["params"]["statusline"].clone()).unwrap(),
             statusline
         );
-        // No spyc listening: it returns without blocking the statusline.
-        let start = std::time::Instant::now();
-        forward_to(
-            dir.path().join("gone.sock").to_str().unwrap(),
-            "pane-7",
-            &statusline,
-        );
-        assert!(start.elapsed() < FORWARD_TIMEOUT);
+    }
+
+    /// A spyc that never answers, or none at all, holds the statusline up for
+    /// at most the forward's timeout. Waited on generously, so only a missing
+    /// timeout fails it, never a slow runner.
+    #[test]
+    fn the_forwarder_never_holds_the_statusline_past_its_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let silent = dir.path().join("silent.sock");
+        let _never_accepts = std::os::unix::net::UnixListener::bind(&silent).unwrap();
+        let statusline = Statusline {
+            five_hour: Some(RateWindow {
+                used_percent: 23,
+                resets_at: None,
+            }),
+            ..Statusline::default()
+        };
+        for sock in [silent, dir.path().join("gone.sock")] {
+            let (done, finished) = std::sync::mpsc::channel();
+            let (path, statusline) = (sock.clone(), statusline.clone());
+            std::thread::spawn(move || {
+                forward_to(path.to_str().unwrap(), "pane-7", &statusline);
+                let _ = done.send(());
+            });
+            assert!(
+                finished.recv_timeout(FORWARD_TIMEOUT * 10).is_ok(),
+                "{sock:?} held the statusline"
+            );
+        }
     }
 }
