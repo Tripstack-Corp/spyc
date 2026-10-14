@@ -7,6 +7,16 @@
 # for what else a bump owes.
 set -euo pipefail
 
+# Linux only. On a macOS host ghostty's build compiles the darwin targets
+# against the installed Xcode SDK, so those archives would follow whatever
+# Xcode is installed; from Linux it uses zig's bundled Darwin headers, which
+# the pinned zig fixes. Any Linux host, arm64 or x86_64, builds the same five.
+if [ "$(uname -s)" != Linux ]; then
+    echo "build the archives on Linux; from a Mac: make vendor-ghostty-container"
+    echo "  (on macOS the darwin archives would depend on the installed Xcode SDK)"
+    exit 1
+fi
+
 ROOT=$(pwd)
 CRATE="crates/spyc-vt-sys"
 PIN=$(sed -n 's/^pub const GHOSTTY_COMMIT: &str = "\(.*\)";$/\1/p' "$CRATE/src/pin.rs")

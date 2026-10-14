@@ -22,6 +22,7 @@ on:
       - "crates/spyc-vt-sys/src/pin.rs"
       - "crates/spyc-vt-sys/REQUIRED_ZIG"
       - "scripts/vendor-ghostty.sh"
+      - "scripts/vendor-ghostty-container.sh"
       - "Makefile"
       - ".github/workflows/vendored-archives.yml"
 
@@ -60,3 +61,11 @@ jobs:
             exit 1
           fi
           echo "committed archives reproduce from the pin"
+      # The archives this run built, matching or not: on a mismatch, these are
+      # the canonical bytes to commit.
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: vendored-archives
+          path: crates/spyc-vt-sys/vendor/
+          if-no-files-found: error
