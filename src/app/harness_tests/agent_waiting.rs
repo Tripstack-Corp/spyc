@@ -179,7 +179,6 @@ fn a_self_reported_wait_outlasts_its_own_turn_end_but_not_the_next() {
 /// says so until the turn ends, and the wait shows from then, in the agent's
 /// words. Claude Code's `Stop` names the pending work; codex's can't.
 #[test]
-#[ignore = "red: a waiting reported mid-turn shows at once while the agent keeps working"]
 fn a_wait_reported_mid_turn_shows_working_until_the_turn_ends() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -210,6 +209,16 @@ fn a_wait_reported_mid_turn_shows_working_until_the_turn_ends() {
 
             hook(&mut app, turn_end_state, &turn_end);
             assert_eq!(
+                app.runtime
+                    .pane_tabs
+                    .as_ref()
+                    .unwrap()
+                    .active_info()
+                    .activity,
+                AgentActivity::Waiting,
+                "{name}: shown as the turn ends, not at the next settle"
+            );
+            assert_eq!(
                 settle(&mut app, Instant::now()),
                 (AgentActivity::Waiting, false),
                 "{name}: the turn ended waiting"
@@ -223,10 +232,71 @@ fn a_wait_reported_mid_turn_shows_working_until_the_turn_ends() {
     });
 }
 
+/// A held wait is the agent's word about how its turn will end, and a later
+/// word beats it: a turn end that says nothing is pending, the agent's own
+/// newer report, or a new prompt from the user.
+#[test]
+fn a_held_wait_gives_way_to_anything_newer() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let open = |app: &mut App| {
+            hook(
+                app,
+                "working",
+                &json!({"hook_event_name":"UserPromptSubmit"}),
+            );
+            agent(app, "waiting", Some("release run"), None);
+        };
+        let stop_nothing_pending =
+            json!({"hook_event_name":"Stop", "background_tasks":0, "session_crons":0});
+
+        let mut app = agent_app(tmp.path(), "claude");
+        open(&mut app);
+        hook(&mut app, "done", &stop_nothing_pending);
+        assert_eq!(
+            settle(&mut app, Instant::now()),
+            (AgentActivity::Done, true),
+            "Claude Code's Stop says nothing will wake it"
+        );
+
+        let mut app = agent_app(tmp.path(), "codex");
+        open(&mut app);
+        agent(&mut app, "working", None, None);
+        hook(
+            &mut app,
+            "done",
+            &json!({"hook_event_name":"Stop", "turn_id":"turn-1"}),
+        );
+        assert_eq!(
+            settle(&mut app, Instant::now()),
+            (AgentActivity::Done, true),
+            "the agent took its wait back before the turn ended"
+        );
+
+        let mut app = agent_app(tmp.path(), "codex");
+        open(&mut app);
+        app.execute_pane_input(
+            PaneTarget::Active,
+            PaneInput::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            None,
+            None,
+        );
+        hook(
+            &mut app,
+            "done",
+            &json!({"hook_event_name":"Stop", "turn_id":"turn-1"}),
+        );
+        assert_eq!(
+            settle(&mut app, Instant::now()).0,
+            AgentActivity::Done,
+            "a new prompt takes over from the wait"
+        );
+    });
+}
+
 /// A wait held for its turn's end is visible in the diagnostics, so a working
 /// dot doesn't hide that the agent said it will wait.
 #[test]
-#[ignore = "red: a waiting reported mid-turn is applied, not held"]
 fn diagnostics_name_a_wait_held_for_its_turn_end() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

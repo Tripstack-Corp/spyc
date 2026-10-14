@@ -255,6 +255,15 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
     if let Some(note) = reported.and_then(|r| r.note.as_deref()) {
         out.push(format!("    note: {note}"));
     }
+    if let Some(held) = info.held_waiting.as_ref().filter(|_| !closed) {
+        out.push(format!(
+            "    held: waiting set {:.1}s ago, shown once this turn ends{}",
+            held.at.elapsed().as_secs_f32(),
+            held.note
+                .as_deref()
+                .map_or_else(String::new, |n| format!(" — {n}")),
+        ));
+    }
     out.push(match &info.last_reported {
         Some(report) => format!(
             "    last_report: status={} received {:.1}s ago (hook or agent; {})",

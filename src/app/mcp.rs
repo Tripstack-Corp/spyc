@@ -688,7 +688,8 @@ fn resolve_report_target(
 
 impl App {
     /// `report_status`: record the report on its tab and apply it to the dot,
-    /// unless the Codex question model or a live `waiting` holds it back.
+    /// unless the Codex question model or a live `waiting` holds it back, or
+    /// it is the agent's own `waiting` sent before its turn has ended.
     fn apply_status_report(
         &mut self,
         pane_id: Option<&str>,
@@ -749,6 +750,10 @@ impl App {
         } else {
             waiting::Origin::Agent
         };
+        let promoted = follow_turn(&mut entry.info, activity, origin);
+        if decision.is_ok() && waiting::held_for_turn_end(activity, origin, entry.info.turn_open) {
+            return hold_waiting(&mut entry.info, idx, ttl_ms, note, now);
+        }
         let verdict = waiting::meet(entry.info.reported.as_ref(), activity, origin, now);
         let decision = decision.and_then(|a| verdict.ignored_because().map_or(Ok(a), Err));
         if verdict == waiting::Verdict::AbsorbTurnEnd
@@ -770,16 +775,14 @@ impl App {
             entry.info.reported = Some(received);
         }
         if let Some(event) = hook_event {
-            let history = &mut entry.info.recent_hook_events;
-            if history.len() >= crate::agent::status_hook::HISTORY_LIMIT {
-                history.pop_front();
-            }
-            history.push_back((event, activity, now));
+            record_hook_event(&mut entry.info, event, activity, now);
         }
         // Apply immediately so this frame reflects it; `settle_agent_activity`
         // maintains it (and falls back to timing once it expires).
         if decision.is_ok() {
             entry.info.activity = activity;
+        } else if promoted && let Some(live) = &entry.info.reported {
+            entry.info.activity = live.status;
         }
         if let Some(sid) = session_id.filter(|_| decision.is_ok()) {
             pin_live_session(&mut entry.info, kind, sid);
@@ -794,6 +797,73 @@ impl App {
                 ),
             },
         }
+    }
+}
+
+/// Keep a hook event for the diagnostics, oldest dropped past the limit.
+fn record_hook_event(
+    info: &mut crate::pane::tabs::TabInfo,
+    event: crate::agent::status_hook::StatusHookEvent,
+    activity: crate::pane::AgentActivity,
+    now: std::time::Instant,
+) {
+    let history = &mut info.recent_hook_events;
+    if history.len() >= crate::agent::status_hook::HISTORY_LIMIT {
+        history.pop_front();
+    }
+    history.push_back((event, activity, now));
+}
+
+/// Why the agent's own `waiting` waits: it was sent before its turn ended.
+const HELD_FOR_TURN_END: &str = "held until this turn ends";
+
+/// Follow the agent's turn through a hook report. The turn's end makes a
+/// `waiting` the agent sent during it the live report, which then meets that
+/// end like a report sent there; any newer report from the agent replaces it.
+/// Returns whether a held report took over.
+fn follow_turn(
+    info: &mut crate::pane::tabs::TabInfo,
+    activity: crate::pane::AgentActivity,
+    origin: crate::agent::waiting::Origin<'_>,
+) -> bool {
+    let crate::agent::waiting::Origin::Hook(event) = origin else {
+        info.held_waiting = None;
+        return false;
+    };
+    let was_open = info.turn_open;
+    info.turn_open = crate::agent::waiting::turn_open_after(was_open, activity, event);
+    if was_open
+        && !info.turn_open
+        && let Some(held) = info.held_waiting.take()
+    {
+        info.reported = Some(held);
+        return true;
+    }
+    false
+}
+
+/// Record the agent's own `waiting`, sent while its turn is open, to take
+/// effect when the turn ends; the dot keeps showing the turn until then.
+fn hold_waiting(
+    info: &mut crate::pane::tabs::TabInfo,
+    idx: usize,
+    ttl_ms: Option<u64>,
+    note: Option<String>,
+    now: std::time::Instant,
+) -> crate::mcp_cmd::McpResponse {
+    let activity = crate::pane::AgentActivity::Waiting;
+    let mut held =
+        crate::pane::ReportedStatus::new(activity, now, now + report_ttl(activity, ttl_ms));
+    held.note = note;
+    info.last_reported = Some(held.clone());
+    info.last_report_ignored = Some(HELD_FOR_TURN_END);
+    info.held_waiting = Some(held);
+    crate::mcp_cmd::McpResponse::Ok {
+        message: format!(
+            "status 'waiting' recorded for pane {} ({}); not applied: {HELD_FOR_TURN_END}",
+            idx + 1,
+            info.label
+        ),
     }
 }
 

@@ -79,6 +79,15 @@ sources set it:
   hooks can't say (codex, agy) or to name what it waits on ("CI on #641"). The
   agent's note outranks the hook's count.
 
+`waiting` is how a turn ends, so an agent's own `waiting` sent while its turn is
+still open (starting a background watch, then carrying on) is held: the dot
+keeps showing the turn, and the wait takes over when the turn's end arrives,
+meeting it exactly as below. The hooks say when a turn opens (`working`) and
+ends (`done`, or Claude's `waiting`). A question or Claude's idle nudge changes
+neither, and an agent whose hooks report no turn start never has one open, so
+its `waiting` applies at once. Any newer report from the agent, or **Enter**,
+drops a held wait. `:why-status` shows it as `held`, with its note.
+
 A live `waiting` holds back only a hook's `done`. Claude's idle nudge is never a
 turn end. When a hook can't say whether work is pending, as with codex's and
 agy's `Stop`, `waiting` absorbs the first `done`, which ends the turn that

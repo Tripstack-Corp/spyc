@@ -83,6 +83,15 @@ fn report_superseded_by_output(
     last_output_at.is_some_and(|o| o > r.at)
 }
 
+/// A closed pane's reports, turn and scrape describe no agent any more.
+fn forget_closed_agent(info: &mut crate::pane::tabs::TabInfo) {
+    info.reported = None;
+    info.held_waiting = None;
+    info.turn_open = false;
+    info.scrape_status = None;
+    info.scrape_dirty = false;
+}
+
 /// Total lifetime of a P3-1 visual-bell border pulse before it clears.
 const VISUAL_BELL_DURATION: Duration = Duration::from_millis(480);
 /// Cadence of the pulse's gradient sweep (~16 Hz). Armed only while a flash is
@@ -602,9 +611,7 @@ impl App {
             let kind = entry.info.agent().kind();
             let closed = entry.pane.is_closed();
             if closed {
-                entry.info.reported = None;
-                entry.info.scrape_status = None;
-                entry.info.scrape_dirty = false;
+                forget_closed_agent(&mut entry.info);
                 self.state.codex_recovery.remove(&entry.info.id);
             }
             // Drop a report that's no longer authoritative (expired, or the tab

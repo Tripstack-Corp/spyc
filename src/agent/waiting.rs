@@ -8,6 +8,11 @@
 //! the reporter turns that `done` into `waiting` itself
 //! (`mcp::effective_report_state`). Other agents' `Stop` can't say, so a
 //! self-reported `waiting` absorbs the one `done` that ends its own turn.
+//!
+//! A `waiting` the agent reports while its turn is still open (starting a
+//! background watch and carrying on) is held until that turn ends: until
+//! then the agent is working. The hooks say when a turn opens and ends, so an
+//! agent without them has no open turn and its `waiting` applies at once.
 
 use std::time::Instant;
 
@@ -44,6 +49,30 @@ impl Verdict {
             Self::Absorb => Some("background work is still pending"),
         }
     }
+}
+
+/// Whether the agent's turn is open after a hook report of `incoming`: a
+/// prompt opens it, the turn's end closes it, and anything in between, a
+/// question or Claude Code's idle nudge, leaves it as it was.
+pub fn turn_open_after(
+    open: bool,
+    incoming: AgentActivity,
+    event: Option<&StatusHookEvent>,
+) -> bool {
+    if event.is_some_and(|e| e.hook_event_name == "Notification") {
+        return open;
+    }
+    match incoming {
+        AgentActivity::Working => true,
+        AgentActivity::Done | AgentActivity::Waiting => false,
+        _ => open,
+    }
+}
+
+/// Whether a report is the agent's own `waiting` sent while its turn is open,
+/// which is held until the turn ends rather than shown at once.
+pub fn held_for_turn_end(incoming: AgentActivity, origin: Origin<'_>, turn_open: bool) -> bool {
+    turn_open && incoming == AgentActivity::Waiting && matches!(origin, Origin::Agent)
 }
 
 /// The tab's report, when it is a `waiting` that hasn't expired.
@@ -123,6 +152,48 @@ mod tests {
             notification_type: None,
             background_tasks: tasks,
             session_crons: crons,
+        }
+    }
+
+    #[test]
+    fn a_prompt_opens_the_turn_its_end_closes_it_and_nothing_between_moves_it() {
+        use super::turn_open_after;
+        let prompt = event("UserPromptSubmit", None, None);
+        let stop = event("Stop", Some(1), Some(0));
+        let nudge = event("Notification", None, None);
+        let question = event("PreToolUse", None, None);
+        assert!(turn_open_after(false, Working, Some(&prompt)));
+        assert!(turn_open_after(false, Working, None), "agy names no event");
+        for end in [Done, Waiting] {
+            assert!(!turn_open_after(true, end, Some(&stop)), "{end:?}");
+            assert!(!turn_open_after(true, end, None), "{end:?}: agy's Stop");
+        }
+        for open in [true, false] {
+            assert_eq!(turn_open_after(open, Blocked, Some(&question)), open);
+            assert_eq!(
+                turn_open_after(open, Done, Some(&nudge)),
+                open,
+                "Claude Code's idle nudge, reported as done, ends no turn"
+            );
+            assert_eq!(turn_open_after(open, Blocked, Some(&nudge)), open);
+        }
+    }
+
+    #[test]
+    fn only_the_agents_own_waiting_inside_an_open_turn_is_held() {
+        use super::held_for_turn_end;
+        let stop = event("Stop", Some(1), Some(0));
+        assert!(held_for_turn_end(Waiting, Origin::Agent, true));
+        assert!(
+            !held_for_turn_end(Waiting, Origin::Agent, false),
+            "no turn open"
+        );
+        assert!(
+            !held_for_turn_end(Waiting, Origin::Hook(Some(&stop)), true),
+            "a hook's waiting is the turn's end"
+        );
+        for other in [Working, Blocked, Done, Idle] {
+            assert!(!held_for_turn_end(other, Origin::Agent, true), "{other:?}");
         }
     }
 

@@ -276,7 +276,9 @@ protocol, no image protocols, no OSC 52 clipboard.
     can tell "needs me / finished" from "busy" and "waiting on CI" at a glance.
     Claude Code's turn-end hook lists the background work still running, so its
     `waiting` needs no report; other agents report it, with a note saying what
-    they wait on, which `:why-status` shows. Entering `waiting` pings nothing.
+    they wait on, which `:why-status` shows. A `waiting` an agent reports
+    before its turn has ended shows once the turn ends; until then the dot
+    stays working. Entering `waiting` pings nothing.
     For Codex and Claude, live reports survive output and footer redraws until
     a newer report or TTL expiry; quiet tool waits do not erase `working`.
     Agy yields non-blocked reports to fresh output for uncovered approvals.
