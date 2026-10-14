@@ -439,25 +439,17 @@ impl App {
         }
     }
 
-    /// Map a "spicy pulse" frame to a warm pepper-heat colour: a 6-phase
-    /// ping-pong (deep-red → ember → orange → spark and back) so the Working dot
-    /// *breathes* like a heating pepper rather than blinking. Truecolor walks an
-    /// RGB gradient; a 16/256-colour terminal alternates two warm ANSI hues; a
-    /// mono theme drops to the single accent (no pulse). PURE.
+    /// Map a "spicy pulse" frame to a warm pepper-heat colour, so the Working dot
+    /// *breathes* like a heating pepper rather than blinking ([`breath_heat`]).
+    /// A 256-colour terminal gets the same colours quantized by the frame's
+    /// downgrade, a stepped warm ramp; a mono theme drops to the single accent
+    /// (no pulse). PURE.
     const fn spicy_pulse_color(&self, frame: u64) -> ratatui::style::Color {
-        use ratatui::style::Color;
         if self.view.theme.mono {
             return self.view.theme.prompt_prefix;
         }
-        if self.view.hud_truecolor {
-            const PHASE: [usize; 6] = [0, 1, 2, 3, 2, 1];
-            let (r, g, b) = SPICE_HEAT[PHASE[(frame % PHASE.len() as u64) as usize]];
-            Color::Rgb(r, g, b)
-        } else if frame.is_multiple_of(2) {
-            Color::Red
-        } else {
-            Color::LightYellow
-        }
+        let (r, g, b) = breath_heat(frame);
+        ratatui::style::Color::Rgb(r, g, b)
     }
 
     /// P3-1 visual-bell colour: a point on spyc's spice-heat gradient
@@ -660,6 +652,46 @@ const SPICE_HEAT: [(u8, u8, u8); 4] = [
     (0xFF, 0xC4, 0x36), // spark
 ];
 
+/// Frames in one breath of the working dot: 16 at the animation's 100 ms, so
+/// a breath takes 1.6 s, and each frame moves the colour only a little.
+const BREATH_FRAMES: u64 = 16;
+
+/// The working dot at `frame`: the spice-heat ramp breathed from pepper red out
+/// to spark and back along a cosine, so the turns at either end ease in and
+/// out instead of bouncing. Pure integer maths, so `const`; the cosine is
+/// [`BREATH_COSINE`], tabulated.
+const fn breath_heat(frame: u64) -> (u8, u8, u8) {
+    // Heat in 1/1000ths of the ramp: 0 at pepper red, 1000 at spark.
+    let heat = BREATH_COSINE[(frame % BREATH_FRAMES) as usize] as usize;
+    let last = SPICE_HEAT.len() - 1;
+    let scaled = heat * last; // in 1/1000ths of a stop
+    let lo = if scaled / 1000 < last {
+        scaled / 1000
+    } else {
+        last - 1
+    };
+    let blend = scaled - lo * 1000;
+    let (a, b) = (SPICE_HEAT[lo], SPICE_HEAT[lo + 1]);
+    (
+        mix_milli(a.0, b.0, blend),
+        mix_milli(a.1, b.1, blend),
+        mix_milli(a.2, b.2, blend),
+    )
+}
+
+/// `from` blended toward `to` by `blend` thousandths, rounded.
+const fn mix_milli(from: u8, to: u8, blend: usize) -> u8 {
+    let (from, to) = (from as usize, to as usize);
+    // At most 255: a weighted mean of two bytes.
+    ((from * (1000 - blend) + to * blend + 500) / 1000) as u8
+}
+
+/// `(1 - cos(2π·k/16)) / 2` in 1/1000ths, for each of the [`BREATH_FRAMES`]:
+/// the breath's heat at frame `k`, rising from 0 to 1000 and back.
+const BREATH_COSINE: [u16; BREATH_FRAMES as usize] = [
+    0, 38, 146, 309, 500, 691, 854, 962, 1000, 962, 854, 691, 500, 309, 146, 38,
+];
+
 /// A point on spyc's spice-heat gradient ([`SPICE_HEAT`]:
 /// pepper→ember→orange→spark) at `frac` (0..1 around the border ring), swept by
 /// the animation `frame` so the band of heat travels. Pure + truecolor; the
@@ -763,14 +795,11 @@ mod tests {
     #[test]
     fn working_pulse_phase_offset_desyncs_tabs() {
         let mut app = App::test_app(PathBuf::from("/tmp/proj"));
-        // Force the truecolor gradient path (env-independent) so the seed maps
-        // through the 6-phase HEAT walk rather than the 2-hue fallback.
-        app.view.hud_truecolor = true;
         app.view.theme.mono = false;
         app.view.agent_anim_frame = 1;
 
-        // Offsets 0 and 3 sit at opposite ends of the ping-pong (pepper red vs
-        // spark) — distinct seeds, distinct colours at one instant.
+        // Offsets 0 and 3 sit at different points of the breath — distinct
+        // seeds, distinct colours at one instant.
         let dot = |offset| {
             app.agent_activity_span(AgentActivity::Working, offset)
                 .expect("a working agent has a dot")
@@ -786,6 +815,96 @@ mod tests {
         // A near-max seed added to a non-zero frame must not overflow — the
         // call site wraps. (A raw `+` would panic here in a checked build.)
         let _ = dot(u64::MAX);
+    }
+
+    /// The breath's smoothness: no frame moves any channel far, including the
+    /// wrap from one breath into the next. The 6-phase walk this replaced
+    /// jumped up to 51 per frame.
+    #[test]
+    fn the_working_breath_moves_a_little_each_frame() {
+        let step = |a: (u8, u8, u8), b: (u8, u8, u8)| {
+            [a.0.abs_diff(b.0), a.1.abs_diff(b.1), a.2.abs_diff(b.2)]
+                .into_iter()
+                .max()
+                .expect("three channels")
+        };
+        for frame in 0..super::BREATH_FRAMES {
+            let (a, b) = (super::breath_heat(frame), super::breath_heat(frame + 1));
+            assert!(step(a, b) <= 32, "frame {frame}: {a:?} → {b:?}");
+        }
+    }
+
+    /// It eases: a step at either end of the breath moves less than half as far
+    /// as one in the middle, so the turns don't bounce. (A linear breath along
+    /// this ramp steps almost evenly, 18 against 19 in green.)
+    #[test]
+    fn the_working_breath_eases_at_its_turns() {
+        let green = |frame| super::breath_heat(frame).1;
+        let half = super::BREATH_FRAMES / 2;
+        let at_the_turn = green(1).abs_diff(green(0));
+        let in_the_middle = green(half / 2 + 1).abs_diff(green(half / 2));
+        assert!(
+            at_the_turn * 2 < in_the_middle,
+            "{at_the_turn} vs {in_the_middle}"
+        );
+    }
+
+    /// The breath spans the whole spice-heat ramp: pepper red, then spark half
+    /// a breath later, and back, the same on the way out as on the way in.
+    #[test]
+    fn the_working_breath_spans_pepper_red_to_spark_and_back() {
+        let n = super::BREATH_FRAMES;
+        assert_eq!(super::breath_heat(0), super::SPICE_HEAT[0]);
+        assert_eq!(super::breath_heat(n / 2), super::SPICE_HEAT[3]);
+        assert_eq!(super::breath_heat(n), super::breath_heat(0));
+        for k in 1..n {
+            assert_eq!(
+                super::breath_heat(k),
+                super::breath_heat(n - k),
+                "frame {k}"
+            );
+        }
+    }
+
+    /// The tabulated cosine is the cosine.
+    #[test]
+    fn the_breath_table_is_the_eased_cosine() {
+        let n = super::BREATH_FRAMES;
+        for (k, &milli) in super::BREATH_COSINE.iter().enumerate() {
+            let exact = (1.0 - (std::f64::consts::TAU * k as f64 / n as f64).cos()) / 2.0;
+            assert!(
+                (f64::from(milli) - exact * 1000.0).abs() <= 0.5,
+                "frame {k}: {milli} for {exact}"
+            );
+        }
+    }
+
+    /// A 256-colour terminal still breathes, as a stepped warm ramp: the
+    /// frame's downgrade quantizes the dot to several distinct indices over a
+    /// breath, where the two-hue fallback this replaced blinked.
+    #[test]
+    fn the_working_dot_breathes_on_a_256_colour_terminal() {
+        use ratatui::style::Color;
+        let mut app = App::test_app(PathBuf::from("/tmp/proj"));
+        app.view.theme.mono = false;
+        app.view.hud_truecolor = false;
+        let seen: std::collections::BTreeSet<String> = (0..super::BREATH_FRAMES)
+            .map(|frame| {
+                app.view.agent_anim_frame = frame;
+                match app
+                    .agent_activity_span(AgentActivity::Working, 0)
+                    .expect("a working agent has a dot")
+                    .style
+                    .fg
+                {
+                    Some(Color::Rgb(r, g, b)) => {
+                        crate::ui::color_depth::rgb_to_ansi256(r, g, b).to_string()
+                    }
+                    other => format!("{other:?}"),
+                }
+            })
+            .collect();
+        assert!(seen.len() >= 4, "{seen:?}");
     }
 
     /// The visual bell's sweep: it starts at pepper red, and the ring has no

@@ -52,9 +52,10 @@ type ActiveAgentKey = (
     Option<String>,
 );
 
-/// Cadence of the "spicy pulse" working animation (~4 Hz). Armed only while
-/// ≥1 agent tab is `Working`, so an all-idle pane set still draws 0 fps.
-const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(250);
+/// Cadence of the "spicy pulse" working animation (10 Hz, a breath of 16
+/// frames in `render::chrome`). Armed only while ≥1 agent tab is `Working`, so
+/// an all-idle pane set still draws 0 fps.
+const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Whether pane output at `last_output_at` supersedes a live report (the agent
 /// resumed → drop the report, fall back to timing).
