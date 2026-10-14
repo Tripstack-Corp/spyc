@@ -12,6 +12,7 @@
 //! meet at [`profile_for`] (kind → profile, for restored tabs) and
 //! [`detect`] (command → profile, for live panes).
 
+pub mod agy_metrics;
 pub mod chrome;
 pub mod claude_metrics;
 pub mod claude_statusline;

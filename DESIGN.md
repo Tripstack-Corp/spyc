@@ -109,7 +109,7 @@ rather than create a new modal type.
 
 ### Native agent strip
 
-The opt-in agent HUD occupies rows below a Codex or Claude Code child. Compact
+The opt-in agent HUD occupies rows below an Antigravity, Codex or Claude Code child. Compact
 is two rows; full adds the tools row and the mode row. Keep six child rows,
 collapse full to compact when needed, then hide the strip. The native composer
 stays visible within the child, including in zoom and splits.

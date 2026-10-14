@@ -87,7 +87,7 @@ fn tick(app: &mut App, ctx: &mut RunCtx) {
 fn codex_request(update: &Update) -> Option<u64> {
     match update {
         Update::Codex(u) => u.snapshot.request.as_ref()?.value.total,
-        Update::Claude(_) => None,
+        Update::Claude(_) | Update::Agy(_) => None,
     }
 }
 
@@ -819,6 +819,139 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
     });
 }
 
+const AGY_SESSION: &str = "a6900000-0000-4000-8000-000000000001";
+
+fn agy_entry(app: &mut App, cwd: &Path, session: Option<&str>) -> TabEntry {
+    let wake = app.make_pane_wake();
+    let pane = Pane::spawn("cat", 24, 100, cwd, &app.view.context_path, wake).unwrap();
+    let mut info = TabInfo::new("agy", cwd);
+    info.live_session_id = session.map(str::to_owned);
+    info.spawn_epoch_secs = 0;
+    info.activity = AgentActivity::Idle;
+    TabEntry::new(pane, info)
+}
+
+fn agy_transcript(home: &Path) -> std::path::PathBuf {
+    let dir = home.join(format!(
+        ".gemini/antigravity-cli/brain/{AGY_SESSION}/.system_generated/logs"
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("transcript.jsonl");
+    std::fs::write(&path, "").unwrap();
+    path
+}
+
+fn append_agy_model_change(path: &Path, model: &str) {
+    let record = json!({
+        "type": "USER_INPUT",
+        "created_at": "2026-10-13T12:00:00Z",
+        "content": format!("<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from prev to {model}. No need to respond to this message directly.</USER_SETTINGS_CHANGE>")
+    });
+    writeln!(
+        std::fs::OpenOptions::new().append(true).open(path).unwrap(),
+        "{record}"
+    )
+    .unwrap();
+}
+
+fn append_agy_message(path: &Path, step: u64, cache_read: u64) {
+    let record = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": step,
+        "created_at": "2026-10-13T12:00:00Z",
+        "input_tokens": 11,
+        "cache_read_tokens": cache_read,
+        "output_tokens": 5,
+        "tool_calls": []
+    });
+    writeln!(
+        std::fs::OpenOptions::new().append(true).open(path).unwrap(),
+        "{record}"
+    )
+    .unwrap();
+}
+
+#[test]
+fn agent_hud_follows_an_agy_tabs_reported_session_in_its_home() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("agy-home");
+        let path = agy_transcript(&home);
+        append_agy_model_change(&path, "gemini-2.5-pro");
+        append_agy_message(&path, 1, 100);
+
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (100, 32);
+        app.state.config.mouse.capture = false;
+        app.state.pane.pane_height_pct = 50;
+        app.state.pane.agent_hud.agy_home = Some(home);
+        let unreported = agy_entry(&mut app, tmp.path(), None);
+        app.runtime.pane_tabs = Some(PaneTabs::new(unreported));
+        app.cmd_agent_hud("full");
+        let mut ctx = RunCtx::for_test();
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "awaiting metrics");
+        assert!(
+            app.runtime.agent_hud.is_none(),
+            "no session reported yet, so nothing to read: {lines:?}"
+        );
+
+        let reported = agy_entry(&mut app, tmp.path(), Some(AGY_SESSION));
+        app.runtime.pane_tabs.as_mut().unwrap().push(reported);
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, " 111 ");
+        assert!(lines[0].contains("gemini-2.5-pro"), "{lines:?}");
+        assert!(
+            lines[1].contains("out 5 ") && lines[1].contains("hit 90%"),
+            "{lines:?}"
+        );
+        append_agy_message(&path, 2, 2_000);
+        wait_hud_line(&mut app, &mut ctx, 1, " 2.0k ");
+
+        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        info.activity = AgentActivity::Waiting;
+        let mut report = crate::pane::tabs::ReportedStatus::new(
+            AgentActivity::Waiting,
+            Instant::now(),
+            Instant::now() + Duration::from_secs(60),
+        );
+        report.note = Some("indexing codebase".into());
+        info.reported = Some(report);
+        let lines = wait_hud_line(&mut app, &mut ctx, 0, "indexing codebase");
+        assert!(lines[0].starts_with("○ waiting"), "{lines:?}");
+        assert!(
+            lines[0].ends_with("indexing codebase"),
+            "the note trails the row: {lines:?}"
+        );
+
+        app.cmd_agent_hud("info");
+        let info: Vec<String> = app
+            .view
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        for expected in [
+            format!("reported session: {AGY_SESSION}"),
+            "context (latest request's input and cache read): 2011 tokens".to_owned(),
+            "totals over 2 distinct messages".to_owned(),
+        ] {
+            assert!(
+                info.iter().any(|line| line.contains(&expected)),
+                "{expected:?} missing from {info:?}"
+            );
+        }
+
+        // Another config directory names other files: the consumer starts over.
+        let binding = app.state.pane.agent_hud.binding.clone();
+        app.state.pane.agent_hud.agy_home = Some(tmp.path().join("other-home"));
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "transcript missing");
+        assert_ne!(app.state.pane.agent_hud.binding, binding, "{lines:?}");
+    });
+}
+
 /// Saving the rc for any other reason keeps what `:agent hud` chose; changing
 /// `agent_hud` in it is the newer word.
 #[test]
@@ -1013,5 +1146,52 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
                 "{expected:?} missing from {dump:?}"
             );
         }
+    });
+}
+
+#[test]
+fn agent_hud_retries_missing_agy_transcript_on_status_report() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("agy-home");
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (100, 32);
+        app.state.config.mouse.capture = false;
+        app.state.pane.pane_height_pct = 50;
+        app.state.pane.agent_hud.agy_home = Some(home.clone());
+        let entry = agy_entry(&mut app, tmp.path(), Some(AGY_SESSION));
+        app.runtime.pane_tabs = Some(PaneTabs::new(entry));
+        app.cmd_agent_hud("full");
+        let mut ctx = RunCtx::for_test();
+
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "transcript missing");
+        assert_eq!(
+            app.active_agent_hud_update().map(Update::availability),
+            Some(Availability::Missing),
+            "{lines:?}"
+        );
+
+        let path = agy_transcript(&home);
+        append_agy_model_change(&path, "gemini-2.5-pro");
+        append_agy_message(&path, 1, 100);
+
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::ReportStatus {
+            pane_id: None,
+            pane: None,
+            status: "working".into(),
+            ttl_ms: None,
+            note: None,
+            session_id: Some(AGY_SESSION.into()),
+            hook_event: None,
+        });
+        assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
+
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, " 111 ");
+        assert!(lines[0].contains("gemini-2.5-pro"), "{lines:?}");
+        assert_eq!(
+            app.active_agent_hud_update().map(Update::availability),
+            Some(Availability::Available)
+        );
     });
 }

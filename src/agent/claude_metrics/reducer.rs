@@ -183,27 +183,7 @@ impl Reducer {
     /// The tally for `name`. Past [`MAX_TOOL_NAMES`] distinct names, new ones
     /// share [`OTHER_TOOLS`], so the list stays bounded.
     fn count(&mut self, name: Option<&str>) -> &mut ToolCount {
-        let counts = &mut self.snapshot.tool_counts;
-        let name = name.unwrap_or("tool");
-        let index = counts.iter().position(|c| c.name == name).or_else(|| {
-            (counts.len() >= MAX_TOOL_NAMES)
-                .then(|| counts.iter().position(|c| c.name == OTHER_TOOLS))
-                .flatten()
-        });
-        let index = index.unwrap_or_else(|| {
-            let name = if counts.len() >= MAX_TOOL_NAMES {
-                OTHER_TOOLS
-            } else {
-                name
-            };
-            counts.push(ToolCount {
-                name: name.to_owned(),
-                calls: 0,
-                failed: 0,
-            });
-            counts.len() - 1
-        });
-        &mut counts[index]
+        count_tool(&mut self.snapshot.tool_counts, name)
     }
 
     /// `TaskCreate` starts a task `pending`; `TaskUpdate`'s own `from`/`to`
@@ -254,7 +234,30 @@ impl Reducer {
     }
 }
 
-fn replace<T>(slot: &mut Option<Sample<T>>, at: Timestamp, value: T) {
+pub fn count_tool<'a>(counts: &'a mut Vec<ToolCount>, name: Option<&str>) -> &'a mut ToolCount {
+    let name = name.unwrap_or("tool");
+    let index = counts.iter().position(|c| c.name == name).or_else(|| {
+        (counts.len() >= MAX_TOOL_NAMES)
+            .then(|| counts.iter().position(|c| c.name == OTHER_TOOLS))
+            .flatten()
+    });
+    let index = index.unwrap_or_else(|| {
+        let name = if counts.len() >= MAX_TOOL_NAMES {
+            OTHER_TOOLS
+        } else {
+            name
+        };
+        counts.push(ToolCount {
+            name: name.to_owned(),
+            calls: 0,
+            failed: 0,
+        });
+        counts.len() - 1
+    });
+    &mut counts[index]
+}
+
+pub fn replace<T>(slot: &mut Option<Sample<T>>, at: Timestamp, value: T) {
     if slot.as_ref().is_none_or(|old| at >= old.at) {
         *slot = Some(Sample { at, value });
     }

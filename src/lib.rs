@@ -7,8 +7,11 @@
 //! are separate binaries). Runtime behaviour is unchanged.
 
 mod agent;
-/// Read-only, consumer-owned telemetry for one pinned Codex rollout.
+/// Read-only, consumer-owned telemetry for one Antigravity (agy) session.
+pub use agent::agy_metrics;
+/// Read-only, consumer-owned telemetry for one Claude Code session.
 pub use agent::claude_metrics;
+/// Read-only, consumer-owned telemetry for one pinned Codex rollout.
 pub use agent::codex_metrics;
 mod app;
 /// Archive browsing — see `docs/archive/ARCHIVE_BROWSING_PLAN.md`.

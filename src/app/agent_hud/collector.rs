@@ -1,6 +1,8 @@
 //! One cancellable startup lookup and one exact-file subscription: a Codex
-//! rollout or a Claude Code transcript. The lookup is bounded and happens once
-//! per binding; a missing source needs a new consumer.
+//! rollout, a Claude Code transcript, or an Antigravity transcript. The
+//! lookup is bounded and happens once per binding. A missing rollout or Claude
+//! transcript needs a new consumer; a missing agy transcript is looked up again
+//! on its tab's next status report.
 
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -10,7 +12,7 @@ use std::sync::{
 };
 
 use crate::agent::tail::Availability;
-use crate::agent::{claude_metrics, codex_metrics};
+use crate::agent::{agy_metrics, claude_metrics, codex_metrics};
 use crate::app::state::agent_hud::{Binding, Update};
 use crate::app::{Message, Wake};
 
@@ -19,6 +21,7 @@ const MAX_LOOKUP_ENTRIES: usize = 65_536;
 enum Subscription {
     Codex(codex_metrics::watch::Subscription),
     Claude(claude_metrics::watch::Subscription),
+    Agy(agy_metrics::watch::Subscription),
 }
 
 impl Subscription {
@@ -30,6 +33,7 @@ impl Subscription {
             Binding::Claude(b) => {
                 Self::Claude(claude_metrics::watch::Subscription::start(b, path, wake))
             }
+            Binding::Agy(b) => Self::Agy(agy_metrics::watch::Subscription::start(b, path, wake)),
         }
     }
 
@@ -37,6 +41,7 @@ impl Subscription {
         match self {
             Self::Codex(s) => s.take().map(|u| Update::Codex(Box::new(u))),
             Self::Claude(s) => s.take().map(|u| Update::Claude(Box::new(u))),
+            Self::Agy(s) => s.take().map(|u| Update::Agy(Box::new(u))),
         }
     }
 
@@ -44,6 +49,7 @@ impl Subscription {
         match self {
             Self::Codex(s) => s.work(),
             Self::Claude(s) => s.work(),
+            Self::Agy(s) => s.work(),
         }
     }
 }
@@ -67,6 +73,9 @@ impl Collector {
                 Binding::Codex(b) => find_pinned(&b.codex_home, &b.thread_id, &worker_cancelled),
                 Binding::Claude(b) => {
                     find_transcript(&b.claude_home, &b.session_id, &worker_cancelled)
+                }
+                Binding::Agy(b) => {
+                    find_agy_transcript(&b.agy_home, &b.session_id, &worker_cancelled)
                 }
             };
             if worker_cancelled.load(Ordering::Acquire) {
@@ -214,6 +223,31 @@ fn find_transcript(home: &Path, session: &str, cancelled: &AtomicBool) -> Option
     matched
 }
 
+fn find_agy_transcript(home: &Path, session: &str, cancelled: &AtomicBool) -> Option<PathBuf> {
+    if !home.is_absolute()
+        || !crate::state::sessions::is_uuid(session)
+        || cancelled.load(Ordering::Acquire)
+    {
+        return None;
+    }
+    let home = home.canonicalize().ok()?;
+    let path = crate::state::sessions::agy_transcript_path(&home, session);
+    let brain = home
+        .join(".gemini/antigravity-cli/brain")
+        .canonicalize()
+        .ok()?;
+
+    if let Ok(meta) = std::fs::symlink_metadata(&path)
+        && meta.is_file()
+        && let Ok(canon_path) = path.canonicalize()
+        && canon_path.starts_with(&brain)
+    {
+        Some(canon_path)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,5 +332,28 @@ mod tests {
             find_transcript(escaped.path(), SESSION, &cancelled).is_none(),
             "projects outside the home are not read"
         );
+    }
+
+    #[test]
+    fn agy_transcript_lookup_finds_exact_transcript() {
+        const SESSION: &str = "00000000-0000-0000-0000-000000000001";
+        let home = tempfile::tempdir().unwrap();
+        let transcript = crate::state::sessions::agy_transcript_path(home.path(), SESSION);
+        std::fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        std::fs::write(&transcript, "").unwrap();
+
+        let cancelled = AtomicBool::new(false);
+        assert_eq!(
+            find_agy_transcript(home.path(), SESSION, &cancelled)
+                .map(|p| p.canonicalize().unwrap()),
+            Some(transcript.canonicalize().unwrap())
+        );
+
+        cancelled.store(true, Ordering::Release);
+        assert!(find_agy_transcript(home.path(), SESSION, &cancelled).is_none());
+        cancelled.store(false, Ordering::Release);
+
+        assert!(find_agy_transcript(Path::new("relative"), SESSION, &cancelled).is_none());
+        assert!(find_agy_transcript(home.path(), "not-a-uuid", &cancelled).is_none());
     }
 }

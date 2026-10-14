@@ -2,7 +2,7 @@
 //! fills. Its rows are laid out as a grid, so each column starts at the same x
 //! on every row. The template owns the activity row, the health cells and all
 //! styling; an agent supplies only its own usage, tools and mode cells
-//! (`claude`, `codex`). The caller supplies every source, timestamp and
+//! (`agy`, `claude`, `codex`). The caller supplies every source, timestamp and
 //! attention state: nothing here reads a clock or collects.
 
 use jiff::Timestamp;
@@ -14,9 +14,10 @@ use ratatui::{
 
 use super::{display_truncate, display_truncate_tail, display_width, theme::Theme};
 use crate::agent::tail::Availability;
-use crate::agent::{claude_metrics, codex_metrics};
+use crate::agent::{agy_metrics, claude_metrics, codex_metrics};
 use crate::config::AgentHudMode;
 
+mod agy;
 mod claude;
 mod codex;
 
@@ -71,6 +72,10 @@ pub enum Metrics<'a> {
         /// miss what came before.
         tail_only: bool,
         reported: Reported<'a>,
+    },
+    Agy {
+        snapshot: Option<&'a agy_metrics::Snapshot>,
+        tail_only: bool,
     },
 }
 
@@ -132,6 +137,10 @@ pub fn lines(
             tail_only,
             reported,
         } => claude::rows(snapshot, tail_only, reported, view, p),
+        Metrics::Agy {
+            snapshot,
+            tail_only,
+        } => agy::rows(snapshot, tail_only, view, p),
     };
     let mut rows = vec![activity(view, p), agent.usage];
     if mode == AgentHudMode::Full {
@@ -441,6 +450,13 @@ fn model(view: &HudView<'_>, p: Palette) -> Field {
             (
                 &m.value.model,
                 &m.value.effort,
+                view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
+            )
+        }),
+        Metrics::Agy { snapshot, .. } => snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
+            (
+                &m.value.model,
+                &None,
                 view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
             )
         }),

@@ -996,20 +996,20 @@ flash instead of silently closing. Scroll positions are preserved.
 
 ## Native agent HUD
 
-`:agent hud compact` enables a two-row strip below the active Codex or Claude
-Code pane; `:agent hud full` adds a tools row and a mode row. Every agent shares
-one layout of aligned, coloured columns, led by the tab's own activity dot, its
-session and model, with a `waiting` agent's note at the end of the row. The
-tools row is a summary: every call, every failure, what is running and the
-three most called, each marked for its own failures. A Claude Code tab also
-gets a `todo` cell once `TodoWrite` or `TaskCreate`/`TaskUpdate` has reported:
-completed over total, with how many are in progress. Usage scopes stay separate,
-and unavailable context occupancy
-and limits stay explicit. A Claude Code tab's context is a token count, followed
-by Claude Code's own percentage and the plan's five-hour and seven-day usage
-once spyc's statusline wrapper forwards them. `:agent hud off` stops collection; `:agent hud dump` (or `info`), or
-a double-click on the strip, opens saveable source and freshness diagnostics
-with every tool's tally. A drag across the strip copies its text.
+`:agent hud compact` enables a two-row strip below the active Codex, Claude
+Code, or Antigravity pane; `:agent hud full` adds a tools row and a mode row.
+Every agent shares one layout of aligned, coloured columns, led by the tab's
+own activity dot, its session and model, with a `waiting` agent's note at the
+end of the row. The tools row is a summary: every call, every failure, what is
+running and the three most called, each marked for its own failures. A Claude
+Code tab also gets a `todo` cell once `TodoWrite` or `TaskCreate`/`TaskUpdate`
+has reported: completed over total, with how many are in progress. Usage scopes
+stay separate, and unavailable context occupancy and limits stay explicit. A
+Claude Code tab's context is a token count, followed by Claude Code's own
+percentage and the plan's five-hour and seven-day usage once spyc's statusline
+wrapper forwards them. `:agent hud off` stops collection; `:agent hud dump` (or
+`info`), or a double-click on the strip, opens saveable source and freshness
+diagnostics with every tool's tally. A drag across the strip copies its text.
 The strip uses the shared pane geometry, preserves six child rows and needs no
 idle polling. See [configuration and source semantics](CONFIGURATION.md#agent-hud--pane-agent_hud)
 for the home-only preference and size fallbacks.

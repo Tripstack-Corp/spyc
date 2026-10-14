@@ -411,9 +411,10 @@ fn initial_pane() -> state::PaneLayout {
         std::env::var_os("CLAUDE_CONFIG_DIR"),
         std::env::var_os("HOME"),
     );
+    let agy_home = crate::agent::agy_metrics::home(std::env::var_os("HOME"));
     state::PaneLayout {
         pane_height_pct: 70,
-        agent_hud: state::agent_hud::AgentHudState::new(claude_home),
+        agent_hud: state::agent_hud::AgentHudState::new(claude_home, agy_home),
         ..Default::default()
     }
 }

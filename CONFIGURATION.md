@@ -83,23 +83,23 @@ for the annotated version of each.
 
 ### Agent HUD — `[pane] agent_hud`
 
-The native agent strip, for Codex and Claude Code tabs, is **off by default**.
-Set `agent_hud = "compact"` or `"full"` in `~/.spycrc.toml`; project-local
-values are ignored. `:agent hud off|compact|full` chooses for the session: the
-choice outranks the file, `spyc -r` brings it back, and a config reload keeps
-it unless the reload changes `agent_hud` itself. `:agent hud info` (or `dump`,
-or a double-click on the strip) names which one is in force and opens saveable
-source diagnostics, with every tool's tally.
+The native agent strip, for Codex, Claude Code, and Antigravity tabs, is **off
+by default**. Set `agent_hud = "compact"` or `"full"` in `~/.spycrc.toml`;
+project-local values are ignored. `:agent hud off|compact|full` chooses for the
+session: the choice outranks the file, `spyc -r` brings it back, and a config
+reload keeps it unless the reload changes `agent_hud` itself. `:agent hud info`
+(or `dump`, or a double-click on the strip) names which one is in force and
+opens saveable source diagnostics, with every tool's tally.
 
 Compact uses two rows below the child: the activity row and the usage row. Full
 adds the tools row and the mode row, for four. Every agent shares one layout in
 aligned columns, described in [`DESIGN.md`](DESIGN.md) under "Native agent
-strip". The child keeps at least six
-rows: full collapses to compact below ten available pane rows, and the strip
-hides below eight. It follows the active live Codex or Claude Code tab,
-including pane zoom, vertical splits and scrollback. Hidden panes, closed tabs,
-other agents and a fullscreen image have no strip or metric subscription. The
-native composer and status line stay inside the resized child.
+strip". The child keeps at least six rows: full collapses to compact below ten
+available pane rows, and the strip hides below eight. It follows the active live
+Codex, Claude Code, or Antigravity tab, including pane zoom, vertical splits and
+scrollback. Hidden panes, closed tabs, other agents and a fullscreen image have
+no strip or metric subscription. The native composer and status line stay inside
+the resized child.
 
 The activity row is the tab's own dot and state, the session's UUID suffix, the
 model and effort, the repository and known branch, and elapsed time, with what a
