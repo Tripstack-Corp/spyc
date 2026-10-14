@@ -558,7 +558,11 @@ until then it reads `awaiting metrics`. For a local round:
 5. With claude wired, send a message: `context` gains a percentage and `5h` /
    `7d` follow it, matching Claude Code's own statusline; a second Claude tab
    shows the same plan windows. `:agent hud dump` names their reset times.
-6. `/clear` or `/resume` changes the reported session, and the strip starts a
+6. Ask me to track work with `TodoWrite`, or run a task through
+   `TaskCreate`/`TaskUpdate`: the mode row gains a `todo` cell, completed over
+   total, with the in-progress count in brackets while any are active. It
+   disappears again on a tab that's used neither.
+7. `/clear` or `/resume` changes the reported session, and the strip starts a
    fresh generation on the new transcript. `:agent hud info` names each field's
    transcript record and its freshness.
 

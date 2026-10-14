@@ -70,6 +70,7 @@ class Observation:
         self.subagent_types = collections.Counter()
         self.stop_reasons = collections.Counter()
         self.result_keys = collections.Counter()
+        self.task_events = collections.Counter()
         self.messages = {}
         self.blocks = 0
         self.sidechain = 0
@@ -133,6 +134,18 @@ class Observation:
                 for key in result:
                     if label(key) and ("ackground" in key or "task" in key.lower()):
                         self.result_keys[key] += 1
+                # `TaskCreate`/`TaskUpdate` results, by shape rather than the
+                # calling tool's name: a `Monitor` result also carries a
+                # `taskId` (an unrelated background-job id), but neither this
+                # nested `task.id` nor a `from`/`to` pair, so it never matches.
+                task = result.get("task")
+                if isinstance(task, dict) and isinstance(task.get("id"), str):
+                    self.task_events["created"] += 1
+                change = result.get("statusChange")
+                if isinstance(change, dict):
+                    frm, to = label(change.get("from")), label(change.get("to"))
+                    if frm and to:
+                        self.task_events[f"{frm}->{to}"] += 1
         elif kind == "permission-mode" and label(record.get("permissionMode")):
             self.latest["permission_mode"] = label(record["permissionMode"])
         elif kind == "mode" and label(record.get("mode")):
@@ -177,6 +190,7 @@ class Observation:
             "tool_result_task_keys": dict(self.result_keys),
             "subagent_types": dict(self.subagent_types),
             "latest_todos": self.latest.get("todos"),
+            "task_events": dict(self.task_events),
             "compaction": {"summaries": self.compact_summaries, "latest_boundary": self.latest.get("compaction")},
         }
 

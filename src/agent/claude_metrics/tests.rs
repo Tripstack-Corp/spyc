@@ -34,6 +34,16 @@ fn result(second: u32, id: &str, is_error: bool) -> Value {
                {"type": "tool_result", "tool_use_id": id, "is_error": is_error, "content": "out"}]}})
 }
 
+/// A `user` record carrying a `TaskCreate`/`TaskUpdate`-shaped
+/// `toolUseResult`, alongside the one tool_result block real transcripts
+/// always pair it with.
+fn task_result(second: u32, id: &str, outcome: Value) -> Value {
+    json!({"type": "user", "sessionId": SESSION, "timestamp": time(second),
+           "toolUseResult": outcome,
+           "message": {"content": [
+               {"type": "tool_result", "tool_use_id": id, "content": "ok"}]}})
+}
+
 fn compaction(second: u32, pre_tokens: u64) -> Value {
     json!({"type": "system", "subtype": "compact_boundary", "sessionId": SESSION,
            "timestamp": time(second), "content": "Conversation compacted",
@@ -274,6 +284,128 @@ fn the_plan_is_the_latest_todo_list() {
     assert_eq!(fold_all(&[]).plan, None, "no list is not an empty plan");
 }
 
+/// `TaskCreate` and `TaskUpdate` tally the same way `TodoWrite` does, folded
+/// from the exact session this driver independently confirmed against:
+/// 22 creates, 20 pending→in_progress, 20 in_progress→completed, 1 direct
+/// pending→completed.
+#[test]
+fn task_create_and_update_fold_into_the_plan_count() {
+    let created = |n: u32| task_result(n, &format!("c{n}"), json!({"task": {"id": n.to_string()}}));
+    let transition = |n: u32, from: &str, to: &str| {
+        task_result(
+            n,
+            &format!("u{n}"),
+            json!({"success": true, "taskId": "1", "updatedFields": ["status"],
+                   "statusChange": {"from": from, "to": to}}),
+        )
+    };
+    let mut records: Vec<Value> = (0..22).map(created).collect();
+    records.extend((100..120).map(|n| transition(n, "pending", "in_progress")));
+    records.extend((200..220).map(|n| transition(n, "in_progress", "completed")));
+    records.push(transition(300, "pending", "completed"));
+    let plan = fold_all(&records).plan.unwrap().value;
+    assert_eq!(
+        plan,
+        Plan {
+            pending: 1,
+            in_progress: 0,
+            completed: 21
+        }
+    );
+}
+
+/// A description-only update carries no `statusChange` at all; it moves
+/// nothing.
+#[test]
+fn a_task_update_with_no_status_change_moves_nothing() {
+    let records = [
+        task_result(1, "c1", json!({"task": {"id": "1"}})),
+        task_result(
+            2,
+            "u1",
+            json!({"success": true, "taskId": "1", "updatedFields": ["description"]}),
+        ),
+    ];
+    assert_eq!(
+        fold_all(&records).plan.unwrap().value,
+        Plan {
+            pending: 1,
+            in_progress: 0,
+            completed: 0
+        }
+    );
+}
+
+/// `Monitor`'s own result also carries a `taskId` (an unrelated background-job
+/// id) — matched by shape, not by which tool ran, so it contributes nothing.
+#[test]
+fn an_unrelated_taskid_is_not_a_task_event() {
+    let monitor = task_result(
+        1,
+        "m1",
+        json!({"taskId": "bns6w2d3o", "timeoutMs": 600_000, "persistent": false}),
+    );
+    assert_eq!(fold_all(&[monitor]).plan, None);
+}
+
+/// `success: false` is its own signal, independent of the block's own
+/// `is_error`: a transition it reports didn't actually happen.
+#[test]
+fn an_unsuccessful_task_update_does_not_move_the_plan() {
+    let records = [
+        task_result(1, "c1", json!({"task": {"id": "1"}})),
+        task_result(
+            2,
+            "u1",
+            json!({"success": false, "statusChange": {"from": "pending", "to": "in_progress"}}),
+        ),
+    ];
+    assert_eq!(
+        fold_all(&records).plan.unwrap().value,
+        Plan {
+            pending: 1,
+            in_progress: 0,
+            completed: 0
+        },
+        "the create stands; the unsuccessful update does not"
+    );
+}
+
+/// An errored call's result isn't trusted for a transition, even if it still
+/// carries a `toolUseResult`-shaped payload.
+#[test]
+fn an_errored_task_result_does_not_move_the_plan() {
+    let errored = json!({"type": "user", "sessionId": SESSION, "timestamp": time(1),
+        "toolUseResult": {"task": {"id": "1"}},
+        "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "c1", "is_error": true, "content": "denied"}]}});
+    assert_eq!(fold_all(&[errored]).plan, None);
+}
+
+/// A status this closed enum doesn't name is dropped, not guessed into one
+/// of the three buckets.
+#[test]
+fn an_unrecognized_status_is_dropped_not_guessed() {
+    let records = [
+        task_result(1, "c1", json!({"task": {"id": "1"}})),
+        task_result(
+            2,
+            "u1",
+            json!({"success": true, "statusChange": {"from": "pending", "to": "blocked"}}),
+        ),
+    ];
+    let plan = fold_all(&records).plan.unwrap().value;
+    assert_eq!(
+        plan,
+        Plan {
+            pending: 0,
+            in_progress: 0,
+            completed: 0
+        },
+        "the move out of pending is real even though the target bucket isn't known"
+    );
+}
+
 /// The permission-mode record carries no timestamp; the records around it
 /// date it.
 #[test]
@@ -326,6 +458,9 @@ fn no_conversation_content_survives_the_projection() {
          "input": {"command": "PRIVATE_ARGUMENT_SENTINEL", "description": "PRIVATE_DESC_SENTINEL"}},
         {"type": "tool_use", "id": "call-2", "name": "TodoWrite",
          "input": {"todos": [{"content": "PRIVATE_TODO_SENTINEL", "status": "pending"}]}},
+        {"type": "tool_use", "id": "call-3", "name": "TaskCreate",
+         "input": {"subject": "PRIVATE_TASK_SUBJECT_SENTINEL", "description": "PRIVATE_TASK_DESC_SENTINEL",
+                   "activeForm": "PRIVATE_TASK_FORM_SENTINEL"}},
     ]);
     let records = [
         assistant("msg-1", 1, usage(1, 1, 1, 1), content),
@@ -333,6 +468,18 @@ fn no_conversation_content_survives_the_projection() {
                "cwd": "/PRIVATE_PATH_SENTINEL", "toolUseResult": {"stdout": "PRIVATE_OUTPUT_SENTINEL"},
                "message": {"content": [{"type": "tool_result", "tool_use_id": "call-1",
                                         "content": "PRIVATE_RESULT_SENTINEL"}]}}),
+        task_result(
+            5,
+            "call-3",
+            json!({"task": {"id": "9", "subject": "PRIVATE_TASK_RESULT_SENTINEL",
+                                                 "description": "PRIVATE_TASK_RESULT_DESC_SENTINEL"}}),
+        ),
+        task_result(
+            6,
+            "call-4",
+            json!({"success": true, "taskId": "9",
+                                        "statusChange": {"from": "pending", "to": "in_progress"}}),
+        ),
         json!({"type": "user", "sessionId": SESSION, "timestamp": time(3),
                "message": {"content": "PRIVATE_PROMPT_SENTINEL"}}),
         json!({"type": "system", "subtype": "compact_boundary", "sessionId": SESSION,
@@ -343,11 +490,20 @@ fn no_conversation_content_survives_the_projection() {
     let events: Vec<Event> = records.iter().filter_map(|r| decode(r, SESSION)).collect();
     assert_eq!(
         events.len(),
-        3,
+        5,
         "the prompt and the title contribute nothing"
     );
     let dump = format!("{events:?} {:?}", fold_all(&records));
     assert!(!dump.contains("SENTINEL"), "{dump}");
+    assert_eq!(
+        fold_all(&records).plan.unwrap().value,
+        Plan {
+            pending: 0,
+            in_progress: 1,
+            completed: 0
+        },
+        "the create and the transition still counted"
+    );
 }
 
 /// A field the transcript didn't report stays unknown; it never becomes zero.

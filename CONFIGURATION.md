@@ -140,10 +140,13 @@ read from part-way through, these counts carry `≥` and the tools row reads
 `recent`. The tools row counts every call and every failure, names what is
 running with `◐`, and lists the three most called, each marked `✓` or `✗<n>` by
 its own failures; the dump lists every tool, then the most recent 64 calls with
-their times and outcomes. The mode row counts
-subagent (`Agent`) and background calls; Claude Code's own footer already shows
-its permission mode. Only spyc's own MCP server keeps its name in a tool label,
-as `spyc:`; other servers' tools read `mcp`.
+their times and outcomes. The mode row counts subagent (`Agent`) and background
+calls, then, once `TodoWrite` or `TaskCreate`/`TaskUpdate` has reported one,
+`todo`: completed over the total, with how many are in progress in brackets
+when any are. The two tools share one three-state list; nothing is shown until
+one has been used. Claude Code's own footer already shows its permission mode.
+Only spyc's own MCP server keeps its name in a tool label, as `spyc:`; other
+servers' tools read `mcp`.
 
 Claude Code hands those figures only to its `statusLine` command, so when claude
 is wired (the first-launch `[Y/n]`, or `:hooks on claude`), spyc wraps that
@@ -160,8 +163,7 @@ directory, `$CLAUDE_CONFIG_DIR` or else `~/.claude`, as spyc's own environment
 names it at startup. The session is the one the tab's status hooks reported, so
 the strip waits for the first report. Claude Code files a session under the
 directory it started in, so every project is asked for that exact name, and a
-session found in two projects is not guessed between. The plan row is not shown:
-no transcript with `TodoWrite` or the `Task` tools has been checked yet.
+session found in two projects is not guessed between.
 
 ### Colour depth — `[layout] color_depth`
 

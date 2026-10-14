@@ -19,6 +19,19 @@ pub struct ToolCall {
     pub plan: Option<Plan>,
 }
 
+/// `TaskCreate` and `TaskUpdate` share `TodoWrite`'s three-state enum
+/// (`pending`/`in_progress`/`completed`): `TaskList`'s own tool description
+/// names it, and no other value has been observed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TaskOutcome {
+    /// A task is created `pending`; `TaskCreate`'s result never says a status.
+    Created,
+    StatusChanged {
+        from: String,
+        to: String,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// One assistant record. Claude Code writes one per content block, each
@@ -31,10 +44,12 @@ pub enum Event {
         usage: Option<Usage>,
         calls: Vec<ToolCall>,
     },
-    /// A user record's tool results, as `(tool_use_id, is_error)`.
+    /// A user record's tool results, as `(tool_use_id, is_error)`, plus what a
+    /// `TaskCreate`/`TaskUpdate` result said happened, if either is this one.
     Results {
         at: Timestamp,
         results: Vec<(String, bool)>,
+        task: Option<TaskOutcome>,
     },
     /// A `permission-mode` record. It has no timestamp: its place in the file
     /// dates it.
@@ -131,12 +146,35 @@ fn results(value: &Value) -> Option<Event> {
         })
         .take(MAX_BLOCKS)
         .collect();
-    if results.is_empty() {
+    // An errored call's result isn't trusted for a task transition either.
+    let errored = results.iter().any(|(_, failed)| *failed);
+    let task = (!errored).then(|| task_outcome(value)).flatten();
+    if results.is_empty() && task.is_none() {
         return None;
     }
     Some(Event::Results {
         at: timestamp(value)?,
         results,
+        task,
+    })
+}
+
+/// What a `TaskCreate`/`TaskUpdate` result says happened, from `toolUseResult`
+/// — never the task's own subject or description. Matched by shape, not by
+/// which tool ran: `Monitor`'s result also carries a `taskId` (an unrelated
+/// background-job id), but neither a nested `task.id` nor a `from`/`to` pair,
+/// so it never matches either arm.
+fn task_outcome(value: &Value) -> Option<TaskOutcome> {
+    let result = &value["toolUseResult"];
+    if result["success"] == false {
+        return None;
+    }
+    if bounded_id(&result["task"]["id"]).is_some() {
+        return Some(TaskOutcome::Created);
+    }
+    Some(TaskOutcome::StatusChanged {
+        from: label(&result["statusChange"]["from"])?,
+        to: label(&result["statusChange"]["to"])?,
     })
 }
 

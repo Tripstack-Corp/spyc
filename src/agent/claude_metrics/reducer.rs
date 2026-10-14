@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 
 use jiff::Timestamp;
 
-use super::records::{Event, ToolCall};
-use super::{Compaction, Mode, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage};
+use super::records::{Event, TaskOutcome, ToolCall};
+use super::{Compaction, Mode, Plan, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage};
 
 pub const MAX_TOOLS: usize = 64;
 /// Tools counted by name; later names share [`OTHER_TOOLS`].
@@ -27,6 +27,10 @@ pub struct Reducer {
     /// The latest timestamp folded, which dates the untimed records.
     clock: Option<Timestamp>,
     compacted_at: Option<Timestamp>,
+    /// Accumulated from `TaskCreate`/`TaskUpdate`, independently of whatever
+    /// `TodoWrite`'s own full-list reports hold — published to
+    /// `snapshot.plan` either way, latest timestamp winning.
+    task_plan: Plan,
 }
 
 impl Reducer {
@@ -75,10 +79,13 @@ impl Reducer {
                     self.fold_call(call, at);
                 }
             }
-            Event::Results { at, results } => {
+            Event::Results { at, results, task } => {
                 self.tick(at);
                 for (id, failed) in results {
                     self.fold_result(&id, failed, at);
+                }
+                if let Some(task) = task {
+                    self.fold_task(task, at);
                 }
             }
             Event::PermissionMode(mode) => {
@@ -197,6 +204,36 @@ impl Reducer {
             counts.len() - 1
         });
         &mut counts[index]
+    }
+
+    /// `TaskCreate` starts a task `pending`; `TaskUpdate`'s own `from`/`to`
+    /// moves it, so no per-task state is kept here to derive the delta.
+    fn fold_task(&mut self, task: TaskOutcome, at: Timestamp) {
+        match task {
+            TaskOutcome::Created => {
+                self.task_plan.pending = self.task_plan.pending.saturating_add(1);
+            }
+            TaskOutcome::StatusChanged { from, to } => {
+                if let Some(slot) = Self::plan_slot(&mut self.task_plan, &from) {
+                    *slot = slot.saturating_sub(1);
+                }
+                if let Some(slot) = Self::plan_slot(&mut self.task_plan, &to) {
+                    *slot = slot.saturating_add(1);
+                }
+            }
+        }
+        replace(&mut self.snapshot.plan, at, self.task_plan);
+    }
+
+    /// Which count `status` names, for an enum closed by `TaskList`'s own
+    /// description; an unrecognized value is dropped rather than guessed.
+    fn plan_slot<'a>(plan: &'a mut Plan, status: &str) -> Option<&'a mut u32> {
+        match status {
+            "pending" => Some(&mut plan.pending),
+            "in_progress" => Some(&mut plan.in_progress),
+            "completed" => Some(&mut plan.completed),
+            _ => None,
+        }
     }
 
     fn fold_compaction(&mut self, at: Timestamp, compaction: Compaction) {
