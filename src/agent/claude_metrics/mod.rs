@@ -20,6 +20,7 @@ use jiff::Timestamp;
 
 pub use crate::agent::tail::Availability;
 pub use reducer::{MAX_TOOL_NAMES, MAX_TOOLS, OTHER_TOOLS, Reducer};
+pub(crate) use reducer::{count_tool, replace};
 
 /// Claude Code's configuration directory: `$CLAUDE_CONFIG_DIR`, else
 /// `~/.claude`. Only an absolute one names a place to read.
@@ -89,7 +90,8 @@ impl Usage {
             .saturating_add(self.cache_read)
     }
 
-    const fn saturating_add(self, other: Self) -> Self {
+    #[must_use]
+    pub const fn saturating_add(self, other: Self) -> Self {
         Self {
             input: self.input.saturating_add(other.input),
             cache_write: self.cache_write.saturating_add(other.cache_write),
@@ -98,7 +100,8 @@ impl Usage {
         }
     }
 
-    const fn saturating_sub(self, other: Self) -> Self {
+    #[must_use]
+    pub const fn saturating_sub(self, other: Self) -> Self {
         Self {
             input: self.input.saturating_sub(other.input),
             cache_write: self.cache_write.saturating_sub(other.cache_write),

@@ -1,6 +1,6 @@
-//! Reconcile the one visible agent strip consumer, for a Codex or Claude Code
-//! tab, through effects. Metric wakes supplement the display without changing
-//! the agent's semantic activity.
+//! Reconcile the one visible agent strip consumer, for a Codex, Claude Code
+//! or Antigravity tab, through effects. Metric wakes supplement the display
+//! without changing the agent's semantic activity.
 
 use jiff::Timestamp;
 use ratatui::layout::Rect;
@@ -47,6 +47,7 @@ impl App {
                 &info.live_session_id,
                 &self.state.pane.agent_hud.claude_home,
             ),
+            Feed::Agy => (&info.live_session_id, &self.state.pane.agent_hud.agy_home),
         };
         let session = session
             .as_deref()
@@ -208,6 +209,7 @@ pub(super) const fn feed(kind: AgentKind) -> Option<Feed> {
     match kind {
         AgentKind::Codex => Some(Feed::Codex),
         AgentKind::Claude => Some(Feed::Claude),
+        AgentKind::Agy => Some(Feed::Agy),
         _ => None,
     }
 }

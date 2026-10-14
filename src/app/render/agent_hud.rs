@@ -152,11 +152,19 @@ fn metrics_of<'a>(
             tail_only: u.tail_only,
             reported: reported(tabs, info),
         },
+        Some(Update::Agy(u)) => Metrics::Agy {
+            snapshot: (u.availability == Availability::Available).then_some(&u.snapshot),
+            tail_only: u.tail_only,
+        },
         None => match super::super::agent_hud::feed(info.agent().kind()) {
             Some(Feed::Claude) => Metrics::Claude {
                 snapshot: None,
                 tail_only: false,
                 reported: reported(tabs, info),
+            },
+            Some(Feed::Agy) => Metrics::Agy {
+                snapshot: None,
+                tail_only: false,
             },
             _ => Metrics::Codex(None),
         },

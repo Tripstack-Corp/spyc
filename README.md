@@ -50,7 +50,7 @@ with git-aware listings; the **bottom pane** is a child process — Claude Code 
 default (Codex, Antigravity and zot are first-class too), in practice anything.
 They share focus through a screen-style `^a` chord prefix.
 
-Codex and Claude Code tabs also have an optional [native session strip](CONFIGURATION.md#agent-hud--pane-agent_hud):
+Codex, Claude Code, and Antigravity tabs also have an optional [native session strip](CONFIGURATION.md#agent-hud--pane-agent_hud):
 `:agent hud compact` shows attention, identity, context and usage below the
 child; `full` adds operating mode and recent tools. It is off by default.
 

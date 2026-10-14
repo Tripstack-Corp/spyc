@@ -2,6 +2,7 @@
 
 use jiff::Timestamp;
 
+use crate::agent::agy_metrics;
 use crate::agent::claude_metrics;
 use crate::agent::codex_metrics::{Sample, Snapshot, Tokens};
 use crate::agent::tail::Availability;
@@ -41,7 +42,7 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
             layout.pane.map_or(0, |p| p.height)
         ),
         None => {
-            "not visible: off, hidden, short, closed or not an active Codex or Claude Code pane"
+            "not visible: off, hidden, short, closed or not an active Codex, Claude Code or Antigravity pane"
                 .to_owned()
         }
     });
@@ -51,30 +52,8 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
         return out;
     };
     let info = tabs.active_info();
-    let tilde = |home: Option<&std::path::PathBuf>| {
-        home.map_or("--".to_owned(), |p| crate::paths::display_tilde(p))
-    };
     out.push(format!("pane: {}", info.id));
-    if super::feed(info.agent().kind()) == Some(Feed::Claude) {
-        out.push(format!(
-            "reported session: {}",
-            info.live_session_id.as_deref().unwrap_or("--")
-        ));
-        out.push(format!(
-            "Claude home (spyc's environment): {}",
-            tilde(app.state.pane.agent_hud.claude_home.as_ref())
-        ));
-        out.extend(statusline_lines(tabs, info));
-    } else {
-        out.push(format!(
-            "pinned thread: {}",
-            info.codex_session_id.as_deref().unwrap_or("--")
-        ));
-        out.push(format!(
-            "captured home: {}",
-            tilde(info.codex_home.as_ref())
-        ));
-    }
+    out.extend(agent_info_lines(app, tabs, info));
     out.push(format!(
         "hooks present at launch: {}; restart needed: {}; reported events: {}",
         info.status_hooks_at_spawn,
@@ -106,7 +85,7 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
     if update.availability() == Availability::Missing {
         let file = match update {
             Update::Codex(_) => "Pinned rollout",
-            Update::Claude(_) => "Session transcript",
+            Update::Claude(_) | Update::Agy(_) => "Session transcript",
         };
         out.push(format!(
             "{file} unavailable in bounded lookup; toggle the strip to retry."
@@ -124,6 +103,7 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
     out.extend(match update {
         Update::Codex(u) => metric_lines(&u.snapshot, now),
         Update::Claude(u) => claude_lines(&u.snapshot, u.tail_only, now),
+        Update::Agy(u) => agy_lines(&u.snapshot, u.tail_only, now),
     });
     out
 }
@@ -257,7 +237,7 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
                 r.value.cache_write,
                 r.value.cache_read,
                 r.value.output,
-                claude_freshness(r, now)
+                sample_freshness(r, now)
             )
         },
     )];
@@ -267,7 +247,7 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
             format!(
                 "context (latest request's input and cache): {} tokens; {}; no window size, so no percentage",
                 c.value,
-                claude_freshness(c, now)
+                sample_freshness(c, now)
             )
         },
     ));
@@ -284,7 +264,7 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
                 m.value.model.as_deref().unwrap_or("--"),
                 m.value.effort.as_deref().unwrap_or("--"),
                 m.value.permission_mode.as_deref().unwrap_or("--"),
-                claude_freshness(m, now)
+                sample_freshness(m, now)
             )
         },
     ));
@@ -298,7 +278,7 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
                 c.value
                     .pre_tokens
                     .map_or("--".to_owned(), |n| n.to_string()),
-                claude_freshness(c, now)
+                sample_freshness(c, now)
             )
         },
     ));
@@ -310,7 +290,7 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
                 plan.value.pending,
                 plan.value.in_progress,
                 plan.value.completed,
-                claude_freshness(plan, now)
+                sample_freshness(plan, now)
             )
         },
     ));
@@ -416,7 +396,7 @@ fn statusline_lines(
     out
 }
 
-fn claude_freshness<T>(sample: &claude_metrics::Sample<T>, now: Timestamp) -> String {
+fn sample_freshness<T>(sample: &claude_metrics::Sample<T>, now: Timestamp) -> String {
     format!(
         "at {}; {}",
         sample.at,
@@ -426,6 +406,137 @@ fn claude_freshness<T>(sample: &claude_metrics::Sample<T>, now: Timestamp) -> St
             "fresh"
         }
     )
+}
+
+fn agent_info_lines(
+    app: &App,
+    tabs: &crate::pane::PaneTabs,
+    info: &crate::pane::tabs::TabInfo,
+) -> Vec<String> {
+    let tilde = |home: Option<&std::path::PathBuf>| {
+        home.map_or("--".to_owned(), |p| crate::paths::display_tilde(p))
+    };
+    let mut out = Vec::new();
+    if super::feed(info.agent().kind()) == Some(Feed::Claude) {
+        out.push(format!(
+            "reported session: {}",
+            info.live_session_id.as_deref().unwrap_or("--")
+        ));
+        out.push(format!(
+            "Claude home (spyc's environment): {}",
+            tilde(app.state.pane.agent_hud.claude_home.as_ref())
+        ));
+        out.extend(statusline_lines(tabs, info));
+    } else if super::feed(info.agent().kind()) == Some(Feed::Agy) {
+        out.push(format!(
+            "reported session: {}",
+            info.live_session_id.as_deref().unwrap_or("--")
+        ));
+        out.push(format!(
+            "Agy home (spyc's environment): {}",
+            tilde(app.state.pane.agent_hud.agy_home.as_ref())
+        ));
+    } else {
+        out.push(format!(
+            "pinned thread: {}",
+            info.codex_session_id.as_deref().unwrap_or("--")
+        ));
+        out.push(format!(
+            "captured home: {}",
+            tilde(info.codex_home.as_ref())
+        ));
+    }
+    out
+}
+
+fn agy_lines(s: &agy_metrics::Snapshot, tail_only: bool, now: Timestamp) -> Vec<String> {
+    let mut out = vec![s.request.as_ref().map_or_else(
+        || "request (planner response usage): --".to_owned(),
+        |r| {
+            format!(
+                "request (planner response usage): input {}; cache read {}; output {}; {}",
+                r.value.input,
+                r.value.cache_read,
+                r.value.output,
+                sample_freshness(r, now)
+            )
+        },
+    )];
+    out.push(s.context_tokens.as_ref().map_or_else(
+        || "context (latest request's input and cache read): -- (none since the read began or the last compaction)".to_owned(),
+        |c| {
+            format!(
+                "context (latest request's input and cache read): {} tokens; {}; no window size, so no percentage",
+                c.value,
+                sample_freshness(c, now)
+            )
+        },
+    ));
+    let t = s.totals;
+    out.push(format!(
+        "totals over {} distinct messages since the read began: input {}; cache read {}; output {}",
+        s.messages, t.input, t.cache_read, t.output
+    ));
+    out.push(s.mode.as_ref().map_or_else(
+        || "mode: --".to_owned(),
+        |m| {
+            format!(
+                "mode: model {}; {}",
+                m.value.model.as_deref().unwrap_or("--"),
+                sample_freshness(m, now)
+            )
+        },
+    ));
+    out.push(s.compaction.as_ref().map_or_else(
+        || format!("compactions (checkpoint records): {}", s.compactions),
+        |c| {
+            format!(
+                "compactions (checkpoint records): {}; latest {}",
+                s.compactions,
+                sample_freshness(c, now)
+            )
+        },
+    ));
+    out.push(format!(
+        "subagent calls (invoke_subagent): {}",
+        s.subagent_calls
+    ));
+    out.extend(agy_tool_lines(s, tail_only));
+    out
+}
+
+fn agy_tool_lines(s: &agy_metrics::Snapshot, tail_only: bool) -> Vec<String> {
+    let calls: u32 = s.tool_counts.iter().map(|c| c.calls).sum();
+    let failed: u32 = s.tool_counts.iter().map(|c| c.failed).sum();
+    let mut out = vec![format!(
+        "tool calls by tool, {}: {calls} calls; {failed} failed",
+        if tail_only {
+            "since the read began part-way through"
+        } else {
+            "every call in the session"
+        }
+    )];
+    for count in &s.tool_counts {
+        out.push(format!(
+            "  {}: {} calls; {} failed",
+            count.name, count.calls, count.failed
+        ));
+    }
+    out.push(format!(
+        "recent calls, oldest first: {} (at most {}); every call since they began: {}",
+        s.tools.len(),
+        agy_metrics::MAX_TOOLS,
+        s.tools_complete
+    ));
+    for tool in &s.tools {
+        out.push(format!(
+            "  {}: {:?}; at {}",
+            tool.name.as_deref().unwrap_or("tool"),
+            tool.status,
+            tool.at
+        ));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -504,5 +615,69 @@ mod tests {
         );
         let partial = claude_tool_lines(&snapshot, true);
         assert!(partial[0].contains("since the read began part-way through"));
+    }
+
+    #[test]
+    fn the_dump_formats_agy_lines_and_tools() {
+        let at: Timestamp = "2026-10-14T08:00:00Z".parse().unwrap();
+        let now = at.checked_add(std::time::Duration::from_secs(10)).unwrap();
+        let snapshot = agy_metrics::Snapshot {
+            request: Some(agy_metrics::Sample {
+                at,
+                value: agy_metrics::Usage {
+                    input: 100,
+                    cache_read: 40,
+                    cache_write: 0,
+                    output: 20,
+                },
+            }),
+            context_tokens: Some(agy_metrics::Sample { at, value: 140 }),
+            totals: agy_metrics::Usage {
+                input: 200,
+                cache_read: 80,
+                cache_write: 0,
+                output: 40,
+            },
+            messages: 2,
+            mode: Some(agy_metrics::Sample {
+                at,
+                value: agy_metrics::Mode {
+                    model: Some("gemini-2.5-pro".to_owned()),
+                },
+            }),
+            tool_counts: vec![agy_metrics::ToolCount {
+                name: "view_file".into(),
+                calls: 5,
+                failed: 1,
+            }],
+            tools: vec![agy_metrics::Tool {
+                name: Some("view_file".into()),
+                status: agy_metrics::ToolStatus::Completed,
+                at,
+            }],
+            tools_complete: true,
+            subagent_calls: 1,
+            ..agy_metrics::Snapshot::default()
+        };
+        let lines = agy_lines(&snapshot, false, now);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("input 100; cache read 40; output 20"))
+        );
+        assert!(lines.iter().any(|l| l.contains("140 tokens")));
+        assert!(lines.iter().any(|l| l.contains("model gemini-2.5-pro")));
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("subagent calls (invoke_subagent): 1"))
+        );
+        let tool_lines = agy_tool_lines(&snapshot, false);
+        assert!(tool_lines[0].contains("every call in the session: 5 calls; 1 failed"));
+        assert!(
+            tool_lines
+                .iter()
+                .any(|l| l.contains("view_file: 5 calls; 1 failed"))
+        );
     }
 }

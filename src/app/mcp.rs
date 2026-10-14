@@ -787,7 +787,9 @@ impl App {
         if let Some(sid) = session_id.filter(|_| decision.is_ok()) {
             pin_live_session(&mut entry.info, kind, sid);
         }
+        let pane_id = entry.info.id.clone();
         let label = entry.info.label.clone();
+        self.state.pane.agent_hud.status_reported(&pane_id);
         McpResponse::Ok {
             message: match decision {
                 Ok(_) => format!("status '{status}' set for pane {} ({label})", idx + 1),
