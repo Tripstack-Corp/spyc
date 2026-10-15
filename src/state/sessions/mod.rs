@@ -849,8 +849,14 @@ pub fn is_uuid(token: &str) -> bool {
 // the shared `closest_short_id` helper. `short_id` below is the shared
 // formatter both the profiles and tests use.
 
+/// Keeps the tail, not the head, matching the agent HUD's session cell
+/// (`display_truncate_tail`) so the status bar and the HUD read the same
+/// session as the same fragment. A codex-style id's leading digits are
+/// timestamp-ordered, so two tabs spawned close together can share a head;
+/// the tail is where they actually differ.
 pub fn short_id(uuid: &str) -> String {
-    uuid.chars().take(8).collect()
+    let chars: Vec<char> = uuid.chars().collect();
+    chars[chars.len().saturating_sub(8)..].iter().collect()
 }
 
 /// Human-readable relative time: "just now", "5 minutes ago", "2 days ago".
