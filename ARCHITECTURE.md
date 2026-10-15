@@ -277,9 +277,19 @@ Goal: 0 draws-per-second at idle. Implementation:
   buffer because the emoji arrives from flashes, file names and agent
   output alike. Its tests replay ratatui's real diff and backend bytes
   through libghostty-vt and compare the screen to the buffer.
-- Caching: `build_rows()` and grid stabilization keyed by a
+- Caching: `build_rows()` and the page settle keyed by a
   `list_generation` counter that increments on any listing /
   cursor / pick / mask change.
+- Pages are counted from the top (#679): the first starts at row 0
+  and each starts where the one before it ends. A page holds as many
+  columns as fit and a column is as wide as its longest name, so pages
+  differ in length, and `ui::list_view::Pages` finds their starts by
+  walking from the top, once per listing and list size and only as far
+  as asked. A row's page therefore never depends on how the cursor got
+  there, and PageDown / PageUp step through the same pages. Snapping
+  `view_top` to a multiple of the current page's length instead
+  alternated between two starts whenever neighbouring pages differed,
+  and could settle on one that didn't hold the cursor.
 
 The activity overlay (`A` toggle) reports dps and bytes/sec for
 ongoing tuning.

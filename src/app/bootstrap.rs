@@ -139,10 +139,8 @@ impl App {
                 view: View::Dir,
                 cursor: Cursor::new(),
                 rows: Vec::new(),
-                grid_dims: crate::ui::list_view::GridDims {
-                    cols: 1,
-                    rows_per_col: 1,
-                },
+                grid_dims: crate::ui::list_view::GridDims::new(1, 1),
+                page: crate::ui::list_view::PageSpan::default(),
                 list_generation: 0,
                 // Per-column git: the startup branch string + (empty) markers,
                 // and empty cache/worker plumbing until the first chdir +

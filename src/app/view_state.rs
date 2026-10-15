@@ -205,14 +205,17 @@ pub struct ViewState {
     /// Cached `build_rows()` output; invalidated by `list_generation`.
     pub(super) cached_rows: Vec<Row>,
     pub(super) cached_rows_gen: u64,
-    /// Grid stabilization cache key: (list_gen, view_top, cursor, width, height).
+    /// Page settle cache key: (list_gen, view_top, cursor, width, height).
     pub(super) cached_grid_key: (u64, usize, usize, u16, u16),
-    /// The same row cache + grid key for the **right** column's second
-    /// commander (`state.right`), settled independently. Unused (empty / `MAX`
-    /// gen) while no second commander is open.
+    /// Where the left column's fixed pages start, measured over `cached_rows`.
+    pub(super) pages: crate::ui::list_view::Pages,
+    /// The same row cache, grid key and page starts for the **right** column's
+    /// second commander (`state.right`), settled independently. Unused (empty /
+    /// `MAX` gen) while no second commander is open.
     pub(super) right_cached_rows: Vec<Row>,
     pub(super) right_cached_rows_gen: u64,
     pub(super) right_cached_grid_key: (u64, usize, usize, u16, u16),
+    pub(super) right_pages: crate::ui::list_view::Pages,
     /// Last terminal-window title emitted (OSC 2 dedup). `None` forces
     /// a re-emit on next draw.
     pub(super) last_term_title: Option<String>,
@@ -446,9 +449,11 @@ impl ViewState {
             cached_rows: Vec::new(),
             cached_rows_gen: u64::MAX, // force first build
             cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            pages: crate::ui::list_view::Pages::default(),
             right_cached_rows: Vec::new(),
             right_cached_rows_gen: u64::MAX, // force first build
             right_cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            right_pages: crate::ui::list_view::Pages::default(),
             last_term_title: None,
             harpoon_menu: None,
             chord_hint: None,

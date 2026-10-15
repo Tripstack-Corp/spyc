@@ -129,8 +129,93 @@ pub struct GridDims {
 }
 
 impl GridDims {
+    pub const fn new(cols: u16, rows_per_col: u16) -> Self {
+        Self { cols, rows_per_col }
+    }
+
     pub const fn items_per_page(self) -> usize {
         self.cols as usize * self.rows_per_col as usize
+    }
+}
+
+/// The page holding the cursor and its neighbours, for update-time paging.
+/// Pages are counted from the top (see [`Pages`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PageSpan {
+    /// The page's first row: the `view_top` drawn.
+    pub start: usize,
+    /// First row and length of the page before. `None` on the first page:
+    /// the last page, where it would wrap, is only known after measuring them
+    /// all, which opening a large directory shouldn't pay for.
+    pub prev: Option<(usize, usize)>,
+    /// First row and length of the page after, or of the first page from the
+    /// last, so a one-page listing is its own neighbour.
+    pub next: (usize, usize),
+}
+
+/// Where the listing's fixed pages start. The first starts at row 0 and each
+/// starts where the one before it ends. A page holds as many columns as fit,
+/// and a column is as wide as its longest name, so pages differ in length and
+/// their starts can only be found by walking from the top.
+///
+/// A row's page therefore never depends on how the cursor reached it. The walk
+/// runs once per listing and list size, and only as far as it is asked.
+#[derive(Debug, Default)]
+pub struct Pages {
+    /// The rows' generation and the list's rect the starts were measured for.
+    key: Option<(u64, Rect)>,
+    /// Ascending, from 0.
+    starts: Vec<usize>,
+    /// Where the last measured page ends.
+    end: usize,
+}
+
+impl Pages {
+    /// The page holding `index`, with its neighbours. `generation` names the
+    /// rows: a new one, or a new `area`, restarts the walk.
+    pub fn around(&mut self, rows: &[Row], area: Rect, generation: u64, index: usize) -> PageSpan {
+        if self.key != Some((generation, area)) {
+            *self = Self {
+                key: Some((generation, area)),
+                ..Self::default()
+            };
+        }
+        let len = rows.len();
+        if len == 0 {
+            return PageSpan::default();
+        }
+        let index = index.min(len - 1);
+        self.measure_while(rows, area, |pages| pages.end <= index);
+        let k = self.starts.partition_point(|&s| s <= index) - 1;
+        // The page after: the next one, or the first from the last.
+        self.measure_while(rows, area, |pages| pages.starts.len() <= k + 1);
+        let next = if k + 1 < self.starts.len() {
+            self.page(k + 1)
+        } else {
+            self.page(0)
+        };
+        PageSpan {
+            start: self.starts[k],
+            prev: k.checked_sub(1).map(|k| self.page(k)),
+            next,
+        }
+    }
+
+    /// First row and length of page `k`, which must be measured.
+    fn page(&self, k: usize) -> (usize, usize) {
+        let end = self.starts.get(k + 1).copied().unwrap_or(self.end);
+        (self.starts[k], end - self.starts[k])
+    }
+
+    /// Measure pages, one after another, while `more` holds and rows remain.
+    fn measure_while(&mut self, rows: &[Row], area: Rect, more: impl Fn(&Self) -> bool) {
+        while self.end < rows.len() && more(self) {
+            let start = self.end;
+            // `grid_at` always yields at least one row-tall column, so this ends.
+            let len = grid_at(rows, start, area).items_per_page();
+            self.starts.push(start);
+            self.end = (start + len).min(rows.len());
+        }
     }
 }
 
@@ -203,72 +288,7 @@ impl ListView<'_> {
 
     /// Compute the grid for the page that starts at `self.view_top`.
     pub fn grid(&self, area: Rect) -> Grid {
-        let height = area.height.max(1) as usize;
-        let width = area.width as usize;
-
-        if self.rows.is_empty() {
-            return Grid {
-                cols: 1,
-                rows: height as u16,
-                col_widths: vec![MIN_NAME_WIDTH + MARKER_W],
-            };
-        }
-
-        // Columns are always R = screen_height rows deep. Walk columns
-        // starting at view_top, adding columns while the total width still
-        // fits on screen. What doesn't fit paginates.
-        let rows_per_col = height;
-        let tail_start = self.view_top.min(self.rows.len());
-        let tail = &self.rows[tail_start..];
-        let count = tail.len();
-
-        // Max display width of column `col`'s rows, measured lazily. Only the
-        // columns that actually fit on screen are measured below, so the work
-        // is O(items_per_page + one overflow column) — NOT O(rows to the end
-        // of the listing). The old code collected display_width for *every*
-        // tail row on *every* frame: a 100k-entry dir near the top meant 100k
-        // width calls + an ~800 KB Vec per frame (typing jank / agent-stream
-        // redraw cost that grew linearly with directory size).
-        let col_max_width = |col: usize| -> usize {
-            let start = col * rows_per_col;
-            let end = (start + rows_per_col).min(count);
-            tail[start..end]
-                .iter()
-                .map(|r| super::display_width(&r.display))
-                .max()
-                .unwrap_or(0)
-        };
-
-        let mut col_widths: Vec<u16> = Vec::new();
-        let mut total = 0usize;
-        let mut col_idx = 0usize;
-        loop {
-            let start = col_idx * rows_per_col;
-            if start >= count {
-                break;
-            }
-            let col_w = col_max_width(col_idx) + MARKER_W as usize;
-            let addition = col_w + if col_idx > 0 { COL_GAP as usize } else { 0 };
-            if total + addition > width {
-                break;
-            }
-            total += addition;
-            col_widths.push(col_w as u16);
-            col_idx += 1;
-        }
-        if col_idx == 0 {
-            // Screen narrower than one cell. Render one clamped column —
-            // measured from the first column's rows only (what's drawn), not
-            // the whole tail.
-            let widest = col_max_width(0).max(MIN_NAME_WIDTH as usize);
-            col_widths.push((widest + MARKER_W as usize).min(width.max(1)) as u16);
-            col_idx = 1;
-        }
-        Grid {
-            cols: col_idx as u16,
-            rows: rows_per_col as u16,
-            col_widths,
-        }
+        grid_at(self.rows, self.view_top, area)
     }
     /// The bar a row gets: its background and whether it is bold, or `None`
     /// for a plain row. The cursor row forces the bright bar bg + fg over both
@@ -308,6 +328,77 @@ impl ListView<'_> {
         } else {
             (None, Modifier::empty())
         }
+    }
+}
+
+/// The grid for the page starting at `view_top`: the one geometry the
+/// renderer, the hit-test and the page walk ([`Pages`]) all derive.
+pub fn grid_at(rows: &[Row], view_top: usize, area: Rect) -> Grid {
+    let height = area.height.max(1) as usize;
+    let width = area.width as usize;
+
+    if rows.is_empty() {
+        return Grid {
+            cols: 1,
+            rows: height as u16,
+            col_widths: vec![MIN_NAME_WIDTH + MARKER_W],
+        };
+    }
+
+    // Columns are always R = screen_height rows deep. Walk columns
+    // starting at view_top, adding columns while the total width still
+    // fits on screen. What doesn't fit paginates.
+    let rows_per_col = height;
+    let tail_start = view_top.min(rows.len());
+    let tail = &rows[tail_start..];
+    let count = tail.len();
+
+    // Max display width of column `col`'s rows, measured lazily. Only the
+    // columns that actually fit on screen are measured below, so the work
+    // is O(items_per_page + one overflow column) — NOT O(rows to the end
+    // of the listing). The old code collected display_width for *every*
+    // tail row on *every* frame: a 100k-entry dir near the top meant 100k
+    // width calls + an ~800 KB Vec per frame (typing jank / agent-stream
+    // redraw cost that grew linearly with directory size).
+    let col_max_width = |col: usize| -> usize {
+        let start = col * rows_per_col;
+        let end = (start + rows_per_col).min(count);
+        tail[start..end]
+            .iter()
+            .map(|r| super::display_width(&r.display))
+            .max()
+            .unwrap_or(0)
+    };
+
+    let mut col_widths: Vec<u16> = Vec::new();
+    let mut total = 0usize;
+    let mut col_idx = 0usize;
+    loop {
+        let start = col_idx * rows_per_col;
+        if start >= count {
+            break;
+        }
+        let col_w = col_max_width(col_idx) + MARKER_W as usize;
+        let addition = col_w + if col_idx > 0 { COL_GAP as usize } else { 0 };
+        if total + addition > width {
+            break;
+        }
+        total += addition;
+        col_widths.push(col_w as u16);
+        col_idx += 1;
+    }
+    if col_idx == 0 {
+        // Screen narrower than one cell. Render one clamped column —
+        // measured from the first column's rows only (what's drawn), not
+        // the whole tail.
+        let widest = col_max_width(0).max(MIN_NAME_WIDTH as usize);
+        col_widths.push((widest + MARKER_W as usize).min(width.max(1)) as u16);
+        col_idx = 1;
+    }
+    Grid {
+        cols: col_idx as u16,
+        rows: rows_per_col as u16,
+        col_widths,
     }
 }
 
@@ -535,6 +626,80 @@ mod tests {
             width: w,
             height: h,
         })
+    }
+
+    /// A 20×2 list over rows on pages of 2, 2 and 8: a column holding a long
+    /// name is the only one its page fits.
+    fn uneven() -> Vec<Row> {
+        let long = "long-name-xxxxx";
+        ["a", "b", long, long, "c", "d", "e", "f", "g", "h", "i", "j"]
+            .iter()
+            .map(|n| row(n))
+            .collect()
+    }
+
+    const UNEVEN_AREA: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 20,
+        height: 2,
+    };
+
+    #[test]
+    fn pages_are_counted_from_the_top_and_wrap() {
+        let rows = uneven();
+        let mut pages = Pages::default();
+        let mut span = |i| pages.around(&rows, UNEVEN_AREA, 0, i);
+        let page = |start, prev, next| PageSpan { start, prev, next };
+        assert_eq!(span(0), page(0, None, (2, 2)));
+        assert_eq!(span(3), page(2, Some((0, 2)), (4, 8)));
+        assert_eq!(span(11), page(4, Some((2, 2)), (0, 2)));
+    }
+
+    /// A row's page doesn't depend on which rows were asked about before it.
+    #[test]
+    fn a_rows_page_ignores_what_was_asked_before() {
+        let rows = uneven();
+        let fresh = |i| Pages::default().around(&rows, UNEVEN_AREA, 0, i);
+        let mut warm = Pages::default();
+        for i in [11, 0, 5, 2, 7, 1] {
+            assert_eq!(warm.around(&rows, UNEVEN_AREA, 0, i), fresh(i), "row {i}");
+        }
+    }
+
+    /// New rows, or a new list size, measure the pages again.
+    #[test]
+    fn new_rows_or_a_new_size_measure_again() {
+        let rows = uneven();
+        let mut pages = Pages::default();
+        assert_eq!(pages.around(&rows, UNEVEN_AREA, 0, 5).start, 4);
+        let wide = Rect {
+            width: 200,
+            ..UNEVEN_AREA
+        };
+        let one_page = PageSpan {
+            start: 0,
+            prev: None,
+            next: (0, 12),
+        };
+        assert_eq!(pages.around(&rows, wide, 0, 5), one_page);
+        let short: Vec<Row> = (0..12).map(|_| row("a")).collect();
+        assert_eq!(pages.around(&short, UNEVEN_AREA, 1, 5).start, 0);
+    }
+
+    /// Placing the first page measures it and the next, not the whole listing.
+    #[test]
+    fn the_first_page_measures_only_what_it_shows() {
+        let rows: Vec<Row> = (0..10_000).map(|_| row("a")).collect();
+        let mut pages = Pages::default();
+        pages.around(&rows, UNEVEN_AREA, 0, 0);
+        assert_eq!(pages.starts, [0, 8]);
+    }
+
+    #[test]
+    fn an_empty_listing_has_no_pages() {
+        let span = Pages::default().around(&[], UNEVEN_AREA, 0, 0);
+        assert_eq!(span, PageSpan::default());
     }
 
     #[test]

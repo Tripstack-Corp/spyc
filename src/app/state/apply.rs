@@ -32,7 +32,6 @@ impl AppState {
     pub fn apply(&mut self, action: &Action) -> ApplyResult {
         let len = self.cur().rows.len();
         let rows_per_col = self.cur().grid_dims.rows_per_col as usize;
-        let per_page = self.cur().grid_dims.items_per_page();
 
         match action {
             // -- Cursor motion --
@@ -56,8 +55,8 @@ impl AppState {
                     self.flash_info("~");
                 }
             }
-            Action::PageUp => self.cursor_move_global(-(per_page as isize), len),
-            Action::PageDown => self.cursor_move_global(per_page as isize, len),
+            Action::PageUp => self.page_move(false),
+            Action::PageDown => self.page_move(true),
             Action::GotoFirst => self.goto_col_top(rows_per_col),
             Action::GotoLast => self.goto_col_bottom(rows_per_col, len),
 
