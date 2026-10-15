@@ -100,6 +100,9 @@ impl Config {
         if let Some(b) = file.codex_daemon {
             self.pane.codex_daemon = b;
         }
+        if let Some(resets) = file.agent_hud_resets {
+            self.pane.agent_hud_resets = resets;
+        }
         if trust == Trust::Trusted
             && let Some(mode) = file.agent_hud
         {

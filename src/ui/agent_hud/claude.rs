@@ -6,7 +6,9 @@ use crate::agent::claude_metrics::{Plan, Sample, Snapshot, ToolStatus};
 
 use ratatui::text::Span;
 
-use super::{AgentRows, Field, HudView, Palette, Reported, Row, Tally, short_count, tools_row};
+use super::{
+    AgentRows, Field, HudView, Palette, Reported, Row, Tally, resets, short_count, tools_row,
+};
 
 pub(super) fn rows(
     snapshot: Option<&Snapshot>,
@@ -22,7 +24,7 @@ pub(super) fn rows(
             let share = Field(vec![p.label("--"), Span::raw(" "), p.meter(percent)]);
             usage.cells.insert(1, share);
         }
-        usage.cells.extend(plan(reported, p));
+        usage.cells.extend(plan(reported, view, p));
         return AgentRows {
             usage,
             tools: Row::new(vec![
@@ -39,7 +41,7 @@ pub(super) fn rows(
     // A read that began part-way through can only have seen fewer.
     let at_least = if tail_only { "≥" } else { "" };
     AgentRows {
-        usage: usage(s, at_least, reported, p),
+        usage: usage(s, at_least, reported, view, p),
         tools: tools(s, tail_only, p),
         mode: mode_row(s, at_least, p),
     }
@@ -84,7 +86,13 @@ fn todo_cell(plan: Option<&Sample<Plan>>, at_least: &str, p: Palette) -> Option<
     Some(field)
 }
 
-fn usage(s: &Snapshot, at_least: &str, reported: Reported<'_>, p: Palette) -> Row {
+fn usage(
+    s: &Snapshot,
+    at_least: &str,
+    reported: Reported<'_>,
+    view: &HudView<'_>,
+    p: Palette,
+) -> Row {
     // Occupancy holds until the next request, so an idle session's is current.
     let mut context = vec![
         s.context_tokens
@@ -103,7 +111,7 @@ fn usage(s: &Snapshot, at_least: &str, reported: Reported<'_>, p: Palette) -> Ro
         .checked_div(sent)
         .map_or_else(|| p.label("--"), |pct| p.value(&format!("{pct}%")));
     let mut cells = vec![Field(vec![p.heading("context")]), Field(context)];
-    cells.extend(plan(reported, p));
+    cells.extend(plan(reported, view, p));
     cells.extend([
         p.pair(
             "out",
@@ -118,14 +126,31 @@ fn usage(s: &Snapshot, at_least: &str, reported: Reported<'_>, p: Palette) -> Ro
     Row::new(cells)
 }
 
-/// The plan's five-hour and seven-day windows, those Claude Code reported.
-fn plan(reported: Reported<'_>, p: Palette) -> Vec<Field> {
+/// The plan's five-hour and seven-day windows, those Claude Code reported, each
+/// with when it resets. Once that has passed the share is the old window's, so
+/// it shows `--` until Claude Code reports the new one.
+fn plan(reported: Reported<'_>, view: &HudView<'_>, p: Palette) -> Vec<Field> {
     let Some(plan) = reported.plan else {
         return Vec::new();
     };
     [("5h", plan.five_hour), ("7d", plan.seven_day)]
         .into_iter()
-        .filter_map(|(name, window)| Some(p.pair(name, p.meter(window?.used_percent))))
+        .filter_map(|(name, window)| {
+            let window = window?;
+            let reset = window.resets_at.zip(view.now);
+            if reset.is_some_and(|(at, now)| at <= now.as_second()) {
+                return Some(p.pair(name, p.label("--")));
+            }
+            let mut field = p.pair(name, p.meter(window.used_percent));
+            let label = reset
+                .zip(view.local_tz)
+                .and_then(|((at, now), tz)| resets::label(at, now, tz, view.resets));
+            if let Some(label) = label {
+                field.0.push(Span::raw(" "));
+                field.0.push(p.label(&format!("\u{21bb}{label}")));
+            }
+            Some(field)
+        })
         .collect()
 }
 
@@ -241,6 +266,8 @@ mod tests {
             },
             availability: snapshot.map(|_| Availability::Available),
             now: Some(at(10)),
+            local_tz: None,
+            resets: crate::config::AgentHudResets::Clock,
             hooks: Hooks::Reported,
             mcp_connections: 1,
         }
@@ -464,5 +491,70 @@ mod tests {
             !plain[1].contains("5h") && !plain[1].contains("7d"),
             "nothing reported, nothing shown"
         );
+    }
+
+    /// The usage row for plan windows resetting `five` and `seven` seconds
+    /// after `at(0)`, read at `at(0)` in Toronto (UTC-4; `at(0)` is 8am there,
+    /// on a Tuesday).
+    fn plan_row(five: i64, seven: i64, resets: crate::config::AgentHudResets) -> String {
+        use crate::agent::claude_statusline::{RateWindow, Statusline};
+        let snapshot = session();
+        let plan = Statusline {
+            five_hour: Some(RateWindow {
+                used_percent: 23,
+                resets_at: Some(at(five).as_second()),
+            }),
+            seven_day: Some(RateWindow {
+                used_percent: 85,
+                resets_at: Some(at(seven).as_second()),
+            }),
+            ..Statusline::default()
+        };
+        let toronto = jiff::tz::TimeZone::fixed(jiff::tz::Offset::from_hours(-4).unwrap());
+        let mut v = view(Some(&snapshot), false);
+        v.now = Some(at(0));
+        v.local_tz = Some(&toronto);
+        v.resets = resets;
+        v.metrics = Metrics::Claude {
+            snapshot: Some(&snapshot),
+            tail_only: false,
+            reported: super::super::Reported {
+                context_percent: None,
+                plan: Some(&plan),
+            },
+        };
+        lines(&v, AgentHudMode::Compact, 200, &Theme::default())
+            .swap_remove(1)
+            .to_string()
+    }
+
+    const HOUR: i64 = 3600;
+    const DAY: i64 = 24 * HOUR;
+
+    #[test]
+    fn each_plan_window_says_when_it_resets_in_local_clock_time() {
+        let clock = crate::config::AgentHudResets::Clock;
+        // 3:40pm today, and 9am Thursday.
+        let text = plan_row(7 * HOUR + 40 * 60, 2 * DAY + HOUR, clock);
+        assert!(text.contains("5h 23% ↻3:40pm"), "{text}");
+        assert!(text.contains("7d 85% ↻Thu 9am"), "{text}");
+    }
+
+    #[test]
+    fn a_countdown_says_how_long_until_each_window_resets() {
+        let countdown = crate::config::AgentHudResets::Countdown;
+        let text = plan_row(2 * HOUR + 5 * 60, 3 * DAY + 4 * HOUR, countdown);
+        assert!(text.contains("5h 23% ↻2h05m"), "{text}");
+        assert!(text.contains("7d 85% ↻3d4h"), "{text}");
+    }
+
+    /// Once a window has reset, its reported share belongs to the window
+    /// before, so the strip stops claiming it.
+    #[test]
+    fn a_window_past_its_reset_shows_no_share() {
+        let text = plan_row(-1, DAY, crate::config::AgentHudResets::Clock);
+        assert!(text.contains("5h --"), "{text}");
+        assert!(!text.contains("23%"), "{text}");
+        assert!(text.contains("7d 85% ↻Wed 8am"), "{text}");
     }
 }

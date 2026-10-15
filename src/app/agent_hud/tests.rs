@@ -1195,3 +1195,101 @@ fn agent_hud_retries_missing_agy_transcript_on_status_report() {
         );
     });
 }
+
+/// A strip showing plan resets wakes spyc for the next reset, and a countdown
+/// also each time its label ticks over; a hidden strip asks for nothing.
+#[test]
+fn plan_resets_wake_the_strip_only_when_its_cells_change() {
+    use crate::agent::claude_statusline::{RateWindow, Statusline};
+    use crate::config::AgentHudResets;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (120, 32);
+        app.state.config.mouse.capture = false;
+        app.state.pane.pane_height_pct = 50;
+        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("claude-home"));
+        let tab = claude_entry(&mut app, tmp.path(), Some(SESSION));
+        let id = tab.info.id.clone();
+        app.runtime.pane_tabs = Some(PaneTabs::new(tab));
+        app.cmd_agent_hud("compact");
+        let now = Timestamp::now().as_second();
+        let five = now + 3 * 3600 + 125;
+        let window = |used_percent, at| RateWindow {
+            used_percent,
+            resets_at: Some(at),
+        };
+        app.land_statusline(
+            &id,
+            Statusline {
+                five_hour: Some(window(23, five)),
+                // Half past an hour, so its own hourly tick is ~30 minutes off.
+                seven_day: Some(window(61, now + 3 * 86_400 + 1800)),
+                ..Statusline::default()
+            },
+        );
+        // Seconds until the strip's own wake, if it armed one.
+        let wake_in = |app: &mut App| {
+            let mut ctx = RunCtx::for_test();
+            let start = Instant::now();
+            app.settle_agent_hud(start, &mut ctx);
+            ctx.scheduler
+                .next()
+                .map(|at| at.duration_since(start).as_secs())
+        };
+        let clock = wake_in(&mut app).expect("a reset to wake for");
+        assert!(
+            (3 * 3600 + 120..=3 * 3600 + 125).contains(&clock),
+            "the five-hour reset: {clock}s"
+        );
+        app.state.config.pane.agent_hud_resets = AgentHudResets::Countdown;
+        let countdown = wake_in(&mut app).expect("a tick to wake for");
+        assert!((1..=60).contains(&countdown), "the next tick: {countdown}s");
+        app.cmd_agent_hud("off");
+        assert_eq!(wake_in(&mut app), None, "no strip, no wake");
+    });
+}
+
+/// A reset passing between two settles is what changes the strip, so it alone
+/// must repaint it: the five-hour share stops being claimed.
+#[test]
+fn a_plan_reset_passing_repaints_the_strip() {
+    use crate::agent::claude_statusline::{RateWindow, Statusline};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (120, 32);
+        app.state.config.mouse.capture = false;
+        app.state.pane.pane_height_pct = 50;
+        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("claude-home"));
+        let tab = claude_entry(&mut app, tmp.path(), Some(SESSION));
+        let id = tab.info.id.clone();
+        app.runtime.pane_tabs = Some(PaneTabs::new(tab));
+        app.cmd_agent_hud("compact");
+        let now = Timestamp::now().as_second();
+        app.land_statusline(
+            &id,
+            Statusline {
+                five_hour: Some(RateWindow {
+                    used_percent: 23,
+                    resets_at: Some(now - 10),
+                }),
+                ..Statusline::default()
+            },
+        );
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_hud(Instant::now(), &mut ctx);
+        // As if the last settle came before the reset.
+        app.state.pane.agent_hud.as_of = Some(Timestamp::from_second(now - 20).unwrap());
+        let rect = app
+            .frame_layout(Rect::new(0, 0, 120, 32))
+            .agent_hud
+            .unwrap();
+        assert!(app.agent_hud_lines(rect)[1].to_string().contains("5h 23%"));
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_hud(Instant::now(), &mut ctx);
+        assert!(ctx.draw.is_dirty(), "the reset repaints");
+        let usage = app.agent_hud_lines(rect)[1].to_string();
+        assert!(usage.contains("5h --"), "{usage}");
+    });
+}

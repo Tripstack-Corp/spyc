@@ -61,6 +61,7 @@ codex_mcp = true               # register spyc's MCP server in codex's user conf
 codex_daemon = false           # false: codex panes run `--no-daemon`, so their hooks + MCP reach the spyc that launched them
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
 agent_hud = "off"             # "off", "compact", or "full"; only $HOME's rc decides
+agent_hud_resets = "clock"    # when a plan window resets: "clock" (3:40pm, Thu 9am) or "countdown" (2h05m)
 
 [yank]
 include_pager_title = true     # prepend a source header to pager yanks (y/Y)
@@ -131,7 +132,14 @@ comes only from Claude Code itself: with spyc's statusline wrapper in place
 (below), `context` is followed by Claude Code's own percentage for this
 session, then `5h` and `7d`, the plan's five-hour and seven-day rate-limit
 windows. Those are the account's, so every Claude tab shows the newest any tab
-reported, and the dump names their reset times. A share is green below 50%,
+reported. Each window is followed by when it resets, in your local time:
+`↻3:40pm` today, `↻Thu 9am` later this week, `↻Oct 22 9am` beyond that.
+`agent_hud_resets = "countdown"` shows the time left instead (`↻2h05m`,
+`↻3d4h`), at the cost of a redraw each time the countdown ticks over: once a
+minute within a day of the reset, once an hour before that. Clock time needs
+none, beyond one when a window resets. A window whose reset has passed reads
+`--`, since its share belongs to the window before, until Claude Code reports
+again. A share is green below 50%,
 amber below 80% and red from there; nothing is shown before a report, or for an
 API-key session, which has no plan windows. `out` is the output of every distinct message since the read
 began, `hit` the share of input read from the prompt cache, and `compacted` the

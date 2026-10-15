@@ -2,6 +2,7 @@
 
 use ratatui::{Frame, layout::Rect};
 
+use crate::agent::claude_statusline::Statusline;
 use crate::agent::tail::Availability;
 use crate::config::AgentHudMode;
 use crate::pane::AgentActivity;
@@ -92,6 +93,8 @@ impl App {
             metrics,
             availability: update.map(Update::availability),
             now: self.state.pane.agent_hud.as_of,
+            local_tz: Some(&self.view.local_tz),
+            resets: self.state.config.pane.agent_hud_resets,
             hooks,
             mcp_connections: self
                 .view
@@ -107,6 +110,18 @@ impl App {
             AgentHudMode::Full
         };
         agent_hud::lines(&view, mode, rect.width, &self.view.theme)
+    }
+}
+
+impl App {
+    /// The plan windows the strip shows, which only a Claude Code tab's has.
+    pub(in crate::app) fn agent_hud_plan(&self) -> Option<&Statusline> {
+        let tabs = self.runtime.pane_tabs.as_ref()?;
+        let info = &tabs.tabs()[tabs.active_index()].info;
+        match metrics_of(self.active_agent_hud_update(), tabs, info) {
+            Metrics::Claude { reported, .. } => reported.plan,
+            _ => None,
+        }
     }
 }
 

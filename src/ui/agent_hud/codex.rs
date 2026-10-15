@@ -133,6 +133,8 @@ mod tests {
             metrics: Metrics::Codex(Some(snapshot)),
             availability: Some(Availability::Available),
             now: None,
+            local_tz: None,
+            resets: crate::config::AgentHudResets::Clock,
             hooks: Hooks::Reported,
             mcp_connections: 1,
         };

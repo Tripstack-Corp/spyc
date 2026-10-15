@@ -148,12 +148,26 @@ impl App {
         let (cols, rows) = self.view.term_size;
         let rect = self.frame_layout(Rect::new(0, 0, cols, rows)).agent_hud;
         let before = rect.map(|rect| self.agent_hud_lines(rect));
-        if self.state.pane.agent_hud.advance_time(wall)
+        // A plan window reset, or a countdown ticked over, since the last settle.
+        let reset_passed = rect
+            .and(self.state.pane.agent_hud.as_of)
+            .and_then(|since| self.agent_hud_reset_edge(since))
+            .is_some_and(|edge| edge <= wall.as_second());
+        let tz_moved = rect.is_some() && self.refresh_local_tz();
+        let aged = self.state.pane.agent_hud.advance_time(wall);
+        if (aged || reset_passed || tz_moved)
             && before != rect.map(|rect| self.agent_hud_lines(rect))
         {
             ctx.draw.mark(3);
         }
-        match self.state.pane.agent_hud.next_expiry(wall) {
+        let next = [
+            self.state.pane.agent_hud.next_expiry(wall),
+            rect.and_then(|_| self.agent_hud_reset_edge(wall)),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
+        match next {
             Some(epoch) => {
                 let delay = epoch.saturating_sub(wall.as_second()) as u64;
                 if let Some(when) = now.checked_add(std::time::Duration::from_secs(delay)) {
@@ -170,6 +184,29 @@ impl App {
                 ConsumerChange::Stop => None,
             })]
         })
+    }
+
+    /// When the strip's plan cells next change on their own: a window
+    /// resetting, or a countdown ticking over.
+    fn agent_hud_reset_edge(&self, now: Timestamp) -> Option<i64> {
+        let plan = self.agent_hud_plan()?;
+        let style = self.state.config.pane.agent_hud_resets;
+        [plan.five_hour, plan.seven_day]
+            .into_iter()
+            .flatten()
+            .filter_map(|w| crate::ui::agent_hud::resets::next_change(w.resets_at?, now, style))
+            .min()
+    }
+
+    /// Follows the system's zone, so a laptop that changes zone reads its new
+    /// local time. jiff caches the lookup, so this is cheap to repeat.
+    fn refresh_local_tz(&mut self) -> bool {
+        let tz = jiff::tz::TimeZone::system();
+        let moved = tz != self.view.local_tz;
+        if moved {
+            self.view.local_tz = tz;
+        }
+        moved
     }
 
     pub(super) fn cmd_agent_hud(&mut self, args: &str) -> Vec<Effect> {

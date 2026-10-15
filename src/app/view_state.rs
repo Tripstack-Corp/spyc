@@ -320,6 +320,10 @@ pub struct ViewState {
     /// P3-1 `desktop_via = "auto"` routing — OSC-9 (client-side) over SSH, the OS
     /// notifier locally — so the pure `notification_for_transition` never reads env.
     pub(super) is_ssh: bool,
+    /// The reader's time zone, for the agent strip's plan resets in clock time.
+    /// UTC here, so tests never depend on the machine's zone; the live app takes
+    /// the system's at startup and `settle_agent_hud` keeps it current.
+    pub(super) local_tz: jiff::tz::TimeZone,
     /// Tab-completion / cycle state.
     // Module-private (type `TabState` is module-private).
     pub(super) tab_state: Option<TabState>,
@@ -494,6 +498,7 @@ impl ViewState {
             is_ssh: std::env::var_os("SSH_CONNECTION").is_some()
                 || std::env::var_os("SSH_TTY").is_some()
                 || std::env::var_os("SSH_CLIENT").is_some(),
+            local_tz: jiff::tz::TimeZone::UTC,
             // `setup_terminal` starts us in 1007 alternate-scroll, so the
             // terminal is NOT in real mouse reporting yet. `settle_mouse_mode`
             // turns it on at the first loop bottom if config asks for it.

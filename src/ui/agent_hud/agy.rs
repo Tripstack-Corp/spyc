@@ -173,6 +173,8 @@ mod tests {
             },
             availability: snapshot.map(|_| Availability::Available),
             now: Some(at(10)),
+            local_tz: None,
+            resets: crate::config::AgentHudResets::Clock,
             hooks: Hooks::Reported,
             mcp_connections: 1,
         }

@@ -32,10 +32,38 @@ impl AgentHudMode {
     }
 }
 
+/// How the strip says when a plan window resets.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentHudResets {
+    /// The local clock time. Never goes stale, so it needs no redraw.
+    #[default]
+    Clock,
+    /// The time left, which costs a redraw each time it ticks over.
+    Countdown,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{Config, load::Trust};
+
+    #[test]
+    fn resets_show_clock_time_unless_a_file_asks_for_a_countdown() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home.toml");
+        let project = dir.path().join("project.toml");
+        assert_eq!(
+            Config::default().pane.agent_hud_resets,
+            AgentHudResets::Clock
+        );
+        std::fs::write(&home, "[pane]\nagent_hud_resets = 'countdown'\n").unwrap();
+        std::fs::write(&project, "[pane]\n").unwrap();
+        let config = Config::load_layered(Some(&home), &project).unwrap();
+        assert_eq!(config.pane.agent_hud_resets, AgentHudResets::Countdown);
+        std::fs::write(&home, "[pane]\nagent_hud_resets = 'soon'\n").unwrap();
+        assert!(Config::load_layered(Some(&home), &project).is_err());
+    }
 
     #[test]
     fn agent_hud_is_off_by_default_and_only_home_can_enable_it() {

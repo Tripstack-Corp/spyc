@@ -18,7 +18,7 @@ mod load;
 pub const DEFAULT_TEMPLATE: &str = include_str!("default.spycrc.toml");
 
 mod agent_hud;
-pub use agent_hud::{AgentHudMode, HUD_STALE_AFTER_SECS};
+pub use agent_hud::{AgentHudMode, AgentHudResets, HUD_STALE_AFTER_SECS};
 
 use std::path::PathBuf;
 
@@ -265,6 +265,8 @@ pub struct PaneConfig {
     pub preview_pasted_images: bool,
     /// Home-configured opt-in strip below the active Codex pane.
     pub agent_hud: AgentHudMode,
+    /// How the strip says when a plan window resets: clock time, or a countdown.
+    pub agent_hud_resets: AgentHudResets,
     /// Startup pane tabs. When non-empty, the bottom pane opens at launch
     /// with these tabs already in place — the config-driven analogue of
     /// pressing `^a c` K times (PANE_STARTUP_TABS_PLAN.md). Empty (the
@@ -317,6 +319,7 @@ impl Default for PaneConfig {
             codex_daemon: false,
             preview_pasted_images: true,
             agent_hud: AgentHudMode::Off,
+            agent_hud_resets: AgentHudResets::Clock,
             tabs: Vec::new(),
             project_tabs: None,
         }
@@ -359,6 +362,8 @@ struct FilePane {
     preview_pasted_images: Option<bool>,
     #[serde(default)]
     agent_hud: Option<AgentHudMode>,
+    #[serde(default)]
+    agent_hud_resets: Option<AgentHudResets>,
     /// Compact startup-tabs form: `tabs = ["claude", "bash"]`.
     #[serde(default)]
     tabs: Option<Vec<String>>,
