@@ -1010,10 +1010,21 @@ mod tests {
         );
     }
 
+    /// A `[clipboard] command` that runs `stub` through `/bin/sh` rather than
+    /// executing it. macOS scans a file the first time it is executed, and in a
+    /// loaded parallel run that scan can outlast even [`TEST_REAP_BUDGET`]: the
+    /// copy then returns once its text is in the pipe, before the stub has run,
+    /// and a test reading what the stub wrote finds nothing. `/bin/sh` is
+    /// scanned already and reads the stub as data, which also rules out the
+    /// `Text file busy` race [`retry_text_busy`] exists for.
+    #[cfg(unix)]
+    fn user_command_via_sh(stub: &std::path::Path) -> String {
+        format!("/bin/sh {}", stub.display())
+    }
+
     #[cfg(unix)]
     #[test]
     fn copy_via_user_command_splits_on_whitespace_and_args_reach_the_child() {
-        use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().expect("tempdir");
         let stub = tmp.path().join("stub-args.sh");
         let sidecar = tmp.path().join("captured.txt");
@@ -1021,19 +1032,15 @@ mod tests {
         // happened, then drain stdin so the caller's write doesn't EPIPE.
         fs::write(
             &stub,
-            format!(
-                "#!/bin/sh\necho \"$1|$2\" > {}\ncat > /dev/null\n",
-                sidecar.display()
-            ),
+            format!("echo \"$1|$2\" > {}\ncat > /dev/null\n", sidecar.display()),
         )
         .expect("write stub");
-        let mut perms = fs::metadata(&stub).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&stub, perms).unwrap();
 
-        let cmd = format!("{} first second", stub.display());
+        // The command names `/bin/sh` and the stub is its first argument: see
+        // `user_command_via_sh`.
+        let cmd = format!("{} first second", user_command_via_sh(&stub));
         with_reap_budget(TEST_REAP_BUDGET, || {
-            retry_text_busy(|| copy_via_user_command(&cmd, "hello")).expect("stub should succeed");
+            copy_via_user_command(&cmd, "hello").expect("stub should succeed");
         });
 
         let captured = fs::read_to_string(&sidecar).expect("read sidecar");
@@ -1043,17 +1050,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn copy_via_user_command_pipes_text_to_stdin() {
-        use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().expect("tempdir");
         let stub = tmp.path().join("stub-stdin.sh");
         let sidecar = tmp.path().join("captured.txt");
-        fs::write(&stub, format!("#!/bin/sh\ncat > {}\n", sidecar.display())).expect("write stub");
-        let mut perms = fs::metadata(&stub).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&stub, perms).unwrap();
+        fs::write(&stub, format!("cat > {}\n", sidecar.display())).expect("write stub");
 
         with_reap_budget(TEST_REAP_BUDGET, || {
-            retry_text_busy(|| copy_via_user_command(&stub.display().to_string(), "hello world\n"))
+            copy_via_user_command(&user_command_via_sh(&stub), "hello world\n")
                 .expect("stub should succeed");
         });
 
@@ -1064,16 +1067,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn copy_via_user_command_propagates_non_zero_exit() {
-        use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().expect("tempdir");
         let stub = tmp.path().join("stub-user-fail.sh");
-        fs::write(&stub, "#!/bin/sh\ncat > /dev/null\nexit 1\n").expect("write stub");
-        let mut perms = fs::metadata(&stub).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&stub, perms).unwrap();
+        fs::write(&stub, "cat > /dev/null\nexit 1\n").expect("write stub");
 
         let err = with_reap_budget(TEST_REAP_BUDGET, || {
-            retry_text_busy(|| copy_via_user_command(&stub.display().to_string(), "ignored"))
+            copy_via_user_command(&user_command_via_sh(&stub), "ignored")
                 .expect_err("non-zero exit should surface as error")
         });
         assert!(
