@@ -6,23 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::app::{Effect, Matcher};
 
-use super::{AppState, Commander, Side};
-
-impl Commander {
-    /// Snap `view_top` to the page containing the cursor, given the last
-    /// rendered grid geometry. Per-browser (cursor/grid/rows all live here), so
-    /// each split column settles independently. Was an `AppState` method back
-    /// when there was one browser.
-    pub const fn ensure_cursor_visible(&mut self) {
-        let per_page = self.grid_dims.items_per_page();
-        if per_page == 0 || self.rows.is_empty() {
-            self.cursor.view_top = 0;
-            return;
-        }
-        let page = self.cursor.index / per_page;
-        self.cursor.view_top = page * per_page;
-    }
-}
+use super::{AppState, Side};
 
 impl AppState {
     /// j/k — move within the current column only. Wraps at column
@@ -73,13 +57,22 @@ impl AppState {
         self.col_mut(side).cursor.index = (cur + delta).clamp(0, last) as usize;
     }
 
-    /// Move across the entire list (PageUp/PageDown). Wraps globally.
-    pub fn cursor_move_global(&mut self, delta: isize, len: usize) {
+    /// PageDown / PageUp: the same column and row on the next or previous page,
+    /// or that page's last row when it is shorter. Pages are the fixed ones the
+    /// last frame placed (`Commander::page`). PageDown from the last page wraps
+    /// to the first; PageUp from the first wraps to the last row.
+    pub fn page_move(&mut self, forward: bool) {
+        let len = self.cur().rows.len();
         if len == 0 {
             return;
         }
-        let new_idx = (self.cur().cursor.index as isize + delta).rem_euclid(len as isize);
-        self.cur_mut().cursor.index = new_idx as usize;
+        let page = self.cur().page;
+        let offset = self.cur().cursor.index.saturating_sub(page.start);
+        let target = if forward { Some(page.next) } else { page.prev };
+        let index = target.map_or(len - 1, |(start, page_len)| {
+            start + offset.min(page_len.saturating_sub(1))
+        });
+        self.cur_mut().cursor.index = index.min(len - 1);
     }
 
     /// `gg` — jump to the first entry of the current column.

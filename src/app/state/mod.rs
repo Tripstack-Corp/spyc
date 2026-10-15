@@ -999,10 +999,8 @@ impl AppState {
                 view: View::Dir,
                 cursor: Cursor::new(),
                 rows: Vec::new(),
-                grid_dims: GridDims {
-                    cols: 1,
-                    rows_per_col: 20,
-                },
+                grid_dims: GridDims::new(1, 20),
+                page: crate::ui::list_view::PageSpan::default(),
                 list_generation: 0,
                 git: GitState::default(),
                 git_cache: GitCache::default(),

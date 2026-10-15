@@ -112,7 +112,6 @@ fn page_cols(app: &App, view_top: usize, (w, h): (u16, u16)) -> u16 {
 /// it. The case: two pages could hold row 240, one from 192 (three columns,
 /// ending at 239) and one from 240 (four).
 #[test]
-#[ignore = "red: the settle alternates between 192 and 240 and keeps 192, which ends before the cursor"]
 fn a_search_jump_draws_the_cursor_bar_on_the_match() {
     let (mut app, names) = listing();
     draw(&mut app, BESIDE_PANE);
@@ -139,7 +138,6 @@ fn a_search_jump_draws_the_cursor_bar_on_the_match() {
 /// the cursor's new one. The case: the page after 348-521 starts at 522 and
 /// fits two columns, and a page from 464 would fit three.
 #[test]
-#[ignore = "red: the settle alternates between 522 and 464 and keeps 464, so the cursor lands in the second column"]
 fn l_off_the_last_column_opens_the_next_page_at_its_first_column() {
     let (mut app, names) = listing();
     draw(&mut app, BARE);
@@ -169,4 +167,45 @@ fn l_off_the_last_column_opens_the_next_page_at_its_first_column() {
         cursor_bar(&app, &buf),
         Some((first_column, row, names[522].clone()))
     );
+}
+
+/// PageDown moves to the same column and row on the next page, or to its last
+/// row when it has no such column. The case: from the last of three columns on
+/// the page 348-521, the next page, 522-599, has two.
+#[test]
+fn page_down_to_a_narrower_page_lands_on_its_last_row() {
+    let (mut app, names) = listing();
+    draw(&mut app, BARE);
+    search(&mut app, "n0464-", BARE);
+    assert_eq!(
+        app.state.left.cursor.view_top, 348,
+        "the cursor starts on the page 348-521"
+    );
+
+    press(&mut app, KeyCode::PageDown, BARE);
+    let buf = draw(&mut app, BARE);
+    let bar = cursor_bar(&app, &buf).map(|(_, _, name)| name);
+    assert_eq!(bar.as_deref(), Some(names[599].as_str()));
+}
+
+/// PageUp moves to the same column and row on the page before. The case: from
+/// the top of the two-column page at 522 to the top of the three-column page
+/// at 348.
+#[test]
+fn page_up_from_a_pages_first_row_lands_on_the_previous_pages_first_row() {
+    let (mut app, names) = listing();
+    draw(&mut app, BARE);
+    search(&mut app, "n0522-", BARE);
+    let buf = draw(&mut app, BARE);
+    let first_column = app.frame_layout(buf.area).list.x;
+    assert_eq!(
+        cursor_bar(&app, &buf).map(|(x, _, _)| x),
+        Some(first_column),
+        "the cursor starts at the top of its page",
+    );
+
+    press(&mut app, KeyCode::PageUp, BARE);
+    let buf = draw(&mut app, BARE);
+    let (x, _, name) = cursor_bar(&app, &buf).unwrap();
+    assert_eq!((x, name.as_str()), (first_column, names[348].as_str()));
 }

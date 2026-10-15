@@ -4,7 +4,7 @@ use super::{GitCache, GitState, RowData, View};
 use crate::config::Config;
 use crate::fs::Listing;
 use crate::state::{Cursor, IgnoreMasks, Picks};
-use crate::ui::list_view::GridDims;
+use crate::ui::list_view::{GridDims, PageSpan};
 use std::path::{Path, PathBuf};
 
 /// One file-commander's worth of pure Model state — the per-browser fields a
@@ -44,6 +44,9 @@ pub struct Commander {
     /// The geometry slice of this browser's last rendered grid (cols ×
     /// rows-per-col), written by render and read by cursor/page-math.
     pub grid_dims: GridDims,
+    /// The cursor's page and its neighbours, as the last frame placed them:
+    /// what PageDown / PageUp step to.
+    pub page: PageSpan,
     /// Monotonic counter bumped whenever this browser's display row list
     /// changes. Used by App to skip redundant `build_rows()` calls.
     pub list_generation: u64,
@@ -101,10 +104,8 @@ impl Commander {
             view: View::Dir,
             cursor: Cursor::new(),
             rows: Vec::new(),
-            grid_dims: GridDims {
-                cols: 1,
-                rows_per_col: 1,
-            },
+            grid_dims: GridDims::new(1, 1),
+            page: PageSpan::default(),
             list_generation: 0,
             git: GitState::default(),
             git_cache: GitCache::default(),

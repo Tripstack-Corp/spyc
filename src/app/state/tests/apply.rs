@@ -30,6 +30,11 @@ fn apply_page_down() {
         cols: 1,
         rows_per_col: 3,
     };
+    s.left.page = crate::ui::list_view::PageSpan {
+        start: 0,
+        prev: None,
+        next: (3, 3),
+    };
     s.apply(&Action::PageDown);
     assert_eq!(s.left.cursor.index, 3);
 }

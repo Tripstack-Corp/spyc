@@ -120,30 +120,52 @@ fn column_move_single_column_noop() {
     assert_eq!(s.left.cursor.index, 0); // no-op
 }
 
-// ── ensure_cursor_visible ─────────────────────────────────────
+// ── page_move ─────────────────────────────────────────────────
 
-#[test]
-fn ensure_visible_snaps_view_top() {
-    let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f", "g", "h"]);
-    s.left.grid_dims = GridDims {
-        cols: 1,
-        rows_per_col: 3,
-    }; // 3 items per page
-    s.left.cursor.index = 5; // page 1 (items 3-5)
-    s.left.ensure_cursor_visible();
-    assert_eq!(s.left.cursor.view_top, 3);
+/// Ten rows on pages of three, three, two and two: the cursor's page starts
+/// at 3, and the shorter page after it isn't the last.
+fn on_the_middle_page(index: usize) -> AppState {
+    let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
+    s.left.page = crate::ui::list_view::PageSpan {
+        start: 3,
+        prev: Some((0, 3)),
+        next: (6, 2),
+    };
+    s.left.cursor.index = index;
+    s
 }
 
 #[test]
-fn ensure_visible_first_page() {
-    let mut s = state_with_rows(&["a", "b", "c", "d"]);
-    s.left.grid_dims = GridDims {
-        cols: 1,
-        rows_per_col: 3,
+fn page_down_keeps_the_place_on_the_page() {
+    let mut s = on_the_middle_page(4);
+    s.page_move(true);
+    assert_eq!(s.left.cursor.index, 7);
+}
+
+#[test]
+fn page_down_to_a_shorter_page_stops_at_its_last_row() {
+    let mut s = on_the_middle_page(5);
+    s.page_move(true);
+    assert_eq!(s.left.cursor.index, 7);
+}
+
+#[test]
+fn page_up_keeps_the_place_on_the_page() {
+    let mut s = on_the_middle_page(4);
+    s.page_move(false);
+    assert_eq!(s.left.cursor.index, 1);
+}
+
+#[test]
+fn page_up_from_the_first_page_wraps_to_the_last_row() {
+    let mut s = on_the_middle_page(1);
+    s.left.page = crate::ui::list_view::PageSpan {
+        start: 0,
+        prev: None,
+        next: (3, 3),
     };
-    s.left.cursor.index = 1;
-    s.left.ensure_cursor_visible();
-    assert_eq!(s.left.cursor.view_top, 0);
+    s.page_move(false);
+    assert_eq!(s.left.cursor.index, 9);
 }
 
 // ── find_match ────────────────────────────────────────────────

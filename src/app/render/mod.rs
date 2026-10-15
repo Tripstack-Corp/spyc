@@ -28,9 +28,9 @@ use ratatui::Frame;
 #[cfg(test)]
 use crate::config::StatusPosition;
 use crate::spyc_debug;
-use crate::ui::list_view::{ListView, Row};
+use crate::ui::list_view::Row;
 
-use super::{App, FrameLayout, View, state};
+use super::{App, FrameLayout, state};
 
 mod activity_hud;
 mod agent_hud;
@@ -434,36 +434,33 @@ impl App {
         self.build_rows_for(&self.state.left)
     }
 
-    /// Rebuild the list-rows cache and run the `view_top`↔grid stabilization.
-    /// Pure derived state: reads the listing/cursor + the list rect, writes
-    /// `cached_rows`, `grid_dims`, and `cursor.view_top`. No drawing, no IO —
-    /// extracted from the draw path (MVU Stage 2) so `render` stays
-    /// mutation-free.
+    /// Rebuild the list-rows cache and place each column on the page holding
+    /// its cursor. Pure derived state: reads the listing/cursor + the list rect,
+    /// writes `cached_rows`, the page caches, `grid_dims`, `page` and
+    /// `cursor.view_top`. No drawing, no IO — extracted from the draw path
+    /// (MVU Stage 2) so `render` stays mutation-free.
     fn settle_list_grid(&mut self, layout: &FrameLayout) {
         if self.view.cached_rows_gen != self.state.left.list_generation {
             self.view.cached_rows = self.build_rows();
             self.view.cached_rows_gen = self.state.left.list_generation;
         }
-        let focused = !self.state.pane_focused();
-        // Disjoint field borrows: cached_rows/theme (read) + cached_grid_key
+        // Disjoint field borrows: cached_rows (read) + pages/cached_grid_key
         // (write) on `view`, and `state.left` (write) — all distinct fields, so
         // this passes the borrow checker without an accessor that locks all of
-        // `self`. PR C settles the right column the same way against its own
-        // commander + caches.
-        stabilize_grid(
+        // `self`.
+        settle_page(
             &self.view.cached_rows,
+            self.view.cached_rows_gen,
             &mut self.state.left,
             layout.list,
-            focused,
-            &self.view.theme,
+            &mut self.view.pages,
             &mut self.view.cached_grid_key,
         );
 
         // The right column's second commander (`state.right`) settles the same
-        // way against its own row cache + grid key + rect. No-op until `^s`
+        // way against its own row cache, pages and grid key. No-op until `^s`
         // opens one.
         if self.state.right.is_some() {
-            let right_focused = self.right_column_focused();
             let right_gen = self
                 .state
                 .right
@@ -476,12 +473,12 @@ impl App {
                 self.view.right_cached_rows_gen = right_gen;
             }
             if let (Some(rect), Some(right)) = (layout.right, self.state.right.as_mut()) {
-                stabilize_grid(
+                settle_page(
                     &self.view.right_cached_rows,
+                    self.view.right_cached_rows_gen,
                     right,
                     rect,
-                    right_focused,
-                    &self.view.theme,
+                    &mut self.view.right_pages,
                     &mut self.view.right_cached_grid_key,
                 );
             }
@@ -489,117 +486,50 @@ impl App {
     }
 }
 
-/// The `view_top` ↔ grid stabilization for one commander column. The grid
-/// depends on `view_top` (entry name lengths → column count → items-per-page)
-/// and `view_top` depends on the grid, so this iterates to a fixpoint (≤4
-/// rounds), breaking a 2-cycle by picking the lower `view_top` (more context,
-/// deterministic across frames). Skips the loop when nothing changed since the
-/// last frame (the `cached_grid_key` guard). Pure derived state — mutates only
-/// the commander's `grid_dims`/`cursor.view_top` and the caller's cache key, no
-/// drawing or IO. Free fn (not an `App` method) so the borrows on the caller's
-/// `view`/`state` fields stay disjoint; called once per visible column.
-fn stabilize_grid(
-    rows: &[crate::ui::list_view::Row],
+/// Put one commander column on the fixed page holding its cursor
+/// ([`crate::ui::list_view::Pages`]), and record that page's grid and its
+/// neighbours for PageDown / PageUp. A row's page depends only on the listing
+/// and the list's size, never on where the view was before.
+///
+/// Skips the work when nothing changed since the last frame (the
+/// `cached_grid_key` guard). Pure derived state: mutates only the commander's
+/// `cursor.view_top` / `grid_dims` / `page` and the caller's caches, no drawing
+/// or IO. A free fn (not an `App` method) so the borrows on the caller's
+/// `view` / `state` fields stay disjoint; called once per visible column.
+fn settle_page(
+    rows: &[Row],
+    rows_gen: u64,
     commander: &mut state::Commander,
     rect: ratatui::layout::Rect,
-    focused: bool,
-    theme: &crate::ui::theme::Theme,
+    pages: &mut crate::ui::list_view::Pages,
     cached_grid_key: &mut (u64, usize, usize, u16, u16),
 ) {
-    let grid_key = (
-        commander.list_generation,
-        commander.cursor.view_top,
-        commander.cursor.index,
-        rect.width,
-        rect.height,
-    );
-    if grid_key == *cached_grid_key {
+    let key = |c: &state::Commander| {
+        (
+            c.list_generation,
+            c.cursor.view_top,
+            c.cursor.index,
+            rect.width,
+            rect.height,
+        )
+    };
+    if key(commander) == *cached_grid_key {
         return;
     }
-    *cached_grid_key = grid_key;
-    let mut prev_vt: Option<usize> = None; // for 2-cycle detection
-    let mut settled = false;
-    for round in 0..4 {
-        let probe = ListView {
-            rows,
-            cursor: commander.cursor.index,
-            view_top: commander.cursor.view_top,
-            empty_marker: commander.view == View::Dir,
-            focused,
-            theme,
-            selection: None,
-        };
-        commander.grid_dims = probe.grid(rect).dims();
-        let old_vt = commander.cursor.view_top;
-        let pp = commander.grid_dims.items_per_page();
-        commander.ensure_cursor_visible();
-        if commander.cursor.view_top == old_vt {
-            spyc_debug!(
-                "grid settled round {}: vt={} cursor={} grid={}x{} pp={}",
-                round + 1,
-                old_vt,
-                commander.cursor.index,
-                commander.grid_dims.cols,
-                commander.grid_dims.rows_per_col,
-                pp,
-            );
-            settled = true;
-            break;
-        }
-        spyc_debug!(
-            "grid unstable round {}: vt {} -> {} cursor={} grid={}x{} pp={}",
-            round + 1,
-            old_vt,
-            commander.cursor.view_top,
-            commander.cursor.index,
-            commander.grid_dims.cols,
-            commander.grid_dims.rows_per_col,
-            pp,
-        );
-        // 2-cycle: new vt equals the vt from two rounds ago.
-        if Some(commander.cursor.view_top) == prev_vt {
-            // Always pick the lower vt — deterministic across frames.
-            let forced = old_vt.min(commander.cursor.view_top);
-            commander.cursor.view_top = forced;
-            // Recompute grid for the forced view_top.
-            let probe = ListView {
-                rows,
-                cursor: commander.cursor.index,
-                view_top: commander.cursor.view_top,
-                empty_marker: commander.view == View::Dir,
-                focused,
-                theme,
-                selection: None,
-            };
-            commander.grid_dims = probe.grid(rect).dims();
-            spyc_debug!(
-                "grid 2-cycle broken: forcing vt={} (cursor={} grid={}x{} pp={})",
-                forced,
-                commander.cursor.index,
-                commander.grid_dims.cols,
-                commander.grid_dims.rows_per_col,
-                commander.grid_dims.items_per_page(),
-            );
-            settled = true;
-            break;
-        }
-        prev_vt = Some(old_vt);
-    }
-    if !settled {
-        spyc_debug!(
-            "grid did NOT settle after 4 rounds: vt={} cursor={}",
-            commander.cursor.view_top,
-            commander.cursor.index,
-        );
-    }
-    // Update cache key in case the stabilization loop changed view_top.
-    *cached_grid_key = (
-        commander.list_generation,
-        commander.cursor.view_top,
+    let page = pages.around(rows, rect, rows_gen, commander.cursor.index);
+    commander.cursor.view_top = page.start;
+    commander.page = page;
+    commander.grid_dims = crate::ui::list_view::grid_at(rows, page.start, rect).dims();
+    spyc_debug!(
+        "page settled: vt={} cursor={} grid={}x{} prev={:?} next={:?}",
+        page.start,
         commander.cursor.index,
-        rect.width,
-        rect.height,
+        commander.grid_dims.cols,
+        commander.grid_dims.rows_per_col,
+        page.prev,
+        page.next,
     );
+    *cached_grid_key = key(commander);
 }
 
 #[cfg(test)]
