@@ -439,14 +439,14 @@ impl App {
                     .iter()
                     .filter_map(|t| {
                         let sid = t.agent_session_id.as_deref()?;
-                        let short_id = &sid[..sid.len().min(8)];
+                        let short_id = sessions::short_id(sid);
                         let kind = t.effective_kind();
                         if kind == AgentKind::Other {
                             return None;
                         }
                         Some(
                             crate::agent::profile_for(kind)
-                                .picker_label(short_id, t.agent_session_name.as_deref()),
+                                .picker_label(&short_id, t.agent_session_name.as_deref()),
                         )
                     })
                     .collect();
