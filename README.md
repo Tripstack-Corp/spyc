@@ -48,7 +48,9 @@ file list bolted onto a chat window.
 A two-pane terminal program. The **top pane** is a vim-flavoured file commander
 with git-aware listings; the **bottom pane** is a child process — Claude Code by
 default (Codex, Antigravity and zot are first-class too), in practice anything.
-They share focus through a screen-style `^a` chord prefix.
+They share focus through a screen-style `^a` chord prefix. The pane is a real
+terminal emulator, [libghostty-vt](https://github.com/ghostty-org/ghostty) (the
+core of Ghostty), so an agent draws just as it would in your own terminal.
 
 Codex, Claude Code, and Antigravity tabs also have an optional [native session strip](CONFIGURATION.md#agent-hud--pane-agent_hud):
 `:agent hud compact` shows attention, identity, context and usage below the
@@ -155,8 +157,8 @@ Then try the part that makes spyc spyc, in a git repo:
 
 ## The MCP bridge
 
-On startup spyc runs a local MCP server and writes the agent's config
-automatically — no flags, no setup. The agent can then ask spyc:
+On startup spyc runs a local MCP server, and the agents it launches find it with
+no flags and no per-project setup. The agent can then ask spyc:
 
 - **What you're looking at** — `get_spyc_context`: cwd, cursor file, picks,
   inventory, active filter, git branch.
@@ -181,9 +183,12 @@ enterprise `managed-mcp.json` policies are respected — see
 
 ## Running multiple agents
 
-Each tab's **activity dot** answers *which one needs me* — hot pulse while
-working, settled square when blocked or done, with a desktop notification on the
-transition. An advisory **scope registry** (`register_scope` / `list_scopes` /
+Each tab's **activity dot** answers *which one needs me* — a warm breathing dot
+while working, a settled square when blocked or done, a hollow circle while it
+waits on background work that will wake it — with a desktop notification when
+an agent blocks or finishes. `^a F` forks a Claude Code or Codex conversation
+into a new tab, so you can try another approach without losing the first. An
+advisory **scope registry** (`register_scope` / `list_scopes` /
 `wait_for_scope_clear`) keeps parallel agents off each other's files. Sessions
 auto-save within seconds of any change, so a crash loses almost nothing and
 `spyc -r` resumes every tab and conversation. Design:
@@ -216,10 +221,11 @@ default:
 spyc --print-config > ~/.spycrc.toml
 ```
 
-Rebind keys, set colours and layout, tune agent notifications, script in Lua.
-Note that `^a` and `^w` are reserved as chord prefixes, and a project-local
-config can't bind executing verbs — full reference, including both rules, in
-[CONFIGURATION.md](CONFIGURATION.md).
+Rebind keys, set colours and layout, open your usual tabs at launch, save prompt
+templates, tune agent notifications, script in Lua. Note that `^a` and `^w` are
+reserved as chord prefixes, a project-local config can't bind executing verbs,
+and a project's startup tabs open only after you approve that exact list — full
+reference, including all three rules, in [CONFIGURATION.md](CONFIGURATION.md).
 
 ## More docs
 
@@ -241,4 +247,6 @@ config can't bind executing verbs — full reference, including both rules, in
 ## License
 
 BSD-3-Clause. Logo uses [Twemoji](https://github.com/jdecked/twemoji) pepper
-artwork (CC-BY 4.0).
+artwork (CC-BY 4.0). The pane's terminal engine is
+[libghostty-vt](https://github.com/ghostty-org/ghostty) (MIT), vendored in
+`crates/spyc-vt-sys`.
