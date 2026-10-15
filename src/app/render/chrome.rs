@@ -642,9 +642,9 @@ impl App {
 }
 
 /// spyc's "spice heat" palette — the warm pepper→ember→orange→spark ramp shared
-/// by the Working activity dot's breathing pulse (`spicy_pulse_color`) and the
-/// visual-bell border sweep (`spice_gradient`), so both read as the same heat
-/// rather than two unrelated colour stories.
+/// by the Working activity dot's breathing pulse (`spicy_pulse_color`, over
+/// [`BREATH_HEAT`]) and the visual-bell border sweep (`spice_gradient`), so
+/// both read as the same heat rather than two unrelated colour stories.
 const SPICE_HEAT: [(u8, u8, u8); 4] = [
     (0xE0, 0x32, 0x22), // pepper red
     (0xF4, 0x62, 0x12), // ember
@@ -652,18 +652,23 @@ const SPICE_HEAT: [(u8, u8, u8); 4] = [
     (0xFF, 0xC4, 0x36), // spark
 ];
 
+/// The stops the working dot breathes across: the spice-heat ramp's orange and
+/// spark, without pepper red or ember. A working dot that turns red, or even
+/// red-orange, reads as an error, and red is what the blocked dot says.
+const BREATH_HEAT: [(u8, u8, u8); 2] = [SPICE_HEAT[2], SPICE_HEAT[3]];
+
 /// Frames in one breath of the working dot: 16 at the animation's 100 ms, so
 /// a breath takes 1.6 s, and each frame moves the colour only a little.
 const BREATH_FRAMES: u64 = 16;
 
-/// The working dot at `frame`: the spice-heat ramp breathed from pepper red out
-/// to spark and back along a cosine, so the turns at either end ease in and
-/// out instead of bouncing. Pure integer maths, so `const`; the cosine is
+/// The working dot at `frame`: [`BREATH_HEAT`] breathed from orange out to
+/// spark and back along a cosine, so the turns at either end ease in and out
+/// instead of bouncing. Pure integer maths, so `const`; the cosine is
 /// [`BREATH_COSINE`], tabulated.
 const fn breath_heat(frame: u64) -> (u8, u8, u8) {
-    // Heat in 1/1000ths of the ramp: 0 at pepper red, 1000 at spark.
+    // Heat in 1/1000ths of the ramp: 0 at orange, 1000 at spark.
     let heat = BREATH_COSINE[(frame % BREATH_FRAMES) as usize] as usize;
-    let last = SPICE_HEAT.len() - 1;
+    let last = BREATH_HEAT.len() - 1;
     let scaled = heat * last; // in 1/1000ths of a stop
     let lo = if scaled / 1000 < last {
         scaled / 1000
@@ -671,7 +676,7 @@ const fn breath_heat(frame: u64) -> (u8, u8, u8) {
         last - 1
     };
     let blend = scaled - lo * 1000;
-    let (a, b) = (SPICE_HEAT[lo], SPICE_HEAT[lo + 1]);
+    let (a, b) = (BREATH_HEAT[lo], BREATH_HEAT[lo + 1]);
     (
         mix_milli(a.0, b.0, blend),
         mix_milli(a.1, b.1, blend),
@@ -849,12 +854,12 @@ mod tests {
         );
     }
 
-    /// The breath spans the whole spice-heat ramp: pepper red, then spark half
-    /// a breath later, and back, the same on the way out as on the way in.
+    /// The breath spans orange to spark: orange, then spark half a breath
+    /// later, and back, the same on the way out as on the way in.
     #[test]
-    fn the_working_breath_spans_pepper_red_to_spark_and_back() {
+    fn the_working_breath_spans_orange_to_spark_and_back() {
         let n = super::BREATH_FRAMES;
-        assert_eq!(super::breath_heat(0), super::SPICE_HEAT[0]);
+        assert_eq!(super::breath_heat(0), super::SPICE_HEAT[2]);
         assert_eq!(super::breath_heat(n / 2), super::SPICE_HEAT[3]);
         assert_eq!(super::breath_heat(n), super::breath_heat(0));
         for k in 1..n {
@@ -863,6 +868,23 @@ mod tests {
                 super::breath_heat(n - k),
                 "frame {k}"
             );
+        }
+    }
+
+    /// A working dot never turns red, which reads as an error and is the
+    /// blocked dot's message: every frame keeps an orange hue, at least 30°.
+    /// Pepper red, where the breath used to start, sits at 5°, and ember at 21°
+    /// still read as red.
+    #[test]
+    fn the_working_breath_never_turns_red() {
+        // Hue in degrees of a warm colour, whose red is highest and blue lowest.
+        let hue = |(r, g, b): (u8, u8, u8)| {
+            assert!(r >= g && g >= b, "{r} {g} {b} is not a warm colour");
+            60.0 * f64::from(g - b) / f64::from(r - b)
+        };
+        for frame in 0..super::BREATH_FRAMES {
+            let heat = super::breath_heat(frame);
+            assert!(hue(heat) >= 30.0, "frame {frame}: {heat:?}");
         }
     }
 
