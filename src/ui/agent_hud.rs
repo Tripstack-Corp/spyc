@@ -20,6 +20,7 @@ use crate::config::AgentHudMode;
 mod agy;
 mod claude;
 mod codex;
+pub mod resets;
 
 /// Spaces between columns.
 const GAP: usize = 3;
@@ -166,6 +167,9 @@ pub struct HudView<'a> {
     pub metrics: Metrics<'a>,
     pub availability: Option<Availability>,
     pub now: Option<Timestamp>,
+    /// The reader's time zone, for a reset shown as clock time.
+    pub local_tz: Option<&'a jiff::tz::TimeZone>,
+    pub resets: crate::config::AgentHudResets,
     pub hooks: Hooks,
     pub mcp_connections: usize,
 }
@@ -679,6 +683,8 @@ mod tests {
             metrics: Metrics::Codex(snapshot),
             availability: snapshot.map(|_| Availability::Available),
             now: None,
+            local_tz: None,
+            resets: crate::config::AgentHudResets::Clock,
             hooks: Hooks::Unverified,
             mcp_connections: 0,
         }
@@ -752,6 +758,8 @@ mod tests {
             },
             availability: Some(Availability::Available),
             now: None,
+            local_tz: None,
+            resets: crate::config::AgentHudResets::Clock,
             hooks: Hooks::Reported,
             mcp_connections: 1,
         }

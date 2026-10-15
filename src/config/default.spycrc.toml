@@ -102,6 +102,10 @@
 # no agent setting is changed. Runtime control: :agent hud off|compact|full;
 # :agent hud info.
 # agent_hud = "off"
+# When a Claude Code tab's plan windows (5h, 7d) reset: "clock" is your local
+# time (3:40pm, Thu 9am); "countdown" is the time left (2h05m), and redraws
+# the strip each time it ticks over.
+# agent_hud_resets = "clock"
 #   Keep a copy of each image you paste into an agent pane, so `^a g` can show
 #   it before you send. An agent reads the system clipboard itself on its paste
 #   key (the terminal can't carry image bytes), so spyc reads the same clipboard

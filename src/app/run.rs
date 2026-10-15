@@ -34,6 +34,11 @@ impl Draw {
         self.reason = reason;
     }
 
+    #[cfg(test)]
+    pub(super) const fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
     /// Mark dirty WITHOUT touching `reason` — for the activity-only
     /// rollover redraw, which must not bump a real `draw_reason` (the
     /// render-stats block reads `reason` and skips counting activity-only

@@ -340,6 +340,7 @@ impl App {
                 picker: None,
             },
         };
+        app.view.local_tz = jiff::tz::TimeZone::system();
         app.state.rebuild_rows();
         // Resolve + cache the repo root at startup so the first git read
         // (and the FSEvent exclude filter) have it before the user navigates.

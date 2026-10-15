@@ -156,6 +156,8 @@ tally. Totals retain their scopes and never stand in for context occupancy or
 account limits. Claude Code's context is a token count; a percentage beside it,
 and the plan windows after it, are Claude Code's own figures from its
 statusline, coloured green, amber, then red by how close each is to its limit.
+Each plan window ends in `↻` and when it resets, as local clock time unless a
+countdown is configured.
 The engineering Activity HUD remains the separate `:activity` overlay.
 
 ## Icons & glyphs
@@ -171,6 +173,7 @@ Used sparingly — every glyph below has a specific meaning.
 | `-` | git-deleted marker |
 | `>` | git-renamed marker; a renamed archive member |
 | `↪` | live pane cwd has drifted from spawn cwd |
+| `↻` | when a plan window resets, on the agent strip |
 | `⏳` | `!` captured command running |
 | `…` | middle-truncation in a path |
 | `*` | active pane tab |

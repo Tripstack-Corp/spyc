@@ -1024,6 +1024,10 @@ mod purity_guard {
             "ui/agent_hud/codex.rs",
             include_str!("../../ui/agent_hud/codex.rs"),
         ),
+        (
+            "ui/agent_hud/resets.rs",
+            include_str!("../../ui/agent_hud/resets.rs"),
+        ),
     ];
 
     /// High-signal tokens for blocking IO / OS access / thread spawning that
