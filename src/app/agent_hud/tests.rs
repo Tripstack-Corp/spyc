@@ -1293,3 +1293,59 @@ fn a_plan_reset_passing_repaints_the_strip() {
         assert!(usage.contains("5h --"), "{usage}");
     });
 }
+
+/// Claude Code reports its session at startup but writes the transcript only
+/// with the first prompt, so the first lookup can miss a file that then exists.
+#[test]
+fn agent_hud_retries_missing_claude_transcript_on_status_report() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        std::fs::create_dir_all(home.join("projects")).unwrap();
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (100, 32);
+        app.state.config.mouse.capture = false;
+        app.state.pane.pane_height_pct = 50;
+        app.state.pane.agent_hud.claude_home = Some(home.clone());
+        let entry = claude_entry(&mut app, tmp.path(), Some(SESSION));
+        app.runtime.pane_tabs = Some(PaneTabs::new(entry));
+        app.cmd_agent_hud("full");
+        let mut ctx = RunCtx::for_test();
+
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, "transcript missing");
+        assert_eq!(
+            app.active_agent_hud_update().map(Update::availability),
+            Some(Availability::Missing),
+            "{lines:?}"
+        );
+        app.cmd_agent_hud("info");
+        let dump = app.view.pager.take().unwrap().lines;
+        assert!(
+            dump.iter()
+                .any(|l| l.to_string().contains("next status report")),
+            "the dump says a report retries it"
+        );
+
+        let path = transcript(&home);
+        append_message(&path, "msg-1", 100);
+
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::ReportStatus {
+            pane_id: None,
+            pane: None,
+            status: "working".into(),
+            ttl_ms: None,
+            note: None,
+            session_id: Some(SESSION.into()),
+            hook_event: None,
+        });
+        assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
+
+        let lines = wait_hud_line(&mut app, &mut ctx, 1, " 111 ");
+        assert!(lines[0].contains("opus-5-5 xhigh"), "{lines:?}");
+        assert_eq!(
+            app.active_agent_hud_update().map(Update::availability),
+            Some(Availability::Available)
+        );
+    });
+}
