@@ -929,3 +929,21 @@ fn unit_tests_see_no_claude_dir_unless_they_pin_one() {
     });
     assert_eq!(claude_dir(), None);
 }
+
+#[test]
+fn short_id_keeps_the_tail_not_the_head() {
+    assert_eq!(short_id("adee8818-af02-438e-b8de-c8a8fe95e594"), "fe95e594");
+    // Shorter than 8 chars round-trips whole, same as the old head-truncation.
+    assert_eq!(short_id("abcd"), "abcd");
+    assert_eq!(short_id(""), "");
+}
+
+#[test]
+fn short_id_distinguishes_timestamp_ordered_ids_sharing_a_head() {
+    // Two codex-style ids spawned close together share a timestamp-ordered
+    // prefix; only the tail tells them apart (this is why the HUD's session
+    // cell and this formatter both keep the tail, not the head).
+    let a = short_id("01a133b2-dc16-74c8-af3c-111111111111");
+    let b = short_id("01a133b2-dc16-74c8-af3c-222222222222");
+    assert_ne!(a, b);
+}
