@@ -260,7 +260,7 @@ protocol, no image protocols, no OSC 52 clipboard.
 - **Agent-activity dots** — each **agent** pane tab shows a live activity dot
   in the divider, from these layered sources:
   - **Output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`**
-    — a pepper-red → ember → orange → spark color *breath*, eased in 16 small
+    — an orange → spark colour *breath*, eased in 16 small
     steps over 1.6 s (10 Hz), a stepped warm ramp on a 256-colour terminal — while
     output is flowing, fading to a quiet `·` once the agent goes silent. The
     pulse animates only while something is working, so a fully-idle pane set
