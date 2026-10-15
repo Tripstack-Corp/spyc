@@ -37,6 +37,8 @@ mod agent_hud;
 mod chrome;
 #[cfg(test)]
 mod divider_tests;
+#[cfg(test)]
+mod grid_settle_tests;
 mod inner;
 mod layout;
 mod overlays;
