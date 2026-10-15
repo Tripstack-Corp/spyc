@@ -248,14 +248,19 @@ impl AgentHudState {
     }
 
     /// Record that a retry is due on the next HUD reconcile if `pane_id` matches
-    /// the currently bound agy tab and its transcript is missing.
+    /// the currently bound Claude Code or agy tab and its transcript is missing.
+    /// Both report a session before its transcript exists.
     pub fn status_reported(&mut self, pane_id: &str) -> bool {
-        let is_bound_agy = matches!(&self.binding, Some(Binding::Agy(b)) if b.pane_id == pane_id);
+        let is_bound = match &self.binding {
+            Some(Binding::Claude(b)) => b.pane_id == pane_id,
+            Some(Binding::Agy(b)) => b.pane_id == pane_id,
+            Some(Binding::Codex(_)) | None => false,
+        };
         let is_missing = self
             .update
             .as_ref()
             .is_some_and(|u| u.availability() == Availability::Missing);
-        if is_bound_agy && is_missing {
+        if is_bound && is_missing {
             self.retry_due = true;
             true
         } else {
@@ -602,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn a_report_while_the_binding_is_claude_or_codex_yields_nothing() {
+    fn a_report_while_the_binding_is_codex_yields_nothing_and_claude_retries() {
         let mut model = AgentHudState::default();
         let codex_target = Target {
             feed: Feed::Codex,
@@ -629,15 +634,26 @@ mod tests {
             home: PathBuf::from("/home/cl"),
         };
         let start = model.set_target(Some(claude_target.clone()));
-        let Some(ConsumerChange::Start(Binding::Claude(b))) = start else {
+        let Some(ConsumerChange::Start(Binding::Claude(first))) = start else {
             panic!("expected claude start");
         };
+        let first_generation = first.generation;
         model.accept(
-            Update::unavailable(Binding::Claude(b), Availability::Missing),
+            Update::unavailable(Binding::Claude(first), Availability::Missing),
             (0, 0),
             Timestamp::now(),
         );
-        model.status_reported("pane-cl");
-        assert!(model.set_target(Some(claude_target)).is_none());
+        assert!(!model.status_reported("pane-c"), "another pane's report");
+        assert!(model.status_reported("pane-cl"));
+        let Some(ConsumerChange::Start(Binding::Claude(second))) =
+            model.set_target(Some(claude_target.clone()))
+        else {
+            panic!("a missing Claude transcript is looked up again");
+        };
+        assert!(second.generation > first_generation);
+        assert!(
+            model.set_target(Some(claude_target)).is_none(),
+            "one report, one retry"
+        );
     }
 }

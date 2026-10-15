@@ -83,13 +83,14 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
         update.tail_only()
     ));
     if update.availability() == Availability::Missing {
-        let file = match update {
-            Update::Codex(_) => "Pinned rollout",
-            Update::Claude(_) | Update::Agy(_) => "Session transcript",
+        let (file, retry) = match update {
+            Update::Codex(_) => ("Pinned rollout", "toggle the strip to retry"),
+            Update::Claude(_) | Update::Agy(_) => (
+                "Session transcript",
+                "looked up again on the tab's next status report, or toggle the strip",
+            ),
         };
-        out.push(format!(
-            "{file} unavailable in bounded lookup; toggle the strip to retry."
-        ));
+        out.push(format!("{file} unavailable in bounded lookup; {retry}."));
     }
     let work = app.runtime.agent_hud.as_ref().map_or(
         app.state.pane.agent_hud.work,

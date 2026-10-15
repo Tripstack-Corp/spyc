@@ -1,8 +1,8 @@
 //! One cancellable startup lookup and one exact-file subscription: a Codex
 //! rollout, a Claude Code transcript, or an Antigravity transcript. The
-//! lookup is bounded and happens once per binding. A missing rollout or Claude
-//! transcript needs a new consumer; a missing agy transcript is looked up again
-//! on its tab's next status report.
+//! lookup is bounded and happens once per binding. A missing rollout needs a
+//! new consumer; a missing Claude Code or agy transcript is looked up again on
+//! its tab's next status report.
 
 use std::path::{Path, PathBuf};
 use std::sync::{

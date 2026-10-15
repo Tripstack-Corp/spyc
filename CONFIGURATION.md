@@ -171,7 +171,9 @@ directory, `$CLAUDE_CONFIG_DIR` or else `~/.claude`, as spyc's own environment
 names it at startup. The session is the one the tab's status hooks reported, so
 the strip waits for the first report. Claude Code files a session under the
 directory it started in, so every project is asked for that exact name, and a
-session found in two projects is not guessed between.
+session found in two projects is not guessed between. Claude Code reports its
+session at startup but writes the transcript only with the first prompt, so a
+transcript not found yet is looked up again on the tab's next status report.
 
 ### Colour depth — `[layout] color_depth`
 
