@@ -325,7 +325,7 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                                         .with_screen(TerminalScreen::size),
                                     (child.height, child.width)
                                 );
-                                assert!(rows[0].contains("56789abc") || width < 20);
+                                assert!(rows[0].contains("56789abc") || width < 22);
                                 if strip.width >= 40 {
                                     assert!(rows[1].starts_with("context"));
                                     assert!(rows[1].ends_with("awaiting metrics"));

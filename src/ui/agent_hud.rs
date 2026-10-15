@@ -33,6 +33,8 @@ const MAX_CELL: usize = 32;
 const MAX_TOOL_NAME: usize = 12;
 /// How many of the most-called tools the collapsed row names.
 const TOP_TOOLS: usize = 3;
+/// The activity dot and the space after it.
+const DOT: usize = 2;
 /// Repository and branch are cut tighter than [`MAX_CELL`]: a long branch name
 /// still widens its column, but not enough to push the row's later fields off
 /// a typical terminal.
@@ -103,11 +105,59 @@ pub enum Hooks {
     Absent,
 }
 
+/// What the activity row says the agent is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Attention {
+    Working,
+    Waiting,
+    NeedsYou,
+    Done,
+    Idle,
+    Suspended,
+    Unknown,
+}
+
+impl Attention {
+    /// Every state, so the first column can be as wide as the widest.
+    const ALL: [Self; 7] = [
+        Self::Working,
+        Self::Waiting,
+        Self::NeedsYou,
+        Self::Done,
+        Self::Idle,
+        Self::Suspended,
+        Self::Unknown,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::Waiting => "waiting",
+            Self::NeedsYou => "needs you",
+            Self::Done => "done",
+            Self::Idle => "idle",
+            Self::Suspended => "suspended",
+            Self::Unknown => "status --",
+        }
+    }
+}
+
+/// The first column's width: the widest activity, dot included, so a change
+/// of state never moves the columns after it. The headings below it are
+/// narrower.
+fn first_column_width() -> usize {
+    Attention::ALL
+        .iter()
+        .map(|a| DOT + display_width(a.label()))
+        .max()
+        .unwrap_or(0)
+}
+
 pub struct HudView<'a> {
     pub session: Option<&'a str>,
     /// The tab's activity dot, in its own colour.
     pub dot: Option<Span<'static>>,
-    pub attention: &'a str,
+    pub attention: Attention,
     /// What a `waiting` agent waits on.
     pub note: Option<&'a str>,
     pub repository: Option<&'a str>,
@@ -150,7 +200,7 @@ pub fn lines(
         rows.push(agent.tools);
         rows.push(mode_row);
     }
-    let mut lines = grid(rows, usize::from(width));
+    let mut lines = grid(rows, usize::from(width), first_column_width());
     if theme.mono {
         // Shape and weight carry the meaning; no span keeps a colour.
         for span in lines.iter_mut().flat_map(|line| line.spans.iter_mut()) {
@@ -220,8 +270,8 @@ impl Field {
 /// Lays `rows` out so column `j` starts at the same x on every row. A cell
 /// past the right edge is dropped, never wrapped, except in the first two
 /// columns: the activity and the session have first claim on the width, so
-/// they are cut instead.
-fn grid(rows: Vec<Row>, width: usize) -> Vec<Line<'static>> {
+/// they are cut instead. The first column is at least `first` wide.
+fn grid(rows: Vec<Row>, width: usize, first: usize) -> Vec<Line<'static>> {
     let columns = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
     // The last column moves nothing, so only the width of the strip cuts it.
     let rows: Vec<Row> = rows
@@ -246,7 +296,7 @@ fn grid(rows: Vec<Row>, width: usize) -> Vec<Line<'static>> {
             .map(Field::width)
             .max()
             .unwrap_or(0);
-        let floor = if j == 0 { 0 } else { MIN_COLUMN };
+        let floor = if j == 0 { first } else { MIN_COLUMN };
         x += widest.max(floor) + GAP;
     }
     rows.into_iter()
@@ -322,6 +372,15 @@ impl Palette {
         }
     }
 
+    /// A row's heading, in the first column: bright and bold, so it reads
+    /// apart from the dim names and placeholders beside it.
+    fn heading(self, text: &str) -> Span<'static> {
+        Span::styled(
+            safe_label(text),
+            Style::default().fg(self.value).add_modifier(Modifier::BOLD),
+        )
+    }
+
     /// A field's name, or a value that is only a placeholder.
     fn label(self, text: &str) -> Span<'static> {
         let style = Style::default().fg(self.label);
@@ -371,7 +430,7 @@ impl Palette {
             Some(other) => self.tint(&source_label(other, file), self.warn),
         };
         Row::new(vec![
-            Field(vec![self.label("context")]),
+            Field(vec![self.heading("context")]),
             Field(vec![reason]),
         ])
     }
@@ -396,7 +455,7 @@ fn activity(view: &HudView<'_>, p: Palette) -> Row {
         first.push(Span::raw(" "));
     }
     first.push(Span::styled(
-        safe_label(view.attention),
+        view.attention.label(),
         Style::default()
             .fg(colour.unwrap_or(p.value))
             .add_modifier(Modifier::BOLD),
@@ -514,7 +573,7 @@ fn tools_row(label: &str, tallies: &[Tally], running: Option<&[String]>, p: Pale
     let calls: u32 = tallies.iter().map(|t| t.calls).sum();
     let failed: u32 = tallies.iter().map(|t| t.failed).sum();
     let mut cells = vec![
-        Field(vec![p.label(label)]),
+        Field(vec![p.heading(label)]),
         Field(vec![p.strong(&calls.to_string()), p.label(" calls")]),
         if failed == 0 {
             Field(vec![p.label("0 failed")])
@@ -612,7 +671,7 @@ mod tests {
         HudView {
             session: Some("01a133b2-dc16-74c8-af3c-111111111111"),
             dot: None,
-            attention: "idle",
+            attention: Attention::Idle,
             note: None,
             repository: Some("spyc"),
             branch: Some("main"),
@@ -681,7 +740,7 @@ mod tests {
         HudView {
             session: Some("537fb604-0a1b-478f-be17-3c76df17b585"),
             dot: Some(Span::raw("●")),
-            attention: "working",
+            attention: Attention::Working,
             note: None,
             repository: Some("spyc"),
             branch: Some(branch),
@@ -783,7 +842,7 @@ mod tests {
             last[2].ends_with("✓ Read 141 · ✓ spyc:get_sp… 19 · Edit 9 ✗1"),
             "the last column is cut only by the strip: {last:?}"
         );
-        let tight = text(&lines(&view, AgentHudMode::Compact, 14, &Theme::default()));
+        let tight = text(&lines(&view, AgentHudMode::Compact, 16, &Theme::default()));
         assert!(tight[0].starts_with("● working"));
         assert!(
             tight[0].ends_with('…'),
@@ -796,7 +855,7 @@ mod tests {
         let (snapshot, branch) = claude_session("main");
         let mut view = claude_view(&snapshot, branch);
         let before = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
-        view.attention = "waiting";
+        view.attention = Attention::Waiting;
         view.note = Some("CI on #641, the long way round");
         let after = text(&lines(&view, AgentHudMode::Full, 200, &Theme::default()));
         assert!(
@@ -819,8 +878,52 @@ mod tests {
         assert!(spans.iter().all(|s| s.style.fg == Some(Color::Reset)));
         let style = |text: &str| spans.iter().find(|s| s.content == text).unwrap().style;
         assert!(style("working").add_modifier.contains(Modifier::BOLD));
-        assert!(style("context").add_modifier.contains(Modifier::DIM));
+        assert!(style("context").add_modifier.contains(Modifier::BOLD));
+        assert!(!style("context").add_modifier.contains(Modifier::DIM));
+        assert!(style("compacted").add_modifier.contains(Modifier::DIM));
         assert!(style("336.6k").add_modifier.contains(Modifier::BOLD));
+    }
+
+    /// A change of state never moves a column: the first is as wide as the
+    /// widest activity it can show.
+    #[test]
+    fn every_activity_leaves_the_columns_where_they_were() {
+        let (snapshot, branch) = claude_session("main");
+        let mut view = claude_view(&snapshot, branch);
+        let session_x = |view: &HudView<'_>| {
+            let rows = text(&lines(view, AgentHudMode::Full, 200, &Theme::default()));
+            (x_of(&rows[0], "df17b585"), x_of(&rows[1], "336.6k"))
+        };
+        let expected = session_x(&view);
+        for attention in Attention::ALL {
+            for dot in [Some(Span::raw("●")), None] {
+                view.attention = attention;
+                view.dot = dot;
+                assert_eq!(session_x(&view), expected, "{attention:?}");
+            }
+        }
+    }
+
+    /// Row headings read apart from the field names and placeholders beside
+    /// them: bright and bold, where those are dim and plain.
+    #[test]
+    fn headings_stand_apart_from_the_names_beside_them() {
+        let (snapshot, branch) = claude_session("main");
+        let view = claude_view(&snapshot, branch);
+        let theme = Theme::default();
+        let lines = lines(&view, AgentHudMode::Full, 200, &theme);
+        let spans: Vec<&Span<'_>> = lines.iter().flat_map(|l| &l.spans).collect();
+        let style = |text: &str| spans.iter().find(|s| s.content == text).unwrap().style;
+        for heading in ["context", "tools", "agents"] {
+            let style = style(heading);
+            assert_eq!(style.fg, Some(theme.status_path), "{heading}");
+            assert!(style.add_modifier.contains(Modifier::BOLD), "{heading}");
+        }
+        for name in ["compacted", "background"] {
+            let style = style(name);
+            assert_eq!(style.fg, Some(theme.status_suffix), "{name}");
+            assert!(!style.add_modifier.contains(Modifier::BOLD), "{name}");
+        }
     }
 
     #[test]
@@ -923,7 +1026,7 @@ mod tests {
             ..Snapshot::default()
         };
         let mut view = codex_view(Some(&snapshot));
-        view.attention = "needs you";
+        view.attention = Attention::NeedsYou;
         view.session = Some("12345678");
         view.now = Some(at);
         for width in 1..130 {

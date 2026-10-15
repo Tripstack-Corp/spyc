@@ -14,7 +14,7 @@ pub(super) fn rows(snapshot: Option<&Snapshot>, view: &HudView<'_>, p: Palette) 
     let mode = |approval: Option<&str>, sandbox: Option<&str>| {
         let field = |v: Option<&str>| Field(vec![v.map_or_else(|| p.label("--"), |v| p.value(v))]);
         Row::new(vec![
-            Field(vec![p.label("mode")]),
+            Field(vec![p.heading("mode")]),
             field(approval),
             field(sandbox),
         ])
@@ -23,7 +23,7 @@ pub(super) fn rows(snapshot: Option<&Snapshot>, view: &HudView<'_>, p: Palette) 
         return AgentRows {
             usage: p.unavailable(view.availability, "rollout"),
             tools: Row::new(vec![
-                Field(vec![p.label("recent")]),
+                Field(vec![p.heading("recent")]),
                 Field(vec![p.label("--")]),
             ]),
             mode: mode(None, None),
@@ -69,7 +69,7 @@ fn usage(s: &Snapshot, view: &HudView<'_>, p: Palette) -> Row {
         },
     );
     Row::new(vec![
-        Field(vec![p.label("context")]),
+        Field(vec![p.heading("context")]),
         Field(vec![p.label("--")]),
         tokens("req", s.request.as_ref().or(s.legacy_last.as_ref())),
         tokens("turn", s.turn.as_ref()),
@@ -114,7 +114,7 @@ fn tallies(s: &Snapshot) -> Vec<Tally> {
 mod tests {
     use jiff::Timestamp;
 
-    use super::super::{Hooks, HudView, Metrics, lines};
+    use super::super::{Attention, Hooks, HudView, Metrics, lines};
     use crate::agent::codex_metrics::{
         Availability, Mode, Sample, Snapshot, Source, Tokens, Tool, ToolStatus,
     };
@@ -125,7 +125,7 @@ mod tests {
         let view = HudView {
             session: Some("01a133b2-dc16-74c8-af3c-123456789abc"),
             dot: None,
-            attention: "working",
+            attention: Attention::Working,
             note: None,
             repository: Some("spyc"),
             branch: None,

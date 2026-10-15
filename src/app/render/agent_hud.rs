@@ -5,7 +5,7 @@ use ratatui::{Frame, layout::Rect};
 use crate::agent::tail::Availability;
 use crate::config::AgentHudMode;
 use crate::pane::AgentActivity;
-use crate::ui::agent_hud::{self, Hooks, HudView, Metrics, Reported};
+use crate::ui::agent_hud::{self, Attention, Hooks, HudView, Metrics, Reported};
 
 use super::super::state::agent_hud::{Feed, Update};
 
@@ -46,15 +46,15 @@ impl App {
                 .flatten()
         });
         let attention = if info.suspended {
-            "suspended"
+            Attention::Suspended
         } else {
             match info.activity {
-                AgentActivity::Working => "working",
-                AgentActivity::Waiting => "waiting",
-                AgentActivity::Blocked => "needs you",
-                AgentActivity::Done => "done",
-                AgentActivity::Idle => "idle",
-                AgentActivity::Unknown => "status --",
+                AgentActivity::Working => Attention::Working,
+                AgentActivity::Waiting => Attention::Waiting,
+                AgentActivity::Blocked => Attention::NeedsYou,
+                AgentActivity::Done => Attention::Done,
+                AgentActivity::Idle => Attention::Idle,
+                AgentActivity::Unknown => Attention::Unknown,
             }
         };
         // What a `waiting` agent waits on, as it or its `Stop` hook said.
