@@ -287,9 +287,9 @@ mod tests {
             rows(&view(Some(&snapshot), false), 120),
             [
                 "● working     df17b585       opus-5-5 xhigh   spyc ⎇ main    32m",
-                "context       336.6k         out 370.2k       hit 98%        compacted 1",
-                "tools         271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1",
-                "agents        1              background 5     hooks ✓        mcp ✓",
+                "│ context     336.6k         out 370.2k       hit 98%        compacted 1",
+                "│ tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1",
+                "│ agents      1              background 5     hooks ✓        mcp ✓",
             ]
         );
     }
@@ -313,11 +313,11 @@ mod tests {
         snapshot.compactions = 2;
         let compacted = rows(&view(Some(&snapshot), true), 160);
         assert!(
-            compacted[1].starts_with("context       --             out ≥370.2k"),
+            compacted[1].starts_with("│ context     --             out ≥370.2k"),
             "lifetime totals survive; a tail-only read says they may be more: {compacted:?}"
         );
         assert!(compacted[1].ends_with("compacted ≥2"));
-        assert!(compacted[2].starts_with("recent "), "{compacted:?}");
+        assert!(compacted[2].starts_with("│ recent "), "{compacted:?}");
     }
 
     #[test]
@@ -326,8 +326,8 @@ mod tests {
         missing.availability = Some(Availability::Missing);
         let missing = rows(&missing, 120);
         assert!(missing[0].contains("model --"), "{missing:?}");
-        assert!(missing[1].starts_with("context") && missing[1].ends_with("transcript missing"));
-        assert!(missing[2].starts_with("tools") && missing[2].ends_with("--"));
+        assert!(missing[1].starts_with("│ context") && missing[1].ends_with("transcript missing"));
+        assert!(missing[2].starts_with("│ tools") && missing[2].ends_with("--"));
         assert!(missing[3].contains("background --"), "{missing:?}");
         let awaiting = rows(&view(None, false), 120);
         assert!(awaiting[1].ends_with("awaiting metrics"));
@@ -465,7 +465,7 @@ mod tests {
         };
         let line = lines(&v, AgentHudMode::Compact, 200, &theme).swap_remove(1);
         let text = line.to_string();
-        assert!(text.starts_with("context       336.6k 55%"), "{text}");
+        assert!(text.starts_with("│ context     336.6k 55%"), "{text}");
         assert!(
             text.find("5h 23%").unwrap() < text.find("7d 85%").unwrap()
                 && text.find("7d 85%").unwrap() < text.find("out ").unwrap(),

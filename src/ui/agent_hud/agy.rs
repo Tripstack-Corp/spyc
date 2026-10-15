@@ -200,7 +200,7 @@ mod tests {
         assert!(rendered[1].contains("compacted 1"));
         assert!(rendered[2].contains("tools"));
         assert!(rendered[2].contains("30 calls"));
-        assert!(rendered[3].contains("agents        3"));
+        assert!(rendered[3].contains("│ agents      3"));
         assert!(rendered[3].contains("hooks ✓"));
         assert!(rendered[3].contains("mcp ✓"));
     }
@@ -215,7 +215,7 @@ mod tests {
         });
         snapshot.compactions = 2;
         let compacted = rows(&view(Some(&snapshot), true), 160);
-        assert!(compacted[1].contains("context       --"));
+        assert!(compacted[1].contains("│ context     --"));
         assert!(compacted[1].contains("compacted ≥2"));
     }
 
@@ -226,6 +226,6 @@ mod tests {
         let rendered = rows(&missing, 120);
         assert!(rendered[1].contains("transcript missing"));
         assert!(rendered[2].contains("--"));
-        assert!(rendered[3].contains("agents        --"));
+        assert!(rendered[3].contains("│ agents      --"));
     }
 }

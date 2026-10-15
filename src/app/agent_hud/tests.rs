@@ -327,7 +327,7 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                                 );
                                 assert!(rows[0].contains("56789abc") || width < 22);
                                 if strip.width >= 40 {
-                                    assert!(rows[1].starts_with("context"));
+                                    assert!(rows[1].starts_with("│ context"));
                                     assert!(rows[1].ends_with("awaiting metrics"));
                                 }
                             } else {
@@ -348,8 +348,8 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
         app.view.scroll_pager = Some(pager);
         let (layout, rows) = paint(&mut app, 100, 32);
         assert_eq!(rows.len(), 4);
-        assert!(rows[3].starts_with("mode") && rows[3].contains("hooks off"));
-        assert!(rows[2].starts_with("recent") && rows[2].ends_with("--"));
+        assert!(rows[3].starts_with("│ mode") && rows[3].contains("hooks off"));
+        assert!(rows[2].starts_with("│ recent") && rows[2].ends_with("--"));
         assert!(
             app.agent_hud_lines(layout.agent_hud.unwrap())
                 .iter()
