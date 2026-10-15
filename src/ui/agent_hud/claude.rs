@@ -26,11 +26,11 @@ pub(super) fn rows(
         return AgentRows {
             usage,
             tools: Row::new(vec![
-                Field(vec![p.label("tools")]),
+                Field(vec![p.heading("tools")]),
                 Field(vec![p.label("--")]),
             ]),
             mode: Row::new(vec![
-                Field(vec![p.label("agents")]),
+                Field(vec![p.heading("agents")]),
                 Field(vec![p.label("--")]),
                 p.pair("background", p.label("--")),
             ]),
@@ -47,7 +47,7 @@ pub(super) fn rows(
 
 fn mode_row(s: &Snapshot, at_least: &str, p: Palette) -> Row {
     let mut cells = vec![
-        Field(vec![p.label("agents")]),
+        Field(vec![p.heading("agents")]),
         Field(vec![p.strong(&format!("{at_least}{}", s.subagent_calls))]),
         p.pair(
             "background",
@@ -102,7 +102,7 @@ fn usage(s: &Snapshot, at_least: &str, reported: Reported<'_>, p: Palette) -> Ro
         .saturating_mul(100)
         .checked_div(sent)
         .map_or_else(|| p.label("--"), |pct| p.value(&format!("{pct}%")));
-    let mut cells = vec![Field(vec![p.label("context")]), Field(context)];
+    let mut cells = vec![Field(vec![p.heading("context")]), Field(context)];
     cells.extend(plan(reported, p));
     cells.extend([
         p.pair(
@@ -163,7 +163,7 @@ mod tests {
     use ratatui::style::Modifier;
     use ratatui::text::Span;
 
-    use super::super::{Hooks, HudView, Metrics, lines};
+    use super::super::{Attention, Hooks, HudView, Metrics, lines};
     use crate::agent::claude_metrics::{
         Availability, Compaction, Mode, Plan, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage,
     };
@@ -229,7 +229,7 @@ mod tests {
         HudView {
             session: Some("537fb604-0a1b-478f-be17-3c76df17b585"),
             dot: Some(Span::raw("●")),
-            attention: "working",
+            attention: Attention::Working,
             note: None,
             repository: Some("spyc"),
             branch: Some("main"),
@@ -259,10 +259,10 @@ mod tests {
         assert_eq!(
             rows(&view(Some(&snapshot), false), 120),
             [
-                "● working   df17b585       opus-5-5 xhigh   spyc ⎇ main    32m",
-                "context     336.6k         out 370.2k       hit 98%        compacted 1",
-                "tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1",
-                "agents      1              background 5     hooks ✓        mcp ✓",
+                "● working     df17b585       opus-5-5 xhigh   spyc ⎇ main    32m",
+                "context       336.6k         out 370.2k       hit 98%        compacted 1",
+                "tools         271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1",
+                "agents        1              background 5     hooks ✓        mcp ✓",
             ]
         );
     }
@@ -286,7 +286,7 @@ mod tests {
         snapshot.compactions = 2;
         let compacted = rows(&view(Some(&snapshot), true), 160);
         assert!(
-            compacted[1].starts_with("context     --             out ≥370.2k"),
+            compacted[1].starts_with("context       --             out ≥370.2k"),
             "lifetime totals survive; a tail-only read says they may be more: {compacted:?}"
         );
         assert!(compacted[1].ends_with("compacted ≥2"));
@@ -438,7 +438,7 @@ mod tests {
         };
         let line = lines(&v, AgentHudMode::Compact, 200, &theme).swap_remove(1);
         let text = line.to_string();
-        assert!(text.starts_with("context     336.6k 55%"), "{text}");
+        assert!(text.starts_with("context       336.6k 55%"), "{text}");
         assert!(
             text.find("5h 23%").unwrap() < text.find("7d 85%").unwrap()
                 && text.find("7d 85%").unwrap() < text.find("out ").unwrap(),

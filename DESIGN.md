@@ -115,17 +115,18 @@ collapse full to compact when needed, then hide the strip. The native composer
 stays visible within the child, including in zoom and splits.
 
 ```text
-● working   df17b585       opus-5-5 xhigh   spyc ⎇ main    32m
-context     336.6k         out 370.2k       hit 98%        compacted 1
-tools       271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1
-agents      1              background 5     todo 2/5 (1 active)  hooks ✓   mcp ✓
+● working     df17b585       opus-5-5 xhigh   spyc ⎇ main    32m
+context       336.6k         out 370.2k       hit 98%        compacted 1
+tools         271 calls      ✗ 4 failed       ◐ Bash         Bash 182 ✗3 · ✓ Read 41 · Edit 23 ✗1
+agents        1              background 5     todo 2/5 (1 active)  hooks ✓   mcp ✓
 ```
 
 It is one template for every agent with a metrics source: the activity row,
 the health cells and the styling are shared, and each agent fills only its
 usage, tools and mode cells. The rows form a grid, so a column starts at the
-same x on every row. A label column leads; value columns are at least twelve
-wide, so a count gaining a digit rarely moves its neighbour; a cell with a
+same x on every row. A heading column leads, as wide as the widest state the
+activity cell can show, so a change of state never moves a column; value
+columns are at least twelve wide, so a count gaining a digit rarely moves its neighbour; a cell with a
 column after it is cut past 32, and the repository and branch past 28, so an
 unusually long branch name can only push the columns after it so far. As the
 frame narrows, whole cells drop from the right, except the activity and the
@@ -144,8 +145,8 @@ strip. The strip is spyc's text, never the child's input: a press there selects,
 a drag copies, and the wheel does nothing.
 
 The activity cell is the tab's own dot in its own colour, with the state in
-bold beside it, so the strip and the tab never disagree. Field names are dim and
-values bright; a key value is bold. Calls are counted in bright text, a running
+bold beside it, so the strip and the tab never disagree. Row headings are bright
+and bold; field names are dim and values bright; a key value is bold. Calls are counted in bright text, a running
 call is marked `◐` in amber, failures `✗` in red, and a working hook or MCP
 connection `✓` in green, with a word only when one isn't working. A stale value
 is dimmed rather than labelled. Monochrome keeps the weights and drops every

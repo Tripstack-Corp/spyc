@@ -18,11 +18,11 @@ pub(super) fn rows(
         return AgentRows {
             usage,
             tools: Row::new(vec![
-                Field(vec![p.label("tools")]),
+                Field(vec![p.heading("tools")]),
                 Field(vec![p.label("--")]),
             ]),
             mode: Row::new(vec![
-                Field(vec![p.label("agents")]),
+                Field(vec![p.heading("agents")]),
                 Field(vec![p.label("--")]),
             ]),
         };
@@ -38,7 +38,7 @@ pub(super) fn rows(
 
 fn mode_row(s: &Snapshot, at_least: &str, p: Palette) -> Row {
     Row::new(vec![
-        Field(vec![p.label("agents")]),
+        Field(vec![p.heading("agents")]),
         Field(vec![p.strong(&format!("{at_least}{}", s.subagent_calls))]),
     ])
 }
@@ -57,7 +57,7 @@ fn usage(s: &Snapshot, at_least: &str, p: Palette) -> Row {
         .checked_div(sent)
         .map_or_else(|| p.label("--"), |pct| p.value(&format!("{pct}%")));
     let cells = vec![
-        Field(vec![p.label("context")]),
+        Field(vec![p.heading("context")]),
         Field(context),
         p.pair(
             "out",
@@ -103,7 +103,7 @@ mod tests {
     use jiff::Timestamp;
     use ratatui::text::Span;
 
-    use super::super::{Hooks, HudView, Metrics, lines};
+    use super::super::{Attention, Hooks, HudView, Metrics, lines};
     use crate::agent::agy_metrics::{
         Availability, Compaction, Mode, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage,
     };
@@ -162,7 +162,7 @@ mod tests {
         HudView {
             session: Some("00000000-0000-0000-0000-000000000001"),
             dot: Some(Span::raw("●")),
-            attention: "working",
+            attention: Attention::Working,
             note: None,
             repository: Some("spyc"),
             branch: Some("main"),
@@ -198,7 +198,7 @@ mod tests {
         assert!(rendered[1].contains("compacted 1"));
         assert!(rendered[2].contains("tools"));
         assert!(rendered[2].contains("30 calls"));
-        assert!(rendered[3].contains("agents      3"));
+        assert!(rendered[3].contains("agents        3"));
         assert!(rendered[3].contains("hooks ✓"));
         assert!(rendered[3].contains("mcp ✓"));
     }
@@ -213,7 +213,7 @@ mod tests {
         });
         snapshot.compactions = 2;
         let compacted = rows(&view(Some(&snapshot), true), 160);
-        assert!(compacted[1].contains("context     --"));
+        assert!(compacted[1].contains("context       --"));
         assert!(compacted[1].contains("compacted ≥2"));
     }
 
@@ -224,6 +224,6 @@ mod tests {
         let rendered = rows(&missing, 120);
         assert!(rendered[1].contains("transcript missing"));
         assert!(rendered[2].contains("--"));
-        assert!(rendered[3].contains("agents      --"));
+        assert!(rendered[3].contains("agents        --"));
     }
 }
