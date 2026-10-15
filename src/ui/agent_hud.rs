@@ -204,6 +204,12 @@ pub fn lines(
         rows.push(agent.tools);
         rows.push(mode_row);
     }
+    // The rows below hang from the dot, each heading under the activity label.
+    for row in &mut rows[1..] {
+        if let Some(first) = row.cells.first_mut() {
+            first.0.splice(0..0, [p.label("│"), Span::raw(" ")]);
+        }
+    }
     let mut lines = grid(rows, usize::from(width), first_column_width());
     if theme.mono {
         // Shape and weight carry the meaning; no span keeps a colour.
@@ -457,6 +463,8 @@ fn activity(view: &HudView<'_>, p: Palette) -> Row {
     if let Some(dot) = &view.dot {
         first.push(dot.clone());
         first.push(Span::raw(" "));
+    } else {
+        first.push(Span::raw(" ".repeat(DOT)));
     }
     first.push(Span::styled(
         view.attention.label(),
@@ -771,9 +779,9 @@ mod tests {
     fn every_column_starts_at_the_same_x_on_every_row() {
         let columns: [&[&str]; 4] = [
             &["●", "df17b585", "opus-5-5", "spyc", "32m"],
-            &["context", "336.6k", "out ", "hit ", "compacted "],
-            &["tools", "175", "✗", "◐", "✓ Read 141"],
-            &["agents", "7", "background", "hooks", "mcp"],
+            &["│ context", "336.6k", "out ", "hit ", "compacted "],
+            &["│ tools", "175", "✗", "◐", "✓ Read 141"],
+            &["│ agents", "7", "background", "hooks", "mcp"],
         ];
         for branch in ["main", "feat/a-branch-name-much-longer-than-any-column"] {
             let (snapshot, branch) = claude_session(branch);
@@ -912,6 +920,40 @@ mod tests {
         }
     }
 
+    /// Every heading starts where the activity label does, under a dim bar
+    /// that continues the dot's column, in every state and whether or not a
+    /// dot is shown: a suspended tab has none.
+    #[test]
+    fn the_headings_line_up_with_the_activity_label_under_a_dim_bar() {
+        let (snapshot, branch) = claude_session("main");
+        let mut view = claude_view(&snapshot, branch);
+        let theme = Theme::default();
+        for attention in Attention::ALL {
+            for dot in [Some(Span::raw("●")), None] {
+                view.attention = attention;
+                view.dot = dot;
+                for mode in [AgentHudMode::Compact, AgentHudMode::Full] {
+                    let rendered = lines(&view, mode, 200, &theme);
+                    let rows = text(&rendered);
+                    let label = x_of(&rows[0], attention.label());
+                    for (row, heading) in rows[1..].iter().zip(["context", "tools", "agents"]) {
+                        assert_eq!(
+                            x_of(row, heading),
+                            label,
+                            "{attention:?} {mode:?}:\n{}",
+                            rows.join("\n")
+                        );
+                    }
+                    for line in &rendered[1..] {
+                        let bar = &line.spans[0];
+                        assert_eq!(bar.content, "│", "{line}");
+                        assert_eq!(bar.style.fg, Some(theme.status_suffix), "dim: {line}");
+                    }
+                }
+            }
+        }
+    }
+
     /// Row headings read apart from the field names and placeholders beside
     /// them: bright and bold, where those are dim and plain.
     #[test]
@@ -1046,7 +1088,7 @@ mod tests {
                         .all(|line| display_width(line) <= usize::from(width))
                 );
                 if width >= 24 {
-                    assert!(rendered[0].starts_with("needs you"), "{rendered:?}");
+                    assert!(rendered[0].starts_with("  needs you"), "{rendered:?}");
                     assert!(rendered[0].contains("12345678"), "{rendered:?}");
                 }
                 assert!(!rendered.iter().any(|line| line.contains('%')));
@@ -1054,8 +1096,8 @@ mod tests {
         }
         let rendered = text(&lines(&view, AgentHudMode::Full, 160, &Theme::default()));
         assert_eq!(rendered.len(), 4);
-        assert!(rendered[1].starts_with("context") && rendered[1].contains(" -- "));
+        assert!(rendered[1].starts_with("│ context") && rendered[1].contains(" -- "));
         assert!(rendered[1].contains("thread 900.0M"));
-        assert!(rendered[2].starts_with("recent") && rendered[2].contains("0 calls"));
+        assert!(rendered[2].starts_with("│ recent") && rendered[2].contains("0 calls"));
     }
 }

@@ -145,8 +145,10 @@ strip. The strip is spyc's text, never the child's input: a press there selects,
 a drag copies, and the wheel does nothing.
 
 The activity cell is the tab's own dot in its own colour, with the state in
-bold beside it, so the strip and the tab never disagree. Row headings are bright
-and bold; field names are dim and values bright; a key value is bold. Calls are counted in bright text, a running
+bold beside it, so the strip and the tab never disagree. The rows below hang
+from that dot on a dim `│`, each heading starting under the state's first
+letter; a suspended tab, which shows no dot, keeps the same two columns blank.
+Row headings are bright and bold; field names are dim and values bright; a key value is bold. Calls are counted in bright text, a running
 call is marked `◐` in amber, failures `✗` in red, and a working hook or MCP
 connection `✓` in green, with a word only when one isn't working. A stale value
 is dimmed rather than labelled. Monochrome keeps the weights and drops every
@@ -174,6 +176,7 @@ Used sparingly — every glyph below has a specific meaning.
 | `>` | git-renamed marker; a renamed archive member |
 | `↪` | live pane cwd has drifted from spawn cwd |
 | `↻` | when a plan window resets, on the agent strip |
+| `│` | dim, under the agent strip's activity dot: the rows that belong to it |
 | `⏳` | `!` captured command running |
 | `…` | middle-truncation in a path |
 | `*` | active pane tab |
