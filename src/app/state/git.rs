@@ -153,11 +153,13 @@ impl AppState {
             // under worktree churn.
             if self.col(side).git_cache.git_worker_available {
                 let generation = self.col(side).git_cache.git_generation.wrapping_add(1);
+                let project = self.active;
                 let c = self.col_mut(side);
                 c.git_cache.git_generation = generation;
                 c.git_cache.pending_git_requests.push(GitWorkerRequest {
                     generation,
                     repo_root,
+                    project,
                     side,
                 });
                 c.git_cache.last_git_request_at = Some(std::time::Instant::now());

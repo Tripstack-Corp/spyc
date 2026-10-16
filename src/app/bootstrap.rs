@@ -260,6 +260,7 @@ impl App {
                     generation: req.generation,
                     repo_root: req.repo_root,
                     // Echo the requesting column so the result routes back to it.
+                    project: req.project,
                     side: req.side,
                     entries,
                     index_mtime,

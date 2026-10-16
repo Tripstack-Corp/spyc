@@ -680,6 +680,128 @@ fn mcp_create_worktree_runs_off_thread_and_replies() {
     });
 }
 
+/// A landed `create_worktree` outcome as the worker builds it, minus the git:
+/// the tree at `path` exists, and `open` asks for it in column `b`.
+fn created_worktree_outcome(
+    path: &std::path::Path,
+    open: bool,
+    completion: crate::app::worktree_ops::WorktreeCompletion,
+    project: state::ProjectId,
+) -> crate::app::worktree_ops::WorktreeOutcome {
+    crate::app::worktree_ops::WorktreeOutcome {
+        result: crate::app::worktree_ops::WorktreeJobResult {
+            response: crate::mcp_cmd::McpResponse::Ok {
+                message: "{}".into(),
+            },
+            flash: Some(format!("[mcp] created worktree {} (wt)", path.display())),
+            mutated: true,
+            open_path: open.then(|| path.to_path_buf()),
+            created_path: Some(path.to_path_buf()),
+        },
+        completion,
+        project,
+    }
+}
+
+/// `create_worktree open:true` opens `b` in the project that asked (#99): a
+/// checkout can take seconds, and if another project is active by the time it
+/// lands, the tree is still created and the agent still answered, but nobody
+/// else's columns move.
+#[test]
+fn a_created_worktree_opens_b_only_in_the_project_that_asked() {
+    use crate::app::worktree_ops::WorktreeCompletion;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let (home, tree) = (base.join("home"), base.join("tree"));
+        std::fs::create_dir(&home).unwrap();
+        std::fs::create_dir(&tree).unwrap();
+        let mut app = App::test_app(home);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let foreign = state::ProjectId::new();
+        let outcome = created_worktree_outcome(&tree, true, WorktreeCompletion::Mcp(tx), foreign);
+        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        assert!(app.apply_worktree_outcomes());
+        assert!(
+            rx.try_recv().is_ok(),
+            "the agent is answered whichever project is active"
+        );
+        assert!(
+            app.state.active_project().right.is_none(),
+            "another project's worktree opened b here"
+        );
+        assert!(
+            !app.flash_text().unwrap_or_default().contains("opened in b"),
+            "the flash claims an open that didn't happen: {:?}",
+            app.flash_text()
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let active = app.state.active;
+        let outcome = created_worktree_outcome(&tree, true, WorktreeCompletion::Mcp(tx), active);
+        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        assert!(app.apply_worktree_outcomes());
+        assert!(rx.try_recv().is_ok());
+        assert_eq!(
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .map(|b| b.listing.dir.clone()),
+            Some(tree),
+            "the project that asked gets the tree in b"
+        );
+        assert!(
+            app.flash_text().unwrap_or_default().contains("opened in b"),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// `W n` enters the new tree only if the project it was pressed in is still the
+/// active one when the checkout lands (#99). Entering it is a chdir, which
+/// unit tests never do, so the positive case is left to the real binary.
+#[test]
+fn a_w_n_worktree_is_entered_only_by_the_project_that_asked() {
+    use crate::app::worktree_ops::WorktreeCompletion;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let (home, tree) = (base.join("home"), base.join("tree"));
+        std::fs::create_dir(&home).unwrap();
+        std::fs::create_dir(&tree).unwrap();
+        let mut app = App::test_app(home.clone());
+        app.state
+            .active_project_mut()
+            .left
+            .listing
+            .dir
+            .clone_from(&home);
+
+        let outcome = created_worktree_outcome(
+            &tree,
+            false,
+            WorktreeCompletion::InteractiveCreate,
+            state::ProjectId::new(),
+        );
+        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        assert!(app.apply_worktree_outcomes());
+        assert_eq!(
+            app.state.cur().listing.dir,
+            home,
+            "another project's W n moved this column"
+        );
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.contains(&tree.display().to_string())),
+            "the new tree is still reported: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
 /// A non-directory path is an error and leaves the layout unchanged.
 #[test]
 fn mcp_open_worktree_rejects_non_dir() {
