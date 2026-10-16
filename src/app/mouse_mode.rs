@@ -28,7 +28,7 @@ impl App {
     pub(super) fn mouse_capture_wanted(&self) -> bool {
         self.state
             .mouse_capture_override
-            .unwrap_or(self.state.config.mouse.capture)
+            .unwrap_or(self.state.active_project().config.mouse.capture)
     }
 
     /// Reconcile the terminal's mouse mode against what the user wants.
@@ -78,11 +78,11 @@ mod tests {
         // Agreement (both off) → nothing. `capture` now defaults to true, so this
         // starting condition is set explicitly rather than assumed from the struct
         // default.
-        app.state.config.mouse.capture = false;
+        app.state.active_project_mut().config.mouse.capture = false;
         assert!(app.settle_mouse_mode().is_empty(), "off/off must be silent");
 
         // User asks for capture → one enable.
-        app.state.config.mouse.capture = true;
+        app.state.active_project_mut().config.mouse.capture = true;
         let fx = app.settle_mouse_mode();
         assert!(
             matches!(fx.as_slice(), [Effect::SetMouseMode { capture: true }]),
@@ -95,7 +95,7 @@ mod tests {
         assert!(app.settle_mouse_mode().is_empty(), "on/on must be silent");
 
         // `:mouse off` (or a config reload) → one disable.
-        app.state.config.mouse.capture = false;
+        app.state.active_project_mut().config.mouse.capture = false;
         let fx = app.settle_mouse_mode();
         assert!(
             matches!(fx.as_slice(), [Effect::SetMouseMode { capture: false }]),
@@ -111,7 +111,7 @@ mod tests {
     fn settle_reclaims_capture_after_a_foreground_child() {
         let _lock = crate::mouse_test_lock();
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.config.mouse.capture = true;
+        app.state.active_project_mut().config.mouse.capture = true;
         crate::set_mouse_capture_for_test(true);
         assert!(app.settle_mouse_mode().is_empty());
 
@@ -138,7 +138,7 @@ mod tests {
     fn settle_reclaims_capture_after_a_caught_panic_restored_the_terminal() {
         let _lock = crate::mouse_test_lock();
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.config.mouse.capture = true;
+        app.state.active_project_mut().config.mouse.capture = true;
         crate::set_mouse_capture_for_test(true);
         assert!(app.settle_mouse_mode().is_empty());
 
@@ -164,7 +164,7 @@ mod tests {
         let _lock = crate::mouse_test_lock();
         let mut app = App::test_app(std::env::temp_dir());
         crate::set_mouse_capture_for_test(true);
-        app.state.config.mouse.capture = true;
+        app.state.active_project_mut().config.mouse.capture = true;
 
         // `:mouse off`.
         app.state.mouse_capture_override = Some(false);
@@ -176,7 +176,7 @@ mod tests {
         crate::set_mouse_capture_for_test(false);
 
         // A reload replaces the whole Config — capture is true again in it.
-        app.state.config.mouse.capture = true;
+        app.state.active_project_mut().config.mouse.capture = true;
         assert!(
             !app.mouse_capture_wanted(),
             "a config reload must not undo `:mouse off`"

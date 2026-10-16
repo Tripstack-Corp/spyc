@@ -34,7 +34,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/agent_status.rs::App::settle_agent_activity", 139),
         ("src/app/archive.rs::App::apply_one_archive_outcome", 134),
         ("src/app/archive_route.rs::classify", 142),
-        ("src/app/bootstrap.rs::App::new", 259),
+        ("src/app/bootstrap.rs::App::new", 211),
         ("src/app/effect/executor.rs::App::run_effects", 242),
         ("src/app/file_ops.rs::App::apply_one_file_outcome", 144),
         ("src/app/file_ops.rs::run_file_op", 162),
@@ -48,7 +48,7 @@ const FUNCTION: Rule = Rule {
             144,
         ),
         ("src/app/mcp.rs::App::execute_mcp_command", 260),
-        ("src/app/mouse/mod.rs::App::handle_mouse", 119),
+        ("src/app/mouse/mod.rs::App::handle_mouse", 108),
         ("src/app/pager_handler/file_view.rs::build_pager_view", 151),
         (
             "src/app/pager_handler/motion.rs::App::handle_pager_motion",

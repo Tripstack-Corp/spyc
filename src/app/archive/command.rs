@@ -178,7 +178,8 @@ impl App {
                     // Unwritten changes would go with the mount, so ask before
                     // dropping them rather than after.
                     if self.mount_is_dirty(&archive)
-                        && self.state.config.archive.write_back == crate::config::WriteBack::Ask
+                        && self.state.active_project().config.archive.write_back
+                            == crate::config::WriteBack::Ask
                     {
                         let counts = self
                             .state
@@ -337,7 +338,13 @@ impl App {
     /// materialize time is what notices an edit made by an editor or an agent.
     fn write_effect(&mut self, archive: &Path) -> Option<Effect> {
         const MB: u64 = 1024 * 1024;
-        let snapshot_limit = self.state.config.archive.snapshot_max_mb.saturating_mul(MB);
+        let snapshot_limit = self
+            .state
+            .active_project()
+            .config
+            .archive
+            .snapshot_max_mb
+            .saturating_mul(MB);
         // Everything the op needs is gathered before the first flash, so the
         // immutable read of the mount ends before the mutable borrow begins.
         let prepared = {
@@ -362,6 +369,7 @@ impl App {
                         free_space_margin: 8 * MB,
                         verify_budget: self
                             .state
+                            .active_project()
                             .config
                             .archive
                             .extract_budget_mb

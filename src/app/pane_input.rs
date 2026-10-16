@@ -15,7 +15,7 @@ impl App {
         err_prefix: Option<&'static str>,
     ) {
         let result = match target {
-            PaneTarget::Active => self.runtime.pane_tabs.as_mut().map(|tabs| {
+            PaneTarget::Active => self.runtime.project_mut().pane_tabs.as_mut().map(|tabs| {
                 if let PaneInput::ConfirmedPipe { tab_id, .. } = &input
                     && *tab_id != tabs.active_info().id
                 {
@@ -31,11 +31,11 @@ impl App {
             }),
             PaneTarget::Overlay => {
                 let slot = if self.focused_side() == super::state::Side::Right
-                    && self.runtime.top_overlay_right.is_some()
+                    && self.runtime.project().top_overlay_right.is_some()
                 {
-                    self.runtime.top_overlay_right.as_mut()
+                    self.runtime.project_mut().top_overlay_right.as_mut()
                 } else {
-                    self.runtime.top_overlay.as_mut()
+                    self.runtime.project_mut().top_overlay.as_mut()
                 };
                 slot.map(|overlay| input.send_to(overlay))
             }
@@ -62,24 +62,32 @@ impl App {
 
     fn track_accepted_pane_input(&mut self, input: &PaneInput) {
         match input {
-            PaneInput::Paste { text, .. } => self.state.pane.pane_prompt_buf.push_str(text),
+            PaneInput::Paste { text, .. } => {
+                self.state
+                    .active_project_mut()
+                    .pane
+                    .pane_prompt_buf
+                    .push_str(text);
+            }
             PaneInput::Key(key) => match key.code {
                 KeyCode::Enter => {
-                    let trimmed = super::util::strip_ansi_escapes(&self.state.pane.pane_prompt_buf);
+                    let trimmed = super::util::strip_ansi_escapes(
+                        &self.state.active_project().pane.pane_prompt_buf,
+                    );
                     if !trimmed.is_empty() {
-                        self.state.pane.last_pane_prompt = Some(trimmed);
+                        self.state.active_project_mut().pane.last_pane_prompt = Some(trimmed);
                     }
-                    self.state.pane.pane_prompt_buf.clear();
+                    self.state.active_project_mut().pane.pane_prompt_buf.clear();
                     self.clear_pending_images_for_active_tab();
                 }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.state.pane.pane_prompt_buf.clear();
+                    self.state.active_project_mut().pane.pane_prompt_buf.clear();
                 }
                 KeyCode::Backspace => {
-                    self.state.pane.pane_prompt_buf.pop();
+                    self.state.active_project_mut().pane.pane_prompt_buf.pop();
                 }
                 KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.state.pane.pane_prompt_buf.push(c);
+                    self.state.active_project_mut().pane.pane_prompt_buf.push(c);
                 }
                 _ => {}
             },
@@ -216,7 +224,13 @@ mod tests {
             ));
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                let pane = app.runtime.pane_tabs.as_mut().unwrap().active_mut();
+                let pane = app
+                    .runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .active_mut();
                 pane.drain_output();
                 if pane
                     .visible_lines()
@@ -233,6 +247,7 @@ mod tests {
             }
             let pid = app
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -264,7 +279,13 @@ mod tests {
             );
             let now = Instant::now();
             {
-                let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+                let info = app
+                    .runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .active_info_mut();
                 info.command = "codex".into();
                 info.reported = Some(crate::pane::ReportedStatus::new(
                     crate::pane::AgentActivity::Blocked,
@@ -273,6 +294,7 @@ mod tests {
                 ));
             }
             app.runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .unwrap()
@@ -289,6 +311,7 @@ mod tests {
             );
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -302,6 +325,7 @@ mod tests {
             );
             assert!(app.flash_text().unwrap().contains("queue full"));
             app.runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .unwrap()
@@ -310,11 +334,11 @@ mod tests {
                 .as_mut()
                 .unwrap()
                 .status = crate::pane::AgentActivity::Blocked;
-            app.state.pane.pane_prompt_buf = "accepted".into();
+            app.state.active_project_mut().pane.pane_prompt_buf = "accepted".into();
             app.set_pane_focus(true);
             let paste = app.handle_paste("rejected paste".into());
             execute(&mut app, paste);
-            assert_eq!(app.state.pane.pane_prompt_buf, "accepted");
+            assert_eq!(app.state.active_project().pane.pane_prompt_buf, "accepted");
             assert!(app.flash_text().unwrap().contains("queue full"));
             let enter = app
                 .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -322,6 +346,7 @@ mod tests {
             execute(&mut app, enter);
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -332,8 +357,8 @@ mod tests {
                     .status,
                 crate::pane::AgentActivity::Blocked
             );
-            assert_eq!(app.state.pane.pane_prompt_buf, "accepted");
-            assert!(app.state.pane.last_pane_prompt.is_none());
+            assert_eq!(app.state.active_project().pane.pane_prompt_buf, "accepted");
+            assert!(app.state.active_project().pane.last_pane_prompt.is_none());
             let _ = cancel.send(());
             killer.join().unwrap();
             assert!(
@@ -368,7 +393,13 @@ mod tests {
             assert!(app.open_pane_tab_in(&format!("/bin/sh '{}'", script.display()), tmp.path()));
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                let pane = app.runtime.pane_tabs.as_mut().unwrap().active_mut();
+                let pane = app
+                    .runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .active_mut();
                 pane.drain_output();
                 if pane
                     .visible_lines()
@@ -427,16 +458,19 @@ mod tests {
             let mut app = test_pane(tmp.path());
             app.set_pane_focus(true);
             let paste = app.handle_paste("hello".into());
-            assert!(app.state.pane.pane_prompt_buf.is_empty());
+            assert!(app.state.active_project().pane.pane_prompt_buf.is_empty());
             execute(&mut app, paste);
-            assert_eq!(app.state.pane.pane_prompt_buf, "hello");
+            assert_eq!(app.state.active_project().pane.pane_prompt_buf, "hello");
             let enter = app
                 .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
                 .unwrap();
-            assert_eq!(app.state.pane.pane_prompt_buf, "hello");
+            assert_eq!(app.state.active_project().pane.pane_prompt_buf, "hello");
             execute(&mut app, enter);
-            assert!(app.state.pane.pane_prompt_buf.is_empty());
-            assert_eq!(app.state.pane.last_pane_prompt.as_deref(), Some("hello"));
+            assert!(app.state.active_project().pane.pane_prompt_buf.is_empty());
+            assert_eq!(
+                app.state.active_project().pane.last_pane_prompt.as_deref(),
+                Some("hello")
+            );
         });
     }
 

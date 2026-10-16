@@ -19,7 +19,7 @@ fn agent_tab(dir: &std::path::Path, name: &str) -> App {
 }
 
 fn tabs(app: &App) -> &crate::pane::tabs::PaneTabs {
-    app.runtime.pane_tabs.as_ref().unwrap()
+    app.runtime.project().pane_tabs.as_ref().unwrap()
 }
 
 #[test]
@@ -28,7 +28,13 @@ fn a_codex_tab_forks_its_conversation_into_a_new_tab() {
     crate::state::with_state_root(&tmp.path().join("state"), || {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let mut app = agent_tab(&dir, "codex");
-        let source = app.runtime.pane_tabs.as_mut().unwrap().tabs_mut();
+        let source = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut();
         source[0].info.codex_session_id = Some(PARENT.into());
         // The pane has wandered; the branch still starts where codex did.
         source[0].set_live_cwd(dir.join("bin"));
@@ -66,7 +72,14 @@ fn a_conversation_two_tabs_share_still_forks() {
         assert!(app.open_pane_tab_in_home(&cmd, &dir, Some(&dir.join("codex-home"))));
         agent_argv(&dir, "codex");
         std::fs::remove_file(dir.join("codex.argv")).unwrap();
-        for tab in app.runtime.pane_tabs.as_mut().unwrap().tabs_mut() {
+        for tab in app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()
+        {
             tab.info.codex_session_id = Some(PARENT.into());
         }
 
@@ -101,7 +114,13 @@ fn codex_fork_preserves_the_requested_settings_in_the_child_argv() {
     crate::state::with_state_root(&tmp.path().join("state"), || {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let mut app = agent_tab(&dir, "codex");
-        let source = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+        let source = &mut app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0];
         source.info.command = format!(
             r#"{} resume OLD --profile team --sandbox read-only -a never -c 'model="test model"' --add-dir 'shared dir'"#,
             source.info.command
@@ -182,7 +201,13 @@ fn codex_refuses_ambiguous_fork_and_restore_without_replacing_live_tabs() {
     crate::state::with_state_root(&tmp.path().join("state"), || {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let mut app = agent_tab(&dir, "codex");
-        let source = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+        let source = &mut app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0];
         source.info.command = format!("{} --future-option resume", source.info.command);
         source.info.codex_session_id = Some(PARENT.into());
         let original_id = source.info.id.clone();
@@ -226,7 +251,12 @@ fn an_agent_that_cannot_branch_opens_nothing() {
     crate::state::with_state_root(&tmp.path().join("state"), || {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let mut app = agent_tab(&dir, "agy");
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
             .info
             .live_session_id = Some(PARENT.into());
 
@@ -252,7 +282,13 @@ fn a_shell_tab_forks_into_a_copy_at_its_live_cwd() {
         std::fs::create_dir(&moved).unwrap();
         let mut app = App::test_app(dir.clone());
         assert!(app.open_pane_tab_in("cat", &dir));
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0].set_live_cwd(moved.clone());
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
+            .set_live_cwd(moved.clone());
 
         app.apply(&Action::PaneForkTab).unwrap();
 

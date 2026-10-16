@@ -85,7 +85,12 @@ fn why_status_explains_a_shell_codex_on_the_shared_daemon() {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let mut app = App::test_app(dir.clone());
         assert!(app.open_pane_tab_in("sh", &dir));
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
             .info
             .running = Some(crate::pane::RunningAgent {
             kind: crate::state::sessions::AgentKind::Codex,

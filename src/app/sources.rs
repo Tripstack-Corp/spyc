@@ -648,13 +648,31 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.state.left.git_cache.last_git_request_at = Some(std::time::Instant::now());
+            app.state
+                .active_project_mut()
+                .left
+                .git_cache
+                .last_git_request_at = Some(std::time::Instant::now());
             app.ingest_git_result(git_result(99));
             // Recorded + cleared on the first result; a second doesn't panic
             // or re-take.
-            assert!(app.state.left.git_cache.last_git_request_at.is_none());
+            assert!(
+                app.state
+                    .active_project()
+                    .left
+                    .git_cache
+                    .last_git_request_at
+                    .is_none()
+            );
             app.ingest_git_result(git_result(99));
-            assert!(app.state.left.git_cache.last_git_request_at.is_none());
+            assert!(
+                app.state
+                    .active_project()
+                    .left
+                    .git_cache
+                    .last_git_request_at
+                    .is_none()
+            );
         });
     }
 }

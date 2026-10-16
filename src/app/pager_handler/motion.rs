@@ -232,7 +232,7 @@ impl App {
                 self.dispatch_pager_command(crate::app::pager_stream::PagerStreamCmd::Rerender);
             }
             KeyCode::Char('y') => {
-                let include_title = self.state.config.yank.include_pager_title;
+                let include_title = self.state.active_project().config.yank.include_pager_title;
                 let text = view.source_yank_text(include_title);
                 return vec![Effect::CopyToPagerClipboard {
                     text,
@@ -240,7 +240,7 @@ impl App {
                 }];
             }
             KeyCode::Char('Y') => {
-                let include_title = self.state.config.yank.include_pager_title;
+                let include_title = self.state.active_project().config.yank.include_pager_title;
                 let text = view.visible_yank_text(include_title);
                 return vec![Effect::CopyToPagerClipboard {
                     text,

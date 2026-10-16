@@ -395,13 +395,13 @@ impl AppState {
             Action::JumpMark(letter) => return ApplyResult::Post(self.jump_to_mark(*letter)),
             Action::JumpStartDir => {
                 return ApplyResult::Post(vec![Effect::ChangeDir {
-                    path: self.start_dir.clone(),
+                    path: self.active_project().start_dir.clone(),
                     focus: None,
                     on_ok: None,
                     err_prefix: "jump to start failed",
                 }]);
             }
-            Action::JumpProjectHome => match self.project_home.clone() {
+            Action::JumpProjectHome => match self.active_project().home.clone() {
                 Some(dir) => {
                     return ApplyResult::Post(vec![Effect::ChangeDir {
                         path: dir,
@@ -429,14 +429,14 @@ impl AppState {
             Action::SetProjectHomeHere => {
                 let dir = self.cur().listing.dir.clone();
                 self.flash_info(format!("PROJECT_HOME: {}", dir.display()));
-                self.project_home = Some(dir);
+                self.active_project_mut().home = Some(dir);
             }
             Action::SetStartDirHere => {
                 let dir = self.cur().listing.dir.clone();
                 self.flash_info(format!("start dir: {}", dir.display()));
-                self.start_dir = dir;
+                self.active_project_mut().start_dir = dir;
             }
-            Action::JumpPrevDir => match self.prev_dir.clone() {
+            Action::JumpPrevDir => match self.active_project().prev_dir.clone() {
                 Some(prev) => {
                     return ApplyResult::Post(vec![Effect::ChangeDir {
                         path: prev,

@@ -20,8 +20,10 @@ impl App {
         // receivers, so both `mcp_cmd_rx` and `git_result_rx` are `None`
         // (Phase 3a/3d: `run()` is the only `.take()` site).
         let context_path = crate::context::context_path(&cwd);
+        let state = state::AppState::test_default(cwd);
+        let active = state.active;
         let mut app = Self {
-            state: state::AppState::test_default(cwd),
+            state,
             view: ViewState::new(
                 Theme::default(),
                 context_path,
@@ -30,57 +32,13 @@ impl App {
                 crate::ui::color_depth::ColorDepth::TrueColor,
             ),
             exit_summary: None,
+            // `next_stream_id` starts at 1 here (0 in `App::new`) — a
+            // pre-existing distinction from before this constructor existed;
+            // preserved via the functional-update override rather than
+            // guessed away.
             runtime: Runtime {
-                git_result_rx: None,
-                git_worker_tx: None,
-                mcp_cmd_rx: None,
-                pane_wake_tx: None,
-                next_sink_id: 0,
-                autosave_last_saved_fp: None,
-                autosave_due: None,
-                pane_scroll_settle: None,
-                scope_waiters: Vec::new(),
-                lua: None,
-                lua_registry: super::lua::LuaRegistry::default(),
-                lua_inflight: None,
-                lua_events: super::lua_events::LuaEventState::default(),
-                pane_tabs: None,
-                agent_hud: None,
-                top_overlay: None,
-                top_overlay_right: None,
-                pending_capture: None,
-                capture_spill_dir: None,
-                background_tasks: BackgroundTasks::new(),
-                find_picker: None,
-                pager_stream: None,
-                scroll_stream: None,
                 next_stream_id: 1,
-                stashed_pager_streams: std::collections::HashMap::new(),
-                pending_git_view: None,
-                agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                agent_status_refreshing: std::sync::Arc::default(),
-                codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                codex_scan_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-                    false,
-                )),
-                graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                wiring_results: std::sync::Arc::default(),
-                image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                archive_mount_then: None,
-                worktree_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                preview_results: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                jump_default_seq: 0,
-                clipboard_copy_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                listing_refresh_inflight: false,
-                listing_refresh_dirty: false,
-                inventory_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                preview_reloading: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                picker: None,
+                ..Runtime::new(None, None, None, active)
             },
         };
         app.state.rebuild_rows();
@@ -90,8 +48,9 @@ impl App {
     /// Seed the listing with fake file rows (no real fs), mirroring the
     /// `state_with_rows` pattern; clamps the cursor into range.
     pub(crate) fn seed_rows(&mut self, names: &[&str]) {
-        let dir = self.state.left.listing.dir.clone();
-        self.state.left.rows = names
+        let dir = self.state.active_project().left.listing.dir.clone();
+        let p = self.state.active_project_mut();
+        p.left.rows = names
             .iter()
             .map(|n| RowData {
                 path: dir.join(n),
@@ -100,7 +59,8 @@ impl App {
                 deleted: false,
             })
             .collect();
-        self.state.left.cursor.clamp(self.state.left.rows.len());
+        let len = p.left.rows.len();
+        p.left.cursor.clamp(len);
     }
 
     /// Flash message text, if any — compact assertion helper.

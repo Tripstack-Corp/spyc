@@ -331,7 +331,7 @@ impl super::super::App {
         let Some(cell) = self.pane_cell_at(ev) else {
             return Vec::new();
         };
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let area = self
@@ -408,7 +408,7 @@ impl super::super::App {
         } else {
             (b, a)
         };
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let snapshot = self
@@ -446,7 +446,7 @@ impl super::super::App {
         pane_area: Option<Rect>,
     ) -> Option<&crate::pane::snapshot::ScreenSnapshot> {
         let held = self.view.pane_selection_snapshot.as_ref()?;
-        let tabs = self.runtime.pane_tabs.as_ref()?;
+        let tabs = self.runtime.project().pane_tabs.as_ref()?;
         (held.tab_id == tabs.active_info().id
             && held.term_size == self.view.term_size
             && Some(held.area) == pane_area)
@@ -790,7 +790,7 @@ mod tests {
             let tmp = tempfile::tempdir().expect("tempdir").keep();
             let effects = crate::state::with_state_root(&tmp, || {
                 let mut app = App::test_app(tmp.clone());
-                app.state.left.rows = ["alpha.rs", "beta.rs", "gamma.rs"]
+                app.state.active_project_mut().left.rows = ["alpha.rs", "beta.rs", "gamma.rs"]
                     .iter()
                     .map(|n| crate::app::RowData {
                         path: tmp.join(n),
@@ -801,7 +801,7 @@ mod tests {
                     .collect();
                 // Geometry the renderer would have settled.
                 app.view.term_size = (80, 24);
-                app.view.cached_rows = cached_for(&app.state.left.rows);
+                app.view.cached_rows = cached_for(&app.state.active_project().left.rows);
 
                 let at = |kind, row, m| MouseEvent {
                     kind,
@@ -848,7 +848,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir").keep();
         crate::state::with_state_root(&tmp, || {
             let mut app = App::test_app(tmp.clone());
-            app.state.left.rows = (0..4)
+            app.state.active_project_mut().left.rows = (0..4)
                 .map(|i| crate::app::RowData {
                     path: tmp.join(format!("f{i}")),
                     display: format!("f{i}"),
@@ -857,7 +857,7 @@ mod tests {
                 })
                 .collect();
             app.view.term_size = (80, 24);
-            app.view.cached_rows = cached_for(&app.state.left.rows);
+            app.view.cached_rows = cached_for(&app.state.active_project().left.rows);
             let at = |kind, row| MouseEvent {
                 kind,
                 column: 0,
@@ -1393,7 +1393,7 @@ mod tests {
                 "a press in column b must not anchor a chrome selection"
             );
             assert_eq!(
-                app.state.vsplit.map(|v| v.focus),
+                app.state.active_project().vsplit.map(|v| v.focus),
                 Some(Side::Right),
                 "the press focuses the column it landed in"
             );
@@ -1414,7 +1414,7 @@ mod tests {
                 "a press on the status bar still anchors a chrome selection"
             );
             assert_eq!(
-                app.state.vsplit.map(|v| v.focus),
+                app.state.active_project().vsplit.map(|v| v.focus),
                 Some(Side::Left),
                 "and selecting chrome doesn't move the keyboard"
             );

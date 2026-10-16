@@ -353,7 +353,7 @@ impl AppState {
         let new_listing = Listing::read(&canonical)?;
         let focused = self.focused_side() == side;
         if focused && self.col(side).listing.dir != canonical {
-            self.prev_dir = Some(self.col(side).listing.dir.clone());
+            self.active_project_mut().prev_dir = Some(self.col(side).listing.dir.clone());
         }
         if focused {
             let _ = std::env::set_current_dir(&canonical);
@@ -418,7 +418,7 @@ impl AppState {
         let truncated = listing.truncated;
         let focused = self.focused_side() == side;
         if focused && self.col(side).listing.dir != listing.dir {
-            self.prev_dir = Some(self.col(side).listing.dir.clone());
+            self.active_project_mut().prev_dir = Some(self.col(side).listing.dir.clone());
         }
         self.install_listing(side, listing);
         self.col_mut(side)
@@ -453,7 +453,7 @@ impl AppState {
     /// (The `remove_worktree`/`clean_worktree` MCP flow no longer refuses a
     /// worktree a column is in — it relies on this.)
     pub fn reset_orphaned_columns_to_home(&mut self) {
-        let home = self.project_home.clone().filter(|h| h.is_dir());
+        let home = self.active_project().home.clone().filter(|h| h.is_dir());
         for side in self.active_sides() {
             let orphaned = self.col(side).listing.dir.clone();
             if orphaned.is_dir() {

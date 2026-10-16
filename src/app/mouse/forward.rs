@@ -20,7 +20,7 @@ impl super::super::App {
         let Some(report) = mouse_report(ev, layout) else {
             return Vec::new();
         };
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let (mode, encoding) = tabs.active().mouse_protocol();
@@ -384,7 +384,7 @@ mod tests {
             crate::set_mouse_capture_for_test(true);
             let (mut app, (col, row)) = app_with_a_mouse_pane(tmp.path());
             let mut bytes_for = |invert: bool, kind| {
-                app.state.config.mouse.invert_scroll = invert;
+                app.state.active_project_mut().config.mouse.invert_scroll = invert;
                 let fx = app.handle_mouse(at(kind, col, row));
                 sent(&fx)
                     .expect("a wheel tick over a mouse-aware pane reaches the child")

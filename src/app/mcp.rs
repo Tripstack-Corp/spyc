@@ -56,14 +56,14 @@ impl App {
         let cur = self.state.cur();
         let cursor_file = cur.rows.get(cur.cursor.index).map(|r| r.display.clone());
         crate::context::SpycContext {
-            root: self.state.start_dir.clone(),
+            root: self.state.active_project().start_dir.clone(),
             cwd: cur.listing.dir.clone(),
             cursor_file,
             picks: cur.picks.iter().cloned().collect(),
             inventory: self.state.inventory.paths().cloned().collect(),
             filter: cur.temp_filter.clone(),
             git_branch: cur.git.info.clone(),
-            project_home: self.state.project_home.clone(),
+            project_home: self.state.active_project().home.clone(),
             // Scope MCP search to the focused column's worktree root (falls back
             // to PROJECT_HOME / cwd inside `tool_root`), so `search_paths` /
             // `search_content` follow the column the user is working in — the
@@ -95,7 +95,7 @@ impl App {
     /// the tab's live cwd and that cwd's worktree root and branch, not the
     /// column the user is browsing. `None` when no live tab has the id.
     fn pane_context(&self, pane_id: &str) -> Option<serde_json::Value> {
-        let tabs = self.runtime.pane_tabs.as_ref()?;
+        let tabs = self.runtime.project().pane_tabs.as_ref()?;
         let (index, entry) = tabs
             .tabs()
             .iter()
@@ -369,7 +369,7 @@ impl App {
                 }
                 // Resolve the claiming tab → its stable owner key + label (same
                 // targeting as `report_status`: pane_id → pane → focused).
-                let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+                let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
                     return McpResponse::Error {
                         message: "no pane open".into(),
                     };
@@ -568,7 +568,7 @@ impl App {
             });
             return;
         }
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             let _ = reply.send(McpResponse::Error {
                 message: "no pane open".into(),
             });
@@ -711,7 +711,7 @@ impl App {
                 message: format!("unknown status: {status}"),
             };
         };
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             return McpResponse::Error {
                 message: "no pane open".into(),
             };
@@ -789,7 +789,7 @@ impl App {
         }
         let pane_id = entry.info.id.clone();
         let label = entry.info.label.clone();
-        self.state.pane.agent_hud.status_reported(&pane_id);
+        self.state.agent_hud_status_reported(&pane_id);
         McpResponse::Ok {
             message: match decision {
                 Ok(_) => format!("status '{status}' set for pane {} ({label})", idx + 1),

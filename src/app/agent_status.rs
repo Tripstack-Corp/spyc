@@ -272,7 +272,7 @@ impl App {
     /// `pane_tabs` borrow is dropped at return (cwd is cloned), so callers can
     /// freely touch the cache / runtime slots afterward.
     fn active_agent_key(&self) -> Option<ActiveAgentKey> {
-        let active = self.runtime.pane_tabs.as_ref()?.active_info();
+        let active = self.runtime.project().pane_tabs.as_ref()?.active_info();
         let profile = active.agent();
         let kind = profile.kind();
         if kind == AgentKind::Other {
@@ -387,12 +387,17 @@ impl App {
         let Some(result) = landed else {
             return false;
         };
-        let matches = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
-            let active = tabs.active_info();
-            result.kind == active.agent().kind()
-                && result.cwd == active.cwd
-                && result.spawn_epoch_secs == active.agent_epoch_secs()
-        });
+        let matches = self
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|tabs| {
+                let active = tabs.active_info();
+                result.kind == active.agent().kind()
+                    && result.cwd == active.cwd
+                    && result.spawn_epoch_secs == active.agent_epoch_secs()
+            });
         if matches {
             self.view.agent_status_cache = Some(result);
         }
@@ -504,7 +509,7 @@ impl App {
         now: std::time::Instant,
         ctx: &mut RunCtx,
     ) -> bool {
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             ctx.scheduler.disarm(Deadline::ScrapeQuiet);
             return false;
         };
@@ -581,12 +586,12 @@ impl App {
         let anim_epoch = self.view.started_at;
         let pane_focused = self.state.pane_focused();
         let is_ssh = self.view.is_ssh;
-        let notify_cfg = self.state.config.notify.clone();
+        let notify_cfg = self.state.active_project().config.notify.clone();
         // Only track `agent_status` transitions when a Lua handler wants the
         // event (the common case has none → no per-tab bookkeeping). Collect
         // during the borrow, fire after it drops (fire needs `&mut self`).
         let track_status = self.lua_wants_agent_status_event();
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             self.state.codex_recovery.clear();
             ctx.scheduler.disarm(Deadline::AgentIdle);
             ctx.scheduler.disarm(Deadline::AgentAnim);

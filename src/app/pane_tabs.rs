@@ -1,13 +1,12 @@
 //! Bottom-pane / tab lifecycle: create / hide / close / restart tabs,
-//! directional focus, resize + zoom, the pane/overlay sizing helpers, and the
-//! `:dump-scrollback` diagnostic. The methods here are called from sibling
-//! modules (`actions`, `key_dispatch`, `commands`, `tasks`, `render`,
-//! `pager_handler`, `loop_steps`, `session`, `session_restore`), so they're
-//! `pub` (or `pub(super)` for those only a sibling needs).
+//! directional focus, and the `:dump-scrollback` diagnostic. Resize + zoom and
+//! the pane/overlay sizing helpers live in the sibling `pane_resize.rs`. The
+//! methods here are called from sibling modules (`actions`, `key_dispatch`,
+//! `commands`, `tasks`, `render`, `pager_handler`, `loop_steps`, `session`,
+//! `session_restore`), so they're `pub` (or `pub(super)` for those only a
+//! sibling needs).
 
-use super::{
-    App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, StatusPosition, TabEntry, TabInfo, state,
-};
+use super::{App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, TabEntry, TabInfo, state};
 
 /// Where a freshly-spawned tab lands. `Replace` keeps the restarted tab's
 /// number: appending after a close is what shifted every later tab left (#151).
@@ -40,19 +39,61 @@ impl App {
     /// [`needs_live_child_confirm`] over a snapshot of the active tab. False
     /// when there is no pane at all.
     fn needs_active_tab_confirm(&self) -> bool {
-        self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
-            let p = tabs.active();
-            needs_live_child_confirm(TabConfirmSnapshot {
-                pane_closed: p.is_closed(),
-                exit_reaped: p.exit_status().is_some(),
-                mode_normal: matches!(self.state.mode, Mode::Normal),
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|tabs| {
+                let p = tabs.active();
+                needs_live_child_confirm(TabConfirmSnapshot {
+                    pane_closed: p.is_closed(),
+                    exit_reaped: p.exit_status().is_some(),
+                    mode_normal: matches!(self.state.mode, Mode::Normal),
+                })
             })
-        })
+    }
+
+    /// The active tab's info, or `None` with no pane open — the
+    /// `self.runtime.project().pane_tabs.as_ref().map(PaneTabs::active_info)`
+    /// shape, named once for the sibling modules that need just this.
+    pub(super) fn active_tab_info(&self) -> Option<&TabInfo> {
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map(PaneTabs::active_info)
+    }
+
+    /// How many pane tabs are open, for the activity HUD's `panes:` cell.
+    pub(super) fn pane_tab_count(&self) -> usize {
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or(0, |t| t.tabs().len())
+    }
+
+    /// `(is_shell, suspended)` for the active tab, with no pane open treated
+    /// as a non-shell (so `^z` is forwarded rather than toggling a suspend
+    /// that has nothing to act on — see `pane_suspend_key_action`).
+    pub(super) fn active_tab_shell_and_suspended(&self) -> (bool, bool) {
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or((true, false), |t| {
+                let info = t.active_info();
+                (
+                    crate::shell::command_is_shell(&info.command),
+                    info.suspended,
+                )
+            })
     }
 
     /// The active tab's label, so a confirm can name what it is about to kill.
     fn active_tab_label(&self) -> String {
         self.runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map_or_else(String::new, |t| t.active_info().label.clone())
@@ -74,23 +115,24 @@ impl App {
     /// doesn't lose an in-flight conversation. Killing is explicit — `^a-x`
     /// (`PaneCloseTab`) per tab, never a side effect of this toggle.
     pub fn toggle_pane(&mut self) {
-        if self.runtime.pane_tabs.is_some() {
-            self.state.pane.pane_hidden = !self.state.pane.pane_hidden;
+        if self.runtime.project().pane_tabs.is_some() {
+            let hidden = self.state.active_project().pane.pane_hidden;
+            self.state.active_project_mut().pane.pane_hidden = !hidden;
             self.view.needs_full_repaint = true;
-            if self.state.pane.pane_hidden {
+            if self.state.active_project().pane.pane_hidden {
                 // Park focus on the list while hidden. Keystrokes
                 // can't drive an off-screen pane sensibly. Zoom is
                 // mutually exclusive with hidden — clear it so a
                 // re-show doesn't try to render zoomed onto a
                 // newly-resized area.
-                self.state.focus = state::Focus::FileList;
-                self.state.pane.zoom = state::ZoomTarget::None;
+                self.state.active_project_mut().focus = state::Focus::FileList;
+                self.state.active_project_mut().pane.zoom = state::ZoomTarget::None;
                 self.state.flash_info("pane hidden — F10/^a-\\ to show");
             } else {
                 // Re-show: focus the pane so the next keystroke
                 // lands in the child. Matches the "I'm opening this
                 // because I want to interact with it" intent.
-                self.state.focus = state::Focus::Pane;
+                self.state.active_project_mut().focus = state::Focus::Pane;
                 self.state.flash_info("pane shown");
             }
             return;
@@ -139,6 +181,7 @@ impl App {
             TabSlot::Append => (None, None),
             TabSlot::Replace(idx) => self
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .and_then(|tabs| tabs.tabs().get(idx))
@@ -184,12 +227,12 @@ impl App {
         // isn't created behind a fullscreen list and silently lost. The
         // pane-zoom case already shows the pane, so leave it. (Cleared before
         // `pane_spawn_size` so the pty spawns at the real split size, not 0.)
-        if self.state.pane.zoom == state::ZoomTarget::TopList {
-            self.state.pane.zoom = state::ZoomTarget::None;
+        if self.state.active_project().pane.zoom == state::ZoomTarget::TopList {
+            self.state.active_project_mut().pane.zoom = state::ZoomTarget::None;
         }
         let (rows, cols) = Self::pane_spawn_size(
             self.effective_pane_pct(),
-            self.state.config.layout.status_position,
+            self.state.active_project().config.layout.status_position,
         );
         let wake = self.make_pane_wake();
         // The tab's agent: the hint's for a wrapper, else the command's. It
@@ -258,14 +301,14 @@ impl App {
                             .and_then(|env| crate::agent::codex_home::from_launch(&env, cwd))
                     });
                 }
-                self.state.focus = state::Focus::Pane;
+                self.state.active_project_mut().focus = state::Focus::Pane;
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
                 let entry = TabEntry::new(p, info);
-                match (self.runtime.pane_tabs.as_mut(), slot) {
+                match (self.runtime.project_mut().pane_tabs.as_mut(), slot) {
                     (Some(tabs), TabSlot::Replace(idx)) => tabs.replace_at(idx, entry),
                     (Some(tabs), TabSlot::Append) => tabs.push(entry),
-                    (None, _) => self.runtime.pane_tabs = Some(PaneTabs::new(entry)),
+                    (None, _) => self.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry)),
                 }
                 // The first launch of an agent asks whether to wire it. After
                 // the tab exists, so the prompt doesn't cover a missing pane.
@@ -284,7 +327,7 @@ impl App {
     /// join codex's shared server. The tab keeps `cmd` itself.
     fn spawn_command<'a>(&self, cmd: &'a str) -> std::borrow::Cow<'a, str> {
         let codex = crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex;
-        if codex && !self.state.config.pane.codex_daemon {
+        if codex && !self.state.active_project().config.pane.codex_daemon {
             crate::agent::codex_without_daemon(cmd)
         } else {
             std::borrow::Cow::Borrowed(cmd)
@@ -308,6 +351,7 @@ impl App {
     ) -> bool {
         if self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .and_then(|tabs| tabs.tabs().get(tab_idx))
@@ -322,12 +366,13 @@ impl App {
         }
         let (rows, cols) = Self::pane_spawn_size(
             self.effective_pane_pct(),
-            self.state.config.layout.status_position,
+            self.state.active_project().config.layout.status_position,
         );
         let wake = self.make_pane_wake();
         let mut info = TabInfo::new(cmd, cwd);
         info.agent_hint = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .and_then(|tabs| tabs.tabs().get(tab_idx))
@@ -344,6 +389,7 @@ impl App {
         let pane_id = info.id.clone();
         let home = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .and_then(|tabs| tabs.tabs().get(tab_idx))
@@ -380,7 +426,7 @@ impl App {
                         crate::state::codex_transcript::resume_uuid_from_command(cmd);
                 }
                 let entry = TabEntry::new(p, info);
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                     tabs.replace_at(tab_idx, entry);
                 }
                 // The replaced entry (and any stashed scrollback pager) was
@@ -405,6 +451,7 @@ impl App {
     pub(super) fn restart_claude_tab(&mut self, tab_idx: usize) {
         let Some((cmd, cwd, kind, in_shell, wraps)) = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .and_then(|t| t.tabs().get(tab_idx))
@@ -445,13 +492,13 @@ impl App {
             crate::agent::resume::command_without_resume(&cmd)
         };
 
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
             && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
         {
             entry.pane.try_kill();
         }
         if self.spawn_agent_into_tab(tab_idx, &cmd_fresh, &cwd, sid) {
-            self.state.focus = state::Focus::Pane;
+            self.state.active_project_mut().focus = state::Focus::Pane;
             if resumed {
                 self.state.flash_info("restarting claude + resuming…");
             } else {
@@ -474,7 +521,7 @@ impl App {
     pub(super) fn toggle_pane_suspend(&mut self) -> Vec<Effect> {
         #[cfg(unix)]
         {
-            let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+            let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
                 return Vec::new();
             };
             // The pty's foreground process group — the command itself, since a
@@ -514,7 +561,14 @@ impl App {
         // .spycrc.toml > "claude" fallback. Env var wins so a user
         // can override on the fly per shell without editing config.
         let default_cmd = crate::envset::var("SPYC_PANE_CMD")
-            .or_else(|| self.state.config.pane.default_command.clone())
+            .or_else(|| {
+                self.state
+                    .active_project()
+                    .config
+                    .pane
+                    .default_command
+                    .clone()
+            })
             .unwrap_or_else(|| "claude".to_string());
         let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");
         p.buffer.clone_from(&default_cmd);
@@ -548,20 +602,22 @@ impl App {
         // claims, not a sibling's.
         let closing_id = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map(|tabs| tabs.active_info().id.clone());
         let closing_owner = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map(|t| t.active_info().claim_owner.clone());
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
             && !tabs.close_active()
         {
             // Last tab removed.
-            self.runtime.pane_tabs = None;
-            self.state.focus = state::Focus::FileList;
+            self.runtime.project_mut().pane_tabs = None;
+            self.state.active_project_mut().focus = state::Focus::FileList;
             self.view.needs_full_repaint = true;
             self.state.flash_info("pane: last tab closed");
         }
@@ -569,8 +625,16 @@ impl App {
             self.state.scope_registry.retain(|c| c.owner != owner);
         }
         if let Some(id) = closing_id {
-            self.state.pane.pending_images.remove(&id);
-            self.state.pane.image_capture_epochs.remove(&id);
+            self.state
+                .active_project_mut()
+                .pane
+                .pending_images
+                .remove(&id);
+            self.state
+                .active_project_mut()
+                .pane
+                .image_capture_epochs
+                .remove(&id);
         }
         // The closed tab may have had a stashed scrollback pager whose stream is
         // parked by id; reclaim it now that the tab is gone.
@@ -581,7 +645,7 @@ impl App {
     /// still running: a restart kills that session exactly as `^a x` would, and
     /// `R` sits one shift away from `r` (rename). An exited tab restarts silently.
     pub fn restart_active_tab(&mut self) {
-        if self.runtime.pane_tabs.is_none() {
+        if self.runtime.project().pane_tabs.is_none() {
             return;
         }
         if self.needs_active_tab_confirm() {
@@ -602,7 +666,7 @@ impl App {
     /// a close shifts every later tab's number down one and lands the
     /// replacement last, which is the numbering drift users see (#151).
     pub(crate) fn restart_active_tab_now(&mut self) {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return;
         };
         let idx = tabs.active_index();
@@ -622,6 +686,7 @@ impl App {
         // never briefly share the cwd; `replace_at` reaps the rest of the tree.
         if let Some(entry) = self
             .runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .and_then(|tabs| tabs.tabs_mut().get_mut(idx))
@@ -635,6 +700,7 @@ impl App {
         }
         if let Some(entry) = self
             .runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .and_then(|tabs| tabs.tabs_mut().get_mut(idx))
@@ -660,7 +726,7 @@ impl App {
         // While zoomed, focus is pinned to the zoomed region: the other
         // region is collapsed/off-screen, so moving focus there is exactly the
         // confusing case. Refuse with a hint (mirrors `resize_pane`).
-        if self.state.pane.zoom != state::ZoomTarget::None {
+        if self.state.active_project().pane.zoom != state::ZoomTarget::None {
             self.state.flash_info("zoomed (^a z to exit)");
             return;
         }
@@ -670,10 +736,11 @@ impl App {
         // list (the generic path below restores it via `right_column_focused`).
         // `^a k` has nothing above the top-right column → no-op.
         if self.right_column_focused() {
-            if want_pane && self.runtime.pane_tabs.is_some() {
-                self.state.focus = state::Focus::Pane;
+            if want_pane && self.runtime.project().pane_tabs.is_some() {
+                self.state.active_project_mut().focus = state::Focus::Pane;
                 let label = self
                     .runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .map_or("pane", |t| t.active_info().label.as_str());
@@ -682,7 +749,7 @@ impl App {
             }
             return;
         }
-        if self.runtime.pane_tabs.is_none() {
+        if self.runtime.project().pane_tabs.is_none() {
             return;
         }
         if self.state.pane_focused() == want_pane {
@@ -692,7 +759,7 @@ impl App {
         // `super::focus::decide_focus`); the branch-order contract — every
         // non-Pane arm collapses to `pane_focused() == false` — is pinned by
         // tests there.
-        self.state.focus = super::focus::decide_focus(
+        self.state.active_project_mut().focus = super::focus::decide_focus(
             super::focus::FocusSnapshot {
                 has_top_overlay: self.focused_col_has_overlay(),
                 pager_mount: self.focused_top_pager_mount(),
@@ -702,6 +769,7 @@ impl App {
         if self.state.pane_focused() {
             let label = self
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .map_or("pane", |t| t.active_info().label.as_str());
@@ -715,7 +783,7 @@ impl App {
             // "non-pane" side is the overlay subprocess, not the file
             // list. Label accordingly so the user can read what just
             // got focus instead of guessing.
-            let label = if self.runtime.top_overlay.is_some() {
+            let label = if self.runtime.project().top_overlay.is_some() {
                 "overlay"
             } else {
                 "spyc"
@@ -744,8 +812,8 @@ impl App {
     /// commander beside an open editor/pager.
     pub(super) fn focused_col_has_overlay(&self) -> bool {
         match self.focused_side() {
-            state::Side::Right => self.runtime.top_overlay_right.is_some(),
-            state::Side::Left => self.runtime.top_overlay.is_some(),
+            state::Side::Right => self.runtime.project().top_overlay_right.is_some(),
+            state::Side::Left => self.runtime.project().top_overlay.is_some(),
         }
     }
 
@@ -770,8 +838,8 @@ impl App {
     }
 
     pub(super) fn recompute_focus(&mut self) {
-        let want_pane = matches!(self.state.focus, state::Focus::Pane);
-        self.state.focus = super::focus::decide_focus(
+        let want_pane = matches!(self.state.active_project().focus, state::Focus::Pane);
+        self.state.active_project_mut().focus = super::focus::decide_focus(
             super::focus::FocusSnapshot {
                 has_top_overlay: self.focused_col_has_overlay(),
                 pager_mount: self.focused_top_pager_mount(),
@@ -787,7 +855,7 @@ impl App {
     /// overlays, etc.) is actually reaching our terminal engine at
     /// snapshot time.
     pub fn dump_scrollback_snapshot(&mut self) {
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             self.state.flash_error("dump-scrollback: no pane open");
             return;
         };
@@ -825,138 +893,6 @@ impl App {
                 .state
                 .flash_error("dump-scrollback: no state dir for the output file".to_string()),
         }
-    }
-
-    /// ^W + / ^W - — change the bottom pane's share of the middle rect
-    /// in 5% steps, clamped to [10%, 90%].
-    pub fn resize_pane(&mut self, delta_pct: i32) {
-        if self.runtime.pane_tabs.is_none() {
-            return;
-        }
-        if self.state.pane.zoom != state::ZoomTarget::None {
-            self.state.flash_info("pane is zoomed (^a z to exit)");
-            return;
-        }
-        let current = i32::from(self.state.pane.pane_height_pct);
-        let new = (current + delta_pct).clamp(10, 90);
-        self.state.pane.pane_height_pct = new as u16;
-        // Force a full clear+redraw: the divider moves, and dirty-frame
-        // rendering otherwise leaves a stale row at the old boundary.
-        self.view.needs_full_repaint = true;
-    }
-
-    /// The pane percentage to use for layout/sizing computations. Zoom drives
-    /// it to a sentinel the stored `pane_height_pct` can never reach (it's
-    /// clamped to `[10, 90]`): `BottomPane` → 100 (list collapses to 0 rows),
-    /// `TopList` → 0 (the pane collapses to a single bottom tab-bar row and
-    /// the list fills the rest — `compute_layout` drops the pane rect to
-    /// `None` at 0). The stored split is left untouched, so un-zoom restores
-    /// it exactly.
-    pub const fn effective_pane_pct(&self) -> u16 {
-        match self.state.pane.zoom {
-            state::ZoomTarget::BottomPane => 100,
-            // Both collapse the pane and fill the body: `TopList` renders the
-            // list there, `RightColumn` renders the preview (see `render_inner`).
-            state::ZoomTarget::TopList | state::ZoomTarget::RightColumn => 0,
-            state::ZoomTarget::None => self.state.pane.pane_height_pct,
-        }
-    }
-
-    /// ^a z / ^w z — toggle "zoom" on the *active* region. Zoom-on
-    /// enlarges whichever region currently has focus: the bottom pane
-    /// (`BottomPane` — list collapses to 0 rows) or the file list
-    /// (`TopList` — the pane collapses off-screen, the list fills the
-    /// frame). Toggling again restores the prior split. Focus is left
-    /// where it is — it already names the zoomed region, so no save/restore
-    /// is needed (this is the fix for the old "zoom always grabbed the
-    /// bottom pane" bug). The stored `pane_height_pct` is preserved across
-    /// the round-trip. No-op (with a flash) when the pane is closed.
-    pub fn toggle_pane_zoom(&mut self) {
-        // Need *something* zoomable: a pane or a vertical split.
-        if self.runtime.pane_tabs.is_none() && self.state.vsplit.is_none() {
-            self.state.flash_info("nothing to zoom");
-            return;
-        }
-        if self.state.pane.zoom != state::ZoomTarget::None {
-            self.state.pane.zoom = state::ZoomTarget::None;
-            self.state.flash_info("zoom: off");
-        } else if self.right_column_focused() {
-            // Right split column focused → fullscreen the preview.
-            self.state.pane.zoom = state::ZoomTarget::RightColumn;
-            self.state.flash_info("zoom: b (^a z to exit)");
-        } else if self.state.pane_focused() {
-            self.state.pane.zoom = state::ZoomTarget::BottomPane;
-            self.state.flash_info("zoom: pane (^a z to exit)");
-        } else {
-            // File list (or the left split column) focused.
-            self.state.pane.zoom = state::ZoomTarget::TopList;
-            self.state.flash_info("zoom: list (^a z to exit)");
-        }
-        // Resize every pane pty to the new layout so child shells re-render at
-        // the right dimensions; otherwise Claude's UI is the wrong size until
-        // the next terminal resize.
-        self.resize_panes_to_layout();
-        self.view.needs_full_repaint = true;
-    }
-
-    /// Resize every pane pty to the current layout's pane rect, so child
-    /// shells re-render at the right size after a zoom / fullscreen change.
-    /// No-op when the layout has no pane rect — `TopList` zoom collapses the
-    /// pane to a tab bar (`compute_layout` yields `pane: None` at pct 0), so
-    /// the pty keeps its prior size, ready the instant the pane is revealed.
-    pub(super) fn resize_panes_to_layout(&mut self) {
-        let (cols, rows) = self.view.term_size;
-        let area = ratatui::layout::Rect::new(0, 0, cols, rows);
-        let pane_open = self.runtime.pane_tabs.is_some() && !self.state.pane.pane_hidden;
-        let layout = Self::compute_layout(
-            area,
-            pane_open,
-            self.effective_pane_pct(),
-            self.state.config.layout.status_position,
-        );
-        if let (Some(pane_rect), Some(tabs)) = (layout.pane, self.runtime.pane_tabs.as_mut()) {
-            for entry in tabs.tabs_mut() {
-                let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
-            }
-        }
-    }
-
-    /// After a tab switch from a fullscreen list (`TopList` zoom), fullscreen
-    /// the newly-active tab (flip to `BottomPane` zoom) — so `^a n`/`^a p`/`^a #`
-    /// navigate between fullscreen views instead of flipping a hidden pane.
-    /// No-op when not list-zoomed.
-    pub(super) fn fullscreen_tab_if_list_zoomed(&mut self) {
-        if self.state.pane.zoom == state::ZoomTarget::TopList {
-            self.state.pane.zoom = state::ZoomTarget::BottomPane;
-            self.resize_panes_to_layout();
-        }
-    }
-
-    /// Compute the (rows, cols) the bottom pane will occupy.
-    pub fn pane_spawn_size(height_pct: u16, status_position: StatusPosition) -> (u16, u16) {
-        let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        let area = ratatui::layout::Rect::new(0, 0, cols, rows);
-        let layout = Self::compute_layout(area, true, height_pct, status_position);
-        match layout.pane {
-            Some(r) => (r.height.max(1), r.width.max(1)),
-            None => (rows.saturating_sub(3).max(1), cols.max(1)),
-        }
-    }
-
-    /// Compute the (rows, cols) available for the top-overlay pty. This
-    /// is the top area: everything above the divider (or the whole
-    /// screen minus the prompt row if no bottom pane).
-    pub fn top_overlay_size(pane_height_pct: u16, has_bottom_pane: bool) -> (u16, u16) {
-        let (cols, total_rows) = crossterm::terminal::size().unwrap_or((80, 24));
-        if !has_bottom_pane {
-            // Full screen minus prompt row.
-            return (total_rows.saturating_sub(1).max(1), cols.max(1));
-        }
-        // With bottom pane: top region = total - divider(1) - bottom pane.
-        let usable = total_rows.saturating_sub(1); // minus divider
-        let bottom = (u32::from(usable) * u32::from(pane_height_pct) / 100) as u16;
-        let top = usable.saturating_sub(bottom);
-        (top.max(1), cols.max(1))
     }
 }
 

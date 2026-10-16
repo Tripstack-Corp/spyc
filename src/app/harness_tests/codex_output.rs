@@ -35,10 +35,10 @@ fn replay(app: &mut App, root: &std::path::Path, label: &str) {
     )
     .unwrap();
     let info = crate::pane::tabs::TabInfo::new(label, root.to_path_buf());
-    app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(
+    app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(
         crate::pane::tabs::TabEntry::new(pane, info),
     ));
-    let tabs = app.runtime.pane_tabs.as_mut().unwrap();
+    let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         tabs.active_mut().drain_output();
@@ -66,7 +66,7 @@ fn codex_gf_and_gf_line_navigate_to_printed_files() {
             let root = tmp.path().canonicalize().unwrap();
             let mut app = App::test_app(root.clone());
             replay(&mut app, &root, "codex");
-            app.state.focus = state::Focus::FileList;
+            app.state.active_project_mut().focus = state::Focus::FileList;
             app.handle_key(key('g')).unwrap();
             let effects = app.handle_key(key(second)).unwrap();
             assert!(
@@ -141,6 +141,7 @@ fn codex_scrollback_selection_uses_the_visible_history_verbatim() {
         let mut app = App::test_app(root.clone());
         replay(&mut app, &root, "codex");
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -194,6 +195,7 @@ fn a_shells_foreground_codex_supplies_the_navigation_boundary() {
         let mut app = App::test_app(root.clone());
         replay(&mut app, &root, "zsh");
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()

@@ -268,18 +268,18 @@ impl App {
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
             // The authoritative focus, recomputed at the loop top before this
             // read. Subsumes the old `has_top_overlay` + `pane_focused` reads.
-            focus: self.state.focus,
+            focus: self.state.active_project().focus,
             // The focused column's top pager (a full-frame modal regardless of
             // column, else `b`'s `D` pager / `a`'s pager). A column-scoped `D` in
             // the OTHER column reads `None` here, so its keys go to the focused
             // column's list — it keeps rendering beside it.
             pager_mount: self.focused_top_pager_mount(),
             has_scroll_pager: self.view.scroll_pager.is_some(),
-            has_pane_tabs: self.runtime.pane_tabs.is_some(),
+            has_pane_tabs: self.runtime.project().pane_tabs.is_some(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
             // loop-top), not the live host — decouples routing from Runtime.
-            pane_scrolling: self.state.pane.pane_snapshot.is_scrolling,
-            pane_closed: self.state.pane.pane_snapshot.is_closed,
+            pane_scrolling: self.state.active_project().pane.pane_snapshot.is_scrolling,
+            pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
             resolver_pending: self.state.resolver.is_pending(),
             // Preview-only: a focused right *commander* (state.right) routes
             // through the resolver/file-list nav instead (driving `cur()`).

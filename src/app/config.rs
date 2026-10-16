@@ -21,7 +21,7 @@ impl App {
         // load_default's project-trust gating closes. (Executing project
         // bindings are dropped regardless; pinning the dir keeps even the
         // cosmetic settings load anchored to where spyc was launched.)
-        match Config::load_default(&self.state.start_dir) {
+        match Config::load_default(&self.state.active_project().start_dir) {
             Ok(new_config) => {
                 self.adopt_config(new_config);
                 // The rebuilt keymap dropped the old synthetic `@map:` entries,
@@ -36,7 +36,8 @@ impl App {
     /// Put a freshly loaded config in force: keymap, theme, masks, and what
     /// `:agent hud` chose unless the file changed `agent_hud` itself.
     pub(super) fn adopt_config(&mut self, new_config: Config) {
-        self.state.user_keymap = UserKeymap::from_bindings(new_config.bindings.clone());
+        self.state.active_project_mut().user_keymap =
+            UserKeymap::from_bindings(new_config.bindings.clone());
         self.view.theme = Theme::default().with_overrides(&new_config.colors);
         // Reset to built-in mask defaults first, then apply config
         // overrides — so removing `[[ignore_masks]]` entries from
@@ -45,11 +46,13 @@ impl App {
         masks.apply_config(&new_config.ignore_masks);
         let count = new_config.sources.len();
         let warnings = new_config.warnings.clone();
+        let before_hud = self.state.active_project().config.pane.agent_hud;
         self.state
+            .active_project_mut()
             .pane
             .agent_hud
-            .config_reloaded(self.state.config.pane.agent_hud, new_config.pane.agent_hud);
-        self.state.config = new_config;
+            .config_reloaded(before_hud, new_config.pane.agent_hud);
+        self.state.active_project_mut().config = new_config;
         let sides: Vec<_> = self.state.active_sides().collect();
         for side in sides {
             self.state.col_mut(side).masks = masks.clone();
@@ -79,7 +82,7 @@ impl App {
         // project rc we watch (and reload on change) matches what
         // `reload_config` actually loads — and browsing into a hostile
         // directory never causes us to watch/react to its `.spycrc.toml`.
-        out.push(self.state.start_dir.join(".spycrc.toml"));
+        out.push(self.state.active_project().start_dir.join(".spycrc.toml"));
         // The Lua entry point: a watch event on it routes through
         // `reload_config` (which re-runs init.lua), so editing init.lua takes
         // effect without `^R` / `:lua reload`. Watching its parent
@@ -93,7 +96,13 @@ impl App {
 
     pub fn is_config_path(&self, path: &Path) -> bool {
         self.candidate_config_paths().iter().any(|c| c == path)
-            || self.state.config.sources.iter().any(|c| c == path)
+            || self
+                .state
+                .active_project()
+                .config
+                .sources
+                .iter()
+                .any(|c| c == path)
     }
 
     /// True iff `path` is the listing directory or anything beneath it
@@ -211,7 +220,8 @@ mod tests {
     #[test]
     fn gitdir_status_path_matches_index_head_and_dir_only() {
         let mut app = App::test_app(PathBuf::from("/repo"));
-        app.state.left.git_cache.current_gitdir = Some(PathBuf::from("/repo/.git"));
+        app.state.active_project_mut().left.git_cache.current_gitdir =
+            Some(PathBuf::from("/repo/.git"));
 
         // The discrete-operation signals.
         assert!(app.is_gitdir_status_path(Path::new("/repo/.git/index")));
@@ -231,7 +241,14 @@ mod tests {
     #[test]
     fn gitdir_status_path_false_without_gitdir() {
         let app = App::test_app(PathBuf::from("/repo"));
-        assert!(app.state.left.git_cache.current_gitdir.is_none());
+        assert!(
+            app.state
+                .active_project()
+                .left
+                .git_cache
+                .current_gitdir
+                .is_none()
+        );
         assert!(!app.is_gitdir_status_path(Path::new("/repo/.git/index")));
     }
 
@@ -275,7 +292,8 @@ mod tests {
     #[test]
     fn listing_path_accepts_index_head_rejects_object_churn() {
         let mut app = App::test_app(PathBuf::from("/repo"));
-        app.state.left.git_cache.current_gitdir = Some(PathBuf::from("/repo/.git"));
+        app.state.active_project_mut().left.git_cache.current_gitdir =
+            Some(PathBuf::from("/repo/.git"));
 
         // Accepted: the two refresh-worthy gitdir files + the gitdir itself.
         assert!(app.is_listing_path(Path::new("/repo/.git/index")));

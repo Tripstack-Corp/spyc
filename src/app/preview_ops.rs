@@ -98,7 +98,7 @@ impl App {
         let req = PreviewReloadReq {
             path,
             theme: self.view.theme.clone(),
-            open_as_rendered: self.state.config.markdown.open_as_rendered,
+            open_as_rendered: self.state.active_project().config.markdown.open_as_rendered,
             wrap_width: self.right_preview_body_width(),
         };
         let results = std::sync::Arc::clone(&self.runtime.preview_results);

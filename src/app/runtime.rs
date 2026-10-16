@@ -16,6 +16,25 @@ use super::{
 };
 use crate::pane::{Pane, PaneTabs};
 
+/// The per-project half of `Runtime` (#99 step 1,
+/// `docs/drafts/PROJECTS_PLAN.md` §1c): the bottom pane tabs and the two
+/// overlay-subprocess slots, which belong to one project's columns. Reached
+/// only through [`Runtime::project`] / [`Runtime::project_mut`].
+#[derive(Default)]
+pub(super) struct ProjectRuntime {
+    /// Bottom pane tabs (each owns a `PtyHost`).
+    pub(super) pane_tabs: Option<PaneTabs>,
+    /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`. The LEFT
+    /// column's (or single / no-split / full-frame `;cmd`) editor / `$PAGER`.
+    pub(super) top_overlay: Option<Pane>,
+    /// The RIGHT column's editor / huge-file `$PAGER` overlay PTY in a vertical
+    /// split — its own slot so a `V`/`D` in `b` coexists with one in `a` rather
+    /// than evicting it (the dual-overlay twin of [`Self::top_overlay`]). Only
+    /// ever holds an auto-dismiss editor/pager (never a `;cmd`), so it has no
+    /// await-dismiss state. `None` outside a split or when `b` has no overlay.
+    pub(super) top_overlay_right: Option<Pane>,
+}
+
 /// A parked `wait_for_scope_clear` MCP call (P2): the caller's resolved owner
 /// key + queried paths, the deadline it times out at, and the one-shot reply
 /// sender the loop fires once its scope clears / the deadline passes. Held in
@@ -71,6 +90,14 @@ pub(super) struct Runtime {
     /// clears or its deadline passes. In `Runtime` — it owns OS handles (the
     /// reply channel) + a clock instant, never the pure Model.
     pub(super) scope_waiters: Vec<PendingScopeWait>,
+    /// Every open project's runtime, keyed by id — an id-addressed side
+    /// table background threads also touch (unlike `AppState::projects`,
+    /// which is ordered for the switcher). Exactly one entry today (#99 step
+    /// 1). Reached only through [`Self::project`] / [`Self::project_mut`].
+    pub(super) projects: std::collections::HashMap<super::state::ProjectId, ProjectRuntime>,
+    /// Which of `projects` the active-project accessors resolve to. Tracks
+    /// `AppState::active`.
+    pub(super) active: super::state::ProjectId,
     /// The embedded Lua engine worker — lazy-spawned on first use
     /// (`ensure_lua_worker`), `None` until then / when disabled (`--no-lua`,
     /// `:lua off`) / in the test harness. Owns the interpreter thread; the
@@ -92,19 +119,8 @@ pub(super) struct Runtime {
     /// own request re-triggers the same event from looping. Rebuilt from
     /// scratch on `:lua off` (the registries go too).
     pub(super) lua_events: lua_events::LuaEventState,
-    /// Bottom pane tabs (each owns a `PtyHost`).
-    pub(super) pane_tabs: Option<PaneTabs>,
     /// The one visible strip subscription; dropping it cancels its workers.
     pub(super) agent_hud: Option<super::agent_hud::collector::Collector>,
-    /// Top-area overlay subprocess (`V`/`D`/`;`) — a `PtyHost`. The LEFT
-    /// column's (or single / no-split / full-frame `;cmd`) editor / `$PAGER`.
-    pub(super) top_overlay: Option<Pane>,
-    /// The RIGHT column's editor / huge-file `$PAGER` overlay PTY in a vertical
-    /// split — its own slot so a `V`/`D` in `b` coexists with one in `a` rather
-    /// than evicting it (the dual-overlay twin of [`Self::top_overlay`]). Only
-    /// ever holds an auto-dismiss editor/pager (never a `;cmd`), so it has no
-    /// await-dismiss state. `None` outside a split or when `b` has no overlay.
-    pub(super) top_overlay_right: Option<Pane>,
     /// In-flight foreground `!` capture (owns a `PtyHost`).
     pub(super) pending_capture: Option<PendingCapture>,
     /// Session-scoped scratch dir for `!`-capture output spills — one file per
@@ -239,4 +255,85 @@ pub(super) struct Runtime {
     /// `None` ⇒ detection failed / no graphics; the mermaid `View` mode then
     /// reports "no image protocol". Cloned into the render worker by `run_effects`.
     pub(super) picker: Option<ratatui_image::picker::Picker>,
+}
+
+impl Runtime {
+    /// Build a fresh `Runtime` around `active`'s (empty) `ProjectRuntime`.
+    /// `git_result_rx` / `git_worker_tx` / `mcp_cmd_rx` are the one real
+    /// difference between the production and test-harness callers (the
+    /// harness drives neither the git worker nor the MCP socket), so they
+    /// stay parameters rather than being hardcoded here.
+    pub(super) fn new(
+        git_result_rx: Option<std::sync::mpsc::Receiver<super::state::GitWorkerResult>>,
+        git_worker_tx: Option<std::sync::mpsc::Sender<super::state::GitWorkerRequest>>,
+        mcp_cmd_rx: Option<std::sync::mpsc::Receiver<crate::mcp_cmd::McpRequest>>,
+        active: super::state::ProjectId,
+    ) -> Self {
+        let mut projects = std::collections::HashMap::new();
+        projects.insert(active, ProjectRuntime::default());
+        Self {
+            git_result_rx,
+            git_worker_tx,
+            mcp_cmd_rx,
+            pane_wake_tx: None,
+            next_sink_id: 0,
+            autosave_last_saved_fp: None,
+            autosave_due: None,
+            pane_scroll_settle: None,
+            scope_waiters: Vec::new(),
+            projects,
+            active,
+            lua: None,
+            lua_registry: lua::LuaRegistry::default(),
+            lua_inflight: None,
+            lua_events: lua_events::LuaEventState::default(),
+            agent_hud: None,
+            pending_capture: None,
+            capture_spill_dir: None,
+            background_tasks: BackgroundTasks::new(),
+            find_picker: None,
+            pager_stream: None,
+            scroll_stream: None,
+            next_stream_id: 0,
+            stashed_pager_streams: std::collections::HashMap::new(),
+            pending_git_view: None,
+            agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            agent_status_refreshing: std::sync::Arc::default(),
+            codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            codex_scan_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            wiring_results: std::sync::Arc::default(),
+            image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            archive_mount_then: None,
+            file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            jump_default_seq: 0,
+            clipboard_copy_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            listing_refresh_inflight: false,
+            listing_refresh_dirty: false,
+            inventory_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            worktree_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            preview_results: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            preview_reloading: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            picker: None,
+        }
+    }
+
+    /// The active project's runtime (pane tabs, overlay slots). `active`
+    /// always names a live entry (#99 step 1).
+    pub(super) fn project(&self) -> &ProjectRuntime {
+        self.projects
+            .get(&self.active)
+            .expect("active always names a live project")
+    }
+
+    /// Mutable [`Self::project`].
+    pub(super) fn project_mut(&mut self) -> &mut ProjectRuntime {
+        self.projects
+            .get_mut(&self.active)
+            .expect("active always names a live project")
+    }
 }

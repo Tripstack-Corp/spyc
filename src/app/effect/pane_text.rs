@@ -5,7 +5,7 @@ use crate::app::App;
 impl App {
     pub(in crate::app) fn execute_pane_text(&mut self, kind: PaneTextKind, then: PaneTextSink) {
         let Some((mut lines, pane_cwd, agent, history)) =
-            self.runtime.pane_tabs.as_mut().map(|tabs| {
+            self.runtime.project_mut().pane_tabs.as_mut().map(|tabs| {
                 let lines = match kind {
                     PaneTextKind::Visible => tabs.active_mut().visible_lines(),
                     PaneTextKind::Scrollback(n) => tabs.active_mut().recent_lines(n),

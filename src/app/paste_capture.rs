@@ -47,13 +47,18 @@ impl App {
     /// Empty otherwise — the common case, and cheap: no clipboard access
     /// happens here, only on the worker the effect spawns.
     pub(crate) fn plan_clipboard_capture(&self, key: KeyEvent) -> Vec<Effect> {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let info = tabs.active_info();
         let snap = PasteSnapshot {
             paste_keys: info.agent().image_paste_keys(),
-            enabled: self.state.config.pane.preview_pasted_images,
+            enabled: self
+                .state
+                .active_project()
+                .config
+                .pane
+                .preview_pasted_images,
         };
         if !should_capture(snap, key) {
             return Vec::new();
@@ -63,6 +68,7 @@ impl App {
                 tab_id: info.id.clone(),
                 epoch: self
                     .state
+                    .active_project()
                     .pane
                     .image_capture_epochs
                     .get(&info.id)
@@ -77,14 +83,25 @@ impl App {
     pub(crate) fn clear_pending_images_for_active_tab(&mut self) {
         let Some(id) = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map(|t| t.active_info().id.clone())
         else {
             return;
         };
-        self.state.pane.pending_images.remove(&id);
-        let epoch = self.state.pane.image_capture_epochs.entry(id).or_default();
+        self.state
+            .active_project_mut()
+            .pane
+            .pending_images
+            .remove(&id);
+        let epoch = self
+            .state
+            .active_project_mut()
+            .pane
+            .image_capture_epochs
+            .entry(id)
+            .or_default();
         *epoch = epoch.wrapping_add(1);
     }
 }

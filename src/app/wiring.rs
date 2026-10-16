@@ -245,7 +245,7 @@ impl App {
     /// Mark `kind`'s tabs as needing a restart: they read their hooks at
     /// startup, before this change.
     fn flag_wiring_restart(&mut self, kind: AgentKind) {
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             return;
         };
         for entry in tabs.tabs_mut() {
@@ -295,7 +295,7 @@ impl App {
             self.state.flash_info(summary());
             return;
         }
-        let active = self.runtime.pane_tabs.as_ref().map(|t| {
+        let active = self.runtime.project().pane_tabs.as_ref().map(|t| {
             let info = t.active_info();
             (t.active_index(), info.agent().kind())
         });

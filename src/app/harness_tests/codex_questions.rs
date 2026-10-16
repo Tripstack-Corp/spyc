@@ -13,6 +13,7 @@ fn add_pane(app: &mut App, dir: &std::path::Path) {
     wait_screen(app, "READY");
     let entry = app
         .runtime
+        .project_mut()
         .pane_tabs
         .as_mut()
         .unwrap()
@@ -26,7 +27,13 @@ fn add_pane(app: &mut App, dir: &std::path::Path) {
 fn wait_screen(app: &mut App, expected: &str) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let pane = app.runtime.pane_tabs.as_mut().unwrap().active_mut();
+        let pane = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_mut();
         pane.drain_output();
         let visible = pane.visible_lines().join("\n");
         if visible.contains(expected) {
@@ -39,6 +46,7 @@ fn wait_screen(app: &mut App, expected: &str) {
 
 fn paint(app: &mut App, text: &str, expected: &str) {
     app.runtime
+        .project_mut()
         .pane_tabs
         .as_mut()
         .unwrap()
@@ -65,7 +73,13 @@ fn settle(app: &mut App, base: Instant) -> Vec<Effect> {
     let mut ctx = RunCtx::for_test();
     for elapsed in [0, 100, 200, 300] {
         let now = base + Duration::from_millis(elapsed);
-        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
         info.last_output_at = Some(now);
         info.scrape_dirty = true;
         app.settle_scrape_quiet(now, &mut ctx);
@@ -83,6 +97,7 @@ fn codex_questions_native_view_requires_attention_during_work_and_retains_the_re
         report(&mut app, "working");
         let original = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -90,10 +105,16 @@ fn codex_questions_native_view_requires_attention_during_work_and_retains_the_re
             .reported
             .clone()
             .unwrap();
-        app.state.focus = state::Focus::FileList;
+        app.state.active_project_mut().focus = state::Focus::FileList;
         paint(&mut app, OPEN, "enter submit");
         let effects = settle(&mut app, Instant::now());
-        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
         assert_eq!(
             info.activity,
             AgentActivity::Blocked,
@@ -115,6 +136,7 @@ fn codex_questions_native_view_requires_attention_during_work_and_retains_the_re
         settle(&mut app, Instant::now());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -124,7 +146,13 @@ fn codex_questions_native_view_requires_attention_during_work_and_retains_the_re
         );
         paint(&mut app, CLEAR, "ANSWERED");
         settle(&mut app, Instant::now());
-        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
         assert_eq!(info.activity, AgentActivity::Working);
         assert_eq!(info.reported.as_ref().unwrap().at, original.at);
     });
@@ -143,6 +171,7 @@ fn codex_questions_latest_done_report_resumes_after_the_native_view_clears() {
         settle(&mut app, Instant::now());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -154,6 +183,7 @@ fn codex_questions_latest_done_report_resumes_after_the_native_view_clears() {
         settle(&mut app, Instant::now());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -179,6 +209,7 @@ fn codex_questions_each_pane_keeps_its_own_unanswered_view() {
         settle(&mut app, Instant::now());
         assert!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -188,7 +219,7 @@ fn codex_questions_each_pane_keeps_its_own_unanswered_view() {
         );
         paint(&mut app, CLEAR, "ANSWERED");
         settle(&mut app, Instant::now());
-        let tabs = app.runtime.pane_tabs.as_ref().unwrap().tabs();
+        let tabs = app.runtime.project().pane_tabs.as_ref().unwrap().tabs();
         assert_eq!(tabs[0].info.activity, AgentActivity::Blocked);
         assert_eq!(tabs[1].info.activity, AgentActivity::Working);
         assert_ne!(tabs[0].info.id, tabs[1].info.id);
@@ -211,6 +242,7 @@ fn codex_questions_a_semantic_block_cannot_erase_the_unanswered_view() {
         app.settle_agent_activity(Instant::now(), &mut RunCtx::for_test());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -225,6 +257,7 @@ fn codex_questions_a_semantic_block_cannot_erase_the_unanswered_view() {
         settle(&mut app, Instant::now());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -244,6 +277,7 @@ fn codex_questions_expired_reports_do_not_become_working_after_the_view_clears()
         add_pane(&mut app, tmp.path());
         let now = Instant::now();
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -257,6 +291,7 @@ fn codex_questions_expired_reports_do_not_become_working_after_the_view_clears()
         settle(&mut app, now + Duration::from_secs(90));
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -266,6 +301,7 @@ fn codex_questions_expired_reports_do_not_become_working_after_the_view_clears()
         );
         assert!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -278,6 +314,7 @@ fn codex_questions_expired_reports_do_not_become_working_after_the_view_clears()
         app.settle_agent_activity(now + Duration::from_secs(100), &mut RunCtx::for_test());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()

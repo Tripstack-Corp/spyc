@@ -315,10 +315,13 @@ impl App {
                 };
                 let idx = self.runtime.lua_registry.maps.len();
                 self.runtime.lua_registry.maps.push(fn_id);
-                self.state.user_keymap.push(UserBinding {
-                    chord,
-                    action: BoundAction::Lua(format!("{MAP_SENTINEL}{idx}")),
-                });
+                self.state
+                    .active_project_mut()
+                    .user_keymap
+                    .push(UserBinding {
+                        chord,
+                        action: BoundAction::Lua(format!("{MAP_SENTINEL}{idx}")),
+                    });
             }
             RegKind::Command(name) => {
                 self.runtime.lua_registry.commands.insert(name, fn_id);

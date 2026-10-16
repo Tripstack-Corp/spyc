@@ -28,9 +28,9 @@ fn with_tabs(labels: &[&str], test: impl FnOnce(&mut App)) {
             let root = Path::new("/");
             let pane = Pane::spawn("cat", 24, 80, root, &app.view.context_path, wake).unwrap();
             let entry = TabEntry::new(pane, TabInfo::new(*label, root));
-            match app.runtime.pane_tabs.as_mut() {
+            match app.runtime.project_mut().pane_tabs.as_mut() {
                 Some(tabs) => tabs.push(entry),
-                None => app.runtime.pane_tabs = Some(PaneTabs::new(entry)),
+                None => app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry)),
             }
         }
         tabs(&mut app).switch_to(0);
@@ -39,7 +39,7 @@ fn with_tabs(labels: &[&str], test: impl FnOnce(&mut App)) {
 }
 
 fn tabs(app: &mut App) -> &mut PaneTabs {
-    app.runtime.pane_tabs.as_mut().unwrap()
+    app.runtime.project_mut().pane_tabs.as_mut().unwrap()
 }
 
 fn info(app: &mut App, tab: usize) -> &mut TabInfo {
@@ -197,9 +197,9 @@ fn background_tasks_are_tagged_on_the_right_and_the_oldest_drop_first() {
 #[test]
 fn a_zoomed_pane_and_scroll_mode_are_tagged() {
     with_tabs(&["cat"], |app| {
-        app.state.pane.zoom = state::ZoomTarget::BottomPane;
+        app.state.active_project_mut().pane.zoom = state::ZoomTarget::BottomPane;
         assert_eq!(row(app, 30), "─[1]  cat ── / ──────── [ZOOM]");
-        app.state.pane.zoom = state::ZoomTarget::None;
+        app.state.active_project_mut().pane.zoom = state::ZoomTarget::None;
 
         tabs(app).active_mut().enter_scroll_mode();
         assert_eq!(
@@ -235,7 +235,7 @@ fn scroll_mode_keeps_its_tag_beside_a_long_cwd() {
                 row(app, width)
             );
         }
-        app.state.pane.zoom = state::ZoomTarget::BottomPane;
+        app.state.active_project_mut().pane.zoom = state::ZoomTarget::BottomPane;
         assert!(
             row(app, 50).ends_with(" [ZOOM] [SCROLL]"),
             "{:?}",

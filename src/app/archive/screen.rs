@@ -34,7 +34,10 @@ impl App {
         };
         // An already-mounted path is served from the index by `chdir_into_mount`,
         // and a real directory is a real directory.
-        if !self.state.config.archive.enable || self.state.mounts.contains(path) || path.is_dir() {
+        if !self.state.active_project().config.archive.enable
+            || self.state.mounts.contains(path)
+            || path.is_dir()
+        {
             return self.screen_mount_paths(effect);
         }
         let Some((archive, _inner)) = archive_ancestor_of(path) else {

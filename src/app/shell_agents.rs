@@ -72,7 +72,7 @@ impl App {
     pub(crate) fn settle_shell_agents(&mut self, now: Instant, ctx: &mut RunCtx) -> bool {
         let mut changes = Vec::new();
         let mut next: Option<Instant> = None;
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             for (idx, entry) in tabs.tabs_mut().iter_mut().enumerate() {
                 match entry.info.fg_check_due {
                     Some(due) if due <= now => {
@@ -100,6 +100,7 @@ impl App {
     fn apply_shell_agent_change(&mut self, idx: usize, change: Change) -> bool {
         let Some(info) = self
             .runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .and_then(|tabs| tabs.tabs_mut().get_mut(idx))

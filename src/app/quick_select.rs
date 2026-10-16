@@ -17,7 +17,7 @@ impl App {
     /// overlay. Bails with a flash if there's nothing pickable.
     pub fn open_quick_select(&mut self) {
         use crate::pane::quick_select::{QuickSelect, assign_labels, build_patterns, scan};
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             self.state.flash_error("quick select: pane is closed");
             return;
         };
@@ -31,7 +31,7 @@ impl App {
         {
             lines.truncate(agent.output_len(&lines));
         }
-        let patterns = build_patterns(&self.state.config.scan_patterns);
+        let patterns = build_patterns(&self.state.active_project().config.scan_patterns);
         let mut matches = scan(&lines, &patterns);
         if matches.is_empty() {
             self.state.flash_info("quick select: no matches in view");

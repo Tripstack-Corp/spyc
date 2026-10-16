@@ -440,14 +440,18 @@ mod tests {
 
         let root = PathBuf::from("/repo");
         let mut app = App::test_app(root.clone());
-        app.state.left.git_cache.current_repo_root = Some(root.clone());
-        app.state.left.rows = vec![RowData {
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = Some(root.clone());
+        app.state.active_project_mut().left.rows = vec![RowData {
             path: root.join("gone.txt"),
             display: "gone.txt".into(),
             kind: EntryKind::File,
             deleted: true,
         }];
-        app.state.left.cursor.index = 0;
+        app.state.active_project_mut().left.cursor.index = 0;
 
         match app.git_restore_cursor().as_slice() {
             [
@@ -493,22 +497,27 @@ mod tests {
             .expect("stamp config");
 
         let mut app = App::test_app(dir.to_path_buf());
-        app.state.left.listing.dir = dir.to_path_buf();
+        app.state.active_project_mut().left.listing.dir = dir.to_path_buf();
         app.state.update_repo_root(Side::Left, dir);
         // Read the root back so the result's relevance gate sees the same path
         // resolution the column cached (tempdirs are symlinked on macOS).
         let root = app
             .state
+            .active_project()
             .left
             .git_cache
             .current_repo_root
             .clone()
             .expect("repo root resolved");
         // Take the off-thread path, where a walk is a request + a generation bump.
-        app.state.left.git_cache.git_worker_available = true;
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .git_worker_available = true;
 
         let (entries, index_mtime, head_mtime) = crate::git::status::repo_status_stable(&root);
-        let generation = app.state.left.git_cache.git_generation;
+        let generation = app.state.active_project().left.git_cache.git_generation;
         app.apply_git_worker_result(GitWorkerResult {
             generation,
             repo_root: root,
@@ -520,7 +529,8 @@ mod tests {
 
         app.state.refresh_git_state();
         assert_eq!(
-            app.state.left.git_cache.git_generation, generation,
+            app.state.active_project().left.git_cache.git_generation,
+            generation,
             "the poll must short-circuit on the key the landed walk stamped — a \
              bumped generation means it dispatched another walk"
         );
@@ -534,14 +544,18 @@ mod tests {
 
         let root = PathBuf::from("/repo");
         let mut app = App::test_app(root.clone());
-        app.state.left.git_cache.current_repo_root = Some(root.clone());
-        app.state.left.rows = vec![RowData {
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = Some(root.clone());
+        app.state.active_project_mut().left.rows = vec![RowData {
             path: root.join("real.txt"),
             display: "real.txt".into(),
             kind: EntryKind::File,
             deleted: false,
         }];
-        app.state.left.cursor.index = 0;
+        app.state.active_project_mut().left.cursor.index = 0;
         assert!(
             app.git_restore_cursor().is_empty(),
             "a live (non-deleted) row produces no restore effect"
@@ -607,7 +621,12 @@ mod tests {
         app.open_second_commander_at_background(&b_dir);
         // Opening points `vsplit.focus` at Right; put the keyboard back on `a`,
         // which is the arrangement that goes stale.
-        app.state.vsplit.as_mut().expect("vsplit open").focus = Side::Left;
+        app.state
+            .active_project_mut()
+            .vsplit
+            .as_mut()
+            .expect("vsplit open")
+            .focus = Side::Left;
         draw(&mut app);
         assert_eq!(
             tracked_status(&app),

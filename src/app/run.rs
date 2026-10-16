@@ -514,7 +514,7 @@ impl App {
         // drop, but do it explicitly so the temp files don't linger if the
         // process exits without unwinding). Capture buffers are session-scoped.
         self.runtime.capture_spill_dir.take();
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             for entry in tabs.tabs_mut() {
                 let label = entry.info.label.clone();
                 let pid = entry.pane.process_id();
@@ -782,7 +782,7 @@ impl App {
     /// re-emit. Returns `None` when the title is unchanged.
     pub(super) fn term_title_effect(&mut self) -> Option<Effect> {
         let title = crate::term_title::compose(
-            self.state.project_home.as_deref(),
+            self.state.active_project().home.as_deref(),
             self.state.session_name.as_deref(),
             &self.state.cur().listing.dir,
         );

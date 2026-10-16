@@ -268,7 +268,7 @@ mod scroll_side_tests {
     fn state_with(rows: usize) -> AppState {
         let tmp = tempfile::tempdir().expect("tempdir").keep();
         let mut s = AppState::test_default(tmp);
-        s.left.rows = (0..rows)
+        s.active_project_mut().left.rows = (0..rows)
             .map(|i| crate::app::RowData {
                 path: std::path::PathBuf::from(format!("f{i}")),
                 display: format!("f{i}"),
@@ -286,22 +286,30 @@ mod scroll_side_tests {
     #[test]
     fn cursor_scroll_side_clamps_instead_of_wrapping() {
         let mut s = state_with(5);
-        s.left.cursor.index = 4; // last row
+        s.active_project_mut().left.cursor.index = 4; // last row
         s.cursor_scroll_side(Side::Left, 3);
-        assert_eq!(s.left.cursor.index, 4, "must not wrap past the end");
+        assert_eq!(
+            s.active_project().left.cursor.index,
+            4,
+            "must not wrap past the end"
+        );
 
-        s.left.cursor.index = 0;
+        s.active_project_mut().left.cursor.index = 0;
         s.cursor_scroll_side(Side::Left, -3);
-        assert_eq!(s.left.cursor.index, 0, "must not wrap past the start");
+        assert_eq!(
+            s.active_project().left.cursor.index,
+            0,
+            "must not wrap past the start"
+        );
     }
 
     #[test]
     fn cursor_scroll_side_moves_by_delta() {
         let mut s = state_with(10);
         s.cursor_scroll_side(Side::Left, 3);
-        assert_eq!(s.left.cursor.index, 3);
+        assert_eq!(s.active_project().left.cursor.index, 3);
         s.cursor_scroll_side(Side::Left, -1);
-        assert_eq!(s.left.cursor.index, 2);
+        assert_eq!(s.active_project().left.cursor.index, 2);
     }
 
     /// An empty listing is a no-op rather than a panic.
@@ -309,6 +317,6 @@ mod scroll_side_tests {
     fn cursor_scroll_side_on_an_empty_list_is_a_noop() {
         let mut s = state_with(0);
         s.cursor_scroll_side(Side::Left, 5);
-        assert_eq!(s.left.cursor.index, 0);
+        assert_eq!(s.active_project().left.cursor.index, 0);
     }
 }

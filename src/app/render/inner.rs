@@ -33,7 +33,7 @@ impl App {
         // If a top-overlay pty is active (`;top`, `;vim`, etc.), it
         // replaces the entire spyc area. Status, list, and prompt are
         // hidden; only the overlay + divider + bottom pane render.
-        if let Some(overlay) = self.runtime.top_overlay.as_ref() {
+        if let Some(overlay) = self.runtime.project().top_overlay.as_ref() {
             self.render_top_overlay_branch(frame, layout, overlay);
             return;
         }
@@ -66,7 +66,7 @@ impl App {
                 // (`overlay_column`); dim it when its column isn't focused, so a
                 // `D` in `a` fades on `^a l` to `b` — mirroring the list/right
                 // dim. (No split → full-frame → never dims.)
-                if self.state.vsplit.is_some()
+                if self.state.active_project().vsplit.is_some()
                     && self.view.dim_inactive
                     && !self.column_focused(state::Side::Left)
                 {
@@ -90,7 +90,7 @@ impl App {
             // beside it.
             self.render_column_beside_overlay(frame, &layout);
             // As in the overlay branch above.
-            if self.state.vsplit.is_some() {
+            if self.state.active_project().vsplit.is_some() {
                 self.render_prompt_line(frame, layout.prompt);
             } else if let Some(rect) = displaced {
                 frame.render_widget(ratatui::widgets::Clear, rect);
@@ -112,7 +112,7 @@ impl App {
         // When the right column is zoomed (`^a z` on the preview), the preview
         // fills the body instead of the list — the pane is collapsed exactly
         // like `TopList`, but the body renders `view.right_pager`.
-        if self.state.pane.zoom == state::ZoomTarget::RightColumn
+        if self.state.active_project().pane.zoom == state::ZoomTarget::RightColumn
             && let Some(view) = self.view.right_pager.as_ref()
         {
             crate::ui::pager::render(frame, layout.list, view, &self.view.theme);
@@ -203,7 +203,7 @@ impl App {
             // The scrollback snapshot owns this rect; the pty runs off-screen.
             // The first-frame scroll snap (pending) is settled in `prepare_panes`.
             crate::ui::pager::render(frame, rect, view, &self.view.theme);
-        } else if let Some(tabs) = self.runtime.pane_tabs.as_ref() {
+        } else if let Some(tabs) = self.runtime.project().pane_tabs.as_ref() {
             let focused = self.state.pane_focused();
             let held = self.pane_drag_screen(Some(rect));
             if self.view.mouse_selection == Some(super::super::mouse::MouseDragTarget::Pane)
@@ -285,8 +285,8 @@ impl App {
         &self,
         layout: &FrameLayout,
     ) -> Option<ratatui::layout::Rect> {
-        let covered = self.runtime.top_overlay.is_some() || self.top_pane_pager_is_open();
-        if !covered || self.state.vsplit.is_some() || self.prompt_row().is_none() {
+        let covered = self.runtime.project().top_overlay.is_some() || self.top_pane_pager_is_open();
+        if !covered || self.state.active_project().vsplit.is_some() || self.prompt_row().is_none() {
             return None;
         }
         let top = layout.top_unit;
@@ -377,13 +377,16 @@ impl App {
         let prompt_row_occupied = matches!(self.state.mode, Mode::Prompting(_))
             || self.state.flash.is_some()
             || self.state.resolver.pending_display().is_some();
-        if self.state.pane.zoom == state::ZoomTarget::BottomPane && prompt_row_occupied {
+        if self.state.active_project().pane.zoom == state::ZoomTarget::BottomPane
+            && prompt_row_occupied
+        {
             return;
         }
         let (path, suffix) = self.header_parts();
         let project_label = self
             .state
-            .project_home
+            .active_project()
+            .home
             .as_deref()
             .map(path_basename_display);
         let agent_info = self.active_agent_status();
@@ -489,9 +492,9 @@ impl App {
         frame.render_widget(
             ListView {
                 rows: &self.view.cached_rows,
-                cursor: self.state.left.cursor.index,
-                view_top: self.state.left.cursor.view_top,
-                empty_marker: self.state.left.view == View::Dir,
+                cursor: self.state.active_project().left.cursor.index,
+                view_top: self.state.active_project().left.cursor.view_top,
+                empty_marker: self.state.active_project().left.view == View::Dir,
                 focused: list_focused,
                 theme: &self.view.theme,
                 selection: self.list_selection_for(state::Side::Left),
@@ -508,7 +511,7 @@ impl App {
     fn render_column_beside_overlay(&self, frame: &mut Frame, layout: &FrameLayout) {
         // No split → the overlay is full-width; nothing renders beside it and
         // the status row is part of the overlay region (no status bar).
-        if self.state.vsplit.is_none() {
+        if self.state.active_project().vsplit.is_none() {
             return;
         }
         // A column-scoped overlay sits below the shared status row, so keep the
@@ -529,7 +532,7 @@ impl App {
     fn render_right_split(&self, frame: &mut Frame, layout: &FrameLayout) {
         if let Some(rect) = layout.right {
             let right_focused = self.column_focused(state::Side::Right);
-            if let Some(overlay) = self.runtime.top_overlay_right.as_ref() {
+            if let Some(overlay) = self.runtime.project().top_overlay_right.as_ref() {
                 // `b`'s own editor / `$PAGER` overlay PTY (`V`/`D`-huge) — covers
                 // the column, coexisting with whatever `a` is doing. Bright only
                 // when `b` owns the keyboard (dims on `^a h` to `a`). Always
@@ -554,7 +557,7 @@ impl App {
                 if self.view.dim_inactive && !right_focused {
                     self.dim_region(frame, rect);
                 }
-            } else if let Some(right) = self.state.right.as_ref() {
+            } else if let Some(right) = self.state.active_project().right.as_ref() {
                 // A second file-commander (`^s`): paint its list, rows + grid
                 // settled in `prepare_frame` against the right caches. The
                 // ListView fades itself on `!focused`, so no separate dim pass.
@@ -772,7 +775,7 @@ impl App {
         // This branch returns early, so the prompt line is painted here: into
         // the row a split reserves below its columns, else wherever
         // `displaced_prompt_row` moved it.
-        if self.state.vsplit.is_some() {
+        if self.state.active_project().vsplit.is_some() {
             self.render_prompt_line(frame, layout.prompt);
         } else if let Some(rect) = displaced {
             frame.render_widget(ratatui::widgets::Clear, rect);

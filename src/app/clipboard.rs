@@ -36,7 +36,7 @@ impl App {
 
     /// yP — yank the last prompt the user typed into the pane.
     pub fn yank_last_prompt_to_clipboard(&mut self) -> Vec<Effect> {
-        let Some(text) = self.state.pane.last_pane_prompt.as_ref() else {
+        let Some(text) = self.state.active_project().pane.last_pane_prompt.as_ref() else {
             self.state.flash_error("no prompt to yank");
             return Vec::new();
         };
@@ -72,7 +72,7 @@ impl App {
     /// concatenating against the last path. No newline — let the user decide
     /// when to submit.
     pub fn send_selection_to_pane(&mut self) -> Vec<Effect> {
-        if self.runtime.pane_tabs.is_none() {
+        if self.runtime.project().pane_tabs.is_none() {
             self.state.flash_error("no pane open (Ctrl-\\ to open one)");
             return Vec::new();
         }
@@ -97,7 +97,7 @@ impl App {
     /// through normal input; this is the tmux `send-prefix` escape hatch
     /// (Claude binds ^a, e.g. to expand notes).
     pub fn send_prefix_to_pane(&mut self) -> Vec<Effect> {
-        if self.runtime.pane_tabs.is_none() {
+        if self.runtime.project().pane_tabs.is_none() {
             self.state.flash_error("no pane open (Ctrl-\\ to open one)");
             return Vec::new();
         }
@@ -114,7 +114,7 @@ impl App {
     /// wrapped with a header so the recipient (e.g. Claude) knows what
     /// it's looking at.
     pub fn pipe_content_to_pane(&mut self, use_inventory: bool) -> Vec<Effect> {
-        if self.runtime.pane_tabs.is_none() {
+        if self.runtime.project().pane_tabs.is_none() {
             self.state.flash_error("no pane open");
             return Vec::new();
         }
@@ -307,7 +307,7 @@ mod tests {
     fn run_selection_to_expands_percent_for_cursor_file() {
         use super::super::file_ops::FileOp;
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.left.listing.dir = PathBuf::from("/projects/demo");
+        app.state.active_project_mut().left.listing.dir = PathBuf::from("/projects/demo");
         app.seed_rows(&["Makefile", "README.md"]); // cursor at 0 = Makefile
         let fx = app.run_selection_to("%.o", true);
         match fx.as_slice() {
@@ -326,14 +326,16 @@ mod tests {
         use super::super::View;
         use super::super::file_ops::FileOp;
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.left.listing.dir = PathBuf::from("/projects/demo");
+        app.state.active_project_mut().left.listing.dir = PathBuf::from("/projects/demo");
         app.seed_rows(&["a.txt", "b.txt"]);
-        app.state.left.view = View::Dir;
+        app.state.active_project_mut().left.view = View::Dir;
         app.state
+            .active_project_mut()
             .left
             .picks
             .insert(Path::new("/projects/demo/a.txt"));
         app.state
+            .active_project_mut()
             .left
             .picks
             .insert(Path::new("/projects/demo/b.txt"));
@@ -416,16 +418,24 @@ impl super::App {
     ///
     /// OSC 52 stays inline — it is a write to spyc's own stdout, not a spawn.
     pub(super) fn deliver_clipboard(&self, text: &str) -> Result<(), String> {
-        if let Some(cmd) =
-            crate::clipboard::resolve_override(self.state.config.clipboard.command.as_deref())
-        {
+        if let Some(cmd) = crate::clipboard::resolve_override(
+            self.state
+                .active_project()
+                .config
+                .clipboard
+                .command
+                .as_deref(),
+        ) {
             let text = text.to_string();
             self.spawn_clipboard_write(move || {
                 crate::clipboard::copy_via_user_command(&cmd, &text).map_err(|e| format!("{e:#}"))
             });
             return Ok(());
         }
-        let (local, osc52) = clipboard_delivery(self.state.config.clipboard.via, self.view.is_ssh);
+        let (local, osc52) = clipboard_delivery(
+            self.state.active_project().config.clipboard.via,
+            self.view.is_ssh,
+        );
         let mut errs: Vec<String> = Vec::new();
         let mut ok = false;
         if osc52 {

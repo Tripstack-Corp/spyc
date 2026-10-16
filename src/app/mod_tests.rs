@@ -117,6 +117,17 @@ mod guard_tests {
     /// one field found nine more (#502), among them a graveyard purge in `b`
     /// that trashed the entry under `a`'s cursor.
     ///
+    /// `state.projects` names a SPECIFIC project the same way (#99 step 1,
+    /// `docs/drafts/PROJECTS_PLAN.md`): everywhere reaches the active one via
+    /// `active_project()` / `active_project_mut()`, both defined alongside the
+    /// column handles in `state/mod.rs`. `self.left`/`self.right` moved onto
+    /// `Project` behind those two methods, so this guard no longer finds them
+    /// reached directly off `state`/`self` anywhere — which is why `render/
+    /// mod.rs`, `render/inner.rs` and `watch.rs` dropped out of `ALLOW` below:
+    /// they still draw/watch each column separately, just through
+    /// `active_project()` first, which this scan doesn't (and shouldn't) see
+    /// as naming a column directly.
+    ///
     /// `ALLOW` is the code that draws or watches each column separately, each
     /// with why. An entry that stops matching fails too, because an exemption
     /// outliving its reason is worse than none: `render/chrome.rs` stayed
@@ -124,21 +135,11 @@ mod guard_tests {
     /// follow focus, pre-approving the regression in the file just fixed for it.
     /// Paths are relative to `src/app`, so an entry names exactly one file.
     ///
-    /// Inside `state/` the fields are `self.left` / `self.right`, and only
-    /// `state/mod.rs`, where the handles live, may name them.
+    /// Inside `state/` the fields are `self.left` / `self.right` / `self.projects`,
+    /// and only `state/mod.rs`, where the handles live, may name them.
     #[test]
     fn columns_are_addressed_through_handles() {
-        const ALLOW: &[(&str, &str)] = &[
-            (
-                "render/mod.rs",
-                "each column settles its own row cache and grid, in its own rect",
-            ),
-            ("render/inner.rs", "each column draws into its own rect"),
-            (
-                "watch.rs",
-                "each column's tree and gitdir are watched under their own dedup key",
-            ),
-        ];
+        const ALLOW: &[(&str, &str)] = &[];
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
         let mut offenders = Vec::new();
         let mut matched = std::collections::BTreeSet::new();
@@ -207,9 +208,11 @@ mod guard_tests {
         );
     }
 
-    /// The receiver of each `<recv>.left` / `<recv>.right` field access, comments
-    /// skipped: `self.state.left.cursor` yields `state`. A longer field
-    /// (`right_pager`) is not a column.
+    /// The receiver of each `<recv>.left` / `<recv>.right` / `<recv>.projects`
+    /// field access, comments skipped: `self.state.left.cursor` yields `state`.
+    /// A longer field (`right_pager`) is not a column, and `Runtime`'s own
+    /// `projects` (a different struct, `runtime.rs`) is never reached with a
+    /// `state`/`*_state` receiver, so it can't false-positive here.
     fn column_field_receivers(src: &str) -> Vec<String> {
         let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
         let mut out = Vec::new();
@@ -218,7 +221,7 @@ mod guard_tests {
                 continue;
             }
             let code = line.find(" //").map_or(line, |i| &line[..i]);
-            for field in [".left", ".right"] {
+            for field in [".left", ".right", ".projects"] {
                 for (at, _) in code.match_indices(field) {
                     let after = code[at + field.len()..].chars().next();
                     if after.is_some_and(ident) {

@@ -12,10 +12,13 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 use crate::config::Config;
 #[cfg(test)]
 use crate::fs::Listing;
-use crate::keymap::{Resolver, UserKeymap};
+use crate::keymap::Resolver;
+#[cfg(test)]
+use crate::keymap::UserKeymap;
 #[cfg(test)]
 use crate::state::{Cursor, IgnoreMasks, Picks};
 use crate::state::{Frecency, History, Inventory, Marks};
@@ -33,10 +36,14 @@ mod commander;
 pub use commander::Commander;
 mod dispatch;
 mod git;
+mod git_cache;
+pub use git_cache::{GitCache, GitState, GitStatusCache, GitWorkerRequest, GitWorkerResult};
 mod listing;
 mod navigation;
 mod pending_images;
 pub use pending_images::{MAX_PENDING_IMAGES_PER_TAB, PendingImage};
+mod project;
+pub use project::{Project, ProjectId};
 pub mod restore;
 mod selection;
 
@@ -169,53 +176,6 @@ pub struct PagerRequest {
     pub fit_to_content: bool,
 }
 
-/// Off-main-thread git-status work item. The chdir hot path sends
-/// these to a background worker on cache miss so the UI returns
-/// immediately; the worker computes the repo's status via gix
-/// (`git::status::repo_status`) — the heavy index/worktree walk on a
-/// ~110k-file repo — and echoes results back via `GitWorkerResult`.
-#[derive(Debug)]
-pub struct GitWorkerRequest {
-    pub generation: u64,
-    pub repo_root: std::path::PathBuf,
-    /// Which column requested this — the worker echoes it back so the result
-    /// routes to that column's git state + generation gate (no cross-column
-    /// collision).
-    pub side: Side,
-}
-
-/// Worker reply. `generation` lets the main thread discard results
-/// whose source chdir has been superseded. `entries` is the structured
-/// repo-relative status (`git::status::StatusEntry`s), or `None` when
-/// the status walk failed (not in a repo, etc.) — the App treats that
-/// as "no markers" rather than a hard error.
-#[derive(Debug)]
-pub struct GitWorkerResult {
-    pub generation: u64,
-    pub repo_root: std::path::PathBuf,
-    /// The column this result is for (echoed from the request) — routes it to
-    /// that column's git state + generation gate.
-    pub side: Side,
-    pub entries: Option<Vec<crate::git::status::StatusEntry>>,
-    pub index_mtime: Option<std::time::SystemTime>,
-    pub head_mtime: Option<std::time::SystemTime>,
-}
-
-/// Cached repo status (structured `StatusEntry`s), keyed by repo root +
-/// `.git/index` / `.git/HEAD` mtimes. The status doesn't depend on the
-/// current listing dir — only on the repo state — so once we have it,
-/// every chdir to a sibling/child path within the same repo re-filters
-/// it locally (`git::status::map_to_listing` with a freshly-computed
-/// prefix) instead of walking the repo again. On a ~110k-file repo that
-/// walk dominates drill-in latency.
-#[derive(Debug, Clone)]
-pub struct GitStatusCache {
-    pub repo_root: PathBuf,
-    pub index_mtime: std::time::SystemTime,
-    pub head_mtime: std::time::SystemTime,
-    pub entries: Vec<crate::git::status::StatusEntry>,
-}
-
 /// Which surface owns the keyboard — the single focus axis, and the
 /// **authority** the router reads for the persistent regions. Kept correct
 /// at every loop top by `recompute_focus` (re-derived from the live surfaces
@@ -243,40 +203,10 @@ pub enum Focus {
     Pager(crate::ui::pager::Mount),
 }
 
-/// MVU Phase 5: the git **display pair** — the top-bar `info` string and
-/// the basename-keyed-per-listing-dir `files` status map. The previously
-/// separate `git_info` / `git_files` fields drifted when one was written
-/// without the other ("files updated but not info"). Folding them here
-/// and routing the recompute sites through [`GitState::set`] makes the
-/// pair atomic: top-bar and per-file markers always reflect the same
-/// `git status` snapshot. (The git *caches* — `raw_cache`, `repo_root`,
-/// `generation`, … — are `AppState` fields; clustering them would be pure
-/// relocation, not a fix.)
 /// Archives currently mounted (`docs/archive/ARCHIVE_BROWSING_PLAN.md`). Pure
 /// data — an index plus the user's pending changes — so it belongs in the Model
 /// even though the bytes it describes live on disk.
 pub type Mounts = crate::archive::Mounts;
-
-#[derive(Default)]
-pub struct GitState {
-    pub info: Option<String>,
-    pub files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
-}
-
-impl GitState {
-    /// The sole writer of the `info`/`files` pair — set both together so
-    /// they can never drift. The recompute sites compute `info` and
-    /// `files` from the same cached `git status` snapshot, then commit
-    /// them here in one call.
-    pub fn set(
-        &mut self,
-        info: Option<String>,
-        files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus>,
-    ) {
-        self.info = info;
-        self.files = files;
-    }
-}
 
 /// MVU Phase 5: a cheap Model-side snapshot of the active pane's
 /// routing-relevant flags, refreshed once per loop iteration (after the
@@ -291,120 +221,6 @@ impl GitState {
 pub struct PaneSnapshot {
     pub is_scrolling: bool,
     pub is_closed: bool,
-}
-
-/// Git status/worker plumbing cached on the Model: the 1 Hz mtime
-/// short-circuit pair, the resolved repo-root/gitdir, the
-/// structured-status cache, and the off-thread worker
-/// outbox/generation/timing. Grouped out of `AppState`
-/// (the loose git-cache fields) so the Model field block stays legible;
-/// the display pair lives separately in [`GitState`].
-#[derive(Default)]
-pub struct GitCache {
-    /// Cached mtime pair of `.git/index` and `.git/HEAD` from the
-    /// last successful `refresh_git_state` call. The 1 Hz poll
-    /// short-circuits when both files' current mtimes match the
-    /// cache — their contents haven't changed, so re-running
-    /// `git status --porcelain -unormal` would produce identical
-    /// output. On a huge working tree (the original report:
-    /// ~112k files) that subprocess walks every tracked file, so
-    /// skipping it on the idle path drops sustained background CPU
-    /// to near zero.
-    ///
-    /// Event-driven refreshes (from `fsevents`) never consult this
-    /// cache — working-tree edits change file mtimes but NOT
-    /// `.git/index`, so a cache hit there would silently miss
-    /// the ` M filename` markers the refresh exists to surface.
-    /// `None` until the first successful poll, or when `.git/index`
-    /// can't be stat'd.
-    pub git_poll_cache: Option<(std::time::SystemTime, std::time::SystemTime)>,
-    /// Memoized branch-display string keyed by `(repo_root, HEAD mtime)`.
-    /// `compute_git_info_fast` re-derives the branch via `gix::open` only
-    /// when `HEAD`'s mtime moves (checkout / branch-switch / detached-HEAD
-    /// commit) — otherwise an active filesystem trips `refresh_listing`
-    /// every few seconds and each call would re-open the repo just to read
-    /// an unchanged branch name. The dirty `*` flag is NOT cached here: it's
-    /// recombined fresh each call from `git_status_cache`, which moves on
-    /// working-tree edits that `HEAD`'s mtime can't see. Shares the coarse-
-    /// FS-mtime caveat of [`Self::git_poll_cache`] (same key, same 1 Hz poll
-    /// gate). `None` until the first resolve, or outside a repo.
-    pub head_branch_cache: Option<(std::path::PathBuf, std::time::SystemTime, String)>,
-    /// Repo root of the active project (the directory containing
-    /// `.git`), or `None` when the listing dir isn't inside any
-    /// repo. Resolved + cached on chdir by `update_repo_root`. Used to
-    /// compute the `git status --porcelain` prefix without spawning
-    /// `git rev-parse --show-toplevel`, as the cache key for
-    /// `git_status_cache`, and as the root for the gitignore-aware
-    /// FSEvent filter (`git::excludes`).
-    pub current_repo_root: Option<std::path::PathBuf>,
-    /// The active repo's *resolved* gitdir — `<root>/.git` for a normal
-    /// repo, or `<main>/.git/worktrees/<name>/` for a linked worktree
-    /// (where `.git` is a *file* pointing there). `None` outside a repo.
-    /// Cached on chdir (alongside `current_repo_root`) so the fs-event
-    /// filter and the gitdir watch stay IO-free per event. Without this,
-    /// a worktree's index/HEAD changes — which live outside the working
-    /// tree — were never watched and markers went stale until the next
-    /// poll.
-    pub current_gitdir: Option<std::path::PathBuf>,
-    /// The repo's shared config path, resolved with the gitdir. In the status
-    /// cache key because config *changes what `status` reports* — a repo made
-    /// bare reports clean with no worktree, and nothing about that moves
-    /// `index` or `HEAD`.
-    pub current_config_path: Option<std::path::PathBuf>,
-    /// Cached structured repo-status (`Vec<StatusEntry>`). On a huge
-    /// working tree the gix status walk traverses every tracked file in
-    /// the index — 200-500 ms on a ~110k-file repo. After the first
-    /// chdir into a project, every subsequent chdir within that
-    /// project's tree hits this cache (provided `.git/index` and
-    /// `.git/HEAD` mtimes match) and skips the walk; only the
-    /// per-listing-dir prefix re-parse is paid.
-    pub git_status_cache: Option<GitStatusCache>,
-    /// Whether a background git-status worker is wired. Set by `App::new`
-    /// once the worker thread spawns; `false` in tests and during the
-    /// AppState bootstrap before the worker exists. When `true`, a
-    /// cache-miss in `git_file_statuses_cached` enqueues a request into
-    /// `pending_git_requests` — the Model holds no channel, so the App run
-    /// loop flushes that outbox to the Runtime-owned `git_worker_tx`. When
-    /// `false`, the synchronous `git status` spawn path runs inline.
-    pub git_worker_available: bool,
-    /// Outbox of git-status worker requests the Model wants dispatched.
-    /// `git_file_statuses_cached` pushes here on a cache miss; the App run
-    /// loop drains it via `flush_git_requests` (sending each over the
-    /// Runtime-owned `git_worker_tx`) before it next blocks on `recv`.
-    /// Results arrive back via the App's `git_result_rx`, gated on
-    /// `git_generation` to discard stale ones.
-    pub pending_git_requests: Vec<GitWorkerRequest>,
-    /// Monotonic counter bumped on every chdir-that-issues-a-git-
-    /// request. The worker echoes the counter back in its result;
-    /// the App event loop discards results whose generation doesn't
-    /// match the current value (the user has navigated past them).
-    /// Eliminates the need for explicit thread cancellation.
-    pub git_generation: u64,
-    /// When the last raw-status cache invalidation was performed by
-    /// `refresh_listing` (i.e. the event-driven path). Throttles
-    /// re-spawning the git worker on huge trees where each spawn
-    /// runs full `git status` for 200-500 ms: an active filesystem
-    /// (claude editing files, build outputs) could trip
-    /// `refresh_listing` every 3 s and burn CPU on
-    /// back-to-back worker runs. The 1 s / 10 s safety poll still
-    /// invalidates on actual `.git/index` mtime changes, so the only
-    /// trade-off is a small lag in working-tree ` ~` markers for
-    /// edits within the throttle window.
-    pub last_git_invalidation: Option<std::time::Instant>,
-    /// When the last git worker request was *sent* (after dedup, etc.).
-    /// Read by the activity-monitor overlay so the user can see
-    /// roundtrip duration for the most recent `git status` spawn
-    /// (which on huge trees can be 200-500 ms).
-    pub last_git_request_at: Option<std::time::Instant>,
-    /// A working-tree fs-event arrived but `refresh_listing` *throttled* its
-    /// cache invalidation, so the new ` ~`/clean state was never re-walked.
-    /// The 1 Hz poll's own mtime short-circuit can't cover it — an unstaged
-    /// edit moves no `.git/index`/`HEAD` mtime — so without this flag a change
-    /// landing inside the throttle window (with no trailing event) would stay
-    /// stale until a chdir. Set on a throttle-skip; the next `refresh_git_state`
-    /// honours it with a forced re-walk and clears it, bounding staleness to one
-    /// poll interval instead of forever.
-    pub pending_worktree_rewalk: bool,
 }
 
 /// Bottom-pane layout + prompt-echo state: the split percentage, zoom
@@ -504,8 +320,6 @@ pub struct AppState {
     /// rather than a directory (`docs/archive/ARCHIVE_BROWSING_PLAN.md`).
     pub mounts: Mounts,
     pub resolver: Resolver,
-    pub user_keymap: UserKeymap,
-    pub config: Config,
     /// `:mouse on|off` for this session, overriding `[mouse] capture`.
     ///
     /// Separate from `config` on purpose: `reload_config` replaces the whole
@@ -517,14 +331,11 @@ pub struct AppState {
     /// reason as `mouse_capture_override`: a config reload would revert it.
     pub status_flags_override: Option<crate::ui::status_flags::FlagsMode>,
     pub mode: Mode,
-    pub start_dir: PathBuf,
-    pub project_home: Option<PathBuf>,
     pub session_name: Option<String>,
     /// Stable per-process session file id (millis timestamp), assigned once at
     /// startup and carried through restore, so every save (quit + P3-2 autosave)
     /// overwrites the same `<id>.json` instead of spawning a new file per save.
     pub session_id: Option<u64>,
-    pub prev_dir: Option<PathBuf>,
     pub last_search: Option<String>,
     pub last_captured_cmd: Option<String>,
     pub history: History,
@@ -584,37 +395,61 @@ pub struct AppState {
     /// (`App::settle_startup_commands`).
     pub startup_commands: Vec<String>,
     pub frecency: Frecency,
-    /// Which surface owns the keyboard. Replaces the old `pane_focused:
-    /// bool`; read the derived bool via `self.pane_focused()`.
-    pub focus: Focus,
-    /// The left (primary) file-commander's per-browser Model state (see
-    /// [`Commander`]). Always present — the single-column default *is* the left
-    /// commander. Action handlers reach the **focused** column via
-    /// [`Self::cur`] / [`Self::cur_mut`]; render draws `left`/`right` explicitly.
-    pub left: Commander,
-    /// The right (secondary) file-commander, when a second column is open.
-    /// `None` is the single-column default (Stage 1) — while `None`, `cur()` /
-    /// `cur_mut()` always resolve to `left`, so the accessor conversion is
-    /// behaviour-preserving. Populated by `^s` (Stage 2 PR C). The vsplit's
-    /// *preview* pager (Stage 1) is a separate `ViewState` slot, not this.
-    pub right: Option<Commander>,
-    /// Bottom-pane layout + prompt state (see [`PaneLayout`]).
-    pub pane: PaneLayout,
-    /// The vertical (left/right) split, when open (see [`VSplit`]). `None`
-    /// is the single-column default. Stage 1: the right region hosts a
-    /// live-reloading preview pager; a second file-commander is deferred.
-    pub vsplit: Option<VSplit>,
+    /// Every open project, in switcher order; looked up by `active` via
+    /// [`Self::active_project`] / [`Self::active_project_mut`]. Exactly one
+    /// today (#99 step 1, `docs/drafts/PROJECTS_PLAN.md`) — the switcher, a
+    /// second project, and per-project MCP routing are later steps. Action
+    /// handlers reach the active project's **focused** column via
+    /// [`Self::cur`] / [`Self::cur_mut`]; render draws `left`/`right`
+    /// explicitly off [`Self::active_project`].
+    pub projects: Vec<Project>,
+    /// Which of `projects` is drawn and driven by the keyboard.
+    pub active: ProjectId,
 }
 
 impl AppState {
-    /// Old `pane_focused` axis, derived from the single `focus` field.
-    /// True exactly when the bottom pty pane owns the keyboard. Every
+    /// The active project — the one drawn and driven by the keyboard. `active`
+    /// always names a live entry in `projects` (#99 step 1); exactly one
+    /// exists today, so this never actually scans past the first element.
+    pub fn active_project(&self) -> &Project {
+        self.projects
+            .iter()
+            .find(|p| p.id == self.active)
+            .expect("active always names a live project")
+    }
+
+    /// Mutable [`Self::active_project`]. Note this borrows all of `self`, same
+    /// caveat as [`Self::cur_mut`].
+    pub fn active_project_mut(&mut self) -> &mut Project {
+        self.projects
+            .iter_mut()
+            .find(|p| p.id == self.active)
+            .expect("active always names a live project")
+    }
+
+    /// Feed `key` to the resolver. `resolver` lives flat on `AppState` while
+    /// `user_keymap` lives on the active project; `active_project()` borrows
+    /// all of `self`, so it can't be called while `resolver` is already
+    /// borrowed mutably for `feed` — take it out, call `feed`, then put it
+    /// back (`Resolver` is cheap and `Default`).
+    pub fn feed_resolver(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> crate::keymap::ResolverOutcome {
+        let mut resolver = std::mem::take(&mut self.resolver);
+        let outcome = resolver.feed(key, &self.active_project().user_keymap);
+        self.resolver = resolver;
+        outcome
+    }
+
+    /// Old `pane_focused` axis, derived from the active project's `focus`
+    /// field. True exactly when the bottom pty pane owns the keyboard. Every
     /// former read of `self.state.pane_focused` is now
     /// `self.state.pane_focused()`; behaviour-equivalent because the
     /// router, the render DIM cue, the `^C` gate and the paste filter
     /// only ever consumed the bool, never the non-Pane discriminant.
-    pub const fn pane_focused(&self) -> bool {
-        matches!(self.focus, Focus::Pane)
+    pub fn pane_focused(&self) -> bool {
+        matches!(self.active_project().focus, Focus::Pane)
     }
 
     /// The **focused** file-commander — the column action handlers operate on.
@@ -625,9 +460,10 @@ impl AppState {
     /// behaviour-preserving. Render does **not** use this — it draws `left` /
     /// `right` explicitly as fixed visual identities.
     pub fn cur(&self) -> &Commander {
-        match self.right.as_ref() {
-            Some(right) if matches!(self.vsplit.map(|v| v.focus), Some(Side::Right)) => right,
-            _ => &self.left,
+        let p = self.active_project();
+        match p.right.as_ref() {
+            Some(right) if matches!(p.vsplit.map(|v| v.focus), Some(Side::Right)) => right,
+            _ => &p.left,
         }
     }
 
@@ -635,9 +471,10 @@ impl AppState {
     /// also touches a global field while holding `cur_mut()` must sequence the
     /// reads first (evaluate the RHS, then assign through `cur_mut()`).
     pub fn cur_mut(&mut self) -> &mut Commander {
-        match self.right.as_mut() {
-            Some(right) if matches!(self.vsplit.map(|v| v.focus), Some(Side::Right)) => right,
-            _ => &mut self.left,
+        let p = self.active_project_mut();
+        match p.right.as_mut() {
+            Some(right) if matches!(p.vsplit.map(|v| v.focus), Some(Side::Right)) => right,
+            _ => &mut p.left,
         }
     }
 
@@ -662,19 +499,20 @@ impl AppState {
     /// `[layout] status_flags`.
     pub fn status_flags(&self) -> crate::ui::status_flags::FlagsMode {
         self.status_flags_override
-            .unwrap_or(self.config.layout.status_flags)
+            .unwrap_or(self.active_project().config.layout.status_flags)
     }
 
     pub fn default_pane_cwd(&self) -> std::path::PathBuf {
-        match self.config.pane.new_tab_cwd {
+        let p = self.active_project();
+        match p.config.pane.new_tab_cwd {
             crate::config::NewTabCwd::WorktreeRoot => self
                 .cur()
                 .git_cache
                 .current_repo_root
                 .clone()
                 .unwrap_or_else(|| self.cur().listing.dir.clone()),
-            crate::config::NewTabCwd::ProjectHome => self
-                .project_home
+            crate::config::NewTabCwd::ProjectHome => p
+                .home
                 .clone()
                 .unwrap_or_else(|| self.cur().listing.dir.clone()),
             crate::config::NewTabCwd::BrowseDir => self.cur().listing.dir.clone(),
@@ -685,60 +523,66 @@ impl AppState {
     /// `Right` with no second commander falls back to `left` (safe no-op for
     /// the per-column git refresh loop). Used to drive git per-Side.
     pub fn col(&self, side: Side) -> &Commander {
+        let p = self.active_project();
         match side {
-            Side::Right => self.right.as_ref().unwrap_or(&self.left),
-            Side::Left => &self.left,
+            Side::Right => p.right.as_ref().unwrap_or(&p.left),
+            Side::Left => &p.left,
         }
     }
 
     pub fn col_mut(&mut self, side: Side) -> &mut Commander {
+        let p = self.active_project_mut();
         match side {
-            Side::Right => self.right.as_mut().unwrap_or(&mut self.left),
-            Side::Left => &mut self.left,
+            Side::Right => p.right.as_mut().unwrap_or(&mut p.left),
+            Side::Left => &mut p.left,
         }
     }
 
     /// The commander on `side` if that column is open. Unlike [`Self::col`],
     /// `Right` with no second commander is `None`, not `left`.
-    pub const fn get_col(&self, side: Side) -> Option<&Commander> {
+    pub fn get_col(&self, side: Side) -> Option<&Commander> {
+        let p = self.active_project();
         match side {
-            Side::Left => Some(&self.left),
-            Side::Right => self.right.as_ref(),
+            Side::Left => Some(&p.left),
+            Side::Right => p.right.as_ref(),
         }
     }
 
     /// Whether the column on `side` is open. `Left` always is.
-    pub const fn has_col(&self, side: Side) -> bool {
+    pub fn has_col(&self, side: Side) -> bool {
         match side {
             Side::Left => true,
-            Side::Right => self.right.is_some(),
+            Side::Right => self.active_project().right.is_some(),
         }
     }
 
     /// Every open commander, `left` first.
     pub fn columns(&self) -> impl Iterator<Item = &Commander> {
-        std::iter::once(&self.left).chain(self.right.as_ref())
+        let p = self.active_project();
+        std::iter::once(&p.left).chain(p.right.as_ref())
     }
 
     /// Mutable [`Self::columns`].
     pub fn columns_mut(&mut self) -> impl Iterator<Item = &mut Commander> {
-        std::iter::once(&mut self.left).chain(self.right.as_mut())
+        let p = self.active_project_mut();
+        std::iter::once(&mut p.left).chain(p.right.as_mut())
     }
 
     /// Open `commander` as the second column, replacing one already open.
     pub fn open_second(&mut self, commander: Commander) {
-        self.right = Some(commander);
+        self.active_project_mut().right = Some(commander);
     }
 
     /// Close the second column. `false` when none was open.
     pub fn close_second(&mut self) -> bool {
-        self.right.take().is_some()
+        self.active_project_mut().right.take().is_some()
     }
 
     /// The `Side` `cur()` resolves to — `Right` iff a second commander is open
     /// AND focused, else `Left`. The side whose git a focus-scoped op targets.
     pub fn focused_side(&self) -> Side {
-        match (self.right.is_some(), self.vsplit.map(|v| v.focus)) {
+        let p = self.active_project();
+        match (p.right.is_some(), p.vsplit.map(|v| v.focus)) {
             (true, Some(Side::Right)) => Side::Right,
             _ => Side::Left,
         }
@@ -748,7 +592,8 @@ impl AppState {
     /// second commander is open. Holds no borrow of `self` (`use<>`), so a
     /// loop over it may mutate the columns it names.
     pub fn active_sides(&self) -> impl Iterator<Item = Side> + use<> {
-        std::iter::once(Side::Left).chain(self.right.is_some().then_some(Side::Right))
+        let has_right = self.active_project().right.is_some();
+        std::iter::once(Side::Left).chain(has_right.then_some(Side::Right))
     }
 
     /// True when ANY active column is inside a git repo — gates the 1 Hz git
@@ -773,7 +618,7 @@ impl AppState {
             .git_cache
             .current_repo_root
             .clone()
-            .or_else(|| self.project_home.clone())
+            .or_else(|| self.active_project().home.clone())
             .unwrap_or_else(|| self.col(side).listing.dir.clone())
     }
 
@@ -811,10 +656,45 @@ impl AppState {
             .git_cache
             .current_repo_root
             .clone()
-            .or_else(|| self.project_home.clone())
+            .or_else(|| self.active_project().home.clone())
     }
 
     // --- Cursor/navigation (Phase 1) ---
+
+    /// Set the active project's `start_dir` (the `` ` `` jump target) by
+    /// reference, reusing the existing allocation where possible. Named so
+    /// call sites read as one short statement instead of a multi-line
+    /// `active_project_mut().start_dir.clone_from(...)` chain.
+    pub fn set_start_dir(&mut self, dir: &PathBuf) {
+        self.active_project_mut().start_dir.clone_from(dir);
+    }
+
+    /// `:startdir` with no argument — report the active project's current
+    /// `` ` `` jump target.
+    pub fn flash_start_dir(&mut self) {
+        let dir = self.active_project().start_dir.display().to_string();
+        self.flash_info(format!("start dir: {dir}"));
+    }
+
+    /// Set the active project's focus to `Pane` when `want_pane`, else back
+    /// to the file list — the two outcomes session restore (and similar
+    /// "did this bring a pane along" paths) ever lands keyboard focus on.
+    pub fn set_focus_pane_or_list(&mut self, want_pane: bool) {
+        self.active_project_mut().focus = if want_pane {
+            Focus::Pane
+        } else {
+            Focus::FileList
+        };
+    }
+
+    /// Record that `pane_id`'s agent self-reported a status this turn — see
+    /// `AgentHudState::status_reported`.
+    pub fn agent_hud_status_reported(&mut self, pane_id: &str) {
+        self.active_project_mut()
+            .pane
+            .agent_hud
+            .status_reported(pane_id);
+    }
 
     pub fn flash_info<S: Into<String>>(&mut self, text: S) {
         self.flash = Some(FlashMessage {
@@ -881,7 +761,8 @@ impl AppState {
 
     /// Human-readable PROJECT_HOME path or `"(unset)"` when none.
     pub fn project_home_display(&self) -> String {
-        self.project_home
+        self.active_project()
+            .home
             .as_ref()
             .map_or_else(|| "(unset)".to_string(), |p| crate::paths::display_tilde(p))
     }
@@ -987,41 +868,50 @@ impl AppState {
     /// buckets use `harness_*` names; wrap callers in
     /// `crate::state::with_state_root` for an isolated state dir.
     pub(crate) fn test_default(cwd: std::path::PathBuf) -> Self {
+        let left = Commander {
+            listing: Listing::empty(cwd.clone()),
+            picks: Picks::new(),
+            masks: IgnoreMasks::default(),
+            temp_filter: None,
+            sort_order: crate::fs::listing::SortMode::Name,
+            sort_reversed: false,
+            view: View::Dir,
+            cursor: Cursor::new(),
+            rows: Vec::new(),
+            grid_dims: GridDims::new(1, 20),
+            page: crate::ui::list_view::PageSpan::default(),
+            list_generation: 0,
+            git: GitState::default(),
+            git_cache: GitCache::default(),
+            harpoon: None,
+            harpoon_filter_set: std::collections::HashSet::new(),
+            pending_ghosts: std::collections::HashSet::new(),
+        };
+        let pane = PaneLayout {
+            pane_height_pct: 30,
+            ..Default::default()
+        };
+        let project = Project::new(
+            None,
+            left,
+            cwd,
+            Config::default(),
+            UserKeymap::default(),
+            pane,
+        );
+        let active = project.id;
         Self {
             mounts: Mounts::default(),
-            left: Commander {
-                listing: Listing::empty(cwd.clone()),
-                picks: Picks::new(),
-                masks: IgnoreMasks::default(),
-                temp_filter: None,
-                sort_order: crate::fs::listing::SortMode::Name,
-                sort_reversed: false,
-                view: View::Dir,
-                cursor: Cursor::new(),
-                rows: Vec::new(),
-                grid_dims: GridDims::new(1, 20),
-                page: crate::ui::list_view::PageSpan::default(),
-                list_generation: 0,
-                git: GitState::default(),
-                git_cache: GitCache::default(),
-                harpoon: None,
-                harpoon_filter_set: std::collections::HashSet::new(),
-                pending_ghosts: std::collections::HashSet::new(),
-            },
-            right: None,
+            projects: vec![project],
+            active,
             inventory: Inventory::new(),
             marks: Marks::default(),
             resolver: Resolver::new(),
-            user_keymap: UserKeymap::default(),
-            config: Config::default(),
             mouse_capture_override: None,
             status_flags_override: None,
             mode: Mode::Normal,
-            start_dir: cwd,
-            project_home: None,
             session_name: None,
             session_id: None,
-            prev_dir: None,
             last_search: None,
             last_captured_cmd: None,
             history: History::load_file("harness_h"),
@@ -1043,12 +933,6 @@ impl AppState {
             deferred_tabs: Vec::new(),
             startup_commands: Vec::new(),
             frecency: Frecency::default(),
-            focus: Focus::FileList,
-            pane: PaneLayout {
-                pane_height_pct: 30,
-                ..Default::default()
-            },
-            vsplit: None,
         }
     }
 }

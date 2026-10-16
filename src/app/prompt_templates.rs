@@ -142,11 +142,11 @@ impl App {
     /// active pane tab and focus the pane. It is never submitted: the text is
     /// the user's to check and finish, and Enter sends it.
     pub(super) fn send_prompt(&mut self, name: &str) -> Vec<Effect> {
-        if self.runtime.pane_tabs.is_none() {
+        if self.runtime.project().pane_tabs.is_none() {
             self.state.flash_info("no pane open (Ctrl-\\ to open one)");
             return Vec::new();
         }
-        let Some(template) = self.state.config.prompts.get(name) else {
+        let Some(template) = self.state.active_project().config.prompts.get(name) else {
             self.state.flash_error(format!(
                 "no prompt named '{name}' in [prompts] (:prompt lists them)"
             ));
@@ -192,12 +192,13 @@ impl App {
         if !name.is_empty() {
             return self.send_prompt(name);
         }
-        if self.state.config.prompts.is_empty() {
+        if self.state.active_project().config.prompts.is_empty() {
             self.state
                 .flash_info("no prompts yet: define them under [prompts] in ~/.spycrc.toml");
         } else {
             let names: Vec<&str> = self
                 .state
+                .active_project()
                 .config
                 .prompts
                 .keys()

@@ -21,7 +21,7 @@ fn recording_wrapper(dir: &std::path::Path) -> (String, std::path::PathBuf, std:
 }
 
 fn info(app: &App) -> &crate::pane::TabInfo {
-    &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info
+    &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info
 }
 
 /// The hint makes a wrapper its agent's tab (env, identity) while spyc adds
@@ -86,11 +86,25 @@ fn a_wrapper_tab_is_not_forked() {
             &dir,
             Some(AgentKind::Claude)
         ));
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
             .info
             .live_session_id = Some("11111111-1111-4111-8111-111111111111".into());
         app.fork_active_tab();
-        assert_eq!(app.runtime.pane_tabs.as_ref().unwrap().tabs().len(), 1);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .tabs()
+                .len(),
+            1
+        );
         assert!(
             app.flash_text()
                 .is_some_and(|f| f.contains("adds no flags to a wrapper")),

@@ -966,7 +966,7 @@ mod tests {
     fn identified_question_input_guard_is_used_by_the_effect_executor() {
         let production = crate::guard_support::production_half(include_str!("pane_input.rs"));
         let active = production
-            .split_once("PaneTarget::Active => self.runtime.pane_tabs.as_mut()")
+            .split_once("PaneTarget::Active => self.runtime.project_mut().pane_tabs.as_mut()")
             .unwrap()
             .1;
         let active = active.split_once("PaneTarget::Overlay =>").unwrap().0;

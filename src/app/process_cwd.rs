@@ -84,7 +84,12 @@ mod tests {
         }
         crate::state::with_state_root(&root, || {
             let mut app = App::test_app(a.clone());
-            app.state.left.listing.dir.clone_from(&a);
+            app.state
+                .active_project_mut()
+                .left
+                .listing
+                .dir
+                .clone_from(&a);
             assert_eq!(app.desired_process_cwd(), Some(a.as_path()));
             app.open_second_commander_at_background(&w1);
             assert_eq!(app.desired_process_cwd(), Some(w1.as_path()));

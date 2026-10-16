@@ -62,6 +62,7 @@ impl App {
         }
         let Some(tab_id) = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map(|t| t.active_info().id.clone())
@@ -72,6 +73,7 @@ impl App {
         };
         let has_pending = self
             .state
+            .active_project()
             .pane
             .pending_images
             .get(&tab_id)
@@ -117,6 +119,7 @@ impl App {
         }
         let pending = self
             .state
+            .active_project()
             .pane
             .pending_images
             .get(&g.tab_id)
@@ -146,6 +149,7 @@ impl App {
         self.view.image_gallery.as_ref().map_or((0, 0), |g| {
             let pending = self
                 .state
+                .active_project()
                 .pane
                 .pending_images
                 .get(&g.tab_id)
@@ -211,6 +215,7 @@ impl App {
             // build its protocol, with nothing to fetch first.
             Some(GalleryRow::Pending(n)) => self
                 .state
+                .active_project()
                 .pane
                 .pending_images
                 .get(&g.tab_id)
@@ -252,7 +257,7 @@ impl App {
         report: bool,
         request_id: u64,
     ) -> Option<image_ops::TranscriptIndexOp> {
-        let info = self.runtime.pane_tabs.as_ref()?.active_info();
+        let info = self.runtime.project().pane_tabs.as_ref()?.active_info();
         let profile = info.agent();
         let Some(spec) = profile.transcript_images() else {
             if report {

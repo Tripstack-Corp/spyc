@@ -81,8 +81,13 @@ impl App {
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone());
-        let dir = &self.state.left.listing.dir;
-        let dir_right = self.state.right.as_ref().map(|c| c.listing.dir.clone());
+        let dir = &self.state.active_project().left.listing.dir;
+        let dir_right = self
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .map(|c| c.listing.dir.clone());
         let unchanged = ctx.watched_listing.as_ref() == Some(dir)
             && ctx.watched_preview == preview
             && ctx.watched_listing_right == dir_right;
@@ -91,10 +96,17 @@ impl App {
         };
         let _ = tx.send(WatchCommand::SyncListing {
             dir: dir.clone(),
-            gitdir: self.state.left.git_cache.current_gitdir.clone(),
+            gitdir: self
+                .state
+                .active_project()
+                .left
+                .git_cache
+                .current_gitdir
+                .clone(),
             dir_right: dir_right.clone(),
             gitdir_right: self
                 .state
+                .active_project()
                 .right
                 .as_ref()
                 .and_then(|c| c.git_cache.current_gitdir.clone()),

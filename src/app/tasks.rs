@@ -380,7 +380,7 @@ impl App {
 
         let (rows, cols) = Self::pane_spawn_size(
             self.effective_pane_pct(),
-            self.state.config.layout.status_position,
+            self.state.active_project().config.layout.status_position,
         );
         // Resize before building the parser so the engine's grid sizes
         // match the child's view. ioctl is best-effort — if it
@@ -436,15 +436,15 @@ impl App {
         info.label.clone_from(&label);
         let entry = TabEntry::new(pane, info);
 
-        self.state.focus = state::Focus::Pane;
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        self.state.active_project_mut().focus = state::Focus::Pane;
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             tabs.push(entry);
             // Switch active tab to the promoted one so the user
             // lands looking at it.
             let last = tabs.len().saturating_sub(1);
             tabs.switch_to(last);
         } else {
-            self.runtime.pane_tabs = Some(PaneTabs::new(entry));
+            self.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry));
         }
         self.view.needs_full_repaint = true;
         self.state.flash_info(format!("task #{id} → tab '{label}'"));
@@ -464,7 +464,7 @@ impl App {
     /// is plain text — seeding would erase colour. Acceptable;
     /// can revisit if users hit it.
     pub fn demote_pane_to_task(&mut self) {
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             self.state.flash_error("no pane to demote");
             return;
         };
@@ -485,12 +485,13 @@ impl App {
             self.state.flash_info("pane already exited — closed it");
             if self
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .is_some_and(PaneTabs::is_empty)
             {
-                self.runtime.pane_tabs = None;
-                self.state.focus = state::Focus::FileList;
+                self.runtime.project_mut().pane_tabs = None;
+                self.state.active_project_mut().focus = state::Focus::FileList;
             }
             return;
         }
@@ -508,12 +509,13 @@ impl App {
         // layout / status / focus revert to "no pane open" state.
         if self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .is_some_and(PaneTabs::is_empty)
         {
-            self.runtime.pane_tabs = None;
-            self.state.focus = state::Focus::FileList;
+            self.runtime.project_mut().pane_tabs = None;
+            self.state.active_project_mut().focus = state::Focus::FileList;
         }
 
         let id = self.runtime.background_tasks.allocate_id();

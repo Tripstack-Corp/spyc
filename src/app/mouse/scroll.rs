@@ -16,7 +16,7 @@ use super::route::{
 impl super::super::App {
     /// The active pane agent's verified scroll keybinding, if it has one.
     pub(super) fn active_pane_wheel_scroll(&self) -> Option<crate::agent::WheelScroll> {
-        let tabs = self.runtime.pane_tabs.as_ref()?;
+        let tabs = self.runtime.project().pane_tabs.as_ref()?;
         tabs.active_info().agent().wheel_scroll()
     }
 
@@ -40,7 +40,7 @@ impl super::super::App {
     /// outcome with the reason attached, which is what silence was missing.
     pub(super) fn wheel_into_pane_history(&mut self, delta: i32) -> Vec<Effect> {
         if matches!(
-            self.state.config.mouse.pane_scroll_view,
+            self.state.active_project().config.mouse.pane_scroll_view,
             crate::config::PaneScrollView::Off
         ) {
             return Vec::new();
@@ -52,7 +52,7 @@ impl super::super::App {
         if self.view.scroll_pager.is_some() || self.runtime.pane_scroll_settle.is_some() {
             return Vec::new();
         }
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let dir: i8 = if delta < 0 { -1 } else { 1 };
@@ -80,7 +80,7 @@ impl super::super::App {
     /// `send_agent_view_scroll_keys` — gated auto-open, and escalation to a page
     /// key under a sustained gesture.
     pub(super) fn send_scroll_keys(&mut self, delta: i32) -> Vec<Effect> {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let profile = tabs.active_info().agent();
@@ -102,7 +102,12 @@ impl super::super::App {
         Self::repeat_key_effect(
             code,
             mods,
-            self.state.config.mouse.pane_scroll_lines.max(1),
+            self.state
+                .active_project()
+                .config
+                .mouse
+                .pane_scroll_lines
+                .max(1),
             app_cursor,
         )
     }
@@ -126,7 +131,7 @@ impl super::super::App {
         marker: &str,
         dir: i8,
     ) -> Vec<Effect> {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let tab_index = tabs.active_index();
@@ -156,7 +161,7 @@ impl super::super::App {
                 at_bottom,
                 streak_ticks: streak.ticks,
             },
-            self.state.config.mouse.pane_scroll_view,
+            self.state.active_project().config.mouse.pane_scroll_view,
             dir,
         );
 
@@ -210,7 +215,12 @@ impl super::super::App {
                 Self::repeat_key_effect(
                     code,
                     mods,
-                    self.state.config.mouse.pane_scroll_lines.max(1),
+                    self.state
+                        .active_project()
+                        .config
+                        .mouse
+                        .pane_scroll_lines
+                        .max(1),
                     app_cursor,
                 )
             }
@@ -280,9 +290,15 @@ mod tests {
     fn codex_pane_showing_the_transcript(dir: &std::path::Path) -> App {
         let mut app = App::test_app(dir.to_path_buf());
         app.view.term_size = (120, 24);
-        app.state.config.mouse.pane_scroll_view = crate::config::PaneScrollView::Native;
+        app.state.active_project_mut().config.mouse.pane_scroll_view =
+            crate::config::PaneScrollView::Native;
         app.open_pane_tab("cat");
-        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+        let tabs = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("a pane tab");
         tabs.active_entry_mut().info.command = "codex".to_string();
         tabs.active_mut()
             .send_bytes("T R A N S C R I P T\n\u{2500}\u{2500} 100% \u{2500}\u{2500}\n".as_bytes())
@@ -348,9 +364,15 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.view.term_size = (120, 24);
-            app.state.config.mouse.pane_scroll_view = crate::config::PaneScrollView::Native;
+            app.state.active_project_mut().config.mouse.pane_scroll_view =
+                crate::config::PaneScrollView::Native;
             app.open_pane_tab("cat");
-            let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+            let tabs = app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .expect("a pane tab");
             tabs.active_entry_mut().info.command = "codex".to_string();
             // Marker present, no `100%` footer: open, mid-history.
             tabs.active_mut()

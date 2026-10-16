@@ -31,7 +31,7 @@ fn fork_base(info: &TabInfo, live_cwd: PathBuf) -> (String, PathBuf) {
 
 impl App {
     pub fn fork_active_tab(&mut self) {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return;
         };
         let active = tabs.active_index();
@@ -93,6 +93,7 @@ impl App {
         if self.open_pane_tab_in_home(&command, &cwd, home.as_deref()) {
             let forked = self
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .map_or(0, |tabs| tabs.tabs().len());

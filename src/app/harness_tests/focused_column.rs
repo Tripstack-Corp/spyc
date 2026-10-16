@@ -27,7 +27,11 @@ fn two_columns(
 }
 
 fn b_col(app: &App) -> &state::Commander {
-    app.state.right.as_ref().expect("b is open")
+    app.state
+        .active_project()
+        .right
+        .as_ref()
+        .expect("b is open")
 }
 
 fn bury(tmp: &std::path::Path, names: &[&str]) {
@@ -50,8 +54,14 @@ fn the_graveyard_in_column_b_moves_and_restores_bs_cursor_entry() {
     crate::state::with_state_root(tmp.path(), || {
         let (mut app, _a, b) = two_columns(tmp.path(), &[], &[]);
         bury(tmp.path(), &["one.txt", "two.txt", "three.txt"]);
-        app.state.left.grid_dims.rows_per_col = 20;
-        app.state.right.as_mut().unwrap().grid_dims.rows_per_col = 20;
+        app.state.active_project_mut().left.grid_dims.rows_per_col = 20;
+        app.state
+            .active_project_mut()
+            .right
+            .as_mut()
+            .unwrap()
+            .grid_dims
+            .rows_per_col = 20;
         app.state.open_graveyard_view();
         assert!(matches!(b_col(&app).view, View::Graveyard));
         assert_eq!(b_col(&app).rows.len(), 3);
@@ -60,7 +70,11 @@ fn the_graveyard_in_column_b_moves_and_restores_bs_cursor_entry() {
         assert_eq!(b_col(&app).cursor.index, 1, "j moves b over b's own rows");
         app.handle_key(key('G')).unwrap();
         assert_eq!(b_col(&app).cursor.index, 2, "G lands on b's last row");
-        assert_eq!(app.state.left.cursor.index, 0, "a's cursor never moved");
+        assert_eq!(
+            app.state.active_project().left.cursor.index,
+            0,
+            "a's cursor never moved"
+        );
 
         let under_cursor = app.state.graveyard[2].filename.clone();
         app.handle_key(key('p')).unwrap();
@@ -81,7 +95,13 @@ fn an_undo_landing_refreshes_the_graveyard_open_in_column_b() {
         let (mut app, _a, b) = two_columns(tmp.path(), &[], &[]);
         bury(tmp.path(), &["x", "y", "z"]);
         app.state.open_graveyard_view();
-        app.state.right.as_mut().unwrap().cursor.index = 2;
+        app.state
+            .active_project_mut()
+            .right
+            .as_mut()
+            .unwrap()
+            .cursor
+            .index = 2;
 
         // The undo worker restored one entry and deleted it from the graveyard.
         let restored = app.state.graveyard[2].clone();
@@ -119,8 +139,8 @@ fn a_landed_graveyard_change_leaves_a_directory_cursor_alone() {
     crate::state::with_state_root(tmp.path(), || {
         let (mut app, _a, _b) = two_columns(tmp.path(), &["1", "2", "3", "4"], &[]);
         bury(tmp.path(), &["x"]);
-        assert_eq!(app.state.left.rows.len(), 4);
-        app.state.left.cursor.index = 3;
+        assert_eq!(app.state.active_project().left.rows.len(), 4);
+        app.state.active_project_mut().left.cursor.index = 3;
 
         app.runtime
             .graveyard_results
@@ -132,7 +152,11 @@ fn a_landed_graveyard_change_leaves_a_directory_cursor_alone() {
             });
         app.apply_graveyard_outcomes();
 
-        assert_eq!(app.state.left.cursor.index, 3, "a lists a directory");
+        assert_eq!(
+            app.state.active_project().left.cursor.index,
+            3,
+            "a lists a directory"
+        );
     });
 }
 
@@ -145,8 +169,14 @@ fn confirming_a_remove_in_column_b_clears_bs_picks_not_as() {
     crate::state::with_state_root(tmp.path(), || {
         let (mut app, a, b) = two_columns(tmp.path(), &["keep.txt"], &["gone.txt"]);
         let (in_a, in_b) = (a.join("keep.txt"), b.join("gone.txt"));
-        app.state.left.picks.insert(&in_a);
-        app.state.right.as_mut().unwrap().picks.insert(&in_b);
+        app.state.active_project_mut().left.picks.insert(&in_a);
+        app.state
+            .active_project_mut()
+            .right
+            .as_mut()
+            .unwrap()
+            .picks
+            .insert(&in_b);
 
         app.apply(&Action::RemovePrompt(None)).unwrap();
         assert_eq!(
@@ -161,7 +191,12 @@ fn confirming_a_remove_in_column_b_clears_bs_picks_not_as() {
             "b's removed picks are cleared"
         );
         assert!(
-            app.state.left.picks.iter().any(|p| p == &in_a),
+            app.state
+                .active_project()
+                .left
+                .picks
+                .iter()
+                .any(|p| p == &in_a),
             "a's picks survive a remove in b"
         );
     });
@@ -182,7 +217,11 @@ fn tab_in_a_search_in_column_b_filters_b() {
             .unwrap();
 
         assert_eq!(b_col(&app).temp_filter.as_deref(), Some("fo*"));
-        assert_eq!(app.state.left.temp_filter, None, "a is not filtered");
+        assert_eq!(
+            app.state.active_project().left.temp_filter,
+            None,
+            "a is not filtered"
+        );
     });
 }
 
@@ -204,7 +243,7 @@ fn a_config_reload_updates_the_masks_of_both_columns() {
         app.reload_config();
 
         assert!(
-            app.state.left.masks.hides("x.zzmask"),
+            app.state.active_project().left.masks.hides("x.zzmask"),
             "a picked up the new mask; flash: {:?}",
             app.flash_text()
         );
@@ -225,7 +264,7 @@ fn the_terminal_title_falls_back_to_the_focused_columns_dir() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let (mut app, _a, _b) = two_columns(tmp.path(), &[], &[]);
-        app.state.project_home = None;
+        app.state.active_project_mut().home = None;
         app.state.session_name = None;
 
         assert!(app.term_title_effect().is_some());
@@ -243,6 +282,7 @@ fn session_info_counts_the_column_it_names() {
     crate::state::with_state_root(tmp.path(), || {
         let (mut app, _a, b) = two_columns(tmp.path(), &[], &["one", "two", "three"]);
         app.state
+            .active_project_mut()
             .right
             .as_mut()
             .unwrap()

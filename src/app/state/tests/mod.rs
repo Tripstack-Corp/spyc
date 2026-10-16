@@ -36,12 +36,12 @@ fn rebuild_rows_synthesizes_struck_ghost_for_deleted_file() {
         mtime: SystemTime::UNIX_EPOCH,
     };
     let mut s = test_state();
-    s.left.view = crate::app::View::Dir;
-    s.left.sort_order = SortMode::Name;
-    s.left.sort_reversed = false;
+    s.active_project_mut().left.view = crate::app::View::Dir;
+    s.active_project_mut().left.sort_order = SortMode::Name;
+    s.active_project_mut().left.sort_reversed = false;
     // Two files on disk; `mid.txt` is tracked-but-deleted (gone from disk).
-    s.left.listing.entries = vec![mk("aaa.txt"), mk("zzz.txt")];
-    s.left.git.files.insert(
+    s.active_project_mut().left.listing.entries = vec![mk("aaa.txt"), mk("zzz.txt")];
+    s.active_project_mut().left.git.files.insert(
         "mid.txt".to_string(),
         GitFileStatus::unstaged(GitChange::Deleted),
     );
@@ -49,16 +49,29 @@ fn rebuild_rows_synthesizes_struck_ghost_for_deleted_file() {
 
     // The deleted file is synthesized as a row, interleaved by name, and flagged
     // so the view strikes it through.
-    let names: Vec<&str> = s.left.rows.iter().map(|r| r.display.as_str()).collect();
+    let names: Vec<&str> = s
+        .active_project()
+        .left
+        .rows
+        .iter()
+        .map(|r| r.display.as_str())
+        .collect();
     assert_eq!(
         names,
         ["aaa.txt", "mid.txt", "zzz.txt"],
         "ghost interleaves into the name sort"
     );
-    let ghost = s.left.rows.iter().find(|r| r.display == "mid.txt").unwrap();
+    let ghost = s
+        .active_project()
+        .left
+        .rows
+        .iter()
+        .find(|r| r.display == "mid.txt")
+        .unwrap();
     assert!(ghost.deleted, "the deleted file is a ghost row");
     assert!(
-        s.left
+        s.active_project()
+            .left
             .rows
             .iter()
             .filter(|r| r.display != "mid.txt")
@@ -87,9 +100,9 @@ fn refreshed_listing_keeps_the_columns_sort_order() {
     // Name order is a/b/c; mtime order (newest first) is its exact reverse, so
     // the two can't be confused for one another.
     let mut s = test_state();
-    s.left.view = crate::app::View::Dir;
-    s.left.sort_order = SortMode::Mtime;
-    s.left.sort_reversed = false;
+    s.active_project_mut().left.view = crate::app::View::Dir;
+    s.active_project_mut().left.sort_order = SortMode::Mtime;
+    s.active_project_mut().left.sort_reversed = false;
 
     // What the off-thread worker hands back: a name-sorted read of the dir.
     let entries = vec![mk("a.txt", 100), mk("b.txt", 200), mk("c.txt", 300)];
@@ -101,14 +114,20 @@ fn refreshed_listing_keeps_the_columns_sort_order() {
     fresh.sort(SortMode::Name, false);
     s.apply_refreshed_listing(fresh);
 
-    let names: Vec<&str> = s.left.rows.iter().map(|r| r.display.as_str()).collect();
+    let names: Vec<&str> = s
+        .active_project()
+        .left
+        .rows
+        .iter()
+        .map(|r| r.display.as_str())
+        .collect();
     assert_eq!(
         names,
         ["c.txt", "b.txt", "a.txt"],
         "a refresh must re-apply sort:mtime (newest first), not keep the read's name order"
     );
     assert_eq!(
-        s.left.sort_order,
+        s.active_project().left.sort_order,
         SortMode::Mtime,
         "the sort mode itself was never the thing that changed"
     );
@@ -121,17 +140,17 @@ fn rebuild_rows_does_not_ghost_a_deleted_file_still_on_disk() {
     use std::time::SystemTime;
 
     let mut s = test_state();
-    s.left.view = crate::app::View::Dir;
+    s.active_project_mut().left.view = crate::app::View::Dir;
     // `staged.txt` is `git rm --cached` (deleted in the index) but still present
     // on disk — it keeps its real row, no ghost duplicate.
-    s.left.listing.entries = vec![Entry {
+    s.active_project_mut().left.listing.entries = vec![Entry {
         path: PathBuf::from("/tmp/test/staged.txt"),
         name: "staged.txt".to_string(),
         kind: EntryKind::File,
         size: 1,
         mtime: SystemTime::UNIX_EPOCH,
     }];
-    s.left.git.files.insert(
+    s.active_project_mut().left.git.files.insert(
         "staged.txt".to_string(),
         GitFileStatus {
             staged: Some(GitChange::Deleted),
@@ -140,8 +159,15 @@ fn rebuild_rows_does_not_ghost_a_deleted_file_still_on_disk() {
         },
     );
     s.rebuild_rows();
-    assert_eq!(s.left.rows.len(), 1, "no ghost for an on-disk file");
-    assert!(!s.left.rows[0].deleted, "the real row stays a real row");
+    assert_eq!(
+        s.active_project().left.rows.len(),
+        1,
+        "no ghost for an on-disk file"
+    );
+    assert!(
+        !s.active_project().left.rows[0].deleted,
+        "the real row stays a real row"
+    );
 }
 
 #[test]
@@ -157,24 +183,39 @@ fn pending_ghost_holds_a_just_removed_row_struck_through() {
         mtime: SystemTime::UNIX_EPOCH,
     };
     let mut s = test_state();
-    s.left.view = crate::app::View::Dir;
-    s.left.sort_order = SortMode::Name;
-    s.left.sort_reversed = false;
+    s.active_project_mut().left.view = crate::app::View::Dir;
+    s.active_project_mut().left.sort_order = SortMode::Name;
+    s.active_project_mut().left.sort_reversed = false;
     // `mid.txt` was just removed (gone from disk) and is held optimistically —
     // the off-thread `git status` hasn't recomputed yet, so it is NOT in
     // git.files. The pending ghost keeps the row visible (struck) so it doesn't
     // momentarily vanish before the async status re-adds it (the `R` "bounce").
-    s.left.listing.entries = vec![mk("aaa.txt"), mk("zzz.txt")];
-    s.left.pending_ghosts.insert("mid.txt".to_string());
+    s.active_project_mut().left.listing.entries = vec![mk("aaa.txt"), mk("zzz.txt")];
+    s.active_project_mut()
+        .left
+        .pending_ghosts
+        .insert("mid.txt".to_string());
     s.rebuild_rows();
 
-    let names: Vec<&str> = s.left.rows.iter().map(|r| r.display.as_str()).collect();
+    let names: Vec<&str> = s
+        .active_project()
+        .left
+        .rows
+        .iter()
+        .map(|r| r.display.as_str())
+        .collect();
     assert_eq!(
         names,
         ["aaa.txt", "mid.txt", "zzz.txt"],
         "optimistic ghost interleaves into the name sort like a git ghost"
     );
-    let ghost = s.left.rows.iter().find(|r| r.display == "mid.txt").unwrap();
+    let ghost = s
+        .active_project()
+        .left
+        .rows
+        .iter()
+        .find(|r| r.display == "mid.txt")
+        .unwrap();
     assert!(
         ghost.deleted,
         "the just-removed file is held as a struck-through ghost (no vanish)"
@@ -187,27 +228,30 @@ fn pending_ghost_for_a_file_still_on_disk_keeps_its_real_row() {
     use std::time::SystemTime;
 
     let mut s = test_state();
-    s.left.view = crate::app::View::Dir;
+    s.active_project_mut().left.view = crate::app::View::Dir;
     // Removal is confirmed but the off-thread unlink hasn't landed yet — the
     // file is still on disk, so it stays a NORMAL row (no premature/duplicate
     // ghost). It only flips to a ghost once the refresh sees it gone.
-    s.left.listing.entries = vec![Entry {
+    s.active_project_mut().left.listing.entries = vec![Entry {
         path: PathBuf::from("/tmp/test/doomed.txt"),
         name: "doomed.txt".to_string(),
         kind: EntryKind::File,
         size: 1,
         mtime: SystemTime::UNIX_EPOCH,
     }];
-    s.left.pending_ghosts.insert("doomed.txt".to_string());
+    s.active_project_mut()
+        .left
+        .pending_ghosts
+        .insert("doomed.txt".to_string());
     s.rebuild_rows();
 
     assert_eq!(
-        s.left.rows.len(),
+        s.active_project().left.rows.len(),
         1,
         "no duplicate ghost while the file is still on disk"
     );
     assert!(
-        !s.left.rows[0].deleted,
+        !s.active_project().left.rows[0].deleted,
         "an on-disk row is never struck through, even when pending removal"
     );
 }
@@ -223,8 +267,10 @@ fn chdir_clears_dir_scoped_pending_ghosts() {
     // Drive the RIGHT (non-focused) column: `chdir_side` skips the process-cwd
     // `set_current_dir` for a non-focused column, so this test stays chdir-free
     // (a global cwd change races the parallel test runner).
-    s.right = Some(Commander::for_dir(&a, &s.config).unwrap());
-    s.right
+    let right = Commander::for_dir(&a, &s.active_project().config).unwrap();
+    s.active_project_mut().right = Some(right);
+    s.active_project_mut()
+        .right
         .as_mut()
         .unwrap()
         .pending_ghosts
@@ -233,7 +279,12 @@ fn chdir_clears_dir_scoped_pending_ghosts() {
     // and ghost a same-named file in `b` — the new dir's git status governs.
     s.chdir_side(Side::Right, &b).unwrap();
     assert!(
-        s.right.as_ref().unwrap().pending_ghosts.is_empty(),
+        s.active_project()
+            .right
+            .as_ref()
+            .unwrap()
+            .pending_ghosts
+            .is_empty(),
         "pending ghosts are dir-scoped and clear on chdir"
     );
 }
@@ -247,11 +298,11 @@ fn reset_orphaned_columns_snaps_a_removed_worktree_column_home() {
 
     let mut s = test_state();
     // Left (focused) sits in a real dir; Right sits in the soon-removed worktree.
-    let left = Commander::for_dir(&home, &s.config).unwrap();
-    let right = Commander::for_dir(&sub, &s.config).unwrap();
-    s.left = left;
-    s.right = Some(right);
-    s.project_home = Some(home.clone());
+    let left = Commander::for_dir(&home, &s.active_project().config).unwrap();
+    let right = Commander::for_dir(&sub, &s.active_project().config).unwrap();
+    s.active_project_mut().left = left;
+    s.active_project_mut().right = Some(right);
+    s.active_project_mut().home = Some(home.clone());
 
     // Simulate the worktree removal: Right's dir no longer exists.
     std::fs::remove_dir_all(&sub).unwrap();
@@ -259,8 +310,8 @@ fn reset_orphaned_columns_snaps_a_removed_worktree_column_home() {
 
     // Right snapped back to home (non-focused → no process-cwd change); Left
     // (valid + focused) is left untouched.
-    assert_eq!(s.right.as_ref().unwrap().listing.dir, home);
-    assert_eq!(s.left.listing.dir, home);
+    assert_eq!(s.active_project().right.as_ref().unwrap().listing.dir, home);
+    assert_eq!(s.active_project().left.listing.dir, home);
 }
 
 /// A plain `refresh_listing` (the fs-event / poll path) must self-heal a column
@@ -278,9 +329,11 @@ fn refresh_listing_self_heals_a_column_whose_dir_was_deleted() {
     std::fs::create_dir(&sub).unwrap();
 
     let mut s = test_state();
-    s.left = Commander::for_dir(&home, &s.config).unwrap();
-    s.right = Some(Commander::for_dir(&sub, &s.config).unwrap());
-    s.project_home = Some(home.clone());
+    let left = Commander::for_dir(&home, &s.active_project().config).unwrap();
+    s.active_project_mut().left = left;
+    let right = Commander::for_dir(&sub, &s.active_project().config).unwrap();
+    s.active_project_mut().right = Some(right);
+    s.active_project_mut().home = Some(home.clone());
 
     // Remove Right's dir WITHOUT going through spyc (the external-removal case).
     std::fs::remove_dir_all(&sub).unwrap();
@@ -288,7 +341,7 @@ fn refresh_listing_self_heals_a_column_whose_dir_was_deleted() {
     s.refresh_listing();
 
     assert_eq!(
-        s.right.as_ref().unwrap().listing.dir,
+        s.active_project().right.as_ref().unwrap().listing.dir,
         home,
         "refresh_listing snaps a column off a deleted dir back to PROJECT_HOME"
     );
@@ -313,10 +366,12 @@ fn reset_orphaned_falls_back_to_nearest_ancestor_when_home_is_gone() {
     std::fs::create_dir_all(&deep).unwrap();
 
     let mut s = test_state();
-    s.left = Commander::for_dir(&base, &s.config).unwrap();
-    s.right = Some(Commander::for_dir(&deep, &s.config).unwrap());
+    let left = Commander::for_dir(&base, &s.active_project().config).unwrap();
+    s.active_project_mut().left = left;
+    let right = Commander::for_dir(&deep, &s.active_project().config).unwrap();
+    s.active_project_mut().right = Some(right);
     // PROJECT_HOME unset → the heal must fall back to an ancestor, not no-op.
-    s.project_home = None;
+    s.active_project_mut().home = None;
 
     // Remove b/ (and c/ under it), leaving `a` as the nearest existing ancestor.
     std::fs::remove_dir_all(base.join("a").join("b")).unwrap();
@@ -324,7 +379,7 @@ fn reset_orphaned_falls_back_to_nearest_ancestor_when_home_is_gone() {
     s.reset_orphaned_columns_to_home();
 
     assert_eq!(
-        s.right.as_ref().unwrap().listing.dir,
+        s.active_project().right.as_ref().unwrap().listing.dir,
         base.join("a"),
         "falls back to the nearest existing ancestor when PROJECT_HOME is gone"
     );
@@ -340,7 +395,7 @@ fn reset_orphaned_falls_back_to_nearest_ancestor_when_home_is_gone() {
 /// Build a test state with named rows (simulating a directory listing).
 fn state_with_rows(names: &[&str]) -> AppState {
     let mut s = test_state();
-    s.left.rows = names
+    s.active_project_mut().left.rows = names
         .iter()
         .map(|n| RowData {
             path: PathBuf::from(format!("/tmp/test/{n}")),
@@ -359,7 +414,7 @@ fn state_with_real_files(tmp: &std::path::Path, names: &[&str]) -> AppState {
     for name in names {
         std::fs::write(tmp.join(name), format!("content of {name}")).unwrap();
     }
-    s.left.rows = names
+    s.active_project_mut().left.rows = names
         .iter()
         .map(|n| RowData {
             path: tmp.join(n),
@@ -375,7 +430,7 @@ fn dirty_state(names: &[&str], dirty: &[&str]) -> AppState {
     use crate::ui::list_view::{GitChange, GitFileStatus};
     let mut s = state_with_rows(names);
     for d in dirty {
-        s.left.git.files.insert(
+        s.active_project_mut().left.git.files.insert(
             (*d).to_string(),
             GitFileStatus::unstaged(GitChange::Modified),
         );
@@ -535,8 +590,14 @@ fn selection_returns_cursor_item_when_no_picks() {
 #[test]
 fn selection_returns_picks_when_present() {
     let mut s = state_with_rows(&["a.txt", "b.txt", "c.txt"]);
-    s.left.picks.toggle(Path::new("/tmp/test/b.txt"));
-    s.left.picks.toggle(Path::new("/tmp/test/c.txt"));
+    s.active_project_mut()
+        .left
+        .picks
+        .toggle(Path::new("/tmp/test/b.txt"));
+    s.active_project_mut()
+        .left
+        .picks
+        .toggle(Path::new("/tmp/test/c.txt"));
     let paths = s.selection_paths();
     assert_eq!(paths.len(), 2);
 }
@@ -585,8 +646,8 @@ fn percent_stays_absolute_inside_an_archive_mount() {
         },
         &[],
     );
-    s.left.listing.dir = PathBuf::from("/tmp/pkg.zip");
-    s.left.rows = vec![RowData {
+    s.active_project_mut().left.listing.dir = PathBuf::from("/tmp/pkg.zip");
+    s.active_project_mut().left.rows = vec![RowData {
         path: PathBuf::from("/tmp/pkg.zip/a.txt"),
         display: "a.txt".to_string(),
         kind: EntryKind::File,
@@ -613,17 +674,23 @@ fn selection_pane_paths_marks_only_real_directories() {
         mtime: SystemTime::UNIX_EPOCH,
     };
     let mut s = test_state();
-    s.left.listing.entries = vec![
+    s.active_project_mut().left.listing.entries = vec![
         mk("dir", EntryKind::Dir),
         mk("link", EntryKind::Symlink),
         mk("f.txt", EntryKind::File),
     ];
     s.rebuild_rows();
     // A filter hides `dir` from the visible rows.
-    s.left.rows.retain(|r| !r.path.ends_with("dir"));
-    assert_eq!(s.left.rows.len(), 2);
+    s.active_project_mut()
+        .left
+        .rows
+        .retain(|r| !r.path.ends_with("dir"));
+    assert_eq!(s.active_project().left.rows.len(), 2);
     for name in ["dir", "link", "f.txt"] {
-        s.left.picks.insert(&PathBuf::from("/tmp/test").join(name));
+        s.active_project_mut()
+            .left
+            .picks
+            .insert(&PathBuf::from("/tmp/test").join(name));
     }
     let mut got: Vec<(String, bool)> = s
         .selection_pane_paths()
@@ -645,7 +712,7 @@ fn selection_pane_paths_marks_only_real_directories() {
 #[test]
 fn selection_pane_paths_marks_a_directory_under_the_cursor() {
     let mut s = state_with_rows(&["sub", "a.txt"]);
-    s.left.rows[0].kind = EntryKind::Dir;
+    s.active_project_mut().left.rows[0].kind = EntryKind::Dir;
     let got = s.selection_pane_paths();
     assert_eq!(got.len(), 1);
     assert!(got[0].is_dir, "{got:?}");
@@ -657,17 +724,27 @@ fn selection_pane_paths_marks_a_directory_under_the_cursor() {
 fn toggle_pick_adds_and_removes() {
     let mut s = state_with_rows(&["a.txt", "b.txt"]);
     s.toggle_pick_cursor();
-    assert!(s.left.picks.contains(Path::new("/tmp/test/a.txt")));
+    assert!(
+        s.active_project()
+            .left
+            .picks
+            .contains(Path::new("/tmp/test/a.txt"))
+    );
     s.toggle_pick_cursor();
-    assert!(!s.left.picks.contains(Path::new("/tmp/test/a.txt")));
+    assert!(
+        !s.active_project()
+            .left
+            .picks
+            .contains(Path::new("/tmp/test/a.txt"))
+    );
 }
 
 #[test]
 fn toggle_pick_noop_in_inventory_view() {
     let mut s = state_with_rows(&["a.txt"]);
-    s.left.view = View::Inventory;
+    s.active_project_mut().left.view = View::Inventory;
     s.toggle_pick_cursor();
-    assert!(s.left.picks.is_empty());
+    assert!(s.active_project().left.picks.is_empty());
 }
 
 // ── toggle_all_picks ──────────────────────────────────────────
@@ -676,9 +753,9 @@ fn toggle_pick_noop_in_inventory_view() {
 fn toggle_all_picks_selects_then_clears() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     s.toggle_all_picks();
-    assert_eq!(s.left.picks.len(), 3);
+    assert_eq!(s.active_project().left.picks.len(), 3);
     s.toggle_all_picks();
-    assert!(s.left.picks.is_empty());
+    assert!(s.active_project().left.picks.is_empty());
 }
 
 // ── take / drop / inventory ───────────────────────────────────
@@ -702,8 +779,14 @@ fn take_picks_to_inventory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut s = state_with_real_files(tmp.path(), &["a.txt", "b.txt"]);
-        s.left.picks.toggle(&tmp.path().join("a.txt"));
-        s.left.picks.toggle(&tmp.path().join("b.txt"));
+        s.active_project_mut()
+            .left
+            .picks
+            .toggle(&tmp.path().join("a.txt"));
+        s.active_project_mut()
+            .left
+            .picks
+            .toggle(&tmp.path().join("b.txt"));
         let fx = s.take();
         let inv = fx.inventory().expect("one Inventory effect");
         assert!(matches!(
@@ -734,11 +817,11 @@ fn drop_removes_from_inventory() {
 #[test]
 fn toggle_inventory_switches_view() {
     let mut s = test_state();
-    assert_eq!(s.left.view, View::Dir);
+    assert_eq!(s.active_project().left.view, View::Dir);
     s.toggle_inventory_view();
-    assert_eq!(s.left.view, View::Inventory);
+    assert_eq!(s.active_project().left.view, View::Inventory);
     s.toggle_inventory_view();
-    assert_eq!(s.left.view, View::Dir);
+    assert_eq!(s.active_project().left.view, View::Dir);
 }
 
 // ── focus_on_path ─────────────────────────────────────────────
@@ -747,15 +830,15 @@ fn toggle_inventory_switches_view() {
 fn focus_on_path_sets_cursor() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     s.focus_on_path(Path::new("/tmp/test/c"));
-    assert_eq!(s.left.cursor.index, 2);
+    assert_eq!(s.active_project().left.cursor.index, 2);
 }
 
 #[test]
 fn focus_on_missing_path_is_noop() {
     let mut s = state_with_rows(&["a", "b"]);
-    s.left.cursor.index = 1;
+    s.active_project_mut().left.cursor.index = 1;
     s.focus_on_path(Path::new("/tmp/test/nope"));
-    assert_eq!(s.left.cursor.index, 1); // unchanged
+    assert_eq!(s.active_project().left.cursor.index, 1); // unchanged
 }
 
 // ── dispatch_command ──────────────────────────────────────────
@@ -763,10 +846,10 @@ fn focus_on_missing_path_is_noop() {
 #[test]
 fn climb_from_inventory_exits_to_dir_view_no_effect() {
     let mut s = test_state();
-    s.left.view = View::Inventory;
+    s.active_project_mut().left.view = View::Inventory;
     let fx = s.climb();
     assert!(fx.is_empty(), "inventory exit emits no effect");
-    assert_eq!(s.left.view, View::Dir);
+    assert_eq!(s.active_project().left.view, View::Dir);
 }
 
 /// End-to-end-ish coverage of the git refresh pipeline. Edit a
@@ -797,41 +880,42 @@ fn refresh_listing_picks_up_edit_and_clears_after_commit() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.left.listing.dir = root.clone();
-    s.start_dir = root.clone();
+    s.active_project_mut().left.listing.dir = root.clone();
+    s.active_project_mut().start_dir = root.clone();
     s.update_repo_root(crate::app::state::Side::Left, &root);
-    s.left.git.info = s.compute_git_info_fast(crate::app::state::Side::Left);
+    let git_info = s.compute_git_info_fast(crate::app::state::Side::Left);
+    s.active_project_mut().left.git.info = git_info;
 
     // Clean repo: refresh sees no modifications.
     s.refresh_listing();
     assert!(
-        s.left.git.files.is_empty(),
+        s.active_project().left.git.files.is_empty(),
         "clean repo: no markers (got {:?})",
-        s.left.git.files
+        s.active_project().left.git.files
     );
 
     // Working-tree edit → `M file.txt` should surface on next refresh.
     std::fs::write(root.join("file.txt"), "v2\n").unwrap();
     // Bypass the in-state 1 s invalidation throttle so this call
     // re-fetches instead of reusing the cached clean snapshot.
-    s.left.git_cache.last_git_invalidation = None;
+    s.active_project_mut().left.git_cache.last_git_invalidation = None;
     s.refresh_listing();
     assert!(
-        s.left.git.files.contains_key("file.txt"),
+        s.active_project().left.git.files.contains_key("file.txt"),
         "expected M marker for file.txt after edit; got {:?}",
-        s.left.git.files
+        s.active_project().left.git.files
     );
 
     // Commit it → marker should clear (`.git/index` mtime moves, so
     // the mtime-cache invalidates on its own).
     run_git(&["add", "file.txt"]);
     run_git(&["commit", "-q", "-m", "v2"]);
-    s.left.git_cache.last_git_invalidation = None;
+    s.active_project_mut().left.git_cache.last_git_invalidation = None;
     s.refresh_listing();
     assert!(
-        !s.left.git.files.contains_key("file.txt"),
+        !s.active_project().left.git.files.contains_key("file.txt"),
         "expected marker to clear after commit; got {:?}",
-        s.left.git.files
+        s.active_project().left.git.files
     );
 }
 
@@ -858,30 +942,34 @@ fn throttled_worktree_edit_converges_on_next_poll() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.left.listing.dir = root.clone();
-    s.start_dir = root.clone();
+    s.active_project_mut().left.listing.dir = root.clone();
+    s.active_project_mut().start_dir = root.clone();
     s.update_repo_root(crate::app::state::Side::Left, &root);
-    s.left.git.info = s.compute_git_info_fast(crate::app::state::Side::Left);
+    let git_info = s.compute_git_info_fast(crate::app::state::Side::Left);
+    s.active_project_mut().left.git.info = git_info;
 
     // Walk once (clean) to seed git_poll_cache with the current index/HEAD
     // mtimes — this is what the poll short-circuits against.
     s.refresh_git_state();
-    assert!(s.left.git.files.is_empty(), "clean baseline");
+    assert!(
+        s.active_project().left.git.files.is_empty(),
+        "clean baseline"
+    );
 
     // Working-tree edit — moves the file's mtime, NOT .git/index/HEAD.
     std::fs::write(root.join("file.txt"), "v2\n").unwrap();
 
     // Simulate the fs-event landing inside the 1 s throttle window: a recent
     // invalidation means refresh_listing skips the re-walk this round.
-    s.left.git_cache.last_git_invalidation = Some(std::time::Instant::now());
+    s.active_project_mut().left.git_cache.last_git_invalidation = Some(std::time::Instant::now());
     s.refresh_listing();
     assert!(
-        s.left.git.files.is_empty(),
+        s.active_project().left.git.files.is_empty(),
         "throttled: marker not surfaced yet (got {:?})",
-        s.left.git.files
+        s.active_project().left.git.files
     );
     assert!(
-        s.left.git_cache.pending_worktree_rewalk,
+        s.active_project().left.git_cache.pending_worktree_rewalk,
         "throttle-skip must defer a re-walk"
     );
 
@@ -890,12 +978,12 @@ fn throttled_worktree_edit_converges_on_next_poll() {
     let changed = s.refresh_git_state();
     assert!(changed, "forced re-walk should report a change");
     assert!(
-        s.left.git.files.contains_key("file.txt"),
+        s.active_project().left.git.files.contains_key("file.txt"),
         "deferred re-walk must surface the M marker; got {:?}",
-        s.left.git.files
+        s.active_project().left.git.files
     );
     assert!(
-        !s.left.git_cache.pending_worktree_rewalk,
+        !s.active_project().left.git_cache.pending_worktree_rewalk,
         "flag cleared after the forced re-walk"
     );
 
@@ -934,16 +1022,20 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.left.listing.dir = root.clone();
-    s.start_dir = root.clone();
+    s.active_project_mut().left.listing.dir = root.clone();
+    s.active_project_mut().start_dir = root.clone();
     s.update_repo_root(crate::app::state::Side::Left, &root); // sets current_repo_root
 
     // Wire the "worker" and force a clean cache-miss baseline so the
     // asserted call takes the enqueue branch deterministically.
-    s.left.git_cache.git_worker_available = true;
-    s.left.git_cache.git_status_cache = None;
-    s.left.git_cache.pending_git_requests.clear();
-    let gen_before = s.left.git_cache.git_generation;
+    s.active_project_mut().left.git_cache.git_worker_available = true;
+    s.active_project_mut().left.git_cache.git_status_cache = None;
+    s.active_project_mut()
+        .left
+        .git_cache
+        .pending_git_requests
+        .clear();
+    let gen_before = s.active_project().left.git_cache.git_generation;
 
     let map = s.git_file_statuses_cached(crate::app::state::Side::Left, &root, false);
 
@@ -952,27 +1044,36 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
         "no cache yet → the worker path returns an empty map this frame (markers arrive async)"
     );
     assert_eq!(
-        s.left.git_cache.pending_git_requests.len(),
+        s.active_project().left.git_cache.pending_git_requests.len(),
         1,
         "exactly one request enqueued for the run loop to flush"
     );
-    let req = &s.left.git_cache.pending_git_requests[0];
+    let req = &s.active_project().left.git_cache.pending_git_requests[0];
     assert_eq!(
-        s.left.git_cache.current_repo_root.as_deref(),
+        s.active_project()
+            .left
+            .git_cache
+            .current_repo_root
+            .as_deref(),
         Some(req.repo_root.as_path()),
         "request carries the current repo root"
     );
     assert_eq!(
-        s.left.git_cache.git_generation,
+        s.active_project().left.git_cache.git_generation,
         gen_before.wrapping_add(1),
         "generation bumped once"
     );
     assert_eq!(
-        req.generation, s.left.git_cache.git_generation,
+        req.generation,
+        s.active_project().left.git_cache.git_generation,
         "enqueued request stamped with the bumped generation"
     );
     assert!(
-        s.left.git_cache.last_git_request_at.is_some(),
+        s.active_project()
+            .left
+            .git_cache
+            .last_git_request_at
+            .is_some(),
         "request-sent timestamp stamped for the activity overlay"
     );
 }
@@ -1001,9 +1102,9 @@ fn forced_rewalk_keeps_stale_markers_and_star_instead_of_blanking() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.left.listing.dir = root.clone();
+    s.active_project_mut().left.listing.dir = root.clone();
     s.update_repo_root(Side::Left, &root);
-    s.left.git_cache.git_worker_available = true;
+    s.active_project_mut().left.git_cache.git_worker_available = true;
 
     // Seed a populated cache stamped with the CURRENT mtimes, so the reuse check
     // would normally skip the walk — `force` must re-walk anyway. This is exactly
@@ -1012,19 +1113,24 @@ fn forced_rewalk_keeps_stale_markers_and_star_instead_of_blanking() {
     let (idx, head) = s
         .compute_git_mtime_key_fast(Side::Left)
         .expect("repo mtimes");
-    s.left.git_cache.git_status_cache = Some(crate::app::state::GitStatusCache {
-        repo_root: root.clone(),
-        index_mtime: idx,
-        head_mtime: head,
-        entries: vec![crate::git::status::StatusEntry {
-            rela_path: "file.txt".to_string(),
-            staged: None,
-            unstaged: Some(crate::ui::list_view::GitChange::Modified),
-            untracked: false,
-        }],
-    });
-    s.left.git_cache.pending_git_requests.clear();
-    let gen_before = s.left.git_cache.git_generation;
+    s.active_project_mut().left.git_cache.git_status_cache =
+        Some(crate::app::state::GitStatusCache {
+            repo_root: root.clone(),
+            index_mtime: idx,
+            head_mtime: head,
+            entries: vec![crate::git::status::StatusEntry {
+                rela_path: "file.txt".to_string(),
+                staged: None,
+                unstaged: Some(crate::ui::list_view::GitChange::Modified),
+                untracked: false,
+            }],
+        });
+    s.active_project_mut()
+        .left
+        .git_cache
+        .pending_git_requests
+        .clear();
+    let gen_before = s.active_project().left.git_cache.git_generation;
 
     let map = s.git_file_statuses_cached(Side::Left, &root, true);
 
@@ -1035,12 +1141,12 @@ fn forced_rewalk_keeps_stale_markers_and_star_instead_of_blanking() {
     );
     // ...and the fresh walk is still enqueued off-thread.
     assert_eq!(
-        s.left.git_cache.pending_git_requests.len(),
+        s.active_project().left.git_cache.pending_git_requests.len(),
         1,
         "forced re-walk still enqueues the async walk"
     );
     assert_eq!(
-        s.left.git_cache.git_generation,
+        s.active_project().left.git_cache.git_generation,
         gen_before.wrapping_add(1),
         "generation bumped once for the enqueued walk"
     );
@@ -1061,19 +1167,19 @@ fn forced_rewalk_keeps_stale_markers_and_star_instead_of_blanking() {
 fn tool_root_prefers_worktree_then_project_home_then_listing() {
     use crate::app::state::Side;
     let mut s = test_state();
-    s.left.listing.dir = PathBuf::from("/list/a");
-    s.project_home = None;
-    s.left.git_cache.current_repo_root = None;
+    s.active_project_mut().left.listing.dir = PathBuf::from("/list/a");
+    s.active_project_mut().home = None;
+    s.active_project_mut().left.git_cache.current_repo_root = None;
 
     // No repo, no PROJECT_HOME → the listing dir.
     assert_eq!(s.tool_root(Side::Left), PathBuf::from("/list/a"));
 
     // PROJECT_HOME set, still no repo → PROJECT_HOME.
-    s.project_home = Some(PathBuf::from("/proj"));
+    s.active_project_mut().home = Some(PathBuf::from("/proj"));
     assert_eq!(s.tool_root(Side::Left), PathBuf::from("/proj"));
 
     // Inside a repo → the worktree root wins over PROJECT_HOME.
-    s.left.git_cache.current_repo_root = Some(PathBuf::from("/repo/a"));
+    s.active_project_mut().left.git_cache.current_repo_root = Some(PathBuf::from("/repo/a"));
     assert_eq!(s.tool_root(Side::Left), PathBuf::from("/repo/a"));
 }
 
@@ -1087,9 +1193,9 @@ fn worktree_anchor_leaves_a_mount_for_the_project_root() {
     use crate::app::state::Side;
     let mut s = test_state();
     let archive = PathBuf::from("/src/pkg.tar.gz");
-    s.left.listing.dir = PathBuf::from("/src");
-    s.project_home = Some(PathBuf::from("/src/spyc"));
-    s.left.git_cache.current_repo_root = None;
+    s.active_project_mut().left.listing.dir = PathBuf::from("/src");
+    s.active_project_mut().home = Some(PathBuf::from("/src/spyc"));
+    s.active_project_mut().left.git_cache.current_repo_root = None;
 
     // Outside a mount the column's own dir is the anchor, untouched.
     assert_eq!(s.worktree_anchor(), PathBuf::from("/src"));
@@ -1118,7 +1224,7 @@ fn worktree_anchor_leaves_a_mount_for_the_project_root() {
     );
 
     for inside in [archive.clone(), archive.join("sub")] {
-        s.left.listing.dir = inside.clone();
+        s.active_project_mut().left.listing.dir = inside.clone();
         assert_eq!(
             s.worktree_anchor(),
             PathBuf::from("/src/spyc"),
@@ -1129,7 +1235,8 @@ fn worktree_anchor_leaves_a_mount_for_the_project_root() {
 
     // A mount clears the column's git state, but if a repo root is known it wins
     // over PROJECT_HOME — same precedence as `tool_root`.
-    s.left.git_cache.current_repo_root = Some(PathBuf::from("/src/other-repo"));
+    s.active_project_mut().left.git_cache.current_repo_root =
+        Some(PathBuf::from("/src/other-repo"));
     assert_eq!(s.worktree_anchor(), PathBuf::from("/src/other-repo"));
     assert_eq!(s.tool_root(Side::Left), s.worktree_anchor());
 }
@@ -1143,9 +1250,9 @@ fn worktree_anchor_leaves_a_mount_for_the_project_root() {
 fn harpoon_root_has_no_listing_fallback_unlike_tool_root() {
     use crate::app::state::Side;
     let mut s = test_state();
-    s.left.listing.dir = PathBuf::from("/list/a");
-    s.project_home = None;
-    s.left.git_cache.current_repo_root = None;
+    s.active_project_mut().left.listing.dir = PathBuf::from("/list/a");
+    s.active_project_mut().home = None;
+    s.active_project_mut().left.git_cache.current_repo_root = None;
 
     // No repo, no PROJECT_HOME → None (NOT the listing dir — the contrast with
     // tool_root, which returns /list/a here).
@@ -1153,11 +1260,11 @@ fn harpoon_root_has_no_listing_fallback_unlike_tool_root() {
     assert_eq!(s.tool_root(Side::Left), PathBuf::from("/list/a"));
 
     // PROJECT_HOME set → Some(project_home).
-    s.project_home = Some(PathBuf::from("/proj"));
+    s.active_project_mut().home = Some(PathBuf::from("/proj"));
     assert_eq!(s.harpoon_root(Side::Left), Some(PathBuf::from("/proj")));
 
     // Inside a repo → the worktree root wins.
-    s.left.git_cache.current_repo_root = Some(PathBuf::from("/repo/a"));
+    s.active_project_mut().left.git_cache.current_repo_root = Some(PathBuf::from("/repo/a"));
     assert_eq!(s.harpoon_root(Side::Left), Some(PathBuf::from("/repo/a")));
 }
 
@@ -1182,8 +1289,8 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
     run_git(&["commit", "-q", "-m", "v1"]);
 
     let mut s = test_state();
-    s.left.listing.dir = root.clone();
-    s.start_dir = root.clone();
+    s.active_project_mut().left.listing.dir = root.clone();
+    s.active_project_mut().start_dir = root.clone();
     s.update_repo_root(crate::app::state::Side::Left, &root); // sets current_repo_root + current_gitdir
 
     // First resolve opens gix and seeds the cache.
@@ -1193,6 +1300,7 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
         Some("main")
     );
     let (cached_root, cached_mtime, _) = s
+        .active_project()
         .left
         .git_cache
         .head_branch_cache
@@ -1202,7 +1310,7 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
 
     // Cache HIT: poison the stored string but keep the (root, mtime) key.
     // A matching key must reuse the poisoned value — proving no gix re-open.
-    s.left.git_cache.head_branch_cache =
+    s.active_project_mut().left.git_cache.head_branch_cache =
         Some((cached_root.clone(), cached_mtime, "POISONED".to_string()));
     assert_eq!(
         s.compute_git_info_fast(crate::app::state::Side::Left)
@@ -1213,7 +1321,7 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
 
     // Cache MISS: force the stored mtime stale. A differing key must
     // re-resolve via gix, recover the real branch, and re-cache.
-    s.left.git_cache.head_branch_cache =
+    s.active_project_mut().left.git_cache.head_branch_cache =
         Some((cached_root, std::time::UNIX_EPOCH, "POISONED".to_string()));
     assert_eq!(
         s.compute_git_info_fast(crate::app::state::Side::Left)
@@ -1222,7 +1330,8 @@ fn compute_git_info_fast_memoizes_branch_by_head_mtime() {
         "stale HEAD mtime must re-resolve the branch"
     );
     assert_eq!(
-        s.left
+        s.active_project()
+            .left
             .git_cache
             .head_branch_cache
             .as_ref()
@@ -1244,7 +1353,7 @@ fn compute_git_mtime_key_fast_tracks_branch_ref_updates() {
     crate::git::test_support::run_git(root, &["commit", "-m", "init"]);
 
     let mut s = test_state();
-    s.left.listing.dir = root.to_path_buf();
+    s.active_project_mut().left.listing.dir = root.to_path_buf();
     s.update_repo_root(crate::app::state::Side::Left, root);
 
     let (_, head_before) = s

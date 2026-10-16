@@ -417,7 +417,7 @@ impl App {
             }
             match key.code {
                 KeyCode::Char('y' | 'Y') => {
-                    let include_title = self.state.config.yank.include_pager_title;
+                    let include_title = self.state.active_project().config.yank.include_pager_title;
                     if let Some((text, n, _)) = view.visual_yank_text(include_title) {
                         let unit = if in_block { "row" } else { "line" };
                         let ok_msg = format!(
@@ -615,7 +615,7 @@ mod tests {
         use crate::ui::pager::{Mount, PAGER_HELP_TITLE, SCROLLBACK_HELP_TITLE};
 
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.focus = Focus::Pane; // bottom scrollback owns input
+        app.state.active_project_mut().focus = Focus::Pane; // bottom scrollback owns input
         let mut sb = PagerView::new_plain(
             "transcript",
             (0..20).map(|i| format!("line {i}")).collect::<Vec<_>>(),
@@ -771,7 +771,7 @@ mod tests {
         use crate::ui::pager::Mount;
 
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.focus = Focus::Pane;
+        app.state.active_project_mut().focus = Focus::Pane;
         let mut sb = PagerView::new_plain("transcript", vec!["line".to_string()]);
         sb.pane_scroll = true;
         sb.mount = Mount::LowerPane;
@@ -819,7 +819,7 @@ mod tests {
         use crate::ui::pager::Mount;
 
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.focus = Focus::Pane;
+        app.state.active_project_mut().focus = Focus::Pane;
         let mut sb = PagerView::new_plain("transcript", vec!["line".to_string()]);
         sb.pane_scroll = true;
         sb.mount = Mount::LowerPane;
