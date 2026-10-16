@@ -806,7 +806,6 @@ fn a_w_n_worktree_is_entered_only_by_the_project_that_asked() {
 /// has to stay on screen. The tree was created, but nothing opened where the
 /// agent's follow-ups are about to go.
 #[test]
-#[ignore = "red: the success flash replaces the open's error right after it is raised"]
 fn a_worktree_that_fails_to_open_in_b_keeps_its_error_on_screen() {
     use crate::app::worktree_ops::WorktreeCompletion;
     let tmp = tempfile::tempdir().unwrap();
@@ -838,7 +837,6 @@ fn a_worktree_that_fails_to_open_in_b_keeps_its_error_on_screen() {
 /// isn't open in `b`, so the agent must not be told it is.
 #[cfg(unix)]
 #[test]
-#[ignore = "red: the reply says `b` opened whether or not it did"]
 fn open_worktree_reports_a_b_that_failed_to_open() {
     use std::os::unix::fs::PermissionsExt;
     let tmp = tempfile::tempdir().unwrap();

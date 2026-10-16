@@ -97,7 +97,8 @@ fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
         // Agent-initiated: user is mid-conversation in the pane.
         let mut app = App::test_app(dir.clone());
         app.state.active_project_mut().focus = state::Focus::Pane;
-        app.open_second_commander_at_background(&b);
+        app.open_second_commander_at_background(&b)
+            .expect("b opens");
         assert!(
             app.state.pane_focused(),
             "background open leaves the keyboard on the pane (still typing to the agent)"
@@ -129,7 +130,6 @@ fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
 /// then fails to open, nothing took the preview's place, so the preview has to
 /// stay where the user was reading it.
 #[test]
-#[ignore = "red: the preview is set aside before the open, and a failed open leaves it hidden"]
 fn a_failed_background_open_leaves_the_preview_in_view() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -146,7 +146,8 @@ fn a_failed_background_open_leaves_the_preview_in_view() {
             vec!["the line being read".to_string()],
         ));
 
-        app.open_second_commander_at_background(&tmp.path().join("gone"));
+        let opened = app.open_second_commander_at_background(&tmp.path().join("gone"));
+        assert!(opened.is_err(), "the caller hears that b didn't open");
         assert!(app.state.active_project().right.is_none(), "b never opened");
         assert!(
             app.view.project().right_pager.is_some(),
@@ -234,7 +235,8 @@ fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
         // An agent opens a worktree in `b`.
         let other = tmp.path().join("wt");
         std::fs::create_dir(&other).unwrap();
-        app.open_second_commander_at_background(&other);
+        app.open_second_commander_at_background(&other)
+            .expect("b opens");
         assert!(
             app.state.active_project().right.is_some(),
             "the agent's column opened"

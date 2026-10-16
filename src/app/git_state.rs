@@ -625,7 +625,8 @@ mod tests {
         }
 
         let mut app = App::test_app(a_dir);
-        app.open_second_commander_at_background(&b_dir);
+        app.open_second_commander_at_background(&b_dir)
+            .expect("b opens");
         // Opening points `vsplit.focus` at Right; put the keyboard back on `a`,
         // which is the arrangement that goes stale.
         app.state

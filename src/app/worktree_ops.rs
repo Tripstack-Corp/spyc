@@ -418,9 +418,19 @@ impl App {
         // the agent's follow-ups target it) without stealing the pane the user is
         // typing into.
         if let Some(path) = open_path {
-            self.open_second_commander_at_background(&path);
-            if let Some(message) = flash.as_mut() {
-                message.push_str(" (opened in b)");
+            match self.open_second_commander_at_background(&path) {
+                Ok(()) => {
+                    if let Some(message) = flash.as_mut() {
+                        message.push_str(" (opened in b)");
+                    }
+                }
+                // The tree exists, but `b` didn't open: the line says both, so
+                // the success half can't hide the failure.
+                Err(e) => {
+                    let created = flash.take().unwrap_or_default();
+                    self.state
+                        .flash_error(format!("{created}; couldn't open it in b: {e:#}"));
+                }
             }
         }
         if let Some(message) = flash {

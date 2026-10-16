@@ -91,9 +91,11 @@ mod tests {
                 .dir
                 .clone_from(&a);
             assert_eq!(app.desired_process_cwd(), Some(a.as_path()));
-            app.open_second_commander_at_background(&w1);
+            app.open_second_commander_at_background(&w1)
+                .expect("b opens");
             assert_eq!(app.desired_process_cwd(), Some(w1.as_path()));
-            app.open_second_commander_at_background(&w2);
+            app.open_second_commander_at_background(&w2)
+                .expect("b opens");
             assert_eq!(app.desired_process_cwd(), Some(w2.as_path()));
             // And the settle owes the move from wherever the process was left.
             assert_eq!(

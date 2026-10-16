@@ -177,6 +177,43 @@ impl App {
         Ok(target)
     }
 
+    /// `open_worktree`: open (or re-target) column `b` at `path`, answering
+    /// with where it opened or why it didn't.
+    fn mcp_open_worktree(&mut self, path: &str) -> crate::mcp_cmd::McpResponse {
+        use crate::mcp_cmd::McpResponse;
+        let path = path.trim();
+        if path.is_empty() {
+            return McpResponse::Error {
+                message: "missing required parameter: path".into(),
+            };
+        }
+        let raw = std::path::PathBuf::from(path);
+        let target = if raw.is_relative() {
+            self.state.worktree_anchor().join(&raw)
+        } else {
+            raw
+        };
+        if !target.is_dir() {
+            return McpResponse::Error {
+                message: format!("not a directory: {}", target.display()),
+            };
+        }
+        // Open (or re-target) column `b` at the worktree. `cur()` now
+        // resolves to `b`, so a follow-up navigate_to/search/pick lands
+        // there while `a` stays put. Background open: the user keeps
+        // typing to the pane below — we don't steal keyboard focus.
+        if let Err(e) = self.open_second_commander_at_background(&target) {
+            let message = format!("open {}: {e:#}", target.display());
+            self.state.flash_error(format!("[mcp] {message}"));
+            return McpResponse::Error { message };
+        }
+        let opened = self.state.cur().listing.dir.clone();
+        self.write_context();
+        McpResponse::Ok {
+            message: format!("opened column b at {}", opened.display()),
+        }
+    }
+
     /// Execute a writable MCP command from Claude. Runs on the main
     /// thread with full access to `AppState`. Returns a response that
     /// the MCP server thread forwards to Claude.
@@ -301,35 +338,7 @@ impl App {
                 // (off-thread) — never reached through this match.
                 unreachable!("worktree create/remove/clean go through plan_worktree_job")
             }
-            McpCommand::OpenWorktree { path } => {
-                let path = path.trim();
-                if path.is_empty() {
-                    return McpResponse::Error {
-                        message: "missing required parameter: path".into(),
-                    };
-                }
-                let raw = std::path::PathBuf::from(path);
-                let target = if raw.is_relative() {
-                    self.state.worktree_anchor().join(&raw)
-                } else {
-                    raw
-                };
-                if !target.is_dir() {
-                    return McpResponse::Error {
-                        message: format!("not a directory: {}", target.display()),
-                    };
-                }
-                // Open (or re-target) column `b` at the worktree. `cur()` now
-                // resolves to `b`, so a follow-up navigate_to/search/pick lands
-                // there while `a` stays put. Background open: the user keeps
-                // typing to the pane below — we don't steal keyboard focus.
-                self.open_second_commander_at_background(&target);
-                let opened = self.state.cur().listing.dir.clone();
-                self.write_context();
-                McpResponse::Ok {
-                    message: format!("opened column b at {}", opened.display()),
-                }
-            }
+            McpCommand::OpenWorktree { path } => self.mcp_open_worktree(&path),
             McpCommand::ReportStatus {
                 pane_id,
                 pane,
