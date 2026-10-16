@@ -194,7 +194,7 @@ impl App {
                 view.line_count_hint = line_count_hint;
                 view.stream_id = Some(id);
                 view.saveable = true;
-                view.tab_width = self.state.config.pager.tab_width;
+                view.tab_width = self.state.active_project().config.pager.tab_width;
                 // Push any open pager onto the back stack so `:bprev` returns
                 // to it; save its scroll first (mirrors the old grep/git-view).
                 self.remember_pager_position();
@@ -279,8 +279,8 @@ impl App {
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
             full_width,
-            tab_width: self.state.config.pager.tab_width,
-            intraline: self.state.config.diff.intraline,
+            tab_width: self.state.active_project().config.pager.tab_width,
+            intraline: self.state.active_project().config.diff.intraline,
         };
         // Field-level `&mut` on one view slot + the disjoint `runtime` borrow
         // both end when `drain` returns the owned DrainOutcome.
@@ -376,8 +376,8 @@ impl App {
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
             full_width,
-            tab_width: self.state.config.pager.tab_width,
-            intraline: self.state.config.diff.intraline,
+            tab_width: self.state.active_project().config.pager.tab_width,
+            intraline: self.state.active_project().config.diff.intraline,
         };
         let view = if in_scroll {
             self.view.scroll_pager.as_mut()
@@ -409,7 +409,7 @@ impl App {
     fn close_stream_pager(&mut self, in_scroll: bool) {
         if in_scroll {
             self.view.scroll_pager = None;
-            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+            if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                 tabs.active_mut().exit_scroll_mode();
             }
         } else if self

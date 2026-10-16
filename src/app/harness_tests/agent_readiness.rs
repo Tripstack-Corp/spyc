@@ -7,6 +7,7 @@ pub(super) fn agent_app(dir: &std::path::Path, name: &str) -> App {
     let mut app = App::test_app(dir.to_path_buf());
     assert!(app.open_pane_tab_in("cat", dir));
     app.runtime
+        .project_mut()
         .pane_tabs
         .as_mut()
         .unwrap()
@@ -14,6 +15,7 @@ pub(super) fn agent_app(dir: &std::path::Path, name: &str) -> App {
         .command = name.into();
     if name == "codex" {
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -77,6 +79,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
             report(&mut app, "working");
             let at = app
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -86,6 +89,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
                 .unwrap()
                 .at;
             app.runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .unwrap()
@@ -93,7 +97,13 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
                 .last_output_at = Some(at + Duration::from_secs(1));
             let mut ctx = RunCtx::for_test();
             app.settle_agent_activity(at + Duration::from_secs(30), &mut ctx);
-            let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+            let info = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info();
             assert_eq!(
                 info.activity,
                 AgentActivity::Working,
@@ -104,6 +114,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
             report(&mut app, "done");
             let at = app
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -113,6 +124,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
                 .unwrap()
                 .at;
             app.runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .unwrap()
@@ -121,6 +133,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
             app.settle_agent_activity(at + Duration::from_secs(30), &mut ctx);
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -132,6 +145,7 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
             app.settle_agent_activity(at + Duration::from_secs(120), &mut ctx);
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -155,6 +169,7 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
         let mut app = agent_app(&dir, "codex");
         let first = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -163,6 +178,7 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
             .clone();
         assert!(app.open_pane_tab_in("cat", &dir));
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -177,18 +193,23 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
             session_id: None,
             hook_event: None,
         });
-        let at = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+        let at = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
             .info
             .reported
             .clone()
             .unwrap()
             .at;
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
             .info
             .last_output_at = Some(at + Duration::from_secs(2));
         let mut ctx = RunCtx::for_test();
         app.settle_agent_activity(at + Duration::from_secs(60), &mut ctx);
-        let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+        let tabs = app.runtime.project().pane_tabs.as_ref().unwrap();
         assert_eq!(tabs.tabs()[0].info.activity, AgentActivity::Blocked);
         assert_eq!(
             tabs.tabs()[0].info.last_reported.clone().unwrap().status,
@@ -200,7 +221,7 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
         let command = fake_agent(&dir, "codex").display().to_string();
         assert!(app.spawn_agent_into_tab(0, &command, &dir, None));
         assert!(
-            app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
                 .info
                 .last_reported
                 .is_none()
@@ -216,6 +237,7 @@ fn status_hook_event_history_is_bounded_pane_local_and_cleared_on_restart() {
         let mut app = agent_app(&dir, "codex");
         let first = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -241,7 +263,7 @@ fn status_hook_event_history_is_bounded_pane_local_and_cleared_on_restart() {
                 McpResponse::Ok { .. }
             ));
         }
-        let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+        let tabs = app.runtime.project().pane_tabs.as_ref().unwrap();
         let history = &tabs.tabs()[0].info.recent_hook_events;
         assert_eq!(history.len(), 8);
         assert_eq!(
@@ -267,7 +289,7 @@ fn status_hook_event_history_is_bounded_pane_local_and_cleared_on_restart() {
         let command = fake_agent(&dir, "codex").display().to_string();
         assert!(app.spawn_agent_into_tab(0, &command, &dir, None));
         assert!(
-            app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
                 .info
                 .recent_hook_events
                 .is_empty()
@@ -298,6 +320,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
         ));
         let at = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -310,6 +333,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
         app.settle_agent_activity(at + Duration::from_secs(60), &mut ctx);
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -320,6 +344,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
         report(&mut app, "done");
         let at = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -368,6 +393,7 @@ fn codex_question_recovery_matches_the_call_and_survives_quiet_after_answer() {
         question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
         let at = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -380,6 +406,7 @@ fn codex_question_recovery_matches_the_call_and_survives_quiet_after_answer() {
         app.settle_agent_activity(at + Duration::from_secs(60), &mut ctx);
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -405,6 +432,7 @@ fn codex_question_recovery_waits_for_completion_instead_of_enter() {
         ));
         let id = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -413,7 +441,12 @@ fn codex_question_recovery_waits_for_completion_instead_of_enter() {
             .clone();
         let recovery = app.state.codex_recovery.get_mut(&id);
         crate::app::effect::clear_blocked_for_input(
-            app.runtime.pane_tabs.as_mut().unwrap().active_info_mut(),
+            app.runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut(),
             &input,
             recovery,
         );
@@ -442,6 +475,7 @@ fn codex_question_recovery_ignores_old_reporters_and_other_panes() {
         ));
         assert!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -453,13 +487,14 @@ fn codex_question_recovery_ignores_old_reporters_and_other_panes() {
         question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
         assert!(app.open_pane_tab_in("cat", tmp.path()));
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
             .active_info_mut()
             .command = "codex".into();
         question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
-        let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+        let tabs = app.runtime.project().pane_tabs.as_ref().unwrap();
         assert_eq!(
             tabs.tabs()[0].info.reported.clone().unwrap().status,
             AgentActivity::Blocked
@@ -479,6 +514,7 @@ fn codex_question_recovery_prunes_a_replaced_pane_without_carrying_its_wait() {
         question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
         let old = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -489,6 +525,7 @@ fn codex_question_recovery_prunes_a_replaced_pane_without_carrying_its_wait() {
         assert!(app.spawn_agent_into_tab(0, &command, tmp.path(), None));
         let new = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -501,6 +538,7 @@ fn codex_question_recovery_prunes_a_replaced_pane_without_carrying_its_wait() {
         question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
         assert!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -519,6 +557,7 @@ fn answered_codex_permission_does_not_poison_the_next_question_in_the_same_turn(
         report(&mut app, "blocked");
         let id = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -527,7 +566,12 @@ fn answered_codex_permission_does_not_poison_the_next_question_in_the_same_turn(
             .clone();
         let recovery = app.state.codex_recovery.get_mut(&id);
         crate::app::effect::clear_blocked_for_input(
-            app.runtime.pane_tabs.as_mut().unwrap().active_info_mut(),
+            app.runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut(),
             &crate::app::effect::PaneInput::Key(KeyEvent::new(
                 KeyCode::Enter,
                 KeyModifiers::empty(),
@@ -536,6 +580,7 @@ fn answered_codex_permission_does_not_poison_the_next_question_in_the_same_turn(
         );
         assert!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -561,7 +606,13 @@ fn typing_or_pasting_does_not_retire_an_unanswered_codex_permission() {
             PaneInput::Bytes(b"answer\r".to_vec()),
         ] {
             report(&mut app, "blocked");
-            let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+            let info = app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut();
             clear_blocked_for_input(info, &input, app.state.codex_recovery.get_mut(&info.id));
             assert!(dump(&mut app).contains("source: SELF-REPORT status=blocked"));
             question_report(&mut app, "codex-question-start", "PreToolUse", "call-1");
@@ -618,6 +669,7 @@ fn accepted_interrupt_retires_working_reports_without_touching_the_other_tab() {
                 report(&mut app, "working");
                 assert!(app.open_pane_tab_in("cat", tmp.path()));
                 app.runtime
+                    .project_mut()
                     .pane_tabs
                     .as_mut()
                     .unwrap()
@@ -625,9 +677,14 @@ fn accepted_interrupt_retires_working_reports_without_touching_the_other_tab() {
                     .command = name.into();
                 report(&mut app, "blocked");
                 app.settle_agent_activity(std::time::Instant::now(), &mut RunCtx::for_test());
-                app.runtime.pane_tabs.as_mut().unwrap().switch_to(0);
+                app.runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .switch_to(0);
                 app.execute_pane_input(PaneTarget::Active, PaneInput::Key(key), None, None);
-                let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+                let tabs = app.runtime.project().pane_tabs.as_ref().unwrap();
                 assert!(
                     tabs.tabs()[0].info.reported.is_none(),
                     "{name} interrupt left a working report"
@@ -641,7 +698,7 @@ fn accepted_interrupt_retires_working_reports_without_touching_the_other_tab() {
                     &mut RunCtx::for_test(),
                 );
                 assert_eq!(
-                    app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+                    app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
                         .info
                         .activity,
                     AgentActivity::Idle
@@ -673,6 +730,7 @@ fn ordinary_input_keeps_a_working_report() {
             app.execute_pane_input(PaneTarget::Active, input, None, None);
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -705,6 +763,7 @@ fn report_ttl_is_bounded_at_dispatch_even_for_the_largest_u64() {
             assert!(matches!(result, McpResponse::Ok { .. }), "{result:?}");
             let reported = app
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -725,6 +784,7 @@ fn a_closed_agent_pane_retires_reports_and_rejects_late_reports() {
         report(&mut app, "blocked");
         let pid = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -737,13 +797,27 @@ fn a_closed_agent_pane_retires_reports_and_rejects_late_reports() {
         )
         .unwrap();
         let until = std::time::Instant::now() + Duration::from_secs(10);
-        while !app.runtime.pane_tabs.as_ref().unwrap().active().is_closed() {
+        while !app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active()
+            .is_closed()
+        {
             app.drain_pane_output();
             assert!(std::time::Instant::now() < until, "child failed to exit");
             std::thread::sleep(Duration::from_millis(10));
         }
         app.settle_agent_activity(std::time::Instant::now(), &mut RunCtx::for_test());
-        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
         assert!(info.reported.is_none());
         assert_eq!(info.activity, AgentActivity::Idle);
         assert!(dump(&mut app).contains("source: process-exit"));
@@ -801,6 +875,7 @@ fn codex_dump_distinguishes_definitions_from_reports_and_retains_last_report() {
             report(&mut app, "working");
             let at = app
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()

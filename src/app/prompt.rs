@@ -293,7 +293,7 @@ impl App {
             PromptKind::PaneRenameTab => {
                 let name = prompt.buffer.trim().to_string();
                 if !name.is_empty()
-                    && let Some(tabs) = self.runtime.pane_tabs.as_mut()
+                    && let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
                 {
                     tabs.active_info_mut().label = name;
                 }
@@ -377,7 +377,8 @@ impl App {
                 // (the trunk), not the focused column's current HEAD.
                 let base = self
                     .state
-                    .project_home
+                    .active_project()
+                    .home
                     .as_deref()
                     .and_then(crate::git::branch::default_base);
                 // The `gix` checkout in `worktree::add` is a full-tree write that

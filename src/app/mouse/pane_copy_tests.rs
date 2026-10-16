@@ -43,6 +43,7 @@ fn wait_for(app: &mut App, text: &str) {
     while Instant::now() < deadline {
         let found = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -92,6 +93,7 @@ fn copied(effects: &[Effect]) -> Option<&str> {
 
 fn repaint(app: &mut App) {
     app.runtime
+        .project_mut()
         .pane_tabs
         .as_mut()
         .unwrap()
@@ -112,6 +114,7 @@ fn ctrl_drag_copies_question_text_without_forwarding_even_during_redraw() {
         assert!(row.contains(COMMAND));
         assert!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -322,7 +325,7 @@ fn changing_pane_geometry_cancels_the_drag() {
             LAST_COL,
             KeyModifiers::CONTROL,
         ));
-        app.state.pane.pane_height_pct = 75;
+        app.state.active_project_mut().pane.pane_height_pct = 75;
         render(&mut app);
         let release = app.handle_mouse(event(
             pane,
@@ -481,6 +484,7 @@ fn a_released_highlight_does_not_move_to_different_live_text() {
         assert_eq!(copied(&release), Some(COMMAND));
         assert!(command_is_highlighted(&mut app));
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -494,6 +498,7 @@ fn a_released_highlight_does_not_move_to_different_live_text() {
             use crate::pane::engine::TerminalScreen as _;
             if app
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()

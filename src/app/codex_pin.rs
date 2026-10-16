@@ -162,13 +162,17 @@ impl App {
     /// [`PIN_WINDOW`] after it stops emitting. So a codex that never writes a
     /// rollout costs one scan per output burst while it is active, not forever.
     fn needs_codex_pin(&self) -> bool {
-        self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
-            tabs.tabs().iter().any(|e| {
-                (e.info.codex_session_id.is_none() || e.info.codex_home.is_none())
-                    && codex_pin_window_open(e.info.last_output_at, e.info.spawn_at)
-                    && e.info.agent().kind() == AgentKind::Codex
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|tabs| {
+                tabs.tabs().iter().any(|e| {
+                    (e.info.codex_session_id.is_none() || e.info.codex_home.is_none())
+                        && codex_pin_window_open(e.info.last_output_at, e.info.spawn_at)
+                        && e.info.agent().kind() == AgentKind::Codex
+                })
             })
-        })
     }
 
     /// Kick an off-thread home-scoped scan when a codex tab still needs
@@ -189,6 +193,7 @@ impl App {
             .store(true, Ordering::Release);
         let records = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map_or_else(Vec::new, |tabs| {
@@ -243,7 +248,7 @@ impl App {
                 None => return false,
             }
         };
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             return false;
         };
         let mut learned: Vec<std::path::PathBuf> = Vec::new();

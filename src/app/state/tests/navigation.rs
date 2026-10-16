@@ -5,7 +5,7 @@ use proptest::prelude::*;
 #[test]
 fn pane_focused_is_true_only_for_pane_variant() {
     let mut s = test_state();
-    s.focus = Focus::Pane;
+    s.active_project_mut().focus = Focus::Pane;
     assert!(s.pane_focused());
     for f in [
         Focus::FileList,
@@ -14,7 +14,7 @@ fn pane_focused_is_true_only_for_pane_variant() {
         Focus::Pager(crate::ui::pager::Mount::TopPane),
         Focus::Pager(crate::ui::pager::Mount::LowerPane),
     ] {
-        s.focus = f;
+        s.active_project_mut().focus = f;
         assert!(!s.pane_focused(), "{f:?} must not be pane-focused");
     }
 }
@@ -24,32 +24,32 @@ fn pane_focused_is_true_only_for_pane_variant() {
 #[test]
 fn vertical_move_wraps_forward() {
     let mut s = state_with_rows(&["a", "b", "c"]);
-    s.left.cursor.index = 2;
+    s.active_project_mut().left.cursor.index = 2;
     s.cursor_move_vertical(1, 3, 3);
-    assert_eq!(s.left.cursor.index, 0);
+    assert_eq!(s.active_project().left.cursor.index, 0);
 }
 
 #[test]
 fn vertical_move_wraps_backward() {
     let mut s = state_with_rows(&["a", "b", "c"]);
-    s.left.cursor.index = 0;
+    s.active_project_mut().left.cursor.index = 0;
     s.cursor_move_vertical(-1, 3, 3);
-    assert_eq!(s.left.cursor.index, 2);
+    assert_eq!(s.active_project().left.cursor.index, 2);
 }
 
 #[test]
 fn vertical_move_no_op_on_empty() {
     let mut s = test_state();
     s.cursor_move_vertical(1, 1, 0);
-    assert_eq!(s.left.cursor.index, 0);
+    assert_eq!(s.active_project().left.cursor.index, 0);
 }
 
 #[test]
 fn vertical_move_multi_step() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-    s.left.cursor.index = 1;
+    s.active_project_mut().left.cursor.index = 1;
     s.cursor_move_vertical(3, 5, 5);
-    assert_eq!(s.left.cursor.index, 4);
+    assert_eq!(s.active_project().left.cursor.index, 4);
 }
 
 // ── goto_col_top / goto_col_bottom ────────────────────────────
@@ -57,33 +57,33 @@ fn vertical_move_multi_step() {
 #[test]
 fn goto_col_top_first_column() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-    s.left.cursor.index = 2; // last in first column
+    s.active_project_mut().left.cursor.index = 2; // last in first column
     s.goto_col_top(3);
-    assert_eq!(s.left.cursor.index, 0);
+    assert_eq!(s.active_project().left.cursor.index, 0);
 }
 
 #[test]
 fn goto_col_top_second_column() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-    s.left.cursor.index = 4; // second column, row 1
+    s.active_project_mut().left.cursor.index = 4; // second column, row 1
     s.goto_col_top(3);
-    assert_eq!(s.left.cursor.index, 3); // top of second column
+    assert_eq!(s.active_project().left.cursor.index, 3); // top of second column
 }
 
 #[test]
 fn goto_col_bottom_first_column() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-    s.left.cursor.index = 0;
+    s.active_project_mut().left.cursor.index = 0;
     s.goto_col_bottom(3, 5);
-    assert_eq!(s.left.cursor.index, 2); // last in first column (3 rows)
+    assert_eq!(s.active_project().left.cursor.index, 2); // last in first column (3 rows)
 }
 
 #[test]
 fn goto_col_bottom_partial_column() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
-    s.left.cursor.index = 3; // second column
+    s.active_project_mut().left.cursor.index = 3; // second column
     s.goto_col_bottom(3, 5);
-    assert_eq!(s.left.cursor.index, 4); // last entry in partial column
+    assert_eq!(s.active_project().left.cursor.index, 4); // last entry in partial column
 }
 
 // ── cursor_move_columns ───────────────────────────────────────
@@ -91,33 +91,33 @@ fn goto_col_bottom_partial_column() {
 #[test]
 fn column_move_right() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-    s.left.cursor.index = 1; // col 0, row 1
+    s.active_project_mut().left.cursor.index = 1; // col 0, row 1
     s.cursor_move_columns(1, 3, 6);
-    assert_eq!(s.left.cursor.index, 4); // col 1, row 1
+    assert_eq!(s.active_project().left.cursor.index, 4); // col 1, row 1
 }
 
 #[test]
 fn column_move_left() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-    s.left.cursor.index = 4; // col 1, row 1
+    s.active_project_mut().left.cursor.index = 4; // col 1, row 1
     s.cursor_move_columns(-1, 3, 6);
-    assert_eq!(s.left.cursor.index, 1); // col 0, row 1
+    assert_eq!(s.active_project().left.cursor.index, 1); // col 0, row 1
 }
 
 #[test]
 fn column_move_wraps_at_edge() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-    s.left.cursor.index = 4; // col 1, row 1
+    s.active_project_mut().left.cursor.index = 4; // col 1, row 1
     s.cursor_move_columns(1, 3, 6); // wraps to col 0
-    assert_eq!(s.left.cursor.index, 1); // col 0, row 1
+    assert_eq!(s.active_project().left.cursor.index, 1); // col 0, row 1
 }
 
 #[test]
 fn column_move_single_column_noop() {
     let mut s = state_with_rows(&["a", "b"]);
-    s.left.cursor.index = 0;
+    s.active_project_mut().left.cursor.index = 0;
     s.cursor_move_columns(1, 10, 2);
-    assert_eq!(s.left.cursor.index, 0); // no-op
+    assert_eq!(s.active_project().left.cursor.index, 0); // no-op
 }
 
 // ── page_move ─────────────────────────────────────────────────
@@ -126,12 +126,12 @@ fn column_move_single_column_noop() {
 /// at 3, and the shorter page after it isn't the last.
 fn on_the_middle_page(index: usize) -> AppState {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
-    s.left.page = crate::ui::list_view::PageSpan {
+    s.active_project_mut().left.page = crate::ui::list_view::PageSpan {
         start: 3,
         prev: Some((0, 3)),
         next: (6, 2),
     };
-    s.left.cursor.index = index;
+    s.active_project_mut().left.cursor.index = index;
     s
 }
 
@@ -139,33 +139,33 @@ fn on_the_middle_page(index: usize) -> AppState {
 fn page_down_keeps_the_place_on_the_page() {
     let mut s = on_the_middle_page(4);
     s.page_move(true);
-    assert_eq!(s.left.cursor.index, 7);
+    assert_eq!(s.active_project().left.cursor.index, 7);
 }
 
 #[test]
 fn page_down_to_a_shorter_page_stops_at_its_last_row() {
     let mut s = on_the_middle_page(5);
     s.page_move(true);
-    assert_eq!(s.left.cursor.index, 7);
+    assert_eq!(s.active_project().left.cursor.index, 7);
 }
 
 #[test]
 fn page_up_keeps_the_place_on_the_page() {
     let mut s = on_the_middle_page(4);
     s.page_move(false);
-    assert_eq!(s.left.cursor.index, 1);
+    assert_eq!(s.active_project().left.cursor.index, 1);
 }
 
 #[test]
 fn page_up_from_the_first_page_wraps_to_the_last_row() {
     let mut s = on_the_middle_page(1);
-    s.left.page = crate::ui::list_view::PageSpan {
+    s.active_project_mut().left.page = crate::ui::list_view::PageSpan {
         start: 0,
         prev: None,
         next: (3, 3),
     };
     s.page_move(false);
-    assert_eq!(s.left.cursor.index, 9);
+    assert_eq!(s.active_project().left.cursor.index, 9);
 }
 
 // ── find_match ────────────────────────────────────────────────
@@ -242,25 +242,25 @@ fn find_glob_remains_anchored() {
 #[test]
 fn jump_next_git_change_skips_clean_rows() {
     let mut s = dirty_state(&["a", "b", "c", "d"], &["c"]);
-    s.left.cursor.index = 0;
+    s.active_project_mut().left.cursor.index = 0;
     assert!(s.jump_to_git_change(true));
-    assert_eq!(s.left.cursor.index, 2); // landed on `c`
+    assert_eq!(s.active_project().left.cursor.index, 2); // landed on `c`
 }
 
 #[test]
 fn jump_next_git_change_wraps_around() {
     let mut s = dirty_state(&["a", "b", "c", "d"], &["a"]);
-    s.left.cursor.index = 2; // past the only dirty row
+    s.active_project_mut().left.cursor.index = 2; // past the only dirty row
     assert!(s.jump_to_git_change(true));
-    assert_eq!(s.left.cursor.index, 0); // wrapped back to `a`
+    assert_eq!(s.active_project().left.cursor.index, 0); // wrapped back to `a`
 }
 
 #[test]
 fn jump_prev_git_change_wraps_around() {
     let mut s = dirty_state(&["a", "b", "c", "d"], &["d"]);
-    s.left.cursor.index = 1; // before the only dirty row in reverse
+    s.active_project_mut().left.cursor.index = 1; // before the only dirty row in reverse
     assert!(s.jump_to_git_change(false));
-    assert_eq!(s.left.cursor.index, 3); // wrapped to `d`
+    assert_eq!(s.active_project().left.cursor.index, 3); // wrapped to `d`
 }
 
 #[test]
@@ -268,9 +268,9 @@ fn jump_advances_off_the_current_dirty_row() {
     // From a dirty row, pressing `]g` should land on the *next*
     // dirty row, not stay put.
     let mut s = dirty_state(&["a", "b", "c", "d"], &["a", "c"]);
-    s.left.cursor.index = 0;
+    s.active_project_mut().left.cursor.index = 0;
     assert!(s.jump_to_git_change(true));
-    assert_eq!(s.left.cursor.index, 2);
+    assert_eq!(s.active_project().left.cursor.index, 2);
 }
 
 #[test]
@@ -332,9 +332,9 @@ fn nav_state(len: usize, cols: u16, rows_per_col: u16, start: usize) -> AppState
     let names: Vec<String> = (0..len).map(|i| format!("row{i}")).collect();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     let mut s = state_with_rows(&refs);
-    s.left.grid_dims = GridDims { cols, rows_per_col };
+    s.active_project_mut().left.grid_dims = GridDims { cols, rows_per_col };
     if len > 0 {
-        s.left.cursor.index = start % len;
+        s.active_project_mut().left.cursor.index = start % len;
     }
     s
 }
@@ -357,12 +357,12 @@ proptest! {
         for m in &moves {
             s.apply(&m.action());
             if len == 0 {
-                prop_assert_eq!(s.left.cursor.index, 0, "empty listing must pin the cursor at 0");
+                prop_assert_eq!(s.active_project().left.cursor.index, 0, "empty listing must pin the cursor at 0");
             } else {
                 prop_assert!(
-                    s.left.cursor.index < len,
+                    s.active_project().left.cursor.index < len,
                     "cursor {} escaped len {} after {:?}",
-                    s.left.cursor.index,
+                    s.active_project().left.cursor.index,
                     len,
                     m
                 );
@@ -386,7 +386,7 @@ proptest! {
         let from = if names.is_empty() { 0 } else { from % names.len() };
         if let Some(i) = s.find_match(&query, from, backward) {
             prop_assert!(i < names.len());
-            prop_assert!(crate::app::Matcher::build(&query).matches(&s.left.rows[i].display));
+            prop_assert!(crate::app::Matcher::build(&query).matches(&s.active_project().left.rows[i].display));
         }
     }
 
@@ -409,7 +409,7 @@ proptest! {
         let found = s.find_match(&needle, from, false);
         prop_assert!(found.is_some(), "needle {needle:?} present but unfound");
         let i = found.unwrap();
-        prop_assert!(s.left.rows[i].display.to_lowercase().contains(&needle));
+        prop_assert!(s.active_project().left.rows[i].display.to_lowercase().contains(&needle));
     }
 
     /// The allocation-free ASCII fast path in the substring matcher must

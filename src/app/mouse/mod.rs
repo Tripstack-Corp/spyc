@@ -215,6 +215,31 @@ pub struct ChromeRow {
 }
 
 impl super::App {
+    /// Whether the active tab's child asked for mouse reporting of its own.
+    fn active_pane_wants_mouse(&self) -> bool {
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|t| t.active().wants_mouse())
+    }
+
+    /// Each tab's on-screen width along the divider, for hit-testing a click
+    /// against [`tab_hit::tab_at_point`]. Empty with no pane open.
+    fn divider_tab_widths(&self, bar_width: u16) -> Vec<u16> {
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map(|t| {
+                tab_hit::tab_layout(t, t.active().is_scrolling(), bar_width)
+                    .into_iter()
+                    .map(|c| c.width)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Handle one mouse event: hit-test the pointer, route it, dispatch the sink.
     ///
     /// Ignores everything unless spyc actually asked the terminal for mouse
@@ -234,7 +259,10 @@ impl super::App {
         // Before anything branches on it — see
         // [`with_wheel_direction_corrected`]. Every path below, including the one
         // that hands a report to the child, reads the corrected event.
-        let ev = with_wheel_direction_corrected(ev, self.state.config.mouse.invert_scroll);
+        let ev = with_wheel_direction_corrected(
+            ev,
+            self.state.active_project().config.mouse.invert_scroll,
+        );
         let (cols, rows) = self.view.term_size;
         let frame = ratatui::layout::Rect::new(0, 0, cols, rows);
 
@@ -259,7 +287,7 @@ impl super::App {
             return self.forward_drag(ev, frame);
         }
 
-        let lines = self.state.config.mouse.scroll_lines.max(1);
+        let lines = self.state.active_project().config.mouse.scroll_lines.max(1);
         // `delta` is only meaningful for a wheel gesture; buttons ignore it.
         let Some((gesture, delta)) = gesture_and_delta(ev.kind, lines) else {
             // Motion or a horizontal wheel: no behaviour. Releases and drags are
@@ -288,11 +316,7 @@ impl super::App {
             region,
             pager_mount: self.focused_top_pager_mount(),
             covering_pager: self.pager_slot_at(ev.column, ev.row),
-            pane_wants_mouse: self
-                .runtime
-                .pane_tabs
-                .as_ref()
-                .is_some_and(|t| t.active().wants_mouse()),
+            pane_wants_mouse: self.active_pane_wants_mouse(),
             // Same sources `route_input`'s snapshot uses (`route.rs`), so the
             // mouse and the keyboard can't disagree about what owns the screen.
             force_pane_selection: matches!(gesture, Gesture::Left)
@@ -301,7 +325,7 @@ impl super::App {
                     .contains(crossterm::event::KeyModifiers::CONTROL),
             is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
             has_scroll_pager: self.view.scroll_pager.is_some(),
-            pane_closed: self.state.pane.pane_snapshot.is_closed,
+            pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
             // Only resolved over the divider: the width walk allocates, and a
             // wheel tick over the pane has no use for it. Not while the prompt
@@ -310,17 +334,7 @@ impl super::App {
                 && self.displaced_prompt_row(&layout) != layout.divider
             {
                 let bar_width = layout.divider.map_or(0, |d| d.width);
-                let widths: Vec<u16> = self
-                    .runtime
-                    .pane_tabs
-                    .as_ref()
-                    .map(|t| {
-                        tab_hit::tab_layout(t, t.active().is_scrolling(), bar_width)
-                            .into_iter()
-                            .map(|c| c.width)
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let widths = self.divider_tab_widths(bar_width);
                 tab_hit::tab_at_point(layout.divider, &widths, ev.column, ev.row)
             } else {
                 None
@@ -552,7 +566,7 @@ mod tests {
     fn app_and_a_point_in_the_list(dir: &std::path::Path) -> (App, (u16, u16)) {
         let mut app = App::test_app(dir.to_path_buf());
         app.view.term_size = (120, 24);
-        app.state.config.mouse.scroll_lines = 1;
+        app.state.active_project_mut().config.mouse.scroll_lines = 1;
         let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
         let point = (layout.list.x + 2, layout.list.y + 1);
         (app, point)
@@ -567,7 +581,12 @@ mod tests {
     /// `?1002` — button-event tracking — because that is what a child wanting
     /// drags asks for; under `?1000` a drag encodes to nothing, correctly.
     pub(super) fn make_pane_speak_mouse(app: &mut App) {
-        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+        let tabs = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("a pane tab");
         tabs.active_mut()
             .send_bytes(b"\x1b[?1002h\n")
             .expect("write to the pty");
@@ -594,8 +613,13 @@ mod tests {
             pane,
             crate::pane::tabs::TabInfo::new("claude", dir.to_path_buf()),
         );
-        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
-        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+        app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        let tabs = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("a pane tab");
         let mut feed = String::new();
         for i in 0..80 {
             use std::fmt::Write as _;
@@ -645,6 +669,7 @@ mod tests {
             // for a reason it isn't testing.
             assert!(
                 !app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .expect("a pane tab")
@@ -705,7 +730,8 @@ mod tests {
             );
 
             app.view.pane_scroll_streak = None;
-            app.state.config.mouse.pane_scroll_view = crate::config::PaneScrollView::Off;
+            app.state.active_project_mut().config.mouse.pane_scroll_view =
+                crate::config::PaneScrollView::Off;
             for _ in 0..(super::route::OPEN_AFTER_UP_TICKS * 2) {
                 app.handle_mouse(at(MouseEventKind::ScrollUp, point.0, point.1));
             }
@@ -766,20 +792,26 @@ mod tests {
                 app.handle_mouse(down).is_empty(),
                 "the wheel emits no effect"
             );
-            assert_eq!(app.state.left.cursor.index, 1, "down moves toward the end");
+            assert_eq!(
+                app.state.active_project().left.cursor.index,
+                1,
+                "down moves toward the end"
+            );
 
             for _ in 0..10 {
                 app.handle_mouse(down);
             }
             assert_eq!(
-                app.state.left.cursor.index, 2,
+                app.state.active_project().left.cursor.index,
+                2,
                 "the wheel stops on the last row rather than wrapping to the top"
             );
             for _ in 0..10 {
                 app.handle_mouse(up);
             }
             assert_eq!(
-                app.state.left.cursor.index, 0,
+                app.state.active_project().left.cursor.index,
+                0,
                 "and stops on the first row going back"
             );
             crate::set_mouse_capture_for_test(false);
@@ -801,7 +833,7 @@ mod tests {
             app.seed_rows(&["a", "b", "c"]);
             app.open_second_commander_at(&right_dir);
             assert_eq!(
-                app.state.vsplit.map(|v| v.focus),
+                app.state.active_project().vsplit.map(|v| v.focus),
                 Some(super::super::state::Side::Right),
                 "the keyboard is in the right column"
             );
@@ -809,16 +841,30 @@ mod tests {
 
             let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
             let left = (layout.list.x + 1, layout.list.y + 1);
-            let before_right = app.state.right.as_ref().expect("split").cursor.index;
+            let before_right = app
+                .state
+                .active_project()
+                .right
+                .as_ref()
+                .expect("split")
+                .cursor
+                .index;
 
             app.handle_mouse(at(MouseEventKind::ScrollDown, left.0, left.1));
 
             assert_eq!(
-                app.state.left.cursor.index, 1,
+                app.state.active_project().left.cursor.index,
+                1,
                 "the pointed (left) column moved"
             );
             assert_eq!(
-                app.state.right.as_ref().expect("split").cursor.index,
+                app.state
+                    .active_project()
+                    .right
+                    .as_ref()
+                    .expect("split")
+                    .cursor
+                    .index,
                 before_right,
                 "the focused (right) column did not"
             );

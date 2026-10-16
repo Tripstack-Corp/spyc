@@ -173,9 +173,15 @@ fn fs_predicates_recognize_the_second_column() {
         std::fs::create_dir(&a).unwrap();
         std::fs::create_dir(&b).unwrap();
         let mut app = App::test_app(a.clone());
-        app.state.left.git_cache.current_gitdir = Some(a.join(".git"));
+        app.state.active_project_mut().left.git_cache.current_gitdir = Some(a.join(".git"));
         app.open_second_commander_at(&b);
-        app.state.right.as_mut().unwrap().git_cache.current_gitdir = Some(b.join(".git"));
+        app.state
+            .active_project_mut()
+            .right
+            .as_mut()
+            .unwrap()
+            .git_cache
+            .current_gitdir = Some(b.join(".git"));
 
         // b's tree + index/HEAD are recognized…
         assert!(app.is_listing_path(&b.join("src/main.rs")), "b tree file");
@@ -206,7 +212,7 @@ fn slash_search_targets_the_focused_column() {
         app.open_second_commander_at(&right_dir); // b focused
 
         // Deterministic rows for b; a starts at cursor 0.
-        let r = app.state.right.as_mut().unwrap();
+        let r = app.state.active_project_mut().right.as_mut().unwrap();
         r.rows = vec![
             RowData {
                 path: right_dir.join("alpha"),
@@ -228,12 +234,19 @@ fn slash_search_targets_the_focused_column() {
             app.handle_key(key(c)).unwrap();
         }
         assert_eq!(
-            app.state.right.as_ref().unwrap().cursor.index,
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .unwrap()
+                .cursor
+                .index,
             1,
             "/ moved b's cursor to the match"
         );
         assert_eq!(
-            app.state.left.cursor.index, 0,
+            app.state.active_project().left.cursor.index,
+            0,
             "a's cursor is untouched by a search in b"
         );
     });
@@ -275,16 +288,16 @@ fn dual_git_each_column_shows_its_own_repo() {
         app.open_second_commander_at(&repo_b); // resolves + refreshes b (dirty)
 
         assert!(
-            app.state.left.git.files.is_empty(),
+            app.state.active_project().left.git.files.is_empty(),
             "a (clean) has no markers: {:?}",
-            app.state.left.git.files
+            app.state.active_project().left.git.files
         );
         assert_eq!(
-            app.state.left.git.info.as_deref(),
+            app.state.active_project().left.git.info.as_deref(),
             Some("main"),
             "a clean branch"
         );
-        let b = app.state.right.as_ref().expect("b open");
+        let b = app.state.active_project().right.as_ref().expect("b open");
         assert!(
             b.git.files.contains_key("file.txt"),
             "b shows ITS own M marker, not a's: {:?}",
@@ -345,6 +358,7 @@ fn worktree_column_markers_clear_after_a_commit() {
         app.open_second_commander_at(&wt); // b at the worktree — dirty
         assert!(
             app.state
+                .active_project()
                 .right
                 .as_ref()
                 .expect("b open")
@@ -362,7 +376,12 @@ fn worktree_column_markers_clear_after_a_commit() {
         // The 1 Hz safety-net poll (or an fs-event) re-runs this.
         app.state.refresh_git_state();
 
-        let b = app.state.right.as_ref().expect("b still open");
+        let b = app
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .expect("b still open");
         assert!(
             b.git.files.is_empty(),
             "b's markers must clear after the worktree commit — got stale {:?}",
@@ -490,8 +509,13 @@ fn gw_targets_the_focused_columns_worktree_root() {
 
         let root_a = tmp.path().join("repoA");
         let root_b = tmp.path().join("repoB");
-        app.state.left.git_cache.current_repo_root = Some(root_a);
         app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = Some(root_a);
+        app.state
+            .active_project_mut()
             .right
             .as_mut()
             .unwrap()
@@ -526,8 +550,13 @@ fn find_picker_walks_the_focused_columns_worktree_root() {
         let root_b = tmp.path().join("repoB");
         std::fs::create_dir(&root_a).unwrap();
         std::fs::create_dir(&root_b).unwrap();
-        app.state.left.git_cache.current_repo_root = Some(root_a);
         app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = Some(root_a);
+        app.state
+            .active_project_mut()
             .right
             .as_mut()
             .unwrap()
@@ -566,39 +595,57 @@ fn harpoon_is_per_column_pinned_to_each_worktree() {
 
         let mut app = App::test_app(dir_a.clone());
         // `a`'s worktree root enables + keys its harpoon.
-        app.state.left.git_cache.current_repo_root = Some(dir_a);
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = Some(dir_a);
         app.reconcile_harpoon();
         // Cursor on fa.txt → Ha appends it to a's list.
-        app.state.left.rows = vec![RowData {
+        app.state.active_project_mut().left.rows = vec![RowData {
             path: fa.clone(),
             display: "fa.txt".into(),
             kind: EntryKind::File,
             deleted: false,
         }];
-        app.state.left.cursor.index = 0;
+        app.state.active_project_mut().left.cursor.index = 0;
         app.harpoon_append();
 
         // Open `b` in its own worktree, harpoon fb.txt there.
         app.open_second_commander_at(&dir_b);
         app.state
+            .active_project_mut()
             .right
             .as_mut()
             .unwrap()
             .git_cache
             .current_repo_root = Some(dir_b.clone());
         app.reconcile_harpoon();
-        app.state.right.as_mut().unwrap().rows = vec![RowData {
+        app.state.active_project_mut().right.as_mut().unwrap().rows = vec![RowData {
             path: fb.clone(),
             display: "fb.txt".into(),
             kind: EntryKind::File,
             deleted: false,
         }];
-        app.state.right.as_mut().unwrap().cursor.index = 0;
+        app.state
+            .active_project_mut()
+            .right
+            .as_mut()
+            .unwrap()
+            .cursor
+            .index = 0;
         app.harpoon_append();
 
-        let a = app.state.left.harpoon.as_ref().expect("a harpoon loaded");
+        let a = app
+            .state
+            .active_project()
+            .left
+            .harpoon
+            .as_ref()
+            .expect("a harpoon loaded");
         let b = app
             .state
+            .active_project()
             .right
             .as_ref()
             .unwrap()

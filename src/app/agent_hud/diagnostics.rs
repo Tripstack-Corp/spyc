@@ -20,7 +20,7 @@ pub(super) fn lines(app: &App) -> Vec<String> {
 
 /// The mode in force and where it came from.
 fn mode_line(app: &App) -> String {
-    let source = if app.state.pane.agent_hud.choice.is_some() {
+    let source = if app.state.active_project().pane.agent_hud.choice.is_some() {
         "chosen with :agent hud; restored by -r"
     } else {
         "from the config file"
@@ -47,7 +47,7 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
         }
     });
     out.push("Context occupancy: unknown (no verified native percentage).".to_owned());
-    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+    let Some(tabs) = app.runtime.project().pane_tabs.as_ref() else {
         out.push("No active pane.".to_owned());
         return out;
     };
@@ -93,7 +93,7 @@ fn diagnostic_lines(app: &App) -> Vec<String> {
         out.push(format!("{file} unavailable in bounded lookup; {retry}."));
     }
     let work = app.runtime.agent_hud.as_ref().map_or(
-        app.state.pane.agent_hud.work,
+        app.state.active_project().pane.agent_hud.work,
         super::collector::Collector::work,
     );
     out.push(format!(
@@ -425,7 +425,14 @@ fn agent_info_lines(
         ));
         out.push(format!(
             "Claude home (spyc's environment): {}",
-            tilde(app.state.pane.agent_hud.claude_home.as_ref())
+            tilde(
+                app.state
+                    .active_project()
+                    .pane
+                    .agent_hud
+                    .claude_home
+                    .as_ref()
+            )
         ));
         out.extend(statusline_lines(tabs, info));
     } else if super::feed(info.agent().kind()) == Some(Feed::Agy) {
@@ -435,7 +442,7 @@ fn agent_info_lines(
         ));
         out.push(format!(
             "Agy home (spyc's environment): {}",
-            tilde(app.state.pane.agent_hud.agy_home.as_ref())
+            tilde(app.state.active_project().pane.agent_hud.agy_home.as_ref())
         ));
     } else {
         out.push(format!(

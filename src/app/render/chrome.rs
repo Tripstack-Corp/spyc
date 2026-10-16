@@ -148,6 +148,7 @@ impl App {
         let width = area.width as usize;
         let is_scrolling = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .is_some_and(|t| t.active().is_scrolling());
@@ -155,13 +156,13 @@ impl App {
         // Only `BottomPane` zoom keeps a divider (this line) to tag; `TopList`
         // zoom has no divider — its cue rides the status-bar suffix instead
         // (see `header_parts`).
-        let zoomed = self.state.pane.zoom == state::ZoomTarget::BottomPane;
+        let zoomed = self.state.active_project().pane.zoom == state::ZoomTarget::BottomPane;
         let zoom_tag = if zoomed { " [ZOOM]" } else { "" };
         let scroll_tag = if is_scrolling { " [SCROLL]" } else { "" };
         let tag_len = crate::ui::display_width(zoom_tag) + crate::ui::display_width(scroll_tag);
         let mut spans: Vec<Span> = Vec::new();
         let mut used = 0usize;
-        if let Some(tabs) = &self.runtime.pane_tabs {
+        if let Some(tabs) = &self.runtime.project().pane_tabs {
             let active_shown;
             (used, active_shown) =
                 self.push_tab_spans(&mut spans, tabs, &styles, is_scrolling, area.width);
@@ -483,7 +484,7 @@ impl App {
                     // pane (distinct colour, right-aligned). When the pane is
                     // hidden there is no divider, so fall back to the status-bar
                     // suffix here.
-                    let bg_tag = if self.runtime.pane_tabs.is_some() {
+                    let bg_tag = if self.runtime.project().pane_tabs.is_some() {
                         None
                     } else {
                         let running = self.runtime.background_tasks.running_count();
@@ -516,7 +517,7 @@ impl App {
                                 };
                                 format!("{}{ro}{pending}", mount.format().label())
                             });
-                    let ignore = &self.state.config.ignore_masks;
+                    let ignore = &self.state.active_project().config.ignore_masks;
                     let mask = |on, group| status_flags::MaskFlag {
                         on,
                         default_on: crate::state::ignore::default_enabled(ignore, group),
@@ -543,7 +544,7 @@ impl App {
                     // does — surface it here, the same fallback the bg-task tag
                     // uses when there's no divider.
                     if matches!(
-                        self.state.pane.zoom,
+                        self.state.active_project().pane.zoom,
                         state::ZoomTarget::TopList | state::ZoomTarget::RightColumn
                     ) {
                         let zoom = |s: &mut String| {

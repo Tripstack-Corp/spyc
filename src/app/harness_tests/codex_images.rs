@@ -11,12 +11,13 @@ fn launch(app: &mut App, cwd: &std::path::Path, home: &std::path::Path) {
     assert!(app.open_pane_tab_in_home(&command, cwd, Some(home)));
     agent_argv(cwd, "codex");
     app.runtime
+        .project_mut()
         .pane_tabs
         .as_mut()
         .unwrap()
         .active_info_mut()
         .codex_session_id = Some(SID.into());
-    app.state.focus = state::Focus::Pane;
+    app.state.active_project_mut().focus = state::Focus::Pane;
 }
 
 #[test]
@@ -34,6 +35,7 @@ fn codex_image_paste_is_captured_alongside_the_original_key() {
             effects.clipboard_capture_tab(),
             Some(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -49,11 +51,19 @@ fn codex_image_paste_is_captured_alongside_the_original_key() {
         let effects = app.handle_key(alternate).unwrap();
         assert_eq!(effects.pane_key(), Some(alternate));
         assert!(effects.clipboard_capture_tab().is_some());
-        app.state.config.pane.preview_pasted_images = false;
+        app.state
+            .active_project_mut()
+            .config
+            .pane
+            .preview_pasted_images = false;
         let effects = app.handle_key(paste).unwrap();
         assert_eq!(effects.pane_key(), Some(paste));
         assert!(effects.clipboard_capture_tab().is_none());
-        app.state.config.pane.preview_pasted_images = true;
+        app.state
+            .active_project_mut()
+            .config
+            .pane
+            .preview_pasted_images = true;
         assert!(
             app.handle_key(key('v'))
                 .unwrap()
@@ -132,6 +142,7 @@ fn a_late_clipboard_read_cannot_restore_unsent_images_after_enter_or_tab_close()
         launch(&mut app, &cwd, &cwd.join("home"));
         let tab_id = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -139,7 +150,10 @@ fn a_late_clipboard_read_cannot_restore_unsent_images_after_enter_or_tab_close()
             .id
             .clone();
         land_capture(&mut app, &tab_id, 0);
-        assert_eq!(app.state.pane.pending_images[&tab_id].len(), 1);
+        assert_eq!(
+            app.state.active_project().pane.pending_images[&tab_id].len(),
+            1
+        );
         app.open_image_gallery();
         assert_eq!(
             app.gallery_counts(),
@@ -153,22 +167,36 @@ fn a_late_clipboard_read_cannot_restore_unsent_images_after_enter_or_tab_close()
             None,
             None,
         );
-        assert!(!app.state.pane.pending_images.contains_key(&tab_id));
+        assert!(
+            !app.state
+                .active_project()
+                .pane
+                .pending_images
+                .contains_key(&tab_id)
+        );
         land_capture(&mut app, &tab_id, 0);
         assert!(
-            !app.state.pane.pending_images.contains_key(&tab_id),
+            !app.state
+                .active_project()
+                .pane
+                .pending_images
+                .contains_key(&tab_id),
             "late read belongs to the submitted draft"
         );
         land_capture(&mut app, &tab_id, 1);
         assert_eq!(
-            app.state.pane.pending_images[&tab_id].len(),
+            app.state.active_project().pane.pending_images[&tab_id].len(),
             1,
             "next draft may capture again"
         );
         app.close_active_tab_now();
         land_capture(&mut app, &tab_id, 1);
         assert!(
-            !app.state.pane.pending_images.contains_key(&tab_id),
+            !app.state
+                .active_project()
+                .pane
+                .pending_images
+                .contains_key(&tab_id),
             "closed pane owns no clipboard bytes"
         );
     });
@@ -208,6 +236,7 @@ fn gallery_worker_resolves_after_dispatch_using_the_captured_home() {
             .clone();
         write_attachment(&home, &cwd);
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -267,6 +296,7 @@ fn gallery_worker_miss_keeps_unsent_images_and_reports_only_for_its_live_popup()
         launch(&mut app, &cwd, &home);
         let tab_id = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -327,7 +357,13 @@ fn image_routing_follows_the_agent_in_a_shells_foreground() {
         let mut app = App::test_app(cwd.clone());
         launch(&mut app, &cwd, &home);
         write_attachment(&home, &cwd);
-        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
         info.command = "zsh".into();
         info.spawn_epoch_secs = 100;
         info.running = Some(crate::pane::RunningAgent {
@@ -362,6 +398,7 @@ fn image_routing_follows_the_agent_in_a_shells_foreground() {
         assert_eq!(app.gallery_counts(), (0, 1));
         app.close_image_gallery();
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()

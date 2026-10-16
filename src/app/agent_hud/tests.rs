@@ -36,9 +36,9 @@ fn entry(app: &mut App, cwd: &Path, home: &Path, command: &str) -> TabEntry {
 fn fixture(cwd: &Path, home: &Path) -> App {
     let mut app = App::test_app(std::env::current_dir().unwrap());
     app.view.term_size = (100, 32);
-    app.state.config.mouse.capture = false;
-    app.state.pane.pane_height_pct = 50;
-    app.runtime.pane_tabs = Some(PaneTabs::new(entry(&mut app, cwd, home, "cat")));
+    app.state.active_project_mut().config.mouse.capture = false;
+    app.state.active_project_mut().pane.pane_height_pct = 50;
+    app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry(&mut app, cwd, home, "cat")));
     app
 }
 
@@ -126,6 +126,7 @@ fn wait_screen(app: &mut App, text: &str) {
     let end = Instant::now() + Duration::from_secs(10);
     while !app
         .runtime
+        .project()
         .pane_tabs
         .as_ref()
         .unwrap()
@@ -161,9 +162,21 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
             "visible HUD must start collection through the executor"
         );
         wait_metrics(&mut app, &mut ctx, 11);
-        let old = app.state.pane.agent_hud.update.clone().unwrap();
+        let old = app
+            .state
+            .active_project()
+            .pane
+            .agent_hud
+            .update
+            .clone()
+            .unwrap();
         let second = entry(&mut app, tmp.path(), &b, "cat");
-        app.runtime.pane_tabs.as_mut().unwrap().push(second);
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .push(second);
         assert!(
             app.active_agent_hud_update().is_none(),
             "tab switch must not paint the prior home"
@@ -179,11 +192,12 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
         wait_metrics(&mut app, &mut ctx, 77);
         for disabled in 0..4 {
             match disabled {
-                0 => app.state.pane.pane_hidden = true,
-                1 => app.state.pane.zoom = state::ZoomTarget::TopList,
+                0 => app.state.active_project_mut().pane.pane_hidden = true,
+                1 => app.state.active_project_mut().pane.zoom = state::ZoomTarget::TopList,
                 2 => app.view.term_size = (100, 12),
                 _ => {
                     app.runtime
+                        .project_mut()
                         .pane_tabs
                         .as_mut()
                         .unwrap()
@@ -192,11 +206,15 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
                 }
             }
             tick(&mut app, &mut ctx);
-            assert!(app.runtime.agent_hud.is_none() && app.state.pane.agent_hud.update.is_none());
-            app.state.pane.pane_hidden = false;
-            app.state.pane.zoom = state::ZoomTarget::None;
+            assert!(
+                app.runtime.agent_hud.is_none()
+                    && app.state.active_project().pane.agent_hud.update.is_none()
+            );
+            app.state.active_project_mut().pane.pane_hidden = false;
+            app.state.active_project_mut().pane.zoom = state::ZoomTarget::None;
             app.view.term_size = (100, 32);
             app.runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .unwrap()
@@ -224,7 +242,14 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
         assert!(app.runtime.agent_hud.is_none() && app.agent_hud_target().is_none());
         app.view.image_view = None;
         wait_metrics(&mut app, &mut ctx, 77);
-        let binding = app.state.pane.agent_hud.binding.clone().unwrap();
+        let binding = app
+            .state
+            .active_project()
+            .pane
+            .agent_hud
+            .binding
+            .clone()
+            .unwrap();
         app.cmd_agent_hud("off");
         tick(&mut app, &mut ctx);
         assert!(app.runtime.agent_hud.is_none());
@@ -235,9 +260,22 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
         app.cmd_agent_hud("full");
         wait_metrics(&mut app, &mut ctx, 77);
         let closing = entry(&mut app, tmp.path(), &b, "true");
-        app.runtime.pane_tabs.as_mut().unwrap().push(closing);
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .push(closing);
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !app.runtime.pane_tabs.as_ref().unwrap().active().is_closed() {
+        while !app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active()
+            .is_closed()
+        {
             app.drain_pane_output();
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(10));
@@ -247,9 +285,12 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
             app.runtime.agent_hud.is_none() && app.agent_hud_target().is_none(),
             "closed panes cannot retain a HUD consumer"
         );
-        app.runtime.pane_tabs = None;
+        app.runtime.project_mut().pane_tabs = None;
         tick(&mut app, &mut ctx);
-        assert!(app.runtime.agent_hud.is_none() && app.state.pane.agent_hud.binding.is_none());
+        assert!(
+            app.runtime.agent_hud.is_none()
+                && app.state.active_project().pane.agent_hud.binding.is_none()
+        );
     });
 }
 
@@ -258,21 +299,21 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = fixture(tmp.path(), tmp.path());
-        app.state.config.pane.agent_hud = AgentHudMode::Compact;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Compact;
         assert_eq!(paint(&mut app, 100, 32).1.len(), 2);
-        app.state.config.pane.agent_hud = AgentHudMode::Full;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Full;
         assert_eq!(paint(&mut app, 100, 32).1.len(), 4);
         for status in [
             crate::config::StatusPosition::Top,
             crate::config::StatusPosition::Bottom,
         ] {
-            app.state.config.layout.status_position = status;
+            app.state.active_project_mut().config.layout.status_position = status;
             for zoom in [
                 state::ZoomTarget::None,
                 state::ZoomTarget::BottomPane,
                 state::ZoomTarget::TopList,
             ] {
-                app.state.pane.zoom = zoom;
+                app.state.active_project_mut().pane.zoom = zoom;
                 for split in [
                     None,
                     Some(state::VSplit {
@@ -286,12 +327,12 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                         focus: state::Side::Left,
                     }),
                 ] {
-                    app.state.vsplit = split;
+                    app.state.active_project_mut().vsplit = split;
                     for (width, height) in [(100, 32), (40, 24), (20, 16), (100, 12)] {
-                        app.state.config.pane.agent_hud = AgentHudMode::Off;
+                        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Off;
                         let (off, _) = paint(&mut app, width, height);
                         for mode in [AgentHudMode::Compact, AgentHudMode::Full] {
-                            app.state.config.pane.agent_hud = mode;
+                            app.state.active_project_mut().config.pane.agent_hud = mode;
                             let (on, rows) = paint(&mut app, width, height);
                             assert_eq!(
                                 (
@@ -318,6 +359,7 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                                 assert_eq!(child.height + strip.height, off.pane.unwrap().height);
                                 assert_eq!(
                                     app.runtime
+                                        .project()
                                         .pane_tabs
                                         .as_ref()
                                         .unwrap()
@@ -338,10 +380,10 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                 }
             }
         }
-        app.state.pane.zoom = state::ZoomTarget::BottomPane;
-        app.state.vsplit = None;
+        app.state.active_project_mut().pane.zoom = state::ZoomTarget::BottomPane;
+        app.state.active_project_mut().vsplit = None;
         app.view.theme.mono = true;
-        app.state.config.pane.agent_hud = AgentHudMode::Full;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Full;
         let mut pager =
             crate::ui::pager::PagerView::new_plain("scroll", vec!["native history".to_owned()]);
         pager.mount = crate::ui::pager::Mount::LowerPane;
@@ -373,10 +415,12 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = fixture(tmp.path(), tmp.path());
-        app.state.config.pane.agent_hud = AgentHudMode::Compact;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Compact;
         let mut ctx = RunCtx::for_test();
         app.settle_agent_hud(Instant::now(), &mut ctx);
-        let Some(Binding::Codex(binding)) = app.state.pane.agent_hud.binding.clone() else {
+        let Some(Binding::Codex(binding)) =
+            app.state.active_project().pane.agent_hud.binding.clone()
+        else {
             panic!("a Codex tab binds a Codex consumer");
         };
         let at = "2026-10-13T12:00:00Z".parse().unwrap();
@@ -418,7 +462,7 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
             app.land_agent_hud_update(Update::Codex(Box::new(update.clone())), (5, 5), at),
             "reported zero differs from unknown"
         );
-        app.state.config.pane.agent_hud = AgentHudMode::Full;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Full;
         update.snapshot.mode.as_mut().unwrap().value.approval = Some("on-request".into());
         assert!(
             app.land_agent_hud_update(Update::Codex(Box::new(update)), (6, 6), at),
@@ -428,6 +472,7 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
         assert!(app.view.pager.as_ref().unwrap().saveable);
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -489,14 +534,14 @@ fn agent_hud_typing_and_paste_reach_the_child_unchanged() {
             std::fs::write(&script,format!("stty -echo -icanon -icrnl -inlcr -igncr min 1 time 0\nprintf 'ready'\ndd bs=1 count=7 of={} 2>/dev/null\nexec sleep 30\n",got.display())).unwrap();
             let command = format!("/bin/sh {}", script.display());
             let mut app = fixture(tmp.path(), tmp.path());
-            app.runtime.pane_tabs = Some(PaneTabs::new(entry(
+            app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry(
                 &mut app,
                 tmp.path(),
                 tmp.path(),
                 &command,
             )));
-            app.state.config.pane.agent_hud = mode;
-            app.state.focus = state::Focus::Pane;
+            app.state.active_project_mut().config.pane.agent_hud = mode;
+            app.state.active_project_mut().focus = state::Focus::Pane;
             app.snapshot_pane_routing();
             paint(&mut app, 100, 32);
             wait_screen(&mut app, "ready");
@@ -549,7 +594,7 @@ fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_cancel_owned_drag
             tmp.path(),
             &format!("/bin/sh {}", script.display()),
         );
-        app.runtime.pane_tabs = Some(PaneTabs::new(child));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(child));
         wait_screen(&mut app, "drag this text");
         let pane = paint(&mut app, 100, 32).0.pane.unwrap();
         app.snapshot_pane_routing();
@@ -567,7 +612,7 @@ fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_cancel_owned_drag
         ));
         assert!(app.view.pane_selection_snapshot.is_some());
         // Config reload and command changes share the same geometry and cancellation.
-        app.state.config.pane.agent_hud = AgentHudMode::Compact;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Compact;
         let hud = paint(&mut app, 100, 32).0.agent_hud.unwrap();
         assert!(app.view.pane_selection_snapshot.is_none());
         for kind in [
@@ -618,7 +663,7 @@ fn agent_hud_cached_branch_must_belong_to_the_panes_repository() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = fixture(tmp.path(), tmp.path());
-        app.state.config.pane.agent_hud = AgentHudMode::Compact;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Compact;
         let column = app.state.cur_mut();
         column.listing.dir = tmp.path().to_owned();
         column.git_cache.current_repo_root = Some(tmp.path().to_owned());
@@ -654,8 +699,9 @@ fn agent_hud_waiting_attention_preserves_the_semantic_state_without_requesting_h
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = fixture(tmp.path(), tmp.path());
-        app.state.config.pane.agent_hud = AgentHudMode::Compact;
+        app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Compact;
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -750,11 +796,11 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         append_message(&path, "msg-1", 100);
         let mut app = App::test_app(std::env::current_dir().unwrap());
         app.view.term_size = (100, 32);
-        app.state.config.mouse.capture = false;
-        app.state.pane.pane_height_pct = 50;
-        app.state.pane.agent_hud.claude_home = Some(home);
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.claude_home = Some(home);
         let unreported = claude_entry(&mut app, tmp.path(), None);
-        app.runtime.pane_tabs = Some(PaneTabs::new(unreported));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(unreported));
         app.cmd_agent_hud("full");
         let mut ctx = RunCtx::for_test();
         let lines = wait_hud_line(&mut app, &mut ctx, 1, "awaiting metrics");
@@ -764,7 +810,12 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         );
 
         let reported = claude_entry(&mut app, tmp.path(), Some(SESSION));
-        app.runtime.pane_tabs.as_mut().unwrap().push(reported);
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .push(reported);
         let lines = wait_hud_line(&mut app, &mut ctx, 1, " 111 ");
         assert!(lines[0].contains("opus-5-5 xhigh"), "{lines:?}");
         assert!(
@@ -774,7 +825,13 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         append_message(&path, "msg-2", 2_000);
         wait_hud_line(&mut app, &mut ctx, 1, " 2.0k ");
 
-        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
         info.activity = AgentActivity::Waiting;
         let mut report = crate::pane::tabs::ReportedStatus::new(
             AgentActivity::Waiting,
@@ -812,10 +869,15 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         }
 
         // Another config directory names other files: the consumer starts over.
-        let binding = app.state.pane.agent_hud.binding.clone();
-        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("other-home"));
+        let binding = app.state.active_project().pane.agent_hud.binding.clone();
+        app.state.active_project_mut().pane.agent_hud.claude_home =
+            Some(tmp.path().join("other-home"));
         let lines = wait_hud_line(&mut app, &mut ctx, 1, "transcript missing");
-        assert_ne!(app.state.pane.agent_hud.binding, binding, "{lines:?}");
+        assert_ne!(
+            app.state.active_project().pane.agent_hud.binding,
+            binding,
+            "{lines:?}"
+        );
     });
 }
 
@@ -883,11 +945,11 @@ fn agent_hud_follows_an_agy_tabs_reported_session_in_its_home() {
 
         let mut app = App::test_app(std::env::current_dir().unwrap());
         app.view.term_size = (100, 32);
-        app.state.config.mouse.capture = false;
-        app.state.pane.pane_height_pct = 50;
-        app.state.pane.agent_hud.agy_home = Some(home);
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.agy_home = Some(home);
         let unreported = agy_entry(&mut app, tmp.path(), None);
-        app.runtime.pane_tabs = Some(PaneTabs::new(unreported));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(unreported));
         app.cmd_agent_hud("full");
         let mut ctx = RunCtx::for_test();
         let lines = wait_hud_line(&mut app, &mut ctx, 1, "awaiting metrics");
@@ -897,7 +959,12 @@ fn agent_hud_follows_an_agy_tabs_reported_session_in_its_home() {
         );
 
         let reported = agy_entry(&mut app, tmp.path(), Some(AGY_SESSION));
-        app.runtime.pane_tabs.as_mut().unwrap().push(reported);
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .push(reported);
         let lines = wait_hud_line(&mut app, &mut ctx, 1, " 111 ");
         assert!(lines[0].contains("gemini-2.5-pro"), "{lines:?}");
         assert!(
@@ -907,7 +974,13 @@ fn agent_hud_follows_an_agy_tabs_reported_session_in_its_home() {
         append_agy_message(&path, 2, 2_000);
         wait_hud_line(&mut app, &mut ctx, 1, " 2.0k ");
 
-        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
         info.activity = AgentActivity::Waiting;
         let mut report = crate::pane::tabs::ReportedStatus::new(
             AgentActivity::Waiting,
@@ -945,10 +1018,15 @@ fn agent_hud_follows_an_agy_tabs_reported_session_in_its_home() {
         }
 
         // Another config directory names other files: the consumer starts over.
-        let binding = app.state.pane.agent_hud.binding.clone();
-        app.state.pane.agent_hud.agy_home = Some(tmp.path().join("other-home"));
+        let binding = app.state.active_project().pane.agent_hud.binding.clone();
+        app.state.active_project_mut().pane.agent_hud.agy_home =
+            Some(tmp.path().join("other-home"));
         let lines = wait_hud_line(&mut app, &mut ctx, 1, "transcript missing");
-        assert_ne!(app.state.pane.agent_hud.binding, binding, "{lines:?}");
+        assert_ne!(
+            app.state.active_project().pane.agent_hud.binding,
+            binding,
+            "{lines:?}"
+        );
     });
 }
 
@@ -960,15 +1038,15 @@ fn a_config_reload_keeps_the_hud_choice_unless_it_changes_agent_hud() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(tmp.path().to_path_buf());
         app.cmd_agent_hud("full");
-        let mut unrelated = app.state.config.clone();
+        let mut unrelated = app.state.active_project().config.clone();
         unrelated.pane.preview_pasted_images = !unrelated.pane.preview_pasted_images;
         app.adopt_config(unrelated);
         assert_eq!(app.agent_hud_preference(), AgentHudMode::Full);
-        let mut edited = app.state.config.clone();
+        let mut edited = app.state.active_project().config.clone();
         edited.pane.agent_hud = AgentHudMode::Compact;
         app.adopt_config(edited);
         assert_eq!(app.agent_hud_preference(), AgentHudMode::Compact);
-        assert!(app.state.pane.agent_hud.choice.is_none());
+        assert!(app.state.active_project().pane.agent_hud.choice.is_none());
     });
 }
 
@@ -989,7 +1067,7 @@ fn agent_hud_double_click_opens_the_dump_and_a_single_click_does_not() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = fixture(tmp.path(), tmp.path());
-        app.state.config.mouse.capture = true;
+        app.state.active_project_mut().config.mouse.capture = true;
         app.cmd_agent_hud("full");
         let hud = paint(&mut app, 100, 32).0.agent_hud.unwrap();
         app.snapshot_pane_routing();
@@ -1052,15 +1130,21 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::env::current_dir().unwrap());
         app.view.term_size = (120, 32);
-        app.state.config.mouse.capture = false;
-        app.state.pane.pane_height_pct = 50;
-        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("claude-home"));
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.claude_home =
+            Some(tmp.path().join("claude-home"));
         let older = claude_entry(&mut app, tmp.path(), None);
         let older_id = older.info.id.clone();
-        app.runtime.pane_tabs = Some(PaneTabs::new(older));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(older));
         let mine = claude_entry(&mut app, tmp.path(), Some(SESSION));
         let mine_id = mine.info.id.clone();
-        app.runtime.pane_tabs.as_mut().unwrap().push(mine);
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .push(mine);
         app.cmd_agent_hud("full");
         let window = |used_percent| RateWindow {
             used_percent,
@@ -1088,7 +1172,7 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
         );
         // Explicit times: two landings can share a clock tick.
         for (id, second) in [(&mine_id, 0), (&older_id, 1)] {
-            let tabs = app.runtime.pane_tabs.as_mut().unwrap();
+            let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
             let entry = tabs
                 .tabs_mut()
                 .iter_mut()
@@ -1100,9 +1184,14 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
         app.land_statusline("no-such-pane", Statusline::default());
         let codex = entry(&mut app, tmp.path(), tmp.path(), "cat");
         let codex_id = codex.info.id.clone();
-        app.runtime.pane_tabs.as_mut().unwrap().push(codex);
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .push(codex);
         app.land_statusline(&codex_id, Statusline::default());
-        let tabs = app.runtime.pane_tabs.as_mut().unwrap();
+        let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
         assert!(
             tabs.active_info().claude_statusline.is_none(),
             "only a Claude Code tab keeps a report"
@@ -1118,7 +1207,13 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
             usage.contains("5h 23%") && usage.contains("7d 61%"),
             "the newest plan: {usage}"
         );
-        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
         info.live_session_id = Some("c1a0de00-0000-4000-8000-000000000002".into());
         let usage = app.agent_hud_lines(rect)[1].to_string();
         assert!(
@@ -1157,11 +1252,11 @@ fn agent_hud_retries_missing_agy_transcript_on_status_report() {
         let home = tmp.path().join("agy-home");
         let mut app = App::test_app(std::env::current_dir().unwrap());
         app.view.term_size = (100, 32);
-        app.state.config.mouse.capture = false;
-        app.state.pane.pane_height_pct = 50;
-        app.state.pane.agent_hud.agy_home = Some(home.clone());
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.agy_home = Some(home.clone());
         let entry = agy_entry(&mut app, tmp.path(), Some(AGY_SESSION));
-        app.runtime.pane_tabs = Some(PaneTabs::new(entry));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry));
         app.cmd_agent_hud("full");
         let mut ctx = RunCtx::for_test();
 
@@ -1206,12 +1301,13 @@ fn plan_resets_wake_the_strip_only_when_its_cells_change() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::env::current_dir().unwrap());
         app.view.term_size = (120, 32);
-        app.state.config.mouse.capture = false;
-        app.state.pane.pane_height_pct = 50;
-        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("claude-home"));
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.claude_home =
+            Some(tmp.path().join("claude-home"));
         let tab = claude_entry(&mut app, tmp.path(), Some(SESSION));
         let id = tab.info.id.clone();
-        app.runtime.pane_tabs = Some(PaneTabs::new(tab));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(tab));
         app.cmd_agent_hud("compact");
         let now = Timestamp::now().as_second();
         let five = now + 3 * 3600 + 125;
@@ -1242,7 +1338,7 @@ fn plan_resets_wake_the_strip_only_when_its_cells_change() {
             (3 * 3600 + 120..=3 * 3600 + 125).contains(&clock),
             "the five-hour reset: {clock}s"
         );
-        app.state.config.pane.agent_hud_resets = AgentHudResets::Countdown;
+        app.state.active_project_mut().config.pane.agent_hud_resets = AgentHudResets::Countdown;
         let countdown = wake_in(&mut app).expect("a tick to wake for");
         assert!((1..=60).contains(&countdown), "the next tick: {countdown}s");
         app.cmd_agent_hud("off");
@@ -1259,12 +1355,13 @@ fn a_plan_reset_passing_repaints_the_strip() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::env::current_dir().unwrap());
         app.view.term_size = (120, 32);
-        app.state.config.mouse.capture = false;
-        app.state.pane.pane_height_pct = 50;
-        app.state.pane.agent_hud.claude_home = Some(tmp.path().join("claude-home"));
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.claude_home =
+            Some(tmp.path().join("claude-home"));
         let tab = claude_entry(&mut app, tmp.path(), Some(SESSION));
         let id = tab.info.id.clone();
-        app.runtime.pane_tabs = Some(PaneTabs::new(tab));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(tab));
         app.cmd_agent_hud("compact");
         let now = Timestamp::now().as_second();
         app.land_statusline(
@@ -1280,7 +1377,8 @@ fn a_plan_reset_passing_repaints_the_strip() {
         let mut ctx = RunCtx::for_test();
         app.settle_agent_hud(Instant::now(), &mut ctx);
         // As if the last settle came before the reset.
-        app.state.pane.agent_hud.as_of = Some(Timestamp::from_second(now - 20).unwrap());
+        app.state.active_project_mut().pane.agent_hud.as_of =
+            Some(Timestamp::from_second(now - 20).unwrap());
         let rect = app
             .frame_layout(Rect::new(0, 0, 120, 32))
             .agent_hud
@@ -1305,11 +1403,11 @@ fn agent_hud_retries_missing_claude_transcript_on_status_report() {
         std::fs::create_dir_all(home.join("projects")).unwrap();
         let mut app = App::test_app(std::env::current_dir().unwrap());
         app.view.term_size = (100, 32);
-        app.state.config.mouse.capture = false;
-        app.state.pane.pane_height_pct = 50;
-        app.state.pane.agent_hud.claude_home = Some(home.clone());
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.claude_home = Some(home.clone());
         let entry = claude_entry(&mut app, tmp.path(), Some(SESSION));
-        app.runtime.pane_tabs = Some(PaneTabs::new(entry));
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry));
         app.cmd_agent_hud("full");
         let mut ctx = RunCtx::for_test();
 

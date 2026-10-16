@@ -20,14 +20,23 @@ fn open_pane_tab_defaults_to_worktree_root_and_focuses_pane() {
         // Browsing has moved the list deep into the tree, but the pane must
         // anchor to the worktree root (wherever `gw` would jump).
         let mut app = App::test_app(browsed.clone());
-        app.state.left.git_cache.current_repo_root = Some(root.clone());
-        assert!(app.runtime.pane_tabs.is_none());
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = Some(root.clone());
+        assert!(app.runtime.project().pane_tabs.is_none());
         app.open_pane_tab("cat");
-        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        let tabs = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .expect("a tab was opened");
         assert_eq!(tabs.active_info().cwd, root, "anchors at the worktree root");
         assert_ne!(tabs.active_info().cwd, browsed, "not the browsed dir");
         assert_eq!(
-            app.state.focus,
+            app.state.active_project().focus,
             state::Focus::Pane,
             "opening a pane focuses it"
         );
@@ -44,12 +53,22 @@ fn open_pane_tab_project_home_anchors_at_project_root() {
         let browsed = tmp.path().join("proj/sub");
         std::fs::create_dir_all(&browsed).unwrap();
         let mut app = App::test_app(browsed.clone());
-        app.state.config.pane.new_tab_cwd = crate::config::NewTabCwd::ProjectHome;
-        app.state.project_home = Some(home.clone());
+        app.state.active_project_mut().config.pane.new_tab_cwd =
+            crate::config::NewTabCwd::ProjectHome;
+        app.state.active_project_mut().home = Some(home.clone());
         // A worktree root is set too — ProjectHome must win over it.
-        app.state.left.git_cache.current_repo_root = Some(browsed.clone());
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = Some(browsed.clone());
         app.open_pane_tab("cat");
-        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        let tabs = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .expect("a tab was opened");
         assert_eq!(tabs.active_info().cwd, home, "anchors at PROJECT_HOME");
         assert_ne!(tabs.active_info().cwd, browsed, "not the browsed dir");
     });
@@ -65,10 +84,16 @@ fn open_pane_tab_browse_dir_uses_listing_dir() {
         let browsed = tmp.path().join("proj/sub");
         std::fs::create_dir_all(&browsed).unwrap();
         let mut app = App::test_app(browsed.clone());
-        app.state.project_home = Some(home);
-        app.state.config.pane.new_tab_cwd = crate::config::NewTabCwd::BrowseDir;
+        app.state.active_project_mut().home = Some(home);
+        app.state.active_project_mut().config.pane.new_tab_cwd =
+            crate::config::NewTabCwd::BrowseDir;
         app.open_pane_tab("cat");
-        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        let tabs = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .expect("a tab was opened");
         assert_eq!(tabs.active_info().cwd, browsed, "opens in the browsed dir");
     });
 }
@@ -82,9 +107,14 @@ fn open_pane_tab_falls_back_to_listing_dir_without_project_home() {
         let dir = tmp.path().join("work");
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir.clone());
-        assert!(app.state.project_home.is_none());
+        assert!(app.state.active_project().home.is_none());
         app.open_pane_tab("cat");
-        let tabs = app.runtime.pane_tabs.as_ref().expect("a tab was opened");
+        let tabs = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .expect("a tab was opened");
         assert_eq!(tabs.active_info().cwd, dir);
     });
 }
@@ -102,46 +132,50 @@ fn zoom_targets_the_active_region() {
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir);
         app.open_pane_tab("cat");
-        let pct_before = app.state.pane.pane_height_pct;
+        let pct_before = app.state.active_project().pane.pane_height_pct;
 
         // List focused → zoom the list; focus stays on the list.
-        app.state.focus = state::Focus::FileList;
+        app.state.active_project_mut().focus = state::Focus::FileList;
         app.toggle_pane_zoom();
         assert_eq!(
-            app.state.pane.zoom,
+            app.state.active_project().pane.zoom,
             state::ZoomTarget::TopList,
             "list focused → zoom the list"
         );
         assert_eq!(
-            app.state.focus,
+            app.state.active_project().focus,
             state::Focus::FileList,
             "list-zoom leaves focus on the list"
         );
         app.toggle_pane_zoom();
         assert_eq!(
-            app.state.pane.zoom,
+            app.state.active_project().pane.zoom,
             state::ZoomTarget::None,
             "second toggle clears the zoom"
         );
 
         // Pane focused → zoom the pane; focus stays on the pane.
-        app.state.focus = state::Focus::Pane;
+        app.state.active_project_mut().focus = state::Focus::Pane;
         app.toggle_pane_zoom();
         assert_eq!(
-            app.state.pane.zoom,
+            app.state.active_project().pane.zoom,
             state::ZoomTarget::BottomPane,
             "pane focused → zoom the pane"
         );
         assert_eq!(
-            app.state.focus,
+            app.state.active_project().focus,
             state::Focus::Pane,
             "pane-zoom leaves focus on the pane"
         );
         app.toggle_pane_zoom();
-        assert_eq!(app.state.pane.zoom, state::ZoomTarget::None);
+        assert_eq!(
+            app.state.active_project().pane.zoom,
+            state::ZoomTarget::None
+        );
 
         assert_eq!(
-            app.state.pane.pane_height_pct, pct_before,
+            app.state.active_project().pane.pane_height_pct,
+            pct_before,
             "zoom must not disturb pane_height_pct"
         );
     });
@@ -159,14 +193,17 @@ fn focus_switch_is_inert_while_zoomed() {
         app.open_pane_tab("cat");
 
         // Zoom the pane (pane focused → BottomPane).
-        app.state.focus = state::Focus::Pane;
+        app.state.active_project_mut().focus = state::Focus::Pane;
         app.toggle_pane_zoom();
-        assert_eq!(app.state.pane.zoom, state::ZoomTarget::BottomPane);
+        assert_eq!(
+            app.state.active_project().pane.zoom,
+            state::ZoomTarget::BottomPane
+        );
 
         // `^a k` would normally move focus to the list — inert while zoomed.
         app.set_pane_focus(false);
         assert_eq!(
-            app.state.focus,
+            app.state.active_project().focus,
             state::Focus::Pane,
             "focus must not move while zoomed"
         );
@@ -175,7 +212,7 @@ fn focus_switch_is_inert_while_zoomed() {
         app.toggle_pane_zoom();
         app.set_pane_focus(false);
         assert_eq!(
-            app.state.focus,
+            app.state.active_project().focus,
             state::Focus::FileList,
             "focus moves again once un-zoomed"
         );
@@ -193,14 +230,17 @@ fn new_pane_reveals_a_list_zoomed_session() {
         let mut app = App::test_app(dir);
         app.open_pane_tab("cat");
         // List focused → zoom the list (pane collapses to its tab bar).
-        app.state.focus = state::Focus::FileList;
+        app.state.active_project_mut().focus = state::Focus::FileList;
         app.toggle_pane_zoom();
-        assert_eq!(app.state.pane.zoom, state::ZoomTarget::TopList);
+        assert_eq!(
+            app.state.active_project().pane.zoom,
+            state::ZoomTarget::TopList
+        );
 
         // Creating another pane clears the list-zoom so the pane is visible.
         app.open_pane_tab("cat");
         assert_eq!(
-            app.state.pane.zoom,
+            app.state.active_project().pane.zoom,
             state::ZoomTarget::None,
             "a new pane reveals the split"
         );
@@ -219,17 +259,20 @@ fn pane_index_fullscreens_from_list_zoom() {
         let mut app = App::test_app(dir);
         app.open_pane_tab("cat");
         app.open_pane_tab("cat"); // two tabs
-        app.state.focus = state::Focus::FileList;
+        app.state.active_project_mut().focus = state::Focus::FileList;
         app.toggle_pane_zoom();
-        assert_eq!(app.state.pane.zoom, state::ZoomTarget::TopList);
+        assert_eq!(
+            app.state.active_project().pane.zoom,
+            state::ZoomTarget::TopList
+        );
 
         app.apply(&Action::PaneTabByIndex(1)).unwrap();
         assert_eq!(
-            app.state.pane.zoom,
+            app.state.active_project().pane.zoom,
             state::ZoomTarget::BottomPane,
             "^a <n> fullscreens the chosen pane from a zoomed list"
         );
-        assert_eq!(app.state.focus, state::Focus::Pane);
+        assert_eq!(app.state.active_project().focus, state::Focus::Pane);
     });
 }
 
@@ -287,7 +330,7 @@ fn empty_scrollback_agent_pane_opens_its_transcript() {
             .expect("spawn cat");
         let entry =
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
-        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
         app.open_pane_scroll_pager();
         let view = app
             .view
@@ -317,8 +360,13 @@ fn agent_pane_with_capture(app: &mut App, dir: &std::path::Path) {
         pane,
         crate::pane::tabs::TabInfo::new("claude", dir.to_path_buf()),
     );
-    app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
-    let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+    app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+    let tabs = app
+        .runtime
+        .project_mut()
+        .pane_tabs
+        .as_mut()
+        .expect("a pane tab");
     let mut feed = String::new();
     for i in 0..80 {
         use std::fmt::Write as _;
@@ -422,7 +470,7 @@ fn t_toggles_transcript_tool_calls_on_an_agent_pane() {
             .expect("spawn cat");
         let entry =
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
-        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
         assert!(app.view.transcript_show_tool_calls, "shown by default");
         app.toggle_scrollback_tool_calls();
         assert!(!app.view.transcript_show_tool_calls, "t hides tool calls");
@@ -479,7 +527,14 @@ fn rapid_pane_next_prev_chords_each_switch_tabs() {
         let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
         let n = KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL);
         let p = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL);
-        let idx = |app: &App| app.runtime.pane_tabs.as_ref().unwrap().active_index();
+        let idx = |app: &App| {
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_index()
+        };
 
         let mut prev = idx(&app);
         for i in 1..=4 {
@@ -532,7 +587,7 @@ fn a_captured_dot_slash_percent_runs_the_selected_script() {
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut app = App::test_app(dir.clone());
-        app.state.left.listing = crate::fs::Listing::read(&dir).unwrap();
+        app.state.active_project_mut().left.listing = crate::fs::Listing::read(&dir).unwrap();
         app.state.rebuild_rows();
         app.run_captured_shell("./%", "./%");
 
@@ -741,10 +796,11 @@ fn jump_to_pane_path_missing_flashes_not_found() {
         let start = tmp.path().join("start");
         std::fs::create_dir(&start).unwrap();
         let mut app = App::test_app(start);
-        let before = app.state.left.listing.dir.clone();
+        let before = app.state.active_project().left.listing.dir.clone();
         app.jump_to_pane_path("/no/such/path/xyz123");
         assert_eq!(
-            app.state.left.listing.dir, before,
+            app.state.active_project().left.listing.dir,
+            before,
             "missing path must not chdir"
         );
         assert!(
@@ -781,11 +837,15 @@ fn quick_select_esc_closes_without_dispatch() {
         std::fs::create_dir(&start).unwrap();
         std::fs::create_dir(&target).unwrap();
         let mut app = App::test_app(start);
-        let before = app.state.left.listing.dir.clone();
+        let before = app.state.active_project().left.listing.dir.clone();
         app.view.quick_select = Some(qs_path_overlay(target.to_str().unwrap()));
         app.handle_key(esc()).unwrap();
         assert!(app.view.quick_select.is_none(), "Esc closes the overlay");
-        assert_eq!(app.state.left.listing.dir, before, "Esc dispatches nothing");
+        assert_eq!(
+            app.state.active_project().left.listing.dir,
+            before,
+            "Esc dispatches nothing"
+        );
     });
 }
 
@@ -860,7 +920,13 @@ fn closing_a_running_tab_confirms_first() {
         let mut app = App::test_app(dir);
         app.open_pane_tab("cat"); // cat blocks on stdin → the tab stays live
         app.open_pane_tab("cat"); // two live tabs
-        let count = |app: &App| app.runtime.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
+        let count = |app: &App| {
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .map_or(0, |t| t.tabs().len())
+        };
         assert_eq!(count(&app), 2);
 
         // Closing the active (running) tab opens a confirm — nothing closes yet.
@@ -897,6 +963,7 @@ fn restarting_a_running_tab_confirms_first() {
         app.open_pane_tab("cat"); // cat blocks on stdin → the tab stays live
         let pane_id = |app: &App| {
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .expect("a tab exists")
@@ -945,6 +1012,7 @@ fn restarting_a_tab_keeps_its_number() {
         }
         let ids = |app: &App| {
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .expect("tabs exist")
@@ -958,7 +1026,12 @@ fn restarting_a_tab_keeps_its_number() {
 
         // Restart the MIDDLE tab (number 2) after renaming it, so a shift left
         // would be visible in both the order and the surviving label.
-        let tabs = app.runtime.pane_tabs.as_mut().expect("tabs exist");
+        let tabs = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("tabs exist");
         tabs.switch_to(1);
         tabs.tabs_mut()[1].info.label = "renamed".to_string();
         app.restart_active_tab_now();
@@ -967,6 +1040,7 @@ fn restarting_a_tab_keeps_its_number() {
         assert_eq!(after.len(), 3, "restart must not change the tab count");
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .expect("tabs exist")
@@ -980,6 +1054,7 @@ fn restarting_a_tab_keeps_its_number() {
 
         let info = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .expect("tabs exist")
@@ -1005,13 +1080,19 @@ fn restarting_an_exited_tab_drops_the_exit_suffix() {
         app.open_pane_tab("cat");
 
         // Exactly what `mark_exited` writes once the reader sees EOF.
-        let tabs = app.runtime.pane_tabs.as_mut().expect("tabs exist");
+        let tabs = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("tabs exist");
         tabs.active_info_mut().label = "cat [exited 0]".to_string();
 
         app.restart_active_tab_now();
 
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .expect("tabs exist")
@@ -1033,13 +1114,19 @@ fn restarting_a_renamed_exited_tab_keeps_the_rename() {
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir);
         app.open_pane_tab("cat");
-        let tabs = app.runtime.pane_tabs.as_mut().expect("tabs exist");
+        let tabs = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("tabs exist");
         tabs.active_info_mut().label = "matrix [exited 130]".to_string();
 
         app.restart_active_tab_now();
 
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .expect("tabs exist")
@@ -1072,11 +1159,17 @@ fn pane_focus_switch_still_works_while_v_editor_is_open() {
         let wake = app.make_pane_wake();
         let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
             .expect("spawn overlay");
-        app.runtime.top_overlay = Some(overlay);
-        app.state.focus = state::Focus::Overlay;
+        app.runtime.project_mut().top_overlay = Some(overlay);
+        app.state.active_project_mut().focus = state::Focus::Overlay;
 
         // A genuinely mutating Pane-tier action stays paused.
-        let count = |app: &App| app.runtime.pane_tabs.as_ref().map_or(0, |t| t.tabs().len());
+        let count = |app: &App| {
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .map_or(0, |t| t.tabs().len())
+        };
         let tabs_before = count(&app);
         app.apply(&Action::PaneNewTab).unwrap();
         assert_eq!(
@@ -1084,20 +1177,23 @@ fn pane_focus_switch_still_works_while_v_editor_is_open() {
             tabs_before,
             "mutating pane actions stay paused while editing"
         );
-        assert!(matches!(app.state.focus, state::Focus::Overlay));
+        assert!(matches!(
+            app.state.active_project().focus,
+            state::Focus::Overlay
+        ));
 
         // Pure focus-switch is exempt: `^a j` moves the keyboard to the
         // already-visible bottom pane...
         app.apply(&Action::PaneFocusDown).unwrap();
         assert!(
-            matches!(app.state.focus, state::Focus::Pane),
+            matches!(app.state.active_project().focus, state::Focus::Pane),
             "^a j must switch to the bottom pane even while the editor is open"
         );
 
         // ...and `^a k` climbs back to the editor.
         app.apply(&Action::PaneFocusUp).unwrap();
         assert!(
-            matches!(app.state.focus, state::Focus::Overlay),
+            matches!(app.state.active_project().focus, state::Focus::Overlay),
             "^a k returns to the editor"
         );
     });
@@ -1123,9 +1219,12 @@ fn open_v_editor(app: &mut App, dir: &std::path::Path) {
     let wake = app.make_pane_wake();
     let overlay = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
         .expect("spawn overlay");
-    app.runtime.top_overlay = Some(overlay);
-    app.state.focus = state::Focus::Overlay;
-    assert!(app.state.vsplit.is_none(), "the editor is full-screen");
+    app.runtime.project_mut().top_overlay = Some(overlay);
+    app.state.active_project_mut().focus = state::Focus::Overlay;
+    assert!(
+        app.state.active_project().vsplit.is_none(),
+        "the editor is full-screen"
+    );
 }
 
 /// #33: a full-screen `V` paints over the prompt row, so what spyc puts there
@@ -1210,7 +1309,14 @@ fn the_prompt_row_borrows_the_tab_bar_and_gives_it_back() {
         app.apply(&Action::PaneFocusDown).unwrap();
         app.state.flash_info("from the pane");
         assert!(bar(&mut app).starts_with("from the pane"));
-        let active = |app: &App| app.runtime.pane_tabs.as_ref().expect("tabs").active_index();
+        let active = |app: &App| {
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .expect("tabs")
+                .active_index()
+        };
         let before = active(&app);
         crate::set_mouse_capture_for_test(true);
         for column in 0..divider.width {
@@ -1277,7 +1383,7 @@ fn with_no_pane_the_prompt_row_takes_the_editors_last_row() {
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir.clone());
         open_v_editor(&mut app, &dir);
-        assert!(app.runtime.pane_tabs.is_none());
+        assert!(app.runtime.project().pane_tabs.is_none());
 
         app.apply(&Action::PaneNewTab).unwrap();
         let rows = screen_rows(&mut app, 80, 24);
@@ -1308,8 +1414,8 @@ fn vsplit_column_focus_switch_still_works_while_v_editor_is_open() {
         let wake = app.make_pane_wake();
         let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
             .expect("spawn overlay");
-        app.runtime.top_overlay = Some(overlay);
-        app.state.focus = state::Focus::Overlay;
+        app.runtime.project_mut().top_overlay = Some(overlay);
+        app.state.active_project_mut().focus = state::Focus::Overlay;
 
         // `^a l` switches to the right column even with the editor open...
         app.apply(&Action::VsplitFocusRight).unwrap();
@@ -1347,7 +1453,7 @@ fn closing_help_over_a_v_editor_keeps_the_editor_column_pinned() {
         let wake = app.make_pane_wake();
         let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
             .expect("spawn overlay");
-        app.runtime.top_overlay = Some(overlay);
+        app.runtime.project_mut().top_overlay = Some(overlay);
         app.view.overlay_column = Some(state::Side::Left);
 
         // Switch to the right column, then open `?` help as a modal Overlay pager.
@@ -1448,7 +1554,11 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
             std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
 
             let mut app = App::test_app(proj.clone());
-            app.state.left.git_cache.current_repo_root = Some(proj);
+            app.state
+                .active_project_mut()
+                .left
+                .git_cache
+                .current_repo_root = Some(proj);
             // The consent offer is gated on MCP running; without this the pane
             // spawns with no prompt and the bug cannot appear.
             app.view.mcp_running = true;
@@ -1477,7 +1587,12 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
                 );
                 for e in app.handle_key(key).unwrap() {
                     if let Effect::SendToPane { mut input, .. } = e {
-                        let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+                        let tabs = app
+                            .runtime
+                            .project_mut()
+                            .pane_tabs
+                            .as_mut()
+                            .expect("a pane tab");
                         input.send_to(tabs.active_mut()).unwrap();
                     }
                 }
@@ -1486,6 +1601,7 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             while std::time::Instant::now() < deadline && !got.exists() {
                 app.runtime
+                    .project_mut()
                     .pane_tabs
                     .as_mut()
                     .expect("a pane tab")

@@ -328,7 +328,7 @@ fn a_harpoon_slot_inside_an_archive_comes_back_to_it() {
         let mut app = App::test_app(dir.clone());
         // Harpoon is keyed on the column's repo root or PROJECT_HOME; inside a
         // mount there is no repo, so the archive's own project is the key.
-        app.state.project_home = Some(dir);
+        app.state.active_project_mut().home = Some(dir);
         app.reconcile_harpoon();
         mount_inline(&mut app, &archive, &tmp.path().join("staging"));
 
@@ -502,7 +502,7 @@ fn nesting_past_max_depth_is_refused_and_names_the_knob() {
         let archive = dir.join("outer.zip");
         build_nested_zip(&archive);
         let mut app = App::test_app(dir);
-        app.state.config.archive.max_depth = 0;
+        app.state.active_project_mut().config.archive.max_depth = 0;
         mount_inline(&mut app, &archive, &tmp.path().join("staging"));
 
         let idx = app

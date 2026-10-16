@@ -25,7 +25,7 @@ fn browsing(entries: &[&str], test: impl FnOnce(&mut App, &std::path::Path)) {
             }
         }
         let mut app = App::test_app(dir.clone());
-        app.state.left.listing = crate::fs::Listing::read(&dir).unwrap();
+        app.state.active_project_mut().left.listing = crate::fs::Listing::read(&dir).unwrap();
         app.state.rebuild_rows();
         test(&mut app, &dir);
     });
@@ -61,6 +61,7 @@ fn press_tab(app: &mut App) -> String {
 
 fn listed(app: &App) -> Vec<String> {
     app.state
+        .active_project()
         .left
         .rows
         .iter()

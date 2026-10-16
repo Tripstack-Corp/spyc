@@ -12,8 +12,7 @@ use crate::state::{Cursor, Harpoon, History, IgnoreMasks, Inventory, Marks, Pick
 use crate::ui::theme::Theme;
 
 use super::{
-    App, BackgroundTasks, FlashKind, FlashMessage, Mode, Runtime, View, ViewState, state,
-    user_host_string,
+    App, FlashKind, FlashMessage, Mode, Runtime, View, ViewState, state, user_host_string,
 };
 
 impl App {
@@ -124,61 +123,59 @@ impl App {
         // stops a `SIGKILL`ed session's extracted bytes from living forever.
         super::archive::sweep_orphan_staging();
 
-        let app_state = state::AppState {
-            left: state::Commander {
-                listing,
-                picks: Picks::new(),
-                masks: {
-                    let mut m = IgnoreMasks::default();
-                    m.apply_config(&config.ignore_masks);
-                    m
-                },
-                temp_filter: None,
-                sort_order: crate::fs::listing::SortMode::Name,
-                sort_reversed: false,
-                view: View::Dir,
-                cursor: Cursor::new(),
-                rows: Vec::new(),
-                grid_dims: crate::ui::list_view::GridDims::new(1, 1),
-                page: crate::ui::list_view::PageSpan::default(),
-                list_generation: 0,
-                // Per-column git: the startup branch string + (empty) markers,
-                // and empty cache/worker plumbing until the first chdir +
-                // `refresh_git_state` populate it. See [`state::GitCache`].
-                git: state::GitState {
-                    info: git_info,
-                    files: git_files,
-                },
-                git_cache: state::GitCache::default(),
-                // Per-column harpoon, keyed by the column's `harpoon_root`
-                // (worktree root, else PROJECT_HOME). Seeded from PROJECT_HOME
-                // here; `reconcile_harpoon` re-keys it to the repo/worktree root
-                // once the first chdir resolves `current_repo_root`.
-                harpoon_filter_set: harpoon
-                    .as_ref()
-                    .map(|h| h.ancestor_set().clone())
-                    .unwrap_or_default(),
-                harpoon,
-                pending_ghosts: std::collections::HashSet::new(),
+        let left = state::Commander {
+            listing,
+            picks: Picks::new(),
+            masks: {
+                let mut m = IgnoreMasks::default();
+                m.apply_config(&config.ignore_masks);
+                m
             },
-            right: None,
+            temp_filter: None,
+            sort_order: crate::fs::listing::SortMode::Name,
+            sort_reversed: false,
+            view: View::Dir,
+            cursor: Cursor::new(),
+            rows: Vec::new(),
+            grid_dims: crate::ui::list_view::GridDims::new(1, 1),
+            page: crate::ui::list_view::PageSpan::default(),
+            list_generation: 0,
+            // Per-column git: the startup branch string + (empty) markers,
+            // and empty cache/worker plumbing until the first chdir +
+            // `refresh_git_state` populate it. See [`state::GitCache`].
+            git: state::GitState {
+                info: git_info,
+                files: git_files,
+            },
+            git_cache: state::GitCache::default(),
+            // Per-column harpoon, keyed by the column's `harpoon_root`
+            // (worktree root, else PROJECT_HOME). Seeded from PROJECT_HOME
+            // here; `reconcile_harpoon` re-keys it to the repo/worktree root
+            // once the first chdir resolves `current_repo_root`.
+            harpoon_filter_set: harpoon
+                .as_ref()
+                .map(|h| h.ancestor_set().clone())
+                .unwrap_or_default(),
+            harpoon,
+            pending_ghosts: std::collections::HashSet::new(),
+        };
+        let project =
+            state::Project::new(project_home, left, cwd, config, user_keymap, initial_pane());
+        let active = project.id;
+        let app_state = state::AppState {
+            projects: vec![project],
+            active,
             inventory: Inventory::load(),
             marks: Marks::load(),
             mounts: state::Mounts::default(),
             resolver: Resolver::new(),
-            user_keymap,
-            config,
             // No runtime `:mouse` toggle yet — follow the config.
             mouse_capture_override: None,
             status_flags_override: None,
             mode: Mode::Normal,
-            project_home,
             session_name,
             session_id,
             frecency: crate::state::Frecency::load(),
-            focus: state::Focus::FileList,
-            pane: initial_pane(),
-            vsplit: None,
             pending_delete_preview: None,
             graveyard: Vec::new(),
             scope_registry: Vec::new(),
@@ -189,8 +186,6 @@ impl App {
             pending_sessions: None,
             deferred_tabs: Vec::new(),
             startup_commands: Vec::new(),
-            start_dir: cwd,
-            prev_dir: None,
             last_search: None,
             quit_pending: None,
             history: History::load(),
@@ -205,7 +200,8 @@ impl App {
             user_host: user_host_string(),
             should_quit: false,
         };
-        let context_path = crate::context::process_context_path(&app_state.start_dir);
+        let start_dir = app_state.active_project().start_dir.clone();
+        let context_path = crate::context::process_context_path(&start_dir);
         // Reap orphaned artifacts left by instances that exited WITHOUT running
         // teardown (SIGKILL / crash / `kill -9`): stale `.spyc-context-<pid>.json`
         // files and dead-PID `spyc` MCP entries in `.mcp.json` / `.codex/config.toml`.
@@ -220,8 +216,7 @@ impl App {
             crate::context::sweep_orphan_context_files(&dir, our_pid)
                 + crate::mcp::sweep_orphan_root_markers(&dir, our_pid)
         });
-        let swept =
-            crate::context::sweep_orphan_context_files(&app_state.start_dir, our_pid) + state_swept;
+        let swept = crate::context::sweep_orphan_context_files(&start_dir, our_pid) + state_swept;
         if swept > 0 {
             spyc_debug!("startup: reaped {swept} orphaned spyc artifact(s)");
         }
@@ -230,7 +225,7 @@ impl App {
         // Start the MCP Unix socket server so `spyc --mcp` (spawned by
         // Claude Code) can proxy to us for full read/write MCP access.
         let mcp_running =
-            crate::mcp::start_socket_server(context_path.clone(), &app_state.start_dir, mcp_cmd_tx)
+            crate::mcp::start_socket_server(context_path.clone(), &start_dir, mcp_cmd_tx)
                 .map_or_else(
                     |e| {
                         spyc_debug!("MCP socket server failed to start: {e}");
@@ -285,60 +280,7 @@ impl App {
             // (context_dirty: true).
             view: ViewState::new(theme, context_path, true, mcp_running, color_depth),
             exit_summary: None,
-            runtime: Runtime {
-                git_result_rx: Some(git_res_rx),
-                git_worker_tx: Some(git_req_tx),
-                mcp_cmd_rx: Some(mcp_cmd_rx),
-                pane_wake_tx: None,
-                next_sink_id: 0,
-                autosave_last_saved_fp: None,
-                autosave_due: None,
-                pane_scroll_settle: None,
-                scope_waiters: Vec::new(),
-                lua: None,
-                lua_registry: super::lua::LuaRegistry::default(),
-                lua_inflight: None,
-                lua_events: super::lua_events::LuaEventState::default(),
-                pane_tabs: None,
-                agent_hud: None,
-                top_overlay: None,
-                top_overlay_right: None,
-                pending_capture: None,
-                capture_spill_dir: None,
-                background_tasks: BackgroundTasks::new(),
-                find_picker: None,
-                pager_stream: None,
-                scroll_stream: None,
-                next_stream_id: 0,
-                stashed_pager_streams: std::collections::HashMap::new(),
-                pending_git_view: None,
-                agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                agent_status_refreshing: std::sync::Arc::default(),
-                codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                codex_scan_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
-                    false,
-                )),
-                graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                wiring_results: std::sync::Arc::default(),
-                image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                archive_mount_then: None,
-                file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                jump_default_seq: 0,
-                clipboard_copy_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                listing_refresh_inflight: false,
-                listing_refresh_dirty: false,
-                inventory_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                worktree_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-                preview_results: std::sync::Arc::new(std::sync::Mutex::new(None)),
-                preview_reloading: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                // Set by `App::set_picker` from `setup_terminal` (real binary
-                // only); tests never detect a terminal graphics protocol.
-                picker: None,
-            },
+            runtime: Runtime::new(Some(git_res_rx), Some(git_req_tx), Some(mcp_cmd_rx), active),
         };
         app.view.local_tz = jiff::tz::TimeZone::system();
         app.state.rebuild_rows();
@@ -371,9 +313,11 @@ impl App {
         // Surface non-fatal config problems (e.g. a bad scan-pattern
         // regex) so a silently-dropped setting doesn't just look broken.
         // Takes precedence over the benign "loaded N config file(s)" note.
-        if !app.state.config.warnings.is_empty() {
-            app.state
-                .flash_error(format!("config: {}", app.state.config.warnings.join("; ")));
+        if !app.state.active_project().config.warnings.is_empty() {
+            app.state.flash_error(format!(
+                "config: {}",
+                app.state.active_project().config.warnings.join("; ")
+            ));
         }
         // Surface any health check warnings so the user knows state
         // was repaired. Overrides the config load note if both exist.

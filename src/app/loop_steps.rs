@@ -18,12 +18,12 @@ impl App {
     /// need clearing — but via a forced draw, not `terminal.clear()`, which
     /// would flash). A pending `needs_full_repaint` additionally requests a
     /// screen clear (`pending_clear`) consumed by the render block.
-    pub(crate) const fn step_pager_repaint(&mut self) -> (bool, bool) {
+    pub(crate) fn step_pager_repaint(&mut self) -> (bool, bool) {
         // Force a draw when the pager opens over a live pane (the pane stops
         // rendering, so its stale cells need clearing — via a forced draw, not
         // `terminal.clear()`, which would flash).
         let pager_just_opened = self.view.pager.is_some()
-            && self.runtime.pane_tabs.is_some()
+            && self.runtime.project().pane_tabs.is_some()
             && !self.view.pager_was_open;
         self.view.pager_was_open = self.view.pager.is_some();
         // A pending full repaint also requests a screen clear.
@@ -40,14 +40,14 @@ impl App {
     /// before this point or strictly after `route_snapshot`, so the value
     /// matches what the old live read observed.
     pub(crate) fn snapshot_pane_routing(&mut self) {
-        self.state.pane.pane_snapshot =
-            self.runtime
-                .pane_tabs
-                .as_ref()
-                .map_or_else(state::PaneSnapshot::default, |t| state::PaneSnapshot {
+        self.state.active_project_mut().pane.pane_snapshot =
+            self.runtime.project().pane_tabs.as_ref().map_or_else(
+                state::PaneSnapshot::default,
+                |t| state::PaneSnapshot {
                     is_scrolling: t.active().is_scrolling(),
                     is_closed: t.active().is_closed(),
-                });
+                },
+            );
         // Re-derive `state.focus` from the live surfaces here, at the same
         // loop-top seam and for the same reason: so the value `route_snapshot`
         // reads next is always current. Most pager opens never set focus and
@@ -244,7 +244,10 @@ impl App {
         self.send_pending_resumes(now_pre);
         // Arm RestoreSettle/ResumeEnter at the earliest pending resume across
         // all tabs so the wait can wake for it.
-        arm_resume_deadlines(&mut ctx.scheduler, self.runtime.pane_tabs.as_ref());
+        arm_resume_deadlines(
+            &mut ctx.scheduler,
+            self.runtime.project().pane_tabs.as_ref(),
+        );
     }
 
     /// MVU Phase 6 PR-C: post-recv MCP context-file write. Event-driven via
@@ -357,7 +360,7 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             assert!(
-                app.state.left.git.info.is_none(),
+                app.state.active_project().left.git.info.is_none(),
                 "tmpdir is not a git repo"
             );
             let mut ctx = RunCtx::for_test();

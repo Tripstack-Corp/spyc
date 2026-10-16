@@ -474,7 +474,7 @@ mod tests {
             matches: vec!["alpha".into(), "beta".into()],
             cycle_index: 0,
         });
-        app.state.left.temp_filter = Some("a*".to_string());
+        app.state.active_project_mut().left.temp_filter = Some("a*".to_string());
     }
 
     /// Regression: a non-Tab key ends the Tab cycle, so the paired preview
@@ -486,7 +486,7 @@ mod tests {
         app.handle_vi_prompt_key(key('x'));
         assert!(app.view.tab_state.is_none(), "tab_state must clear");
         assert!(
-            app.state.left.temp_filter.is_none(),
+            app.state.active_project().left.temp_filter.is_none(),
             "paired Tab-preview filter must clear with the cycle state"
         );
     }
@@ -500,7 +500,7 @@ mod tests {
         // Empty buffer + `?` opens the shell-history popup.
         app.handle_vi_prompt_key(key('?'));
         assert!(
-            app.state.left.temp_filter.is_none(),
+            app.state.active_project().left.temp_filter.is_none(),
             "preview filter must not leak past the popup escape"
         );
         assert!(app.view.tab_state.is_none(), "tab_state must not leak");
@@ -515,10 +515,10 @@ mod tests {
     #[test]
     fn user_limit_filter_survives_prompt_editing() {
         let mut app = shell_prompt_app(PromptKind::ShellCmd);
-        app.state.left.temp_filter = Some("*.rs".to_string());
+        app.state.active_project_mut().left.temp_filter = Some("*.rs".to_string());
         app.handle_vi_prompt_key(key('x'));
         assert_eq!(
-            app.state.left.temp_filter.as_deref(),
+            app.state.active_project().left.temp_filter.as_deref(),
             Some("*.rs"),
             "a user limit filter (no tab_state) must survive editing"
         );

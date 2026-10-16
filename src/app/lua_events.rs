@@ -147,7 +147,7 @@ impl App {
         self.runtime.lua_events.applying_requests = false;
 
         let cwd = self.state.cur().listing.dir.clone();
-        let project = self.state.project_home.clone();
+        let project = self.state.active_project().home.clone();
 
         // First settle seeds the baselines without firing (the initial cwd /
         // PROJECT_HOME are a baseline, not a change).
@@ -354,7 +354,8 @@ mod tests {
             assert!(!app.runtime.lua.as_ref().unwrap().is_busy());
 
             // Change the focused column's cwd, then settle → fires.
-            app.state.left.listing.dir = std::path::PathBuf::from("/moved/here");
+            app.state.active_project_mut().left.listing.dir =
+                std::path::PathBuf::from("/moved/here");
             app.state.flash = None;
             app.settle_lua_events();
             let _ = wait_and_drain(&mut app, &rx);
@@ -382,7 +383,8 @@ mod tests {
             app.settle_lua_events(); // seed baseline
 
             // Simulate a user cwd change → fires the handler.
-            app.state.left.listing.dir = std::path::PathBuf::from("/user/moved");
+            app.state.active_project_mut().left.listing.dir =
+                std::path::PathBuf::from("/user/moved");
             let mut fires = 0;
             // Drive several loop iterations. Each: settle (may fire), drain (runs
             // the handler → its navigate applies via effects/requests, setting
@@ -400,7 +402,7 @@ mod tests {
                     // (mirrors run_effects(lua_fx) in the real loop).
                     for e in &fx {
                         if let Effect::ChangeDir { path, .. } = e {
-                            app.state.left.listing.dir = path.clone();
+                            app.state.active_project_mut().left.listing.dir = path.clone();
                         }
                     }
                     fires += 1;

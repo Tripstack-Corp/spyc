@@ -31,6 +31,7 @@ fn automatic_codex_permission_review_is_observed_without_latching_blocked() {
         report(&mut app, "working", None);
         let original = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -41,13 +42,20 @@ fn automatic_codex_permission_review_is_observed_without_latching_blocked() {
         report(&mut app, "blocked", Some(permission()));
         let now = original.at + Duration::from_secs(30);
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
             .active_info_mut()
             .last_output_at = Some(original.at + Duration::from_secs(1));
         app.settle_agent_activity(now, &mut RunCtx::for_test());
-        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
         assert_eq!(info.activity, AgentActivity::Working);
         assert_eq!(info.reported.clone().unwrap().at, original.at);
         let explanation = dump(&mut app);
@@ -76,6 +84,7 @@ fn permission_observation_does_not_invent_working_or_change_claude_permissions()
             app.settle_agent_activity(Instant::now(), &mut RunCtx::for_test());
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -139,6 +148,7 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
         report(&mut app, "working", None);
         let at = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -148,13 +158,20 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
             .unwrap()
             .at;
         {
-            let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+            let info = app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut();
             info.last_output_at = Some(at + Duration::from_secs(1));
             info.scrape_status = Some((AgentActivity::Blocked, Some("awaiting command approval")));
         }
         app.settle_agent_activity(at + Duration::from_secs(30), &mut RunCtx::for_test());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -167,7 +184,13 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
                 .contains("source: SCRAPE-FALLBACK status=blocked (awaiting command approval)")
         );
         assert!(super::agent_readiness::why_status(&mut app).contains("blocked (scrape-fallback:"));
-        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
         assert_eq!(
             info.reported.clone().unwrap().at,
             at,
@@ -177,6 +200,7 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
         app.settle_agent_activity(at + Duration::from_secs(60), &mut RunCtx::for_test());
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -368,7 +392,14 @@ fn codex_approval_scan_has_a_deadline_despite_continuous_redraws() {
             // launches can take seconds; keep the same budget as agent_argv.
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                let pane = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0].pane;
+                let pane = &mut app
+                    .runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .tabs_mut()[0]
+                    .pane;
                 pane.drain_output();
                 let visible = pane.visible_lines().join("\n");
                 if visible.contains(expected) {
@@ -384,7 +415,13 @@ fn codex_approval_scan_has_a_deadline_despite_continuous_redraws() {
         wait_screen(&mut app, "READY");
         let fixture = include_str!("../../../tests/fixtures/codex-approval-exec.txt");
         {
-            let entry = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+            let entry = &mut app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .tabs_mut()[0];
             entry.info.command = "codex".into();
             entry.pane.resize(30, 100).unwrap();
             entry
@@ -399,14 +436,26 @@ fn codex_approval_scan_has_a_deadline_despite_continuous_redraws() {
         for elapsed in [0, 100, 200, 300] {
             let now = base + Duration::from_millis(elapsed);
             {
-                let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+                let info = app
+                    .runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .active_info_mut();
                 info.last_output_at = Some(now);
                 info.scrape_dirty = true;
             }
             app.settle_scrape_quiet(now, &mut ctx);
             app.settle_agent_activity(now, &mut ctx);
         }
-        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
         assert_eq!(
             info.activity,
             AgentActivity::Blocked,

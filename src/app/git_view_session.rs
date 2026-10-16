@@ -381,8 +381,8 @@ impl App {
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
             full_width,
-            tab_width: self.state.config.pager.tab_width,
-            intraline: self.state.config.diff.intraline,
+            tab_width: self.state.active_project().config.pager.tab_width,
+            intraline: self.state.active_project().config.diff.intraline,
         };
         if let Some(view) = self.view.pager.as_mut() {
             stream.render_into(view, &ctx);

@@ -178,7 +178,7 @@ impl App {
         {
             self.runtime.stashed_pager_streams.insert(id, stream);
         }
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             tabs.active_entry_mut().stashed_scrollback_pager = Some(view);
         }
     }
@@ -192,7 +192,7 @@ impl App {
         if self.view.scroll_pager.is_some() {
             return;
         }
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             return;
         };
         let Some(view) = tabs.active_entry_mut().stashed_scrollback_pager.take() else {
@@ -213,6 +213,7 @@ impl App {
     /// ids `prune_orphaned_pager_streams` must keep.
     fn live_stashed_stream_ids(&self) -> std::collections::HashSet<u32> {
         self.runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map(|tabs| {
@@ -256,17 +257,18 @@ impl App {
     /// no history.
     fn scroll_snapshot(&mut self) -> Option<ScrollSnapshot> {
         let has_terminal_capture = {
-            let pane = self.runtime.pane_tabs.as_mut()?.active_mut();
+            let pane = self.runtime.project_mut().pane_tabs.as_mut()?.active_mut();
             pane.drain_output();
             pane.with_screen_mut(crate::ui::scrollback::scrollback_len) > 0
         };
-        let tabs = self.runtime.pane_tabs.as_ref()?;
+        let tabs = self.runtime.project().pane_tabs.as_ref()?;
         let is_alt_screen = tabs.active().is_alternate_screen();
         let spec = tabs.active_info().agent().transcript();
         let transcript_enabled = spec.as_ref().is_some_and(|s| match s.config_key {
             None => s.default_enabled,
             Some(key) => self
                 .state
+                .active_project()
                 .config
                 .pane
                 .transcript_enabled(key, s.default_enabled),
@@ -305,6 +307,7 @@ impl App {
             Ok(pick) => {
                 let Some(id) = self
                     .runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .map(|t| t.active_info().id.clone())
@@ -328,7 +331,7 @@ impl App {
         let Some(snap) = self.scroll_snapshot() else {
             return;
         };
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return;
         };
         let active_info = tabs.active_info();
@@ -426,6 +429,7 @@ impl App {
         // and `settle_pane_scroll` snapshots when the window elapses.
         let tabs = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .expect("pane_tabs presence checked above");
@@ -449,6 +453,7 @@ impl App {
         use super::scheduler::Deadline;
         let active_tab = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map(crate::pane::tabs::PaneTabs::active_index);
@@ -480,7 +485,7 @@ impl App {
     /// split off so the settle window can elapse on the loop rather than in a
     /// sleep. Callable on its own — that is what the harness drives.
     pub(crate) fn mount_terminal_scrollback(&mut self) {
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             return;
         };
         let label = tabs.active_info().label.clone();
@@ -535,7 +540,7 @@ impl App {
     /// only the slot, not the mode), so this just reseats the view.
     pub(crate) fn restore_scroll_pager_view(&mut self, view: crate::ui::pager::PagerView) {
         self.view.scroll_pager = Some(view);
-        self.state.focus = state::Focus::Pane;
+        self.state.active_project_mut().focus = state::Focus::Pane;
         self.view.needs_full_repaint = true;
     }
 
@@ -553,6 +558,7 @@ impl App {
     pub(crate) fn toggle_scrollback_tool_calls(&mut self) {
         let has_transcript = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .is_some_and(|tabs| tabs.active_info().agent().transcript().is_some());
@@ -577,13 +583,13 @@ impl App {
         lines: Vec<ratatui::text::Line<'static>>,
         stream_id: Option<u32>,
     ) {
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             tabs.active_mut().enter_scroll_mode();
         }
         let mut view = crate::ui::pager::PagerView::new_styled(title, lines);
         view.mount = crate::ui::pager::Mount::LowerPane;
         view.pane_scroll = true;
-        view.tab_width = self.state.config.pager.tab_width;
+        view.tab_width = self.state.active_project().config.pager.tab_width;
         // Line numbers on by default: a gutter the live pane never has,
         // so it reads at a glance as "scrolled back, not live" (and `:N`
         // / `V` line targeting is legible). `l` toggles it off.
@@ -598,7 +604,7 @@ impl App {
         // The bottom-region scrollback slot — coexists with a top-region
         // `view.pager` (`D`) rather than evicting it.
         self.view.scroll_pager = Some(view);
-        self.state.focus = state::Focus::Pane;
+        self.state.active_project_mut().focus = state::Focus::Pane;
         self.view.needs_full_repaint = true;
         self.state
             .flash_info("scroll: on (/, n/N, :N, V, y, Esc exit)");
@@ -614,6 +620,7 @@ impl App {
             return match key.code {
                 KeyCode::Char('g') => {
                     self.runtime
+                        .project_mut()
                         .pane_tabs
                         .as_mut()
                         .expect("pane_tabs presence checked by key routing")
@@ -648,6 +655,7 @@ impl App {
 
         let pane = self
             .runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .expect("pane_tabs presence checked by key routing")
@@ -774,7 +782,7 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.runtime.stashed_pager_streams = parked(&[1, 2]);
-            assert!(app.runtime.pane_tabs.is_none());
+            assert!(app.runtime.project().pane_tabs.is_none());
             app.prune_orphaned_pager_streams();
             assert!(
                 app.runtime.stashed_pager_streams.is_empty(),

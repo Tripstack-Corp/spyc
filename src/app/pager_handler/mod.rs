@@ -216,7 +216,7 @@ impl App {
             // `^a l` moved focus to `b`), and it needs the pin to keep rendering
             // in place — clearing it would move the editor into the other column
             // (blanking this one, artifacting that one).
-            if self.runtime.top_overlay.is_none() {
+            if self.runtime.project().top_overlay.is_none() {
                 self.view.overlay_column = None;
             }
         }
@@ -235,7 +235,7 @@ impl App {
         if self.view.scroll_pager.is_none() {
             return;
         }
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             tabs.active_mut().exit_scroll_mode();
         }
         // The scrollback lives in its own region slot; the top/overlay pager
@@ -283,8 +283,10 @@ impl App {
     /// auto-dismiss on exit. Shared by `V` (`edit_in_pane`), `D` on a huge file,
     /// and the in-pager `v` editor handoff.
     pub(super) fn spawn_top_overlay(&mut self, cmd: &str) {
-        let (rows, cols) =
-            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
+        let (rows, cols) = Self::top_overlay_size(
+            self.effective_pane_pct(),
+            self.runtime.project().pane_tabs.is_some(),
+        );
         let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(cmd, rows, cols, &cwd, &self.view.context_path, wake) {
@@ -295,18 +297,22 @@ impl App {
 
     pub(super) fn install_overlay_pty(&mut self, p: Pane) {
         if self.overlay_targets_right() {
-            self.runtime.top_overlay_right = Some(p);
+            self.runtime.project_mut().top_overlay_right = Some(p);
         } else {
-            self.runtime.top_overlay = Some(p);
+            self.runtime.project_mut().top_overlay = Some(p);
             // Interactive overlay (editor / pager): on exit, return to spyc
             // immediately rather than holding a "press any key" frame.
             self.view.overlay_auto_dismiss = true;
             // This is the LEFT / single slot, so it scopes to the left column
             // when split (`None` when no split). The right column uses its own
             // slot above and never sets this.
-            self.view.overlay_column = self.state.vsplit.map(|_| state::Side::Left);
+            self.view.overlay_column = self
+                .state
+                .active_project()
+                .vsplit
+                .map(|_| state::Side::Left);
         }
-        self.state.focus = state::Focus::Overlay;
+        self.state.active_project_mut().focus = state::Focus::Overlay;
     }
 
     /// Install a `D` `TopPane` pager into the focused column's slot, then focus
@@ -322,9 +328,13 @@ impl App {
             self.set_pager(view);
             // LEFT / single slot → scopes to the left column when split (`None`
             // with no split). The right column uses its own `pager_right` slot.
-            self.view.overlay_column = self.state.vsplit.map(|_| state::Side::Left);
+            self.view.overlay_column = self
+                .state
+                .active_project()
+                .vsplit
+                .map(|_| state::Side::Left);
         }
-        self.state.focus = state::Focus::Pager(pager::Mount::TopPane);
+        self.state.active_project_mut().focus = state::Focus::Pager(pager::Mount::TopPane);
         self.view.needs_full_repaint = true;
     }
 
@@ -598,7 +608,7 @@ impl App {
         // column (the carve scopes `top_unit` to it), so wrap to that column's
         // width — not the full terminal, or the markdown overflows the narrow
         // column. (`None` = full width, used when there's no split.)
-        let wrap = self.state.vsplit.and_then(|v| {
+        let wrap = self.state.active_project().vsplit.and_then(|v| {
             let (term_w, _) = self.view.term_size;
             super::vsplit::vsplit_column_widths(term_w, v.width_pct).map(
                 |(left_w, right_w)| match v.focus {
@@ -676,11 +686,11 @@ impl App {
         match build_pager_view(
             path,
             &self.view.theme,
-            self.state.config.markdown.open_as_rendered,
+            self.state.active_project().config.markdown.open_as_rendered,
             wrap_width,
         ) {
             Ok(mut view) => {
-                view.tab_width = self.state.config.pager.tab_width;
+                view.tab_width = self.state.active_project().config.pager.tab_width;
                 // Restore the scroll position from the previous visit (if any).
                 if let Some(saved) = self.view.pager_positions.get(path) {
                     let last = view.lines.len().saturating_sub(1);
@@ -754,7 +764,7 @@ impl App {
         Some(FileOp::OpenSpecialFile {
             path: path.to_path_buf(),
             theme: self.view.theme.clone(),
-            open_as_rendered: self.state.config.markdown.open_as_rendered,
+            open_as_rendered: self.state.active_project().config.markdown.open_as_rendered,
             wrap,
             dest,
         })

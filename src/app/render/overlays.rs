@@ -211,8 +211,8 @@ impl App {
         let Some(g) = self.view.image_gallery.as_ref() else {
             return;
         };
-        let pending = self
-            .state
+        let project = self.state.active_project();
+        let pending = project
             .pane
             .pending_images
             .get(&g.tab_id)

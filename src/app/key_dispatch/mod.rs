@@ -201,7 +201,8 @@ impl App {
         //    sees the spyc-list flash on the *background* status
         //    bar while looking at the pager — wrong screen for the
         //    notice.
-        let pane_has_focus = self.runtime.pane_tabs.is_some() && self.state.pane_focused();
+        let pane_has_focus =
+            self.runtime.project().pane_tabs.is_some() && self.state.pane_focused();
         if matches!(key.code, KeyCode::Char('c'))
             && key.modifiers.contains(KeyModifiers::CONTROL)
             && self.runtime.pending_capture.is_none()
@@ -279,14 +280,7 @@ impl App {
                 // shell tab forwards so its own job control keeps working. Meta
                 // chords never reach here (they route to the resolver), so
                 // `^a-x` still closes a suspended tab.
-                let (is_shell, suspended) =
-                    self.runtime.pane_tabs.as_ref().map_or((true, false), |t| {
-                        let info = t.active_info();
-                        (
-                            crate::shell::command_is_shell(&info.command),
-                            info.suspended,
-                        )
-                    });
+                let (is_shell, suspended) = self.active_tab_shell_and_suspended();
                 match pane_suspend_key_action(key, is_shell, suspended) {
                     PaneKeyAction::Toggle => return Ok(self.toggle_pane_suspend()),
                     PaneKeyAction::EatSuspended => {
@@ -360,7 +354,7 @@ impl App {
         if self.state.cur().view == View::Graveyard {
             return Ok(self.handle_graveyard_view_key(key));
         }
-        let outcome = self.state.resolver.feed(key, &self.state.user_keymap);
+        let outcome = self.state.feed_resolver(key);
         if crate::key_trace::is_enabled() {
             crate::key_trace::log(&format!("  resolver -> {outcome:?}"));
         }
@@ -384,7 +378,8 @@ impl App {
                 // (unless disabled, or this is just a count prefix, which is
                 // `Pending` but not a chord). `settle_chord_hint` shows it if
                 // the chord is still pending when the delay elapses.
-                let delay = self.state.config.layout.chord_hint_delay_ms;
+                let config = &self.state.active_project().config;
+                let delay = config.layout.chord_hint_delay_ms;
                 if delay > 0 && self.state.resolver.is_pending() {
                     self.view.chord_hint_due =
                         Some(std::time::Instant::now() + std::time::Duration::from_millis(delay));
@@ -493,7 +488,7 @@ impl App {
     /// `;ls` don't flash and vanish). Reached via the
     /// `InputSink::OverlayDismiss` dispatch arm.
     fn dismiss_overlay(&mut self) {
-        self.runtime.top_overlay = None;
+        self.runtime.project_mut().top_overlay = None;
         self.view.overlay_awaiting_dismiss = false;
         self.view.overlay_auto_dismiss = false;
         self.view.overlay_column = None;
@@ -612,6 +607,7 @@ impl App {
                 }
                 let child_bracketed = self
                     .runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .is_some_and(|t| t.active().bracketed_paste_enabled());
@@ -653,12 +649,12 @@ impl App {
         self.view.term_size = (cols, rows);
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
         let pane_pct = self.effective_pane_pct();
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             let layout = Self::compute_layout(
                 area,
                 true,
                 pane_pct,
-                self.state.config.layout.status_position,
+                self.state.active_project().config.layout.status_position,
             );
             if let Some(pane_rect) = layout.pane {
                 for entry in tabs.tabs_mut() {
@@ -666,8 +662,9 @@ impl App {
                 }
             }
         }
-        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
-            let (r, c) = Self::top_overlay_size(pane_pct, self.runtime.pane_tabs.is_some());
+        let pane_tabs_present = self.runtime.project().pane_tabs.is_some();
+        if let Some(overlay) = self.runtime.project_mut().top_overlay.as_mut() {
+            let (r, c) = Self::top_overlay_size(pane_pct, pane_tabs_present);
             let _ = overlay.resize(r, c);
         }
         // Help content is baked at open time for the current width (wrap

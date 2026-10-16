@@ -119,7 +119,7 @@ impl App {
         // pager already allows (it never hits this gate — `Focus::Pager`, not
         // `Focus::Overlay`). Without the exemption the `^a` chord armed (the
         // which-key popup even appeared) but the completing key did nothing.
-        if matches!(self.state.focus, state::Focus::Overlay)
+        if matches!(self.state.active_project().focus, state::Focus::Overlay)
             && action.tier() == Tier::Pane
             && !matches!(
                 action,
@@ -207,7 +207,7 @@ impl App {
                 // so merging old `Handled`+`Post` here is safe: a
                 // `Post` result never has that mode and falls to
                 // `Ok(post)` unchanged.
-                if !self.state.config.delete.confirm
+                if !self.state.active_project().config.delete.confirm
                     && matches!(
                         self.state.mode,
                         Mode::Prompting(ref p) if matches!(p.kind, PromptKind::RemoveConfirm)
@@ -389,16 +389,7 @@ impl App {
             Action::PaneScrollEnter => {
                 self.open_pane_scroll_pager();
             }
-            Action::PaneScrollSave => {
-                let result = self
-                    .runtime
-                    .pane_tabs
-                    .as_mut()
-                    .map(|tabs| tabs.active_mut().save_to_file());
-                if let Some(result) = result {
-                    self.state.flash_saved_file(result);
-                }
-            }
+            Action::PaneScrollSave => self.pane_scroll_save(),
 
             Action::PaneNewTab => self.start_new_tab_prompt(),
             Action::PaneCloseTab => self.close_active_tab(),
@@ -409,9 +400,9 @@ impl App {
                 // `fullscreen_tab_if_list_zoomed`), navigating between
                 // fullscreen views. Matches `^a c` (new tab).
                 self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                     tabs.switch_to((*n as usize).saturating_sub(1));
-                    self.state.focus = state::Focus::Pane;
+                    self.state.active_project_mut().focus = state::Focus::Pane;
                 }
                 self.fullscreen_tab_if_list_zoomed();
                 self.restore_active_tab_scrollback_pager();
@@ -419,9 +410,9 @@ impl App {
             }
             Action::PaneNextTab => {
                 self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                     tabs.next();
-                    self.state.focus = state::Focus::Pane;
+                    self.state.active_project_mut().focus = state::Focus::Pane;
                 }
                 self.fullscreen_tab_if_list_zoomed();
                 self.restore_active_tab_scrollback_pager();
@@ -429,9 +420,9 @@ impl App {
             }
             Action::PanePrevTab => {
                 self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+                if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                     tabs.prev();
-                    self.state.focus = state::Focus::Pane;
+                    self.state.active_project_mut().focus = state::Focus::Pane;
                 }
                 self.fullscreen_tab_if_list_zoomed();
                 self.restore_active_tab_scrollback_pager();
@@ -441,6 +432,7 @@ impl App {
                 self.stash_scrollback_pager_to_active_tab();
                 let jumped = self
                     .runtime
+                    .project_mut()
                     .pane_tabs
                     .as_mut()
                     .is_some_and(PaneTabs::switch_to_last);
@@ -448,7 +440,7 @@ impl App {
                     // Same rationale as PaneTabByIndex: a tab switch
                     // means "interact with that tab", so pull focus
                     // into the pane.
-                    self.state.focus = state::Focus::Pane;
+                    self.state.active_project_mut().focus = state::Focus::Pane;
                     self.fullscreen_tab_if_list_zoomed();
                     self.view.needs_full_repaint = true;
                 } else {
@@ -460,7 +452,7 @@ impl App {
                 self.restore_active_tab_scrollback_pager();
             }
             Action::PaneRenameTab => {
-                if let Some(tabs) = self.runtime.pane_tabs.as_ref() {
+                if let Some(tabs) = self.runtime.project().pane_tabs.as_ref() {
                     let current = tabs.active_info().label.clone();
                     let mut p = Prompt::shell(PromptKind::PaneRenameTab, "tab name: ");
                     p.buffer.clone_from(&current);
@@ -564,6 +556,20 @@ impl App {
         self.state.cur_mut().cursor.clamp(row_count);
         Ok(effects)
     }
+
+    /// `^a s` (pane-scroll mode's save key, routed through `Action`): save the
+    /// active tab's pty scrollback to a file.
+    fn pane_scroll_save(&mut self) {
+        let result = self
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .map(|tabs| tabs.active_mut().save_to_file());
+        if let Some(result) = result {
+            self.state.flash_saved_file(result);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -576,7 +582,7 @@ mod tests {
     fn pane_commands_are_paused_while_the_editor_overlay_is_focused() {
         let mut app = App::test_app(std::env::temp_dir());
         // The `V` editor / `;` command overlay owns the top region.
-        app.state.focus = state::Focus::Overlay;
+        app.state.active_project_mut().focus = state::Focus::Overlay;
         // `^a c` resolves to PaneNewTab (a Pane-tier action); it must be
         // swallowed, not open the new-tab prompt hidden behind the editor.
         let fx = app.apply(&Action::PaneNewTab).expect("apply ok");
@@ -597,7 +603,7 @@ mod tests {
     #[test]
     fn frame_actions_still_run_under_the_editor_overlay() {
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.focus = state::Focus::Overlay;
+        app.state.active_project_mut().focus = state::Focus::Overlay;
         // A Frame-tier action (cursor move) is not a pane command — the
         // overlay guard must not swallow it.
         app.apply(&Action::Down(1)).expect("apply ok");

@@ -74,19 +74,19 @@ impl App {
             return;
         }
         let cursor_file = self.previewable_cursor_path();
-        if self.state.vsplit.is_none() {
+        if self.state.active_project().vsplit.is_none() {
             // Opening: require a previewable file under the cursor.
             let Some(path) = cursor_file else {
                 self.state.flash_info("not a valid file for the pager");
                 return;
             };
-            let shape = opening_vsplit(self.state.config.layout.vsplit_mode);
-            self.state.vsplit = Some(shape);
+            let shape = opening_vsplit(self.state.active_project().config.layout.vsplit_mode);
+            self.state.active_project_mut().vsplit = Some(shape);
             // If the file couldn't be read/rendered, `load_right_preview`
             // flashed its own error and left the slot as-is — don't leave a
             // blank split open.
             if !self.load_right_preview(&path) {
-                self.state.vsplit = None;
+                self.state.active_project_mut().vsplit = None;
                 return;
             }
             let label = mode_label(shape.mode);
@@ -131,7 +131,7 @@ impl App {
     /// a `^s |` preview or a second commander (`^s n`), which opens top-only but
     /// can be made full-height from here.
     pub(super) fn toggle_vsplit_height(&mut self) {
-        let Some(v) = self.state.vsplit.as_mut() else {
+        let Some(v) = self.state.active_project_mut().vsplit.as_mut() else {
             self.state.flash_info("no vertical split (^s | opens one)");
             return;
         };
@@ -150,7 +150,8 @@ impl App {
     pub(super) fn open_second_commander(&mut self) {
         let dir = self
             .state
-            .project_home
+            .active_project()
+            .home
             .clone()
             .unwrap_or_else(|| self.state.cur().listing.dir.clone());
         self.open_second_commander_at(&dir);
@@ -180,7 +181,10 @@ impl App {
     /// was reading it and never asked for the commander, so closing `b` puts the
     /// file (and the split shape it had) straight back.
     pub(super) fn open_second_commander_at_background(&mut self, dir: &std::path::Path) {
-        if let (Some(shape), Some(preview)) = (self.state.vsplit, self.view.right_pager.take()) {
+        if let (Some(shape), Some(preview)) = (
+            self.state.active_project().vsplit,
+            self.view.right_pager.take(),
+        ) {
             self.view.displaced_preview = Some((shape, preview));
         }
         self.open_second_commander_at_inner(dir, false);
@@ -203,13 +207,14 @@ impl App {
         // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
         // `cur().listing.dir` matches what later path comparisons expect).
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        let mut commander = match state::Commander::for_dir(&dir, &self.state.config) {
-            Ok(c) => c,
-            Err(e) => {
-                self.state.flash_error(format!("open: {e:#}"));
-                return;
-            }
-        };
+        let mut commander =
+            match state::Commander::for_dir(&dir, &self.state.active_project().config) {
+                Ok(c) => c,
+                Err(e) => {
+                    self.state.flash_error(format!("open: {e:#}"));
+                    return;
+                }
+            };
         // Inherit the worker-available flag from `left` (set at bootstrap) so
         // `b`'s git cache-misses go to the background worker, not a blocking
         // synchronous walk. `Commander::for_dir` defaults it `false`.
@@ -220,7 +225,7 @@ impl App {
             .git_worker_available;
         self.view.right_pager = None; // a commander and the preview are exclusive
         self.state.open_second(commander);
-        self.state.vsplit = Some(state::VSplit {
+        self.state.active_project_mut().vsplit = Some(state::VSplit {
             width_pct: DEFAULT_VSPLIT_PCT,
             mode: state::VsplitMode::TopOnly,
             focus: state::Side::Right,
@@ -228,7 +233,7 @@ impl App {
         // `^s n` pulls the keyboard into `b`; a background (agent) open leaves
         // `state.focus` as-is so the user keeps typing to the pane below.
         if grab_keyboard {
-            self.state.focus = state::Focus::FileList;
+            self.state.active_project_mut().focus = state::Focus::FileList;
         }
         // Resolve `b`'s own repo root + populate its git markers now (per-column
         // git — `b` may be a different repo/worktree than `a`). The 1 Hz poll
@@ -263,15 +268,16 @@ impl App {
         }
         // Drop any `V`/`D` overlay open in `b` along with its column — otherwise
         // the editor PTY / pager would linger with no column to render into.
-        self.runtime.top_overlay_right = None;
+        self.runtime.project_mut().top_overlay_right = None;
         self.view.pager_right = None;
         self.view.needs_full_repaint = true;
         if let Some((shape, preview)) = self.view.displaced_preview.take() {
-            self.state.vsplit = Some(shape);
+            let p = self.state.active_project_mut();
+            p.vsplit = Some(shape);
             self.view.right_pager = Some(preview);
             // `shape.focus` carries the column the user was in; `FileList` hands
             // the keyboard back to it (the a/b axis lives on the shape).
-            self.state.focus = state::Focus::FileList;
+            self.state.active_project_mut().focus = state::Focus::FileList;
             // The file may have changed while the commander covered it — the
             // fs-watch reload no-ops on a stashed preview, so re-read it now.
             self.kick_preview_reload();
@@ -279,8 +285,9 @@ impl App {
                 .flash_info("second commander closed — preview restored");
             return;
         }
-        self.state.vsplit = None;
-        self.state.focus = state::Focus::FileList;
+        let p = self.state.active_project_mut();
+        p.vsplit = None;
+        p.focus = state::Focus::FileList;
         self.state.flash_info("second commander closed");
     }
 
@@ -288,7 +295,7 @@ impl App {
     /// stays on the file list (now the sole column). This is the `q`/Esc close
     /// path when the right preview is focused.
     pub(super) fn close_vsplit(&mut self) {
-        self.state.vsplit = None;
+        self.state.active_project_mut().vsplit = None;
         self.view.right_pager = None;
         self.view.needs_full_repaint = true;
         self.state.flash_info("vsplit: off");
@@ -302,7 +309,7 @@ impl App {
     /// straight into it (leaving the pane). In top-only the pane is full-width
     /// below both columns, so h/l stay inert (use `^a k` to leave the pane).
     pub(super) fn vsplit_focus(&mut self, side: state::Side) {
-        let Some(mode) = self.state.vsplit.map(|v| v.mode) else {
+        let Some(mode) = self.state.active_project().vsplit.map(|v| v.mode) else {
             return; // no split: nothing to switch
         };
         // A `V`/`D` overlay/pager stays pinned to its own column (`overlay_column`),
@@ -315,21 +322,22 @@ impl App {
         // Going right: remember the left side's vertical position (top list vs
         // bottom pane) so `^a h` returns there instead of always the top.
         if side == state::Side::Right {
-            self.state.pane.vsplit_left_was_pane = self.state.pane_focused();
+            let was_pane = self.state.pane_focused();
+            self.state.active_project_mut().pane.vsplit_left_was_pane = was_pane;
         }
-        if let Some(v) = self.state.vsplit.as_mut() {
+        if let Some(v) = self.state.active_project_mut().vsplit.as_mut() {
             v.focus = side;
         }
         // Right column owns input via the (file-pane) row; left restores the
         // remembered vertical position (the bottom pane if it left from there).
-        self.state.focus = if side == state::Side::Left
-            && self.state.pane.vsplit_left_was_pane
-            && self.runtime.pane_tabs.is_some()
-        {
-            state::Focus::Pane
-        } else {
-            state::Focus::FileList
-        };
+        let left_was_pane = self.state.active_project().pane.vsplit_left_was_pane;
+        let pane_tabs_present = self.runtime.project().pane_tabs.is_some();
+        self.state.active_project_mut().focus =
+            if side == state::Side::Left && left_was_pane && pane_tabs_present {
+                state::Focus::Pane
+            } else {
+                state::Focus::FileList
+            };
         self.state.flash_info(match side {
             state::Side::Left => "focus: a (left)",
             state::Side::Right => "focus: b (right)",
@@ -345,6 +353,7 @@ impl App {
         let (term_w, _) = self.view.term_size;
         let pct = self
             .state
+            .active_project()
             .vsplit
             .map_or(DEFAULT_VSPLIT_PCT, |v| v.width_pct);
         // Derive from the same helper `carve_vsplit` uses, so the wrap width
@@ -356,9 +365,10 @@ impl App {
     /// keyboard — the file-pane row is focused and `b` is the active column.
     /// Routing sends its non-meta keys to `view.right_pager`.
     pub(super) fn right_column_focused(&self) -> bool {
-        matches!(self.state.focus, state::Focus::FileList)
+        matches!(self.state.active_project().focus, state::Focus::FileList)
             && self
                 .state
+                .active_project()
                 .vsplit
                 .is_some_and(|v| v.focus == state::Side::Right)
     }
@@ -370,7 +380,10 @@ impl App {
     /// Drives per-column slot selection (which `top_overlay*` / pager a key or a
     /// spawn targets).
     pub(super) fn focused_side(&self) -> state::Side {
-        self.state.vsplit.map_or(state::Side::Left, |v| v.focus)
+        self.state
+            .active_project()
+            .vsplit
+            .map_or(state::Side::Left, |v| v.focus)
     }
 
     /// Does `side`'s column currently own the keyboard? True only when the
@@ -391,8 +404,8 @@ impl App {
     /// Context-sensitive `^a +`/`^a -`: resize the vertical split's width when
     /// a column is focused, else the bottom pane's height (`resize_pane`).
     pub(super) fn resize_focused_split(&mut self, delta_pct: i32) {
-        if self.state.vsplit.is_some() && !self.state.pane_focused() {
-            if let Some(v) = self.state.vsplit.as_mut() {
+        if self.state.active_project().vsplit.is_some() && !self.state.pane_focused() {
+            if let Some(v) = self.state.active_project_mut().vsplit.as_mut() {
                 v.width_pct = (i32::from(v.width_pct) + delta_pct).clamp(20, 80) as u16;
                 self.view.needs_full_repaint = true;
             }

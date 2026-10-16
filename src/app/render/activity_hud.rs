@@ -92,11 +92,7 @@ impl App {
         // pid is snapshotted in ViewState at startup — render reads no OS here.
         let pid = self.view.hud_pid;
         let uptime_str = format_uptime(self.view.started_at.elapsed().as_secs());
-        let pane_count = self
-            .runtime
-            .pane_tabs
-            .as_ref()
-            .map_or(0, |t| t.tabs().len());
+        let pane_count = self.pane_tab_count();
         let rss_mb = self.view.activity.proc_rss_kb / 1024;
         let l3 = format!(
             " pid:{pid}  up:{uptime_str}  rss:{rss_mb}m  thr:{}  panes:{pane_count} ",

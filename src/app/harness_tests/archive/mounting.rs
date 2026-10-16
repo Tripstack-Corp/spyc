@@ -144,6 +144,7 @@ fn a_mount_carries_no_git_state() {
         build_zip(&archive);
         let mut app = App::test_app(dir);
         app.state
+            .active_project_mut()
             .left
             .git
             .set(Some("main".to_string()), std::collections::HashMap::new());
@@ -308,7 +309,7 @@ fn disabling_the_feature_pages_the_archive_instead() {
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
-        app.state.config.archive.enable = false;
+        app.state.active_project_mut().config.archive.enable = false;
         app.state.refresh_listing();
 
         let fx = app.apply(&Action::EnterOrDisplay).unwrap();

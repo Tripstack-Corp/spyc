@@ -151,6 +151,7 @@ mod pager_history;
 mod pager_stream;
 mod pane_fork;
 mod pane_input;
+mod pane_resize;
 mod pane_scroll;
 mod pane_tabs;
 mod pane_wake;
@@ -393,7 +394,11 @@ impl App {
             2
         };
         let col_w = pager::centered_col_width(term_w, ncols) as usize;
-        let lines = help::build_lines(&self.view.theme, &self.state.user_keymap, col_w);
+        let lines = help::build_lines(
+            &self.view.theme,
+            &self.state.active_project().user_keymap,
+            col_w,
+        );
         let mut view = pager::PagerView::new_styled(Self::HELP_TITLE, lines);
         view.columns = ncols as u8;
         view.no_history = true;

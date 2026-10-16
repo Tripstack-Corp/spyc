@@ -18,7 +18,7 @@ fn a_codex_pane_runs_without_the_shared_daemon() {
         assert!(app.open_pane_tab_in(&cmd, &dir));
 
         assert_eq!(agent_argv(&dir, "codex"), ["--no-daemon", "resume", "abc"]);
-        let tabs = app.runtime.pane_tabs.as_ref().unwrap();
+        let tabs = app.runtime.project().pane_tabs.as_ref().unwrap();
         assert_eq!(
             tabs.tabs()[0].info.command,
             cmd,
@@ -53,7 +53,7 @@ fn the_daemon_flag_is_added_only_when_wanted_and_missing() {
         let exe = fake_agent(&dir, "codex").display().to_string();
 
         let mut app = App::test_app(dir.clone());
-        app.state.config.pane.codex_daemon = true;
+        app.state.active_project_mut().config.pane.codex_daemon = true;
         assert!(app.open_pane_tab_in(&exe, &dir));
         assert!(
             agent_argv(&dir, "codex").is_empty(),

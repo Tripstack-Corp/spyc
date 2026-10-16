@@ -18,9 +18,14 @@ impl App {
         if self.view.image_view.is_some() {
             return AgentHudMode::Off;
         }
-        let eligible = self.runtime.pane_tabs.as_ref().is_some_and(|tabs| {
-            !tabs.active().is_closed() && feed(tabs.active_info().agent().kind()).is_some()
-        });
+        let eligible = self
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .is_some_and(|tabs| {
+                !tabs.active().is_closed() && feed(tabs.active_info().agent().kind()).is_some()
+            });
         if eligible {
             self.agent_hud_preference()
         } else {
@@ -31,23 +36,27 @@ impl App {
     /// The mode asked for, whether or not the active pane can show it.
     pub(super) fn agent_hud_preference(&self) -> AgentHudMode {
         self.state
+            .active_project()
             .pane
             .agent_hud
-            .mode(self.state.config.pane.agent_hud)
+            .mode(self.state.active_project().config.pane.agent_hud)
     }
 
     pub(super) fn agent_hud_target(&self) -> Option<Target> {
         let (cols, rows) = self.view.term_size;
         self.frame_layout(Rect::new(0, 0, cols, rows)).agent_hud?;
-        let info = self.runtime.pane_tabs.as_ref()?.active_info();
+        let info = self.runtime.project().pane_tabs.as_ref()?.active_info();
         let feed = feed(info.agent().kind())?;
         let (session, home) = match feed {
             Feed::Codex => (&info.codex_session_id, &info.codex_home),
             Feed::Claude => (
                 &info.live_session_id,
-                &self.state.pane.agent_hud.claude_home,
+                &self.state.active_project().pane.agent_hud.claude_home,
             ),
-            Feed::Agy => (&info.live_session_id, &self.state.pane.agent_hud.agy_home),
+            Feed::Agy => (
+                &info.live_session_id,
+                &self.state.active_project().pane.agent_hud.agy_home,
+            ),
         };
         let session = session
             .as_deref()
@@ -76,7 +85,7 @@ impl App {
         pane_id: &str,
         statusline: crate::agent::claude_statusline::Statusline,
     ) {
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             return;
         };
         if let Some(entry) = tabs.tabs_mut().iter_mut().find(|e| e.info.id == pane_id)
@@ -89,13 +98,14 @@ impl App {
 
     pub(super) fn active_agent_hud_update(&self) -> Option<&Update> {
         self.state
+            .active_project()
             .pane
             .agent_hud
             .update_for(&self.agent_hud_target()?)
     }
 
     pub(super) fn execute_agent_hud(&mut self, binding: Option<Binding>) {
-        if binding.as_ref() != self.state.pane.agent_hud.binding.as_ref() {
+        if binding.as_ref() != self.state.active_project().pane.agent_hud.binding.as_ref() {
             return;
         }
         self.runtime.agent_hud = binding
@@ -112,6 +122,7 @@ impl App {
         };
         if !target.as_ref().is_some_and(|target| {
             self.state
+                .active_project()
                 .pane
                 .agent_hud
                 .binding
@@ -130,7 +141,11 @@ impl App {
             return false;
         };
         let before = self.agent_hud_lines(rect);
-        self.state.pane.agent_hud.accept(update, work, now);
+        self.state
+            .active_project_mut()
+            .pane
+            .agent_hud
+            .accept(update, work, now);
         before != self.agent_hud_lines(rect)
     }
 
@@ -140,7 +155,12 @@ impl App {
         ctx: &mut RunCtx,
     ) -> Vec<Effect> {
         let target = self.agent_hud_target();
-        let change = self.state.pane.agent_hud.set_target(target);
+        let change = self
+            .state
+            .active_project_mut()
+            .pane
+            .agent_hud
+            .set_target(target);
         if change.is_some() {
             ctx.draw.mark(3);
         }
@@ -150,18 +170,23 @@ impl App {
         let before = rect.map(|rect| self.agent_hud_lines(rect));
         // A plan window reset, or a countdown ticked over, since the last settle.
         let reset_passed = rect
-            .and(self.state.pane.agent_hud.as_of)
+            .and(self.state.active_project().pane.agent_hud.as_of)
             .and_then(|since| self.agent_hud_reset_edge(since))
             .is_some_and(|edge| edge <= wall.as_second());
         let tz_moved = rect.is_some() && self.refresh_local_tz();
-        let aged = self.state.pane.agent_hud.advance_time(wall);
+        let aged = self
+            .state
+            .active_project_mut()
+            .pane
+            .agent_hud
+            .advance_time(wall);
         if (aged || reset_passed || tz_moved)
             && before != rect.map(|rect| self.agent_hud_lines(rect))
         {
             ctx.draw.mark(3);
         }
         let next = [
-            self.state.pane.agent_hud.next_expiry(wall),
+            self.state.active_project().pane.agent_hud.next_expiry(wall),
             rect.and_then(|_| self.agent_hud_reset_edge(wall)),
         ]
         .into_iter()
@@ -190,7 +215,7 @@ impl App {
     /// resetting, or a countdown ticking over.
     fn agent_hud_reset_edge(&self, now: Timestamp) -> Option<i64> {
         let plan = self.agent_hud_plan()?;
-        let style = self.state.config.pane.agent_hud_resets;
+        let style = self.state.active_project().config.pane.agent_hud_resets;
         [plan.five_hour, plan.seven_day]
             .into_iter()
             .flatten()
@@ -227,7 +252,7 @@ impl App {
         let Some(mode) = command.and_then(AgentHudMode::parse) else {
             return self.agent_hud_usage();
         };
-        self.state.pane.agent_hud.choice = Some(mode);
+        self.state.active_project_mut().pane.agent_hud.choice = Some(mode);
         self.clear_pane_selection();
         self.state
             .flash_info(format!("agent HUD: {}", mode.as_str()));

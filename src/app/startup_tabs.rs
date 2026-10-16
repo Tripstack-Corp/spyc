@@ -152,8 +152,8 @@ impl App {
     /// and the undo for an accidental answer: `forget` drops the recorded
     /// answer for the project's list, so the next launch asks again.
     pub(super) fn cmd_startup_tabs(&mut self, arg: &str) -> Vec<Effect> {
-        let user = self.state.config.pane.tabs.len();
-        let project = self.state.config.pane.project_tabs.clone();
+        let user = self.state.active_project().config.pane.tabs.len();
+        let project = self.state.active_project().config.pane.project_tabs.clone();
         match (arg.trim(), project) {
             ("" | "status", None) => self.state.flash_info(format!(
                 "startup tabs: {user} from ~/.spycrc.toml; this project declares none"
@@ -194,11 +194,11 @@ impl App {
     /// Launch's startup tabs: seed the approved list, or ask about a
     /// project-local list the user hasn't answered for yet.
     pub(super) fn start_startup_tabs(&mut self, resume: bool) {
-        let project = self.state.config.pane.project_tabs.clone();
+        let project = self.state.active_project().config.pane.project_tabs.clone();
         let consent = project
             .as_ref()
             .map(|p| tab_consent::consent_for(&p.source, &p.tabs));
-        let user = self.state.config.pane.tabs.clone();
+        let user = self.state.active_project().config.pane.tabs.clone();
         match plan(resume, !user.is_empty(), consent) {
             Plan::Nothing => {}
             Plan::SeedUser => self.seed_startup_tabs(&user, None),
@@ -235,7 +235,7 @@ impl App {
             }
             return;
         }
-        let launch_dir = self.state.start_dir.clone();
+        let launch_dir = self.state.active_project().start_dir.clone();
         let mut opened = 0usize;
         let mut cwd_fallbacks = 0usize;
         for tab in tabs {
@@ -271,19 +271,19 @@ impl App {
             if spawned {
                 opened += 1;
                 if let Some(label) = &tab.label
-                    && let Some(pane_tabs) = self.runtime.pane_tabs.as_mut()
+                    && let Some(pane_tabs) = self.runtime.project_mut().pane_tabs.as_mut()
                     && let Some(entry) = pane_tabs.tabs_mut().last_mut()
                 {
                     entry.info.label.clone_from(label);
                 }
             }
         }
-        if let Some(pane_tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(pane_tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             // Land on the first declared tab (the user ordered them;
             // spawning leaves the last one active).
             pane_tabs.switch_to(0);
         }
-        self.state.focus = state::Focus::FileList;
+        self.state.active_project_mut().focus = state::Focus::FileList;
         let lead = note.map(|n| format!("{n}; ")).unwrap_or_default();
         let summary = format!(
             "{lead}opened {opened}/{} startup tab(s) — ^a 1..9 to jump",
@@ -325,8 +325,8 @@ mod app_tests {
     /// declaring `project`.
     fn launch(dir: &std::path::Path, user: &[&str], project: &[&str]) -> App {
         let mut app = App::test_app(dir.to_path_buf());
-        app.state.config.pane.tabs = tabs(user);
-        app.state.config.pane.project_tabs = Some(ProjectTabs {
+        app.state.active_project_mut().config.pane.tabs = tabs(user);
+        app.state.active_project_mut().config.pane.project_tabs = Some(ProjectTabs {
             source: dir.join(".spycrc.toml"),
             tabs: tabs(project),
         });
@@ -335,9 +335,13 @@ mod app_tests {
     }
 
     fn opened(app: &App) -> Vec<String> {
-        app.runtime.pane_tabs.as_ref().map_or_else(Vec::new, |t| {
-            t.tabs().iter().map(|e| e.info.command.clone()).collect()
-        })
+        app.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or_else(Vec::new, |t| {
+                t.tabs().iter().map(|e| e.info.command.clone()).collect()
+            })
     }
 
     fn asking(app: &App) -> bool {
@@ -510,8 +514,8 @@ mod app_tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.state.config.pane.tabs = tabs(&["cat"]);
-            app.state.config.pane.project_tabs = Some(ProjectTabs {
+            app.state.active_project_mut().config.pane.tabs = tabs(&["cat"]);
+            app.state.active_project_mut().config.pane.project_tabs = Some(ProjectTabs {
                 source: tmp.path().join(".spycrc.toml"),
                 tabs: tabs(&["cat"]),
             });

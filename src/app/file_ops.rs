@@ -426,12 +426,7 @@ impl App {
                     format!("piped {count} file(s) to pane")
                 };
                 if payload.len() > crate::pane::pty_host::MAX_INPUT_BYTES {
-                    let Some(info) = self
-                        .runtime
-                        .pane_tabs
-                        .as_ref()
-                        .map(crate::pane::PaneTabs::active_info)
-                    else {
+                    let Some(info) = self.active_tab_info() else {
                         self.state.flash_error("pipe failed: no pane open");
                         return;
                     };

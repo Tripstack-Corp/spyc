@@ -45,10 +45,15 @@ fn listing() -> (App, Vec<String>) {
     let names = mixed_length_names();
     let refs: Vec<&str> = names.iter().map(String::as_str).collect();
     let mut app = App::test_app(std::env::temp_dir());
-    app.state.left.listing.dir = PathBuf::from("/projects/demo");
+    app.state.active_project_mut().left.listing.dir = PathBuf::from("/projects/demo");
     app.seed_rows(&refs);
     // `seed_rows` doesn't bump `list_generation`, which the row cache is keyed on.
-    app.view.cached_rows_gen = app.state.left.list_generation.wrapping_sub(1);
+    app.view.cached_rows_gen = app
+        .state
+        .active_project()
+        .left
+        .list_generation
+        .wrapping_sub(1);
     (app, names)
 }
 
@@ -117,7 +122,8 @@ fn a_search_jump_draws_the_cursor_bar_on_the_match() {
     draw(&mut app, BESIDE_PANE);
     search(&mut app, "n0240-", BESIDE_PANE);
     assert_eq!(
-        app.state.left.cursor.index, 240,
+        app.state.active_project().left.cursor.index,
+        240,
         "the search found its match"
     );
     assert_eq!(
@@ -143,7 +149,7 @@ fn l_off_the_last_column_opens_the_next_page_at_its_first_column() {
     draw(&mut app, BARE);
     search(&mut app, "n0464-", BARE);
     let buf = draw(&mut app, BARE);
-    let left = &app.state.left;
+    let left = &app.state.active_project().left;
     assert_eq!(
         (
             left.cursor.view_top,
@@ -178,7 +184,8 @@ fn page_down_to_a_narrower_page_lands_on_its_last_row() {
     draw(&mut app, BARE);
     search(&mut app, "n0464-", BARE);
     assert_eq!(
-        app.state.left.cursor.view_top, 348,
+        app.state.active_project().left.cursor.view_top,
+        348,
         "the cursor starts on the page 348-521"
     );
 

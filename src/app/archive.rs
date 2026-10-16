@@ -65,8 +65,8 @@ impl App {
         vec![Effect::Archive(ArchiveOp::Mount {
             path: path.to_path_buf(),
             staging_root,
-            limits: self.state.config.archive.limits(),
-            max_entries: self.state.config.archive.max_entries,
+            limits: self.state.active_project().config.archive.limits(),
+            max_entries: self.state.active_project().config.archive.max_entries,
             confirmed,
             cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
             then,
@@ -101,7 +101,7 @@ impl App {
             .mounts
             .resolve(at)
             .map_or(0, |(parent, _)| parent.depth + 1);
-        let max = self.state.config.archive.max_depth;
+        let max = self.state.active_project().config.archive.max_depth;
         if depth > max {
             self.state.flash_error(format!(
                 "archive: {} is {depth} archives deep — [archive] max_depth is {max}",
@@ -123,8 +123,8 @@ impl App {
         vec![Effect::Archive(ArchiveOp::Mount {
             path: source.to_path_buf(),
             staging_root,
-            limits: self.state.config.archive.limits(),
-            max_entries: self.state.config.archive.max_entries,
+            limits: self.state.active_project().config.archive.limits(),
+            max_entries: self.state.active_project().config.archive.max_entries,
             confirmed: false,
             cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
             then,
@@ -167,8 +167,8 @@ impl App {
         vec![Effect::Archive(ArchiveOp::Mount {
             path: nested_source.unwrap_or_else(|| archive.to_path_buf()),
             staging_root,
-            limits: self.state.config.archive.limits(),
-            max_entries: self.state.config.archive.max_entries,
+            limits: self.state.active_project().config.archive.limits(),
+            max_entries: self.state.active_project().config.archive.max_entries,
             // Already read once at this size — re-reading it is not a new
             // decision for the user to make.
             confirmed: true,

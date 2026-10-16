@@ -241,17 +241,18 @@ impl App {
         // stays alive in `pane_tabs`, just no rect for it this frame.
         let layout = Self::compute_layout(
             area,
-            self.runtime.pane_tabs.is_some() && !self.state.pane.pane_hidden,
+            self.runtime.project().pane_tabs.is_some()
+                && !self.state.active_project().pane.pane_hidden,
             self.effective_pane_pct(),
-            self.state.config.layout.status_position,
+            self.state.active_project().config.layout.status_position,
         );
         // Carve the single-column layout into a left/right split when one is
         // open AND no zoom is active — a `^a z` zoom fills one region full-screen
         // and takes precedence over the split (otherwise the zoomed pane would
         // be clamped to the left column). The split state is kept, so un-zoom
         // restores it.
-        let mut layout = match self.state.vsplit {
-            Some(vsplit) if self.state.pane.zoom == state::ZoomTarget::None => {
+        let mut layout = match self.state.active_project().vsplit {
+            Some(vsplit) if self.state.active_project().pane.zoom == state::ZoomTarget::None => {
                 Self::carve_vsplit(layout, vsplit, area, self.view.overlay_column)
             }
             _ => layout,
@@ -276,7 +277,7 @@ impl App {
     /// `render_inner`'s overlay early-return.
     fn prepare_frame(&mut self, area: ratatui::layout::Rect) -> FrameLayout {
         let layout = self.frame_layout(area);
-        if self.runtime.top_overlay.is_none() {
+        if self.runtime.project().top_overlay.is_none() {
             self.settle_list_grid(&layout);
         }
         self.prepare_panes(&layout);
@@ -333,11 +334,12 @@ impl App {
         {
             self.clear_pane_selection();
         }
-        let overlay_active = self.runtime.top_overlay.is_some();
+        let overlay_active = self.runtime.project().top_overlay.is_some();
 
         // Top overlay (`;cmd`/`V`/`D`): resize to the spyc area, drain, and
         // flag dismissal once the child exits.
-        let overlay_closed = if let Some(overlay) = self.runtime.top_overlay.as_mut() {
+        let overlay_closed = if let Some(overlay) = self.runtime.project_mut().top_overlay.as_mut()
+        {
             // Resize to the region the overlay actually paints (`top_unit`),
             // so the pty's row count matches what render_inner draws under
             // both status positions.
@@ -360,7 +362,7 @@ impl App {
                 // return to spyc immediately rather than holding a "press any
                 // key" frame. `recompute_focus` at the next loop top drops the
                 // stale `Overlay` focus; this frame already redraws without it.
-                self.runtime.top_overlay = None;
+                self.runtime.project_mut().top_overlay = None;
                 self.view.overlay_auto_dismiss = false;
                 self.view.overlay_column = None;
                 self.view.needs_full_repaint = true;
@@ -376,24 +378,27 @@ impl App {
         // editor/pager (never a `;cmd`), so there's no await-dismiss frame — it
         // returns straight to the commander, the dual-overlay twin of the
         // `AutoClose` arm above.
-        let right_overlay_closed = if let Some(overlay) = self.runtime.top_overlay_right.as_mut() {
-            if let Some(rect) = layout.right {
-                let _ = overlay.resize(rect.height, rect.width);
-            }
-            overlay.drain_output();
-            overlay.is_closed()
-        } else {
-            false
-        };
+        let right_overlay_closed =
+            if let Some(overlay) = self.runtime.project_mut().top_overlay_right.as_mut() {
+                if let Some(rect) = layout.right {
+                    let _ = overlay.resize(rect.height, rect.width);
+                }
+                overlay.drain_output();
+                overlay.is_closed()
+            } else {
+                false
+            };
         if right_overlay_closed {
-            self.runtime.top_overlay_right = None;
+            self.runtime.project_mut().top_overlay_right = None;
             self.view.needs_full_repaint = true;
         }
 
         // Bottom pane: resize to its rect + drain (uniform across the overlay,
         // TopPane-pager, and default draw paths). `output_dirty` is cleared
         // only on the non-overlay paths, matching `render_inner`.
-        if let (Some(tabs), Some(rect)) = (self.runtime.pane_tabs.as_mut(), layout.pane) {
+        if let (Some(tabs), Some(rect)) =
+            (self.runtime.project_mut().pane_tabs.as_mut(), layout.pane)
+        {
             let _ = tabs.active_mut().resize(rect.height, rect.width);
             tabs.drain_all();
             if !overlay_active {
@@ -431,7 +436,7 @@ impl App {
 
     /// Column `a`'s display rows: the ones `view.cached_rows` holds.
     fn build_rows(&self) -> Vec<Row> {
-        self.build_rows_for(&self.state.left)
+        self.build_rows_for(&self.state.active_project().left)
     }
 
     /// Rebuild the list-rows cache and place each column on the page holding
@@ -440,9 +445,9 @@ impl App {
     /// `cursor.view_top`. No drawing, no IO — extracted from the draw path
     /// (MVU Stage 2) so `render` stays mutation-free.
     fn settle_list_grid(&mut self, layout: &FrameLayout) {
-        if self.view.cached_rows_gen != self.state.left.list_generation {
+        if self.view.cached_rows_gen != self.state.active_project().left.list_generation {
             self.view.cached_rows = self.build_rows();
-            self.view.cached_rows_gen = self.state.left.list_generation;
+            self.view.cached_rows_gen = self.state.active_project().left.list_generation;
         }
         // Disjoint field borrows: cached_rows (read) + pages/cached_grid_key
         // (write) on `view`, and `state.left` (write) — all distinct fields, so
@@ -451,7 +456,7 @@ impl App {
         settle_page(
             &self.view.cached_rows,
             self.view.cached_rows_gen,
-            &mut self.state.left,
+            &mut self.state.active_project_mut().left,
             layout.list,
             &mut self.view.pages,
             &mut self.view.cached_grid_key,
@@ -460,19 +465,22 @@ impl App {
         // The right column's second commander (`state.right`) settles the same
         // way against its own row cache, pages and grid key. No-op until `^s`
         // opens one.
-        if self.state.right.is_some() {
+        if self.state.active_project().right.is_some() {
             let right_gen = self
                 .state
+                .active_project()
                 .right
                 .as_ref()
                 .map_or(u64::MAX, |r| r.list_generation);
             if self.view.right_cached_rows_gen != right_gen
-                && let Some(right) = self.state.right.as_ref()
+                && let Some(right) = self.state.active_project().right.as_ref()
             {
                 self.view.right_cached_rows = self.build_rows_for(right);
                 self.view.right_cached_rows_gen = right_gen;
             }
-            if let (Some(rect), Some(right)) = (layout.right, self.state.right.as_mut()) {
+            if let (Some(rect), Some(right)) =
+                (layout.right, self.state.active_project_mut().right.as_mut())
+            {
                 settle_page(
                     &self.view.right_cached_rows,
                     self.view.right_cached_rows_gen,
@@ -559,9 +567,14 @@ mod render_tests {
     /// without bumping `list_generation`, which the cache is keyed on).
     fn demo_app(names: &[&str]) -> App {
         let mut app = App::test_app(std::env::temp_dir());
-        app.state.left.listing.dir = PathBuf::from("/projects/demo");
+        app.state.active_project_mut().left.listing.dir = PathBuf::from("/projects/demo");
         app.seed_rows(names);
-        app.view.cached_rows_gen = app.state.left.list_generation.wrapping_sub(1);
+        app.view.cached_rows_gen = app
+            .state
+            .active_project()
+            .left
+            .list_generation
+            .wrapping_sub(1);
         app
     }
 
@@ -597,6 +610,7 @@ mod render_tests {
     fn the_status_bar_reports_what_differs_and_follows_set_flags() {
         let mut app = demo_app(&files());
         app.state
+            .active_project_mut()
             .left
             .picks
             .insert(&PathBuf::from("/projects/demo/README.md"));
@@ -627,7 +641,7 @@ mod render_tests {
     #[test]
     fn snapshot_frame_status_bottom() {
         let mut app = demo_app(&files());
-        app.state.config.layout.status_position = StatusPosition::Bottom;
+        app.state.active_project_mut().config.layout.status_position = StatusPosition::Bottom;
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
 
@@ -639,7 +653,7 @@ mod render_tests {
         let names: Vec<String> = (0..200).map(|i| format!("file-{i:03}.txt")).collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let mut app = demo_app(&refs);
-        app.state.left.cursor.index = 180;
+        app.state.active_project_mut().left.cursor.index = 180;
         insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
     }
 
@@ -705,7 +719,7 @@ mod render_tests {
         );
         pv.mount = crate::ui::pager::Mount::RightPane;
         app.view.right_pager = Some(pv);
-        app.state.vsplit = Some(state::VSplit {
+        app.state.active_project_mut().vsplit = Some(state::VSplit {
             width_pct: 50,
             mode,
             focus,
@@ -751,7 +765,13 @@ mod render_tests {
             }
             let mut app = demo_app(&files()); // a = /projects/demo
             app.open_second_commander_at(tmp.path()); // b reads the 3 files, focused
-            app.state.right.as_mut().unwrap().listing.dir = PathBuf::from("/projects/other");
+            app.state
+                .active_project_mut()
+                .right
+                .as_mut()
+                .unwrap()
+                .listing
+                .dir = PathBuf::from("/projects/other");
             insta::assert_snapshot!(render_to_string(&mut app, 80, 24));
         });
     }
@@ -766,10 +786,16 @@ mod render_tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = demo_app(&files()); // a = /projects/demo
             app.open_second_commander_at(tmp.path());
-            app.state.right.as_mut().unwrap().listing.dir = PathBuf::from("/projects/other");
+            app.state
+                .active_project_mut()
+                .right
+                .as_mut()
+                .unwrap()
+                .listing
+                .dir = PathBuf::from("/projects/other");
 
             let flip = |app: &mut App, side| {
-                if let Some(v) = app.state.vsplit.as_mut() {
+                if let Some(v) = app.state.active_project_mut().vsplit.as_mut() {
                     v.focus = side;
                 }
             };
@@ -877,9 +903,9 @@ mod render_tests {
             let overlay =
                 crate::pane::Pane::spawn("cat", 24, 80, tmp.path(), &app.view.context_path, wake)
                     .expect("spawn overlay");
-            app.runtime.top_overlay = Some(overlay);
+            app.runtime.project_mut().top_overlay = Some(overlay);
             app.view.overlay_column = Some(state::Side::Left);
-            app.state.vsplit = Some(state::VSplit {
+            app.state.active_project_mut().vsplit = Some(state::VSplit {
                 width_pct: 50,
                 mode: state::VsplitMode::TopOnly,
                 focus: state::Side::Right,
@@ -890,7 +916,8 @@ mod render_tests {
                 crate::ui::pager::PagerView::new_plain("Help", vec!["ZZHELPMARKERZZ".to_string()]);
             help.mount = crate::ui::pager::Mount::Overlay;
             app.view.pager = Some(help);
-            app.state.focus = state::Focus::Pager(crate::ui::pager::Mount::Overlay);
+            app.state.active_project_mut().focus =
+                state::Focus::Pager(crate::ui::pager::Mount::Overlay);
 
             let out = render_to_string(&mut app, 80, 24);
             assert!(
@@ -944,7 +971,7 @@ mod render_tests {
 
         let mut app = demo_app(&files()); // dir = /projects/demo
         let dir = PathBuf::from("/projects/demo");
-        app.state.left.rows = vec![
+        app.state.active_project_mut().left.rows = vec![
             RowData {
                 path: dir.join("run"),
                 display: "run*".to_string(), // ls -F decoration for an executable
@@ -959,7 +986,7 @@ mod render_tests {
             },
         ];
         // git status keys BOTH by bare basename (no `*`).
-        let files = &mut app.state.left.git.files;
+        let files = &mut app.state.active_project_mut().left.git.files;
         files.insert(
             "run".to_string(),
             GitFileStatus::unstaged(GitChange::Modified),

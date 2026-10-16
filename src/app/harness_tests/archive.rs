@@ -33,7 +33,7 @@ fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
     let outcome = run_archive_op(ArchiveOp::Mount {
         path: archive.to_path_buf(),
         staging_root: staging.to_path_buf(),
-        limits: app.state.config.archive.limits(),
+        limits: app.state.active_project().config.archive.limits(),
         max_entries: 1000,
         confirmed: false,
         cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

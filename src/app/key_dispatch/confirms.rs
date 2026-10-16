@@ -330,7 +330,7 @@ impl App {
         else {
             return Vec::new();
         };
-        let user_tabs = self.state.config.pane.tabs.clone();
+        let user_tabs = self.state.active_project().config.pane.tabs.clone();
         match key.code {
             KeyCode::Char('y' | 'Y') => {
                 crate::state::tab_consent::set_consent(&source, &tabs, true);

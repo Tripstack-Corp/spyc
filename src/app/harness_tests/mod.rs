@@ -94,7 +94,12 @@ fn agent_argv(dir: &std::path::Path, name: &str) -> Vec<String> {
 /// Deliver `effects`' pane input to the active pane the way the executor does,
 /// then press Enter so a line-reading child hands the line over.
 fn deliver(app: &mut App, effects: Vec<Effect>) {
-    let tabs = app.runtime.pane_tabs.as_mut().expect("a pane tab");
+    let tabs = app
+        .runtime
+        .project_mut()
+        .pane_tabs
+        .as_mut()
+        .expect("a pane tab");
     for e in effects {
         if let Effect::SendToPane { mut input, .. } = e {
             input.send_to(tabs.active_mut()).expect("send");
@@ -112,7 +117,7 @@ fn received(app: &mut App, got: &std::path::Path) -> String {
         {
             return s;
         }
-        if let Some(tabs) = app.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = app.runtime.project_mut().pane_tabs.as_mut() {
             tabs.active_mut().drain_output();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
@@ -127,15 +132,15 @@ fn fresh_harness_is_deterministic() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
-        assert_eq!(app.state.focus, state::Focus::FileList);
+        assert_eq!(app.state.active_project().focus, state::Focus::FileList);
         assert!(!app.state.pane_focused());
         assert!(matches!(app.state.mode, Mode::Normal));
-        assert_eq!(app.state.left.cursor.index, 0);
-        assert!(app.runtime.pane_tabs.is_none());
+        assert_eq!(app.state.active_project().left.cursor.index, 0);
+        assert!(app.runtime.project().pane_tabs.is_none());
         assert!(app.view.pager.is_none());
         assert!(app.flash_text().is_none());
         assert_eq!(
-            app.state.left.listing.dir,
+            app.state.active_project().left.listing.dir,
             std::path::PathBuf::from("/tmp/harness")
         );
     });
@@ -149,12 +154,12 @@ fn apply_action_moves_cursor() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
         app.seed_rows(&["a", "b", "c"]);
-        assert_eq!(app.state.left.cursor.index, 0);
+        assert_eq!(app.state.active_project().left.cursor.index, 0);
         let post = app.apply(&Action::Down(1)).unwrap();
-        assert_eq!(app.state.left.cursor.index, 1);
+        assert_eq!(app.state.active_project().left.cursor.index, 1);
         assert!(post.is_empty());
         app.apply(&Action::Up(1)).unwrap();
-        assert_eq!(app.state.left.cursor.index, 0);
+        assert_eq!(app.state.active_project().left.cursor.index, 0);
     });
 }
 
@@ -203,7 +208,8 @@ fn handle_key_routes_j_to_cursor_down() {
         app.seed_rows(&["a", "b", "c"]);
         app.handle_key(key('j')).unwrap();
         assert_eq!(
-            app.state.left.cursor.index, 1,
+            app.state.active_project().left.cursor.index,
+            1,
             "j should move the cursor down"
         );
     });
@@ -264,7 +270,8 @@ fn prompt_input_wins_over_list() {
         app.state.mode = Mode::Prompting(Prompt::simple(PromptKind::Jump, "jump: "));
         app.handle_key(key('x')).unwrap();
         assert_eq!(
-            app.state.left.cursor.index, 0,
+            app.state.active_project().left.cursor.index,
+            0,
             "cursor must not move while prompting"
         );
         match &app.state.mode {
@@ -303,7 +310,8 @@ fn overlay_pager_consumes_keys_not_list() {
         app.view.pager = Some(PagerView::new_plain("t", lines));
         app.handle_key(key('j')).unwrap();
         assert_eq!(
-            app.state.left.cursor.index, 0,
+            app.state.active_project().left.cursor.index,
+            0,
             "list cursor must not move with a pager open"
         );
         assert!(app.view.pager.is_some(), "pager stays open on j");
@@ -434,7 +442,7 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
             .expect("spawn cat");
         let entry =
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", &dir));
-        app.runtime.pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+        app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
 
         // The state right after the MCP report handler applied a `blocked`
         // report: `reported` + `activity` are Blocked (the instant-dot pre-set),
@@ -442,7 +450,13 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
         // pane-focused (default focus is the file list) → not suppressed.
         let now = std::time::Instant::now();
         {
-            let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+            let info = app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut();
             info.reported = Some(crate::pane::ReportedStatus::new(
                 crate::pane::AgentActivity::Blocked,
                 now,

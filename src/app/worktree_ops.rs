@@ -252,7 +252,8 @@ impl App {
                         // is on).
                         base: base.clone().or_else(|| {
                             self.state
-                                .project_home
+                                .active_project()
+                                .home
                                 .as_deref()
                                 .and_then(crate::git::branch::default_base)
                         }),
@@ -287,13 +288,13 @@ impl App {
     /// [`AppState::worktree_anchor`]: crate::app::state::AppState::worktree_anchor
     fn create_anchors(&self, pane_id: Option<&str>) -> Vec<std::path::PathBuf> {
         let pane_cwd = pane_id.and_then(|id| {
-            let tabs = self.runtime.pane_tabs.as_ref()?;
+            let tabs = self.runtime.project().pane_tabs.as_ref()?;
             let tab = tabs.tabs().iter().find(|t| t.info.id == id)?;
             Some(tab.live_cwd())
         });
         std::iter::once(self.state.worktree_anchor())
             .chain(pane_cwd)
-            .chain(self.state.project_home.clone())
+            .chain(self.state.active_project().home.clone())
             .collect()
     }
 

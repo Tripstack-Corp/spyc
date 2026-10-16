@@ -44,6 +44,7 @@ fn mixed_restore_opens_valid_tabs_and_keeps_active_tab_identity() {
         app.restore_session(&saved);
         let tabs = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .expect("supported tabs must restore");
@@ -52,7 +53,7 @@ fn mixed_restore_opens_valid_tabs_and_keeps_active_tab_identity() {
         assert_eq!(tabs.tabs()[0].info.label, "saved-1");
         assert_eq!(tabs.tabs()[1].info.claim_owner, "saved-owner-2");
         assert_eq!(app.state.session_id, Some(saved.id));
-        assert_eq!(app.state.pane.pane_height_pct, 75);
+        assert_eq!(app.state.active_project().pane.pane_height_pct, 75);
         assert!(
             agent_argv(&dir, "codex")
                 .iter()
@@ -112,7 +113,7 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
         drop(app);
         let mut again = App::test_app(dir);
         again.restore_session(&first_save);
-        let tabs = again.runtime.pane_tabs.as_ref().unwrap();
+        let tabs = again.runtime.project().pane_tabs.as_ref().unwrap();
         assert_eq!(tabs.tabs().len(), 2);
         assert_eq!(tabs.active_index(), 0);
         assert_eq!(tabs.tabs()[0].info.label, "saved-1");
@@ -124,7 +125,7 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
             serde_json::to_value(&original.tabs[0]).unwrap()
         );
         // Closing all live panes must not drop the unopened records.
-        again.runtime.pane_tabs = None;
+        again.runtime.project_mut().pane_tabs = None;
         again.save_session();
         let last_save = read_saved(&state_root, original.id);
         assert_eq!(last_save.tabs.len(), 1);
@@ -152,12 +153,29 @@ fn a_refused_selected_tab_falls_forward_and_new_restore_clears_old_refusals() {
         );
         let mut app = App::test_app(dir.clone());
         app.restore_session(&original);
-        assert_eq!(app.runtime.pane_tabs.as_ref().unwrap().active_index(), 1);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_index(),
+            1
+        );
         assert_eq!(app.state.deferred_tabs.len(), 1);
         let supported = saved_session(&dir, &[command], 0);
         app.restore_session(&supported);
         assert!(app.state.deferred_tabs.is_empty());
-        assert_eq!(app.runtime.pane_tabs.as_ref().unwrap().tabs().len(), 1);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .tabs()
+                .len(),
+            1
+        );
         assert_eq!(app.flash_text(), Some("session restored"));
     });
 }
@@ -172,7 +190,7 @@ fn unopened_tabs_survive_debounced_autosave_without_live_panes() {
         let original = saved_session(&dir, &[format!("{command} --future-option"), command], 1);
         let mut app = App::test_app(dir);
         app.restore_session(&original);
-        app.runtime.pane_tabs = None;
+        app.runtime.project_mut().pane_tabs = None;
         let mut ctx = RunCtx::for_test();
         let now = std::time::Instant::now();
         app.settle_autosave(now, &mut ctx);
@@ -224,14 +242,24 @@ fn a_refused_tab_does_not_prevent_layout_or_scope_restore() {
             });
         let mut app = App::test_app(dir);
         app.restore_session(&saved);
-        assert_eq!(app.state.right.as_ref().unwrap().listing.dir, right);
-        let split = app.state.vsplit.unwrap();
+        assert_eq!(
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .unwrap()
+                .listing
+                .dir,
+            right
+        );
+        let split = app.state.active_project().vsplit.unwrap();
         assert_eq!(split.width_pct, 65);
         assert_eq!(split.mode, super::super::state::VsplitMode::FullHeight);
         assert_eq!(split.focus, super::super::state::Side::Right);
         assert_eq!(app.state.scope_registry, saved.scope_claims);
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -258,7 +286,12 @@ fn a_restored_tab_takes_back_its_saved_pane_id() {
         let mut app = App::test_app(dir.clone());
         app.restore_session(&saved);
         agent_argv(&dir, "codex");
-        let tabs = app.runtime.pane_tabs.as_ref().expect("the tab restored");
+        let tabs = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .expect("the tab restored");
         assert_eq!(tabs.tabs()[0].info.id, "saved-pane");
         let env = std::fs::read_to_string(dir.join("codex.argv.pane")).unwrap();
         assert_eq!(env.trim_end(), "saved-pane", "the child's SPYC_PANE_ID");
@@ -287,6 +320,7 @@ fn a_saved_pane_id_is_taken_back_only_once() {
         app.restore_session(&saved);
         let ids: Vec<&str> = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .expect("the tabs restored")

@@ -23,6 +23,7 @@ impl App {
         let pane_id = tab.pane_id.as_str();
         let taken = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .is_some_and(|tabs| tabs.tabs().iter().any(|t| t.info.id == pane_id));
@@ -58,7 +59,7 @@ impl App {
     /// this; delete the phase when that lands.)
     pub fn send_pending_resumes(&mut self, now: std::time::Instant) {
         use crate::pane::tabs::{PendingResumeSend, resume_still_unsubmitted};
-        let Some(tabs) = self.runtime.pane_tabs.as_mut() else {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             return;
         };
         for entry in tabs.tabs_mut() {
@@ -152,12 +153,12 @@ impl App {
                 self.state.flash_error(format!("session chdir: {e:#}"));
                 return effects;
             }
-            self.state.start_dir.clone_from(&session.cwd);
+            self.state.set_start_dir(&session.cwd);
         } else if super::archive::archive_ancestor_of(&session.cwd).is_some() {
             // The user quit while browsing an archive. It isn't a directory and
             // never was — the effect screen mounts it and lands the column back
             // where they left off. The rest of the restore carries on meanwhile.
-            self.state.start_dir.clone_from(&session.cwd);
+            self.state.set_start_dir(&session.cwd);
             effects.push(Effect::ChangeDir {
                 path: session.cwd.clone(),
                 focus: None,
@@ -171,7 +172,7 @@ impl App {
         }
         self.restore_session_settings(session);
         if !session.tabs.is_empty() {
-            self.runtime.pane_tabs = None;
+            self.runtime.project_mut().pane_tabs = None;
             let mut restored_indices = Vec::new();
             for (index, (tab, plan)) in session.tabs.iter().zip(plans).enumerate() {
                 if let crate::agent::ResumeAction::Refuse { reason } = &plan.resume {
@@ -205,7 +206,7 @@ impl App {
                 // agent.
                 let spawned = self.spawn_restored_tab(&plan.command, cwd, tab);
                 if spawned
-                    && let Some(tabs) = self.runtime.pane_tabs.as_mut()
+                    && let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
                     && let Some(entry) = tabs.tabs_mut().last_mut()
                 {
                     restored_indices.push(index);
@@ -248,14 +249,11 @@ impl App {
                     });
                 }
             }
-            if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+            if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                 tabs.switch_to(restored_active_index(&restored_indices, session.active_tab));
             }
-            self.state.focus = if session.pane_focused && !restored_indices.is_empty() {
-                Focus::Pane
-            } else {
-                Focus::FileList
-            };
+            let want_pane = session.pane_focused && !restored_indices.is_empty();
+            self.state.set_focus_pane_or_list(want_pane);
         }
         // Restore the vertical split (shape + previewed file). Independent of
         // the pane block above — a split can exist without a bottom pane.
@@ -296,10 +294,10 @@ impl App {
         // subsequent saves/autosaves (P3-2), rather than forking a new file.
         self.state.session_id = Some(session.id);
         self.state.deferred_tabs.clear();
-        self.state.project_home = session.project_home.clone().filter(|p| p.is_dir());
-        self.state.pane.pane_height_pct = session.pane_height_pct;
+        self.state.active_project_mut().home = session.project_home.clone().filter(|p| p.is_dir());
+        self.state.active_project_mut().pane.pane_height_pct = session.pane_height_pct;
         if let Some(mode) = session.agent_hud {
-            self.state.pane.agent_hud.choice = Some(mode);
+            self.state.active_project_mut().pane.agent_hud.choice = Some(mode);
         }
     }
 
@@ -338,13 +336,13 @@ impl App {
                 return;
             };
             self.open_second_commander_at(parent);
-            if let Some(v) = self.state.vsplit.as_mut() {
+            if let Some(v) = self.state.active_project_mut().vsplit.as_mut() {
                 v.width_pct = width_pct;
                 v.mode = mode;
                 v.focus = focus;
             }
             self.state.focus_on_path(&archive);
-            self.state.focus = if pane_focused {
+            self.state.active_project_mut().focus = if pane_focused {
                 Focus::Pane
             } else {
                 Focus::FileList
@@ -363,7 +361,7 @@ impl App {
             // `state.right` + `vsplit` + git/harpoon + rows), then override the
             // split shape with the saved one (open_* uses defaults).
             self.open_second_commander_at(right_cwd);
-            if let Some(v) = self.state.vsplit.as_mut() {
+            if let Some(v) = self.state.active_project_mut().vsplit.as_mut() {
                 v.width_pct = width_pct;
                 v.mode = mode;
                 v.focus = focus;
@@ -371,13 +369,13 @@ impl App {
             // `open_second_commander_at` forces `state.focus = FileList`;
             // re-apply the saved region focus (the pane block may have wanted
             // `Pane`).
-            self.state.focus = if pane_focused {
+            self.state.active_project_mut().focus = if pane_focused {
                 Focus::Pane
             } else {
                 Focus::FileList
             };
         } else {
-            self.state.vsplit = Some(VSplit {
+            self.state.active_project_mut().vsplit = Some(VSplit {
                 width_pct,
                 mode,
                 focus,
@@ -391,7 +389,7 @@ impl App {
             // failed to load, there'd be a carved, empty right column with no
             // content. Match `cycle_vsplit`'s open-branch guard.
             if self.view.right_pager.is_none() {
-                self.state.vsplit = None;
+                self.state.active_project_mut().vsplit = None;
             }
         }
     }

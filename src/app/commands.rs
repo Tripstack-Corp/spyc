@@ -33,16 +33,18 @@ impl App {
                 return;
             }
         };
-        let (rows, cols) =
-            Self::top_overlay_size(self.effective_pane_pct(), self.runtime.pane_tabs.is_some());
+        let (rows, cols) = Self::top_overlay_size(
+            self.effective_pane_pct(),
+            self.runtime.project().pane_tabs.is_some(),
+        );
         let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
         match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
             Ok(p) => {
                 // Initial focus on the new overlay so the user drives the
                 // subprocess directly; `^a j` hands focus to the bottom pane.
-                self.runtime.top_overlay = Some(p);
-                self.state.focus = Focus::Overlay;
+                self.runtime.project_mut().top_overlay = Some(p);
+                self.state.active_project_mut().focus = Focus::Overlay;
             }
             Err(e) => self.state.flash_error(format!("spawn: {e:#}")),
         }
@@ -408,7 +410,7 @@ pub(super) fn cmd_mouse(app: &mut App, args: &str) -> Vec<Effect> {
         // again without restarting.
         "auto" | "default" | "config" => {
             app.state.mouse_capture_override = None;
-            let want = app.state.config.mouse.capture;
+            let want = app.state.active_project().config.mouse.capture;
             app.state.flash_info(format!(
                 "mouse: following config ([mouse] capture = {want})"
             ));
@@ -557,7 +559,7 @@ fn agent_list_lines(app: &App) -> Vec<String> {
         crate::VERSION,
         crate::sysinfo::format_now(),
     )];
-    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+    let Some(tabs) = app.runtime.project().pane_tabs.as_ref() else {
         out.push("(no panes open)".to_string());
         return out;
     };
@@ -673,12 +675,17 @@ pub(super) fn cmd_pane_to_task(app: &mut App, args: &str) -> Vec<Effect> {
     match args.parse::<usize>() {
         Ok(n) if n >= 1 => {
             let idx = n - 1;
-            let len = app.runtime.pane_tabs.as_ref().map_or(0, PaneTabs::len);
+            let len = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .map_or(0, PaneTabs::len);
             if idx >= len {
                 app.state
                     .flash_error(format!("pane-to-task: no tab #{n} (have {len})"));
             } else {
-                if let Some(tabs) = app.runtime.pane_tabs.as_mut() {
+                if let Some(tabs) = app.runtime.project_mut().pane_tabs.as_mut() {
                     tabs.switch_to(idx);
                 }
                 app.demote_pane_to_task();

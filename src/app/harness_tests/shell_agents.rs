@@ -7,7 +7,7 @@ use crate::mcp_cmd::{McpCommand, McpResponse};
 
 /// The id of the only tab.
 fn tab_id(app: &App) -> String {
-    app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+    app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
         .info
         .id
         .clone()
@@ -66,7 +66,13 @@ fn a_report_to_a_shell_tab_is_recorded_not_applied() {
             ),
             McpResponse::Error { message } => panic!("report refused: {message}"),
         }
-        let info = app.runtime.pane_tabs.as_ref().unwrap().active_info();
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
         assert!(info.reported.is_none());
         assert_eq!(info.activity, crate::pane::AgentActivity::Unknown);
         assert!(info.last_reported.is_some(), "kept for :why-status");
@@ -88,7 +94,12 @@ fn fake_agents(dir: &std::path::Path) -> std::path::PathBuf {
 
 /// Type `text` into the tab, then drain output and settle until `done` holds.
 fn type_until(app: &mut App, text: &str, what: &str, done: impl Fn(&crate::pane::TabInfo) -> bool) {
-    app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+    app.runtime
+        .project_mut()
+        .pane_tabs
+        .as_mut()
+        .unwrap()
+        .tabs_mut()[0]
         .pane
         .send_bytes(text.as_bytes())
         .unwrap();
@@ -96,7 +107,7 @@ fn type_until(app: &mut App, text: &str, what: &str, done: impl Fn(&crate::pane:
     loop {
         app.drain_pane_output();
         app.settle_shell_agents(std::time::Instant::now(), &mut RunCtx::for_test());
-        if done(&app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info) {
+        if done(&app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info) {
             return;
         }
         assert!(std::time::Instant::now() < deadline, "never saw: {what}");
@@ -128,7 +139,7 @@ fn a_shell_tab_follows_the_agent_it_runs_and_returns_to_a_shell() {
         type_until(&mut app, &claude, "claude", |info| {
             kind_of(info) == AgentKind::Claude
         });
-        let info = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info;
+        let info = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info;
         assert_eq!(
             info.launched_agent().kind(),
             AgentKind::Other,
@@ -150,14 +161,14 @@ fn a_shell_tab_follows_the_agent_it_runs_and_returns_to_a_shell() {
         assert!(
             matches!(response, McpResponse::Ok { ref message } if !message.contains("not applied"))
         );
-        let info = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info;
+        let info = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info;
         assert!(info.reported.is_some());
         assert!(info.live_session_id.is_some());
 
         type_until(&mut app, "\x03", "claude exit", |info| {
             info.running.is_none()
         });
-        let info = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info;
+        let info = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info;
         assert_eq!(kind_of(info), AgentKind::Other);
         assert!(
             info.reported.is_none() && info.last_reported.is_none(),
@@ -169,7 +180,7 @@ fn a_shell_tab_follows_the_agent_it_runs_and_returns_to_a_shell() {
         type_until(&mut app, &agy, "agy", |info| {
             kind_of(info) == AgentKind::Agy
         });
-        let info = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info;
+        let info = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info;
         assert_ne!(info.running.expect("running").pid, first, "a new process");
         type_until(&mut app, "\x03", "agy exit", |info| info.running.is_none());
     });
@@ -194,7 +205,7 @@ fn a_stopped_agent_leaves_the_tab_a_shell_until_it_is_brought_back() {
         type_until(&mut app, "\x1a", "^Z", |info| {
             info.running.is_some_and(|r| r.backgrounded)
         });
-        let info = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info;
+        let info = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info;
         assert_eq!(
             kind_of(info),
             AgentKind::Other,
@@ -206,7 +217,7 @@ fn a_stopped_agent_leaves_the_tab_a_shell_until_it_is_brought_back() {
             info.running.is_some_and(|r| !r.backgrounded)
         });
         assert_eq!(
-            kind_of(&app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info),
+            kind_of(&app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info),
             AgentKind::Claude
         );
         type_until(&mut app, "\x03", "exit", |info| info.running.is_none());
@@ -229,7 +240,12 @@ fn a_shell_tab_running_an_agent_is_saved_as_its_shell() {
         type_until(&mut app, &claude, "claude", |info| {
             kind_of(info) == AgentKind::Claude
         });
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
             .info
             .live_session_id = Some("11111111-1111-4111-8111-111111111111".into());
 
@@ -308,10 +324,15 @@ fn hooks_on_bang_leaves_a_shell_tab_running_claude_alone() {
             std::fs::create_dir_all(&dir).unwrap();
             let mut app = App::test_app(dir.clone());
             assert!(app.open_pane_tab_in("sh", &dir));
-            let shell = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+            let shell = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
                 .pane
                 .process_id();
-            app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+            app.runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .tabs_mut()[0]
                 .info
                 .running = Some(crate::pane::RunningAgent {
                 kind: crate::state::sessions::AgentKind::Claude,
@@ -324,7 +345,7 @@ fn hooks_on_bang_leaves_a_shell_tab_running_claude_alone() {
             app.dispatch_command("hooks on!");
             assert!(app.apply_wiring_outcomes());
 
-            let entry = &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0];
+            let entry = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0];
             assert_eq!(entry.info.command, "sh");
             assert_eq!(entry.pane.process_id(), shell, "the shell was restarted");
             assert!(

@@ -30,7 +30,7 @@ fn live_report(e: &TabEntry) -> Option<&ReportedStatus> {
 /// does for git markers: the verdict first, then the tab's `:activity dump`
 /// report, so it can be searched, copied and saved.
 pub(super) fn cmd_why_status(app: &mut App, _args: &str) -> Vec<Effect> {
-    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+    let Some(tabs) = app.runtime.project().pane_tabs.as_ref() else {
         app.state.flash_info("why-status: no pane open");
         return Vec::new();
     };
@@ -133,6 +133,7 @@ pub(super) fn activity_dump_lines(app: &App) -> Vec<String> {
     for (conn, c) in &app.view.activity.mcp_connections {
         let tab = c.pane_id.as_deref().and_then(|id| {
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()?
                 .tabs()
@@ -152,7 +153,7 @@ pub(super) fn activity_dump_lines(app: &App) -> Vec<String> {
     }
     out.push(String::new());
 
-    let Some(tabs) = app.runtime.pane_tabs.as_ref() else {
+    let Some(tabs) = app.runtime.project().pane_tabs.as_ref() else {
         out.push("(no panes open)".to_string());
         return out;
     };

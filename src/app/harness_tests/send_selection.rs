@@ -23,7 +23,7 @@ fn send_selection_anchors_on_the_panes_cwd_not_project_home() {
         let got = root.join("got.txt");
 
         let mut app = App::test_app(home.clone());
-        app.state.project_home = Some(home);
+        app.state.active_project_mut().home = Some(home);
         let cmd = format!(
             "cat > {}",
             crate::shell::shell_quote(&got.to_string_lossy())
@@ -32,8 +32,8 @@ fn send_selection_anchors_on_the_panes_cwd_not_project_home() {
             app.open_pane_tab_in(&cmd, &wt),
             "pane spawned in the worktree"
         );
-        app.state.left.picks.insert(&inside);
-        app.state.left.picks.insert(&outside);
+        app.state.active_project_mut().left.picks.insert(&inside);
+        app.state.active_project_mut().left.picks.insert(&outside);
 
         let effects = app.send_selection_to_pane();
         deliver(&mut app, effects);
@@ -73,18 +73,19 @@ fn a_pane_that_changed_directory_gets_paths_from_where_it_is_now() {
         let got = root.join("got.txt");
 
         let mut app = App::test_app(wt.clone());
-        app.state.project_home = Some(wt.clone());
+        app.state.active_project_mut().home = Some(wt.clone());
         let child = format!(
             "cd sub && exec cat > {}",
             crate::shell::shell_quote(&got.to_string_lossy())
         );
         let cmd = format!("sh -c {}", crate::shell::shell_quote(&child));
         assert!(app.open_pane_tab_in(&cmd, &wt));
-        app.state.left.picks.insert(&inside);
+        app.state.active_project_mut().left.picks.insert(&inside);
 
         // Wait until the child has actually moved before sending.
         let pid = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .and_then(|t| t.active().process_id())
@@ -120,7 +121,7 @@ fn a_directory_gets_a_trailing_slash_and_a_symlink_to_one_does_not() {
         let got = root.join("got.txt");
 
         let mut app = App::test_app(wt.clone());
-        app.state.left.listing = crate::fs::Listing::read(&wt).unwrap();
+        app.state.active_project_mut().left.listing = crate::fs::Listing::read(&wt).unwrap();
         app.state.rebuild_rows();
         let cmd = format!(
             "cat > {}",
@@ -128,7 +129,11 @@ fn a_directory_gets_a_trailing_slash_and_a_symlink_to_one_does_not() {
         );
         assert!(app.open_pane_tab_in(&cmd, &wt));
         for name in ["sub", "link", "f.txt"] {
-            app.state.left.picks.insert(&wt.join(name));
+            app.state
+                .active_project_mut()
+                .left
+                .picks
+                .insert(&wt.join(name));
         }
 
         let effects = app.send_selection_to_pane();

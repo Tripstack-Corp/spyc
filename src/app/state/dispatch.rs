@@ -177,14 +177,14 @@ impl AppState {
 
         // :startdir [.|<path>] — manage the `` ` `` jump target.
         if input == "startdir" {
-            self.flash_info(format!("start dir: {}", self.start_dir.display()));
+            self.flash_start_dir();
             return CommandResult::Handled;
         }
         if let Some(arg) = input.strip_prefix("startdir ") {
             match self.resolve_dir_arg(arg.trim()) {
                 Ok(canon) => {
                     self.flash_info(format!("start dir: {}", canon.display()));
-                    self.start_dir = canon;
+                    self.active_project_mut().start_dir = canon;
                 }
                 Err(e) => self.flash_error(format!("startdir: {e:#}")),
             }
@@ -199,14 +199,14 @@ impl AppState {
         if let Some(arg) = input.strip_prefix("project ") {
             let arg = arg.trim();
             if arg == "clear" {
-                self.project_home = None;
+                self.active_project_mut().home = None;
                 self.flash_info("PROJECT_HOME cleared");
                 return CommandResult::Handled;
             }
             match self.resolve_dir_arg(arg) {
                 Ok(canon) => {
                     self.flash_info(format!("PROJECT_HOME: {}", canon.display()));
-                    self.project_home = Some(canon);
+                    self.active_project_mut().home = Some(canon);
                 }
                 Err(e) => self.flash_error(format!("project: {e:#}")),
             }

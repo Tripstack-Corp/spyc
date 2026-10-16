@@ -358,7 +358,7 @@ impl App {
         let mut needs_draw = false;
         let mut draw_reason = 0u8;
         let mut pane_had_output = false;
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut() {
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             let active_idx = tabs.active_index();
             // Stamp the moment of output for the agent-activity signal (P0).
             // `&mut` settle step, so reading the clock here is fine (render is
@@ -390,7 +390,7 @@ impl App {
                 }
             }
         }
-        if let Some(overlay) = self.runtime.top_overlay.as_mut() {
+        if let Some(overlay) = self.runtime.project_mut().top_overlay.as_mut() {
             overlay.clear_wake(); // clear-before-read (see the tab scan)
             if overlay.drain_output() {
                 pane_had_output = true;
@@ -401,7 +401,7 @@ impl App {
         // clear_wake site. Without it `b`'s editor wake edge never re-arms: after
         // its first output the reader stops pushing wakes, so the loop only
         // redraws on the next keystroke (laggy editor + stale frames).
-        if let Some(overlay) = self.runtime.top_overlay_right.as_mut() {
+        if let Some(overlay) = self.runtime.project_mut().top_overlay_right.as_mut() {
             overlay.clear_wake();
             if overlay.drain_output() {
                 pane_had_output = true;
@@ -433,7 +433,7 @@ impl App {
         // Mark exited tabs AFTER drain so the Closed event has been processed
         // and `is_closed()` returns true; the "[exited N]" label appears
         // immediately.
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
             && tabs.mark_exited()
         {
             needs_draw = true;

@@ -528,11 +528,13 @@ impl super::App {
     ) {
         let live = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .is_some_and(|tabs| tabs.tabs().iter().any(|tab| tab.info.id == tab_id));
         let current = self
             .state
+            .active_project()
             .pane
             .image_capture_epochs
             .get(&tab_id)
@@ -541,7 +543,13 @@ impl super::App {
         if !live || epoch != current || encoded.len() as u64 > MAX_IMAGE_BYTES {
             return;
         }
-        let ring = self.state.pane.pending_images.entry(tab_id).or_default();
+        let ring = self
+            .state
+            .active_project_mut()
+            .pane
+            .pending_images
+            .entry(tab_id)
+            .or_default();
         let seq = ring.last().map_or(1, |p| p.seq + 1);
         ring.push(crate::app::state::PendingImage {
             seq,

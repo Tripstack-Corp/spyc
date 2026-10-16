@@ -48,7 +48,10 @@ fn the_mcp_root_follows_start_dir() {
         assert_eq!(recorded(), launch.to_string_lossy());
 
         // What `restore_session` does to it.
-        app.state.start_dir.clone_from(&restored);
+        app.state
+            .active_project_mut()
+            .start_dir
+            .clone_from(&restored);
         app.write_context();
         assert_eq!(app.snapshot_context().root, restored);
         assert_eq!(recorded(), restored.to_string_lossy());
@@ -107,12 +110,18 @@ fn mcp_context_and_mutations_follow_the_focused_column() {
             pattern: Some("*.rs".to_string()),
         });
         assert_eq!(
-            app.state.right.as_ref().unwrap().temp_filter.as_deref(),
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .unwrap()
+                .temp_filter
+                .as_deref(),
             Some("*.rs"),
             "set_filter applies to the focused (b) column"
         );
         assert!(
-            app.state.left.temp_filter.is_none(),
+            app.state.active_project().left.temp_filter.is_none(),
             "the left column's filter is untouched"
         );
     });
@@ -182,8 +191,11 @@ fn mcp_create_worktree_open_opens_column_b() {
 
         let mut app = App::test_app(repo.clone());
         app.state.update_repo_root(state::Side::Left, &repo);
-        app.state.project_home = Some(repo.clone());
-        assert!(app.state.right.is_none(), "single column to start");
+        app.state.active_project_mut().home = Some(repo.clone());
+        assert!(
+            app.state.active_project().right.is_none(),
+            "single column to start"
+        );
 
         let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CreateWorktree {
             branch: "mcp-open-wt".to_string(),
@@ -198,7 +210,12 @@ fn mcp_create_worktree_open_opens_column_b() {
             }
             crate::mcp_cmd::McpResponse::Error { message } => panic!("create errored: {message}"),
         };
-        let b = app.state.right.as_ref().expect("open=true opens column b");
+        let b = app
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .expect("open=true opens column b");
         assert_eq!(
             std::fs::canonicalize(&b.listing.dir).ok(),
             std::fs::canonicalize(&path).ok(),
@@ -272,9 +289,9 @@ fn mcp_create_worktree_falls_back_to_the_calling_panes_repo() {
         std::fs::create_dir(&outside).unwrap();
 
         let mut app = App::test_app(outside);
-        app.state.project_home = None;
+        app.state.active_project_mut().home = None;
         assert!(app.open_pane_tab_in("cat", &repo));
-        let pane_id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+        let pane_id = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
             .info
             .id
             .clone();
@@ -297,7 +314,7 @@ fn mcp_create_worktree_falls_back_to_project_home() {
         std::fs::create_dir(&outside).unwrap();
 
         let mut app = App::test_app(outside);
-        app.state.project_home = Some(repo);
+        app.state.active_project_mut().home = Some(repo);
         let path = created_at(create_worktree(&mut app, "home-wt", None));
         assert_eq!(path, root.join("repo.worktrees/home-wt"));
     });
@@ -317,7 +334,7 @@ fn mcp_create_worktree_prefers_the_focused_columns_repo() {
         let mut app = App::test_app(a.clone());
         app.state.update_repo_root(state::Side::Left, &a);
         assert!(app.open_pane_tab_in("cat", &b));
-        let pane_id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+        let pane_id = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
             .info
             .id
             .clone();
@@ -335,7 +352,7 @@ fn mcp_create_worktree_outside_every_repo_reports_the_columns_dir() {
         let outside = std::fs::canonicalize(tmp.path()).unwrap().join("outside");
         std::fs::create_dir(&outside).unwrap();
         let mut app = App::test_app(outside.clone());
-        app.state.project_home = None;
+        app.state.active_project_mut().home = None;
         match create_worktree(&mut app, "nowhere", None) {
             McpResponse::Error { message } => assert!(
                 message.contains("open repo") && message.contains(&*outside.to_string_lossy()),
@@ -387,9 +404,14 @@ fn mcp_remove_worktree_tears_down_and_resets_occupied_column() {
 
         // Open `b` inside it, then refocus `a` (so the post-removal reset of the
         // background column `b` doesn't move the process cwd during the test).
-        app.state.project_home = Some(repo.clone());
+        app.state.active_project_mut().home = Some(repo.clone());
         app.open_second_commander_at(&path);
-        app.state.vsplit.as_mut().unwrap().focus = state::Side::Left;
+        app.state
+            .active_project_mut()
+            .vsplit
+            .as_mut()
+            .unwrap()
+            .focus = state::Side::Left;
 
         // Removal PROCEEDS even with `b` inside it (the occupied-column refuse is
         // gone) and snaps `b` back to PROJECT_HOME instead of stranding it.
@@ -402,7 +424,13 @@ fn mcp_remove_worktree_tears_down_and_resets_occupied_column() {
         );
         assert!(!path.exists(), "worktree dir removed");
         assert_eq!(
-            app.state.right.as_ref().unwrap().listing.dir,
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .unwrap()
+                .listing
+                .dir,
             repo,
             "column b reset to PROJECT_HOME after its worktree was removed"
         );
@@ -420,7 +448,10 @@ fn mcp_open_worktree_opens_column_b() {
         std::fs::create_dir(&a).unwrap();
         std::fs::create_dir(&wt).unwrap();
         let mut app = App::test_app(a);
-        assert!(app.state.right.is_none(), "single column to start");
+        assert!(
+            app.state.active_project().right.is_none(),
+            "single column to start"
+        );
 
         let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::OpenWorktree {
             path: wt.display().to_string(),
@@ -429,7 +460,12 @@ fn mcp_open_worktree_opens_column_b() {
             matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }),
             "open ok: {resp:?}"
         );
-        let b = app.state.right.as_ref().expect("column b opened");
+        let b = app
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .expect("column b opened");
         assert_eq!(b.listing.dir, wt, "b opened at the worktree");
         assert_eq!(app.focused_side(), state::Side::Right, "focus moved to b");
     });
@@ -450,7 +486,12 @@ fn worktree_arg_empty_errors_and_relative_resolves_against_cwd() {
         let mut app = App::test_app(base.clone());
         app.open_second_commander_at(&sub); // b inside base/sub
         // Resolve relative paths against `a` (base) → "sub" means base/sub.
-        app.state.vsplit.as_mut().unwrap().focus = state::Side::Left;
+        app.state
+            .active_project_mut()
+            .vsplit
+            .as_mut()
+            .unwrap()
+            .focus = state::Side::Left;
         assert_eq!(app.focused_side(), state::Side::Left);
 
         // Empty path → missing-parameter error (before any path logic).
@@ -498,9 +539,13 @@ fn worktree_arg_empty_errors_and_relative_resolves_against_cwd() {
             },
             &[],
         );
-        app.state.project_home = Some(base.clone());
-        app.state.left.git_cache.current_repo_root = None;
-        app.state.left.listing.dir = archive;
+        app.state.active_project_mut().home = Some(base.clone());
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = None;
+        app.state.active_project_mut().left.listing.dir = archive;
         assert_eq!(
             app.resolve_worktree_arg("sub")
                 .expect("relative path still resolves"),
@@ -527,8 +572,13 @@ fn worktree_delete_refuses_when_other_column_inside() {
         app.open_second_commander_at(&sub); // b in wt/sub
         // Focus a (the worktree we'll delete); mark it a git repo so the delete
         // path proceeds past the "not in a git repository" check.
-        app.state.vsplit.as_mut().unwrap().focus = state::Side::Left;
-        app.state.left.git.info = Some("main".to_string());
+        app.state
+            .active_project_mut()
+            .vsplit
+            .as_mut()
+            .unwrap()
+            .focus = state::Side::Left;
+        app.state.active_project_mut().left.git.info = Some("main".to_string());
         assert_eq!(app.focused_side(), state::Side::Left);
 
         let _ = app.apply(&Action::WorktreeDelete);
@@ -545,7 +595,13 @@ fn worktree_delete_refuses_when_other_column_inside() {
         );
 
         // Control: move b out of the worktree → the delete now prompts.
-        app.state.right.as_mut().unwrap().listing.dir = root;
+        app.state
+            .active_project_mut()
+            .right
+            .as_mut()
+            .unwrap()
+            .listing
+            .dir = root;
         let _ = app.apply(&Action::WorktreeDelete);
         assert!(
             matches!(
@@ -634,7 +690,10 @@ fn mcp_open_worktree_rejects_non_dir() {
             path: tmp.path().join("does-not-exist").display().to_string(),
         });
         assert!(matches!(resp, crate::mcp_cmd::McpResponse::Error { .. }));
-        assert!(app.state.right.is_none(), "b not opened on error");
+        assert!(
+            app.state.active_project().right.is_none(),
+            "b not opened on error"
+        );
     });
 }
 
@@ -838,7 +897,7 @@ fn mcp_create_worktree_works_while_the_column_is_inside_an_archive() {
 
         let mut app = App::test_app(repo.clone());
         app.state.update_repo_root(state::Side::Left, &repo);
-        app.state.project_home = Some(repo.clone());
+        app.state.active_project_mut().home = Some(repo.clone());
 
         // Stand the column inside an archive that lives *outside* the repo — the
         // shape that broke: `~/src/pkg.tar.gz` while the project is `~/src/spyc`.
@@ -864,8 +923,12 @@ fn mcp_create_worktree_works_while_the_column_is_inside_an_archive() {
             &[],
         );
         // A mount clears the column's git state, exactly as entering one does.
-        app.state.left.git_cache.current_repo_root = None;
-        app.state.left.listing.dir = archive.clone();
+        app.state
+            .active_project_mut()
+            .left
+            .git_cache
+            .current_repo_root = None;
+        app.state.active_project_mut().left.listing.dir = archive.clone();
         assert!(
             !archive.is_dir(),
             "the premise: the column is somewhere that is not a directory"
@@ -905,7 +968,7 @@ fn pane_context_answers_for_the_tab_while_the_user_browses_elsewhere() {
         crate::git::test_support::run_git(&wt, &["init", "-q", "-b", "feat/x"]);
         let mut app = App::test_app(y.clone());
         assert!(app.open_pane_tab_in("cat", &wt));
-        let id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+        let id = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
             .info
             .id
             .clone();
@@ -949,7 +1012,7 @@ fn the_activity_dump_lists_each_mcp_connection_and_its_tab() {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let mut app = App::test_app(dir.clone());
         assert!(app.open_pane_tab_in("cat", &dir));
-        let id = app.runtime.pane_tabs.as_ref().unwrap().tabs()[0]
+        let id = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
             .info
             .id
             .clone();

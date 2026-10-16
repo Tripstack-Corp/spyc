@@ -6,81 +6,86 @@ use crate::app::effect::matchers::EffectSliceExt;
 fn apply_down_moves_cursor() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     assert!(matches!(s.apply(&Action::Down(1)), ApplyResult::Handled));
-    assert_eq!(s.left.cursor.index, 1);
+    assert_eq!(s.active_project().left.cursor.index, 1);
 }
 
 #[test]
 fn apply_up_wraps() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     assert!(matches!(s.apply(&Action::Up(1)), ApplyResult::Handled));
-    assert_eq!(s.left.cursor.index, 2);
+    assert_eq!(s.active_project().left.cursor.index, 2);
 }
 
 #[test]
 fn apply_down_with_count() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e"]);
     s.apply(&Action::Down(3));
-    assert_eq!(s.left.cursor.index, 3);
+    assert_eq!(s.active_project().left.cursor.index, 3);
 }
 
 #[test]
 fn apply_page_down() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-    s.left.grid_dims = GridDims {
+    s.active_project_mut().left.grid_dims = GridDims {
         cols: 1,
         rows_per_col: 3,
     };
-    s.left.page = crate::ui::list_view::PageSpan {
+    s.active_project_mut().left.page = crate::ui::list_view::PageSpan {
         start: 0,
         prev: None,
         next: (3, 3),
     };
     s.apply(&Action::PageDown);
-    assert_eq!(s.left.cursor.index, 3);
+    assert_eq!(s.active_project().left.cursor.index, 3);
 }
 
 #[test]
 fn apply_goto_first() {
     let mut s = state_with_rows(&["a", "b", "c"]);
-    s.left.cursor.index = 2;
+    s.active_project_mut().left.cursor.index = 2;
     s.apply(&Action::GotoFirst);
-    assert_eq!(s.left.cursor.index, 0);
+    assert_eq!(s.active_project().left.cursor.index, 0);
 }
 
 #[test]
 fn apply_goto_last() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     s.apply(&Action::GotoLast);
-    assert_eq!(s.left.cursor.index, 2);
+    assert_eq!(s.active_project().left.cursor.index, 2);
 }
 
 #[test]
 fn apply_left_right_columns() {
     let mut s = state_with_rows(&["a", "b", "c", "d", "e", "f"]);
-    s.left.grid_dims = GridDims {
+    s.active_project_mut().left.grid_dims = GridDims {
         cols: 2,
         rows_per_col: 3,
     };
     s.apply(&Action::Right(1));
-    assert_eq!(s.left.cursor.index, 3);
+    assert_eq!(s.active_project().left.cursor.index, 3);
     s.apply(&Action::Left(1));
-    assert_eq!(s.left.cursor.index, 0);
+    assert_eq!(s.active_project().left.cursor.index, 0);
 }
 
 #[test]
 fn apply_toggle_pick() {
     let mut s = state_with_rows(&["a.txt", "b.txt"]);
     s.apply(&Action::TogglePick);
-    assert!(s.left.picks.contains(Path::new("/tmp/test/a.txt")));
+    assert!(
+        s.active_project()
+            .left
+            .picks
+            .contains(Path::new("/tmp/test/a.txt"))
+    );
 }
 
 #[test]
 fn apply_pick_toggle_all() {
     let mut s = state_with_rows(&["a", "b", "c"]);
     s.apply(&Action::PickToggleAll);
-    assert_eq!(s.left.picks.len(), 3);
+    assert_eq!(s.active_project().left.picks.len(), 3);
     s.apply(&Action::PickToggleAll);
-    assert!(s.left.picks.is_empty());
+    assert!(s.active_project().left.picks.is_empty());
 }
 
 #[test]
@@ -123,9 +128,9 @@ fn apply_drop_removes_from_inventory() {
 fn apply_toggle_inventory_view() {
     let mut s = test_state();
     s.apply(&Action::ToggleInventoryView);
-    assert_eq!(s.left.view, View::Inventory);
+    assert_eq!(s.active_project().left.view, View::Inventory);
     s.apply(&Action::ToggleInventoryView);
-    assert_eq!(s.left.view, View::Dir);
+    assert_eq!(s.active_project().left.view, View::Dir);
 }
 
 #[test]
@@ -145,9 +150,9 @@ fn apply_empty_inventory() {
 #[test]
 fn apply_toggle_mask() {
     let mut s = test_state();
-    let was_enabled = s.left.masks.mask1.enabled;
+    let was_enabled = s.active_project().left.masks.mask1.enabled;
     s.apply(&Action::ToggleMask(1));
-    assert_ne!(s.left.masks.mask1.enabled, was_enabled);
+    assert_ne!(s.active_project().left.masks.mask1.enabled, was_enabled);
 }
 
 #[test]
@@ -155,7 +160,7 @@ fn apply_search_next_finds_match() {
     let mut s = state_with_rows(&["alpha", "beta", "gamma"]);
     s.last_search = Some("g".to_string());
     s.apply(&Action::SearchNext);
-    assert_eq!(s.left.cursor.index, 2);
+    assert_eq!(s.active_project().left.cursor.index, 2);
 }
 
 #[test]
@@ -164,10 +169,10 @@ fn apply_search_prev_finds_match() {
     // gamma → beta → alpha lands unambiguously on idx 0 under
     // substring matching too.
     let mut s = state_with_rows(&["alpha", "beta", "gamma"]);
-    s.left.cursor.index = 2;
+    s.active_project_mut().left.cursor.index = 2;
     s.last_search = Some("lph".to_string());
     s.apply(&Action::SearchPrev);
-    assert_eq!(s.left.cursor.index, 0);
+    assert_eq!(s.active_project().left.cursor.index, 0);
 }
 
 #[test]
@@ -315,7 +320,7 @@ fn apply_worktree_new_sets_prompt_or_errors() {
 
     // With git info → prompt
     s.flash = None;
-    s.left.git.info = Some("main".to_string());
+    s.active_project_mut().left.git.info = Some("main".to_string());
     s.apply(&Action::WorktreeNew);
     assert!(matches!(s.mode, Mode::Prompting(_)));
 }
@@ -351,7 +356,7 @@ fn apply_jump_start_dir_emits_change_dir() {
 #[test]
 fn apply_jump_prev_dir_emits_change_dir_when_set() {
     let mut s = test_state();
-    s.prev_dir = Some(PathBuf::from("/tmp/prev"));
+    s.active_project_mut().prev_dir = Some(PathBuf::from("/tmp/prev"));
     let ApplyResult::Post(fx) = s.apply(&Action::JumpPrevDir) else {
         panic!("expected Post");
     };
@@ -363,7 +368,7 @@ fn apply_jump_prev_dir_emits_change_dir_when_set() {
 #[test]
 fn apply_jump_project_home_emits_change_dir_when_set() {
     let mut s = test_state();
-    s.project_home = Some(PathBuf::from("/tmp/proj"));
+    s.active_project_mut().home = Some(PathBuf::from("/tmp/proj"));
     let ApplyResult::Post(fx) = s.apply(&Action::JumpProjectHome) else {
         panic!("expected Post");
     };
@@ -450,9 +455,9 @@ fn apply_home_emits_change_dir() {
 #[test]
 fn apply_clamps_cursor_after_action() {
     let mut s = state_with_rows(&["a", "b"]);
-    s.left.cursor.index = 10; // out of bounds
+    s.active_project_mut().left.cursor.index = 10; // out of bounds
     s.apply(&Action::Noop); // any handled action should clamp
-    assert_eq!(s.left.cursor.index, 1); // clamped to last valid
+    assert_eq!(s.active_project().left.cursor.index, 1); // clamped to last valid
 }
 
 // ── COMMAND_TABLE registry sanity (MVU Phase 6) ───────────────

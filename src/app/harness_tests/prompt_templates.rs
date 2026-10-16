@@ -30,11 +30,12 @@ fn a_prompt_binding_types_the_template_into_the_pane() {
 
         let mut app = App::test_app(root.clone());
         app.state
+            .active_project_mut()
             .config
             .prompts
             .insert("review".into(), "review % from %d, 100%% please".into());
         cat_pane(&mut app, &wt, &got);
-        app.state.left.picks.insert(&picked);
+        app.state.active_project_mut().left.picks.insert(&picked);
 
         let effects = app
             .apply_user(&BoundAction::Prompt("review".into()))
@@ -60,14 +61,19 @@ fn a_picked_directory_reaches_the_pane_with_a_trailing_slash() {
         let got = root.join("got.txt");
 
         let mut app = App::test_app(root.clone());
-        app.state.left.listing = crate::fs::Listing::read(&root).unwrap();
+        app.state.active_project_mut().left.listing = crate::fs::Listing::read(&root).unwrap();
         app.state.rebuild_rows();
         app.state
+            .active_project_mut()
             .config
             .prompts
             .insert("look".into(), "look at %".into());
         cat_pane(&mut app, &root, &got);
-        app.state.left.picks.insert(&root.join("sub"));
+        app.state
+            .active_project_mut()
+            .left
+            .picks
+            .insert(&root.join("sub"));
 
         let effects = app.apply_user(&BoundAction::Prompt("look".into())).unwrap();
         deliver(&mut app, effects);
@@ -100,6 +106,7 @@ fn a_prompt_with_no_pane_open_types_nothing() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::fs::canonicalize(tmp.path()).unwrap());
         app.state
+            .active_project_mut()
             .config
             .prompts
             .insert("review".into(), "review %".into());
@@ -118,8 +125,13 @@ fn bare_prompt_command_lists_the_templates() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::fs::canonicalize(tmp.path()).unwrap());
-        app.state.config.prompts.insert("review".into(), "r".into());
         app.state
+            .active_project_mut()
+            .config
+            .prompts
+            .insert("review".into(), "r".into());
+        app.state
+            .active_project_mut()
             .config
             .prompts
             .insert("explain".into(), "e".into());
@@ -141,6 +153,7 @@ fn a_child_that_asked_for_bracketed_paste_gets_one_paste() {
         let got = root.join("got.txt");
         let mut app = App::test_app(root.clone());
         app.state
+            .active_project_mut()
             .config
             .prompts
             .insert("two".into(), "first line\nsecond line".into());
@@ -152,7 +165,7 @@ fn a_child_that_asked_for_bracketed_paste_gets_one_paste() {
         assert!(app.open_pane_tab_in(&cmd, &root));
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
-            let tabs = app.runtime.pane_tabs.as_mut().unwrap();
+            let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
             tabs.active_mut().drain_output();
             if tabs.active().bracketed_paste_enabled() {
                 break;
@@ -174,6 +187,7 @@ fn a_child_that_asked_for_bracketed_paste_gets_one_paste() {
                 break text;
             }
             app.runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .unwrap()

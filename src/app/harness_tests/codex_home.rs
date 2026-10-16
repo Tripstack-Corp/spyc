@@ -47,6 +47,7 @@ fn codex_home_is_captured_and_preserved_by_fork_restore_and_both_restarts() {
         let mut app = App::test_app(cwd.clone());
         launch(&mut app, &cwd, &home);
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -67,6 +68,7 @@ fn codex_home_is_captured_and_preserved_by_fork_restore_and_both_restarts() {
         agent_argv(&cwd, "codex");
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -79,6 +81,7 @@ fn codex_home_is_captured_and_preserved_by_fork_restore_and_both_restarts() {
 
         let command = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -110,6 +113,7 @@ fn codex_home_is_captured_and_preserved_by_fork_restore_and_both_restarts() {
         );
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -131,7 +135,12 @@ fn codex_scan_keeps_claims_separate_for_two_homes_in_one_cwd() {
         let mut app = App::test_app(cwd.clone());
         launch(&mut app, &cwd, &first);
         launch(&mut app, &cwd, &second);
-        app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0]
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
             .info
             .codex_session_id = Some(SID.into());
         rollout(&first, "first home's history");
@@ -139,7 +148,7 @@ fn codex_scan_keeps_claims_separate_for_two_homes_in_one_cwd() {
         app.kick_codex_session_scan();
         wait_for_scan(&app);
         app.apply_codex_session_pins();
-        let tabs = app.runtime.pane_tabs.as_ref().unwrap().tabs();
+        let tabs = app.runtime.project().pane_tabs.as_ref().unwrap().tabs();
         assert_eq!(tabs[0].info.codex_session_id.as_deref(), Some(SID));
         assert_eq!(tabs[1].info.codex_session_id.as_deref(), Some(SID));
         assert_eq!(tabs[1].info.codex_home.as_ref(), Some(&second));
@@ -157,10 +166,17 @@ fn codex_scan_cannot_pin_a_replacement_pane_from_an_old_snapshot() {
         rollout(&home, "old pane");
         app.kick_codex_session_scan();
         wait_for_scan(&app);
-        app.runtime.pane_tabs.as_mut().unwrap().active_info_mut().id = "replacement-pane".into();
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .id = "replacement-pane".into();
         app.apply_codex_session_pins();
         assert_eq!(
             app.runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -181,6 +197,7 @@ fn codex_scrollback_reads_only_the_active_panes_home() {
         launch(&mut app, &cwd, &home);
         rollout(&home, "this pane's custom history");
         app.runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .unwrap()
@@ -240,6 +257,7 @@ fn codex_home_is_the_environment_after_shell_rc() {
             agent_argv(&cwd, "codex");
             if app
                 .runtime
+                .project()
                 .pane_tabs
                 .as_ref()
                 .unwrap()
@@ -253,6 +271,7 @@ fn codex_home_is_the_environment_after_shell_rc() {
             }
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
@@ -301,17 +320,42 @@ fn codex_without_a_known_home_cannot_fork_or_restart_into_another_home() {
         let cwd = tmp.path().canonicalize().unwrap();
         let mut app = App::test_app(cwd.clone());
         launch(&mut app, &cwd, &cwd.join("custom"));
-        let info = app.runtime.pane_tabs.as_mut().unwrap().active_info_mut();
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
         info.codex_home = None;
         info.codex_session_id = Some(SID.into());
         let id = info.id.clone();
         app.fork_active_tab();
-        assert_eq!(app.runtime.pane_tabs.as_ref().unwrap().tabs().len(), 1);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .tabs()
+                .len(),
+            1
+        );
         assert!(app.flash_text().unwrap().contains("home is not identified"));
         app.restart_active_tab_now();
-        assert_eq!(app.runtime.pane_tabs.as_ref().unwrap().active_info().id, id);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .id,
+            id
+        );
         let command = app
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .unwrap()
@@ -319,6 +363,15 @@ fn codex_without_a_known_home_cannot_fork_or_restart_into_another_home() {
             .command
             .clone();
         assert!(!app.spawn_agent_into_tab(0, &command, &cwd, None));
-        assert_eq!(app.runtime.pane_tabs.as_ref().unwrap().active_info().id, id);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .id,
+            id
+        );
     });
 }

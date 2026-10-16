@@ -15,21 +15,30 @@ fn second_commander_open_focus_and_close() {
         }
         let mut app = App::test_app(dir);
 
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d);
-        assert!(app.state.right.is_some(), "^s n opens a second commander");
+        assert!(
+            app.state.active_project().right.is_some(),
+            "^s n opens a second commander"
+        );
         assert_eq!(
-            app.state.vsplit.map(|v| v.focus),
+            app.state.active_project().vsplit.map(|v| v.focus),
             Some(state::Side::Right),
             "opening focuses the new (right) column"
         );
         assert_eq!(
-            app.state.vsplit.map(|v| v.mode),
+            app.state.active_project().vsplit.map(|v| v.mode),
             Some(state::VsplitMode::TopOnly),
             "a commander always opens top-only — never full-height (no pane under a only)"
         );
         assert_eq!(
-            app.state.right.as_ref().unwrap().rows.len(),
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .unwrap()
+                .rows
+                .len(),
             3,
             "the right commander read + built its own rows"
         );
@@ -39,7 +48,13 @@ fn second_commander_open_focus_and_close() {
         );
 
         // cur() follows focus: with `b` focused it is the right commander.
-        app.state.right.as_mut().unwrap().cursor.index = 2;
+        app.state
+            .active_project_mut()
+            .right
+            .as_mut()
+            .unwrap()
+            .cursor
+            .index = 2;
         assert_eq!(
             app.state.cur().cursor.index,
             2,
@@ -54,11 +69,11 @@ fn second_commander_open_focus_and_close() {
 
         app.apply(&Action::CloseSecondCommander).unwrap();
         assert!(
-            app.state.right.is_none(),
+            app.state.active_project().right.is_none(),
             "^s x closes the second commander"
         );
         assert!(
-            app.state.vsplit.is_none(),
+            app.state.active_project().vsplit.is_none(),
             "closing returns to a single column"
         );
     });
@@ -81,7 +96,7 @@ fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
 
         // Agent-initiated: user is mid-conversation in the pane.
         let mut app = App::test_app(dir.clone());
-        app.state.focus = state::Focus::Pane;
+        app.state.active_project_mut().focus = state::Focus::Pane;
         app.open_second_commander_at_background(&b);
         assert!(
             app.state.pane_focused(),
@@ -100,7 +115,7 @@ fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
 
         // User-initiated: `^s n` from the same pane-focused start grabs it.
         let mut app = App::test_app(dir);
-        app.state.focus = state::Focus::Pane;
+        app.state.active_project_mut().focus = state::Focus::Pane;
         app.open_second_commander_at(&b);
         assert!(
             !app.state.pane_focused(),
@@ -122,20 +137,24 @@ fn vsplit_toggle_disabled_with_second_commander() {
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
 
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d);
-        let shape = app.state.vsplit;
+        let shape = app.state.active_project().vsplit;
 
         app.apply(&Action::VsplitToggle).unwrap();
         assert!(
-            app.state.right.is_some(),
+            app.state.active_project().right.is_some(),
             "^s | must not tear down the commander"
         );
         assert!(
             app.view.right_pager.is_none(),
             "^s | must not open a preview over the commander"
         );
-        assert_eq!(app.state.vsplit, shape, "the split shape is unchanged");
+        assert_eq!(
+            app.state.active_project().vsplit,
+            shape,
+            "the split shape is unchanged"
+        );
 
         // `^s n` opens top-only; `^s f` is how you get a full-height `b`.
         assert_eq!(
@@ -145,11 +164,14 @@ fn vsplit_toggle_disabled_with_second_commander() {
         );
         app.apply(&Action::VsplitToggleHeight).unwrap();
         assert_eq!(
-            app.state.vsplit.map(|v| v.mode),
+            app.state.active_project().vsplit.map(|v| v.mode),
             Some(state::VsplitMode::FullHeight),
             "^s f flips the commander split to full-height"
         );
-        assert!(app.state.right.is_some(), "the commander survives the flip");
+        assert!(
+            app.state.active_project().right.is_some(),
+            "the commander survives the flip"
+        );
     });
 }
 
@@ -171,14 +193,21 @@ fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
         // The user is reading a.md in a full-height right column.
         app.apply(&Action::VsplitToggle).unwrap();
         app.apply(&Action::VsplitFocusRight).unwrap();
-        let read_shape = app.state.vsplit.expect("preview split open");
+        let read_shape = app
+            .state
+            .active_project()
+            .vsplit
+            .expect("preview split open");
         assert_eq!(read_shape.mode, state::VsplitMode::FullHeight);
 
         // An agent opens a worktree in `b`.
         let other = tmp.path().join("wt");
         std::fs::create_dir(&other).unwrap();
         app.open_second_commander_at_background(&other);
-        assert!(app.state.right.is_some(), "the agent's column opened");
+        assert!(
+            app.state.active_project().right.is_some(),
+            "the agent's column opened"
+        );
         assert!(
             app.view.right_pager.is_none(),
             "one thing at a time in the right column"
@@ -187,7 +216,7 @@ fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
         // Closing `b` hands the reading position back, shape and all.
         app.apply(&Action::CloseSecondCommander).unwrap();
         assert_eq!(
-            app.state.vsplit,
+            app.state.active_project().vsplit,
             Some(read_shape),
             "the preview's split shape (height, width, focused column) returns"
         );
@@ -205,7 +234,7 @@ fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
         app.open_second_commander_at(&other);
         app.apply(&Action::CloseSecondCommander).unwrap();
         assert!(
-            app.state.vsplit.is_none() && app.view.right_pager.is_none(),
+            app.state.active_project().vsplit.is_none() && app.view.right_pager.is_none(),
             "^s n discards the preview it replaced"
         );
     });
@@ -225,7 +254,7 @@ fn session_persists_and_restores_a_commander_split() {
         let mut app = App::test_app(left.clone());
         app.state.session_name = Some("vsplit-commander-test".to_string());
         app.open_second_commander_at(&right);
-        if let Some(v) = app.state.vsplit.as_mut() {
+        if let Some(v) = app.state.active_project_mut().vsplit.as_mut() {
             v.width_pct = 42; // non-default → proves the shape round-trips
         }
 
@@ -247,10 +276,15 @@ fn session_persists_and_restores_a_commander_split() {
         // b reopens at its saved cwd with the saved shape.
         let mut fresh = App::test_app(left);
         fresh.restore_vsplit(sv, false);
-        let b = fresh.state.right.as_ref().expect("b reopened on restore");
+        let b = fresh
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .expect("b reopened on restore");
         assert_eq!(b.listing.dir, right, "b restored at its saved cwd");
         assert_eq!(
-            fresh.state.vsplit.map(|v| v.width_pct),
+            fresh.state.active_project().vsplit.map(|v| v.width_pct),
             Some(42),
             "split width restored"
         );
@@ -290,16 +324,20 @@ fn a_split_whose_column_was_inside_an_archive_still_restores() {
         app.restore_vsplit(&inside, false);
 
         assert!(
-            app.state.vsplit.is_some(),
+            app.state.active_project().vsplit.is_some(),
             "the split must survive a column that was inside a container"
         );
         assert_eq!(
-            app.state.vsplit.map(|v| v.width_pct),
+            app.state.active_project().vsplit.map(|v| v.width_pct),
             Some(42),
             "and keep its saved shape"
         );
         assert_eq!(
-            app.state.right.as_ref().map(|c| c.listing.dir.clone()),
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .map(|c| c.listing.dir.clone()),
             Some(dir),
             "column b lands on the directory holding the container"
         );
@@ -332,7 +370,10 @@ fn restore_vsplit_drops_blank_split_and_clamps_width() {
             right_cwd: None,
         };
         app.restore_vsplit(&gone, false);
-        assert!(app.state.vsplit.is_none(), "gone preview → no split");
+        assert!(
+            app.state.active_project().vsplit.is_none(),
+            "gone preview → no split"
+        );
         assert!(app.view.right_pager.is_none(), "no phantom right pager");
 
         // (b) preview present + out-of-range width → split restored, file
@@ -348,7 +389,7 @@ fn restore_vsplit_drops_blank_split_and_clamps_width() {
         };
         app.restore_vsplit(&ok, false);
         assert_eq!(
-            app.state.vsplit.map(|v| v.width_pct),
+            app.state.active_project().vsplit.map(|v| v.width_pct),
             Some(80),
             "split restored with width clamped to 80"
         );
@@ -409,14 +450,19 @@ fn ctrl_s_n_opens_at_project_home() {
         std::fs::write(home.join("root.txt"), "x").unwrap();
         // Focused column sits in a subdir; PROJECT_HOME is the project root.
         let mut app = App::test_app(sub);
-        app.state.project_home = Some(std::fs::canonicalize(&home).unwrap());
+        app.state.active_project_mut().home = Some(std::fs::canonicalize(&home).unwrap());
 
         app.apply(&Action::OpenSecondCommander).unwrap();
         assert!(
             matches!(app.state.mode, Mode::Normal),
             "no prompt — opens directly"
         );
-        let right = app.state.right.as_ref().expect("second commander opened");
+        let right = app
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .expect("second commander opened");
         assert_eq!(
             right.listing.dir,
             std::fs::canonicalize(&home).unwrap(),
@@ -436,20 +482,32 @@ fn app_side_sort_targets_the_focused_column() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d);
         assert!(app.right_column_focused(), "b is focused after open");
 
-        let left_before = app.state.left.sort_order;
-        let right_before = app.state.right.as_ref().unwrap().sort_order;
+        let left_before = app.state.active_project().left.sort_order;
+        let right_before = app
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .unwrap()
+            .sort_order;
         app.apply(&Action::SortCycle).unwrap();
 
         assert_eq!(
-            app.state.left.sort_order, left_before,
+            app.state.active_project().left.sort_order,
+            left_before,
             "the left column's sort is untouched"
         );
         assert_ne!(
-            app.state.right.as_ref().unwrap().sort_order,
+            app.state
+                .active_project()
+                .right
+                .as_ref()
+                .unwrap()
+                .sort_order,
             right_before,
             "SortCycle cycled the focused (right) column"
         );
@@ -469,7 +527,7 @@ fn vsplit_focus_switches_with_pager_pinned_to_its_column() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d); // b open + focused
         // Focus the left column, then open a `D` pager there (pinned to `a`).
         app.apply(&Action::VsplitFocusLeft).unwrap();
@@ -481,7 +539,7 @@ fn vsplit_focus_switches_with_pager_pinned_to_its_column() {
         // `^a l` moves focus to `b`; the pager stays pinned to `a`.
         app.apply(&Action::VsplitFocusRight).unwrap();
         assert_eq!(
-            app.state.vsplit.map(|v| v.focus),
+            app.state.active_project().vsplit.map(|v| v.focus),
             Some(state::Side::Right),
             "^a l switches focus to b even with a pager open"
         );
@@ -509,7 +567,7 @@ fn d_pagers_in_both_columns_coexist_and_route_to_the_focused_one() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d); // b open + focused
 
         // A `D` TopPane pager in each column, open at the same time.
@@ -519,7 +577,8 @@ fn d_pagers_in_both_columns_coexist_and_route_to_the_focused_one() {
         let mut rb = PagerView::new_plain("b", vec!["right".to_string()]);
         rb.mount = crate::ui::pager::Mount::TopPane;
         app.view.pager_right = Some(rb);
-        app.state.focus = state::Focus::Pager(crate::ui::pager::Mount::TopPane);
+        app.state.active_project_mut().focus =
+            state::Focus::Pager(crate::ui::pager::Mount::TopPane);
 
         // b focused → its own pager owns input.
         assert_eq!(app.focused_side(), state::Side::Right);
@@ -546,7 +605,7 @@ fn modal_pager_owns_input_even_with_right_column_focused() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d); // b open + focused
 
         // b has a `D` pager, but a full-frame grep (Overlay mount) is also up.
@@ -556,7 +615,8 @@ fn modal_pager_owns_input_even_with_right_column_focused() {
         let mut grep = PagerView::new_plain("grep", vec!["hit".to_string()]);
         grep.mount = crate::ui::pager::Mount::Overlay;
         app.view.pager = Some(grep);
-        app.state.focus = state::Focus::Pager(crate::ui::pager::Mount::Overlay);
+        app.state.active_project_mut().focus =
+            state::Focus::Pager(crate::ui::pager::Mount::Overlay);
 
         assert_eq!(
             app.active_pager_ref().map(|v| v.title.as_str()),
@@ -576,14 +636,14 @@ fn closing_b_drops_its_pager() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d);
         let mut rb = PagerView::new_plain("b", vec!["x".to_string()]);
         rb.mount = crate::ui::pager::Mount::TopPane;
         app.view.pager_right = Some(rb);
 
         app.close_second_commander();
-        assert!(app.state.right.is_none());
+        assert!(app.state.active_project().right.is_none());
         assert!(
             app.view.pager_right.is_none(),
             "b's pager is dropped when its column closes"
@@ -602,7 +662,7 @@ fn q_on_b_pager_leaves_a_pager_open() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d); // b focused
 
         // A `D` pager in each column.
@@ -649,7 +709,7 @@ fn q_from_b_commander_does_not_close_a_pager() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d);
         app.apply(&Action::VsplitFocusLeft).unwrap();
         let mut pv = PagerView::new_plain("a-pager", vec!["x".to_string()]);
@@ -679,7 +739,7 @@ fn column_focused_tracks_any_surface_in_b() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d); // b focused
         let mut pb = PagerView::new_plain("b-pager", vec!["y".to_string()]);
         pb.mount = crate::ui::pager::Mount::TopPane;
@@ -712,17 +772,17 @@ fn ctrl_d_quits_and_keeps_the_second_commander_open() {
         std::fs::create_dir(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "x").unwrap();
         let mut app = App::test_app(dir);
-        let d = app.state.left.listing.dir.clone();
+        let d = app.state.active_project().left.listing.dir.clone();
         app.open_second_commander_at(&d);
         // Focus the LEFT column — the case the user hit: `^d` from `a` used to
         // close `b`.
         app.apply(&Action::VsplitFocusLeft).unwrap();
-        assert!(app.state.right.is_some());
+        assert!(app.state.active_project().right.is_some());
 
         // First `^d` arms the quit confirm; `b` stays open, no quit yet.
         app.apply(&Action::Quit).unwrap();
         assert!(
-            app.state.right.is_some(),
+            app.state.active_project().right.is_some(),
             "^d must not close the second commander"
         );
         assert!(
@@ -734,7 +794,7 @@ fn ctrl_d_quits_and_keeps_the_second_commander_open() {
         app.apply(&Action::Quit).unwrap();
         assert!(app.state.should_quit, "second quit tap quits");
         assert!(
-            app.state.right.is_some(),
+            app.state.active_project().right.is_some(),
             "b is still open at quit → session save persists right_cwd for -r"
         );
     });

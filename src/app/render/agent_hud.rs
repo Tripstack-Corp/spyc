@@ -20,7 +20,7 @@ impl App {
 
     /// Shared visible projection for drawing and wake-driven dirty-frame decisions.
     pub(in crate::app) fn agent_hud_lines(&self, rect: Rect) -> Vec<ratatui::text::Line<'static>> {
-        let Some(tabs) = self.runtime.pane_tabs.as_ref() else {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
         let entry = &tabs.tabs()[tabs.active_index()];
@@ -77,11 +77,17 @@ impl App {
         let dot = (!info.suspended)
             .then(|| self.agent_activity_span(info.activity, info.anim_phase_offset))
             .flatten();
-        let elapsed_secs = self.state.pane.agent_hud.as_of.and_then(|now| {
-            u64::try_from(now.as_second())
-                .ok()
-                .map(|now| now.saturating_sub(info.agent_epoch_secs()))
-        });
+        let elapsed_secs = self
+            .state
+            .active_project()
+            .pane
+            .agent_hud
+            .as_of
+            .and_then(|now| {
+                u64::try_from(now.as_second())
+                    .ok()
+                    .map(|now| now.saturating_sub(info.agent_epoch_secs()))
+            });
         let view = HudView {
             session: info.pinned_session_id(),
             dot,
@@ -92,9 +98,9 @@ impl App {
             elapsed_secs,
             metrics,
             availability: update.map(Update::availability),
-            now: self.state.pane.agent_hud.as_of,
+            now: self.state.active_project().pane.agent_hud.as_of,
             local_tz: Some(&self.view.local_tz),
-            resets: self.state.config.pane.agent_hud_resets,
+            resets: self.state.active_project().config.pane.agent_hud_resets,
             hooks,
             mcp_connections: self
                 .view
@@ -116,7 +122,7 @@ impl App {
 impl App {
     /// The plan windows the strip shows, which only a Claude Code tab's has.
     pub(in crate::app) fn agent_hud_plan(&self) -> Option<&Statusline> {
-        let tabs = self.runtime.pane_tabs.as_ref()?;
+        let tabs = self.runtime.project().pane_tabs.as_ref()?;
         let info = &tabs.tabs()[tabs.active_index()].info;
         match metrics_of(self.active_agent_hud_update(), tabs, info) {
             Metrics::Claude { reported, .. } => reported.plan,

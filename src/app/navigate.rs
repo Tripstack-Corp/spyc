@@ -66,7 +66,7 @@ impl App {
             pane_cwd,
             &col.listing.dir,
             col.git_cache.current_repo_root.as_deref(),
-            self.state.project_home.as_deref(),
+            self.state.active_project().home.as_deref(),
         )
     }
 
@@ -80,6 +80,7 @@ impl App {
         let column_dir = self.state.cur().listing.dir.clone();
         let tab_cwd = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map_or_else(|| column_dir.clone(), |t| t.active_info().cwd.clone());
@@ -116,7 +117,7 @@ impl App {
         if let Some(p) = focus {
             self.state.focus_on_path(&p);
         }
-        self.state.focus = state::Focus::FileList;
+        self.state.active_project_mut().focus = state::Focus::FileList;
         self.state.rebuild_rows();
         self.view.needs_full_repaint = true;
     }
@@ -165,12 +166,12 @@ impl App {
 
         // Exit scroll mode and switch focus to the file list so the user
         // sees the navigation result.
-        if let Some(tabs) = self.runtime.pane_tabs.as_mut()
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
             && tabs.active().is_scrolling()
         {
             tabs.active_mut().exit_scroll_mode();
         }
-        self.state.focus = state::Focus::FileList;
+        self.state.active_project_mut().focus = state::Focus::FileList;
         self.view.needs_full_repaint = true;
 
         // Navigate: if it's a directory, chdir there; if a file, chdir to
@@ -285,7 +286,7 @@ impl App {
             // `Enter` on an archive out on disk. Its bytes have to become a real
             // file first, so the mount rides the extraction.
             if matches!(intent, ActivateIntent::Display)
-                && self.state.config.archive.enable
+                && self.state.active_project().config.archive.enable
                 && path
                     .file_name()
                     .is_some_and(|n| crate::archive::looks_mountable(&n.to_string_lossy()))
@@ -318,7 +319,7 @@ impl App {
         // a pre-filter — the worker sniffs the magic and hands back a plain file
         // when the extension lied, so `Enter` still opens `notes.zip` if that's
         // what it really is.
-        if self.state.config.archive.enable
+        if self.state.active_project().config.archive.enable
             && path
                 .file_name()
                 .is_some_and(|n| crate::archive::looks_mountable(&n.to_string_lossy()))
@@ -450,7 +451,7 @@ mod tests {
             let elsewhere = base.join("elsewhere");
             std::fs::create_dir(&elsewhere).unwrap();
             let mut app = app_listing(&home.join("docs"));
-            app.state.project_home = Some(home.clone());
+            app.state.active_project_mut().home = Some(home.clone());
             app.goto_file_navigate(vec!["see docs/a.md".to_string()], elsewhere, false);
             assert_eq!(cursor_file(&app), home.join("docs/a.md"));
         });

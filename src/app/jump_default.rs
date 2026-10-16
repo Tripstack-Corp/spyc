@@ -29,7 +29,7 @@ impl App {
         let col = self.state.cur();
         let column_dir = col.listing.dir.clone();
         let column_root = col.git_cache.current_repo_root.clone();
-        let project_home = self.state.project_home.clone();
+        let project_home = self.state.active_project().home.clone();
         let results = Arc::clone(&self.runtime.jump_default_results);
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {

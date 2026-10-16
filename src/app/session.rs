@@ -150,6 +150,7 @@ impl App {
         > = std::collections::HashMap::new();
         let tabs: Vec<SavedTab> = self
             .runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .map(|pt| {
@@ -210,6 +211,7 @@ impl App {
         // original session, so unopened entries must survive every snapshot.
         let live_active = self
             .runtime
+            .project()
             .pane_tabs
             .as_ref()
             .map_or(0, PaneTabs::active_index);
@@ -231,9 +233,10 @@ impl App {
         // explicitly with `:project` or `gP`.
         let session_cwd = self
             .state
-            .project_home
+            .active_project()
+            .home
             .clone()
-            .unwrap_or_else(|| self.state.start_dir.clone());
+            .unwrap_or_else(|| self.state.active_project().start_dir.clone());
         Session {
             id,
             saved_at: crate::sysinfo::format_now(),
@@ -241,18 +244,16 @@ impl App {
             cwd: session_cwd,
             tabs,
             active_tab,
-            pane_height_pct: self.state.pane.pane_height_pct,
+            pane_height_pct: self.state.active_project().pane.pane_height_pct,
             pane_focused: self.state.pane_focused(),
             name: self.state.session_name.clone().unwrap_or_default(),
-            project_home: self.state.project_home.clone(),
+            project_home: self.state.active_project().home.clone(),
             // Persist the open vertical split's shape + its content key: a
             // second *commander*'s cwd (`right_cwd`, reopened on restore — PR G)
             // or a Stage-1 *preview* file (`preview_path`). The two are mutually
             // exclusive (a commander clears `right_pager`).
-            vsplit: self
-                .state
-                .vsplit
-                .map(|v| crate::state::sessions::SavedVsplit {
+            vsplit: self.state.active_project().vsplit.map(|v| {
+                crate::state::sessions::SavedVsplit {
                     width_pct: v.width_pct,
                     full_height: matches!(v.mode, VsplitMode::FullHeight),
                     focus_right: matches!(v.focus, Side::Right),
@@ -265,9 +266,10 @@ impl App {
                         .state
                         .get_col(Side::Right)
                         .map(|c| c.listing.dir.clone()),
-                }),
+                }
+            }),
             scope_claims: self.state.scope_registry.clone(),
-            agent_hud: self.state.pane.agent_hud.choice,
+            agent_hud: self.state.active_project().pane.agent_hud.choice,
         }
     }
 
@@ -344,7 +346,7 @@ impl App {
     fn session_fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        if let Some(pt) = self.runtime.pane_tabs.as_ref() {
+        if let Some(pt) = self.runtime.project().pane_tabs.as_ref() {
             pt.active_index().hash(&mut h);
             for t in pt.tabs() {
                 t.info.command.hash(&mut h);
@@ -358,10 +360,14 @@ impl App {
             }
         }
         super::state::restore::hash_deferred_tabs(&self.state.deferred_tabs, &mut h);
-        self.state.project_home.hash(&mut h);
-        self.state.pane.pane_height_pct.hash(&mut h);
+        self.state.active_project().home.hash(&mut h);
+        self.state
+            .active_project()
+            .pane
+            .pane_height_pct
+            .hash(&mut h);
         self.state.pane_focused().hash(&mut h);
-        if let Some(v) = self.state.vsplit {
+        if let Some(v) = self.state.active_project().vsplit {
             v.width_pct.hash(&mut h);
             matches!(v.mode, VsplitMode::FullHeight).hash(&mut h);
             matches!(v.focus, Side::Right).hash(&mut h);
@@ -372,7 +378,12 @@ impl App {
         // P2: a scope-registry mutation (register/release) is session-relevant
         // — it's exactly what must survive a crash mid-merge-train.
         self.state.scope_registry.hash(&mut h);
-        self.state.pane.agent_hud.choice.hash(&mut h);
+        self.state
+            .active_project()
+            .pane
+            .agent_hud
+            .choice
+            .hash(&mut h);
         h.finish()
     }
 
@@ -380,11 +391,12 @@ impl App {
     /// unopened), a split, or scope claims. A cwd alone doesn't count.
     fn has_restorable_state(&self) -> bool {
         self.runtime
+            .project()
             .pane_tabs
             .as_ref()
             .is_some_and(|pt| !pt.tabs().is_empty())
             || !self.state.deferred_tabs.is_empty()
-            || self.state.vsplit.is_some()
+            || self.state.active_project().vsplit.is_some()
             || !self.state.scope_registry.is_empty()
     }
 
@@ -500,7 +512,7 @@ impl App {
         lines.push(format!("user@host: {}", self.state.user_host));
         lines.push(format!(
             "start dir: {}",
-            crate::paths::display_tilde(&self.state.start_dir)
+            crate::paths::display_tilde(&self.state.active_project().start_dir)
         ));
         lines.push(format!("pid      : {}", std::process::id()));
         lines.push(format!(
@@ -528,10 +540,10 @@ impl App {
                 lines.push(format!("    {}", deferred.tab.command));
             }
         }
-        if !self.state.config.sources.is_empty() {
+        if !self.state.active_project().config.sources.is_empty() {
             lines.push(String::new());
             lines.push("config sources:".into());
-            for src in &self.state.config.sources {
+            for src in &self.state.active_project().config.sources {
                 lines.push(format!("  {}", crate::paths::display_tilde(src)));
             }
         }
@@ -561,7 +573,7 @@ impl App {
             self.state.should_quit = true;
         } else {
             self.state.quit_pending = Some(now);
-            let running_panes = self.runtime.pane_tabs.as_ref().map_or(0, |tabs| {
+            let running_panes = self.runtime.project().pane_tabs.as_ref().map_or(0, |tabs| {
                 tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
             });
             let running_bg = self.runtime.background_tasks.running_count();
@@ -722,6 +734,7 @@ mod tests {
             {
                 let info = &mut app
                     .runtime
+                    .project_mut()
                     .pane_tabs
                     .as_mut()
                     .expect("a tab was opened")
@@ -766,6 +779,7 @@ mod tests {
             app.open_pane_tab("cat");
             for entry in app
                 .runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .expect("two tabs were opened")
@@ -796,6 +810,7 @@ mod tests {
             app.open_pane_tab("cat");
             for (index, entry) in app
                 .runtime
+                .project_mut()
                 .pane_tabs
                 .as_mut()
                 .unwrap()
@@ -826,7 +841,13 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.open_pane_tab("cat");
-            let entry = &mut app.runtime.pane_tabs.as_mut().unwrap().tabs_mut()[0];
+            let entry = &mut app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .tabs_mut()[0];
             entry.info.command = "codex".into();
             entry.info.codex_session_id = Some("019e8b21-9e7c-7553-a118-d1cdada725fd".into());
             entry.info.codex_home = None;
@@ -885,7 +906,9 @@ mod tests {
     }
 
     fn entry_id(app: &App) -> &str {
-        &app.runtime.pane_tabs.as_ref().unwrap().tabs()[0].info.id
+        &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
+            .info
+            .id
     }
 
     /// A restore point the picker can restore. Its `cwd` is the crate root,
@@ -1066,6 +1089,7 @@ mod tests {
         app.open_pane_tab("cat");
         let info = &mut app
             .runtime
+            .project_mut()
             .pane_tabs
             .as_mut()
             .expect("a tab was opened")
@@ -1247,7 +1271,12 @@ mod tests {
             let mut app = App::test_app(project.to_path_buf());
             claude_tab(&mut app, project, None);
             let before = app.session_fingerprint();
-            app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
+            app.runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .expect("the tab")
+                .tabs_mut()[0]
                 .info
                 .live_session_id = Some(MINE.into());
             assert_ne!(app.session_fingerprint(), before);
@@ -1257,7 +1286,12 @@ mod tests {
     /// One agy tab in `cwd`, spawned at [`SPAWN`] and pinned to `pin`.
     fn agy_tab(app: &mut App, cwd: &std::path::Path, pin: Option<&str>) {
         claude_tab(app, cwd, pin);
-        app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("the tab")
+            .tabs_mut()[0]
             .info
             .command = "agy".into();
     }
@@ -1328,7 +1362,12 @@ mod tests {
             let mut app = App::test_app(project.to_path_buf());
             claude_tab(&mut app, project, None);
             let before = app.session_fingerprint();
-            app.runtime.pane_tabs.as_mut().expect("the tab").tabs_mut()[0]
+            app.runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .expect("the tab")
+                .tabs_mut()[0]
                 .info
                 .id = "respawned".into();
             assert_ne!(app.session_fingerprint(), before);

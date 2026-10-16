@@ -40,6 +40,7 @@ fn agent(app: &mut App, status: &str, note: Option<&str>, ttl_ms: Option<u64>) {
 
 fn reported(app: &App) -> Option<ReportedStatus> {
     app.runtime
+        .project()
         .pane_tabs
         .as_ref()
         .unwrap()
@@ -53,6 +54,7 @@ fn settle(app: &mut App, at: Instant) -> (AgentActivity, bool) {
     let (_, effects) = app.settle_agent_activity(at, &mut RunCtx::for_test());
     let activity = app
         .runtime
+        .project()
         .pane_tabs
         .as_ref()
         .unwrap()
@@ -210,6 +212,7 @@ fn a_wait_reported_mid_turn_shows_working_until_the_turn_ends() {
             hook(&mut app, turn_end_state, &turn_end);
             assert_eq!(
                 app.runtime
+                    .project()
                     .pane_tabs
                     .as_ref()
                     .unwrap()
