@@ -125,6 +125,37 @@ fn background_open_keeps_pane_focus_while_user_open_grabs_it() {
     });
 }
 
+/// An agent's open sets the user's preview aside to make room for `b`. If `b`
+/// then fails to open, nothing took the preview's place, so the preview has to
+/// stay where the user was reading it.
+#[test]
+#[ignore = "red: the preview is set aside before the open, and a failed open leaves it hidden"]
+fn a_failed_background_open_leaves_the_preview_in_view() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.state.active_project_mut().vsplit = Some(state::VSplit {
+            width_pct: 50,
+            mode: state::VsplitMode::TopOnly,
+            focus: state::Side::Left,
+        });
+        app.view.project_mut().right_pager = Some(crate::ui::pager::PagerView::new_plain(
+            "preview",
+            vec!["the line being read".to_string()],
+        ));
+
+        app.open_second_commander_at_background(&tmp.path().join("gone"));
+        assert!(app.state.active_project().right.is_none(), "b never opened");
+        assert!(
+            app.view.project().right_pager.is_some(),
+            "the preview vanished though nothing replaced it"
+        );
+        assert!(app.view.project().displaced_preview.is_none());
+    });
+}
+
 /// `^s |` is disabled while a second commander occupies the right column —
 /// the two are mutually exclusive, so it no-ops (no preview opens) and the
 /// commander stays put. `^s f` still flips the commander split's height.
