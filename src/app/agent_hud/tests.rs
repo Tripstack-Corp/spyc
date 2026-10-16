@@ -24,7 +24,15 @@ const THREAD: &str = "01a133b2-dc16-74c8-af3c-123456789abc";
 
 fn entry(app: &mut App, cwd: &Path, home: &Path, command: &str) -> TabEntry {
     let wake = app.make_pane_wake();
-    let pane = Pane::spawn(command, 24, 100, cwd, &app.view.context_path, wake).unwrap();
+    let pane = Pane::spawn(
+        command,
+        24,
+        100,
+        cwd,
+        &app.view.project().context_path,
+        wake,
+    )
+    .unwrap();
     let mut info = TabInfo::new("codex", cwd);
     info.codex_home = Some(home.to_owned());
     info.codex_session_id = Some(THREAD.to_owned());
@@ -387,7 +395,7 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
         let mut pager =
             crate::ui::pager::PagerView::new_plain("scroll", vec!["native history".to_owned()]);
         pager.mount = crate::ui::pager::Mount::LowerPane;
-        app.view.scroll_pager = Some(pager);
+        app.view.project_mut().scroll_pager = Some(pager);
         let (layout, rows) = paint(&mut app, 100, 32);
         assert_eq!(rows.len(), 4);
         assert!(rows[3].starts_with("│ mode") && rows[3].contains("hooks off"));
@@ -398,7 +406,7 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                 .flat_map(|l| &l.spans)
                 .all(|s| s.style.fg == Some(ratatui::style::Color::Reset))
         );
-        app.view.pager = Some(crate::ui::pager::PagerView::new_plain(
+        app.view.project_mut().pager = Some(crate::ui::pager::PagerView::new_plain(
             "top",
             vec!["top overlay".to_owned()],
         ));
@@ -469,7 +477,7 @@ fn agent_hud_only_changed_visible_fields_request_a_repaint() {
             "full mode exposes approval"
         );
         app.cmd_agent_hud("info");
-        assert!(app.view.pager.as_ref().unwrap().saveable);
+        assert!(app.view.project().pager.as_ref().unwrap().saveable);
         assert_eq!(
             app.runtime
                 .project()
@@ -730,7 +738,7 @@ const SESSION: &str = "c1a0de00-0000-4000-8000-000000000001";
 
 fn claude_entry(app: &mut App, cwd: &Path, session: Option<&str>) -> TabEntry {
     let wake = app.make_pane_wake();
-    let pane = Pane::spawn("cat", 24, 100, cwd, &app.view.context_path, wake).unwrap();
+    let pane = Pane::spawn("cat", 24, 100, cwd, &app.view.project().context_path, wake).unwrap();
     let mut info = TabInfo::new("claude", cwd);
     info.live_session_id = session.map(str::to_owned);
     info.spawn_epoch_secs = 0;
@@ -850,6 +858,7 @@ fn agent_hud_follows_a_claude_tabs_reported_session_in_its_home() {
         app.cmd_agent_hud("info");
         let info: Vec<String> = app
             .view
+            .project()
             .pager
             .as_ref()
             .unwrap()
@@ -885,7 +894,7 @@ const AGY_SESSION: &str = "a6900000-0000-4000-8000-000000000001";
 
 fn agy_entry(app: &mut App, cwd: &Path, session: Option<&str>) -> TabEntry {
     let wake = app.make_pane_wake();
-    let pane = Pane::spawn("cat", 24, 100, cwd, &app.view.context_path, wake).unwrap();
+    let pane = Pane::spawn("cat", 24, 100, cwd, &app.view.project().context_path, wake).unwrap();
     let mut info = TabInfo::new("agy", cwd);
     info.live_session_id = session.map(str::to_owned);
     info.spawn_epoch_secs = 0;
@@ -999,6 +1008,7 @@ fn agent_hud_follows_an_agy_tabs_reported_session_in_its_home() {
         app.cmd_agent_hud("info");
         let info: Vec<String> = app
             .view
+            .project()
             .pager
             .as_ref()
             .unwrap()
@@ -1081,11 +1091,15 @@ fn agent_hud_double_click_opens_the_dump_and_a_single_click_does_not() {
         };
         let mut effects = press(&mut app, MouseEventKind::Down(MouseButton::Left));
         effects.extend(press(&mut app, MouseEventKind::Up(MouseButton::Left)));
-        assert!(app.view.pager.is_none(), "one click opens nothing");
+        assert!(
+            app.view.project().pager.is_none(),
+            "one click opens nothing"
+        );
         effects.extend(press(&mut app, MouseEventKind::Down(MouseButton::Left)));
         effects.extend(press(&mut app, MouseEventKind::Up(MouseButton::Left)));
         let pager = app
             .view
+            .project()
             .pager
             .as_ref()
             .expect("a double-click opens the dump");
@@ -1097,7 +1111,7 @@ fn agent_hud_double_click_opens_the_dump_and_a_single_click_does_not() {
             )),
             "{effects:?}"
         );
-        app.view.pager = None;
+        app.view.project_mut().pager = None;
         paint(&mut app, 100, 32);
         let mut drag = press(&mut app, MouseEventKind::Down(MouseButton::Left));
         drag.extend(app.handle_mouse(MouseEvent {
@@ -1223,6 +1237,7 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
         app.cmd_agent_hud("info");
         let dump: Vec<String> = app
             .view
+            .project()
             .pager
             .as_ref()
             .unwrap()
@@ -1418,7 +1433,7 @@ fn agent_hud_retries_missing_claude_transcript_on_status_report() {
             "{lines:?}"
         );
         app.cmd_agent_hud("info");
-        let dump = app.view.pager.take().unwrap().lines;
+        let dump = app.view.project_mut().pager.take().unwrap().lines;
         assert!(
             dump.iter()
                 .any(|l| l.to_string().contains("next status report")),

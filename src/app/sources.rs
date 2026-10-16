@@ -175,6 +175,7 @@ impl App {
     pub(crate) fn drop_gitignored_fs_events(&self, fs_pending: &mut Vec<notify::Event>) {
         let preview_path = self
             .view
+            .project()
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone());
@@ -364,6 +365,7 @@ impl App {
             return true;
         }
         self.view
+            .project()
             .pager
             .as_ref()
             .and_then(|v| v.task_id)
@@ -625,7 +627,7 @@ mod tests {
             // the tick (no task id 1 exists → the strongest negative).
             let mut view = crate::ui::pager::PagerView::new_plain("task", vec![]);
             view.task_id = Some(1);
-            app.view.pager = Some(view);
+            app.view.project_mut().pager = Some(view);
             assert!(!app.capture_tick_should_arm());
         });
     }

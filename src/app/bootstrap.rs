@@ -278,7 +278,7 @@ impl App {
             state: app_state,
             // Write context once on startup so claude sees initial state
             // (context_dirty: true).
-            view: ViewState::new(theme, context_path, true, mcp_running, color_depth),
+            view: ViewState::new(theme, context_path, true, mcp_running, color_depth, active),
             exit_summary: None,
             runtime: Runtime::new(Some(git_res_rx), Some(git_req_tx), Some(mcp_cmd_rx), active),
         };

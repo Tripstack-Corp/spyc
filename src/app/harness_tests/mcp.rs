@@ -1034,7 +1034,7 @@ fn the_activity_dump_lists_each_mcp_connection_and_its_tab() {
 
         let dump = |app: &mut App| -> Vec<String> {
             app.dispatch_command("activity dump");
-            let pager = app.view.pager.as_ref().expect("dump opened");
+            let pager = app.view.project().pager.as_ref().expect("dump opened");
             pager
                 .lines
                 .iter()
@@ -1061,7 +1061,7 @@ fn the_activity_dump_lists_each_mcp_connection_and_its_tab() {
 
         app.execute_mcp_command(McpCommand::ConnectionClosed { conn: 7 });
         assert_eq!(app.view.activity.mcp_connection_summary(), "conn:1 bound:0");
-        app.view.pager = None;
+        app.view.project_mut().pager = None;
         let lines = dump(&mut app);
         assert!(
             !lines.iter().any(|l| l.trim_start().starts_with("#7")),

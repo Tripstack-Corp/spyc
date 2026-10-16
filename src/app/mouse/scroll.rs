@@ -49,7 +49,7 @@ impl super::super::App {
         // pager claims the wheel itself via `covering_pager`, and re-entering
         // during the snapshot's settle window would respawn a transcript worker
         // per tick.
-        if self.view.scroll_pager.is_some() || self.runtime.pane_scroll_settle.is_some() {
+        if self.view.project().scroll_pager.is_some() || self.runtime.pane_scroll_settle.is_some() {
             return Vec::new();
         }
         let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {

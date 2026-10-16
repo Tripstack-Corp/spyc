@@ -158,7 +158,7 @@ impl App {
         // The bottom scrollback lives in its own region slot now; the
         // top-region `view.pager` (a `D` doc, etc.) is App-level and persists
         // across tab switches untouched.
-        let Some(view) = self.view.scroll_pager.take() else {
+        let Some(view) = self.view.project_mut().scroll_pager.take() else {
             return;
         };
         // If the stashed pager is backed by an in-flight stream, park the
@@ -189,7 +189,7 @@ impl App {
     /// half of the pair. (The top-region `view.pager` is independent — a `D`
     /// doc stays visible across tab switches.)
     pub fn restore_active_tab_scrollback_pager(&mut self) {
-        if self.view.scroll_pager.is_some() {
+        if self.view.project().scroll_pager.is_some() {
             return;
         }
         let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
@@ -206,7 +206,7 @@ impl App {
         {
             self.runtime.scroll_stream = Some(stream);
         }
-        self.view.scroll_pager = Some(view);
+        self.view.project_mut().scroll_pager = Some(view);
     }
 
     /// Stream ids still owned by a living tab's stashed scrollback pager — the
@@ -539,7 +539,7 @@ impl App {
     /// The pane stays in scroll mode across the round-trip (the launch clears
     /// only the slot, not the mode), so this just reseats the view.
     pub(crate) fn restore_scroll_pager_view(&mut self, view: crate::ui::pager::PagerView) {
-        self.view.scroll_pager = Some(view);
+        self.view.project_mut().scroll_pager = Some(view);
         self.state.active_project_mut().focus = state::Focus::Pane;
         self.view.needs_full_repaint = true;
     }
@@ -603,7 +603,7 @@ impl App {
         }
         // The bottom-region scrollback slot — coexists with a top-region
         // `view.pager` (`D`) rather than evicting it.
-        self.view.scroll_pager = Some(view);
+        self.view.project_mut().scroll_pager = Some(view);
         self.state.active_project_mut().focus = state::Focus::Pane;
         self.view.needs_full_repaint = true;
         self.state

@@ -1,7 +1,8 @@
 //! The **ViewState** half of the MVU split: render ephemerals and caches,
-//! plus the seven types that exist only as its field types — the pager-return
-//! slot, the harpoon menu, the image gallery and full-screen view, the chord
-//! hint, the visual bell, and the tab-rename scratch.
+//! plus the eight types that exist only as its field types — the per-project
+//! views, the pager-return slot, the harpoon menu, the image gallery and
+//! full-screen view, the chord hint, the visual bell, and the tab-rename
+//! scratch.
 //!
 //! They travel with the fields they describe. Extracted from `app/mod.rs` for
 //! the same reason as [`super::runtime`].
@@ -117,12 +118,12 @@ pub struct VisualBell {
     pub(super) frame: u64,
 }
 
-/// MVU end-state: the **ViewState** cluster — render ephemerals + derived
-/// caches + UI-layer state. Pure of OS handles (those live in [`Runtime`]) and
-/// of domain state (that lives in `AppState`). Owned by `App` as a disjoint
-/// field; handlers reach it via `self.view.…`.
-#[allow(clippy::struct_excessive_bools)]
-pub struct ViewState {
+/// The per-project half of `ViewState` (#99 step 1,
+/// `docs/drafts/PROJECTS_PLAN.md` §1d): the pagers open over one project's
+/// columns and panes, their history, each column's row cache, the bookkeeping
+/// of `ProjectRuntime`'s overlay slots, and the project's MCP context file.
+/// Reached only through [`ViewState::project`] / [`ViewState::project_mut`].
+pub(super) struct ProjectView {
     /// The top-region / centred pager: `Mount::Overlay` (grep, git-view,
     /// help, command output, file viewers) or `Mount::TopPane` (`D`). Drives
     /// the file-list area or the centred overlay.
@@ -155,6 +156,103 @@ pub struct ViewState {
     /// split shape it had and comes back when `b` closes. `None` when the user
     /// opened `b` themselves (`^s n` IS the ask) or after a restore.
     pub(super) displaced_preview: Option<(super::state::VSplit, PagerView)>,
+    pub(super) pager_history: PagerHistory,
+    /// Stash for the pager that was active when `?` opened the
+    /// pager-help overlay. Restored verbatim on Esc/q dismissal so
+    /// the user lands back in the same view. Separate from
+    /// `pager_history` because the latter silently drops
+    /// `no_history=true` views — going through history would lose them.
+    pub(super) pager_help_stash: Option<PagerView>,
+    /// Stash for the real scrollback (`scroll_pager`) while its dedicated help
+    /// (`H` in `^a v`) is shown in that same bottom slot. `H` toggles the help
+    /// between scrollback- and pager-keys variants; `Esc`/`q` restores this.
+    /// Kept apart from `pager_help_stash` (the top-overlay help) so the two
+    /// regions' help flows never clobber each other.
+    pub(super) scroll_pager_help_stash: Option<PagerView>,
+    /// Cached `build_rows()` output; invalidated by `list_generation`.
+    pub(super) cached_rows: Vec<Row>,
+    pub(super) cached_rows_gen: u64,
+    /// Page settle cache key: (list_gen, view_top, cursor, width, height).
+    pub(super) cached_grid_key: (u64, usize, usize, u16, u16),
+    /// Where the left column's fixed pages start, measured over `cached_rows`.
+    pub(super) pages: crate::ui::list_view::Pages,
+    /// The same row cache, grid key and page starts for the **right** column's
+    /// second commander (`state.right`), settled independently. Unused (empty /
+    /// `MAX` gen) while no second commander is open.
+    pub(super) right_cached_rows: Vec<Row>,
+    pub(super) right_cached_rows_gen: u64,
+    pub(super) right_cached_grid_key: (u64, usize, usize, u16, u16),
+    pub(super) right_pages: crate::ui::list_view::Pages,
+    pub(super) overlay_awaiting_dismiss: bool,
+    /// When the current top overlay's child exits, return to spyc **immediately**
+    /// instead of holding the "[process exited — press any key]" frame. Set for
+    /// interactive overlays — the `V` editor, the `D` huge-file `$PAGER`, the
+    /// in-pager editor — where there's no command output to linger on (you `:q`
+    /// and want straight back). Left `false` for `;cmd` / `:`-spawned commands,
+    /// whose output the await-dismiss preserves (so `;ls` doesn't flash + vanish).
+    pub(super) overlay_auto_dismiss: bool,
+    /// Which vsplit column the current `V`/`D` overlay/TopPane-pager lives in
+    /// (`None` when no split, or no overlay). The overlay is pinned to the
+    /// column it opened from: `top_unit` scopes to it and it stays there even
+    /// when `^a l`/`^a h` moves keyboard focus to the other column. Set at open,
+    /// cleared at teardown.
+    pub(super) overlay_column: Option<super::state::Side>,
+    // Module-private (type `PagerReturn` is module-private).
+    pub(super) pending_pager_return: Option<PagerReturn>,
+    /// This process's MCP context file (`context::process_context_path`).
+    pub(super) context_path: PathBuf,
+    /// Last context snapshot written to disk — skip the write when the new
+    /// snapshot compares equal (avoids serializing just to diff).
+    pub(super) last_context: Option<crate::context::SpycContext>,
+    /// The context file is stale and should be rewritten (debounced +
+    /// typing-burst-guarded).
+    pub(super) context_dirty: bool,
+}
+
+impl ProjectView {
+    /// A project's views before anything is open. `context_dirty` is whether
+    /// its context file is written on the first settle.
+    pub(super) fn new(context_path: PathBuf, context_dirty: bool) -> Self {
+        Self {
+            pager: None,
+            scroll_pager: None,
+            pager_right: None,
+            right_pager: None,
+            displaced_preview: None,
+            pager_history: PagerHistory::new(),
+            pager_help_stash: None,
+            scroll_pager_help_stash: None,
+            cached_rows: Vec::new(),
+            cached_rows_gen: u64::MAX, // force first build
+            cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            pages: crate::ui::list_view::Pages::default(),
+            right_cached_rows: Vec::new(),
+            right_cached_rows_gen: u64::MAX, // force first build
+            right_cached_grid_key: (u64::MAX, 0, 0, 0, 0),
+            right_pages: crate::ui::list_view::Pages::default(),
+            overlay_awaiting_dismiss: false,
+            overlay_auto_dismiss: false,
+            overlay_column: None,
+            pending_pager_return: None,
+            context_path,
+            last_context: None,
+            context_dirty,
+        }
+    }
+}
+
+/// MVU end-state: the **ViewState** cluster — render ephemerals + derived
+/// caches + UI-layer state. Pure of OS handles (those live in [`Runtime`]) and
+/// of domain state (that lives in `AppState`). Owned by `App` as a disjoint
+/// field; handlers reach it via `self.view.…`.
+#[allow(clippy::struct_excessive_bools)]
+pub struct ViewState {
+    /// Every open project's views, keyed by id. Exactly one entry today (#99
+    /// step 1). Reached only through [`Self::project`] / [`Self::project_mut`].
+    pub(super) projects: std::collections::HashMap<super::state::ProjectId, ProjectView>,
+    /// Which of `projects` the active-project accessors resolve to. Tracks
+    /// `AppState::active`.
+    pub(super) active: super::state::ProjectId,
     /// Whether to fade the inactive split column / list (the focus dim). On by
     /// default; toggled by `^a d` for users who prefer both columns bright.
     pub(super) dim_inactive: bool,
@@ -172,7 +270,6 @@ pub struct ViewState {
     /// The `^a g` gallery popup, when open.
     pub(super) image_gallery: Option<ImageGallery>,
     pub(super) image_gallery_epoch: u64,
-    pub(super) pager_history: PagerHistory,
     pub(super) pager_pending_bracket: Option<char>,
     /// True after a bare `z` in the pager — the vim fold prefix, awaiting
     /// `a` / `R` / `M`. Its own flag rather than a second use of
@@ -183,18 +280,6 @@ pub struct ViewState {
     /// running its effects belongs in the pager instead (#166). Consumed at
     /// loop bottom by `relocate_flash_into_pager`.
     pub(super) input_went_to_pager: bool,
-    /// Stash for the pager that was active when `?` opened the
-    /// pager-help overlay. Restored verbatim on Esc/q dismissal so
-    /// the user lands back in the same view. Separate from
-    /// `pager_history` because the latter silently drops
-    /// `no_history=true` views — going through history would lose them.
-    pub(super) pager_help_stash: Option<PagerView>,
-    /// Stash for the real scrollback (`scroll_pager`) while its dedicated help
-    /// (`H` in `^a v`) is shown in that same bottom slot. `H` toggles the help
-    /// between scrollback- and pager-keys variants; `Esc`/`q` restores this.
-    /// Kept apart from `pager_help_stash` (the top-overlay help) so the two
-    /// regions' help flows never clobber each other.
-    pub(super) scroll_pager_help_stash: Option<PagerView>,
     /// Per-file scroll memory for the pager (loaded once at startup;
     /// see [`super::state::pager_positions`]).
     pub(super) pager_positions: crate::state::pager_positions::PagerPositions,
@@ -202,20 +287,6 @@ pub struct ViewState {
     pub(super) theme: Theme,
     /// One-shot full buffer clear/redraw request.
     pub(super) needs_full_repaint: bool,
-    /// Cached `build_rows()` output; invalidated by `list_generation`.
-    pub(super) cached_rows: Vec<Row>,
-    pub(super) cached_rows_gen: u64,
-    /// Page settle cache key: (list_gen, view_top, cursor, width, height).
-    pub(super) cached_grid_key: (u64, usize, usize, u16, u16),
-    /// Where the left column's fixed pages start, measured over `cached_rows`.
-    pub(super) pages: crate::ui::list_view::Pages,
-    /// The same row cache, grid key and page starts for the **right** column's
-    /// second commander (`state.right`), settled independently. Unused (empty /
-    /// `MAX` gen) while no second commander is open.
-    pub(super) right_cached_rows: Vec<Row>,
-    pub(super) right_cached_rows_gen: u64,
-    pub(super) right_cached_grid_key: (u64, usize, usize, u16, u16),
-    pub(super) right_pages: crate::ui::list_view::Pages,
     /// Last terminal-window title emitted (OSC 2 dedup). `None` forces
     /// a re-emit on next draw.
     pub(super) last_term_title: Option<String>,
@@ -238,20 +309,6 @@ pub struct ViewState {
     pub(super) graveyard_pending_d: bool,
     /// `gg` arming for the graveyard view (jump to top).
     pub(super) graveyard_pending_g: bool,
-    pub(super) overlay_awaiting_dismiss: bool,
-    /// When the current top overlay's child exits, return to spyc **immediately**
-    /// instead of holding the "[process exited — press any key]" frame. Set for
-    /// interactive overlays — the `V` editor, the `D` huge-file `$PAGER`, the
-    /// in-pager editor — where there's no command output to linger on (you `:q`
-    /// and want straight back). Left `false` for `;cmd` / `:`-spawned commands,
-    /// whose output the await-dismiss preserves (so `;ls` doesn't flash + vanish).
-    pub(super) overlay_auto_dismiss: bool,
-    /// Which vsplit column the current `V`/`D` overlay/TopPane-pager lives in
-    /// (`None` when no split, or no overlay). The overlay is pinned to the
-    /// column it opened from: `top_unit` scopes to it and it stays there even
-    /// when `^a l`/`^a h` moves keyboard focus to the other column. Set at open,
-    /// cleared at teardown.
-    pub(super) overlay_column: Option<super::state::Side>,
     /// TTL cache for the active pane's status-line session short-id.
     // Module-private (type `AgentStatusCache` is module-private); the
     // `app::*` descendant modules still reach it via `self.view.…`.
@@ -262,16 +319,6 @@ pub struct ViewState {
     pub(super) history_pending_g: bool,
     /// Pending `g` in pane scroll mode (`gg`/`gf`/`gF`).
     pub(super) scroll_pending_g: bool,
-    // Module-private (type `PagerReturn` is module-private).
-    pub(super) pending_pager_return: Option<PagerReturn>,
-    /// This process's MCP context file (`context::process_context_path`).
-    pub(super) context_path: PathBuf,
-    /// Last context snapshot written to disk — skip the write when the new
-    /// snapshot compares equal (avoids serializing just to diff).
-    pub(super) last_context: Option<crate::context::SpycContext>,
-    /// The context file is stale and should be rewritten (debounced +
-    /// typing-burst-guarded).
-    pub(super) context_dirty: bool,
     /// Whether the MCP socket server is running.
     pub(super) mcp_running: bool,
     /// When a focus-switch chord just completed: (when, completing key) —
@@ -416,48 +463,38 @@ pub struct ViewState {
 }
 
 impl ViewState {
-    /// Build the initial ViewState. `theme`/`context_path` are the only
-    /// caller-specific values; `context_dirty` (write-context-on-startup) and
-    /// `mcp_running` differ between the live app (`true` / actual) and the test
-    /// harness (`false` / `false`). Everything else starts empty.
+    /// Build the initial ViewState around `active`'s `ProjectView`.
+    /// `theme`/`context_path` are the only caller-specific values;
+    /// `context_dirty` (write-context-on-startup) and `mcp_running` differ
+    /// between the live app (`true` / actual) and the test harness (`false` /
+    /// `false`). Everything else starts empty.
     pub(super) fn new(
         theme: Theme,
         context_path: PathBuf,
         context_dirty: bool,
         mcp_running: bool,
         color_depth: crate::ui::color_depth::ColorDepth,
+        active: super::state::ProjectId,
     ) -> Self {
         use crate::ui::color_depth::ColorDepth;
+        let mut projects = std::collections::HashMap::new();
+        projects.insert(active, ProjectView::new(context_path, context_dirty));
         Self {
-            pager: None,
-            scroll_pager: None,
-            pager_right: None,
-            right_pager: None,
-            displaced_preview: None,
+            projects,
+            active,
             dim_inactive: true,
             preview_dirty: false,
             image_view: None,
             image_gallery: None,
             image_gallery_epoch: 0,
-            pager_history: PagerHistory::new(),
             pager_pending_bracket: None,
             pager_pending_z: false,
             pager_was_open: false,
             input_went_to_pager: false,
-            pager_help_stash: None,
-            scroll_pager_help_stash: None,
             scroll_source_override: None,
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
             theme,
             needs_full_repaint: false,
-            cached_rows: Vec::new(),
-            cached_rows_gen: u64::MAX, // force first build
-            cached_grid_key: (u64::MAX, 0, 0, 0, 0),
-            pages: crate::ui::list_view::Pages::default(),
-            right_cached_rows: Vec::new(),
-            right_cached_rows_gen: u64::MAX, // force first build
-            right_cached_grid_key: (u64::MAX, 0, 0, 0, 0),
-            right_pages: crate::ui::list_view::Pages::default(),
             last_term_title: None,
             harpoon_menu: None,
             chord_hint: None,
@@ -465,18 +502,11 @@ impl ViewState {
             quick_select: None,
             graveyard_pending_d: false,
             graveyard_pending_g: false,
-            overlay_awaiting_dismiss: false,
-            overlay_auto_dismiss: false,
-            overlay_column: None,
             agent_status_cache: None,
             pending_history_pick: None,
             pending_jump_history: None,
             history_pending_g: false,
             scroll_pending_g: false,
-            pending_pager_return: None,
-            context_path,
-            last_context: None,
-            context_dirty,
             mcp_running,
             // Set from the `App::new` arg in bootstrap; the test harness never
             // writes client configs, so the default is fine there.
@@ -517,6 +547,41 @@ impl ViewState {
             transcript_show_tool_calls: true,
             term_size: crossterm::terminal::size().unwrap_or((80, 24)),
         }
+    }
+
+    /// The active project's views (pagers, row caches, context file).
+    /// `active` always names an entry: the one project is inserted at
+    /// construction and none is ever removed.
+    pub(super) fn project(&self) -> &ProjectView {
+        self.projects
+            .get(&self.active)
+            .expect("active always names a live project")
+    }
+
+    /// Mutable twin of [`Self::project`].
+    pub(super) fn project_mut(&mut self) -> &mut ProjectView {
+        Self::project_in(&mut self.projects, self.active)
+    }
+
+    /// [`Self::project_mut`] borrowing only the `projects` field, for a caller
+    /// that holds another `ViewState` field at the same time — a method
+    /// borrows all of `self`. `active_pager_mut!` is the one that needs it.
+    pub(super) fn project_in(
+        projects: &mut std::collections::HashMap<super::state::ProjectId, ProjectView>,
+        active: super::state::ProjectId,
+    ) -> &mut ProjectView {
+        projects
+            .get_mut(&active)
+            .expect("active always names a live project")
+    }
+
+    /// The top pager and the history editor together: the history popup
+    /// drives both, and two accessor calls would each borrow all of `self`.
+    pub(super) fn top_pager_and_history_pick_mut(
+        &mut self,
+    ) -> (Option<&mut PagerView>, Option<&mut LineEditor>) {
+        let project = Self::project_in(&mut self.projects, self.active);
+        (project.pager.as_mut(), self.pending_history_pick.as_mut())
     }
 }
 

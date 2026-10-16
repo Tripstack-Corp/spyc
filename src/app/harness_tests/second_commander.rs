@@ -43,7 +43,7 @@ fn second_commander_open_focus_and_close() {
             "the right commander read + built its own rows"
         );
         assert!(
-            app.view.right_pager.is_none(),
+            app.view.project().right_pager.is_none(),
             "a commander and the preview are mutually exclusive"
         );
 
@@ -147,7 +147,7 @@ fn vsplit_toggle_disabled_with_second_commander() {
             "^s | must not tear down the commander"
         );
         assert!(
-            app.view.right_pager.is_none(),
+            app.view.project().right_pager.is_none(),
             "^s | must not open a preview over the commander"
         );
         assert_eq!(
@@ -209,7 +209,7 @@ fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
             "the agent's column opened"
         );
         assert!(
-            app.view.right_pager.is_none(),
+            app.view.project().right_pager.is_none(),
             "one thing at a time in the right column"
         );
 
@@ -222,6 +222,7 @@ fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
         );
         assert!(
             app.view
+                .project()
                 .right_pager
                 .as_ref()
                 .and_then(|v| v.source_path.as_ref())
@@ -234,7 +235,7 @@ fn an_agent_open_sets_the_users_preview_aside_and_gives_it_back() {
         app.open_second_commander_at(&other);
         app.apply(&Action::CloseSecondCommander).unwrap();
         assert!(
-            app.state.active_project().vsplit.is_none() && app.view.right_pager.is_none(),
+            app.state.active_project().vsplit.is_none() && app.view.project().right_pager.is_none(),
             "^s n discards the preview it replaced"
         );
     });
@@ -374,7 +375,10 @@ fn restore_vsplit_drops_blank_split_and_clamps_width() {
             app.state.active_project().vsplit.is_none(),
             "gone preview → no split"
         );
-        assert!(app.view.right_pager.is_none(), "no phantom right pager");
+        assert!(
+            app.view.project().right_pager.is_none(),
+            "no phantom right pager"
+        );
 
         // (b) preview present + out-of-range width → split restored, file
         // loaded, width clamped to [20, 80].
@@ -395,6 +399,7 @@ fn restore_vsplit_drops_blank_split_and_clamps_width() {
         );
         assert_eq!(
             app.view
+                .project()
                 .right_pager
                 .as_ref()
                 .and_then(|p| p.source_path.clone()),
@@ -418,7 +423,7 @@ fn load_right_preview_reports_landing() {
         let good = dir.join("a.md");
         std::fs::write(&good, "# a\n").unwrap();
         assert!(app.load_right_preview(&good), "readable file loads");
-        assert!(app.view.right_pager.is_some());
+        assert!(app.view.project().right_pager.is_some());
 
         // A missing file fails and leaves the prior preview in place (the swap
         // branch keeps showing the old file).
@@ -428,6 +433,7 @@ fn load_right_preview_reports_landing() {
         );
         assert_eq!(
             app.view
+                .project()
                 .right_pager
                 .as_ref()
                 .and_then(|p| p.source_path.clone()),
@@ -531,10 +537,10 @@ fn vsplit_focus_switches_with_pager_pinned_to_its_column() {
         app.open_second_commander_at(&d); // b open + focused
         // Focus the left column, then open a `D` pager there (pinned to `a`).
         app.apply(&Action::VsplitFocusLeft).unwrap();
-        app.view.overlay_column = Some(state::Side::Left);
+        app.view.project_mut().overlay_column = Some(state::Side::Left);
         let mut pv = PagerView::new_plain("t", vec!["a".to_string()]);
         pv.mount = crate::ui::pager::Mount::TopPane;
-        app.view.pager = Some(pv);
+        app.view.project_mut().pager = Some(pv);
 
         // `^a l` moves focus to `b`; the pager stays pinned to `a`.
         app.apply(&Action::VsplitFocusRight).unwrap();
@@ -544,7 +550,7 @@ fn vsplit_focus_switches_with_pager_pinned_to_its_column() {
             "^a l switches focus to b even with a pager open"
         );
         assert_eq!(
-            app.view.overlay_column,
+            app.view.project().overlay_column,
             Some(state::Side::Left),
             "the pager stays pinned to its own column"
         );
@@ -573,10 +579,10 @@ fn d_pagers_in_both_columns_coexist_and_route_to_the_focused_one() {
         // A `D` TopPane pager in each column, open at the same time.
         let mut la = PagerView::new_plain("a", vec!["left".to_string()]);
         la.mount = crate::ui::pager::Mount::TopPane;
-        app.view.pager = Some(la);
+        app.view.project_mut().pager = Some(la);
         let mut rb = PagerView::new_plain("b", vec!["right".to_string()]);
         rb.mount = crate::ui::pager::Mount::TopPane;
-        app.view.pager_right = Some(rb);
+        app.view.project_mut().pager_right = Some(rb);
         app.state.active_project_mut().focus =
             state::Focus::Pager(crate::ui::pager::Mount::TopPane);
 
@@ -588,10 +594,10 @@ fn d_pagers_in_both_columns_coexist_and_route_to_the_focused_one() {
         app.apply(&Action::VsplitFocusLeft).unwrap();
         assert_eq!(app.active_pager_ref().map(|v| v.title.as_str()), Some("a"));
         assert!(
-            app.view.pager_right.is_some(),
+            app.view.project().pager_right.is_some(),
             "b's pager isn't evicted by a's — they have separate slots"
         );
-        assert!(app.view.pager.is_some());
+        assert!(app.view.project().pager.is_some());
     });
 }
 
@@ -611,10 +617,10 @@ fn modal_pager_owns_input_even_with_right_column_focused() {
         // b has a `D` pager, but a full-frame grep (Overlay mount) is also up.
         let mut rb = PagerView::new_plain("b", vec!["x".to_string()]);
         rb.mount = crate::ui::pager::Mount::TopPane;
-        app.view.pager_right = Some(rb);
+        app.view.project_mut().pager_right = Some(rb);
         let mut grep = PagerView::new_plain("grep", vec!["hit".to_string()]);
         grep.mount = crate::ui::pager::Mount::Overlay;
-        app.view.pager = Some(grep);
+        app.view.project_mut().pager = Some(grep);
         app.state.active_project_mut().focus =
             state::Focus::Pager(crate::ui::pager::Mount::Overlay);
 
@@ -640,12 +646,12 @@ fn closing_b_drops_its_pager() {
         app.open_second_commander_at(&d);
         let mut rb = PagerView::new_plain("b", vec!["x".to_string()]);
         rb.mount = crate::ui::pager::Mount::TopPane;
-        app.view.pager_right = Some(rb);
+        app.view.project_mut().pager_right = Some(rb);
 
         app.close_second_commander();
         assert!(app.state.active_project().right.is_none());
         assert!(
-            app.view.pager_right.is_none(),
+            app.view.project().pager_right.is_none(),
             "b's pager is dropped when its column closes"
         );
     });
@@ -675,16 +681,16 @@ fn q_on_b_pager_leaves_a_pager_open() {
         pb.mount = crate::ui::pager::Mount::TopPane;
         app.install_top_pager(pb);
         app.recompute_focus();
-        assert!(app.view.pager.is_some() && app.view.pager_right.is_some());
+        assert!(app.view.project().pager.is_some() && app.view.project().pager_right.is_some());
 
         // q closes b's pager (the focused one) and leaves a's intact.
         app.handle_key(key('q')).unwrap();
         assert!(
-            app.view.pager_right.is_none(),
+            app.view.project().pager_right.is_none(),
             "q closes the focused column's (b's) pager"
         );
         assert!(
-            app.view.pager.is_some(),
+            app.view.project().pager.is_some(),
             "a's pager in the other column survives"
         );
         // …and a's pager stays PINNED to the left column — closing b's pager
@@ -692,7 +698,7 @@ fn q_on_b_pager_leaves_a_pager_open() {
         // into the (now focused) right column and blank the left (image: A
         // blank, B's list + A's pager overlapping).
         assert_eq!(
-            app.view.overlay_column,
+            app.view.project().overlay_column,
             Some(state::Side::Left),
             "a's pager stays pinned to the left column"
         );
@@ -720,7 +726,7 @@ fn q_from_b_commander_does_not_close_a_pager() {
 
         app.handle_key(key('q')).unwrap();
         assert!(
-            app.view.pager.is_some(),
+            app.view.project().pager.is_some(),
             "q from b's commander leaves a's pager open"
         );
     });

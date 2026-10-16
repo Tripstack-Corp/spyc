@@ -78,6 +78,7 @@ impl App {
     pub(super) fn sync_watch(&self, ctx: &mut RunCtx) {
         let preview = self
             .view
+            .project()
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone());

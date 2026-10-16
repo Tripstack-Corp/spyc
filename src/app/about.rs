@@ -45,6 +45,7 @@ impl super::App {
     /// True when the about pager is the currently-open pager view.
     pub(super) fn about_is_open(&self) -> bool {
         self.view
+            .project()
             .pager
             .as_ref()
             .is_some_and(|v| v.title == Self::ABOUT_TITLE)
@@ -87,10 +88,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
-            assert!(app.view.pager.is_none());
+            assert!(app.view.project().pager.is_none());
             let fx = app.apply(&Action::About).unwrap();
             assert!(fx.is_empty(), "about is pure view state, no effects");
-            let view = app.view.pager.as_ref().expect("about opened a pager");
+            let view = app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .expect("about opened a pager");
             assert_eq!(view.title, App::ABOUT_TITLE);
             assert!(view.markdown_rendered, "lands on the rendered view");
             assert!(view.alt_lines.is_some(), "`m` can toggle to the source");
@@ -110,7 +116,12 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
             app.apply(&Action::About).unwrap();
-            let view = app.view.pager.as_ref().expect("about opened a pager");
+            let view = app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .expect("about opened a pager");
 
             // The render splits a heading across spans (`"## "` then the text),
             // so match on the line's joined content, not a single span.
@@ -155,7 +166,12 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
             app.apply(&Action::About).unwrap();
-            let view = app.view.pager.as_ref().expect("about opened a pager");
+            let view = app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .expect("about opened a pager");
             let first = view
                 .lines
                 .iter()

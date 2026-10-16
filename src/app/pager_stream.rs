@@ -198,8 +198,8 @@ impl App {
                 // Push any open pager onto the back stack so `:bprev` returns
                 // to it; save its scroll first (mirrors the old grep/git-view).
                 self.remember_pager_position();
-                if let Some(prev) = self.view.pager.take() {
-                    self.view.pager_history.push(prev);
+                if let Some(prev) = self.view.project_mut().pager.take() {
+                    self.view.project_mut().pager_history.push(prev);
                 }
                 self.set_pager(view);
                 self.view.needs_full_repaint = true;
@@ -252,6 +252,7 @@ impl App {
             if !is_scroll
                 && self
                     .view
+                    .project()
                     .pager_help_stash
                     .as_ref()
                     .is_some_and(|p| p.stream_id == Some(id))
@@ -270,11 +271,16 @@ impl App {
         // doesn't alias `&self.view.theme` — both live under `self.view`.
         let full_width = if in_scroll {
             self.view
+                .project()
                 .scroll_pager
                 .as_ref()
                 .is_some_and(|p| p.full_width)
         } else {
-            self.view.pager.as_ref().is_some_and(|p| p.full_width)
+            self.view
+                .project()
+                .pager
+                .as_ref()
+                .is_some_and(|p| p.full_width)
         };
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
@@ -285,9 +291,9 @@ impl App {
         // Field-level `&mut` on one view slot + the disjoint `runtime` borrow
         // both end when `drain` returns the owned DrainOutcome.
         let view = if in_scroll {
-            self.view.scroll_pager.as_mut()
+            self.view.project_mut().scroll_pager.as_mut()
         } else {
-            self.view.pager.as_mut()
+            self.view.project_mut().pager.as_mut()
         }
         .expect("matching slot confirmed by stream_slot above");
         let stream = if is_scroll {
@@ -335,6 +341,7 @@ impl App {
     fn stream_slot(&self, id: u32) -> Option<bool> {
         if self
             .view
+            .project()
             .scroll_pager
             .as_ref()
             .is_some_and(|p| p.stream_id == Some(id))
@@ -342,6 +349,7 @@ impl App {
             Some(true)
         } else if self
             .view
+            .project()
             .pager
             .as_ref()
             .is_some_and(|p| p.stream_id == Some(id))
@@ -367,11 +375,16 @@ impl App {
         };
         let full_width = if in_scroll {
             self.view
+                .project()
                 .scroll_pager
                 .as_ref()
                 .is_some_and(|p| p.full_width)
         } else {
-            self.view.pager.as_ref().is_some_and(|p| p.full_width)
+            self.view
+                .project()
+                .pager
+                .as_ref()
+                .is_some_and(|p| p.full_width)
         };
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
@@ -380,9 +393,9 @@ impl App {
             intraline: self.state.active_project().config.diff.intraline,
         };
         let view = if in_scroll {
-            self.view.scroll_pager.as_mut()
+            self.view.project_mut().scroll_pager.as_mut()
         } else {
-            self.view.pager.as_mut()
+            self.view.project_mut().pager.as_mut()
         }
         .expect("matching slot checked above");
         let stream = self
@@ -408,17 +421,18 @@ impl App {
     /// reaches it for deliberate buffer navigation.
     fn close_stream_pager(&mut self, in_scroll: bool) {
         if in_scroll {
-            self.view.scroll_pager = None;
+            self.view.project_mut().scroll_pager = None;
             if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                 tabs.active_mut().exit_scroll_mode();
             }
         } else if self
             .view
+            .project()
             .pager
             .as_ref()
             .is_some_and(|p| p.stream_id.is_some())
         {
-            self.view.pager = None;
+            self.view.project_mut().pager = None;
         }
         self.view.needs_full_repaint = true;
     }
@@ -476,7 +490,7 @@ mod tests {
     #[test]
     fn id_mismatch_drops_stream() {
         with_app(|app| {
-            app.view.pager = Some(pager_with_stream_id(7));
+            app.view.project_mut().pager = Some(pager_with_stream_id(7));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 99, // does not match the pager
                 outcome: Some(DrainOutcome::Changed),
@@ -490,7 +504,7 @@ mod tests {
     #[test]
     fn changed_appends_and_redraws_without_dropping() {
         with_app(|app| {
-            app.view.pager = Some(pager_with_stream_id(1));
+            app.view.project_mut().pager = Some(pager_with_stream_id(1));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 1,
                 outcome: Some(DrainOutcome::Changed),
@@ -498,14 +512,14 @@ mod tests {
             }));
             assert!(app.drain_pager_stream());
             assert!(app.runtime.pager_stream.is_some());
-            assert_eq!(app.view.pager.as_ref().unwrap().lines.len(), 1);
+            assert_eq!(app.view.project().pager.as_ref().unwrap().lines.len(), 1);
         });
     }
 
     #[test]
     fn finished_drops_unless_retained() {
         with_app(|app| {
-            app.view.pager = Some(pager_with_stream_id(1));
+            app.view.project_mut().pager = Some(pager_with_stream_id(1));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 1,
                 outcome: Some(DrainOutcome::Finished),
@@ -515,7 +529,7 @@ mod tests {
             assert!(app.runtime.pager_stream.is_none(), "non-retained drops");
         });
         with_app(|app| {
-            app.view.pager = Some(pager_with_stream_id(2));
+            app.view.project_mut().pager = Some(pager_with_stream_id(2));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 2,
                 outcome: Some(DrainOutcome::Finished),
@@ -529,7 +543,7 @@ mod tests {
     #[test]
     fn close_info_clears_pager_and_drops_stream() {
         with_app(|app| {
-            app.view.pager = Some(pager_with_stream_id(1));
+            app.view.project_mut().pager = Some(pager_with_stream_id(1));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 1,
                 outcome: Some(DrainOutcome::CloseInfo("no changes".into())),
@@ -537,7 +551,7 @@ mod tests {
             }));
             assert!(app.drain_pager_stream());
             // The empty result reveals the base listing; stream drops.
-            assert!(app.view.pager.is_none());
+            assert!(app.view.project().pager.is_none());
             assert!(app.runtime.pager_stream.is_none());
         });
     }
@@ -551,8 +565,8 @@ mod tests {
     fn help_overlay_preserves_in_flight_overlay_stream() {
         with_app(|app| {
             // Stream pager hidden behind the help overlay.
-            app.view.pager_help_stash = Some(pager_with_stream_id(1));
-            app.view.pager = Some(PagerView::new_plain("help", Vec::<String>::new()));
+            app.view.project_mut().pager_help_stash = Some(pager_with_stream_id(1));
+            app.view.project_mut().pager = Some(PagerView::new_plain("help", Vec::<String>::new()));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 1,
                 outcome: Some(DrainOutcome::Changed),
@@ -577,14 +591,14 @@ mod tests {
     fn overlay_stream_coexists_with_scroll_stream() {
         with_app(|app| {
             // Transcript loading into the lower-pane slot.
-            app.view.scroll_pager = Some(pager_with_stream_id(10));
+            app.view.project_mut().scroll_pager = Some(pager_with_stream_id(10));
             app.runtime.scroll_stream = Some(Box::new(FakeStream {
                 id: 10,
                 outcome: Some(DrainOutcome::Idle),
                 retain: false,
             }));
             // Grep open in the overlay slot.
-            app.view.pager = Some(pager_with_stream_id(20));
+            app.view.project_mut().pager = Some(pager_with_stream_id(20));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 20,
                 outcome: Some(DrainOutcome::Changed),
@@ -597,7 +611,7 @@ mod tests {
                 "transcript stream must not be killed by the grep"
             );
             // The grep pager received the 'Changed' append.
-            assert_eq!(app.view.pager.as_ref().unwrap().lines.len(), 1);
+            assert_eq!(app.view.project().pager.as_ref().unwrap().lines.len(), 1);
         });
     }
 
@@ -615,10 +629,10 @@ mod tests {
             prior
                 .lines
                 .push(ratatui::text::Line::from("PRIOR DIFF CONTENT"));
-            app.view.pager_history.push(prior);
+            app.view.project_mut().pager_history.push(prior);
             // The freshly-mounted (second) git-view stream, about to report
             // "no changes".
-            app.view.pager = Some(pager_with_stream_id(2));
+            app.view.project_mut().pager = Some(pager_with_stream_id(2));
             app.runtime.pager_stream = Some(Box::new(FakeStream {
                 id: 2,
                 outcome: Some(DrainOutcome::CloseInfo("no changes".into())),
@@ -626,12 +640,12 @@ mod tests {
             }));
             assert!(app.drain_pager_stream());
             assert!(
-                app.view.pager.is_none(),
+                app.view.project().pager.is_none(),
                 "empty git-view must reveal the listing, not pop the prior diff"
             );
             assert!(app.runtime.pager_stream.is_none());
             // The prior diff is still reachable via `:bprev` (left in history).
-            assert_eq!(app.view.pager_history.back_len(), 1);
+            assert_eq!(app.view.project().pager_history.back_len(), 1);
         });
     }
 }

@@ -22,10 +22,10 @@ impl App {
         // Force a draw when the pager opens over a live pane (the pane stops
         // rendering, so its stale cells need clearing — via a forced draw, not
         // `terminal.clear()`, which would flash).
-        let pager_just_opened = self.view.pager.is_some()
+        let pager_just_opened = self.view.project().pager.is_some()
             && self.runtime.project().pane_tabs.is_some()
             && !self.view.pager_was_open;
-        self.view.pager_was_open = self.view.pager.is_some();
+        self.view.pager_was_open = self.view.project().pager.is_some();
         // A pending full repaint also requests a screen clear.
         let pending_clear = self.view.needs_full_repaint;
         self.view.needs_full_repaint = false;
@@ -145,7 +145,7 @@ impl App {
         for result in std::mem::take(&mut ctx.git_pending) {
             if self.ingest_git_result(result) {
                 needs_draw = true;
-                self.view.context_dirty = true;
+                self.view.project_mut().context_dirty = true;
             }
         }
         needs_draw
@@ -260,19 +260,19 @@ impl App {
         let typing_burst = ctx
             .last_input_at
             .is_some_and(|t| now_post.duration_since(t) < Duration::from_millis(300));
-        if self.view.context_dirty
+        if self.view.project().context_dirty
             && !typing_burst
             && now_post.duration_since(ctx.last_context_write) >= Duration::from_millis(150)
         {
             self.write_context();
             ctx.last_context_write = now_post;
-            self.view.context_dirty = false;
+            self.view.project_mut().context_dirty = false;
             ctx.scheduler.disarm(Deadline::ContextWrite);
         }
         // Arm ContextWrite at the predicate edge (the later of the 150 ms
         // min-interval and the 300 ms typing-burst suppressor) while dirty;
         // disarm once written.
-        if self.view.context_dirty {
+        if self.view.project().context_dirty {
             let edge = (ctx.last_context_write + Duration::from_millis(150)).max(
                 ctx.last_input_at
                     .map_or(ctx.last_context_write, |t| t + Duration::from_millis(300)),

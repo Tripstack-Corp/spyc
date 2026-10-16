@@ -169,7 +169,7 @@ impl App {
     /// 15-line mirror copies — only the history call and the end-of-list wording
     /// differ.
     fn nav_pager_buffer(&mut self, forward: bool) {
-        let Some(mut current) = self.view.pager.take() else {
+        let Some(mut current) = self.view.project_mut().pager.take() else {
             return;
         };
         // If navigating away from a mid-flight overlay stream, kill it now and
@@ -195,20 +195,20 @@ impl App {
         // history and resurface when this view is restored.
         current.flash = None;
         let step = if forward {
-            self.view.pager_history.go_forward(current)
+            self.view.project_mut().pager_history.go_forward(current)
         } else {
-            self.view.pager_history.go_back(current)
+            self.view.project_mut().pager_history.go_back(current)
         };
         let msg = match step {
             Ok(next) => {
-                self.view.pager = Some(next);
+                self.view.project_mut().pager = Some(next);
                 self.view.needs_full_repaint = true;
-                let back = self.view.pager_history.back_len();
-                let fwd = self.view.pager_history.forward_len();
+                let back = self.view.project().pager_history.back_len();
+                let fwd = self.view.project().pager_history.forward_len();
                 format!("buffer ←{back} →{fwd}")
             }
             Err(current) => {
-                self.view.pager = Some(current);
+                self.view.project_mut().pager = Some(current);
                 if forward {
                     "no newer buffers".to_string()
                 } else {
@@ -217,7 +217,7 @@ impl App {
             }
         };
         // Flash in the pager, not the file-list status bar the pager covers.
-        if let Some(view) = self.view.pager.as_mut() {
+        if let Some(view) = self.view.project_mut().pager.as_mut() {
             view.flash = Some(msg);
         }
     }
@@ -236,7 +236,7 @@ impl App {
             // A bottom scrollback (`view.scroll_pager`) is `no_history` and
             // task-less, so swallow the chord rather than navigate the top
             // pager's history from underneath the focused scrollback.
-            if self.state.pane_focused() && self.view.scroll_pager.is_some() {
+            if self.state.pane_focused() && self.view.project().scroll_pager.is_some() {
                 return Some(Vec::new());
             }
             if key.code == KeyCode::Char('b') {
@@ -545,12 +545,12 @@ mod tests {
         let lines: Vec<String> = (0..50).map(|i| format!("line {i}")).collect();
         let view = PagerView::new_plain("t", lines);
         view.last_viewport_h.set(20);
-        app.view.pager = Some(view);
+        app.view.project_mut().pager = Some(view);
         app
     }
 
     fn pager(app: &App) -> &PagerView {
-        app.view.pager.as_ref().expect("pager")
+        app.view.project().pager.as_ref().expect("pager")
     }
 
     #[test]
@@ -622,38 +622,54 @@ mod tests {
         );
         sb.pane_scroll = true;
         sb.mount = Mount::LowerPane;
-        app.view.scroll_pager = Some(sb);
+        app.view.project_mut().scroll_pager = Some(sb);
 
         // First H → transcript help, real scrollback stashed.
         app.handle_pager_key(ch('H'));
         assert_eq!(
-            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            app.view
+                .project()
+                .scroll_pager
+                .as_ref()
+                .map(|v| v.title.as_str()),
             Some(SCROLLBACK_HELP_TITLE)
         );
-        assert!(app.view.scroll_pager_help_stash.is_some());
+        assert!(app.view.project().scroll_pager_help_stash.is_some());
 
         // H again → toggle to the full pager-keys help (still stashed).
         app.handle_pager_key(ch('H'));
         assert_eq!(
-            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            app.view
+                .project()
+                .scroll_pager
+                .as_ref()
+                .map(|v| v.title.as_str()),
             Some(PAGER_HELP_TITLE)
         );
-        assert!(app.view.scroll_pager_help_stash.is_some());
+        assert!(app.view.project().scroll_pager_help_stash.is_some());
 
         // H once more → back to transcript help (toggle is symmetric).
         app.handle_pager_key(ch('H'));
         assert_eq!(
-            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            app.view
+                .project()
+                .scroll_pager
+                .as_ref()
+                .map(|v| v.title.as_str()),
             Some(SCROLLBACK_HELP_TITLE)
         );
 
         // Esc → restore the real scrollback (not snap-to-live, not close).
         app.handle_pager_key(code(KeyCode::Esc));
         assert_eq!(
-            app.view.scroll_pager.as_ref().map(|v| v.title.as_str()),
+            app.view
+                .project()
+                .scroll_pager
+                .as_ref()
+                .map(|v| v.title.as_str()),
             Some("transcript")
         );
-        assert!(app.view.scroll_pager_help_stash.is_none());
+        assert!(app.view.project().scroll_pager_help_stash.is_none());
     }
 
     /// App with a pager whose only `needle` sits on line 3, so a committed
@@ -667,7 +683,7 @@ mod tests {
             .collect::<Vec<_>>();
         let view = PagerView::new_plain("t", lines);
         view.last_viewport_h.set(5);
-        app.view.pager = Some(view);
+        app.view.project_mut().pager = Some(view);
         app
     }
 
@@ -693,7 +709,7 @@ mod tests {
         );
 
         // Commit: only a query of "needle" can land on line 3.
-        let view = app.view.pager.as_mut().expect("pager");
+        let view = app.view.project_mut().pager.as_mut().expect("pager");
         assert!(view.commit_search(5), "pasted query must match");
         assert_eq!(view.current_match_line(), Some(3));
     }
@@ -735,6 +751,7 @@ mod tests {
     fn buffer_history_step_flashes_depth_in_the_pager() {
         let mut app = jump_pager_app();
         app.view
+            .project_mut()
             .pager_history
             .push(PagerView::new_plain("older", vec!["a".to_string()]));
         app.handle_pager_key(ch('['));
@@ -754,6 +771,7 @@ mod tests {
     fn buffer_history_does_not_resurrect_a_stale_flash() {
         let mut app = jump_pager_app();
         app.view
+            .project_mut()
             .pager_history
             .push(PagerView::new_plain("older", vec!["a".to_string()]));
         for k in [ch('['), ch('b'), ch(']'), ch('b')] {
@@ -775,11 +793,12 @@ mod tests {
         let mut sb = PagerView::new_plain("transcript", vec!["line".to_string()]);
         sb.pane_scroll = true;
         sb.mount = Mount::LowerPane;
-        app.view.scroll_pager = Some(sb);
+        app.view.project_mut().scroll_pager = Some(sb);
 
         app.handle_pager_key(ch('t'));
         assert_eq!(
             app.view
+                .project()
                 .scroll_pager
                 .as_ref()
                 .and_then(|v| v.flash.as_deref()),
@@ -798,7 +817,7 @@ mod tests {
     #[test]
     fn task_viewer_pause_message_lands_in_the_pager() {
         let mut app = jump_pager_app();
-        if let Some(v) = app.view.pager.as_mut() {
+        if let Some(v) = app.view.project_mut().pager.as_mut() {
             v.task_id = Some(7);
         }
         app.handle_pager_key(ch('S'));
@@ -823,10 +842,13 @@ mod tests {
         let mut sb = PagerView::new_plain("transcript", vec!["line".to_string()]);
         sb.pane_scroll = true;
         sb.mount = Mount::LowerPane;
-        app.view.scroll_pager = Some(sb);
+        app.view.project_mut().scroll_pager = Some(sb);
 
         app.handle_pager_key(ch('q'));
-        assert!(app.view.scroll_pager.is_none(), "q closed the scrollback");
+        assert!(
+            app.view.project().scroll_pager.is_none(),
+            "q closed the scrollback"
+        );
         assert_eq!(
             app.state.flash.as_ref().map(|f| f.text.as_str()),
             Some("scroll: off"),

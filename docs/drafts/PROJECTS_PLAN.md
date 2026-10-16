@@ -266,8 +266,11 @@ has: restoring a stale pick set is worse than restoring none.
 |---|---|---|---|
 | `pager`, `pager_right`, `right_pager`, `displaced_preview`, `scroll_pager`, the help stashes | project | Open views over that project's columns. | A (`right_pager.source_path` is R, as today) |
 | `pager_history` | project | `[b` / `gp` means "what I was reading here". Reopening a buffer from another project inside this one is disorienting. | A |
-| `cached_rows*`, `right_cached_rows*` | project | Keyed by each column's `list_generation`. | C |
+| `cached_rows*`, `right_cached_rows*`, `cached_grid_key`, `right_cached_grid_key`, `pages`, `right_pages` | project | Keyed by each column's `list_generation`. | C |
+| `overlay_awaiting_dismiss`, `overlay_auto_dismiss`, `overlay_column` | project | Bookkeeping for `ProjectRuntime`'s overlay slots, so they move with them. | T |
+| `pending_pager_return` | project | The pager a `v` edit reopens when the editor exits, into this project's slot. | T |
 | `context_path`, `last_context`, `context_dirty` | project | One context file per project home (§2). | D |
+| `preview_dirty` | global | The re-kick flag of `preview_reloading` (§1c), which is global. | T |
 | `pager_positions` | global | Keyed by file. | own file |
 | `theme` | global, recomputed on switch | Follows the active project's config. | C |
 | `term_size`, `color_depth`, `is_ssh`, `hud_*`, `last_term_title`, `chrome_rows` | global | Facts about the terminal and the frame drawn on it. | C |

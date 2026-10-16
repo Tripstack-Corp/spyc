@@ -52,9 +52,10 @@ pub(super) fn why_status(app: &mut App) -> String {
 /// The pager `command` opens. Any pager already open is closed first, so a
 /// command that opens none can't be read as the previous one.
 fn pager_text(app: &mut App, command: &str) -> String {
-    app.view.pager = None;
+    app.view.project_mut().pager = None;
     app.dispatch_command(command);
     app.view
+        .project()
         .pager
         .as_ref()
         .unwrap()

@@ -388,7 +388,7 @@ impl App {
             // Don't restore a blank split: if the preview file is gone or
             // failed to load, there'd be a carved, empty right column with no
             // content. Match `cycle_vsplit`'s open-branch guard.
-            if self.view.right_pager.is_none() {
+            if self.view.project().right_pager.is_none() {
                 self.state.active_project_mut().vsplit = None;
             }
         }

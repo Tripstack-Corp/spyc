@@ -253,7 +253,7 @@ impl App {
         // restores it.
         let mut layout = match self.state.active_project().vsplit {
             Some(vsplit) if self.state.active_project().pane.zoom == state::ZoomTarget::None => {
-                Self::carve_vsplit(layout, vsplit, area, self.view.overlay_column)
+                Self::carve_vsplit(layout, vsplit, area, self.view.project().overlay_column)
             }
             _ => layout,
         };
@@ -353,8 +353,8 @@ impl App {
         };
         match overlay_exit(
             overlay_closed,
-            self.view.overlay_awaiting_dismiss,
-            self.view.overlay_auto_dismiss,
+            self.view.project().overlay_awaiting_dismiss,
+            self.view.project().overlay_auto_dismiss,
         ) {
             OverlayExit::Hold => {}
             OverlayExit::AutoClose => {
@@ -363,12 +363,12 @@ impl App {
                 // key" frame. `recompute_focus` at the next loop top drops the
                 // stale `Overlay` focus; this frame already redraws without it.
                 self.runtime.project_mut().top_overlay = None;
-                self.view.overlay_auto_dismiss = false;
-                self.view.overlay_column = None;
+                self.view.project_mut().overlay_auto_dismiss = false;
+                self.view.project_mut().overlay_column = None;
                 self.view.needs_full_repaint = true;
             }
             OverlayExit::AwaitDismiss => {
-                self.view.overlay_awaiting_dismiss = true;
+                self.view.project_mut().overlay_awaiting_dismiss = true;
             }
         }
 
@@ -426,7 +426,7 @@ impl App {
         // one fact "the bottom region is the scrollback", which is exactly
         // `scroll_pager.is_some()`.)
         if let Some(rect) = layout.pane
-            && let Some(view) = self.view.scroll_pager.as_mut()
+            && let Some(view) = self.view.project_mut().scroll_pager.as_mut()
             && view.pending_scroll_to_bottom.get()
         {
             view.scroll_to_bottom(rect.height);
@@ -445,21 +445,23 @@ impl App {
     /// `cursor.view_top`. No drawing, no IO — extracted from the draw path
     /// (MVU Stage 2) so `render` stays mutation-free.
     fn settle_list_grid(&mut self, layout: &FrameLayout) {
-        if self.view.cached_rows_gen != self.state.active_project().left.list_generation {
-            self.view.cached_rows = self.build_rows();
-            self.view.cached_rows_gen = self.state.active_project().left.list_generation;
+        if self.view.project().cached_rows_gen != self.state.active_project().left.list_generation {
+            self.view.project_mut().cached_rows = self.build_rows();
+            self.view.project_mut().cached_rows_gen =
+                self.state.active_project().left.list_generation;
         }
         // Disjoint field borrows: cached_rows (read) + pages/cached_grid_key
         // (write) on `view`, and `state.left` (write) — all distinct fields, so
         // this passes the borrow checker without an accessor that locks all of
         // `self`.
+        let pv = self.view.project_mut();
         settle_page(
-            &self.view.cached_rows,
-            self.view.cached_rows_gen,
+            &pv.cached_rows,
+            pv.cached_rows_gen,
             &mut self.state.active_project_mut().left,
             layout.list,
-            &mut self.view.pages,
-            &mut self.view.cached_grid_key,
+            &mut pv.pages,
+            &mut pv.cached_grid_key,
         );
 
         // The right column's second commander (`state.right`) settles the same
@@ -472,22 +474,23 @@ impl App {
                 .right
                 .as_ref()
                 .map_or(u64::MAX, |r| r.list_generation);
-            if self.view.right_cached_rows_gen != right_gen
+            if self.view.project().right_cached_rows_gen != right_gen
                 && let Some(right) = self.state.active_project().right.as_ref()
             {
-                self.view.right_cached_rows = self.build_rows_for(right);
-                self.view.right_cached_rows_gen = right_gen;
+                self.view.project_mut().right_cached_rows = self.build_rows_for(right);
+                self.view.project_mut().right_cached_rows_gen = right_gen;
             }
             if let (Some(rect), Some(right)) =
                 (layout.right, self.state.active_project_mut().right.as_mut())
             {
+                let pv = self.view.project_mut();
                 settle_page(
-                    &self.view.right_cached_rows,
-                    self.view.right_cached_rows_gen,
+                    &pv.right_cached_rows,
+                    pv.right_cached_rows_gen,
                     right,
                     rect,
-                    &mut self.view.right_pages,
-                    &mut self.view.right_cached_grid_key,
+                    &mut pv.right_pages,
+                    &mut pv.right_cached_grid_key,
                 );
             }
         }
@@ -569,7 +572,7 @@ mod render_tests {
         let mut app = App::test_app(std::env::temp_dir());
         app.state.active_project_mut().left.listing.dir = PathBuf::from("/projects/demo");
         app.seed_rows(names);
-        app.view.cached_rows_gen = app
+        app.view.project_mut().cached_rows_gen = app
             .state
             .active_project()
             .left
@@ -718,7 +721,7 @@ mod render_tests {
             (0..30).map(|i| format!("preview line {i}")).collect(),
         );
         pv.mount = crate::ui::pager::Mount::RightPane;
-        app.view.right_pager = Some(pv);
+        app.view.project_mut().right_pager = Some(pv);
         app.state.active_project_mut().vsplit = Some(state::VSplit {
             width_pct: 50,
             mode,
@@ -870,8 +873,8 @@ mod render_tests {
                 (0..40).map(|i| format!("line {i}")).collect(),
             );
             pv.mount = crate::ui::pager::Mount::TopPane;
-            app.view.pager = Some(pv);
-            app.view.overlay_column = Some(state::Side::Left);
+            app.view.project_mut().pager = Some(pv);
+            app.view.project_mut().overlay_column = Some(state::Side::Left);
             // open b (right), focused.
             app.open_second_commander_at(tmp.path());
             // open a prompt (as `O` would) from the focused column.
@@ -900,11 +903,17 @@ mod render_tests {
             // A live top-overlay pty (stands in for the `V` editor), pinned to
             // the left column of a vsplit; keyboard on the right column.
             let wake = app.make_pane_wake();
-            let overlay =
-                crate::pane::Pane::spawn("cat", 24, 80, tmp.path(), &app.view.context_path, wake)
-                    .expect("spawn overlay");
+            let overlay = crate::pane::Pane::spawn(
+                "cat",
+                24,
+                80,
+                tmp.path(),
+                &app.view.project().context_path,
+                wake,
+            )
+            .expect("spawn overlay");
             app.runtime.project_mut().top_overlay = Some(overlay);
-            app.view.overlay_column = Some(state::Side::Left);
+            app.view.project_mut().overlay_column = Some(state::Side::Left);
             app.state.active_project_mut().vsplit = Some(state::VSplit {
                 width_pct: 50,
                 mode: state::VsplitMode::TopOnly,
@@ -915,7 +924,7 @@ mod render_tests {
             let mut help =
                 crate::ui::pager::PagerView::new_plain("Help", vec!["ZZHELPMARKERZZ".to_string()]);
             help.mount = crate::ui::pager::Mount::Overlay;
-            app.view.pager = Some(help);
+            app.view.project_mut().pager = Some(help);
             app.state.active_project_mut().focus =
                 state::Focus::Pager(crate::ui::pager::Mount::Overlay);
 

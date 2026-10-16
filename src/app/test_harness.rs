@@ -10,7 +10,8 @@ impl App {
     /// `App` with **no** terminal, **no** MCP socket server, **no**
     /// git-status worker thread, and **no** real-env cwd — unlike
     /// `App::new`. Drive it with `apply(&Action)` / `handle_key(KeyEvent)`
-    /// and assert on `self.state.*`, `self.runtime.pane_tabs`, `self.view.pager`, etc.
+    /// and assert on `self.state.*`, `self.runtime.project().pane_tabs`,
+    /// `self.view.project().pager`, etc.
     ///
     /// Wrap callers in `crate::state::with_state_root(tmp, || …)` so the
     /// history / pager-position / inventory state dir is an isolated temp.
@@ -30,6 +31,7 @@ impl App {
                 false,
                 false,
                 crate::ui::color_depth::ColorDepth::TrueColor,
+                active,
             ),
             exit_summary: None,
             // `next_stream_id` starts at 1 here (0 in `App::new`) — a

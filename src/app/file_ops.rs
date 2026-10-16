@@ -497,7 +497,7 @@ impl App {
                         self.state.apply_refreshed_listing(listing);
                         // The fs-driven refresh may have shifted cursor_file /
                         // git_branch — mirror the old inline `context_dirty`.
-                        self.view.context_dirty = true;
+                        self.view.project_mut().context_dirty = true;
                     }
                 }
                 // A refresh requested while this read was in flight → re-spawn
@@ -846,7 +846,12 @@ mod tests {
         let (drew, fx) = app.apply_file_outcomes();
         assert!(drew);
         assert!(fx.is_empty(), "opening a pager emits no follow-on effect");
-        let pager = app.view.pager.as_ref().expect("pager opened from outcome");
+        let pager = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("pager opened from outcome");
         assert_eq!(pager.title, "long listing — x");
         assert!(pager.fit_to_content, "L pager is fit-to-content");
     }
@@ -918,7 +923,12 @@ mod tests {
             fx.is_empty(),
             "installing a pager emits no follow-on effect"
         );
-        let pager = app.view.pager.as_ref().expect("overlay pager installed");
+        let pager = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("overlay pager installed");
         assert_eq!(
             pager.scroll, 2,
             "the dest's scroll override (gF line) applied"
@@ -940,7 +950,12 @@ mod tests {
             });
         let (drew, _) = app.apply_file_outcomes();
         assert!(drew);
-        let pager = app.view.pager.as_ref().expect("top-pane pager installed");
+        let pager = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("top-pane pager installed");
         assert!(matches!(pager.mount, crate::ui::pager::Mount::TopPane));
         assert!(pager.no_history, "D opens are not pushed to buffer history");
     }
@@ -960,7 +975,10 @@ mod tests {
         let (drew, fx) = app.apply_file_outcomes();
         assert!(drew);
         assert!(fx.is_empty());
-        assert!(app.view.pager.is_none(), "a refused open leaves no pager");
+        assert!(
+            app.view.project().pager.is_none(),
+            "a refused open leaves no pager"
+        );
         assert!(
             app.state
                 .flash

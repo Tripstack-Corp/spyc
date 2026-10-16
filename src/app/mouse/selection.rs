@@ -461,10 +461,14 @@ impl super::super::App {
         let (cols, rows) = self.view.term_size;
         let layout = self.frame_layout(Rect::new(0, 0, cols, rows));
         let (area, cached, commander) = match side {
-            Side::Left => (layout.list, &self.view.cached_rows, self.state.col(side)),
+            Side::Left => (
+                layout.list,
+                &self.view.project().cached_rows,
+                self.state.col(side),
+            ),
             Side::Right => (
                 layout.right?,
-                &self.view.right_cached_rows,
+                &self.view.project().right_cached_rows,
                 self.state.get_col(side)?,
             ),
         };
@@ -617,7 +621,7 @@ mod tests {
         let path = tmp.keep();
         crate::state::with_state_root(&path, || {
             let mut app = App::test_app(path.clone());
-            app.view.pager = Some(view);
+            app.view.project_mut().pager = Some(view);
             app
         })
     }
@@ -657,12 +661,12 @@ mod tests {
     fn drag_past_the_bottom_edge_scrolls_and_keeps_extending() {
         let mut app = app_with_pager(mounted_pager());
         app.begin_pager_selection(left_down(0, 0), PagerSlot::Modal);
-        let before = app.view.pager.as_ref().unwrap().scroll;
+        let before = app.view.project().pager.as_ref().unwrap().scroll;
 
         // Row 5 is three rows past the 2-row viewport — squarely "in the pane".
         app.extend_pager_selection(left_drag(0, 5));
 
-        let view = app.view.pager.as_ref().expect("still mounted");
+        let view = app.view.project().pager.as_ref().expect("still mounted");
         assert!(
             view.scroll > before,
             "a drag past the bottom edge must scroll the pager, not freeze it"
@@ -688,7 +692,7 @@ mod tests {
 
         app.extend_pager_selection(left_drag(0, 0));
 
-        let view = app.view.pager.as_ref().expect("still mounted");
+        let view = app.view.project().pager.as_ref().expect("still mounted");
         assert!(view.scroll < 5, "a drag past the top edge must scroll up");
     }
 
@@ -699,11 +703,11 @@ mod tests {
     fn drag_beyond_the_right_edge_clamps_without_scrolling() {
         let mut app = app_with_pager(mounted_pager());
         app.begin_pager_selection(left_down(0, 0), PagerSlot::Modal);
-        let scroll_before = app.view.pager.as_ref().unwrap().scroll;
+        let scroll_before = app.view.project().pager.as_ref().unwrap().scroll;
 
         app.extend_pager_selection(left_drag(50, 0)); // same row, way past the right edge
 
-        let view = app.view.pager.as_ref().expect("still mounted");
+        let view = app.view.project().pager.as_ref().expect("still mounted");
         assert_eq!(
             view.scroll, scroll_before,
             "a horizontal miss must not scroll"
@@ -735,6 +739,7 @@ mod tests {
         );
         let sel = app
             .view
+            .project()
             .pager
             .as_ref()
             .and_then(|v| v.visual)
@@ -753,7 +758,7 @@ mod tests {
 
         assert!(effects.is_empty(), "a plain click must not copy anything");
         assert!(
-            app.view.pager.as_ref().unwrap().visual.is_none(),
+            app.view.project().pager.as_ref().unwrap().visual.is_none(),
             "a plain click must not leave a stray highlight"
         );
     }
@@ -801,7 +806,8 @@ mod tests {
                     .collect();
                 // Geometry the renderer would have settled.
                 app.view.term_size = (80, 24);
-                app.view.cached_rows = cached_for(&app.state.active_project().left.rows);
+                app.view.project_mut().cached_rows =
+                    cached_for(&app.state.active_project().left.rows);
 
                 let at = |kind, row, m| MouseEvent {
                     kind,
@@ -857,7 +863,7 @@ mod tests {
                 })
                 .collect();
             app.view.term_size = (80, 24);
-            app.view.cached_rows = cached_for(&app.state.active_project().left.rows);
+            app.view.project_mut().cached_rows = cached_for(&app.state.active_project().left.rows);
             let at = |kind, row| MouseEvent {
                 kind,
                 column: 0,
@@ -918,7 +924,7 @@ mod tests {
                 cursor_col: 0,
                 kind: VisualKind::Char,
             });
-            app.view.pager = Some(pager);
+            app.view.project_mut().pager = Some(pager);
 
             let _ = app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
 
@@ -935,7 +941,12 @@ mod tests {
                 "a keypress must retire the chrome selection"
             );
             assert!(
-                app.view.pager.as_ref().and_then(|v| v.visual).is_some(),
+                app.view
+                    .project()
+                    .pager
+                    .as_ref()
+                    .and_then(|v| v.visual)
+                    .is_some(),
                 "the pager's visual mode is modal and must survive"
             );
         });

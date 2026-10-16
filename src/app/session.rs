@@ -259,6 +259,7 @@ impl App {
                     focus_right: matches!(v.focus, Side::Right),
                     preview_path: self
                         .view
+                        .project()
                         .right_pager
                         .as_ref()
                         .and_then(|p| p.source_path.clone()),
@@ -547,7 +548,7 @@ impl App {
                 lines.push(format!("  {}", crate::paths::display_tilde(src)));
             }
         }
-        self.view.pager = Some(PagerView::new_plain("session info", lines));
+        self.view.project_mut().pager = Some(PagerView::new_plain("session info", lines));
     }
 
     /// Run the canonical quit lifecycle: first call arms a 2-second
@@ -605,10 +606,7 @@ impl App {
     /// Sync the history editor after moving the picker cursor to a new line.
     /// Updates the LineEditor content and the display line.
     pub fn sync_history_editor_to_cursor(&mut self) {
-        if let (Some(view), Some(editor)) = (
-            self.view.pager.as_mut(),
-            self.view.pending_history_pick.as_mut(),
-        ) {
+        if let (Some(view), Some(editor)) = self.view.top_pager_and_history_pick_mut() {
             Self::show_history_selection(view, editor, &self.state.history, true);
         }
     }
@@ -941,7 +939,12 @@ mod tests {
 
     /// The text of the line under the open picker's cursor.
     fn cursored_line(app: &App) -> String {
-        let view = app.view.pager.as_ref().expect("the picker is open");
+        let view = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("the picker is open");
         let cursor = view.picker_cursor.expect("a picker has a cursor");
         view.lines[cursor].to_string()
     }
@@ -1019,7 +1022,14 @@ mod tests {
             }
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.show_session_picker();
-            let reachable = app.view.pager.as_ref().expect("picker").lines.len();
+            let reachable = app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .expect("picker")
+                .lines
+                .len();
             for code in [
                 crossterm::event::KeyCode::Up,
                 crossterm::event::KeyCode::Down,
@@ -1063,13 +1073,21 @@ mod tests {
 
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.show_session_picker();
-            for _ in 0..app.view.pager.as_ref().expect("picker").lines.len() {
+            for _ in 0..app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .expect("picker")
+                .lines
+                .len()
+            {
                 press(&mut app, KeyCode::Up);
             }
             assert!(cursored_line(&app).contains("new session"));
             press(&mut app, KeyCode::Enter);
             assert_eq!(app.state.session_id, None, "the [n] row restores nothing");
-            assert!(app.view.pager.is_none(), "and closes the picker");
+            assert!(app.view.project().pager.is_none(), "and closes the picker");
         });
     }
 

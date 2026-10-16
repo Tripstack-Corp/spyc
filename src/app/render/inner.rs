@@ -56,9 +56,9 @@ impl App {
             // `status_position = "bottom"`.
             let top_area = layout.top_unit;
             let underlying = if in_help {
-                self.view.pager_help_stash.as_ref()
+                self.view.project().pager_help_stash.as_ref()
             } else {
-                self.view.pager.as_ref()
+                self.view.project().pager.as_ref()
             };
             if let Some(view) = underlying {
                 crate::ui::pager::render(frame, top_area, view, &self.view.theme);
@@ -101,7 +101,7 @@ impl App {
             // top of the just-drawn slot before returning. The
             // standard branch's centred-overlay tail (further down)
             // never runs in this path.
-            if in_help && let Some(help) = self.view.pager.as_ref() {
+            if in_help && let Some(help) = self.view.project().pager.as_ref() {
                 crate::ui::pager::render(frame, frame.area(), help, &self.view.theme);
             }
             return;
@@ -113,7 +113,7 @@ impl App {
         // fills the body instead of the list — the pane is collapsed exactly
         // like `TopList`, but the body renders `view.right_pager`.
         if self.state.active_project().pane.zoom == state::ZoomTarget::RightColumn
-            && let Some(view) = self.view.right_pager.as_ref()
+            && let Some(view) = self.view.project().right_pager.as_ref()
         {
             crate::ui::pager::render(frame, layout.list, view, &self.view.theme);
         } else {
@@ -134,7 +134,7 @@ impl App {
         // identically whether the top region is the file list or a `D` pager.
         // The scrollback lives in its own slot, independent of the help
         // overlay's `view.pager` stash.
-        let bottom_is_pager = self.view.scroll_pager.is_some();
+        let bottom_is_pager = self.view.project().scroll_pager.is_some();
         if let Some(rect) = layout.pane {
             self.render_bottom_region(frame, rect, false);
             // output_dirty cleared in `prepare_panes`.
@@ -157,7 +157,7 @@ impl App {
         // `LowerPane` and `TopPane` mounts already rendered into
         // their slots above; only `Overlay` mount hits this centred
         // render path.
-        if let Some(view) = &self.view.pager
+        if let Some(view) = &self.view.project().pager
             && matches!(view.mount, crate::ui::pager::Mount::Overlay)
         {
             pager::render(frame, frame.area(), view, &self.view.theme);
@@ -199,7 +199,7 @@ impl App {
         rect: ratatui::layout::Rect,
         suppress_cursor: bool,
     ) {
-        if let Some(view) = self.view.scroll_pager.as_ref() {
+        if let Some(view) = self.view.project().scroll_pager.as_ref() {
             // The scrollback snapshot owns this rect; the pty runs off-screen.
             // The first-frame scroll snap (pending) is settled in `prepare_panes`.
             crate::ui::pager::render(frame, rect, view, &self.view.theme);
@@ -241,6 +241,7 @@ impl App {
     /// The pager-help overlay is up; the pager it covers is stashed.
     fn pager_help_is_open(&self) -> bool {
         self.view
+            .project()
             .pager
             .as_ref()
             .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
@@ -250,9 +251,9 @@ impl App {
     /// overlay has stashed.
     fn top_pane_pager_is_open(&self) -> bool {
         if self.pager_help_is_open() {
-            self.view.pager_help_stash.as_ref()
+            self.view.project().pager_help_stash.as_ref()
         } else {
-            self.view.pager.as_ref()
+            self.view.project().pager.as_ref()
         }
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane))
     }
@@ -491,7 +492,7 @@ impl App {
         let list_focused = !self.view.dim_inactive || self.column_focused(state::Side::Left);
         frame.render_widget(
             ListView {
-                rows: &self.view.cached_rows,
+                rows: &self.view.project().cached_rows,
                 cursor: self.state.active_project().left.cursor.index,
                 view_top: self.state.active_project().left.cursor.view_top,
                 empty_marker: self.state.active_project().left.view == View::Dir,
@@ -551,7 +552,7 @@ impl App {
                         crate::app::util::place_pty_cursor_from_screen(frame, screen, rect);
                     }
                 });
-            } else if let Some(view) = self.view.pager_right.as_ref() {
+            } else if let Some(view) = self.view.project().pager_right.as_ref() {
                 // `b`'s own `D` TopPane pager.
                 crate::ui::pager::render(frame, rect, view, &self.view.theme);
                 if self.view.dim_inactive && !right_focused {
@@ -564,7 +565,7 @@ impl App {
                 let focused = !self.view.dim_inactive || self.right_column_focused();
                 frame.render_widget(
                     ListView {
-                        rows: &self.view.right_cached_rows,
+                        rows: &self.view.project().right_cached_rows,
                         cursor: right.cursor.index,
                         view_top: right.cursor.view_top,
                         empty_marker: right.view == View::Dir,
@@ -574,7 +575,7 @@ impl App {
                     },
                     rect,
                 );
-            } else if let Some(view) = self.view.right_pager.as_ref() {
+            } else if let Some(view) = self.view.project().right_pager.as_ref() {
                 // Otherwise the live-reloading preview (`^a |`).
                 crate::ui::pager::render(frame, rect, view, &self.view.theme);
                 if self.view.dim_inactive && !self.right_column_focused() {
@@ -712,7 +713,7 @@ impl App {
         // single / no-split overlay slot; the right column's overlay is drawn
         // (and focus-tracked) in `render_right_split`.
         let overlay_focused = self.column_focused(state::Side::Left);
-        let want_overlay_cursor = overlay_focused && !self.view.overlay_awaiting_dismiss;
+        let want_overlay_cursor = overlay_focused && !self.view.project().overlay_awaiting_dismiss;
         overlay.with_screen(|screen| {
             frame.render_widget(
                 PaneWidget {
@@ -727,7 +728,7 @@ impl App {
             }
         });
         // Show a dismiss prompt when the subprocess has exited.
-        if self.view.overlay_awaiting_dismiss && overlay_area.height > 0 {
+        if self.view.project().overlay_awaiting_dismiss && overlay_area.height > 0 {
             use ratatui::{
                 style::{Modifier, Style},
                 text::{Line, Span},
@@ -766,7 +767,7 @@ impl App {
             // Suppress the pty cursor while the overlay awaits dismissal so
             // the "[process exited — press any key]" frame shows no stray
             // cursor (the overlay's own cursor is suppressed the same way).
-            self.render_bottom_region(frame, rect, self.view.overlay_awaiting_dismiss);
+            self.render_bottom_region(frame, rect, self.view.project().overlay_awaiting_dismiss);
         }
         // The overlay (`top_unit`) is scoped to the focused column when a
         // vertical split is open; keep the OTHER column (its list / the
@@ -788,7 +789,7 @@ impl App {
         // site in this branch — paint it on top before returning (mirrors
         // the TopPane branch's help tail below). Without this it's invisible
         // yet still eats input.
-        if let Some(view) = self.view.pager.as_ref()
+        if let Some(view) = self.view.project().pager.as_ref()
             && matches!(view.mount, crate::ui::pager::Mount::Overlay)
         {
             crate::ui::pager::render(frame, frame.area(), view, &self.view.theme);

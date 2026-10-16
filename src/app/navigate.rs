@@ -375,7 +375,12 @@ mod tests {
             // A pane line referencing the file at line 3 (compiler/grep shape).
             app.goto_file_navigate(vec!["foo.txt:3".to_string()], dir.clone(), true);
 
-            let pager = app.view.pager.as_ref().expect("gF opened a pager");
+            let pager = app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .expect("gF opened a pager");
             assert_eq!(
                 pager.source_path.as_deref(),
                 Some(dir.join("foo.txt").as_path()),
@@ -503,7 +508,7 @@ mod tests {
             app.goto_file_navigate(vec![target.display().to_string()], dir, true);
 
             assert!(
-                app.view.pager.is_none(),
+                app.view.project().pager.is_none(),
                 "a directory reference chdirs, never opens a file pager"
             );
         });
@@ -536,7 +541,7 @@ mod tests {
                 "a socket is read off-thread, never inline on the input thread"
             );
             assert!(
-                app.view.pager.is_none(),
+                app.view.project().pager.is_none(),
                 "nothing is paged synchronously for a non-regular file"
             );
         });

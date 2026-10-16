@@ -289,7 +289,7 @@ impl App {
             rows,
             cols,
             cwd,
-            &self.view.context_path,
+            &self.view.project().context_path,
             &extra_env,
             wake,
         ) {
@@ -411,7 +411,7 @@ impl App {
             rows,
             cols,
             cwd,
-            &self.view.context_path,
+            &self.view.project().context_path,
             &extra_env,
             wake,
         ) {
@@ -826,14 +826,14 @@ impl App {
     pub(super) fn focused_top_pager_mount(&self) -> Option<crate::ui::pager::Mount> {
         use crate::ui::pager::Mount;
         if matches!(
-            self.view.pager.as_ref().map(|v| v.mount),
+            self.view.project().pager.as_ref().map(|v| v.mount),
             Some(Mount::Overlay)
         ) {
             return Some(Mount::Overlay);
         }
         match self.focused_side() {
-            state::Side::Right => self.view.pager_right.as_ref().map(|v| v.mount),
-            state::Side::Left => self.view.pager.as_ref().map(|v| v.mount),
+            state::Side::Right => self.view.project().pager_right.as_ref().map(|v| v.mount),
+            state::Side::Left => self.view.project().pager.as_ref().map(|v| v.mount),
         }
     }
 

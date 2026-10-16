@@ -100,6 +100,7 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
         app.show_session_info();
         let text = app
             .view
+            .project()
             .pager
             .as_ref()
             .unwrap()

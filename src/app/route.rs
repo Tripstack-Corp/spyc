@@ -259,7 +259,7 @@ impl App {
             modal: active_modal(ModalSnapshot {
                 has_find_picker: self.runtime.find_picker.is_some(),
                 has_capture: self.runtime.pending_capture.is_some(),
-                overlay_awaiting_dismiss: self.view.overlay_awaiting_dismiss,
+                overlay_awaiting_dismiss: self.view.project().overlay_awaiting_dismiss,
                 has_quick_select: self.view.quick_select.is_some(),
                 has_harpoon: self.view.harpoon_menu.is_some(),
                 has_image_gallery: self.view.image_gallery.is_some(),
@@ -274,7 +274,7 @@ impl App {
             // the OTHER column reads `None` here, so its keys go to the focused
             // column's list — it keeps rendering beside it.
             pager_mount: self.focused_top_pager_mount(),
-            has_scroll_pager: self.view.scroll_pager.is_some(),
+            has_scroll_pager: self.view.project().scroll_pager.is_some(),
             has_pane_tabs: self.runtime.project().pane_tabs.is_some(),
             // MVU Phase 5: read from the Model snapshot (refreshed at
             // loop-top), not the live host — decouples routing from Runtime.
@@ -283,7 +283,8 @@ impl App {
             resolver_pending: self.state.resolver.is_pending(),
             // Preview-only: a focused right *commander* (state.right) routes
             // through the resolver/file-list nav instead (driving `cur()`).
-            right_preview_focused: self.right_column_focused() && self.view.right_pager.is_some(),
+            right_preview_focused: self.right_column_focused()
+                && self.view.project().right_pager.is_some(),
         }
     }
 }

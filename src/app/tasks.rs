@@ -410,6 +410,7 @@ impl App {
         // viewer's task_id is stale.
         if self
             .view
+            .project()
             .pager
             .as_ref()
             .is_some_and(|v| v.task_id == Some(id))
@@ -711,8 +712,8 @@ impl App {
         }
         // Push the prior pager (if any, eligible) so `[b` can walk back.
         self.remember_pager_position();
-        if let Some(prev) = self.view.pager.take() {
-            self.view.pager_history.push(prev);
+        if let Some(prev) = self.view.project_mut().pager.take() {
+            self.view.project_mut().pager_history.push(prev);
         }
         self.set_pager(view);
         self.view.needs_full_repaint = true;
@@ -728,6 +729,7 @@ impl App {
         }
         let current = self
             .view
+            .project()
             .pager
             .as_ref()
             .and_then(|v| v.task_id)

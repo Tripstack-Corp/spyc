@@ -137,7 +137,7 @@ fn fresh_harness_is_deterministic() {
         assert!(matches!(app.state.mode, Mode::Normal));
         assert_eq!(app.state.active_project().left.cursor.index, 0);
         assert!(app.runtime.project().pane_tabs.is_none());
-        assert!(app.view.pager.is_none());
+        assert!(app.view.project().pager.is_none());
         assert!(app.flash_text().is_none());
         assert_eq!(
             app.state.active_project().left.listing.dir,
@@ -307,14 +307,14 @@ fn overlay_pager_consumes_keys_not_list() {
         let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
         app.seed_rows(&["a", "b", "c"]);
         let lines: Vec<String> = (0..50).map(|i| format!("line {i}")).collect();
-        app.view.pager = Some(PagerView::new_plain("t", lines));
+        app.view.project_mut().pager = Some(PagerView::new_plain("t", lines));
         app.handle_key(key('j')).unwrap();
         assert_eq!(
             app.state.active_project().left.cursor.index,
             0,
             "list cursor must not move with a pager open"
         );
-        assert!(app.view.pager.is_some(), "pager stays open on j");
+        assert!(app.view.project().pager.is_some(), "pager stays open on j");
     });
 }
 
@@ -336,9 +336,9 @@ fn worktree_picker_jk_moves_highlight() {
         let mut view =
             PagerView::new_plain("worktrees", vec!["wt0".into(), "wt1".into(), "wt2".into()]);
         view.picker_cursor = Some(0);
-        app.view.pager = Some(view);
+        app.view.project_mut().pager = Some(view);
 
-        let cursor = |app: &App| app.view.pager.as_ref().unwrap().picker_cursor;
+        let cursor = |app: &App| app.view.project().pager.as_ref().unwrap().picker_cursor;
         app.handle_key(key('j')).unwrap();
         assert_eq!(cursor(&app), Some(1), "j moves down");
         app.handle_key(key('j')).unwrap();
@@ -347,7 +347,10 @@ fn worktree_picker_jk_moves_highlight() {
         assert_eq!(cursor(&app), Some(2), "clamps at the last row");
         app.handle_key(key('k')).unwrap();
         assert_eq!(cursor(&app), Some(1), "k moves up");
-        assert!(app.view.pager.is_some(), "j/k keep the picker open");
+        assert!(
+            app.view.project().pager.is_some(),
+            "j/k keep the picker open"
+        );
         assert!(app.state.pending_worktrees.is_some());
     });
 }
@@ -392,9 +395,12 @@ fn esc_closes_overlay_pager() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(std::path::PathBuf::from("/tmp/harness"));
-        app.view.pager = Some(PagerView::new_plain("t", vec!["a".to_string()]));
+        app.view.project_mut().pager = Some(PagerView::new_plain("t", vec!["a".to_string()]));
         app.handle_key(esc()).unwrap();
-        assert!(app.view.pager.is_none(), "Esc should close the pager");
+        assert!(
+            app.view.project().pager.is_none(),
+            "Esc should close the pager"
+        );
     });
 }
 
@@ -438,8 +444,9 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
         // `cat` stands in for the agent process; the "claude" command makes the
         // tab detect as an agent. Same spawn idiom as the pane harness tests.
         let wake = app.make_pane_wake();
-        let pane = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
-            .expect("spawn cat");
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
         let entry =
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", &dir));
         app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));

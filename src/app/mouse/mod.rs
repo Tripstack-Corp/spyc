@@ -307,7 +307,7 @@ impl super::App {
             modal: active_modal(ModalSnapshot {
                 has_find_picker: self.runtime.find_picker.is_some(),
                 has_capture: self.runtime.pending_capture.is_some(),
-                overlay_awaiting_dismiss: self.view.overlay_awaiting_dismiss,
+                overlay_awaiting_dismiss: self.view.project().overlay_awaiting_dismiss,
                 has_quick_select: self.view.quick_select.is_some(),
                 has_harpoon: self.view.harpoon_menu.is_some(),
                 has_image_gallery: self.view.image_gallery.is_some(),
@@ -324,7 +324,7 @@ impl super::App {
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL),
             is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
-            has_scroll_pager: self.view.scroll_pager.is_some(),
+            has_scroll_pager: self.view.project().scroll_pager.is_some(),
             pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
             // Only resolved over the divider: the width walk allocates, and a
@@ -607,8 +607,9 @@ mod tests {
     /// genuinely leave the screen and land in the emulator's scrollback.
     fn inline_agent_pane_with_history(app: &mut App, dir: &std::path::Path) {
         let wake = app.make_pane_wake();
-        let pane = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
-            .expect("spawn cat");
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
         let entry = crate::pane::tabs::TabEntry::new(
             pane,
             crate::pane::tabs::TabInfo::new("claude", dir.to_path_buf()),
@@ -692,7 +693,8 @@ mod tests {
             crate::set_mouse_capture_for_test(false);
 
             assert!(
-                app.runtime.pane_scroll_settle.is_some() || app.view.scroll_pager.is_some(),
+                app.runtime.pane_scroll_settle.is_some()
+                    || app.view.project().scroll_pager.is_some(),
                 "a sustained wheel-up over an inline agent must reach for the pane's \
                  captured history; instead the tick vanished"
             );
@@ -718,8 +720,9 @@ mod tests {
             let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 120, 24));
             let pane_rect = layout.pane.expect("a pane is open");
             let point = (pane_rect.x + 2, pane_rect.y + 1);
-            let reached_for_history =
-                |a: &App| a.runtime.pane_scroll_settle.is_some() || a.view.scroll_pager.is_some();
+            let reached_for_history = |a: &App| {
+                a.runtime.pane_scroll_settle.is_some() || a.view.project().scroll_pager.is_some()
+            };
 
             for _ in 0..(super::route::OPEN_AFTER_UP_TICKS * 2) {
                 app.handle_mouse(at(MouseEventKind::ScrollDown, point.0, point.1));

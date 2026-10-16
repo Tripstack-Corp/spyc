@@ -298,10 +298,10 @@ impl App {
             Action::OpenTaskViewer => self.open_task_viewer(None),
 
             Action::ReopenLastBuffer => {
-                if let Some(prev) = self.view.pager_history.pop_back() {
-                    self.view.pager = Some(prev);
+                if let Some(prev) = self.view.project_mut().pager_history.pop_back() {
+                    self.view.project_mut().pager = Some(prev);
                     self.view.needs_full_repaint = true;
-                    let msg = format!("buffer ←{}", self.view.pager_history.back_len());
+                    let msg = format!("buffer ←{}", self.view.project().pager_history.back_len());
                     // The reopened pager covers the status bar (#166).
                     self.set_active_pager_flash(msg);
                 } else {

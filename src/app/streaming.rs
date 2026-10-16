@@ -101,7 +101,7 @@ impl App {
                 // `git log` shows its start instead of beginning mid-output.
                 let (lines, spill_capped) =
                     finished_capture_lines(capture.full_log.as_ref(), &capture.buffer);
-                if let Some(view) = self.view.pager.as_mut() {
+                if let Some(view) = self.view.project_mut().pager.as_mut() {
                     view.title = title;
                     view.lines = lines;
                     // If the spill hit its backstop, say so before the EOF frame.
@@ -210,7 +210,7 @@ impl App {
                 let elapsed = capture.started.elapsed().as_secs();
                 let human_time = super::format_elapsed_hms(elapsed);
                 let timer_title = format!("\u{23f3} {} — running... ({human_time})", capture.title);
-                if let Some(view) = self.view.pager.as_mut() {
+                if let Some(view) = self.view.project_mut().pager.as_mut() {
                     if view.title != timer_title {
                         redraw = true;
                     }
@@ -226,14 +226,14 @@ impl App {
                 // leave the top half of the pager showing content with `~`
                 // markers filling the rest until the user manually scrolled.
                 // last_viewport_h is set by the renderer on every frame.
-                let at_bottom = self.view.pager.as_ref().is_some_and(|v| {
+                let at_bottom = self.view.project().pager.as_ref().is_some_and(|v| {
                     let h = v.last_viewport_h.get();
                     let h = if h == 0 { 40 } else { h };
                     let total = v.line_count();
                     let page = v.page_lines(h);
                     v.scroll >= total.saturating_sub(page)
                 });
-                if let Some(view) = self.view.pager.as_mut() {
+                if let Some(view) = self.view.project_mut().pager.as_mut() {
                     view.lines = lines;
                     if at_bottom {
                         view.scroll_to_bottom_auto();
@@ -308,7 +308,7 @@ impl App {
     /// buffer (the bg drain above may have updated it this tick). Returns
     /// `true` when it rebuilt.
     pub(crate) fn refresh_task_viewer(&mut self) -> bool {
-        if let Some(viewer_id) = self.view.pager.as_ref().and_then(|v| v.task_id)
+        if let Some(viewer_id) = self.view.project().pager.as_ref().and_then(|v| v.task_id)
             && let Some(task) = self
                 .runtime
                 .background_tasks
@@ -321,13 +321,18 @@ impl App {
             // [EOF] marker keep up with reality. Drop has_unread_output even
             // on status-only refreshes so the divider `+` clears.
             let task_running = matches!(task.status, TaskStatus::Running);
-            let viewer_streaming = self.view.pager.as_ref().is_some_and(|v| v.streaming);
+            let viewer_streaming = self
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .is_some_and(|v| v.streaming);
             let status_changed = task_running != viewer_streaming;
             if task.has_unread_output || status_changed {
                 task.has_unread_output = false;
                 task.viewed_in_task_viewer = true;
                 let new_view = Self::build_task_viewer_for(viewer_id, task);
-                if let Some(view) = self.view.pager.as_mut() {
+                if let Some(view) = self.view.project_mut().pager.as_mut() {
                     view.lines = new_view.lines;
                     view.title = new_view.title;
                     view.streaming = new_view.streaming;
@@ -557,7 +562,7 @@ mod drain_tests {
     }
 
     fn pager_text(app: &App) -> Vec<String> {
-        let view = app.view.pager.as_ref().expect("a pager is open");
+        let view = app.view.project().pager.as_ref().expect("a pager is open");
         view.lines
             .iter()
             .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
@@ -639,7 +644,7 @@ mod drain_tests {
             });
             assert_eq!(answers.last(), Some(&true), "new output must draw");
             assert!(app.runtime.pending_capture.is_some(), "still running");
-            let view = app.view.pager.as_ref().unwrap();
+            let view = app.view.project().pager.as_ref().unwrap();
             assert!(view.streaming, "a running capture is still streaming");
             assert!(view.title.starts_with('\u{23f3}'), "{}", view.title);
         });
@@ -660,7 +665,7 @@ mod drain_tests {
                 .expect("the clock is past five seconds");
             app.runtime.pending_capture.as_mut().unwrap().started = five_seconds_ago;
             assert!(app.drain_pending_capture(), "the clock moved on");
-            let title = &app.view.pager.as_ref().unwrap().title;
+            let title = &app.view.project().pager.as_ref().unwrap().title;
             assert!(title.ends_with("(5s)"), "{title}");
             assert!(!app.drain_pending_capture(), "the same second again");
         });
@@ -672,7 +677,7 @@ mod drain_tests {
             app.start_capture("printf 'one\\ntwo\\n'", "printf", "printf");
             let answers = drain_capture_to_exit(app);
             assert_eq!(answers.last(), Some(&true), "the exit frame must draw");
-            let view = app.view.pager.as_ref().unwrap();
+            let view = app.view.project().pager.as_ref().unwrap();
             assert_eq!(view.title, "\u{2713} ! printf — exit 0");
             assert!(!view.streaming, "a finished capture stops streaming");
             assert!(view.saveable, "a finished capture can be saved");
@@ -691,7 +696,7 @@ mod drain_tests {
             });
             let answers = drain_capture_to_exit(app);
             assert_eq!(answers.last(), Some(&true), "the exit frame must draw");
-            let view = app.view.pager.as_ref().unwrap();
+            let view = app.view.project().pager.as_ref().unwrap();
             assert_eq!(view.title, "\u{2717} ! fails — exit 3");
             assert_eq!(pager_rows(app), ["x", "[EOF — exit 3]"]);
         });
@@ -781,13 +786,19 @@ mod drain_tests {
     fn the_pager_follows_output_only_for_a_reader_at_the_bottom() {
         with_app(|app| {
             app.start_capture("cat", "cat", "cat");
-            app.view.pager.as_ref().unwrap().last_viewport_h.set(10);
+            app.view
+                .project()
+                .pager
+                .as_ref()
+                .unwrap()
+                .last_viewport_h
+                .set(10);
             let lines = numbered_lines("line ", 1..=30);
             write_to_capture(app, lines.as_bytes());
             drain_capture_until(app, "thirty lines", |a| {
                 pager_rows(a).iter().filter(|l| *l == "line 30").count() == 2
             });
-            let view = app.view.pager.as_ref().unwrap();
+            let view = app.view.project().pager.as_ref().unwrap();
             assert!(
                 view.scroll + view.page_lines(10) >= view.line_count(),
                 "the newest line is on screen: scroll {} of {} lines",
@@ -795,13 +806,13 @@ mod drain_tests {
                 view.line_count()
             );
 
-            app.view.pager.as_mut().unwrap().scroll = 0;
+            app.view.project_mut().pager.as_mut().unwrap().scroll = 0;
             write_to_capture(app, b"more\n");
             drain_capture_until(app, "more output", |a| {
                 pager_rows(a).iter().any(|l| l == "more")
             });
             assert_eq!(
-                app.view.pager.as_ref().unwrap().scroll,
+                app.view.project().pager.as_ref().unwrap().scroll,
                 0,
                 "a reader who scrolled up stays put"
             );

@@ -126,7 +126,7 @@ impl App {
         // fields), so this is the same dedup decision without serializing a
         // second time purely to compare — `write_context_file` does the one
         // and only serialization, on the write path.
-        if self.view.last_context.as_ref() == Some(&ctx) {
+        if self.view.project().last_context.as_ref() == Some(&ctx) {
             return;
         }
         // MVU Phase 3d: only advance the dedup cache when the write actually
@@ -134,18 +134,19 @@ impl App {
         // later identical-state mutation still writes instead of dedup-skipping
         // into a stale file. (The 500ms cap used to mask this by re-running the
         // debounced writer; it's gone now.)
-        if crate::context::write_context_file(&self.view.context_path, &ctx).is_ok() {
+        if crate::context::write_context_file(&self.view.project().context_path, &ctx).is_ok() {
             // The sidecar is discovery's record of the root, so it moves when
             // the root does (a `spyc -r` restoring a project elsewhere, #523).
             let moved = self
                 .view
+                .project()
                 .last_context
                 .as_ref()
                 .is_none_or(|c| c.root != ctx.root);
             if moved && self.view.mcp_running {
                 crate::mcp::record_root(&ctx.root);
             }
-            self.view.last_context = Some(ctx);
+            self.view.project_mut().last_context = Some(ctx);
         }
     }
 
