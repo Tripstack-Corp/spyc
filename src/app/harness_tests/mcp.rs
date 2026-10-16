@@ -802,6 +802,71 @@ fn a_w_n_worktree_is_entered_only_by_the_project_that_asked() {
     });
 }
 
+/// When `create_worktree open:true` can't open the new tree in `b`, the failure
+/// has to stay on screen. The tree was created, but nothing opened where the
+/// agent's follow-ups are about to go.
+#[test]
+#[ignore = "red: the success flash replaces the open's error right after it is raised"]
+fn a_worktree_that_fails_to_open_in_b_keeps_its_error_on_screen() {
+    use crate::app::worktree_ops::WorktreeCompletion;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let home = base.join("home");
+        std::fs::create_dir(&home).unwrap();
+        // Never created, so `b` can't open it.
+        let gone = base.join("gone");
+        let mut app = App::test_app(home);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let active = app.state.active;
+        let outcome = created_worktree_outcome(&gone, true, WorktreeCompletion::Mcp(tx), active);
+        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        assert!(app.apply_worktree_outcomes());
+        assert!(rx.try_recv().is_ok());
+        assert!(app.state.active_project().right.is_none());
+        let flash = app.state.flash.as_ref().expect("a flash");
+        assert!(
+            matches!(flash.kind, crate::app::FlashKind::Error),
+            "the open's failure was replaced by: {:?}",
+            flash.text
+        );
+    });
+}
+
+/// `open_worktree` answers with what happened. A directory `b` can't read
+/// isn't open in `b`, so the agent must not be told it is.
+#[cfg(unix)]
+#[test]
+#[ignore = "red: the reply says `b` opened whether or not it did"]
+fn open_worktree_reports_a_b_that_failed_to_open() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let home = base.join("home");
+        let locked = base.join("locked");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::create_dir(&locked).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // A process that can read it anyway (root) can't build this case.
+        let readable = std::fs::read_dir(&locked).is_ok();
+        let mut app = App::test_app(home);
+        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::OpenWorktree {
+            path: locked.display().to_string(),
+        });
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if readable {
+            return;
+        }
+        assert!(
+            matches!(resp, crate::mcp_cmd::McpResponse::Error { .. }),
+            "an unreadable dir was reported open: {resp:?}"
+        );
+        assert!(app.state.active_project().right.is_none());
+    });
+}
+
 /// A non-directory path is an error and leaves the layout unchanged.
 #[test]
 fn mcp_open_worktree_rejects_non_dir() {
