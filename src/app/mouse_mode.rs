@@ -129,7 +129,7 @@ mod tests {
     }
 
     /// The same reclaim covers the panic hook, which is NOT exit-only: `Pane`
-    /// catches a known vt100 panic (nvim leaving the alt screen) and spyc keeps
+    /// catches a parser panic and spyc keeps
     /// running. Before the actual-state moved to a global the hook disabled
     /// reporting at the terminal while `App` still believed it was on, so the
     /// reconcile saw agreement and never restored it — mouse dead for the session,

@@ -5,8 +5,8 @@
 //! the master so we can resize and the child so we can reap. Pre-v1.5
 //! that machinery was duplicated across `pane::Pane::spawn_with_env`
 //! and `app::spawn_capture`; v1.5 Phase 6 hoists it here so both
-//! consumers reduce to a thin wrapper plus their own state (vt100
-//! parser for `Pane`, flat byte buffer + lifecycle metadata for
+//! consumers reduce to a thin wrapper plus their own state (terminal
+//! engine for `Pane`, flat byte buffer + lifecycle metadata for
 //! `BackgroundTask`).
 //!
 //! Input delivery runs on a bounded worker queue: a stopped or non-reading
@@ -39,7 +39,7 @@ const REAP_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 /// blocks the reader thread's `send`, which lets the pty's kernel buffer fill
 /// and the child's `write` throttle — natural terminal flow control — so a
 /// firehose child (`yes`, `cat /dev/urandom`) can't grow the channel without
-/// limit when the consumer (the vt100 parser for a `Pane`, the per-tick `drain`
+/// limit when the consumer (the terminal engine for a `Pane`, the per-tick `drain`
 /// for a capture/task) falls behind. 512 ⇒ ≤4 MiB buffered: far above any
 /// legitimate interactive burst (a full-screen redraw is a few chunks), small
 /// enough that the parser catches up quickly once a firehose is interrupted.
@@ -115,7 +115,7 @@ pub use super::launch_env::LaunchEnvironment;
 /// channel, plus the small bag of state every consumer needs
 /// (last_size, closed, exit_status, debug_dump).
 ///
-/// Owned by `Pane` (which adds a vt100 parser on top) and by
+/// Owned by `Pane` (which adds a terminal engine on top) and by
 /// `BackgroundTask` (which adds a flat byte buffer + lifecycle
 /// metadata). Same fields, same semantics — only the shell
 /// differs.
@@ -435,7 +435,7 @@ impl PtyHost {
     /// Tell the pty about a new size. Coalesces redundant calls so
     /// repeated resizes (window-drag) don't flood the kernel with
     /// SIGWINCH. Caller is responsible for resizing any emulator
-    /// (vt100 grid) sitting on top.
+    /// (the pane's engine) sitting on top.
     pub fn resize(&mut self, rows: u16, cols: u16) -> anyhow::Result<()> {
         if (rows, cols) == self.last_size {
             return Ok(());

@@ -119,7 +119,7 @@ pub struct TranscriptSpec {
     /// Flash text when no transcript is found. Either way `^a v` flashes and
     /// closes back to the pane (`pane_scroll`'s `TranscriptStream`): `Some(msg)`
     /// uses `msg`, `None` uses a generic "`<agent>`: no transcript found for this
-    /// session". There is no fall-through to vt100 terminal capture — that only
+    /// session". There is no fall-through to terminal capture — that only
     /// runs when the agent has no transcript spec at all, or the view is disabled.
     pub miss_message: Option<&'static str>,
 }
@@ -533,9 +533,8 @@ impl AgentProfile for CodexProfile {
     }
 
     /// Plain `Up` / `Down`, which scroll codex's `^T` transcript overlay — the only
-    /// scrollable view it has. Its main chat view doesn't scroll at all, and its
-    /// vt100 scrollback is empty (it confines the transcript to a DECSTBM scroll
-    /// region), so this is the only surface either side can move.
+    /// scrollable view it has. Its main chat view doesn't scroll at all, so this
+    /// is the only surface either side can move.
     ///
     /// Safe outside the overlay, which is why it's plain arrows and not PageUp:
     /// codex binds `plain(Up)` to `editor.move_up` — move the cursor within the

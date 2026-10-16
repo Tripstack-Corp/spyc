@@ -560,7 +560,7 @@ mod tests {
 
     /// A pane tab that speaks the mouse, the way a real child says so: the DEC
     /// mode is written to `cat`'s stdin and comes back through the pty, so the
-    /// pane's own vt100 parser sees the request exactly as it would from claude.
+    /// pane's own engine sees the request exactly as it would from claude.
     /// (The `\n` matters — the line discipline echoes a bare ESC as `^[`, so
     /// only cat's own re-emit carries the real escape.)
     ///

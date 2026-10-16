@@ -14,7 +14,7 @@ impl App {
     /// A down-scroll in a `^a v` scrollback that had nowhere left to go: leave
     /// scroll mode and snap back to the live pane.
     ///
-    /// The same "scroll past the end and you're back" contract the raw vt100
+    /// The same "scroll past the end and you're back" contract the raw
     /// scroll mode already has ([`crate::pane::Pane::scroll_down_or_exit`]), and
     /// the one spyc gives codex's own overlay by sending it `q`. This pager is
     /// spyc's, so there is no key to send — it just closes.
@@ -547,7 +547,7 @@ mod tests {
     }
 
     /// **Scrolling down past the end of a `^a v` scrollback returns you to the
-    /// live pane.** The same contract the raw vt100 scroll mode has, and the one
+    /// live pane.** The same contract the raw scroll mode has, and the one
     /// spyc gives codex's own overlay by sending it `q` — this pager is spyc's, so
     /// it just closes. Without it the user is parked at `[EOF]` hunting for `Esc`.
     #[test]

@@ -140,7 +140,7 @@ impl App {
         let bases = self.path_ref_bases_for(&pane_cwd);
 
         // Debug: dump visible lines to the debug log so we can see what
-        // the vt100 screen actually contains.
+        // the terminal screen actually contains.
         spyc_debug!("gf: {} lines from pane, bases={bases:?}", lines.len());
         for (i, line) in lines.iter().enumerate() {
             if !line.trim().is_empty() {

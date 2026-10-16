@@ -784,7 +784,7 @@ impl App {
     /// snapshot path as `^a-v`, then writes the captured lines as
     /// plain text to `/tmp/spyc-scrollback.txt`. Tail the file to
     /// confirm whether content visible on the live pane (HUD
-    /// overlays, etc.) is actually reaching our vt100 emulator at
+    /// overlays, etc.) is actually reaching our terminal engine at
     /// snapshot time.
     pub fn dump_scrollback_snapshot(&mut self) {
         let Some(tabs) = self.runtime.pane_tabs.as_mut() else {

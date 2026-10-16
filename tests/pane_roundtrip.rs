@@ -1,15 +1,13 @@
 //! End-to-end pty roundtrip integration test.
 //!
 //! Spawns `cat` via `portable-pty`, writes a line of bytes to the
-//! master, reads what cat echoes back, parses through `vt100`, and
-//! asserts the rendered screen contains the expected text.
+//! master, reads what cat echoes back, and asserts the line arrives
+//! CRLF-translated.
 //!
-//! Validates the integration contract spyc relies on (`portable-pty`
-//! pty plumbing + `vt100` parser) without going through any
+//! Validates the pty plumbing spyc relies on without going through any
 //! spyc-internal wiring. If a future portable-pty release stops
-//! delivering CRLF-translated bytes, or vt100 changes how it lays out
-//! cells, this test trips. Spyc's own pane code has unit tests that
-//! cover the wrapper layer.
+//! delivering CRLF-translated bytes, this test trips. Spyc's own pane
+//! code has unit tests that cover parsing and rendering.
 
 #![cfg(unix)]
 
@@ -20,7 +18,7 @@ use std::time::Duration;
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 #[test]
-fn cat_roundtrip_renders_input_in_vt100_screen() {
+fn cat_roundtrip_echoes_the_line_crlf_translated() {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -82,29 +80,13 @@ fn cat_roundtrip_renders_input_in_vt100_screen() {
         "expected pty to deliver some bytes; got nothing"
     );
 
-    let mut parser = vt100::Parser::new(24, 80, 0);
-    parser.process(&bytes);
-
     // Cooked-mode line discipline echoes the typed line, and cat
-    // re-emits it after the \n. Either echo lands on row 0 — if it
-    // doesn't, the integration is broken regardless of which layer.
-    let screen = parser.screen();
-    let row0: String = (0..80)
-        .filter_map(|c| screen.cell(0, c))
-        .map(|c| {
-            let s = c.contents();
-            if s.is_empty() {
-                " ".to_string()
-            } else {
-                s.to_string()
-            }
-        })
-        .collect();
-
+    // re-emits it after the \n. Either copy arrives with its newline
+    // translated to CRLF — if it doesn't, the integration is broken
+    // regardless of which layer.
+    let text = String::from_utf8_lossy(&bytes);
     assert!(
-        row0.starts_with("hello, spyc!"),
-        "row 0 was {:?}; raw bytes were {:?}",
-        row0,
-        String::from_utf8_lossy(&bytes)
+        text.starts_with("hello, spyc!\r\n"),
+        "raw bytes were {text:?}"
     );
 }

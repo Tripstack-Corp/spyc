@@ -4,28 +4,16 @@
 //! and discards the result (no internal types leak into the public API), so a
 //! fuzz target asserts only the "never panics" property.
 
-/// Drive the pane's byte-processing path with structured escape streams and
-/// assert the terminal is still usable afterwards.
+/// Drive the pane's byte-processing path with structured escape streams.
 ///
-/// **The property is recovery, not absence of panics.** spyc's
-/// `pane::parser_worker` deliberately wraps `process()` in `catch_unwind`,
-/// rebuilds a torn parser at its current size, and clears the mutex poison —
-/// because the incumbent engine panics on roughly 2.87% of structured-random
-/// escape streams at reachable geometries (see `[profile.release]`'s comment
-/// and `docs/drafts/VT_ENGINE_SPIKE.md` §5). Asserting "the engine never
-/// panics" would therefore fail on the *current* engine for a known and
-/// mitigated reason, which trains a reader to ignore a red fuzz job.
+/// Asserts that `process` never panics and the terminal still answers
+/// afterwards: geometry intact, cursor in bounds, every in-bounds cell present.
 ///
-/// So this asserts what production actually depends on and what holds for
-/// any engine: after ANY byte stream, the terminal is still there and still
-/// answers questions. That covers the recovery path itself, which is
-/// production code no test reaches — the panic branch only runs when the
-/// engine panics, so a fuzzer is the only thing that exercises it.
-///
-/// When the engine flips (`docs/drafts/V2_2_PLAN.md` §8, PR 15) the stricter
-/// property becomes assertable: libghostty panicked 0 times in 50,000
-/// iterations of the same generator. Tighten the assertion then rather than
-/// adding a knowingly-red target now.
+/// `pane::parser_worker` still wraps `process()` in `catch_unwind` in
+/// production (`[profile.release]` says why). This target lets a panic reach
+/// libFuzzer instead: libghostty panicked 0 times in 50,000 iterations of the
+/// same generator, and a recovery property asserts almost nothing against an
+/// engine that does not panic.
 ///
 /// The input is used as a *script* rather than as a PRNG seed, so
 /// libFuzzer's coverage feedback can steer the shape of the escape stream
@@ -41,8 +29,8 @@ pub fn pane_engine(data: &[u8]) {
     };
     // Geometry spyc can actually produce: `Pane::resize` and
     // `pane_spawn_size` clamp both dimensions with `.max(1)`, so 1 is
-    // reachable and 0 is not. 1-row and 1-column are where the incumbent's
-    // live panic classes are, so they must be in range.
+    // reachable and 0 is not. 1-row and 1-column are where a parser's edge
+    // cases live (vt100's panic classes all sat there), so they stay in range.
     let rows = u16::from(g0 % 40) + 1;
     let cols = u16::from(g1 % 60) + 1;
 

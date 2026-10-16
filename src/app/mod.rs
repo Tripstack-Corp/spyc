@@ -405,7 +405,7 @@ impl App {
     }
 }
 
-/// Place the OS terminal cursor at the focused pty pane's vt100
+/// Place the OS terminal cursor at the focused pty pane's
 /// cursor position so alt-screen TUIs (nvim, less, htop, lazygit)
 /// render a visible cursor. Without this they show no cursor at
 /// all: spyc hides the host cursor at startup
@@ -415,7 +415,7 @@ impl App {
 /// hidden unless something asks ratatui to position it.
 ///
 /// No-ops when the pane is missing or the child has hidden the
-/// cursor via DEC ?25l (vt100 surfaces this as `hide_cursor()`).
+/// cursor via DEC ?25l (the engine surfaces this as `hide_cursor()`).
 /// Skips the call when the cursor would land outside the pane's
 /// drawable rect, which can happen briefly during a resize.
 /// Build a `ForegroundExec` effect that runs `cmd` through `sh -c` so shell features

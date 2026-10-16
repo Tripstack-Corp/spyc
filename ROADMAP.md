@@ -625,6 +625,12 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   A pin *revert* remains the cheaper escape from a bad pin bump either way, and
   that one survives the removal.
 
+  **Done** (2026-10-16, the first change after v2.2.0): `engine_vt100.rs`, the
+  `vt100` dependency and the seam's vt100-only `copy_pads_blank_cells` are
+  gone, and the conformance suite runs against the one engine. The htop
+  comparison against vt100, which caught the background-colour-erase bug, is
+  kept as a golden taken while the two engines agreed cell for cell.
+
 - **2.2 ships its full scope rather than an early engine release**
   (2026-09-29). The alternative was considered at a point when the engine and
   three other items were on `main` but none of the projects-prep had started:

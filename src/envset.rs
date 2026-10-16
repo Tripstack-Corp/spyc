@@ -2,7 +2,7 @@
 //!
 //! These used to be applied with `unsafe { std::env::set_var }`, but
 //! mutating the process environment is unsound once spyc has worker
-//! threads (the per-pane vt100 parsers, the git-status worker — which
+//! threads (the per-pane terminal engines, the git-status worker — which
 //! runs gix in-process): another thread calling `getenv`
 //! concurrently with `setenv` is undefined behaviour.
 //!

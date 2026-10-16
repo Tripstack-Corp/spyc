@@ -58,7 +58,7 @@ pub(super) struct Runtime {
     /// only while a change awaits its save; cleared on save / when clean. An
     /// OS-ish clock value, correctly in `Runtime` (never the pure Model).
     pub(super) autosave_due: Option<std::time::Instant>,
-    /// A deferred vt100 scrollback snapshot: when to take it, and which tab
+    /// A deferred terminal scrollback snapshot: when to take it, and which tab
     /// asked for it. `Some` only between `open_pane_scroll_pager` arming the
     /// settle and `settle_pane_scroll` taking the shot, so idle stays 0 dps.
     ///

@@ -632,10 +632,10 @@ one RIS restores, so a child running `reset` keeps clustering.
 
 A child that asks with `CSI ? 2027 $ p` is told the mode is set (see "Answering
 the child's queries" below), though the common producers emit and assume rather
-than ask, which is what made the bug visible. vt100 cannot satisfy this (flag as
-two narrow cells, ZWJ family across six columns, VS16 heart in one), so the
-contract test is scoped to the ghostty engine rather than the `E: Engine`
-conformance suite.
+than ask, which is what made the bug visible. It is a capability beyond the
+seam's contract (vt100, the engine before 2.2, laid the flag out as two narrow
+cells, the ZWJ family across six columns and the VS16 heart in one), so its test
+is scoped to the ghostty engine rather than the `E: Engine` conformance suite.
 
 ## Answering the child's queries
 

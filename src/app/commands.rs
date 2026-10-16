@@ -424,7 +424,7 @@ pub(super) fn cmd_mouse(app: &mut App, args: &str) -> Vec<Effect> {
 /// pane and writes the snapshot (one line per row) to /tmp/spyc-scrollback.txt;
 /// useful when content visible on the live pane seems to go missing in the pager
 /// — `cat /tmp/spyc-scrollback.txt | tail` shows whether the bytes reach our
-/// vt100 emulator at snapshot time.
+/// terminal engine at snapshot time.
 pub(super) fn cmd_dump_scrollback(app: &mut App, _args: &str) -> Vec<Effect> {
     app.dump_scrollback_snapshot();
     Vec::new()
@@ -650,7 +650,7 @@ pub(super) fn cmd_fg(app: &mut App, args: &str) -> Vec<Effect> {
 }
 
 /// `:task-to-pane [N]` — promote a backgrounded `!` task to a new pane tab. The
-/// pty keeps running through the transition; we attach a vt100 emulator and
+/// pty keeps running through the transition; we attach a terminal engine and
 /// register it in `pane_tabs`. No arg = most-recent task; numeric arg = id.
 pub(super) fn cmd_task_to_pane(app: &mut App, args: &str) -> Vec<Effect> {
     match parse_task_id_arg(app, args, "task-to-pane") {

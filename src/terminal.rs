@@ -138,8 +138,7 @@ impl crossterm::Command for DisableWheelReporting {
 /// things that change this state run outside `App` and cannot reach its fields:
 /// [`restore_terminal`] and the **panic hook**. The hook is not exit-only —
 /// `pane::parser_worker` deliberately `catch_unwind`s a parser panic on
-/// untrusted child output (vt100 0.16.2 has four such classes reachable at
-/// spyc's geometry clamp; `Cargo.toml`'s `[profile.release]` lists them) and
+/// untrusted child output (`Cargo.toml`'s `[profile.release]` says why) and
 /// spyc keeps running — so
 /// with the flag on `ViewState` that path disabled reporting at the terminal
 /// while `App` still believed it was on. `settle_mouse_mode` then saw no
@@ -464,8 +463,8 @@ pub fn restore_on_panic() {
         ShowMousePointer,
         crossterm::cursor::Show,
     );
-    // This hook is NOT exit-only (`pane::Pane` catches a known vt100 panic
-    // and spyc keeps running), so the flag has to follow the terminal or the
+    // This hook is NOT exit-only (`pane::Pane` catches a parser panic and
+    // spyc keeps running), so the flag has to follow the terminal or the
     // reconcile will believe capture is still on and never restore it.
     MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
     let _ = term_title::pop();

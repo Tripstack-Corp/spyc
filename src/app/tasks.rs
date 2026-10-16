@@ -342,7 +342,7 @@ impl App {
     /// the transition; we resize it to the bottom-pane geometry
     /// (capture spawned at terminal-rows × terminal-cols, the new
     /// tab slot is usually smaller), replay the captured buffer
-    /// through a fresh vt100 parser, wake the child if it was
+    /// through a fresh terminal engine, wake the child if it was
     /// paused, and register the resulting `Pane` in `pane_tabs`.
     /// `BackgroundTask` lifecycle metadata (status, finished_at,
     /// has_unread_output, viewed_in_task_viewer) is dropped — the
@@ -382,7 +382,7 @@ impl App {
             self.effective_pane_pct(),
             self.state.config.layout.status_position,
         );
-        // Resize before building the parser so vt100's grid sizes
+        // Resize before building the parser so the engine's grid sizes
         // match the child's view. ioctl is best-effort — if it
         // fails, the geometry is just slightly off until the next
         // resize event.

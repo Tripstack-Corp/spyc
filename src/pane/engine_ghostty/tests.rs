@@ -16,8 +16,6 @@ mod seam_contract {
         e
     }
 
-    // The seam's contract suite, against the shipped engine. The same suite
-    // runs against vt100 in `engine_vt100`; one contract, both impls.
     #[test]
     fn reports_what_the_engine_holds() {
         conformance::reports_what_the_engine_holds::<GhosttyEngine>();
@@ -218,19 +216,18 @@ mod issue_34_engine_defects {
     }
 }
 
-/// The shipped engine against the reference engine, over a real captured
-/// terminal stream, through the same widget.
+/// A real captured terminal stream through the pane widget, pinned as a
+/// golden: each row's text, then its style runs.
 ///
-/// This is the only place spyc compares the two engines' *rendering* rather
-/// than their seam answers, and it is what caught the background-colour-erase
-/// bug that `both_fills_agree_on_the_live_viewport` could not: both fills were
-/// wrong the same way, so they agreed. An instrument that shares the subject's
-/// model inherits its blind spots — the reference engine does not share it.
-///
-/// It dies with `engine_vt100.rs` after 2.2 tags ([#453](https://github.com/Tripstack-Corp/spyc/issues/453)).
-/// Until then it is the strongest thing the fallback buys.
+/// The golden was taken while this rendering matched vt100's cell for cell.
+/// That comparison against a second engine caught the background-colour-erase
+/// bug `both_fills_agree_on_the_live_viewport` could not, since both of
+/// ghostty's fills were wrong the same way; an instrument that shares the
+/// subject's model inherits its blind spots. vt100 is gone (#453), so the
+/// golden keeps its verdict: a pin bump that changes how a coloured run ends in
+/// erased cells fails here.
 #[cfg(test)]
-mod against_the_reference_engine {
+mod htop_golden {
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
     use ratatui::widgets::Widget as _;
@@ -252,11 +249,45 @@ mod against_the_reference_engine {
         buf
     }
 
+    /// Text and style runs. A blank cell's foreground is left out: a cell
+    /// erased under SGR has nothing to paint, and vt100 and ghostty disagreed
+    /// about what it holds.
+    fn describe(buf: &Buffer, rows: u16, cols: u16) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        for r in 0..rows {
+            let mut text = String::new();
+            let mut runs: Vec<(u16, u16, String)> = Vec::new();
+            for c in 0..cols {
+                let Some(cell) = buf.cell((c, r)) else {
+                    continue;
+                };
+                text.push_str(cell.symbol());
+                let s = cell.style();
+                let fg = if cell.symbol().trim().is_empty() {
+                    None
+                } else {
+                    s.fg
+                };
+                let key = format!("bg={:?} fg={fg:?} mod={:?}", s.bg, s.add_modifier);
+                match runs.last_mut() {
+                    Some((_, end, k)) if *k == key => *end = c + 1,
+                    _ => runs.push((c, c + 1, key)),
+                }
+            }
+            let _ = writeln!(out, "{r:02} |{text}|");
+            for (start, end, key) in runs {
+                let _ = writeln!(out, "   {start}..{end} {key}");
+            }
+        }
+        out
+    }
+
     /// htop is the case that exercises meters, a full-width header bar, a
     /// selected row and the function-key footer — every one of which is a
     /// coloured run that ends in erased cells.
     #[test]
-    fn htop_renders_identically_through_both_engines() {
+    fn htop_renders_as_it_did_beside_vt100() {
         // Absolute, via the manifest dir: tests share a process, so a
         // relative path breaks the moment another test changes the cwd.
         let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -264,63 +295,17 @@ mod against_the_reference_engine {
         let bytes = std::fs::read(&fixture)
             .unwrap_or_else(|e| panic!("the spike's htop capture at {}: {e}", fixture.display()));
         let (rows, cols) = (24u16, 80);
-        let a = render::<vt100::Parser>(&bytes, rows, cols);
-        let b = render::<super::super::GhosttyEngine>(&bytes, rows, cols);
-
-        let mut wrong = Vec::new();
-        for r in 0..rows {
-            for c in 0..cols {
-                let (Some(x), Some(y)) = (a.cell((c, r)), b.cell((c, r))) else {
-                    continue;
-                };
-                if x.symbol() != y.symbol() {
-                    wrong.push(format!(
-                        "({r},{c}) symbol {:?} vs {:?}",
-                        x.symbol(),
-                        y.symbol()
-                    ));
-                    continue;
-                }
-                let (sx, sy) = (x.style(), y.style());
-                if sx.bg != sy.bg {
-                    wrong.push(format!("({r},{c}) bg {:?} vs {:?}", sx.bg, sy.bg));
-                }
-                if sx.add_modifier != sy.add_modifier {
-                    wrong.push(format!(
-                        "({r},{c}) modifiers {:?} vs {:?}",
-                        sx.add_modifier, sy.add_modifier
-                    ));
-                }
-                // Foreground is compared only where there is a glyph to
-                // colour. A cell erased under SGR keeps the foreground of the
-                // moment in vt100 and carries none in ghostty, which stores
-                // such a cell as a background-only content tag — invisible
-                // either way, since a blank has nothing to paint.
-                if x.symbol().trim().is_empty() {
-                    continue;
-                }
-                if sx.fg != sy.fg {
-                    wrong.push(format!("({r},{c}) fg {:?} vs {:?}", sx.fg, sy.fg));
-                }
-            }
-        }
-        assert!(
-            wrong.is_empty(),
-            "{} cells differ between the engines:\n  {}",
-            wrong.len(),
-            wrong[..wrong.len().min(12)].join("\n  ")
-        );
+        let buf = render::<super::super::GhosttyEngine>(&bytes, rows, cols);
+        insta::assert_snapshot!("htop_through_the_pane_widget", describe(&buf, rows, cols));
     }
 }
 
 /// Grapheme clustering (DEC mode 2027), pinned against `ui::display_width`.
 ///
-/// Ghostty-scoped rather than part of the `E: Engine` conformance suite, for
-/// the reason that suite states about `issue_34_engine_defects`: vt100 fails
-/// this by design — it lays the flag out as two narrow cells, the ZWJ family
-/// across six columns and the VS16 heart in one — and pinning a capability the
-/// escape hatch ([#453](https://github.com/Tripstack-Corp/spyc/issues/453))
-/// cannot have would assert only that it is still broken.
+/// Ghostty-scoped rather than part of the `E: Engine` conformance suite, as
+/// `issue_34_engine_defects` is: a capability beyond the contract, which vt100
+/// lacked (it laid the flag out as two narrow cells, the ZWJ family across six
+/// columns and the VS16 heart in one).
 #[cfg(test)]
 mod grapheme_cluster_width {
     use super::super::*;

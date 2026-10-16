@@ -261,7 +261,7 @@ impl App {
             ctx.draw.mark(3);
         }
 
-        // A deferred vt100 scrollback snapshot: take it once the settle
+        // A deferred terminal scrollback snapshot: take it once the settle
         // window has elapsed. Armed only between `^a v` (or a
         // `spyc_history` wheel gesture) and the shot, so idle stays 0 dps —
         // and the wait happens on the loop instead of in a sleep, which is

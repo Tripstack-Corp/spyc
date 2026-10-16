@@ -417,7 +417,7 @@ impl App {
             return Vec::new();
         };
         let forward = |key| {
-            // A capture is a bare `PtyHost` with no vt100 emulator, so no DECCKM
+            // A capture is a bare `PtyHost` with no terminal engine, so no DECCKM
             // state exists to honour — the CSI form is what a terminal that never
             // negotiated the mode sends.
             let bytes = crate::pane::input::encode_key(key, false);
