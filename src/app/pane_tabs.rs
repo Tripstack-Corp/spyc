@@ -442,13 +442,18 @@ impl App {
         }
     }
 
-    /// `:hooks on!`, once claude is wired: **restart the claude tab at
-    /// `tab_idx`** (fresh env + hooks present from launch) and auto-`/resume`
-    /// its conversation. The forceful escape hatch for when a live reload
-    /// doesn't take. Reuses the session-restore `/resume` injection; falls back
-    /// to a fresh claude + "type /resume" when the live session id can't be
-    /// resolved.
-    pub(super) fn restart_claude_tab(&mut self, tab_idx: usize) {
+    /// `:hooks on!`, once claude is wired: **restart the claude tab `tab_id`**
+    /// (fresh env + hooks present from launch) and auto-`/resume` its
+    /// conversation. The forceful escape hatch for when a live reload doesn't
+    /// take. Reuses the session-restore `/resume` injection; falls back to a
+    /// fresh claude + "type /resume" when the live session id can't be
+    /// resolved. A tab that closed while the install ran restarts nothing.
+    pub(super) fn restart_claude_tab(&mut self, tab_id: &str) {
+        let tabs = self.runtime.project().pane_tabs.as_ref();
+        let Some(tab_idx) = tabs.and_then(|t| t.tabs().iter().position(|e| e.info.id == tab_id))
+        else {
+            return;
+        };
         let Some((cmd, cwd, kind, in_shell, wraps)) = self
             .runtime
             .project()

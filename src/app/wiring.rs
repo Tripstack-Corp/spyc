@@ -15,11 +15,13 @@ use crate::state::wiring_consent;
 use crate::wiring::{self, Env, Status};
 
 /// What a worker does to one agent's wiring.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum WiringOp {
-    /// Install it; then restart the claude tab at `restart` (`:hooks on!`).
+    /// Install it; then restart the claude tab whose id is `restart`
+    /// (`:hooks on!`). An id, not an index: tabs can close or move while the
+    /// install runs.
     Install {
-        restart: Option<usize>,
+        restart: Option<String>,
     },
     Remove,
 }
@@ -235,10 +237,10 @@ impl App {
             self.state.flash_info(text);
         }
         if let WiringOp::Install {
-            restart: Some(tab_idx),
+            restart: Some(tab_id),
         } = outcome.op
         {
-            self.restart_claude_tab(tab_idx);
+            self.restart_claude_tab(&tab_id);
         }
     }
 
@@ -256,7 +258,7 @@ impl App {
     }
 
     /// Record the user's answer for `kind` and act on it.
-    fn set_wiring(&mut self, kind: AgentKind, answer: Option<bool>, restart: Option<usize>) {
+    fn set_wiring(&mut self, kind: AgentKind, answer: Option<bool>, restart: Option<String>) {
         wiring_consent::set(kind, answer);
         let name = wiring::name(kind);
         match answer {
@@ -297,12 +299,13 @@ impl App {
         }
         let active = self.runtime.project().pane_tabs.as_ref().map(|t| {
             let info = t.active_info();
-            (t.active_index(), info.agent().kind())
+            (info.id.clone(), info.agent().kind())
         });
         let kind = match words.next() {
             Some(name) => wiring::named(name),
             None => active
-                .map(|(_, kind)| kind)
+                .as_ref()
+                .map(|(_, kind)| *kind)
                 .filter(|kind| wiring::KINDS.contains(kind)),
         };
         let Some(kind) = kind else {
@@ -315,7 +318,7 @@ impl App {
             "on!" | "enable!" => {
                 let restart = active
                     .filter(|(_, active)| *active == AgentKind::Claude && kind == AgentKind::Claude)
-                    .map(|(idx, _)| idx);
+                    .map(|(id, _)| id);
                 self.set_wiring(kind, Some(true), restart);
             }
             "off" | "disable" | "no" | "n" => self.set_wiring(kind, Some(false), None),
@@ -602,7 +605,6 @@ mod tests {
     /// close meanwhile. Its restart must go nowhere, not to whichever claude
     /// tab moved into its place.
     #[test]
-    #[ignore = "red: the restart is keyed on the tab's index, so it reaches the tab that took the closed one's place"]
     fn a_restart_for_a_closed_tab_goes_to_no_other_tab() {
         with_app(|app, root| {
             two_claude_tabs(app, root);
