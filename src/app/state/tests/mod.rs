@@ -1068,6 +1068,10 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
         s.active_project().left.git_cache.git_generation,
         "enqueued request stamped with the bumped generation"
     );
+    assert_eq!(
+        req.project, s.active,
+        "enqueued request stamped with the project that asked"
+    );
     assert!(
         s.active_project()
             .left

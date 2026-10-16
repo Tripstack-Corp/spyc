@@ -73,6 +73,11 @@ impl App {
     /// the generation + repo-root drop gates. Moved verbatim from the run
     /// loop (MVU Phase 5 PR 0).
     pub(super) fn apply_git_worker_result(&mut self, result: state::GitWorkerResult) -> bool {
+        // Only the active project is polled, so a walk for another one is
+        // stale by the time it could be shown.
+        if result.project != self.state.active {
+            return false;
+        }
         // Route to the column that requested this (the worker echoed its side).
         let side = result.side;
         // Generation gate (per-column): that column navigated past this request.
@@ -521,6 +526,7 @@ mod tests {
         app.apply_git_worker_result(GitWorkerResult {
             generation,
             repo_root: root,
+            project: app.state.active,
             side: Side::Left,
             entries,
             index_mtime,
@@ -652,5 +658,58 @@ mod tests {
             "b's RENDERED rows must carry the marker: a walk for the unfocused \
              column has to repaint that column, not whichever one holds the keyboard"
         );
+    }
+
+    /// A walk is routed by project as well as by side (#99): two projects'
+    /// columns count generations independently and can share a repository, so
+    /// a result whose side, generation and repo root all match the active
+    /// column must still be dropped when another project asked for it.
+    #[test]
+    fn a_walk_for_another_project_never_lands_in_the_active_one() {
+        use crate::app::App;
+        use crate::app::state::{GitWorkerResult, ProjectId, Side};
+        use std::path::PathBuf;
+        use std::time::UNIX_EPOCH;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let repo = PathBuf::from("/repo");
+            let left = &mut app.state.active_project_mut().left;
+            left.listing.dir.clone_from(&repo);
+            left.git_cache.current_repo_root = Some(repo.clone());
+            left.git_cache.git_status_cache = None;
+            left.git_cache.git_poll_cache = None;
+            left.pending_ghosts.insert("gone.txt".to_string());
+            let generation = left.git_cache.git_generation;
+            let result = |project| GitWorkerResult {
+                generation,
+                repo_root: repo.clone(),
+                project,
+                side: Side::Left,
+                entries: Some(Vec::new()),
+                index_mtime: Some(UNIX_EPOCH),
+                head_mtime: Some(UNIX_EPOCH),
+            };
+
+            assert!(!app.apply_git_worker_result(result(ProjectId::new())));
+            let left = &app.state.active_project().left;
+            assert!(left.git_cache.git_status_cache.is_none());
+            assert!(left.git_cache.git_poll_cache.is_none());
+            assert!(
+                left.pending_ghosts.contains("gone.txt"),
+                "another project's walk cleared this column's ghosts"
+            );
+
+            let active = app.state.active;
+            assert!(app.apply_git_worker_result(result(active)));
+            let left = &app.state.active_project().left;
+            assert!(left.git_cache.git_status_cache.is_some());
+            assert_eq!(
+                left.git_cache.git_poll_cache,
+                Some((UNIX_EPOCH, UNIX_EPOCH))
+            );
+            assert!(left.pending_ghosts.is_empty());
+        });
     }
 }

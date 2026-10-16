@@ -720,7 +720,13 @@ PR:
    the handles delegate. Extend `columns_are_addressed_through_handles` so only
    project-level code names `projects[…]`.
 2. **Route results by project.** Git worker results carry `(ProjectId, Side)`;
-   worktree job results carry the caller's project.
+   worktree job results carry the caller's project. A git result for a project
+   that isn't active is dropped, since only the active project is polled. A
+   worktree job's filesystem follow-ups (refresh, orphan reset, context write)
+   still run on the active project, while what the caller asked for (`open`
+   into `b`, `W n`'s chdir) lands only if the caller's project is still the
+   active one. Until step 3 binds connections to projects, a job's project is
+   the one active when it started.
 3. **Per-project MCP.** A context file per project (the single-root version
    landed in #525), `PaneContext` returning the project, reads and driving tools
    on the caller's project, the sidecar as a list of homes, and `spyc/cwd` for
@@ -729,7 +735,31 @@ PR:
 4. **Manifest v2.** The v1 reader, `left_cwd`, `pid` and the picker labels.
 5. **Open, close and switch.** The `Space` keys, the switcher, stashing on a
    switch, watch and poll on the active project only, and refresh on
-   activation.
+   activation. Switching is what makes a project inactive while its work is in
+   flight, so it also has to close the following, found by inventory during
+   step 2:
+   - **The other off-thread landings that act on the active project.** Each
+     must drop or route a result for a project that isn't active: listing
+     refresh, file-op completions (copy, move, rename, restore and pipe to
+     pane), the inventory and graveyard refreshes, archive mount and remount
+     (which change directory in the focused column), the pagers that file ops
+     and archives open, the pending git view, the `F` finder, `!` capture,
+     image-status flashes and Lua requests.
+   - **Activation re-walks git.** Set `pending_worktree_rewalk` on each of the
+     activated project's columns. A walk dropped while the project was inactive
+     has already spent its force flag and stashed `git_poll_cache`. With the
+     index and `HEAD` mtimes unchanged, clearing the poll cache alone reuses the
+     stale status. The rewalk flag forces past both checks without blanking
+     the markers.
+   - **A new project's columns need `git_worker_available`.** Only bootstrap's
+     `a` sets it, and `b` copies it from `a`. Without it, a new project's status
+     walks run on the UI thread.
+   - **The git outbox needs nothing.** `flush_git_requests` drains only the
+     active project, so an outgoing project's requests wait in its own columns,
+     already stamped.
+   - **With a context file per project (step 3),** a worktree removal's orphan
+     reset and context write must also cover the caller's project, not only the
+     active one.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

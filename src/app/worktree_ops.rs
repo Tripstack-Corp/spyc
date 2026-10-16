@@ -97,6 +97,9 @@ pub enum WorktreeCompletion {
 pub struct WorktreeOutcome {
     pub result: WorktreeJobResult,
     pub completion: WorktreeCompletion,
+    /// The project the job was started for: opening `b` or entering the new
+    /// tree lands only there.
+    pub project: super::state::ProjectId,
 }
 
 const fn err_result(message: String) -> WorktreeJobResult {
@@ -126,13 +129,12 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
                         "branch": branch,
                         "path": path.display().to_string(),
                     });
-                    let opened = if open { " (opened in b)" } else { "" };
                     WorktreeJobResult {
                         response: McpResponse::Ok {
                             message: serde_json::to_string_pretty(&json).unwrap_or_default(),
                         },
                         flash: Some(format!(
-                            "[mcp] created worktree {} ({branch}){opened}",
+                            "[mcp] created worktree {} ({branch})",
                             path.display()
                         )),
                         mutated: true,
@@ -321,12 +323,16 @@ impl App {
     pub(crate) fn spawn_worktree_job(&self, job: WorktreeJob, completion: WorktreeCompletion) {
         let results = std::sync::Arc::clone(&self.runtime.worktree_results);
         let wake = self.runtime.pane_wake_tx.clone();
+        // Both callers spawn in the same pass as the key or MCP command that
+        // asked, so the active project is the one that asked.
+        let project = self.state.active;
         std::thread::spawn(move || {
             let result = run_worktree_job(job);
-            results
-                .lock()
-                .unwrap()
-                .push(WorktreeOutcome { result, completion });
+            results.lock().unwrap().push(WorktreeOutcome {
+                result,
+                completion,
+                project,
+            });
             // Wake AFTER the outcome is stored, so the pre-recv scan sees it.
             if let Some(tx) = wake {
                 let _ = tx.send(Message::Wake(Wake::WorktreeJob));
@@ -343,7 +349,12 @@ impl App {
         if outcomes.is_empty() {
             return false;
         }
-        for WorktreeOutcome { result, completion } in outcomes {
+        for WorktreeOutcome {
+            result,
+            completion,
+            project,
+        } in outcomes
+        {
             let WorktreeJobResult {
                 response,
                 flash,
@@ -351,9 +362,13 @@ impl App {
                 open_path,
                 created_path,
             } = result;
+            let still_active = project == self.state.active;
             match completion {
                 WorktreeCompletion::Mcp(reply) => {
                     if mutated {
+                        // The filesystem changed under every project, but
+                        // opening `b` was this project's request.
+                        let open_path = open_path.filter(|_| still_active);
                         self.after_worktree_mutation(flash, open_path);
                     }
                     // The client may have timed out (5 s) and dropped its
@@ -371,7 +386,7 @@ impl App {
                         Some(path) => {
                             self.state
                                 .flash_info(format!("created worktree: {}", path.display()));
-                            if let Err(e) = self.state.chdir(&path) {
+                            if still_active && let Err(e) = self.state.chdir(&path) {
                                 self.state.flash_error(format!("chdir: {e:#}"));
                             }
                         }
@@ -395,7 +410,7 @@ impl App {
     /// commonly reads it right after).
     fn after_worktree_mutation(
         &mut self,
-        flash: Option<String>,
+        mut flash: Option<String>,
         open_path: Option<std::path::PathBuf>,
     ) {
         // Open `b` FIRST so the refresh + context capture the now-active column.
@@ -404,6 +419,9 @@ impl App {
         // typing into.
         if let Some(path) = open_path {
             self.open_second_commander_at_background(&path);
+            if let Some(message) = flash.as_mut() {
+                message.push_str(" (opened in b)");
+            }
         }
         if let Some(message) = flash {
             self.state.flash_info(message);

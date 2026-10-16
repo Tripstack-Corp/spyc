@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use super::Side;
+use super::{ProjectId, Side};
 
 /// Off-main-thread git-status work item. The chdir hot path sends
 /// these to a background worker on cache miss so the UI returns
@@ -18,9 +18,11 @@ use super::Side;
 pub struct GitWorkerRequest {
     pub generation: u64,
     pub repo_root: std::path::PathBuf,
-    /// Which column requested this — the worker echoes it back so the result
-    /// routes to that column's git state + generation gate (no cross-column
-    /// collision).
+    /// Which project and column requested this — the worker echoes both back
+    /// so the result routes to that column's git state + generation gate. A
+    /// generation is per column, so the project is what keeps two projects'
+    /// columns apart.
+    pub project: ProjectId,
     pub side: Side,
 }
 
@@ -33,8 +35,9 @@ pub struct GitWorkerRequest {
 pub struct GitWorkerResult {
     pub generation: u64,
     pub repo_root: std::path::PathBuf,
-    /// The column this result is for (echoed from the request) — routes it to
-    /// that column's git state + generation gate.
+    /// The project and column this result is for (echoed from the request) —
+    /// routes it to that column's git state + generation gate.
+    pub project: ProjectId,
     pub side: Side,
     pub entries: Option<Vec<crate::git::status::StatusEntry>>,
     pub index_mtime: Option<std::time::SystemTime>,

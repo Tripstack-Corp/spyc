@@ -388,13 +388,15 @@ impl App {
     pub fn ingest_git_result(&mut self, result: state::GitWorkerResult) -> bool {
         self.view.activity.live.git_results = self.view.activity.live.git_results.saturating_add(1);
         // Roundtrip duration: when the requesting column sent it (set by
-        // `git_file_statuses_cached`) vs. now.
-        if let Some(sent) = self
-            .state
-            .col_mut(result.side)
-            .git_cache
-            .last_git_request_at
-            .take()
+        // `git_file_statuses_cached`) vs. now. Another project's result has no
+        // stamp on the active project's columns.
+        if result.project == self.state.active
+            && let Some(sent) = self
+                .state
+                .col_mut(result.side)
+                .git_cache
+                .last_git_request_at
+                .take()
         {
             self.view.activity.git_last_ms =
                 u32::try_from(sent.elapsed().as_millis()).unwrap_or(u32::MAX);
@@ -439,10 +441,11 @@ mod tests {
         );
     }
 
-    fn git_result(generation: u64) -> state::GitWorkerResult {
+    fn git_result(generation: u64, project: state::ProjectId) -> state::GitWorkerResult {
         state::GitWorkerResult {
             generation,
             repo_root: PathBuf::from("/no/such/repo"),
+            project,
             side: state::Side::Left,
             entries: None,
             index_mtime: None,
@@ -455,7 +458,8 @@ mod tests {
         let (tx, rx) = mpsc::channel::<Message>();
         tx.send(Message::FsEvent(fs_event(Path::new("/a"))))
             .unwrap();
-        tx.send(Message::GitResult(git_result(0))).unwrap();
+        tx.send(Message::GitResult(git_result(0, state::ProjectId::new())))
+            .unwrap();
         tx.send(Message::Input(Event::FocusGained)).unwrap();
         tx.send(Message::Input(Event::FocusLost)).unwrap();
 
@@ -484,7 +488,8 @@ mod tests {
             .unwrap();
         tx.send(Message::FsEvent(fs_event(Path::new("/b"))))
             .unwrap();
-        tx.send(Message::GitResult(git_result(0))).unwrap();
+        tx.send(Message::GitResult(git_result(0, state::ProjectId::new())))
+            .unwrap();
         tx.send(Message::Tick(Deadline::GitPoll)).unwrap();
         // MVU Phase 3d: pager-stream/finder wakes collapse to nothing buffered
         // (the data rides their own channels; the loop re-drains on re-entry).
@@ -639,9 +644,36 @@ mod tests {
             let mut app = App::test_app(tmp.path().to_path_buf());
             // Generation mismatch (state starts at 0) → dropped, but still
             // counted per delivery (activity is "results seen", not "applied").
-            assert!(!app.ingest_git_result(git_result(99)));
-            assert!(!app.ingest_git_result(git_result(99)));
+            assert!(!app.ingest_git_result(git_result(99, app.state.active)));
+            assert!(!app.ingest_git_result(git_result(99, app.state.active)));
             assert_eq!(app.view.activity.live.git_results, 2);
+        });
+    }
+
+    /// Another project's result is counted like any other delivery, but the
+    /// round-trip stamp it reads belongs to the active project's column, so it
+    /// must leave that stamp for the active project's own result.
+    #[test]
+    fn ingest_git_result_from_another_project_keeps_the_request_stamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.state
+                .active_project_mut()
+                .left
+                .git_cache
+                .last_git_request_at = Some(std::time::Instant::now());
+            assert!(!app.ingest_git_result(git_result(99, state::ProjectId::new())));
+            assert_eq!(app.view.activity.live.git_results, 1);
+            assert!(
+                app.state
+                    .active_project()
+                    .left
+                    .git_cache
+                    .last_git_request_at
+                    .is_some(),
+                "a foreign result took the active column's round-trip stamp"
+            );
         });
     }
 
@@ -655,7 +687,7 @@ mod tests {
                 .left
                 .git_cache
                 .last_git_request_at = Some(std::time::Instant::now());
-            app.ingest_git_result(git_result(99));
+            app.ingest_git_result(git_result(99, app.state.active));
             // Recorded + cleared on the first result; a second doesn't panic
             // or re-take.
             assert!(
@@ -666,7 +698,7 @@ mod tests {
                     .last_git_request_at
                     .is_none()
             );
-            app.ingest_git_result(git_result(99));
+            app.ingest_git_result(git_result(99, app.state.active));
             assert!(
                 app.state
                     .active_project()
