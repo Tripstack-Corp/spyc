@@ -605,24 +605,22 @@ until then it reads `awaiting metrics`. For a local round:
 
 codex runs the hooks of every layer it loads, user and project alike, without
 merging duplicates. spyc's hooks live in `$CODEX_HOME/hooks.json`, so a project
-`.codex/config.toml` or `.codex/hooks.json` that an older spyc wrote them into
-would report each event a second time. spyc takes that copy out at startup and
-when it launches codex there; it leaves one another running spyc still uses, or
-one git tracks, and `:why-status` names a copy that remains. The user-scope hooks
-need one approval in codex's `/hooks`, and then apply in every project, trusted
-or not.
+`.codex/config.toml` or `.codex/hooks.json` that a spyc before 2.2 wrote them
+into reports each event a second time. 2.2 took those copies out; delete one
+that remains by hand (`INSTALL.md`). The user-scope hooks need one approval in
+codex's `/hooks`, and then apply in every project, trusted or not.
 
 Codex identifies an owned handler by a direct `spyc` invocation (or the
 currently resolved reporter executable), a known wire status and the generated
-command shape, including its optional trace flag and fail-soft tail. Bare legacy
-invocations are also recognized. Quoted flags, other programs, wrappers, unknown
-statuses and extra shell actions are preserved. A non-command handler is never
-pruned. This check does not change generated hook commands or trust records.
+command shape, including its optional trace flag and fail-soft tail. Bare
+invocations from older versions are also recognized. Quoted flags, other
+programs, wrappers, unknown statuses and extra shell actions are preserved. A
+non-command handler is never pruned. This check does not change generated hook
+commands or trust records.
 
 Removing a spyc reporter before a user hook can change Codex's positional trust
-key and silently disable that user hook, so spyc refuses such a removal, in the
-user `hooks.json` and in an old project copy alike; the declarations stay, and
-the refusal names the reason. Its own handlers never move: an install rewrites a
+key and silently disable that user hook, so spyc refuses such a removal in the
+user `hooks.json`; the declarations stay, and the refusal names the reason. Its own handlers never move: an install rewrites a
 handler where it stands. A running CLI keeps the definitions it started with, so
 restart Codex after a change and review `/hooks`; nothing spyc does approves a
 hook or infers that a pending question or permission request was answered.
@@ -783,20 +781,3 @@ refused record survives autosave and quit and repeat the restore. The last
 checks a wholly refused session executes no child and remains saved unchanged.
 Each host must quit with exit code zero and no signal. This covers spyc's restore
 behaviour without running native Codex or approving hook trust.
-
-
-Codex legacy-hook migration preserves a `.codex/hooks.json` symlink, including
-its target, and refuses installation/teardown rather than replacing or unlinking
-it. Diagnostics explain that the linked reporters need manual migration.
-Regular JSON files keep their existing permission bits when spyc removes its
-reporters; the replacement file receives those bits before atomic rename.
-The ownership TUI driver adds `symlink`, `dangling_symlink`, `mode_640` and
-`mode_644` scenarios. They check installation, diagnostics, file contents and
-permissions after graceful host exit, using controlled children and disposable
-HOME/state without executing native hooks or changing trust.
-
-The ownership smoke driver also accepts `json_mentions`, `toml_mentions` and
-`json_user_only`. These scenarios preserve user hooks that quote the reporter
-flag, call another program, wrap spyc or add shell actions; they check migration,
-installed user-command ordering, graceful teardown and unchanged user-only JSON.
-They use controlled children and do not execute these fixture commands.

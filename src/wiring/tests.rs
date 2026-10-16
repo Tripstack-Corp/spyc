@@ -665,6 +665,49 @@ fn removing_codex_hooks_after_the_users_keeps_theirs() {
     );
 }
 
+/// An interrupt reports idle beside the user's own handler for it, the question
+/// hooks match only codex's `request_user_input`, and a second install leaves
+/// the file byte for byte as it was.
+#[test]
+fn codex_hooks_report_interrupts_as_idle_and_questions_narrowly() {
+    use crate::agent::codex_recovery::{QUESTION_END, QUESTION_START};
+    let s = Sandbox::new();
+    let hooks = s.home(".codex/hooks.json");
+    let user = json!({"hooks": [{"type": "command", "command": "user-reporter"}]});
+    s.put(&hooks, &json!({"hooks": {"Interrupt": [user]}}).to_string());
+    install(AgentKind::Codex, &s.env).unwrap();
+    let v = json(&hooks);
+    let interrupt: Vec<&str> = v["hooks"]["Interrupt"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["hooks"][0]["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        interrupt,
+        [
+            "user-reporter",
+            "spyc --report-status idle 2>/dev/null || true"
+        ]
+    );
+    for (event, signal) in [
+        ("PreToolUse", QUESTION_START),
+        ("PostToolUse", QUESTION_END),
+    ] {
+        assert_eq!(
+            v["hooks"][event][0]["matcher"], "^request_user_input$",
+            "{event}"
+        );
+        let command = v["hooks"][event][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert!(command.contains(signal), "{event}: {command}");
+    }
+    let once = std::fs::read(&hooks).unwrap();
+    install(AgentKind::Codex, &s.env).unwrap();
+    assert_eq!(std::fs::read(&hooks).unwrap(), once);
+}
+
 /// Hooks the user keeps in `config.toml` are never touched, and get a note,
 /// since codex warns about two representations in one layer. Its own
 /// `[hooks.state]` trust records aren't hooks.

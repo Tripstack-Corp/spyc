@@ -332,8 +332,8 @@ protocol, no image protocols, no OSC 52 clipboard.
     none is named): `on` installs, `off` takes spyc's part back out, `ask` forgets
     the answer. If a claude live reload doesn't take, **`:hooks on!`** also
     restarts the active claude pane and resumes the conversation so the hooks
-    load from launch. spyc also takes out the per-project copies older versions
-    wrote, unless another running spyc still uses them or git tracks them.
+    load from launch. spyc writes nothing into a project; copies a version
+    before 2.2 wrote there can be deleted by hand (`INSTALL.md`).
   - **Scrape fallback** (for a state an agent's hooks can't report) — spyc
     reads the **visible screen** for verified approval prompts. Agy exposes no
     approval event. Codex's permission event precedes both automatic and human

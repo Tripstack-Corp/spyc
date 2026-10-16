@@ -73,15 +73,6 @@ fn user_scope_facts(info: &crate::pane::TabInfo, kind: AgentKind) -> Vec<String>
         .to_string(),
     );
     if kind == AgentKind::Codex {
-        // codex runs every layer's hooks, so a project copy reports as well.
-        if let Some(support) = info.agent().status_hooks()
-            && support.installed(&info.cwd)
-        {
-            facts.push(format!(
-                "a project copy in {} runs too: reports may arrive twice",
-                support.config_label
-            ));
-        }
         facts.push("execution/trust unverified: review /hooks".to_string());
     } else {
         facts.push("hook execution unverified".to_string());
@@ -104,21 +95,11 @@ pub(super) fn status_hooks_facts(info: &crate::pane::TabInfo) -> Option<Vec<Stri
     })
 }
 
-/// [`App::wire_at_startup`]'s work, for the agents in `answered`.
-fn startup_pass(answered: &[AgentKind], start: std::path::PathBuf, env: &Env) {
-    crate::state::hook_consent::retire();
-    for kind in answered {
-        if wiring_consent::opted_in(*kind) {
-            let _ = wiring::install(*kind, env);
-        }
+/// [`App::wire_at_startup`]'s work: bring each agent in `wired` up to date.
+fn startup_pass(wired: &[AgentKind], env: &Env) {
+    for kind in wired {
+        let _ = wiring::install(*kind, env);
     }
-    let done = wiring::legacy::scrub_all(answered, &[start], env, std::process::id());
-    crate::mcp::mcp_log(&format!(
-        "wiring: took spyc's project copies out of {} file(s); left {} directory(ies) another spyc uses and {} tracked",
-        done.cleaned,
-        done.in_use.len(),
-        done.tracked.len()
-    ));
 }
 
 /// One line per agent for `:hooks`.
@@ -138,19 +119,17 @@ fn summary() -> String {
 }
 
 impl App {
-    /// After an agent starts in a tab: ask, once per agent, whether to wire it,
-    /// and take out a copy of its wiring an older spyc left in `cwd`.
-    pub(super) fn offer_wiring(&mut self, kind: AgentKind, cwd: &Path) {
-        if !self.view.mcp_running || !wiring::KINDS.contains(&kind) {
+    /// After an agent starts in a tab: ask, once per agent, whether to wire it.
+    pub(super) fn offer_wiring(&mut self, kind: AgentKind) {
+        if !self.view.mcp_running
+            || !wiring::KINDS.contains(&kind)
+            || wiring_consent::answer(kind).is_some()
+        {
             return;
         }
         let Some(env) = Env::current() else {
             return;
         };
-        if wiring_consent::answer(kind).is_some() {
-            wiring::legacy::scrub(kind, cwd, &env, std::process::id());
-            return;
-        }
         let name = wiring::name(kind);
         let file = wiring::hooks_file(kind, &env)
             .map(|f| crate::paths::display_tilde(&f))
@@ -348,18 +327,15 @@ impl App {
     }
 
     /// At startup, on a worker: bring each wired agent's user configuration up
-    /// to date with this spyc, and take out the project copies older spycs
-    /// left for every agent the user has answered for. Retiring the old
-    /// per-project consent stops an older spyc still running from writing more.
+    /// to date with this spyc.
     pub(super) fn wire_at_startup(&self) {
-        let answered: Vec<AgentKind> = wiring::KINDS
+        let wired: Vec<AgentKind> = wiring::KINDS
             .into_iter()
-            .filter(|kind| wiring_consent::answer(*kind).is_some())
+            .filter(|kind| wiring_consent::opted_in(*kind))
             .collect();
-        let start = self.state.start_dir.clone();
         std::thread::spawn(move || {
             if let Some(env) = Env::for_spyc() {
-                startup_pass(&answered, start, &env);
+                startup_pass(&wired, &env);
             }
         });
     }
@@ -440,18 +416,18 @@ mod tests {
     /// asked again, wherever it starts, and another agent still is.
     #[test]
     fn each_agent_is_asked_once_for_every_project() {
-        with_app(|app, root| {
-            app.offer_wiring(AgentKind::Claude, &root.join("a"));
+        with_app(|app, _| {
+            app.offer_wiring(AgentKind::Claude);
             assert_eq!(asking_for(app), Some(AgentKind::Claude));
             app.answer_wiring(AgentKind::Claude, false);
             app.state.mode = Mode::Normal;
 
-            app.offer_wiring(AgentKind::Claude, &root.join("b"));
+            app.offer_wiring(AgentKind::Claude);
             assert_eq!(asking_for(app), None, "claude answered");
-            app.offer_wiring(AgentKind::Agy, &root.join("b"));
+            app.offer_wiring(AgentKind::Agy);
             assert_eq!(asking_for(app), Some(AgentKind::Agy));
             app.state.mode = Mode::Normal;
-            app.offer_wiring(AgentKind::Zot, &root.join("b"));
+            app.offer_wiring(AgentKind::Zot);
             assert_eq!(asking_for(app), None, "zot isn't wired");
         });
     }
@@ -460,9 +436,9 @@ mod tests {
     /// nothing is asked.
     #[test]
     fn nothing_is_asked_without_a_socket() {
-        with_app(|app, root| {
+        with_app(|app, _| {
             app.view.mcp_running = false;
-            app.offer_wiring(AgentKind::Claude, root);
+            app.offer_wiring(AgentKind::Claude);
             assert_eq!(asking_for(app), None);
         });
     }
@@ -474,7 +450,7 @@ mod tests {
         with_app(|app, root| {
             let project = root.join("project");
             std::fs::create_dir_all(&project).unwrap();
-            app.offer_wiring(AgentKind::Agy, &project);
+            app.offer_wiring(AgentKind::Agy);
             app.state.mode = Mode::Normal;
             app.answer_wiring(AgentKind::Agy, true);
             assert!(app.apply_wiring_outcomes());
@@ -535,31 +511,16 @@ mod tests {
         });
     }
 
-    /// At startup a wired agent's user configuration is brought up to date, the
-    /// copies older spycs left in projects come out, and the old per-project
-    /// answers become noes so an older spyc still running writes no more.
+    /// At startup a wired agent's user configuration is brought up to date.
     #[test]
-    fn the_startup_pass_refreshes_scrubs_and_retires() {
+    fn the_startup_pass_refreshes_a_wired_agent() {
         with_app(|_, root| {
-            let project = root.join("project");
-            std::fs::create_dir_all(&project).unwrap();
-            crate::state::hook_consent::set_consent(&project, true);
-            assert!(crate::mcp::ensure_claude_status_hooks(&project));
-            wiring_consent::set(AgentKind::Claude, Some(true));
-            let env = env(root);
-            startup_pass(&[AgentKind::Claude], root.to_path_buf(), &env);
+            startup_pass(&[AgentKind::Claude], &env(root));
             assert!(
                 std::fs::read_to_string(root.join("home/.claude/settings.json"))
                     .unwrap()
                     .contains("--report-status")
             );
-            assert!(!project.join(".claude/settings.json").exists());
-            assert!(crate::state::hook_consent::recorded_roots().contains(&project));
-            let store: std::collections::HashMap<String, bool> = serde_json::from_str(
-                &std::fs::read_to_string(root.join("state/hook_consent.json")).unwrap(),
-            )
-            .unwrap();
-            assert!(store.values().all(|allowed| !allowed), "{store:?}");
         });
     }
 

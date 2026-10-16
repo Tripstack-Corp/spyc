@@ -247,15 +247,14 @@ PTY tests are separate from native CLI acceptance.
 Codex loads the hooks of every layer it reads — user and project, `config.toml`
 and `hooks.json` — and runs them all, merging no duplicates. spyc's hooks live in
 the user `$CODEX_HOME/hooks.json`, so a project `.codex/config.toml` or
-`.codex/hooks.json` that an older spyc wrote reporters into would report each
-event a second time. spyc takes those copies out at startup and when it launches
-codex there (`wiring::legacy`), except where another running spyc still uses
-them or git tracks them; `:why-status` names a copy that remains.
+`.codex/hooks.json` that a spyc before 2.2 wrote reporters into reports each
+event a second time. 2.2 took those copies out; one left behind is the user's to
+delete (`INSTALL.md`).
 
 Codex identifies an owned handler by a direct `spyc` invocation (or the
 currently resolved reporter executable), a known wire status and the generated
-command shape, including its optional trace flag and fail-soft tail. Bare legacy
-invocations are also recognized. Quoted flags, other programs, wrappers, unknown
+command shape, including its optional trace flag and fail-soft tail. Bare
+invocations from older versions are also recognized. Quoted flags, other programs, wrappers, unknown
 statuses and extra shell actions are preserved. A non-command handler is never
 pruned. This check does not change generated hook commands or trust records.
 
@@ -290,8 +289,8 @@ again at the next startup refresh.
 
 The commands never vary, so claude's collapsing of identical handlers and
 agy's of named sets keep a leftover project copy from reporting twice; codex
-merges nothing, which is why the old project copies are taken out. Agents that
-read their hooks once at startup (codex, agy) are flagged for a restart when an
+merges nothing, so a codex copy left behind does report twice. Agents that read
+their hooks once at startup (codex, agy) are flagged for a restart when an
 install changes them.
 
 ### Who owns them
@@ -416,11 +415,12 @@ map: `src/app/agent_status.rs` (dots + notify + autosave settle),
 Codex's persisted hook key includes the source, event, matcher-group index and
 handler index. Removing a reporter ahead of a user handler changes the trust
 lookup even when that handler's command hash is identical. spyc therefore
-preflights inline TOML and legacy JSON pruning. If a user handler would move,
-installation and cleanup preserve both sources and explain the refusal in
-`:activity dump`. Removing trailing reporters is still allowed. spyc does not
-move or create hook trust records; a manual migration must include reviewing the
-affected user hooks in `/hooks` after restarting Codex.
+checks every edit to the user `hooks.json` first: a removal that would move a
+user handler is refused with the file untouched (`no_codex_hook_ever_moves`),
+and spyc's own handler is rewritten where it stands. Removing trailing
+reporters is still allowed. spyc does not move or create hook trust records; a
+manual edit must include reviewing the affected user hooks in `/hooks` after
+restarting Codex.
 
 ### Interruption and process exit
 

@@ -3,44 +3,6 @@ use crate::mcp_cmd::{McpCommand, McpResponse};
 use crate::pane::AgentActivity;
 use std::time::Duration;
 
-#[test]
-fn codex_interrupt_hook_reports_idle_without_changing_user_hooks_or_trust() {
-    let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join(".codex/config.toml");
-    std::fs::create_dir(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, "[[hooks.Interrupt]]\n[[hooks.Interrupt.hooks]]\ntype = 'command'\ncommand = 'user-reporter'\n[hooks.state.user]\ntrusted_hash = 'preserve-me'\n").unwrap();
-    assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
-    let value: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let commands: Vec<_> = value["hooks"]["Interrupt"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|group| group["hooks"].as_array().unwrap())
-        .map(|handler| handler["command"].as_str().unwrap())
-        .collect();
-    assert!(
-        commands
-            .iter()
-            .any(|command| command.contains("--report-status idle")),
-        "{commands:?}"
-    );
-    assert!(commands.contains(&"user-reporter"));
-    assert_eq!(
-        value["hooks"]["state"]["user"]["trusted_hash"].as_str(),
-        Some("preserve-me")
-    );
-    let once = std::fs::read(&path).unwrap();
-    assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
-    assert_eq!(std::fs::read(&path).unwrap(), once);
-    crate::mcp::cleanup_codex_status_hooks(tmp.path());
-    let cleaned: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(cleaned["hooks"]["Interrupt"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        cleaned["hooks"]["state"]["user"]["trusted_hash"].as_str(),
-        Some("preserve-me")
-    );
-}
-
 pub(super) fn agent_app(dir: &std::path::Path, name: &str) -> App {
     let mut app = App::test_app(dir.to_path_buf());
     assert!(app.open_pane_tab_in("cat", dir));
@@ -459,34 +421,6 @@ fn codex_question_recovery_waits_for_completion_instead_of_enter() {
         question_report(&mut app, "codex-question-end", "PostToolUse", "call-1");
         assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
     });
-}
-
-#[test]
-fn codex_question_hook_definitions_are_narrow_and_require_a_metadata_capable_host() {
-    let tmp = tempfile::tempdir().unwrap();
-    assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
-    let path = tmp.path().join(".codex/config.toml");
-    let value: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    for (event, signal) in [
-        ("PreToolUse", "codex-question-start"),
-        ("PostToolUse", "codex-question-end"),
-    ] {
-        assert_eq!(
-            value["hooks"][event][0]["matcher"].as_str(),
-            Some("^request_user_input$")
-        );
-        assert!(
-            value["hooks"][event][0]["hooks"][0]["command"]
-                .as_str()
-                .unwrap()
-                .contains(signal)
-        );
-    }
-    let before = std::fs::read(&path).unwrap();
-    assert!(crate::mcp::ensure_codex_status_hooks(tmp.path()));
-    assert_eq!(std::fs::read(&path).unwrap(), before);
-    crate::mcp::cleanup_codex_status_hooks(tmp.path());
-    assert!(!path.exists());
 }
 
 #[test]
