@@ -959,14 +959,9 @@ from `$HOME`'s rc alone because the entry it governs is global, keeps the entry
 out. A codex pane whose shell sets its own `CODEX_HOME` reads its hooks there,
 so once codex reports that home, spyc wires it too.
 
-A project copy an older spyc wrote runs beside the user one, so spyc takes it
-out (`wiring::legacy`): at launch from the agent's own directory, and at startup,
-on a worker, from every directory its per-project consent and ownership records
-name, for every agent the user has answered for. A directory another live spyc
-relies on is left for that spyc, a file git tracks is left alone, and a project
-file that is itself a user-scope file (`$HOME` as a project) is never touched.
-Startup also turns every old per-project answer into a no, because an older
-spyc still running reads that store before writing a project its hooks.
+spyc writes nothing into a project. Versions before 2.2 wrote each agent's
+wiring into every directory it ran in, and 2.2 took those copies back out; one
+that predates a user's first 2.2 launch is theirs to delete (`INSTALL.md`).
 
 Claude Code hands its plan's rate-limit windows and the context window to one
 place only: the `statusLine` command's input. So claude's wiring also wraps that
@@ -1201,9 +1196,9 @@ back on `-r`.
 ### Codex hook pruning requires a reporter invocation
 
 A flag mentioned in an unrelated hook grants no permission to remove that
-handler. The user-scope `hooks.json` install, the cleanup of older spycs'
-per-directory copies and its positional-trust preflight share a conservative
-command matcher: a direct `spyc` invocation
+handler. The user-scope `hooks.json` install and removal, with its
+positional-trust check, use a conservative command matcher: a direct `spyc`
+invocation
 (or the caller's resolved reporter executable), a known wire status, and the
 exact generated or bare legacy command shape. Quoted flags, other programs,
 wrappers, extra shell actions and unknown statuses remain user content. The

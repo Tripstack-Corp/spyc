@@ -137,22 +137,15 @@ pub mod statusline;
 mod tool_schemas;
 
 pub use config::{
-    ConfigCleanup, MANAGED_MCP_PATHS, MANAGED_SETTINGS_PATHS, PANE_ENV, Removal,
-    cleanup_agy_mcp_config, cleanup_codex_config, cleanup_mcp_json, enterprise_allows_spyc_in,
+    MANAGED_MCP_PATHS, MANAGED_SETTINGS_PATHS, PANE_ENV, Removal, enterprise_allows_spyc_in,
     enterprise_defines_spyc_in, mcp_json_with_spyc, mcp_json_without_spyc,
 };
 #[cfg(test)]
-pub use config::{ensure_agy_mcp_config, ensure_codex_config_toml};
+pub use hooks::with_search_path;
 pub use hooks::{
-    agy_hooks_without_spyc, claude_hooks_without_spyc, cleanup_agy_status_hooks,
-    cleanup_claude_status_hooks, cleanup_codex_status_hooks, codex_hooks_json_with_spyc,
+    agy_hooks_without_spyc, claude_hooks_without_spyc, codex_hooks_json_with_spyc,
     codex_hooks_json_without_spyc, find_on_path, merged_agy_status_hooks_json,
     merged_status_hooks_json, spyc_binary,
-};
-#[cfg(test)]
-pub use hooks::{
-    ensure_agy_status_hooks, ensure_claude_status_hooks, ensure_codex_status_hooks,
-    with_search_path,
 };
 pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
 

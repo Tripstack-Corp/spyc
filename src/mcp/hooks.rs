@@ -1,9 +1,10 @@
-//! Agent status hooks: spyc installs command hooks into a launched agent
-//! pane's project config so the agent auto-reports its activity
+//! Agent status hooks: the command hooks `src/wiring/` installs in each agent's
+//! user configuration so the agent auto-reports its activity
 //! (`spyc --report-status <state>`) on lifecycle events, driving the per-tab
 //! activity dot WITHOUT the agent having to call the `report_status` tool
 //! itself. The reporter reads `SPYC_MCP_SOCK` + `SPYC_PANE_ID` from the env
-//! spyc injects into the pane (inherited by the hook).
+//! spyc injects into the pane (inherited by the hook). This module holds the
+//! pure codecs: each agent's file with spyc's hooks merged in or taken out.
 //!
 //! The reporter binary is resolved PATH-first (a bare `spyc` when one is on
 //! `$PATH`, else the running binary's absolute path), and the command is
@@ -13,12 +14,11 @@
 //! [`spyc_binary`] / [`reporter_command`].
 //!
 //! Three agents are wired (all share the lifecycle-event → reported-state idea):
-//! * **claude** — `.claude/settings.json` (JSON), reloaded live → hooks take
-//!   effect on the next turn (the functions below).
-//! * **codex** — inline `[[hooks.<Event>]]` arrays in the SAME
-//!   `.codex/config.toml` we write the MCP entry into; read once at startup, so
-//!   they must be written BEFORE the pane spawns (see the codex section).
-//! * **agy** (Antigravity) — a `spyc-status` named set in `.agents/hooks.json`;
+//! * **claude** — `settings.json` (JSON), reloaded live → hooks take effect on
+//!   the next turn (the functions below).
+//! * **codex** — `$CODEX_HOME/hooks.json`; read once at startup, so a change
+//!   takes effect on codex's next launch (see the codex section).
+//! * **agy** (Antigravity) — a `spyc-status` named set in its `hooks.json`;
 //!   PARTIAL (working/done, plus blocked for its `ask_question` tool — no agy event
 //!   fires on a tool-permission prompt, so that half of `blocked` comes from the
 //!   screen scrape instead; `done` needs agy >= 1.1.10). See the agy section.
@@ -44,17 +44,16 @@
 //!   pulsing `working` while the agent actually waits on the user.)
 //! * `Stop`              → `done`    (the agent finished its turn)
 //!
-//! Merge/cleanup mirrors the `.mcp.json` policy in [`super::config`]: merge our
-//! entries into an existing file without disturbing the user's other hooks or
-//! settings; on teardown remove only the entries we wrote (identified by the
-//! `--report-status` command), deleting an emptied file/dir; never touch a
-//! git-tracked `settings.json` (don't dirty something the user committed).
+//! A merge splices our entries into an existing file without disturbing the
+//! user's other hooks or settings; a removal takes out only the entries we
+//! wrote (identified by the `--report-status` command) and says whether the
+//! file is left empty.
 
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::config::{ConfigCleanup, Removal};
+use super::config::Removal;
 
 /// The spyc binary to bake into an installed status-hook command. Prefers a
 /// `spyc` discoverable on `$PATH` so the hook survives the binary MOVING (a
@@ -186,17 +185,6 @@ fn merge_root_json(existing: Option<&str>) -> Option<Value> {
     }
 }
 
-/// [`merge_root_json`] for codex's TOML config. Same rule, same reasoning.
-#[cfg(test)]
-fn merge_root_toml(existing: Option<&str>) -> Option<toml::Value> {
-    match existing {
-        Some(t) if !t.trim().is_empty() => toml::from_str::<toml::Value>(t)
-            .ok()
-            .filter(toml::Value::is_table),
-        _ => Some(toml::Value::Table(toml::Table::new())),
-    }
-}
-
 /// Merge spyc's status hooks into `existing` settings.json content (or a fresh
 /// `{}` when absent), returning the serialized result with a
 /// trailing newline. `None` when we refuse: an unparseable existing file, a
@@ -255,40 +243,8 @@ pub fn claude_hooks_without_spyc(text: &str) -> Option<Removal> {
     Some(Removal::Rest { text, empty })
 }
 
-/// Teardown counterpart: remove only the hook entries spyc wrote from
-/// `<dir>/.claude/settings.json`, preserving the user's other hooks/settings.
-/// Empties cascade: an event whose array becomes empty is dropped, then the
-/// `hooks` key if empty, then the whole file (and the `.claude/` dir) if that
-/// leaves it empty. Refuses a git-tracked file. Best-effort.
-pub fn cleanup_claude_status_hooks(dir: &Path) -> ConfigCleanup {
-    let path = dir.join(".claude").join("settings.json");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return ConfigCleanup::NothingToDo;
-    };
-    let Some(Removal::Rest { text: rest, empty }) = claude_hooks_without_spyc(&text) else {
-        return ConfigCleanup::NothingToDo;
-    };
-    if crate::git::discovery::is_tracked(&path) {
-        return ConfigCleanup::SkippedTracked;
-    }
-    if empty {
-        let _ = std::fs::remove_file(&path);
-        // Remove `.claude/` too, but only if now empty (no-op otherwise).
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::remove_dir(parent);
-        }
-        return ConfigCleanup::Cleaned;
-    }
-    let _ = crate::fs::write_atomic(&path, rest.as_bytes());
-    ConfigCleanup::Cleaned
-}
-
 mod codex;
-#[cfg(test)]
-pub use codex::ensure_codex_status_hooks;
-pub use codex::{
-    cleanup_codex_status_hooks, codex_hooks_json_with_spyc, codex_hooks_json_without_spyc,
-};
+pub use codex::{codex_hooks_json_with_spyc, codex_hooks_json_without_spyc};
 
 // ── Agy (Antigravity CLI) status hooks ────────────────────────────────
 //
@@ -423,111 +379,18 @@ pub fn agy_hooks_without_spyc(text: &str) -> Option<Removal> {
     Some(Removal::Rest { text, empty })
 }
 
-/// Teardown counterpart: remove only spyc's `spyc-status` set from
-/// `<dir>/.agents/hooks.json`, preserving the user's other sets; delete the
-/// file (and `.agents/` if now empty) when nothing else remains. Refuses a
-/// git-tracked file.
-pub fn cleanup_agy_status_hooks(dir: &Path) -> ConfigCleanup {
-    let agents_dir = dir.join(".agents");
-    let path = agents_dir.join("hooks.json");
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return ConfigCleanup::NothingToDo;
-    };
-    let Some(Removal::Rest { text: rest, empty }) = agy_hooks_without_spyc(&text) else {
-        return ConfigCleanup::NothingToDo;
-    };
-    if crate::git::discovery::is_tracked(&path) {
-        return ConfigCleanup::SkippedTracked;
-    }
-    if empty {
-        let _ = std::fs::remove_file(&path);
-        // Remove `.agents/` too, but only if now empty (no-op otherwise — it
-        // may hold skills / mcp_config.json).
-        let _ = std::fs::remove_dir(&agents_dir);
-        return ConfigCleanup::Cleaned;
-    }
-    let _ = crate::fs::write_atomic(&path, rest.as_bytes());
-    ConfigCleanup::Cleaned
-}
-
-#[cfg(test)]
-/// Write/merge the spyc status hooks into `<dir>/.claude/settings.json`,
-/// preserving any existing settings + the user's own hooks. Idempotent at the
-/// byte level: when the file already holds exactly the merged content the write
-/// is **skipped**, so re-launching a pane in a cwd whose hooks are already
-/// installed doesn't touch the file. (All agent panes in a repo share one
-/// settings.json and Claude reloads it live — an identical rewrite still bumps
-/// mtime and would trip every sibling agent's hook reload for nothing.)
-/// Returns whether our hooks are present in a file we own (so teardown knows to
-/// clean it) — `true` both when we wrote and when an already-current file let us
-/// skip. `false` if the file is git-tracked (we never dirty a committed config)
-/// or its `hooks` value is a non-object we won't clobber.
-pub fn ensure_claude_status_hooks(dir: &Path) -> bool {
-    let path = dir.join(".claude").join("settings.json");
-    if crate::git::discovery::is_tracked(&path) {
-        return false;
-    }
-    // Resolve the reporter binary (PATH-preferring, so the hook survives the
-    // binary moving); skip on a non-UTF-8 path a shell would mis-exec.
-    let Some(exe) = spyc_binary() else {
-        return false;
-    };
-    let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_status_hooks_json(existing.as_deref(), &exe) else {
-        return false;
-    };
-    // Already current → skip the write (and its mtime bump), but still report
-    // `true`: our hooks ARE present, so teardown must track this dir.
-    if existing.as_deref() == Some(out.as_str()) {
-        return true;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
-}
-
-#[cfg(test)]
-/// Agy counterpart of [`ensure_claude_status_hooks`]: merge spyc's status hooks
-/// into `<dir>/.agents/hooks.json`. Byte-idempotent skip, git-tracked guard,
-/// and return contract mirror the claude version.
-pub fn ensure_agy_status_hooks(dir: &Path) -> bool {
-    let path = dir.join(".agents").join("hooks.json");
-    if crate::git::discovery::is_tracked(&path) {
-        return false;
-    }
-    let Some(exe) = spyc_binary() else {
-        return false;
-    };
-    let existing = std::fs::read_to_string(&path).ok();
-    let Some(out) = merged_agy_status_hooks_json(existing.as_deref(), &exe) else {
-        return false;
-    };
-    if existing.as_deref() == Some(out.as_str()) {
-        return true;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    crate::fs::write_atomic(&path, out.as_bytes()).is_ok()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::codex::merged_codex_status_hooks_toml;
     use super::*;
 
-    fn read(path: &Path) -> Value {
-        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    fn parse(text: &str) -> Value {
+        serde_json::from_str(text).unwrap()
     }
 
     #[test]
-    fn writes_status_hooks_then_cleans_them_leaving_no_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        assert!(ensure_claude_status_hooks(dir));
-        let path = dir.join(".claude/settings.json");
-        let v = read(&path);
+    fn claude_merge_installs_every_hook_and_removal_leaves_nothing() {
+        let merged = merged_status_hooks_json(None, "spyc").expect("fresh merge");
+        let v = parse(&merged);
         // Every event present, each running --report-status with its state and
         // carrying its tool-name matcher (`""` for the non-tool events).
         for (event, matcher, state) in STATUS_HOOKS {
@@ -551,47 +414,35 @@ mod tests {
                 .and_then(Value::as_str),
             Some("AskUserQuestion|ExitPlanMode")
         );
-        // Cleanup removes everything → file (and .claude/) gone.
+        // Removing ours leaves nothing, so the file can go.
         assert!(matches!(
-            cleanup_claude_status_hooks(dir),
-            ConfigCleanup::Cleaned
+            claude_hooks_without_spyc(&merged),
+            Some(Removal::Rest { empty: true, .. })
         ));
-        assert!(
-            !path.exists(),
-            "settings.json should be removed when emptied"
-        );
     }
 
     #[test]
-    fn merge_preserves_user_settings_and_hooks_and_cleanup_leaves_them() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+    fn merge_preserves_user_settings_and_hooks_and_removal_leaves_them() {
         // A pre-existing settings.json with a user theme + a user Stop hook.
-        std::fs::write(
-            dir.join(".claude/settings.json"),
-            r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo bye"}]}]}}"#,
-        )
-        .unwrap();
-        assert!(ensure_claude_status_hooks(dir));
-        let path = dir.join(".claude/settings.json");
-        let v = read(&path);
+        let user = r#"{"theme":"dark","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo bye"}]}]}}"#;
+        let merged = merged_status_hooks_json(Some(user), "spyc").expect("merge");
+        let v = parse(&merged);
         assert_eq!(v["theme"], "dark", "user setting preserved");
         // Stop now has BOTH the user's echo + our report-status group.
         let stop = v.pointer("/hooks/Stop").unwrap().as_array().unwrap();
         assert_eq!(stop.len(), 2, "user hook kept, ours appended: {stop:?}");
 
-        // Idempotent re-write doesn't duplicate ours.
-        assert!(ensure_claude_status_hooks(dir));
-        let stop2 = read(&path)["hooks"]["Stop"].as_array().unwrap().len();
-        assert_eq!(stop2, 2, "re-launch replaces our group, no dupe");
+        // A second merge replaces our group rather than adding another.
+        let again = merged_status_hooks_json(Some(&merged), "spyc").expect("re-merge");
+        let stop2 = parse(&again)["hooks"]["Stop"].as_array().unwrap().len();
+        assert_eq!(stop2, 2, "re-merge replaces our group, no dupe");
 
-        // Cleanup removes ONLY ours; the user's theme + echo hook survive.
-        assert!(matches!(
-            cleanup_claude_status_hooks(dir),
-            ConfigCleanup::Cleaned
-        ));
-        let after = read(&path);
+        // Removal takes out ONLY ours; the user's theme + echo hook survive.
+        let Some(Removal::Rest { text, empty }) = claude_hooks_without_spyc(&again) else {
+            panic!("ours was there to remove");
+        };
+        assert!(!empty);
+        let after = parse(&text);
         assert_eq!(after["theme"], "dark");
         let stop_after = after.pointer("/hooks/Stop").unwrap().as_array().unwrap();
         assert_eq!(stop_after.len(), 1, "only the user's echo hook remains");
@@ -599,24 +450,18 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_is_a_noop_when_nothing_of_ours() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        std::fs::create_dir_all(dir.join(".claude")).unwrap();
-        std::fs::write(dir.join(".claude/settings.json"), r#"{"theme":"dark"}"#).unwrap();
+    fn removal_leaves_a_file_with_nothing_of_ours_alone() {
         assert!(matches!(
-            cleanup_claude_status_hooks(dir),
-            ConfigCleanup::NothingToDo
+            claude_hooks_without_spyc(r#"{"theme":"dark"}"#),
+            Some(Removal::NothingOurs)
         ));
-        assert!(dir.join(".claude/settings.json").exists());
     }
 
     #[test]
     fn merge_is_byte_idempotent() {
         // Applying the merge to its own output must reproduce it byte-for-byte —
-        // this is the invariant that lets `ensure_claude_status_hooks` skip the
-        // write (and the mtime bump) on a re-launch instead of churning the
-        // shared settings.json.
+        // this is the invariant that lets an unchanged install skip its write
+        // (and the mtime bump that would trip Claude's live reload).
         let once = merged_status_hooks_json(None, "spyc").expect("fresh merge");
         let twice = merged_status_hooks_json(Some(&once), "spyc").expect("re-merge");
         assert_eq!(once, twice, "re-applying the merge changed a byte");
@@ -645,7 +490,7 @@ mod tests {
         let quoted = "'/Users/My User/bin/spyc' --report-status";
         let claude = merged_status_hooks_json(None, exe).expect("claude merge");
         assert!(claude.contains(quoted), "claude not quoted: {claude}");
-        let codex = merged_codex_status_hooks_toml(None, exe).expect("codex merge");
+        let codex = codex_hooks_json_with_spyc(None, exe).expect("codex merge");
         assert!(codex.contains(quoted), "codex not quoted: {codex}");
         let agy = merged_agy_status_hooks_json(None, exe).expect("agy merge");
         assert!(agy.contains(quoted), "agy not quoted: {agy}");
@@ -695,46 +540,12 @@ mod tests {
         assert!(!is_executable_file(&tmp.path().join("missing")));
     }
 
-    #[test]
-    fn relaunch_does_not_rewrite_an_already_current_file() {
-        use std::time::{Duration, SystemTime};
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        assert!(ensure_claude_status_hooks(dir));
-        let path = dir.join(".claude/settings.json");
-
-        // Backdate mtime far enough that a rewrite is unambiguous regardless of
-        // the filesystem's timestamp resolution.
-        let backdated = SystemTime::now() - Duration::from_secs(3600);
-        std::fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(backdated)
-            .unwrap();
-        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
-
-        // Second launch: hooks already current → must skip the write...
-        assert!(
-            ensure_claude_status_hooks(dir),
-            "still reports present (track for cleanup)"
-        );
-        let after = std::fs::metadata(&path).unwrap().modified().unwrap();
-        assert_eq!(
-            before, after,
-            "an already-current settings.json was rewritten (mtime bumped → would trip Claude's live-reload)"
-        );
-    }
-
-    // ── agy (.agents/hooks.json, named hook-set, flat handler lists) ──────
+    // ── agy (hooks.json, named hook-set, flat handler lists) ──────
 
     #[test]
-    fn writes_agy_status_hooks_then_cleans_them_leaving_no_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        assert!(ensure_agy_status_hooks(dir));
-        let path = dir.join(".agents/hooks.json");
-        let v = read(&path);
+    fn agy_merge_installs_every_hook_and_removal_leaves_nothing() {
+        let merged = merged_agy_status_hooks_json(None, "spyc").expect("fresh merge");
+        let v = parse(&merged);
         for (event, matcher, state) in AGY_STATUS_HOOKS {
             // Lifecycle events sit in a flat handler list; a tool event is wrapped
             // in a `{matcher, hooks}` group, so its handler is one level deeper.
@@ -763,42 +574,26 @@ mod tests {
             );
         }
         assert!(matches!(
-            cleanup_agy_status_hooks(dir),
-            ConfigCleanup::Cleaned
+            agy_hooks_without_spyc(&merged),
+            Some(Removal::Rest { empty: true, .. })
         ));
-        assert!(!path.exists(), "hooks.json should be removed when emptied");
-        assert!(
-            !dir.join(".agents").exists(),
-            "empty .agents dir should be removed"
-        );
     }
 
     #[test]
-    fn agy_hooks_preserve_user_sets_and_cleanup_leaves_them() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        std::fs::create_dir_all(dir.join(".agents")).unwrap();
-        let path = dir.join(".agents/hooks.json");
+    fn agy_hooks_preserve_user_sets_and_removal_leaves_them() {
         // A pre-existing user hook-set.
-        std::fs::write(
-            &path,
-            r#"{"linter":{"PostToolUse":[{"matcher":"write_to_file","hooks":[{"type":"command","command":"./lint.sh"}]}]}}"#,
-        )
-        .unwrap();
-        assert!(ensure_agy_status_hooks(dir));
-        let v = read(&path);
+        let user = r#"{"linter":{"PostToolUse":[{"matcher":"write_to_file","hooks":[{"type":"command","command":"./lint.sh"}]}]}}"#;
+        let merged = merged_agy_status_hooks_json(Some(user), "spyc").expect("merge");
+        let v = parse(&merged);
         assert!(v.get("linter").is_some(), "user set preserved");
         assert!(v.get(AGY_HOOK_SET).is_some(), "our set added");
 
-        // Idempotent re-write.
-        assert!(ensure_agy_status_hooks(dir));
-
-        // Cleanup removes ONLY our set; the user's linter set survives.
-        assert!(matches!(
-            cleanup_agy_status_hooks(dir),
-            ConfigCleanup::Cleaned
-        ));
-        let after = read(&path);
+        // Removal takes out ONLY our set; the user's linter set survives.
+        let Some(Removal::Rest { text, empty }) = agy_hooks_without_spyc(&merged) else {
+            panic!("ours was there to remove");
+        };
+        assert!(!empty);
+        let after = parse(&text);
         assert!(after.get(AGY_HOOK_SET).is_none(), "our set removed");
         assert!(after.get("linter").is_some(), "user set preserved");
         assert_eq!(
@@ -858,16 +653,11 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_agy_hooks_is_a_noop_when_nothing_of_ours() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path();
-        std::fs::create_dir_all(dir.join(".agents")).unwrap();
-        std::fs::write(dir.join(".agents/hooks.json"), r#"{"linter":{}}"#).unwrap();
+    fn agy_removal_leaves_a_file_with_nothing_of_ours_alone() {
         assert!(matches!(
-            cleanup_agy_status_hooks(dir),
-            ConfigCleanup::NothingToDo
+            agy_hooks_without_spyc(r#"{"linter":{}}"#),
+            Some(Removal::NothingOurs)
         ));
-        assert!(dir.join(".agents/hooks.json").exists());
     }
 
     #[test]
@@ -917,10 +707,9 @@ mod tests {
     /// than starting from an empty document and writing the user's content away.
     ///
     /// These files are not spyc's: claude's `settings.json` holds permissions,
-    /// codex's `config.toml` holds `model` / `approval_policy`, agy's
-    /// `hooks.json` holds the user's own named hook sets. One trailing comma was
-    /// enough to lose all of it on the next pane launch. A refusal costs the
-    /// activity dots for that repo, which is recoverable; the write was not.
+    /// codex's and agy's `hooks.json` hold the user's own hooks. One trailing
+    /// comma was enough to lose all of it on the next write. A refusal costs
+    /// the activity dots, which is recoverable; the write was not.
     #[test]
     fn every_merge_refuses_an_unparseable_existing_file() {
         for bad in [
@@ -936,10 +725,8 @@ mod tests {
                 merged_agy_status_hooks_json(Some(bad), "spyc").is_none(),
                 "agy merge must refuse {bad:?}"
             );
-        }
-        for bad in ["}}}}{{{ not toml", "model = \n"] {
             assert!(
-                merged_codex_status_hooks_toml(Some(bad), "spyc").is_none(),
+                codex_hooks_json_with_spyc(Some(bad), "spyc").is_err(),
                 "codex merge must refuse {bad:?}"
             );
         }
@@ -959,6 +746,10 @@ mod tests {
                 merged_agy_status_hooks_json(Some(bad), "spyc").is_none(),
                 "agy merge must refuse root {bad:?}"
             );
+            assert!(
+                codex_hooks_json_with_spyc(Some(bad), "spyc").is_err(),
+                "codex merge must refuse root {bad:?}"
+            );
         }
     }
 
@@ -977,7 +768,7 @@ mod tests {
                 "agy merge must accept {existing:?}"
             );
             assert!(
-                merged_codex_status_hooks_toml(existing, "spyc").is_some(),
+                codex_hooks_json_with_spyc(existing, "spyc").is_ok(),
                 "codex merge must accept {existing:?}"
             );
         }

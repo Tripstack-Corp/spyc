@@ -9,14 +9,12 @@ pub mod codex_history;
 pub mod codex_images;
 pub mod codex_transcript;
 pub mod cursor;
-pub mod dir_owners;
 pub mod frecency;
 pub mod graveyard;
 pub mod harpoon;
 pub mod health;
 #[allow(dead_code, clippy::question_mark)]
 pub mod history;
-pub mod hook_consent;
 pub mod ignore;
 pub mod inventory;
 pub mod marks;

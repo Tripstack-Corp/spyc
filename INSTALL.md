@@ -229,9 +229,25 @@ The entry spyc registers for Claude Code looks like this:
 
 spyc edits these files in place: your own settings and their order are kept,
 a symlinked file stays a link, and a file that won't parse is left alone with
-the reason shown. Older versions of spyc wrote `.mcp.json`, `.codex/` and
-`.agents/` files into each project; spyc takes spyc's part of those out on its
-own.
+the reason shown.
+
+**Upgrading from a version before 2.2.** Older versions wrote the wiring into
+each project an agent ran in, and 2.2 took it back out on first launch. If you
+skipped 2.2, delete what's left by hand. In a project, spyc's part is:
+
+| File | spyc's part |
+|---|---|
+| `.mcp.json`, `.agents/mcp_config.json` | the `spyc` entry under `mcpServers` |
+| `.claude/settings.json` | hooks whose command runs `spyc --report-status` |
+| `.codex/config.toml` | `[mcp_servers.spyc]`, and `[[hooks.*]]` handlers that run `spyc --report-status` |
+| `.codex/hooks.json` | handlers that run `spyc --report-status` |
+| `.agents/hooks.json` | the `spyc-status` set |
+
+A codex project in a linked worktree had its hooks written in the main
+checkout's `.codex/`. A codex copy matters most: codex runs every copy of a
+hook, so a leftover one reports each event twice. spyc's state directory may
+also hold `hook_consent.json`, `hook_owners.json`, `mcp_owners.json` and
+`hook_leases.json`, which nothing reads any more.
 
 **Before uninstalling spyc**, run `spyc --remove-agents`. The entries outlive
 spyc otherwise, and an agent then reports an MCP server that fails to start.

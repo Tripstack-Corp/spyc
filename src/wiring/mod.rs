@@ -2,8 +2,8 @@
 //! entry and the status hooks, installed once into each agent's own user
 //! configuration (#619) rather than into every directory an agent runs in.
 //!
-//! What spyc owns inside a shared file is decided by its content, as the
-//! per-directory writers decide it: a hook whose command runs
+//! What spyc owns inside a shared file is decided by its content: a hook whose
+//! command runs
 //! `--report-status`, agy's `spyc-status` set, an MCP server named `spyc` that
 //! runs spyc. An install that would change nothing writes nothing, and the
 //! generated commands never vary, because codex keeps a user's trust in a hook
@@ -14,7 +14,6 @@ mod claude;
 mod cli;
 mod codex;
 mod file;
-pub mod legacy;
 mod statusline;
 
 pub use cli::run_cli;

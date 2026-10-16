@@ -269,7 +269,7 @@ impl App {
                 }
                 // The first launch of an agent asks whether to wire it. After
                 // the tab exists, so the prompt doesn't cover a missing pane.
-                self.offer_wiring(kind, cwd);
+                self.offer_wiring(kind);
                 true
             }
             Err(e) => {

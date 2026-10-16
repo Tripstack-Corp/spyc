@@ -522,13 +522,6 @@ pub fn cleanup_socket() {
     }
 }
 
-/// Extract the PID from a socket path like `mcp-12345.sock`.
-pub(super) fn pid_from_sock_path(path: &str) -> Option<u32> {
-    let fname = Path::new(path).file_name()?.to_str()?;
-    let stripped = fname.strip_prefix("mcp-")?.strip_suffix(".sock")?;
-    stripped.parse().ok()
-}
-
 /// Handle a single Unix socket connection. Uses the same Content-Length
 /// framing as the stdio transport.
 pub(super) fn handle_socket_connection(

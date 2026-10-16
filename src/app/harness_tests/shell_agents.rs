@@ -263,11 +263,10 @@ fn wiring_env(root: &std::path::Path) -> crate::wiring::Env {
     }
 }
 
-/// A shell tab writes nothing into its project: agents are wired in their own
-/// user configuration. An agent that starts there takes out the copy an older
-/// spyc left, once the user has answered for it.
+/// A shell tab writes nothing into its project, and neither does an agent the
+/// user has wired: agents are wired in their own user configuration.
 #[test]
-fn a_shell_tab_writes_nothing_and_an_answered_agent_takes_out_old_copies() {
+fn a_shell_tab_and_its_agents_write_nothing_into_the_project() {
     use crate::state::sessions::AgentKind;
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap();
@@ -284,21 +283,15 @@ fn a_shell_tab_writes_nothing_and_an_answered_agent_takes_out_old_copies() {
                 "the shell wrote nothing"
             );
 
-            assert!(crate::mcp::ensure_claude_status_hooks(&dir));
-            assert!(crate::mcp::ensure_agy_status_hooks(&dir));
-            crate::mcp::ensure_codex_config_toml(&dir).unwrap();
-            assert!(crate::mcp::ensure_codex_status_hooks(&dir));
             for kind in [AgentKind::Claude, AgentKind::Codex, AgentKind::Agy] {
                 crate::state::wiring_consent::set(kind, Some(true));
-                app.offer_wiring(kind, &dir);
+                app.offer_wiring(kind);
             }
-            for file in [
-                ".claude/settings.json",
-                ".codex/config.toml",
-                ".agents/hooks.json",
-            ] {
-                assert!(!dir.join(file).exists(), "{file} survived");
-            }
+            assert_eq!(
+                std::fs::read_dir(&dir).unwrap().count(),
+                0,
+                "a wired agent wrote nothing"
+            );
         });
     });
 }

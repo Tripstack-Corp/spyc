@@ -142,39 +142,12 @@ pub struct TranscriptImageSpec {
 /// `spyc --report-status <state>` so the tab dot tracks the agent's turn).
 /// Returned by [`AgentProfile::status_hooks`] for the agents spyc wires
 /// (claude/codex/agy); `None` for the rest. spyc installs them in the agent's
-/// user configuration (`crate::wiring`); `config_dir` and `config_label` name
-/// the per-directory copy older spycs wrote, which `:why-status` still reports.
+/// user configuration (`crate::wiring`).
 pub struct StatusHookSupport {
-    /// Resolve the hook directory an older spyc wrote for this cwd.
-    pub config_dir: fn(&Path) -> std::path::PathBuf,
-    /// That copy's config file, relative to `config_dir` (e.g.
-    /// `.claude/settings.json`).
-    pub config_label: &'static str,
     /// True if the agent re-reads its hook config live (claude reloads its
     /// settings each turn). False = config is read once at startup (codex,
     /// agy), so hooks installed after it started load on its next launch.
     pub live_reload: bool,
-}
-
-impl StatusHookSupport {
-    /// Are spyc's status hooks currently present in `dir`'s agent config?
-    ///
-    /// Marker presence does not confer cleanup authority or establish trust.
-    /// Format-agnostic on purpose: every agent's hooks embed that token, so one
-    /// substring check covers claude's JSON, codex's TOML/legacy JSON and
-    /// agy's named set without separate parsers. Deliberately blind to *which*
-    /// spyc wrote them — the reporter targets the pane's own socket, so any instance's hooks work
-    /// for any instance's pane.
-    #[must_use]
-    pub fn installed(&self, dir: &Path) -> bool {
-        let dir = (self.config_dir)(dir);
-        let present = |label| {
-            std::fs::read_to_string(dir.join(label))
-                .is_ok_and(|text| text.contains("--report-status"))
-        };
-        present(self.config_label)
-            || (self.config_label == ".codex/config.toml" && present(".codex/hooks.json"))
-    }
 }
 
 /// Per-agent behaviour. Default methods express "this agent doesn't do
@@ -504,11 +477,7 @@ impl AgentProfile for ClaudeProfile {
         KEYS
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
-        Some(StatusHookSupport {
-            config_dir: Path::to_path_buf,
-            config_label: ".claude/settings.json",
-            live_reload: true,
-        })
+        Some(StatusHookSupport { live_reload: true })
     }
     fn output_len(&self, lines: &[String]) -> usize {
         chrome::claude_output_len(lines)
@@ -737,13 +706,7 @@ impl AgentProfile for CodexProfile {
         })
     }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
-        // Codex loads hooks from the corresponding root-checkout directory;
-        // ordinary config and the MCP entry remain worktree-local.
-        Some(StatusHookSupport {
-            config_dir: crate::git::discovery::root_checkout_dir,
-            config_label: ".codex/config.toml",
-            live_reload: false,
-        })
+        Some(StatusHookSupport { live_reload: false })
     }
 }
 
@@ -851,11 +814,7 @@ impl AgentProfile for AgyProfile {
         // `done` needs agy >= 1.1.10: before it, `Stop` sat unreachable behind
         // agy's built-in termination checks, so the hook was installed and never
         // ran. On an older agy that half degrades to output timing.
-        Some(StatusHookSupport {
-            config_dir: Path::to_path_buf,
-            config_label: ".agents/hooks.json",
-            live_reload: false,
-        })
+        Some(StatusHookSupport { live_reload: false })
     }
     fn detection_rules(&self) -> &'static [DetectionRule] {
         AGY_DETECTION_RULES
@@ -1185,22 +1144,19 @@ mod tests {
         assert_eq!(detect("").kind(), AgentKind::Other);
     }
 
-    /// claude / codex / agy auto-install status hooks, each naming its own
-    /// config file; only claude live-reloads (codex/agy read config at startup).
+    /// claude / codex / agy have status hooks; only claude live-reloads
+    /// (codex/agy read config at startup).
     #[test]
     fn status_hook_support_per_agent() {
         let claude = ClaudeProfile
             .status_hooks()
             .expect("claude has status hooks");
-        assert_eq!(claude.config_label, ".claude/settings.json");
         assert!(claude.live_reload, "claude reloads settings.json live");
 
         let codex = CodexProfile.status_hooks().expect("codex has status hooks");
-        assert_eq!(codex.config_label, ".codex/config.toml");
         assert!(!codex.live_reload, "codex reads config once at startup");
 
         let agy = AgyProfile.status_hooks().expect("agy has status hooks");
-        assert_eq!(agy.config_label, ".agents/hooks.json");
         assert!(!agy.live_reload, "agy reads config at startup");
 
         assert!(ZotProfile.status_hooks().is_none());

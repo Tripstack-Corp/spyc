@@ -37,7 +37,7 @@ fn report(kind: AgentKind, st: &Status, installing: bool) {
 }
 
 /// Install (or remove) the wiring of the agents `list` names, report each, and
-/// record the answer so spyc stops (or resumes) its per-directory writes.
+/// record the answer so spyc doesn't ask about that agent again.
 pub fn run_cli(installing: bool, list: &str) -> Result<()> {
     let kinds = kinds(list)?;
     let Some(mut env) = Env::current() else {

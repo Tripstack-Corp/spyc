@@ -125,12 +125,11 @@ impl App {
             Change::Started(running) => {
                 forget_agent(info);
                 info.running = Some(running);
-                let cwd = info.cwd.clone();
                 info.status_hooks_at_spawn = super::wiring::hooks_present(running.kind);
                 let id = info.id.clone();
                 self.state.codex_recovery.remove(&id);
                 // As a launched agent tab does: ask once for the agent.
-                self.offer_wiring(running.kind, &cwd);
+                self.offer_wiring(running.kind);
                 true
             }
         }

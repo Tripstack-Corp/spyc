@@ -12,9 +12,7 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::McpCommand;
 
 use super::protocol::{dispatch, read_lsp_message, send_message};
-use super::server::{
-    collect_project_pids_in, discover_live_socket, handle_socket_connection, pid_from_sock_path,
-};
+use super::server::{collect_project_pids_in, discover_live_socket, handle_socket_connection};
 use super::*;
 
 mod attribution;
@@ -672,17 +670,6 @@ fn disconnect_notification_routes_through_channel() {
         McpCommand::Disconnected { new_pid } => assert_eq!(new_pid, 99999),
         other => panic!("expected Disconnected, got {other:?}"),
     }
-}
-
-#[test]
-fn pid_from_sock_path_parses() {
-    assert_eq!(
-        pid_from_sock_path("/home/user/.local/state/spyc/mcp-12345.sock"),
-        Some(12345)
-    );
-    assert_eq!(pid_from_sock_path("mcp-1.sock"), Some(1));
-    assert_eq!(pid_from_sock_path("mcp.sock"), None);
-    assert_eq!(pid_from_sock_path("mcp-.sock"), None);
 }
 
 #[test]

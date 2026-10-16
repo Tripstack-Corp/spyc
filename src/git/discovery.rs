@@ -59,59 +59,6 @@ pub fn head_branch(repo_root: &Path) -> Option<String> {
     }
 }
 
-/// True if `path` is tracked by git — present in the repository index (so it's
-/// committed or staged). Used by teardown cleanup to refuse to delete a config
-/// file the user has checked in. Returns `false` when there's no enclosing
-/// repo, the path lies outside its worktree, or it simply isn't in the index.
-/// Uses `gix::discover` so a path in a repo subdirectory still resolves.
-pub fn is_tracked(path: &Path) -> bool {
-    let Some(dir) = path.parent() else {
-        return false;
-    };
-    let Ok(repo) = gix::discover(dir) else {
-        return false;
-    };
-    let Some(workdir) = repo.workdir() else {
-        return false;
-    };
-    let Ok(rela) = path.strip_prefix(workdir) else {
-        return false;
-    };
-    let Ok(index) = repo.index() else {
-        return false;
-    };
-    // The index keys on forward-slash repo-relative paths.
-    let rela = rela.to_string_lossy().replace('\\', "/");
-    index.entry_by_path(gix::bstr::BStr::new(&rela)).is_some()
-}
-
-/// Directory corresponding to `cwd` in the root checkout. Codex loads hooks
-/// there even when ordinary project config comes from a linked worktree.
-/// Preserve the checkout-relative subdirectory; leave other repositories and
-/// undiscoverable paths alone rather than guessing a writable hook location.
-pub fn root_checkout_dir(cwd: &Path) -> PathBuf {
-    let resolve = || -> Option<PathBuf> {
-        let repo = gix::discover(cwd).ok()?;
-        let common = std::fs::canonicalize(repo.common_dir()).ok()?;
-        if std::fs::canonicalize(repo.git_dir()).ok()? == common {
-            return None;
-        }
-        let workdir = std::fs::canonicalize(repo.workdir()?).ok()?;
-        let main = gix::open(common).ok()?;
-        let root = std::fs::canonicalize(main.workdir()?).ok()?;
-        let cwd = std::fs::canonicalize(cwd).ok()?;
-        let relative = cwd.strip_prefix(workdir).ok()?;
-        // Avoid a trailing slash for the root: persistent consent and owner
-        // keys compare path strings, so `root/` would become a separate owner.
-        Some(if relative.as_os_str().is_empty() {
-            root
-        } else {
-            root.join(relative)
-        })
-    };
-    resolve().unwrap_or_else(|| cwd.to_path_buf())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -187,29 +134,6 @@ mod tests {
         let b = head_branch(&root).expect("detached head still resolves");
         assert_eq!(b.len(), 7, "expected 7-char short hash, got {b:?}");
         assert!(b.chars().all(|c| c.is_ascii_hexdigit()), "not hex: {b:?}");
-    }
-
-    #[test]
-    fn is_tracked_distinguishes_committed_untracked_and_no_repo() {
-        let (_tmp, root) = init_repo();
-        // `f.txt` was committed by the fixture → tracked.
-        assert!(is_tracked(&root.join("f.txt")));
-        // A new, unadded file in the repo → not tracked.
-        std::fs::write(root.join("untracked.txt"), "x\n").unwrap();
-        assert!(!is_tracked(&root.join("untracked.txt")));
-        // A path with no enclosing repo → not tracked.
-        let outside = tempfile::tempdir().unwrap();
-        assert!(!is_tracked(&outside.path().join("anything.txt")));
-    }
-
-    #[test]
-    fn is_tracked_sees_a_staged_but_uncommitted_file() {
-        let (_tmp, root) = init_repo();
-        std::fs::write(root.join("staged.txt"), "y\n").unwrap();
-        run_git(&root, &["add", "staged.txt"]);
-        // Staged (in the index) counts as tracked — the teardown guard must not
-        // delete a config the user has `git add`ed even before committing.
-        assert!(is_tracked(&root.join("staged.txt")));
     }
 
     // Linked-worktree gitdir resolution (gix following a worktree's `.git`
