@@ -117,7 +117,7 @@ pub(super) struct RouteSnapshot {
     pub has_scroll_pager: bool,
     /// `App::pane_tabs.is_some()`.
     pub has_pane_tabs: bool,
-    /// Active pane is in scrollback (vt100 reverse-mode) mode.
+    /// Active pane is in scrollback mode.
     pub pane_scrolling: bool,
     /// Active pane's subprocess has exited.
     pub pane_closed: bool,

@@ -176,7 +176,7 @@ impl App {
     }
 
     /// Render label overlay on top of the pane. Drawn after the
-    /// pane widget so labels paint over the live vt100 grid; small
+    /// pane widget so labels paint over the live terminal grid; small
     /// inverted-colour cells next to each match's start position.
     pub fn render_quick_select_overlay(&self, frame: &mut Frame, pane_rect: ratatui::layout::Rect) {
         use ratatui::{

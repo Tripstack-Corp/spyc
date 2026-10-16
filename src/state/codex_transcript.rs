@@ -4,8 +4,8 @@
 //! Codex (OpenAI's terminal agent) confines its conversation
 //! history to a DECSTBM scroll region above its viewport — in both
 //! alt-screen and `--no-alt-screen` modes — so completed turns
-//! never scroll into the terminal's main buffer where spyc's vt100
-//! emulator could capture them. `^a v` therefore can't screen-scrape
+//! never scroll into the terminal's main buffer, where vt100, spyc's
+//! engine before 2.2, could capture them; screen-scraping never got
 //! codex history.
 //!
 //! But codex writes the full transcript, live and flushed per turn,

@@ -1,9 +1,9 @@
 //! The terminal-engine seam: what spyc needs from a VT state machine, and
 //! nothing about which one it is.
 //!
-//! Introduced by the engine series (`docs/drafts/V2_2_PLAN.md` §8) ahead of
-//! swapping the implementation. vt100 sits behind it today; the point is that
-//! swapping it becomes a change of one impl rather than a change of six files.
+//! Introduced by the engine series (`docs/drafts/V2_2_PLAN.md` §8) to swap
+//! vt100 for libghostty-vt as one impl rather than a change of six files.
+//! libghostty-vt (`engine_ghostty`) is the one engine behind it.
 //!
 //! ## Why the cell API looks like this
 //!
@@ -132,7 +132,7 @@ pub trait TerminalScreen {
     /// Visible screen as plain text, one line per row.
     fn contents(&self) -> String;
     /// Plain text from `(start_row, start_col)` up to, not including,
-    /// `(end_row, end_col)`: the end column is exclusive, as vt100 defined it.
+    /// `(end_row, end_col)`: the end column is exclusive.
     ///
     /// Honouring soft wraps is the implementation's job, not the caller's:
     /// `Pane::selection_text` needs a newline at a hard line end and none at a
@@ -148,12 +148,6 @@ pub trait TerminalScreen {
 
     /// Whether this visible row continues into the next row without a newline.
     fn row_wrapped(&self, row: u16) -> bool;
-    /// Copy retains empty cells, rather than adding gaps only before nonblank text.
-    /// The vt100 fallback requires this distinction; [#453] tracks removal of
-    /// this method and the snapshot's vt100 padding branch.
-    ///
-    /// [#453]: https://github.com/Tripstack-Corp/spyc/issues/453
-    fn copy_pads_blank_cells(&self) -> bool;
 
     /// Current scrollback view offset in rows.
     fn scrollback(&self) -> usize;
@@ -194,19 +188,10 @@ pub trait Engine: Send {
 
 /// The seam's contract, as tests, generic over the engine behind it.
 ///
-/// Every engine that claims to satisfy [`Engine`] runs these. That is not
-/// ceremony: spyc keeps a second implementation as the escape hatch from a bad
-/// pin bump ([#453](https://github.com/Tripstack-Corp/spyc/issues/453)), and an
-/// escape hatch nothing exercises is a fiction — reverting to it would ship
-/// code no test has touched since the swap. Running one suite against both is
-/// also the only differential spyc has in CI; the spike had to build a harness
-/// outside the workspace to get one.
-///
-/// What does NOT belong here is anything the engines legitimately disagree
-/// about. The four defects in `engine_ghostty::issue_34_engine_defects` are
-/// capability differences — vt100 fails them by design, which is why the engine
-/// was swapped — and pinning them here would only assert that the incumbent is
-/// still broken.
+/// Every engine that claims to satisfy [`Engine`] runs these, so a candidate
+/// engine is judged against the same contract the current one meets. What the
+/// current engine does beyond the contract is pinned in its own tests
+/// (`engine_ghostty::issue_34_engine_defects`), not here.
 #[cfg(test)]
 pub mod conformance {
     use super::{Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};

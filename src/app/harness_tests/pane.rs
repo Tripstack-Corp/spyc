@@ -301,7 +301,7 @@ fn empty_scrollback_agent_pane_opens_its_transcript() {
         );
         assert!(
             app.runtime.pane_scroll_settle.is_none(),
-            "and no vt100 snapshot should be armed — there is nothing to snapshot"
+            "and no terminal snapshot should be armed — there is nothing to snapshot"
         );
     });
 }
@@ -355,7 +355,7 @@ fn capital_t_flips_the_scrollback_source_both_ways() {
         let mut app = App::test_app(dir.clone());
         agent_pane_with_capture(&mut app, &dir);
 
-        // With a capture present and the config gate off, `^a v` snapshots vt100
+        // With a capture present and the config gate off, `^a v` snapshots the terminal
         // — the deferred settle is what the loop drives, so drive it here.
         app.open_pane_scroll_pager();
         app.mount_terminal_scrollback();
@@ -434,7 +434,7 @@ fn t_toggles_transcript_tool_calls_on_an_agent_pane() {
 }
 
 /// `t` on a plain (non-agent) pane is a no-op with a hint — there are no tool
-/// calls in vt100 scrollback to toggle.
+/// calls in terminal scrollback to toggle.
 #[test]
 fn toggle_tool_calls_on_a_plain_pane_is_a_hinted_noop() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1370,7 +1370,7 @@ fn closing_help_over_a_v_editor_keeps_the_editor_column_pinned() {
 /// **A wheel tick must not stall the event loop.**
 ///
 /// With `[mouse] pane_scroll_view = "spyc_history"` a qualifying wheel gesture
-/// mounts spyc's own scrollback pager. The vt100 branch used to settle the pty
+/// mounts spyc's own scrollback pager. The terminal-capture branch used to settle the pty
 /// by sleeping — `3 × 10 ms` inline — so an input event cost 30 ms of dead loop,
 /// re-paid on the next qualifying tick whenever scrollback turned out empty and
 /// nothing mounted. `docs/archive/native_scroll_plan.md` ruled exactly this out

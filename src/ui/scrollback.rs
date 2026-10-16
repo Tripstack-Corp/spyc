@@ -4,7 +4,7 @@
 //! scrollback) into the pager's data model (styled lines), so the
 //! v1.5 `^a-v` rewrite can use the in-app pager — search, jump,
 //! visual-mode range yank, line numbers — over pane history
-//! instead of vt100's flat scroll-mode buffer.
+//! instead of the terminal's flat scroll mode.
 //!
 //! The adapter is consumed by `App::open_pane_scroll_pager`
 //! (src/app/pane_scroll.rs) for the `^a-v` scroll-mode pager.
@@ -38,12 +38,12 @@ use ratatui::{
 use crate::pane::cell_style;
 use crate::pane::engine::{TerminalScreen, Wide};
 
-/// Snapshot the whole vt100 buffer (scrollback + live screen) as
+/// Snapshot the engine's whole buffer (scrollback + live screen) as
 /// styled lines, in chronological order (oldest first). The live-
 /// screen portion is preserved verbatim — including blank rows
 /// below the cursor — so the snapshot mirrors the on-screen
 /// geometry the user just had in front of them. Trailing-
-/// whitespace runs within a single row are dropped because vt100
+/// whitespace runs within a single row are dropped because a grid
 /// pads short rows with spaces out to the full column width and
 /// that's a fixed-grid artifact, not user content.
 ///
@@ -120,7 +120,7 @@ pub fn tail_lines_from_scrollback<S: TerminalScreen>(
     out
 }
 
-/// Number of rows in the vt100 scrollback buffer (history above the
+/// Number of rows in the engine's scrollback buffer (history above the
 /// live screen), independent of the current view offset. Zero means
 /// the pane has no captured history — either a fresh process that
 /// hasn't scrolled, or (the case this exists for) an app like codex
@@ -190,7 +190,7 @@ fn line_from_visible_row<S: TerminalScreen>(screen: &S, row: u16, cols: u16) -> 
 /// and trim trailing spaces from the last non-blank span. Leaves
 /// interior whitespace alone — only the right-edge run goes.
 ///
-/// This is what makes the result read like a vi buffer: vt100
+/// This is what makes the result read like a vi buffer: a grid
 /// pads short rows with spaces out to the right edge, and we
 /// don't want every line to be exactly `cols` characters wide
 /// in the pager.

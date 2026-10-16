@@ -100,7 +100,7 @@ pub struct GhosttyScreen {
     rows: u16,
     cols: u16,
     /// Scrollback view offset in rows. ghostty addresses history by
-    /// coordinate, so the offset is ours to keep; vt100 stored it internally.
+    /// coordinate, so the offset is ours to keep.
     view: usize,
     /// The row budget the seam was constructed with.
     ///
@@ -707,9 +707,6 @@ impl TerminalScreen for GhosttyScreen {
     fn row_wrapped(&self, row: u16) -> bool {
         self.with_frame(|f| f.wrapped.get(usize::from(row)).copied().unwrap_or(false))
     }
-    fn copy_pads_blank_cells(&self) -> bool {
-        true
-    }
 
     fn scrollback(&self) -> usize {
         self.view
@@ -856,8 +853,7 @@ impl Engine for GhosttyEngine {
 }
 
 impl GhosttyScreen {
-    /// The pane resizes through the screen (vt100's shape); kept so the flip
-    /// needs no call-site change.
+    /// Resize to `rows` x `cols`, viewing the live screen again.
     pub fn set_size(&mut self, rows: u16, cols: u16) {
         let _ = unsafe { ffi::ghostty_terminal_resize(self.t, cols, rows, 8, 16) };
         self.rows = rows;

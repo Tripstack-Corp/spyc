@@ -1,7 +1,7 @@
 //! ratatui widget that draws a terminal screen into a frame.
 //!
 //! Each cell becomes a single styled character in the buffer. We map
-//! vt100's colour model onto ratatui's, preserving bold / italic /
+//! the engine's colour model onto ratatui's, preserving bold / italic /
 //! underline / reverse.
 
 use ratatui::{
@@ -108,8 +108,8 @@ pub fn cell_style(cell: CellStyle) -> Style {
     if cell.bold {
         style = style.add_modifier(Modifier::BOLD);
     }
-    // SGR 2. vt100 exposed `dim()` in 0.16, after this function was written
-    // against 0.15, so a child's dim text used to arrive here and be dropped.
+    // SGR 2. The adapter once dropped it (#452), so a child's dim text
+    // rendered at full weight.
     // Note the channel is shared: the unfocused-pane fade in `PaneWidget`
     // also spends `Modifier::DIM`, so on an unfocused pane content-dim and
     // focus-dim are indistinguishable. That is accepted — SGR 2 is what a
@@ -215,9 +215,8 @@ mod attribute_tests {
 
     /// SGR 2 reaches the buffer as `Modifier::DIM`.
     ///
-    /// vt100 exposed `Cell::dim()` in 0.16, after `cell_style` was written
-    /// against 0.15, so the attribute was read by the emulator and dropped by
-    /// the adapter — a child's dim text rendered at full weight.
+    /// The adapter once read the attribute and dropped it (#452), so a child's
+    /// dim text rendered at full weight.
     #[test]
     fn sgr_2_reaches_the_buffer_as_dim() {
         let buf = rendered(b"\x1b[2mdim", 1, 8, true);

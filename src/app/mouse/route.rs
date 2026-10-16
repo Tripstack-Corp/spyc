@@ -1208,7 +1208,7 @@ mod tests {
     }
 
     /// An exited child has nothing to receive the event. `pane_wants_mouse` may
-    /// still read true if vt100 retains the mode after the child dies, so the
+    /// still read true if the engine retains the mode after the child dies, so the
     /// closed check has to be its own condition rather than relying on that.
     #[test]
     fn a_closed_pane_is_never_forwarded_to() {

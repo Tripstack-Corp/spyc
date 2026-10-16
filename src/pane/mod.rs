@@ -11,8 +11,6 @@
 
 pub mod engine;
 pub mod engine_ghostty;
-mod engine_vt100;
-pub use engine_vt100::{PaneEngine, PaneScreen};
 pub mod input;
 pub mod pathref;
 pub mod quick_select;
@@ -29,9 +27,23 @@ pub use widget::{PaneWidget, cell_style};
 pub mod launch_env;
 pub mod pty_host;
 
-// A few call sites reach the engine by method syntax; with vt100 those
-// resolved to its inherent methods, so the seam's traits must be in scope
-// for any other engine.
+/// The engine `Pane` runs.
+///
+/// A type alias rather than a generic parameter on `Pane`, deliberately.
+/// `Pane` is reached from `PaneTabs`, `App` and the render pass, so a
+/// `Pane<E>` would propagate a parameter through all of them for no benefit
+/// while this is the only implementation. Everything below the alias speaks
+/// through [`engine::Engine`] and [`engine::TerminalScreen`], so swapping the
+/// engine is a change to this line and the impls under it — not to a
+/// signature anywhere else.
+pub type PaneEngine = engine_ghostty::GhosttyEngine;
+
+/// The screen type that engine exposes, spelled once so call sites do not
+/// repeat the projection.
+pub type PaneScreen = <PaneEngine as engine::Engine>::Screen;
+
+// A few call sites reach the engine by method syntax, so the seam's traits
+// must be in scope.
 use crate::pane::engine::{Engine as _, TerminalScreen as _};
 use std::io::Write as _;
 use std::path::Path;
@@ -54,7 +66,7 @@ pub type PaneWake = Arc<dyn Fn() + Send + Sync>;
 ///
 /// v1.5 Phase 6a: pty kernel (master/writer/child/reader thread/
 /// event channel/last_size/closed/exit_status/debug_dump)
-/// lives in `host: PtyHost`. `Pane` is the vt100-parser shell on top.
+/// lives in `host: PtyHost`. `Pane` is the terminal-engine shell on top.
 /// Same struct shape `BackgroundTask` will adopt in 6a step 3, which
 /// is what unlocks promotion / demotion in 6b/6c.
 pub struct Pane {
@@ -168,7 +180,7 @@ impl Pane {
     }
 
     /// Build a `Pane` around an already-spawned `PtyHost` and a
-    /// vt100 parser. v1.5 Phase 6 promotion path: a backgrounded
+    /// terminal engine. v1.5 Phase 6 promotion path: a backgrounded
     /// task hands over its `PtyHost`, we wrap it in a fresh parser
     /// (or one pre-fed with the task's captured output), and the
     /// pty keeps running through the transition.
@@ -308,10 +320,9 @@ impl Pane {
     /// cell grid matches — without this, the child keeps drawing at the
     /// old dimensions.
     pub fn resize(&mut self, rows: u16, cols: u16) -> anyhow::Result<()> {
-        // vt100's `set_size` does `rows - 1` unconditionally, so a
-        // zero dimension underflow-panics (debug) / wraps to 65535
-        // (release). A tiny terminal can produce a 0-row pane rect, so
-        // never hand the emulator a zero dimension.
+        // A tiny terminal can produce a 0-row pane rect, and a terminal
+        // has at least one row and column, so never hand the engine or
+        // the child a zero dimension.
         let rows = rows.max(1);
         let cols = cols.max(1);
         if (rows, cols) == self.host.last_size {
@@ -447,7 +458,7 @@ impl Pane {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Run `f` with a mutable reference to the vt100 screen.
+    /// Run `f` with a mutable reference to the engine's screen.
     /// Used by the scrollback adapter (which walks scrollback by
     /// temporarily shifting the offset). Same lock semantics as
     /// `with_screen` — keep the closure short.
@@ -624,22 +635,23 @@ impl Pane {
         Ok(path)
     }
 
-    /// The real maximum scrollback offset: vt100's actual buffered history
-    /// length, not a guess. `scrollback_len` probes it via
+    /// The real maximum scrollback offset: the engine's actual buffered
+    /// history length, not a guess. `scrollback_len` probes it via
     /// `set_scrollback(usize::MAX)` + readback (restoring the live offset),
-    /// so clamping against it matches what vt100 will actually accept — no
-    /// phantom offset above the real top.
+    /// so clamping against it matches what the engine will actually accept —
+    /// no phantom offset above the real top.
     fn max_scrollback(&self) -> usize {
         self.with_screen_mut(crate::ui::scrollback::scrollback_len)
     }
 
-    /// Push `scroll_offset` into vt100, then sync it back to the value vt100
+    /// Push `scroll_offset` into the engine, then sync it back to the value it
     /// actually clamped to. Without the read-back, `scroll_offset` could sit
-    /// *above* vt100's real top (e.g. after `g` set it to a stale 10_000
+    /// *above* the engine's real top (e.g. after `g` set it to a stale 10_000
     /// guess) — then every `scroll_down` just decrements a phantom counter
     /// with no visible movement until it falls back below the real length
     /// (the "scroll-down is dead" / "dead zone after g" dead zone). Keeping
-    /// the field equal to vt100's clamp keeps Top/Bot and the key math honest.
+    /// the field equal to the engine's clamp keeps Top/Bot and the key math
+    /// honest.
     fn apply_scroll(&mut self) {
         let off = self.scroll_offset;
         let clamped = self.with_screen_mut(|s| {
@@ -663,11 +675,8 @@ fn append_pty_debug(bytes: &[u8]) {
 }
 
 /// Replace a torn parser with a fresh one at its CURRENT size — NOT a captured
-/// adopt-time size. (vt100 0.16.2 still panics on valid input at a 1-row or
-/// 1-column screen and on a wide char split by a shrink — all reachable,
-/// because the geometry clamps stop at 1; the worker's `catch_unwind` calls
-/// this to recover. The nvim exit-from-alt-screen panic this used to name was
-/// fixed in 0.16.2. `Cargo.toml`'s `[profile.release]` carries the full list.)
+/// adopt-time size. (The worker's `catch_unwind` calls this when `process`
+/// panics; `Cargo.toml`'s `[profile.release]` says why that net stays.)
 /// `Pane::resize` coalesces same-size resizes, so a stale size would
 /// never get corrected. Reading the live size off the parser keeps the
 /// recovered grid the right shape; the size fields survive a `process` panic
@@ -763,7 +772,7 @@ fn parser_worker(
                 }));
                 let (open, replies) = result.unwrap_or_else(|_| {
                     crate::spyc_debug!(
-                        "vt100 parser panicked on {} bytes; replacing parser to recover",
+                        "terminal engine panicked on {} bytes; replacing it to recover",
                         bytes.len()
                     );
                     // The panic unwound through a held MutexGuard, so the

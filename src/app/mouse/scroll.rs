@@ -113,8 +113,7 @@ impl super::super::App {
     ///
     /// First decides whether the view is open by scraping the pane's CURRENT
     /// visible screen (`Pane::visible_lines` — the viewport, not scrollback:
-    /// codex's own vt100 scrollback is confirmed empty, per #230's
-    /// investigation, so scrollback has nothing to scrape). Cheap enough to run
+    /// the view is drawn on the visible screen, #230). Cheap enough to run
     /// every tick — a plain substring search over one screen's worth of text —
     /// so no debounce is needed for the scrape itself; only the toggle-send
     /// needs one (see `pane_view_sent`'s doc).
@@ -131,9 +130,9 @@ impl super::super::App {
             return Vec::new();
         };
         let tab_index = tabs.active_index();
-        // One scrape, reused for both checks below — codex's own vt100
-        // scrollback is confirmed empty (#230), so this reads the viewport, not
-        // scrollback, and there is no cheaper way to ask "is X still true" than
+        // One scrape, reused for both checks below — the view is drawn on the
+        // visible screen (#230), so this reads the viewport, not scrollback,
+        // and there is no cheaper way to ask "is X still true" than
         // reading the same lines twice.
         let visible = tabs.active().visible_lines();
         let app_cursor = tabs.active().application_cursor();

@@ -18,7 +18,6 @@ pub struct ScreenSnapshot {
     cells: Vec<Cell>,
     text: String,
     hard_ends: Vec<bool>,
-    pad_blanks: bool,
     cursor: (u16, u16),
     hidden: bool,
     alternate: bool,
@@ -59,7 +58,6 @@ impl ScreenSnapshot {
             cells,
             text,
             hard_ends,
-            pad_blanks: screen.copy_pads_blank_cells(),
             cursor: screen.cursor_position(),
             hidden: screen.hide_cursor(),
             alternate: screen.alternate_screen(),
@@ -69,35 +67,17 @@ impl ScreenSnapshot {
         })
     }
 
+    /// A blank cell copies as a space, as the engine copies it; a wide glyph's
+    /// continuation copies as nothing.
     fn write_row(&self, out: &mut String, row: u16, first: u16, last: u16) {
-        let mut next_col = first;
-        let mut skip_tail = false;
         for col in first..last {
             let Some(cell) = self.cell(row, col) else {
                 break;
             };
-            if self.pad_blanks {
-                if cell.start != cell.end {
-                    out.push_str(&self.text[cell.start..cell.end]);
-                } else if cell.style.wide != Wide::Tail {
-                    out.push(' ');
-                }
-                continue;
-            }
-            // #453 tracks removal of this branch with the vt100 fallback.
-            // vt100 emits padding only when text follows it, including a range
-            // beginning on a wide continuation. A wide head consumes its tail.
-            if skip_tail {
-                skip_tail = false;
-                continue;
-            }
-            skip_tail = cell.style.wide == Wide::Head;
             if cell.start != cell.end {
-                for _ in next_col..col {
-                    out.push(' ');
-                }
                 out.push_str(&self.text[cell.start..cell.end]);
-                next_col = col.saturating_add(if skip_tail { 2 } else { 1 });
+            } else if cell.style.wide != Wide::Tail {
+                out.push(' ');
             }
         }
     }
@@ -170,9 +150,6 @@ impl TerminalScreen for ScreenSnapshot {
             .get(usize::from(row))
             .is_some_and(|hard| !hard)
     }
-    fn copy_pads_blank_cells(&self) -> bool {
-        self.pad_blanks
-    }
     // A snapshot contains its visible rows only, with no navigable history.
     fn scrollback(&self) -> usize {
         0
@@ -219,10 +196,6 @@ mod tests {
     #[test]
     fn ghostty_snapshot_preserves_wraps_wide_cells_and_combining_text() {
         extraction::<crate::pane::engine_ghostty::GhosttyEngine>();
-    }
-    #[test]
-    fn vt100_snapshot_preserves_wraps_wide_cells_and_combining_text() {
-        extraction::<vt100::Parser>();
     }
     struct Probe {
         engine: crate::pane::engine_ghostty::GhosttyEngine,
@@ -282,9 +255,6 @@ mod tests {
         }
         fn row_wrapped(&self, row: u16) -> bool {
             self.engine.screen().row_wrapped(row)
-        }
-        fn copy_pads_blank_cells(&self) -> bool {
-            self.engine.screen().copy_pads_blank_cells()
         }
         fn scrollback(&self) -> usize {
             0

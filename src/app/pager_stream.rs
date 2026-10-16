@@ -130,7 +130,7 @@ pub enum PagerStreamMount {
     },
     /// Lower-pane scroll pager (agent-transcript scrollback): enters the active
     /// pane's scroll mode, parks at the bottom, gutter off, wrap on. Mirrors
-    /// the vt100 `mount_scroll_pager` setup.
+    /// the `mount_scroll_pager` setup.
     LowerPane {
         /// Initial title (e.g. `" claude (transcript)"`).
         title: String,
