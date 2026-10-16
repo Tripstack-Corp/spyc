@@ -61,6 +61,9 @@ pub enum Effect {
         /// Whether to pause for a keypress after the child exits so the
         /// user can read its output before the TUI is restored.
         pause_after: bool,
+        /// `$`'s own handoff (#686): paints the `subshell_banner` marker
+        /// and exports `SPYC_SUBSHELL=1` for the child's prompt to show.
+        subshell: bool,
     },
 
     /// A-class. Copy `text` to the system clipboard, then flash the
@@ -636,10 +639,12 @@ impl From<PostAction> for Vec<Effect> {
                 program,
                 args,
                 pause_after,
+                subshell,
             } => vec![Effect::ForegroundExec {
                 program,
                 args,
                 pause_after,
+                subshell,
             }],
         }
     }
@@ -975,6 +980,7 @@ mod tests {
             program: "sh".to_string(),
             args: vec!["-c".to_string(), "echo hi".to_string()],
             pause_after: true,
+            subshell: false,
         }
         .into();
         match effects.as_slice() {
@@ -983,11 +989,30 @@ mod tests {
                     program,
                     args,
                     pause_after,
+                    subshell,
                 },
             ] => {
                 assert_eq!(program, "sh");
                 assert_eq!(args, &["-c".to_string(), "echo hi".to_string()]);
                 assert!(pause_after, "pause_after must flow through byte-identical");
+                assert!(!subshell);
+            }
+            other => panic!("expected one ForegroundExec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn post_action_spawn_subshell_flows_through() {
+        let effects: Vec<Effect> = PostAction::Spawn {
+            program: "zsh".to_string(),
+            args: vec![],
+            pause_after: false,
+            subshell: true,
+        }
+        .into();
+        match effects.as_slice() {
+            [Effect::ForegroundExec { subshell, .. }] => {
+                assert!(subshell, "subshell must flow through byte-identical");
             }
             other => panic!("expected one ForegroundExec, got {other:?}"),
         }

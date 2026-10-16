@@ -15,7 +15,7 @@ use crate::shell;
 use crate::spyc_debug;
 
 use super::file_ops::PagerDest;
-use super::{ActivateIntent, App, Effect, EntryKind, PostAction, View, state};
+use super::{ActivateIntent, App, Effect, EntryKind, View, state};
 
 /// The directories a path printed in the pane resolves against, best first:
 /// the pane's cwd, then its worktree root, since a tool run from a
@@ -350,12 +350,7 @@ impl App {
                 }
                 let program = argv.remove(0);
                 argv.push(path.to_string_lossy().into_owned());
-                PostAction::Spawn {
-                    program,
-                    args: argv,
-                    pause_after: false,
-                }
-                .into()
+                super::spawn_foreground(program, argv, false)
             }
         }
     }

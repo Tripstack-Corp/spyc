@@ -35,7 +35,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/archive.rs::App::apply_one_archive_outcome", 134),
         ("src/app/archive_route.rs::classify", 142),
         ("src/app/bootstrap.rs::App::new", 259),
-        ("src/app/effect/executor.rs::App::run_effects", 293),
+        ("src/app/effect/executor.rs::App::run_effects", 242),
         ("src/app/file_ops.rs::App::apply_one_file_outcome", 144),
         ("src/app/file_ops.rs::run_file_op", 162),
         ("src/app/key_dispatch/mod.rs::App::handle_key", 172),

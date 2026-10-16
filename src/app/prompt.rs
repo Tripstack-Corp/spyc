@@ -14,7 +14,7 @@
 use crate::shell;
 use crate::ui::line_edit::LineEditor;
 
-use super::{App, Effect, Mode, PostAction, state};
+use super::{App, Effect, Mode, state};
 
 pub struct Prompt {
     pub kind: PromptKind,
@@ -324,12 +324,7 @@ impl App {
                 }
                 let program = argv.remove(0);
                 argv.push(resolved.to_string_lossy().into_owned());
-                PostAction::Spawn {
-                    program,
-                    args: argv,
-                    pause_after: false,
-                }
-                .into()
+                super::spawn_foreground(program, argv, false)
             }
             PromptKind::Command => self.dispatch_command(&prompt.buffer),
             // Jump / MakeDir / Worktree do unbounded blocking IO (chdir,

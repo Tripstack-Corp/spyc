@@ -218,6 +218,7 @@ impl App {
                     program,
                     args,
                     pause_after,
+                    subshell,
                 } => {
                     // Capture the result instead of `?`-propagating it: a
                     // failed spawn (missing/misspelled $EDITOR/$SHELL) used to
@@ -226,7 +227,7 @@ impl App {
                     // children) without saving the session. `run` already
                     // restored the TUI on the spawn-error path, so here we just
                     // flash it (below) and carry on.
-                    let fg_result = fg.run(terminal, &program, &args, pause_after);
+                    let fg_result = fg.run(terminal, &program, &args, pause_after, subshell);
                     // `suspend_tui` handed mouse reporting to the child; record
                     // that so the loop-bottom `settle_mouse_mode` re-enables it
                     // if the user wants it. `resume_tui` deliberately doesn't do
@@ -244,80 +245,7 @@ impl App {
                     // The listing may have changed (mv, rm, chmod, etc).
                     self.state.refresh_listing();
                     // If we were editing a pager buffer, restore it.
-                    if let Some(ret) = self.view.pending_pager_return.take() {
-                        match ret {
-                            PagerReturn::TempFile {
-                                path,
-                                title,
-                                scroll,
-                                mount,
-                                pane_scroll,
-                            } => {
-                                match std::fs::read_to_string(&path) {
-                                    Ok(content) => {
-                                        let lines: Vec<String> =
-                                            content.lines().map(String::from).collect();
-                                        let mut view = PagerView::new_plain(title, lines);
-                                        view.scroll = scroll;
-                                        view.saveable = true;
-                                        view.mount = mount;
-                                        view.pane_scroll = pane_scroll;
-                                        // A scrollback-sourced edit returns to
-                                        // its own bottom slot, not the top
-                                        // `view.pager` (`set_pager`).
-                                        if pane_scroll {
-                                            self.restore_scroll_pager_view(view);
-                                        } else {
-                                            self.set_pager(view);
-                                        }
-                                        let _ = std::fs::remove_file(&path);
-                                    }
-                                    Err(e) => {
-                                        // Reading the edited buffer back failed.
-                                        // Do NOT delete the temp file — it holds
-                                        // the user's edits; deleting it (the old
-                                        // behaviour) silently discarded them. Tell
-                                        // the user where to recover them.
-                                        self.state.flash_error(format!(
-                                            "couldn't read back edits ({e:#}); preserved at {}",
-                                            path.display()
-                                        ));
-                                    }
-                                }
-                            }
-                            PagerReturn::SourceFile {
-                                path,
-                                scroll,
-                                mount,
-                                pane_scroll,
-                            } => {
-                                // Reuse `build_pager_view_for_file` so a
-                                // markdown file edited via `v` re-renders
-                                // on return. Reported by JRob: open a .md
-                                // (rendered), `v` to edit, quit $EDITOR —
-                                // file came back as plain text with no
-                                // `m`-toggle (the inline rebuild here used
-                                // `PagerView::new_plain` and skipped the
-                                // markdown / alt_lines branch entirely).
-                                if let Some(mut view) = self.build_pager_view_for_file(&path, None)
-                                {
-                                    // Override the position restored from
-                                    // the per-file cache with the scroll
-                                    // we explicitly stashed before
-                                    // launching $EDITOR — it's the more
-                                    // recent intent for this round-trip.
-                                    view.scroll = scroll;
-                                    view.mount = mount;
-                                    view.pane_scroll = pane_scroll;
-                                    if pane_scroll {
-                                        self.restore_scroll_pager_view(view);
-                                    } else {
-                                        self.set_pager(view);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    self.restore_pending_pager_return();
                     // Flash a failed spawn last (so it's the message left on
                     // screen) — never fatal. The TUI and pager were already
                     // restored above.
@@ -471,6 +399,79 @@ impl App {
 }
 
 impl App {
+    /// `ForegroundExec`'s after-work (run_effects, every program handoff
+    /// `$EDITOR` through `$`): if a pager buffer was closed for the child to
+    /// edit the same file, reopen it now that the child has exited. Moved
+    /// out of `run_effects` to keep that function under its size pin.
+    fn restore_pending_pager_return(&mut self) {
+        let Some(ret) = self.view.pending_pager_return.take() else {
+            return;
+        };
+        match ret {
+            PagerReturn::TempFile {
+                path,
+                title,
+                scroll,
+                mount,
+                pane_scroll,
+            } => match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    let lines: Vec<String> = content.lines().map(String::from).collect();
+                    let mut view = PagerView::new_plain(title, lines);
+                    view.scroll = scroll;
+                    view.saveable = true;
+                    view.mount = mount;
+                    view.pane_scroll = pane_scroll;
+                    // A scrollback-sourced edit returns to its own bottom
+                    // slot, not the top `view.pager` (`set_pager`).
+                    if pane_scroll {
+                        self.restore_scroll_pager_view(view);
+                    } else {
+                        self.set_pager(view);
+                    }
+                    let _ = std::fs::remove_file(&path);
+                }
+                Err(e) => {
+                    // Reading the edited buffer back failed. Do NOT delete
+                    // the temp file — it holds the user's edits; deleting it
+                    // (the old behaviour) silently discarded them. Tell the
+                    // user where to recover them.
+                    self.state.flash_error(format!(
+                        "couldn't read back edits ({e:#}); preserved at {}",
+                        path.display()
+                    ));
+                }
+            },
+            PagerReturn::SourceFile {
+                path,
+                scroll,
+                mount,
+                pane_scroll,
+            } => {
+                // Reuse `build_pager_view_for_file` so a markdown file
+                // edited via `v` re-renders on return. Reported by JRob:
+                // open a .md (rendered), `v` to edit, quit $EDITOR — file
+                // came back as plain text with no `m`-toggle (the inline
+                // rebuild here used `PagerView::new_plain` and skipped the
+                // markdown / alt_lines branch entirely).
+                if let Some(mut view) = self.build_pager_view_for_file(&path, None) {
+                    // Override the position restored from the per-file
+                    // cache with the scroll we explicitly stashed before
+                    // launching $EDITOR — it's the more recent intent for
+                    // this round-trip.
+                    view.scroll = scroll;
+                    view.mount = mount;
+                    view.pane_scroll = pane_scroll;
+                    if pane_scroll {
+                        self.restore_scroll_pager_view(view);
+                    } else {
+                        self.set_pager(view);
+                    }
+                }
+            }
+        }
+    }
+
     fn save_pager_output(&mut self, content: String) {
         let stamp = crate::sysinfo::format_now().replace([' ', ':'], "_");
         let stamp = stamp.trim_end_matches("_UTC");

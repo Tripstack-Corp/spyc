@@ -457,12 +457,7 @@ impl App {
                 let mut argv = argv;
                 let program = argv.remove(0);
                 argv.push(real.display().to_string());
-                super::PostAction::Spawn {
-                    program,
-                    args: argv,
-                    pause_after: false,
-                }
-                .into()
+                super::spawn_foreground(program, argv, false)
             }
             // A single-member retry: the effect's own paths are rewritten from
             // this one mapping.

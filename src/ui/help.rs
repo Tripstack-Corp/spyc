@@ -368,7 +368,10 @@ const SECTIONS: &[Section] = &[
                 "open history editor mid-prompt (Normal mode)",
             ),
             (";", "interactive → runs in top pane (top, vim, htop, less)"),
-            ("$", "drop into $SHELL in current dir"),
+            (
+                "$",
+                "drop into $SHELL in current dir (top row marks the subshell)",
+            ),
             (
                 ":",
                 "command line (:cd, :sort, :grep, :limit, :lua, :set, :!, :;, :q)",

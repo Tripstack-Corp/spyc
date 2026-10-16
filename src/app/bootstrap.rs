@@ -380,6 +380,7 @@ impl App {
         if !health_warnings.is_empty() {
             app.state.flash_error(health_warnings.join("; "));
         }
+        app.flash_if_already_in_subshell();
         // The graveyard cap cascade is deliberately NOT here: it is an
         // `Effect::Graveyard` kicked from `App::run`, so its disk IO stays off
         // the startup path. See that call site.
@@ -401,6 +402,19 @@ impl App {
             app.maybe_offer_skill_update();
         }
         app
+    }
+
+    /// Flash a warning if this spyc was itself launched from inside another
+    /// spyc's `$` subshell (`SPYC_SUBSHELL`, set by `subshell_banner`'s
+    /// caller in `proc.rs`) — the nested-launch confusion #686 exists to
+    /// prevent. Overrides every flash set earlier in `new`: getting back to
+    /// the outer spyc matters more than a stale config note.
+    fn flash_if_already_in_subshell(&mut self) {
+        if crate::envset::var("SPYC_SUBSHELL").is_some() {
+            self.state.flash_error(
+                "spyc: you're already inside a spyc $ subshell — exit or ^D to get back",
+            );
+        }
     }
 }
 
