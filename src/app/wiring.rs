@@ -545,4 +545,79 @@ mod tests {
             );
         });
     }
+
+    /// What a restart says when it reaches a shell tab running claude: it
+    /// reports instead of respawning, since a respawn would restart the shell.
+    /// So a test sees which tab a restart reached without starting claude.
+    const SHELL_TAB_RESTART: &str = "claude runs in a shell here";
+
+    /// A shell tab running claude (#544), over a `cat` standing in for both.
+    fn shell_running_claude(app: &mut App, dir: &Path) -> crate::pane::TabEntry {
+        let wake = app.make_pane_wake();
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
+        let mut info = crate::pane::TabInfo::new("zsh", dir);
+        info.running = Some(crate::pane::RunningAgent {
+            kind: AgentKind::Claude,
+            pid: 1,
+            started_epoch_secs: 0,
+            backgrounded: false,
+            on_shared_daemon: false,
+        });
+        crate::pane::TabEntry::new(pane, info)
+    }
+
+    /// Two claude tabs, the first one active: where `:hooks on!` is typed.
+    fn two_claude_tabs(app: &mut App, dir: &Path) {
+        let first = shell_running_claude(app, dir);
+        let second = shell_running_claude(app, dir);
+        let mut tabs = crate::pane::PaneTabs::new(first);
+        tabs.push(second);
+        tabs.switch_to(0);
+        app.runtime.project_mut().pane_tabs = Some(tabs);
+    }
+
+    /// `:hooks on!` restarts the claude tab it was typed in once the install
+    /// lands. The positive control for the case below: the restart's report is
+    /// how these tests see where it went.
+    #[test]
+    fn hooks_on_bang_restarts_the_tab_it_was_typed_in() {
+        with_app(|app, root| {
+            two_claude_tabs(app, root);
+            app.hooks_command("on! claude");
+            app.state.flash = None;
+            app.apply_wiring_outcomes();
+            assert!(
+                app.flash_text()
+                    .unwrap_or_default()
+                    .contains(SHELL_TAB_RESTART),
+                "the restart never reached the tab: {:?}",
+                app.flash_text()
+            );
+        });
+    }
+
+    /// The install takes a moment, and the tab `:hooks on!` was typed in can
+    /// close meanwhile. Its restart must go nowhere, not to whichever claude
+    /// tab moved into its place.
+    #[test]
+    #[ignore = "red: the restart is keyed on the tab's index, so it reaches the tab that took the closed one's place"]
+    fn a_restart_for_a_closed_tab_goes_to_no_other_tab() {
+        with_app(|app, root| {
+            two_claude_tabs(app, root);
+            app.hooks_command("on! claude");
+            let tabs = app.runtime.project_mut().pane_tabs.as_mut().expect("tabs");
+            tabs.remove_at(0);
+            app.state.flash = None;
+            app.apply_wiring_outcomes();
+            assert!(
+                !app.flash_text()
+                    .unwrap_or_default()
+                    .contains(SHELL_TAB_RESTART),
+                "a closed tab's restart reached the tab that took its place: {:?}",
+                app.flash_text()
+            );
+        });
+    }
 }
