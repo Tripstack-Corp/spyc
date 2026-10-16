@@ -94,6 +94,9 @@ pub enum PostAction {
         /// Whether to pause and wait for a keypress after the child exits,
         /// so the user can read any output before the TUI is restored.
         pause_after: bool,
+        /// `$`'s own handoff (#686): paints the [`subshell_banner`] marker
+        /// and exports `SPYC_SUBSHELL=1` for the child's prompt to show.
+        subshell: bool,
     },
 }
 
@@ -173,6 +176,7 @@ mod startup_commands;
 mod startup_tabs;
 pub mod state;
 mod streaming;
+mod subshell_banner;
 mod tab_completion;
 mod tasks;
 #[cfg(test)]
@@ -425,6 +429,20 @@ fn sh_c(cmd: &str, pause_after: bool) -> Vec<Effect> {
         program: "sh".to_string(),
         args: vec!["-c".to_string(), cmd.to_string()],
         pause_after,
+        subshell: false,
+    }
+    .into()
+}
+
+/// Build a `ForegroundExec` effect that runs `program` directly (no shell
+/// wrapper) — the `$EDITOR`/archive-edit shape, as opposed to `$`'s own
+/// [`PostAction::Spawn`] literal, which sets `subshell: true`.
+fn spawn_foreground(program: String, args: Vec<String>, pause_after: bool) -> Vec<Effect> {
+    PostAction::Spawn {
+        program,
+        args,
+        pause_after,
+        subshell: false,
     }
     .into()
 }

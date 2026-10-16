@@ -186,6 +186,7 @@ impl AppState {
                         program: sh,
                         args: vec![],
                         pause_after: false,
+                        subshell: true,
                     }
                     .into(),
                 );

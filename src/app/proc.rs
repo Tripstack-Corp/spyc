@@ -12,6 +12,7 @@ use crossterm::event::{self, Event, KeyEventKind, MouseEventKind};
 use crate::spyc_debug;
 use crate::{Tui, resume_tui, suspend_tui};
 
+use super::subshell_banner;
 use super::{Message, Wake};
 
 /// Owns the parkable crossterm input-reader thread (MVU Phase 1). The
@@ -203,10 +204,11 @@ impl ForegroundExec {
         program: &str,
         args: &[String],
         pause_after: bool,
+        subshell: bool,
     ) -> Result<()> {
         self.park_and_wait();
         // The existing takeover, byte-for-byte unchanged.
-        let r = run_child_in_foreground(terminal, program, args, pause_after);
+        let r = run_child_in_foreground(terminal, program, args, pause_after, subshell);
         self.unpark_reader();
         r
     }
@@ -229,9 +231,13 @@ fn run_child_in_foreground(
     program: &str,
     args: &[String],
     pause_after: bool,
+    subshell: bool,
 ) -> Result<()> {
     use std::io::Write;
     suspend_tui(terminal)?;
+    if subshell {
+        paint_subshell_banner(terminal);
+    }
 
     let mut cmd = std::process::Command::new(program);
     cmd.args(args);
@@ -244,6 +250,11 @@ fn run_child_in_foreground(
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
+    if subshell {
+        // A marker the shell's own prompt can show (#686); spyc never reads
+        // this back, only sets it for the child.
+        cmd.env("SPYC_SUBSHELL", "1");
+    }
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -253,6 +264,9 @@ fn run_child_in_foreground(
             // before returning the error — otherwise the `?` would skip
             // `resume_tui` and leave the terminal in raw/alt-screen mode on the
             // way out. The caller turns this Err into a flash, not an abort.
+            if subshell {
+                clear_subshell_banner();
+            }
             resume_tui(terminal)?;
             return Err(e.into());
         }
@@ -298,8 +312,39 @@ fn run_child_in_foreground(
         let _ = std::io::Read::read(&mut std::io::stdin(), &mut byte);
     }
 
+    if subshell {
+        clear_subshell_banner();
+    }
     resume_tui(terminal)?;
     Ok(())
+}
+
+/// Paint the #686 subshell marker right after `suspend_tui`: reserve the
+/// real terminal's top row via DECSTBM and set the window title, both from
+/// [`subshell_banner::MARKER`]. Best-effort like every other raw write in
+/// this handoff — a failed `terminal.size()` or write just skips the
+/// on-screen bar, since `$` must still work without one.
+fn paint_subshell_banner(terminal: &Tui) {
+    use std::io::Write;
+    if let Ok(size) = terminal.size() {
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all(subshell_banner::enter(size.width, size.height).as_bytes());
+        let _ = stdout.flush();
+    }
+    let _ = crate::term_title::set(subshell_banner::MARKER);
+}
+
+/// Undo [`paint_subshell_banner`]'s DECSTBM region before `resume_tui`
+/// repaints — best-effort, matching every other raw write in this
+/// handoff: a lost byte here would leave spyc's own render confined to
+/// the carved-out area, not crash it. The title needs no undo: the
+/// `ForegroundExec` after-work resets `last_term_title` to force a
+/// re-emit of spyc's own title on the very next tick.
+fn clear_subshell_banner() {
+    use std::io::Write;
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(subshell_banner::leave().as_bytes());
+    let _ = stdout.flush();
 }
 
 #[cfg(test)]

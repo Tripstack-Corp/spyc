@@ -146,6 +146,12 @@ impl crossterm::Command for DisableWheelReporting {
 /// session, and `:mouse` reported "on" because want matched the stale actual.
 static MOUSE_CAPTURE_ON: AtomicBool = AtomicBool::new(false);
 
+/// Whether the real terminal replied to the kitty keyboard-enhancement query
+/// `setup_terminal` makes once at startup. Cached so `suspend_tui`/`resume_tui`
+/// don't repeat that round-trip on every `$EDITOR`/`;`/`$` handoff — a plain
+/// `AtomicBool` for the same cross-function reason as `MOUSE_CAPTURE_ON`.
+static KEYBOARD_ENHANCEMENT_SUPPORTED: AtomicBool = AtomicBool::new(false);
+
 /// Read the terminal's actual mouse-reporting state. The `settle_mouse_mode`
 /// reconcile compares this against what the user asked for.
 pub fn mouse_capture_is_on() -> bool {
@@ -403,7 +409,13 @@ pub fn setup_terminal() -> Result<Tui> {
     // to a `\n` newline (multi-line input in Claude). Best-effort:
     // terminals that don't support the protocol (Terminal.app, older
     // Alacritty) simply don't reply to the request -- no harm done.
-    if supports_keyboard_enhancement().unwrap_or(false) {
+    //
+    // The query result is cached in `KEYBOARD_ENHANCEMENT_SUPPORTED` so
+    // `resume_tui` can re-push it after a `$EDITOR`/`;`/`$` handoff without
+    // repeating the round-trip query on every return.
+    let keyboard_enhancement_supported = supports_keyboard_enhancement().unwrap_or(false);
+    KEYBOARD_ENHANCEMENT_SUPPORTED.store(keyboard_enhancement_supported, Ordering::Relaxed);
+    if keyboard_enhancement_supported {
         let _ = execute!(
             io::stdout(),
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
@@ -502,6 +514,14 @@ pub fn set_mouse_capture(terminal: &mut Tui, capture: bool) -> Result<()> {
 /// alt screen and let the child's `smcup` reuse or stack on top of it.
 pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
     disable_raw_mode()?;
+    // Pop the kitty keyboard-enhancement flag BEFORE the child can see any
+    // input: left pushed, a plain `$SHELL` (or any program that doesn't
+    // negotiate the protocol itself) receives CSI-u sequences for Ctrl+<key>
+    // instead of the legacy C0 control bytes its line discipline expects —
+    // Ctrl+C/Ctrl+D/Ctrl+\ silently stop generating SIGINT/EOF/SIGQUIT in the
+    // child (#686). Unconditional and best-effort, matching `restore_terminal`:
+    // a terminal that never had it pushed just ignores an unknown CSI.
+    let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     execute!(
         terminal.backend_mut(),
         Clear(ClearType::All),
@@ -526,6 +546,16 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
 /// we bounce right back before anything is visible.
 pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
     enable_raw_mode()?;
+    // Re-push the kitty keyboard-enhancement flag `suspend_tui` popped, iff
+    // the terminal answered the one-time query in `setup_terminal` — reusing
+    // that cached answer instead of re-querying (and waiting on a reply) on
+    // every return from an editor/pager/shell.
+    if KEYBOARD_ENHANCEMENT_SUPPORTED.load(Ordering::Relaxed) {
+        let _ = execute!(
+            terminal.backend_mut(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     execute!(
         terminal.backend_mut(),
         EnterAlternateScreen,
@@ -850,5 +880,43 @@ mod mouse_reporting_tests {
             &format!("    execute!(out, {banned})?; // needed for X\n"),
             &banned
         ));
+    }
+}
+
+#[cfg(test)]
+mod keyboard_enhancement_tests {
+    /// #686: a `$`/`;`/`$EDITOR` handoff must leave the child's own Ctrl+C /
+    /// Ctrl+D / Ctrl+\ working. Left pushed, those arrive as kitty-protocol
+    /// CSI-u sequences instead of the C0 bytes a plain shell's line discipline
+    /// expects, so SIGINT/EOF/SIGQUIT silently stop firing in the child —
+    /// `suspend_tui`/`resume_tui` had no coverage of this at all before, the
+    /// same gap `the_two_modes_are_never_both_enabled`'s own doc comment
+    /// names for the mouse-mode pair. `&mut Tui` still can't be unit-built, so
+    /// this scans the source instead of calling the functions.
+    #[test]
+    fn suspend_pops_and_resume_conditionally_repushes_the_flag() {
+        let production = crate::guard_support::production_half(include_str!("terminal.rs"));
+        let suspend_body = production
+            .split_once("pub fn suspend_tui(")
+            .expect("suspend_tui exists")
+            .1
+            .split_once("pub fn resume_tui(")
+            .expect("resume_tui exists")
+            .0;
+        assert!(
+            suspend_body.contains("PopKeyboardEnhancementFlags"),
+            "suspend_tui must unconditionally pop the flag before the child \
+             can see any input: {suspend_body:?}"
+        );
+        let resume_body = production
+            .split_once("pub fn resume_tui(")
+            .expect("resume_tui exists")
+            .1;
+        assert!(
+            resume_body.contains("PushKeyboardEnhancementFlags")
+                && resume_body.contains("KEYBOARD_ENHANCEMENT_SUPPORTED"),
+            "resume_tui must re-push the flag, gated on the cached support \
+             bit from setup_terminal's one-time query: {resume_body:?}"
+        );
     }
 }
