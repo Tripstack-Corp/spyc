@@ -586,6 +586,7 @@ mod tests {
         }
         fn tracked_status(app: &App) -> GitFileStatus {
             app.view
+                .project()
                 .right_cached_rows
                 .iter()
                 .find(|r| r.display.starts_with("tracked.txt"))

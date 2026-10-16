@@ -26,7 +26,8 @@ fn with_tabs(labels: &[&str], test: impl FnOnce(&mut App)) {
         for label in labels {
             let wake = app.make_pane_wake();
             let root = Path::new("/");
-            let pane = Pane::spawn("cat", 24, 80, root, &app.view.context_path, wake).unwrap();
+            let pane =
+                Pane::spawn("cat", 24, 80, root, &app.view.project().context_path, wake).unwrap();
             let entry = TabEntry::new(pane, TabInfo::new(*label, root));
             match app.runtime.project_mut().pane_tabs.as_mut() {
                 Some(tabs) => tabs.push(entry),

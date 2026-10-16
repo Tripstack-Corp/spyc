@@ -377,14 +377,19 @@ impl App {
             content,
             title: pending.title,
         };
-        let full_width = self.view.pager.as_ref().is_some_and(|p| p.full_width);
+        let full_width = self
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .is_some_and(|p| p.full_width);
         let ctx = RenderCtx {
             theme: self.view.theme.clone(),
             full_width,
             tab_width: self.state.active_project().config.pager.tab_width,
             intraline: self.state.active_project().config.diff.intraline,
         };
-        if let Some(view) = self.view.pager.as_mut() {
+        if let Some(view) = self.view.project_mut().pager.as_mut() {
             stream.render_into(view, &ctx);
         }
         self.runtime.pager_stream = Some(Box::new(stream));
@@ -481,7 +486,7 @@ mod tests {
             });
             assert!(app.drain_pending_git_view());
             assert!(
-                app.view.pager.is_none(),
+                app.view.project().pager.is_none(),
                 "an empty result must not mount an overlay"
             );
             assert!(app.runtime.pager_stream.is_none());
@@ -510,7 +515,12 @@ mod tests {
                 layout: DiffLayout::SideBySide,
             });
             assert!(app.drain_pending_git_view());
-            let pager = app.view.pager.as_ref().expect("content mounts the overlay");
+            let pager = app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .expect("content mounts the overlay");
             assert_eq!(pager.stream_id, Some(7));
             assert!(
                 app.runtime.pager_stream.is_some(),
@@ -575,6 +585,7 @@ mod tests {
             assert!(app.drain_pending_git_view());
             let widest = |app: &App| {
                 app.view
+                    .project()
                     .pager
                     .as_ref()
                     .unwrap()
@@ -591,7 +602,12 @@ mod tests {
             };
             let before = widest(app);
             // Exactly what the `f` key arm does: toggle full-width, re-render.
-            app.view.pager.as_mut().unwrap().toggle_full_width();
+            app.view
+                .project_mut()
+                .pager
+                .as_mut()
+                .unwrap()
+                .toggle_full_width();
             assert!(app.dispatch_pager_command(PagerStreamCmd::Rerender));
             let after = widest(app);
             assert!(
@@ -655,6 +671,7 @@ mod tests {
             assert!(app.drain_pending_git_view());
             let body = |app: &App| -> String {
                 app.view
+                    .project()
                     .pager
                     .as_ref()
                     .unwrap()

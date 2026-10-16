@@ -208,7 +208,7 @@ impl App {
             && self.runtime.pending_capture.is_none()
             && !matches!(self.state.mode, Mode::Prompting(_))
             && !pane_has_focus
-            && self.view.pager.is_none()
+            && self.view.project().pager.is_none()
         {
             self.state.flash_info(
                 "^C is not a quit binding — use Q (or :q) to quit, Esc to cancel modes",
@@ -457,7 +457,7 @@ impl App {
                 let _ = capture.host.child.wait();
                 // ✗ — same non-clean-termination glyph the status bar uses.
                 let title = format!("\u{2717} {} — interrupted", capture.title);
-                if let Some(view) = self.view.pager.as_mut() {
+                if let Some(view) = self.view.project_mut().pager.as_mut() {
                     view.title = title;
                     view.saveable = true;
                     view.streaming = false;
@@ -489,9 +489,9 @@ impl App {
     /// `InputSink::OverlayDismiss` dispatch arm.
     fn dismiss_overlay(&mut self) {
         self.runtime.project_mut().top_overlay = None;
-        self.view.overlay_awaiting_dismiss = false;
-        self.view.overlay_auto_dismiss = false;
-        self.view.overlay_column = None;
+        self.view.project_mut().overlay_awaiting_dismiss = false;
+        self.view.project_mut().overlay_auto_dismiss = false;
+        self.view.project_mut().overlay_column = None;
         self.view.needs_full_repaint = true;
         // The overlay just closed — drop the stale `Overlay` focus this frame.
         self.recompute_focus();

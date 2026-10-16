@@ -15,7 +15,7 @@ fn why_status_opens_a_saveable_pager_with_the_verdict_first() {
         crate::state::wiring_consent::set(crate::state::sessions::AgentKind::Claude, Some(true));
         let mut app = agent_app(&dir, "claude");
         let text = why_status(&mut app);
-        let view = app.view.pager.as_ref().expect("a pager opened");
+        let view = app.view.project().pager.as_ref().expect("a pager opened");
         assert_eq!(view.title, "why-status");
         assert!(view.saveable, "its report can be saved");
         assert!(
@@ -70,7 +70,7 @@ fn why_status_with_no_pane_says_so_in_the_status_line() {
     crate::state::with_state_root(&tmp.path().join("state"), || {
         let mut app = App::test_app(std::fs::canonicalize(tmp.path()).unwrap());
         app.dispatch_command("why-status");
-        assert!(app.view.pager.is_none());
+        assert!(app.view.project().pager.is_none());
         assert_eq!(app.flash_text(), Some("why-status: no pane open"));
     });
 }

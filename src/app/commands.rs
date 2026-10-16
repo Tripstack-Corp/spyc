@@ -39,7 +39,14 @@ impl App {
         );
         let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
-        match Pane::spawn(&expanded, rows, cols, &cwd, &self.view.context_path, wake) {
+        match Pane::spawn(
+            &expanded,
+            rows,
+            cols,
+            &cwd,
+            &self.view.project().context_path,
+            wake,
+        ) {
             Ok(p) => {
                 // Initial focus on the new overlay so the user drives the
                 // subprocess directly; `^a j` hands focus to the bottom pane.
@@ -94,7 +101,7 @@ impl App {
                 // `set_pager` / `remember_pager_position`), rebuilt from the
                 // normalized request (columns 1, no fit = `new_plain`
                 // defaults, so byte-identical to the old call).
-                self.view.pager = Some(PagerView::new_plain(req.title, req.lines));
+                self.view.project_mut().pager = Some(PagerView::new_plain(req.title, req.lines));
                 return Vec::new();
             }
             Update::Quit => {
@@ -747,30 +754,30 @@ pub(super) fn cmd_resume(app: &mut App, args: &str) -> Vec<Effect> {
 
 /// `:bprev` — step the pager buffer history backward (older).
 pub(super) fn cmd_bprev(app: &mut App, _args: &str) -> Vec<Effect> {
-    if let Some(mut current) = app.view.pager.take() {
+    if let Some(mut current) = app.view.project_mut().pager.take() {
         // A flash describes the keypress that set it, so it must not ride into
         // history and resurface when this view is restored.
         current.flash = None;
-        let msg = match app.view.pager_history.go_back(current) {
+        let msg = match app.view.project_mut().pager_history.go_back(current) {
             Ok(prev) => {
-                app.view.pager = Some(prev);
+                app.view.project_mut().pager = Some(prev);
                 app.view.needs_full_repaint = true;
-                let back = app.view.pager_history.back_len();
-                let fwd = app.view.pager_history.forward_len();
+                let back = app.view.project().pager_history.back_len();
+                let fwd = app.view.project().pager_history.forward_len();
                 format!("buffer ←{back} →{fwd}")
             }
             Err(current) => {
                 // At the start of history -- keep the current pager
                 // visible instead of closing it.
-                app.view.pager = Some(current);
+                app.view.project_mut().pager = Some(current);
                 "no older buffers".to_string()
             }
         };
         pager_flash(app, msg);
-    } else if let Some(prev) = app.view.pager_history.pop_back() {
-        app.view.pager = Some(prev);
+    } else if let Some(prev) = app.view.project_mut().pager_history.pop_back() {
+        app.view.project_mut().pager = Some(prev);
         app.view.needs_full_repaint = true;
-        let msg = format!("buffer ←{}", app.view.pager_history.back_len());
+        let msg = format!("buffer ←{}", app.view.project().pager_history.back_len());
         pager_flash(app, msg);
     } else {
         // No pager opened, so the user is looking at the list -- status bar.
@@ -782,25 +789,25 @@ pub(super) fn cmd_bprev(app: &mut App, _args: &str) -> Vec<Effect> {
 /// Land a buffer-history message on the pager the command just installed, not
 /// the file-list status bar it is drawn over (#166).
 fn pager_flash(app: &mut App, msg: String) {
-    if let Some(view) = app.view.pager.as_mut() {
+    if let Some(view) = app.view.project_mut().pager.as_mut() {
         view.flash = Some(msg);
     }
 }
 
 /// `:bnext` — step the pager buffer history forward (newer).
 pub(super) fn cmd_bnext(app: &mut App, _args: &str) -> Vec<Effect> {
-    if let Some(mut current) = app.view.pager.take() {
+    if let Some(mut current) = app.view.project_mut().pager.take() {
         current.flash = None;
-        let msg = match app.view.pager_history.go_forward(current) {
+        let msg = match app.view.project_mut().pager_history.go_forward(current) {
             Ok(next) => {
-                app.view.pager = Some(next);
+                app.view.project_mut().pager = Some(next);
                 app.view.needs_full_repaint = true;
-                let back = app.view.pager_history.back_len();
-                let fwd = app.view.pager_history.forward_len();
+                let back = app.view.project().pager_history.back_len();
+                let fwd = app.view.project().pager_history.forward_len();
                 format!("buffer ←{back} →{fwd}")
             }
             Err(current) => {
-                app.view.pager = Some(current);
+                app.view.project_mut().pager = Some(current);
                 "no newer buffers".to_string()
             }
         };
@@ -819,7 +826,7 @@ mod tests {
 
     fn app_with_pager() -> App {
         let mut app = App::test_app(std::env::temp_dir());
-        app.view.pager = Some(PagerView::new_plain("t", vec!["line".to_string()]));
+        app.view.project_mut().pager = Some(PagerView::new_plain("t", vec!["line".to_string()]));
         app
     }
 
@@ -859,7 +866,11 @@ mod tests {
             let fx = app.dispatch_command(cmd);
             assert!(fx.is_empty(), ":{cmd} effects: {fx:?}");
             assert_eq!(
-                app.view.pager.as_ref().and_then(|v| v.flash.as_deref()),
+                app.view
+                    .project()
+                    .pager
+                    .as_ref()
+                    .and_then(|v| v.flash.as_deref()),
                 Some(msg),
                 ":{cmd}"
             );
@@ -876,11 +887,16 @@ mod tests {
     fn bprev_reopening_from_the_list_flashes_in_the_reopened_pager() {
         let mut app = App::test_app(std::env::temp_dir());
         app.view
+            .project_mut()
             .pager_history
             .push(PagerView::new_plain("older", vec!["a".to_string()]));
         app.dispatch_command("bprev");
         assert_eq!(
-            app.view.pager.as_ref().and_then(|v| v.flash.as_deref()),
+            app.view
+                .project()
+                .pager
+                .as_ref()
+                .and_then(|v| v.flash.as_deref()),
             Some("buffer ←0")
         );
         assert!(app.state.flash.is_none(), "{:?}", app.state.flash);
@@ -896,7 +912,7 @@ mod tests {
         ] {
             let mut app = App::test_app(std::env::temp_dir());
             app.dispatch_command(cmd);
-            assert!(app.view.pager.is_none(), ":{cmd} opened nothing");
+            assert!(app.view.project().pager.is_none(), ":{cmd} opened nothing");
             assert_eq!(
                 app.state.flash.as_ref().map(|f| f.text.as_str()),
                 Some(msg),

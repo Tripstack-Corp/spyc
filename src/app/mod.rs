@@ -408,6 +408,7 @@ impl App {
     /// True when the help pager is the currently-open pager view.
     fn help_is_open(&self) -> bool {
         self.view
+            .project()
             .pager
             .as_ref()
             .is_some_and(|v| v.title == Self::HELP_TITLE)

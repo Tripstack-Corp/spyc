@@ -89,7 +89,7 @@ fn gitignored_fs_event_drop_keeps_cwd_level_source_and_preview() {
         let preview = repo.join("target/preview.md");
         let mut pv = crate::ui::pager::PagerView::new_plain("preview", vec!["x".to_string()]);
         pv.source_path = Some(preview.clone());
-        app.view.right_pager = Some(pv);
+        app.view.project_mut().right_pager = Some(pv);
 
         let ev = |p: &std::path::Path| {
             notify::Event::new(notify::EventKind::Any).add_path(p.to_path_buf())
@@ -424,7 +424,12 @@ fn why_git_dumps_per_column_refresh_state() {
         app.state.refresh_git_state();
 
         app.dispatch_command("why-git");
-        let view = app.view.pager.as_ref().expect(":why-git opens a pager");
+        let view = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect(":why-git opens a pager");
         assert_eq!(view.title, "why-git");
         assert!(view.saveable, "the dump is yankable/saveable");
         let text: String = view

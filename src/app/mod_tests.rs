@@ -139,7 +139,11 @@ mod guard_tests {
     /// and only `state/mod.rs`, where the handles live, may name them.
     #[test]
     fn columns_are_addressed_through_handles() {
-        const ALLOW: &[(&str, &str)] = &[];
+        const ALLOW: &[(&str, &str)] = &[(
+            "pager_handler/mod.rs",
+            "`active_pager_mut!` borrows `view.projects` alone, so a handler can hold \
+             `pending_history_pick` beside the pager",
+        )];
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
         let mut offenders = Vec::new();
         let mut matched = std::collections::BTreeSet::new();
@@ -152,7 +156,13 @@ mod guard_tests {
             let own_fields = rel.starts_with("state/") && rel != "state/mod.rs";
             let hits = column_field_receivers(&crate::guard_support::production_half(src))
                 .into_iter()
-                .filter(|r| r == "state" || r.ends_with("_state") || (own_fields && r == "self"))
+                .filter(|r| {
+                    r == "state"
+                        || r.ends_with("_state")
+                        || r == "view"
+                        || r == "runtime"
+                        || (own_fields && r == "self")
+                })
                 .count();
             if hits == 0 {
                 return;
@@ -169,8 +179,9 @@ mod guard_tests {
             "a column is named directly in: {offenders:?}. Reach it by handle: `cur()` / \
              `cur_mut()` for the focused column (a spawn cwd, a restore target, what an op \
              acts on), `col(side)` / `get_col(side)` for a named one, `active_sides()` / \
-             `columns_mut()` for every open one. If the file draws or watches each column \
-             separately, add it to ALLOW with why."
+             `columns_mut()` for every open one. A project is reached the same way: \
+             `state.active_project()`, `runtime.project()`, `view.project()`. If the file \
+             draws or watches each column separately, add it to ALLOW with why."
         );
         let stale: Vec<&str> = ALLOW
             .iter()
@@ -210,9 +221,9 @@ mod guard_tests {
 
     /// The receiver of each `<recv>.left` / `<recv>.right` / `<recv>.projects`
     /// field access, comments skipped: `self.state.left.cursor` yields `state`.
-    /// A longer field (`right_pager`) is not a column, and `Runtime`'s own
-    /// `projects` (a different struct, `runtime.rs`) is never reached with a
-    /// `state`/`*_state` receiver, so it can't false-positive here.
+    /// A longer field (`right_pager`) is not a column. `view` and `runtime`
+    /// have no `left`/`right`, so for those receivers a hit is their own
+    /// `projects` map named outside its `project()` accessors.
     fn column_field_receivers(src: &str) -> Vec<String> {
         let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
         let mut out = Vec::new();

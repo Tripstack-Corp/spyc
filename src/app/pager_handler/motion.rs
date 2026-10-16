@@ -47,13 +47,14 @@ impl App {
                 // the help variant; this is the way back to the transcript.
                 // Checked before the pane-scroll snap below because the help view
                 // intentionally carries `pane_scroll = false`.
-                if self.view.scroll_pager_help_stash.is_some()
+                if self.view.project().scroll_pager_help_stash.is_some()
                     && self.active_pager_ref().is_some_and(|v| {
                         v.title == crate::ui::pager::SCROLLBACK_HELP_TITLE
                             || v.title == crate::ui::pager::PAGER_HELP_TITLE
                     })
                 {
-                    self.view.scroll_pager = self.view.scroll_pager_help_stash.take();
+                    self.view.project_mut().scroll_pager =
+                        self.view.project_mut().scroll_pager_help_stash.take();
                     self.view.pager_pending_bracket = None;
                     self.view.needs_full_repaint = true;
                     return Vec::new();
@@ -78,11 +79,12 @@ impl App {
                 // and pop a stale file-viewer instead.
                 if self
                     .view
+                    .project()
                     .pager
                     .as_ref()
                     .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
                 {
-                    self.view.pager = self.view.pager_help_stash.take();
+                    self.view.project_mut().pager = self.view.project_mut().pager_help_stash.take();
                     self.view.pager_pending_bracket = None;
                     self.view.needs_full_repaint = true;
                     return Vec::new();
@@ -112,7 +114,7 @@ impl App {
                         let mut snapshot = Self::build_task_viewer_for(id, &task);
                         snapshot.task_id = None; // not a live viewer anymore
                         snapshot.no_history = false; // must be eligible for history
-                        self.view.pager_history.push(snapshot);
+                        self.view.project_mut().pager_history.push(snapshot);
                         // Reap the child handle if still around (already
                         // wait()'d when EOF arrived; this is just to drop
                         // the writer/rx). Implicit via task drop.
@@ -140,14 +142,14 @@ impl App {
                         let slot = self.active_pager_slot();
                         self.remember_pager_position();
                         if let Some(v) = self.take_active_pager() {
-                            self.view.pager_history.push(v);
+                            self.view.project_mut().pager_history.push(v);
                         }
                         // The rest of `clear_pager`'s teardown (the slot is
                         // already empty after the take). Only the left/single
                         // slot uses `overlay_column`; closing `b`'s pager must
                         // NOT unpin a still-open pager in `a`.
                         if !matches!(slot, crate::app::pager_handler::PagerSlot::Right) {
-                            self.view.overlay_column = None;
+                            self.view.project_mut().overlay_column = None;
                         }
                         self.recompute_focus();
                     } else {
@@ -392,14 +394,14 @@ impl App {
                 if source.is_some() {
                     self.watch_for_edits(&edit_path);
                 }
-                self.view.pending_pager_return = Some(pager_return);
+                self.view.project_mut().pending_pager_return = Some(pager_return);
                 // A scrollback `v` lives in `view.scroll_pager`, which
                 // `clear_pager` (top slot only) wouldn't touch — clear ITS slot
                 // so it isn't orphaned, keeping the pane in scroll mode for the
                 // round-trip (the editor return reseats it via
                 // `restore_scroll_pager_view`).
                 if pane_scroll {
-                    self.view.scroll_pager = None;
+                    self.view.project_mut().scroll_pager = None;
                 } else {
                     self.clear_pager();
                 }
@@ -412,51 +414,7 @@ impl App {
                     false,
                 );
             }
-            KeyCode::Char('H') | KeyCode::F(1) => {
-                use crate::ui::pager::{
-                    PAGER_HELP_TITLE, SCROLLBACK_HELP_TITLE, build_pager_help,
-                    build_scrollback_help,
-                };
-                if self.state.pane_focused() && self.view.scroll_pager.is_some() {
-                    // Scrollback / transcript view: its OWN help, shown in the
-                    // bottom `scroll_pager` slot so it keeps the slot's focus +
-                    // routing (no "help overlay over a focused scrollback from
-                    // underneath" — the reason this used to be a no-op). The
-                    // first `H` stashes the real scrollback and shows the
-                    // transcript help; `H` again toggles to the full pager-keys
-                    // help (separate-but-linked); Esc/q restores the scrollback.
-                    let cur = self.view.scroll_pager.as_ref().map(|v| v.title.as_str());
-                    let next = match cur {
-                        Some(SCROLLBACK_HELP_TITLE) => build_pager_help(&self.view.theme),
-                        Some(PAGER_HELP_TITLE) => build_scrollback_help(&self.view.theme),
-                        _ => {
-                            // Real scrollback showing — stash it before swapping
-                            // in the help (Esc/q restores from this slot).
-                            self.view.scroll_pager_help_stash = self.view.scroll_pager.take();
-                            build_scrollback_help(&self.view.theme)
-                        }
-                    };
-                    // Both help variants render in the bottom pane region where
-                    // the scrollback was (`build_scrollback_help` sets LowerPane;
-                    // force it on the pager-keys variant too).
-                    let mut help = next;
-                    help.mount = crate::ui::pager::Mount::LowerPane;
-                    self.view.scroll_pager = Some(help);
-                    self.view.needs_full_repaint = true;
-                } else {
-                    // Top/overlay pager help. Stash the current pager so
-                    // dismissing (Esc/q) restores it verbatim — same content,
-                    // same mount. Going through `pager_history.push` here was the
-                    // v1.5 regression: it filters out `no_history=true` views
-                    // (both `Mount::LowerPane` `^a-v` and `Mount::TopPane` `D`),
-                    // so the help would dismiss to nothing or a stale file-viewer.
-                    if let Some(current) = self.view.pager.take() {
-                        self.view.pager_help_stash = Some(current);
-                    }
-                    self.view.pager = Some(build_pager_help(&self.view.theme));
-                    self.view.needs_full_repaint = true;
-                }
-            }
+            KeyCode::Char('H') | KeyCode::F(1) => self.show_pager_help(),
             KeyCode::Char('r') if view.pane_scroll => {
                 // Reload a transcript scrollback: re-resolve + re-read + render
                 // off-thread (a full-screen agent keeps appending, so the
@@ -514,6 +472,59 @@ impl App {
         }
         Vec::new()
     }
+
+    /// `H` / F1: the help for the focused pager, stashing what it covers so
+    /// Esc/q restores it.
+    fn show_pager_help(&mut self) {
+        use crate::ui::pager::{
+            PAGER_HELP_TITLE, SCROLLBACK_HELP_TITLE, build_pager_help, build_scrollback_help,
+        };
+        if self.state.pane_focused() && self.view.project().scroll_pager.is_some() {
+            // Scrollback / transcript view: its OWN help, shown in the
+            // bottom `scroll_pager` slot so it keeps the slot's focus +
+            // routing (no "help overlay over a focused scrollback from
+            // underneath" — the reason this used to be a no-op). The
+            // first `H` stashes the real scrollback and shows the
+            // transcript help; `H` again toggles to the full pager-keys
+            // help (separate-but-linked); Esc/q restores the scrollback.
+            let cur = self
+                .view
+                .project()
+                .scroll_pager
+                .as_ref()
+                .map(|v| v.title.as_str());
+            let next = match cur {
+                Some(SCROLLBACK_HELP_TITLE) => build_pager_help(&self.view.theme),
+                Some(PAGER_HELP_TITLE) => build_scrollback_help(&self.view.theme),
+                _ => {
+                    // Real scrollback showing — stash it before swapping
+                    // in the help (Esc/q restores from this slot).
+                    self.view.project_mut().scroll_pager_help_stash =
+                        self.view.project_mut().scroll_pager.take();
+                    build_scrollback_help(&self.view.theme)
+                }
+            };
+            // Both help variants render in the bottom pane region where
+            // the scrollback was (`build_scrollback_help` sets LowerPane;
+            // force it on the pager-keys variant too).
+            let mut help = next;
+            help.mount = crate::ui::pager::Mount::LowerPane;
+            self.view.project_mut().scroll_pager = Some(help);
+            self.view.needs_full_repaint = true;
+        } else {
+            // Top/overlay pager help. Stash the current pager so
+            // dismissing (Esc/q) restores it verbatim — same content,
+            // same mount. Going through `pager_history.push` here was the
+            // v1.5 regression: it filters out `no_history=true` views
+            // (both `Mount::LowerPane` `^a-v` and `Mount::TopPane` `D`),
+            // so the help would dismiss to nothing or a stale file-viewer.
+            if let Some(current) = self.view.project_mut().pager.take() {
+                self.view.project_mut().pager_help_stash = Some(current);
+            }
+            self.view.project_mut().pager = Some(build_pager_help(&self.view.theme));
+            self.view.needs_full_repaint = true;
+        }
+    }
 }
 
 /// Scroll `view` down by `delta` and report whether it actually moved.
@@ -559,22 +570,25 @@ mod tests {
             let mut app = App::test_app(dir);
             app.open_pane_tab("cat");
             app.install_lower_pane_scroll_view(" pane (history)".to_string(), fifty_lines(), None);
-            assert!(app.view.scroll_pager.is_some(), "the scrollback mounted");
+            assert!(
+                app.view.project().scroll_pager.is_some(),
+                "the scrollback mounted"
+            );
 
             // Mid-history: the scroll moves, so it must NOT close.
             app.handle_pager_motion(down(), 10);
             assert!(
-                app.view.scroll_pager.is_some(),
+                app.view.project().scroll_pager.is_some(),
                 "a scroll with somewhere to go must not exit"
             );
 
             // Park at the very end, then one more down.
-            if let Some(v) = app.view.scroll_pager.as_mut() {
+            if let Some(v) = app.view.project_mut().scroll_pager.as_mut() {
                 v.scroll_by(1000, 10);
             }
             app.handle_pager_motion(down(), 10);
             assert!(
-                app.view.scroll_pager.is_none(),
+                app.view.project().scroll_pager.is_none(),
                 "a down-scroll with nowhere to go exits back to the live pane"
             );
         });
@@ -596,11 +610,11 @@ mod tests {
             view.mount = crate::ui::pager::Mount::TopPane;
             assert!(!view.pane_scroll, "a `D` doc is not a pane scrollback");
             view.scroll_by(1000, 10);
-            app.view.pager = Some(view);
+            app.view.project_mut().pager = Some(view);
 
             app.handle_pager_motion(down(), 10);
             assert!(
-                app.view.pager.is_some(),
+                app.view.project().pager.is_some(),
                 "only a pane scrollback exits on a down-scroll past the end"
             );
         });

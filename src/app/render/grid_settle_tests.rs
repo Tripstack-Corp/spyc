@@ -48,7 +48,7 @@ fn listing() -> (App, Vec<String>) {
     app.state.active_project_mut().left.listing.dir = PathBuf::from("/projects/demo");
     app.seed_rows(&refs);
     // `seed_rows` doesn't bump `list_generation`, which the row cache is keyed on.
-    app.view.cached_rows_gen = app
+    app.view.project_mut().cached_rows_gen = app
         .state
         .active_project()
         .left
@@ -101,7 +101,7 @@ fn cursor_bar(app: &App, buf: &Buffer) -> Option<(u16, u16, String)> {
 fn page_cols(app: &App, view_top: usize, (w, h): (u16, u16)) -> u16 {
     let list = app.frame_layout(Rect::new(0, 0, w, h)).list;
     ListView {
-        rows: &app.view.cached_rows,
+        rows: &app.view.project().cached_rows,
         cursor: 0,
         view_top,
         empty_marker: false,

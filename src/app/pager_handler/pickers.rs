@@ -303,10 +303,7 @@ impl App {
             return;
         }
         self.show_history_popup();
-        if let (Some(view), Some(editor)) = (
-            self.view.pager.as_mut(),
-            self.view.pending_history_pick.as_mut(),
-        ) {
+        if let (Some(view), Some(editor)) = self.view.top_pager_and_history_pick_mut() {
             let max = view.line_count().saturating_sub(1);
             view.picker_cursor = Some(cursor.min(max));
             Self::show_history_selection(view, editor, &self.state.history, true);

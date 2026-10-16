@@ -214,7 +214,10 @@ fn opening_a_member_extracts_it_then_pages_it() {
                 .any(|e| matches!(e, Effect::Archive(ArchiveOp::Materialize { .. }))),
             "an unextracted member is materialized first: {fx:?}"
         );
-        assert!(app.view.pager.is_none(), "nothing is paged synchronously");
+        assert!(
+            app.view.project().pager.is_none(),
+            "nothing is paged synchronously"
+        );
 
         // Run the extraction and its follow-up the way the loop does.
         for effect in fx {
@@ -226,7 +229,12 @@ fn opening_a_member_extracts_it_then_pages_it() {
         }
         app.apply_archive_outcomes();
 
-        let pager = app.view.pager.as_ref().expect("the member is paged");
+        let pager = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("the member is paged");
         assert_eq!(
             pager.source_path.as_deref(),
             Some(staging.join("README.md").as_path()),
@@ -263,7 +271,10 @@ fn re_opening_a_member_skips_the_worker() {
         app.apply(&Action::Down(1)).unwrap();
         let fx = app.apply(&Action::EnterOrDisplay).unwrap();
         assert!(fx.is_empty(), "no worker round trip: {fx:?}");
-        assert!(app.view.pager.is_some(), "the pager opens immediately");
+        assert!(
+            app.view.project().pager.is_some(),
+            "the pager opens immediately"
+        );
     });
 }
 
@@ -295,7 +306,12 @@ fn a_file_that_only_looks_like_an_archive_still_opens_as_a_file() {
         app.apply_archive_outcomes();
 
         assert!(app.state.mounts.is_empty(), "nothing was mounted");
-        let pager = app.view.pager.as_ref().expect("it opens as a file");
+        let pager = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("it opens as a file");
         assert_eq!(pager.source_path.as_deref(), Some(fake.as_path()));
     });
 }
@@ -317,7 +333,10 @@ fn disabling_the_feature_pages_the_archive_instead() {
             !fx.iter().any(|e| matches!(e, Effect::Archive(_))),
             "no mount is attempted: {fx:?}"
         );
-        assert!(app.view.pager.is_some(), "the archive is paged as bytes");
+        assert!(
+            app.view.project().pager.is_some(),
+            "the archive is paged as bytes"
+        );
         assert!(app.state.mounts.is_empty());
     });
 }

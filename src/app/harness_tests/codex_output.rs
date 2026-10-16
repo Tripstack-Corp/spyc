@@ -30,7 +30,7 @@ fn replay(app: &mut App, root: &std::path::Path, label: &str) {
         24,
         100,
         root,
-        &app.view.context_path,
+        &app.view.project().context_path,
         wake,
     )
     .unwrap();
@@ -81,7 +81,10 @@ fn codex_gf_and_gf_line_navigate_to_printed_files() {
                 root.join("files/printed.rs")
             );
             if second == 'F' {
-                assert!(app.view.pager.is_some(), "gF opens the printed file");
+                assert!(
+                    app.view.project().pager.is_some(),
+                    "gF opens the printed file"
+                );
             }
         });
     }

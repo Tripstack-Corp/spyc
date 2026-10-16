@@ -291,7 +291,12 @@ fn session_info_counts_the_column_it_names() {
 
         app.show_session_info();
 
-        let pager = app.view.pager.as_ref().expect("session info opened");
+        let pager = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("session info opened");
         let text: Vec<String> = pager
             .lines
             .iter()

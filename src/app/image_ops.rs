@@ -573,7 +573,7 @@ impl super::App {
     /// pager), the main status bar otherwise (an image file opened from the
     /// list has no pager — the message would be swallowed).
     fn flash_image_status(&mut self, msg: &str) {
-        if let Some(pager) = self.view.pager.as_mut() {
+        if let Some(pager) = self.view.project_mut().pager.as_mut() {
             pager.flash = Some(msg.to_string());
         } else {
             self.state.flash_error(msg);

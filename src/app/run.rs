@@ -296,7 +296,7 @@ impl App {
                         // serializes-then-skips when JSON is unchanged,
                         // so a no-op keystroke (e.g. pressing keys in
                         // a chord prefix) won't actually touch disk.
-                        self.view.context_dirty = true;
+                        self.view.project_mut().context_dirty = true;
                         // Throttle rapid-fire arrow keys from trackpad scroll
                         // (DEC 1007 alternate-scroll). Allow ~25 events/sec.
                         if matches!(key.code, KeyCode::Up | KeyCode::Down)
@@ -506,7 +506,7 @@ impl App {
     /// run on every exit path (the PR8b guarantee) — `main` calls it
     /// unconditionally regardless of the run loop's result.
     pub fn run_teardown(&mut self) {
-        crate::context::remove_context_file(&self.view.context_path);
+        crate::context::remove_context_file(&self.view.project().context_path);
         // Drop every archive staging tree this session created. The startup
         // sweep is the backstop for a process that never gets here.
         self.clean_all_staging();

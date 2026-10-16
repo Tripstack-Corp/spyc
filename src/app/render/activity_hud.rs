@@ -59,7 +59,7 @@ impl App {
             .iter()
             .filter(|t| t.paused)
             .count();
-        let pager_state = match self.view.pager.as_ref() {
+        let pager_state = match self.view.project().pager.as_ref() {
             None => "none",
             Some(v) => match v.mount {
                 crate::ui::pager::Mount::Overlay => "overlay",

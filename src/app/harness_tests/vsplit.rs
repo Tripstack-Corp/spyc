@@ -28,7 +28,7 @@ fn vsplit_toggle_opens_and_closes() {
             "a second ^s | on the same file closes it — no mode step between"
         );
         assert!(
-            app.view.right_pager.is_none(),
+            app.view.project().right_pager.is_none(),
             "closing clears the right-region preview"
         );
     });
@@ -155,6 +155,7 @@ fn vsplit_toggle_swaps_preview_keeping_shape() {
         );
         assert!(
             app.view
+                .project()
                 .right_pager
                 .as_ref()
                 .and_then(|v| v.source_path.as_ref())
@@ -171,6 +172,7 @@ fn vsplit_toggle_swaps_preview_keeping_shape() {
         );
         assert!(
             app.view
+                .project()
                 .right_pager
                 .as_ref()
                 .and_then(|v| v.source_path.as_ref())
@@ -404,7 +406,7 @@ fn q_on_focused_preview_closes_the_split() {
             app.state.active_project().vsplit.is_none(),
             "q on the focused preview closes the split"
         );
-        assert!(app.view.right_pager.is_none());
+        assert!(app.view.project().right_pager.is_none());
     });
 }
 
@@ -429,6 +431,6 @@ fn vsplit_toggle_on_directory_warns_and_stays_closed() {
             app.state.active_project().vsplit.is_none(),
             "^s | on a directory stays closed"
         );
-        assert!(app.view.right_pager.is_none());
+        assert!(app.view.project().right_pager.is_none());
     });
 }

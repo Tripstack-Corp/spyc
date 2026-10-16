@@ -208,11 +208,11 @@ impl App {
             .chunks(120)
             .map(|c| String::from_utf8_lossy(c).into_owned())
             .collect();
-        if let Some(prev) = self.view.pager.take() {
-            self.view.pager_history.push(prev);
+        if let Some(prev) = self.view.project_mut().pager.take() {
+            self.view.project_mut().pager_history.push(prev);
         }
         let title = format!("{} \u{2014} base64", iv.origin.label());
-        self.view.pager = Some(crate::ui::pager::PagerView::new_plain(&title, lines));
+        self.view.project_mut().pager = Some(crate::ui::pager::PagerView::new_plain(&title, lines));
         self.view.needs_full_repaint = true;
     }
 }

@@ -40,11 +40,12 @@ fn ctrl(app: &mut App, c: char) {
 }
 
 fn popup_open(app: &App) -> bool {
-    app.view.pending_history_pick.is_some() && app.view.pager.is_some()
+    app.view.pending_history_pick.is_some() && app.view.project().pager.is_some()
 }
 
 fn selected(app: &App) -> usize {
     app.view
+        .project()
         .pager
         .as_ref()
         .and_then(|v| v.picker_cursor)
@@ -62,6 +63,7 @@ fn editing(app: &App) -> String {
 
 fn rows(app: &App) -> Vec<String> {
     app.view
+        .project()
         .pager
         .as_ref()
         .expect("the popup")

@@ -404,7 +404,7 @@ impl App {
     /// edit the same file, reopen it now that the child has exited. Moved
     /// out of `run_effects` to keep that function under its size pin.
     fn restore_pending_pager_return(&mut self) {
-        let Some(ret) = self.view.pending_pager_return.take() else {
+        let Some(ret) = self.view.project_mut().pending_pager_return.take() else {
             return;
         };
         match ret {

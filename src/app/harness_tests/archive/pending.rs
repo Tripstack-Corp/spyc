@@ -221,6 +221,7 @@ fn archive_info_outside_a_mount_reports_what_is_mounted() {
 
         let shown = app
             .view
+            .project()
             .pager
             .as_ref()
             .map(|p| {
@@ -335,6 +336,7 @@ fn an_edited_member_is_marked_in_the_listing() {
         settle(&mut app, fx);
         let staged = app
             .view
+            .project()
             .pager
             .as_ref()
             .and_then(|p| p.source_path.clone())
@@ -535,6 +537,7 @@ fn a_put_member_can_be_opened_yanked_and_deleted() {
         );
         assert_eq!(
             app.view
+                .project()
                 .pager
                 .as_ref()
                 .expect("the put member is paged")
@@ -543,7 +546,7 @@ fn a_put_member_can_be_opened_yanked_and_deleted() {
             Some(staging.join("brought.txt").as_path()),
             "reading the staged copy the put wrote"
         );
-        app.view.pager = None;
+        app.view.project_mut().pager = None;
 
         // Reading it out — `y`, and by the same route `L` / `f` / copy-out.
         settle(

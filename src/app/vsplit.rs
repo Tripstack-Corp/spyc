@@ -100,6 +100,7 @@ impl App {
         // "show this one instead" — swap the content, keep the shape.
         let preview_path = self
             .view
+            .project()
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone());
@@ -165,7 +166,7 @@ impl App {
     pub(super) fn open_second_commander_at(&mut self, dir: &std::path::Path) {
         // The user asking for `b` takes ownership of the column: any preview an
         // agent displaced earlier stops being owed back.
-        self.view.displaced_preview = None;
+        self.view.project_mut().displaced_preview = None;
         self.open_second_commander_at_inner(dir, true);
     }
 
@@ -183,9 +184,9 @@ impl App {
     pub(super) fn open_second_commander_at_background(&mut self, dir: &std::path::Path) {
         if let (Some(shape), Some(preview)) = (
             self.state.active_project().vsplit,
-            self.view.right_pager.take(),
+            self.view.project_mut().right_pager.take(),
         ) {
-            self.view.displaced_preview = Some((shape, preview));
+            self.view.project_mut().displaced_preview = Some((shape, preview));
         }
         self.open_second_commander_at_inner(dir, false);
     }
@@ -223,7 +224,7 @@ impl App {
             .col(state::Side::Left)
             .git_cache
             .git_worker_available;
-        self.view.right_pager = None; // a commander and the preview are exclusive
+        self.view.project_mut().right_pager = None; // a commander and the preview are exclusive
         self.state.open_second(commander);
         self.state.active_project_mut().vsplit = Some(state::VSplit {
             width_pct: DEFAULT_VSPLIT_PCT,
@@ -248,7 +249,7 @@ impl App {
         // Build the right column's rows — `cur()` now resolves to it.
         self.state.rebuild_rows();
         self.state
-            .flash_info(if self.view.displaced_preview.is_some() {
+            .flash_info(if self.view.project().displaced_preview.is_some() {
                 "second commander (^s x closes it, restoring your preview)"
             } else {
                 "second commander (^s x / ^d to close)"
@@ -269,12 +270,12 @@ impl App {
         // Drop any `V`/`D` overlay open in `b` along with its column — otherwise
         // the editor PTY / pager would linger with no column to render into.
         self.runtime.project_mut().top_overlay_right = None;
-        self.view.pager_right = None;
+        self.view.project_mut().pager_right = None;
         self.view.needs_full_repaint = true;
-        if let Some((shape, preview)) = self.view.displaced_preview.take() {
+        if let Some((shape, preview)) = self.view.project_mut().displaced_preview.take() {
             let p = self.state.active_project_mut();
             p.vsplit = Some(shape);
-            self.view.right_pager = Some(preview);
+            self.view.project_mut().right_pager = Some(preview);
             // `shape.focus` carries the column the user was in; `FileList` hands
             // the keyboard back to it (the a/b axis lives on the shape).
             self.state.active_project_mut().focus = state::Focus::FileList;
@@ -296,7 +297,7 @@ impl App {
     /// path when the right preview is focused.
     pub(super) fn close_vsplit(&mut self) {
         self.state.active_project_mut().vsplit = None;
-        self.view.right_pager = None;
+        self.view.project_mut().right_pager = None;
         self.view.needs_full_repaint = true;
         self.state.flash_info("vsplit: off");
     }

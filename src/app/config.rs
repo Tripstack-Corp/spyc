@@ -144,6 +144,7 @@ impl App {
     /// events for all its siblings, so anything looser would over-trigger.
     pub fn is_preview_path(&self, path: &Path) -> bool {
         self.view
+            .project()
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.as_deref())
@@ -318,7 +319,7 @@ mod tests {
 
         let mut view = crate::ui::pager::PagerView::new_plain("doc.md".to_string(), Vec::new());
         view.source_path = Some(PathBuf::from("/repo/doc.md"));
-        app.view.right_pager = Some(view);
+        app.view.project_mut().right_pager = Some(view);
         assert!(app.is_preview_path(Path::new("/repo/doc.md")));
         assert!(
             !app.is_preview_path(Path::new("/repo/other.md")),

@@ -304,7 +304,7 @@ fn empty_scrollback_flashes_hint_and_stays_live() {
             "empty scrollback should flash the accurate hint"
         );
         assert!(
-            app.view.scroll_pager.is_none(),
+            app.view.project().scroll_pager.is_none(),
             "empty scrollback must not enter scroll mode (no dead-end pager)"
         );
     });
@@ -326,14 +326,16 @@ fn empty_scrollback_agent_pane_opens_its_transcript() {
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir.clone());
         let wake = app.make_pane_wake();
-        let pane = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
-            .expect("spawn cat");
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
         let entry =
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
         app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
         app.open_pane_scroll_pager();
         let view = app
             .view
+            .project()
             .scroll_pager
             .as_ref()
             .expect("an inline agent with no capture mounts its transcript view");
@@ -354,7 +356,7 @@ fn empty_scrollback_agent_pane_opens_its_transcript() {
 /// leave the screen and land in the emulator's scrollback.
 fn agent_pane_with_capture(app: &mut App, dir: &std::path::Path) {
     let wake = app.make_pane_wake();
-    let pane = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
+    let pane = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
         .expect("spawn cat");
     let entry = crate::pane::tabs::TabEntry::new(
         pane,
@@ -409,6 +411,7 @@ fn capital_t_flips_the_scrollback_source_both_ways() {
         app.mount_terminal_scrollback();
         let title = |a: &App| {
             a.view
+                .project()
                 .scroll_pager
                 .as_ref()
                 .map(|v| v.title.clone())
@@ -466,8 +469,9 @@ fn t_toggles_transcript_tool_calls_on_an_agent_pane() {
         std::fs::create_dir(&dir).unwrap();
         let mut app = App::test_app(dir.clone());
         let wake = app.make_pane_wake();
-        let pane = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
-            .expect("spawn cat");
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
         let entry =
             crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
         app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
@@ -614,14 +618,20 @@ fn capture_backgrounds_with_ctrl_z_then_foregrounds_with_fg() {
         let mut app = App::test_app(dir);
         app.start_capture("cat", "cat", "cat"); // real running capture
         assert!(app.runtime.pending_capture.is_some(), "capture is live");
-        assert!(app.view.pager.is_some(), "streaming pager is open");
+        assert!(
+            app.view.project().pager.is_some(),
+            "streaming pager is open"
+        );
 
         app.background_capture(); // ^Z
         assert!(
             app.runtime.pending_capture.is_none(),
             "no live capture after ^Z"
         );
-        assert!(app.view.pager.is_none(), "pager closed on background");
+        assert!(
+            app.view.project().pager.is_none(),
+            "pager closed on background"
+        );
         assert_eq!(
             app.runtime.background_tasks.tasks.len(),
             1,
@@ -645,7 +655,10 @@ fn capture_backgrounds_with_ctrl_z_then_foregrounds_with_fg() {
             app.runtime.background_tasks.tasks.is_empty(),
             ":fg removes it from the task list"
         );
-        assert!(app.view.pager.is_some(), ":fg reopens the streaming pager");
+        assert!(
+            app.view.project().pager.is_some(),
+            ":fg reopens the streaming pager"
+        );
     });
 }
 
@@ -713,7 +726,12 @@ fn capture_ctrl_backslash_tears_down() {
             app.runtime.pending_capture.is_none(),
             "^\\ tears down the live capture"
         );
-        let view = app.view.pager.as_ref().expect("the pager stays open");
+        let view = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("the pager stays open");
         assert_eq!(view.title, "\u{2717} ! cat — interrupted");
         assert!(!view.streaming, "an interrupted capture stops streaming");
         assert!(view.saveable, "what it printed can still be saved");
@@ -744,7 +762,12 @@ fn open_task_viewer_views_without_taking_ownership() {
         let t = &app.runtime.background_tasks.tasks[0];
         assert!(t.viewed_in_task_viewer, "task is marked viewed");
         assert!(!t.has_unread_output, "viewing clears the unread divider");
-        let pager = app.view.pager.as_ref().expect("task viewer pager opened");
+        let pager = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("task viewer pager opened");
         assert_eq!(pager.task_id, Some(1), "pager tracks the viewed task id");
     });
 }
@@ -764,7 +787,7 @@ fn cycle_task_viewer_wraps_across_tasks() {
         app.background_capture(); // task #2
         assert_eq!(app.runtime.background_tasks.tasks.len(), 2);
 
-        let viewed = |app: &App| app.view.pager.as_ref().and_then(|v| v.task_id);
+        let viewed = |app: &App| app.view.project().pager.as_ref().and_then(|v| v.task_id);
         app.open_task_viewer(None); // most-recent → #2
         assert_eq!(viewed(&app), Some(2));
         app.cycle_task_viewer(1); // forward wraps → #1
@@ -1157,8 +1180,9 @@ fn pane_focus_switch_still_works_while_v_editor_is_open() {
         // Simulate `V`: a live top-overlay pty + Focus::Overlay. `apply_inner`'s
         // gate only reads `state.focus`, so this is a faithful stand-in.
         let wake = app.make_pane_wake();
-        let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
-            .expect("spawn overlay");
+        let overlay =
+            crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
+                .expect("spawn overlay");
         app.runtime.project_mut().top_overlay = Some(overlay);
         app.state.active_project_mut().focus = state::Focus::Overlay;
 
@@ -1217,8 +1241,9 @@ fn screen_rows(app: &mut App, w: u16, h: u16) -> Vec<String> {
 /// keyboard. `apply_inner`'s gate reads only `state.focus`.
 fn open_v_editor(app: &mut App, dir: &std::path::Path) {
     let wake = app.make_pane_wake();
-    let overlay = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.context_path, wake)
-        .expect("spawn overlay");
+    let overlay =
+        crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
+            .expect("spawn overlay");
     app.runtime.project_mut().top_overlay = Some(overlay);
     app.state.active_project_mut().focus = state::Focus::Overlay;
     assert!(
@@ -1412,8 +1437,9 @@ fn vsplit_column_focus_switch_still_works_while_v_editor_is_open() {
 
         // Open a `V` editor in the left column (its own top-overlay slot).
         let wake = app.make_pane_wake();
-        let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
-            .expect("spawn overlay");
+        let overlay =
+            crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
+                .expect("spawn overlay");
         app.runtime.project_mut().top_overlay = Some(overlay);
         app.state.active_project_mut().focus = state::Focus::Overlay;
 
@@ -1451,22 +1477,23 @@ fn closing_help_over_a_v_editor_keeps_the_editor_column_pinned() {
         // `V` editor live in the left column, pinned there (as install_overlay_pty
         // would set it).
         let wake = app.make_pane_wake();
-        let overlay = crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.context_path, wake)
-            .expect("spawn overlay");
+        let overlay =
+            crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
+                .expect("spawn overlay");
         app.runtime.project_mut().top_overlay = Some(overlay);
-        app.view.overlay_column = Some(state::Side::Left);
+        app.view.project_mut().overlay_column = Some(state::Side::Left);
 
         // Switch to the right column, then open `?` help as a modal Overlay pager.
         app.apply(&Action::VsplitFocusRight).unwrap();
         let mut help = crate::ui::pager::PagerView::new_plain("Help", vec!["help".to_string()]);
         help.mount = crate::ui::pager::Mount::Overlay;
-        app.view.pager = Some(help);
+        app.view.project_mut().pager = Some(help);
 
         // Closing help drops the pager but must leave the editor's pin intact.
         app.clear_pager();
-        assert!(app.view.pager.is_none(), "help pager closed");
+        assert!(app.view.project().pager.is_none(), "help pager closed");
         assert_eq!(
-            app.view.overlay_column,
+            app.view.project().overlay_column,
             Some(state::Side::Left),
             "the still-open V editor must stay pinned to its column after help closes",
         );

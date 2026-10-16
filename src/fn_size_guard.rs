@@ -52,7 +52,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/pager_handler/file_view.rs::build_pager_view", 151),
         (
             "src/app/pager_handler/motion.rs::App::handle_pager_motion",
-            329,
+            305,
         ),
         ("src/app/prompt.rs::App::dispatch_prompt", 162),
         (

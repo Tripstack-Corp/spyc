@@ -77,6 +77,7 @@ impl App {
     pub(crate) fn kick_preview_reload(&mut self) {
         let Some(path) = self
             .view
+            .project()
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone())
@@ -132,6 +133,7 @@ impl App {
         };
         let current = self
             .view
+            .project()
             .right_pager
             .as_ref()
             .and_then(|v| v.source_path.clone());
@@ -142,17 +144,17 @@ impl App {
                     let mut view = *view;
                     // Preserve the reader's scroll across the reload (clamped to
                     // the new last line — the file may have shrunk).
-                    if let Some(old) = self.view.right_pager.as_ref() {
+                    if let Some(old) = self.view.project().right_pager.as_ref() {
                         let last = view.lines.len().saturating_sub(1);
                         view.scroll = old.scroll.min(last);
                     }
-                    self.view.right_pager = Some(view);
+                    self.view.project_mut().right_pager = Some(view);
                     redraw = true;
                 }
             }
             PreviewOutcome::Failed { path, error } => {
                 if current.as_deref() == Some(path.as_path())
-                    && let Some(v) = self.view.right_pager.as_mut()
+                    && let Some(v) = self.view.project_mut().right_pager.as_mut()
                 {
                     v.flash = Some(error);
                     redraw = true;
@@ -183,7 +185,7 @@ mod tests {
         );
         v.source_path = Some(PathBuf::from(path));
         v.scroll = scroll;
-        app.view.right_pager = Some(v);
+        app.view.project_mut().right_pager = Some(v);
     }
 
     fn reloaded(path: &str, lines: usize) -> PreviewOutcome {
@@ -233,7 +235,7 @@ mod tests {
         *app.runtime.preview_results.lock().unwrap() = Some(reloaded("/repo/doc.md", 20));
 
         assert!(app.apply_preview_reloads(), "a real install redraws");
-        let v = app.view.right_pager.as_ref().unwrap();
+        let v = app.view.project().right_pager.as_ref().unwrap();
         assert_eq!(v.lines.len(), 20, "fresh content installed");
         assert_eq!(v.scroll, 5, "reader's scroll preserved across the reload");
     }
@@ -248,7 +250,7 @@ mod tests {
 
         assert!(app.apply_preview_reloads());
         assert_eq!(
-            app.view.right_pager.as_ref().unwrap().scroll,
+            app.view.project().right_pager.as_ref().unwrap().scroll,
             4,
             "clamped to the new last line (5 lines → index 4)"
         );
@@ -263,7 +265,7 @@ mod tests {
         *app.runtime.preview_results.lock().unwrap() = Some(reloaded("/repo/old.md", 20));
 
         assert!(!app.apply_preview_reloads(), "stale result → no redraw");
-        let v = app.view.right_pager.as_ref().unwrap();
+        let v = app.view.project().right_pager.as_ref().unwrap();
         assert_eq!(
             v.source_path.as_deref(),
             Some(PathBuf::from("/repo/current.md").as_path())
@@ -283,7 +285,7 @@ mod tests {
         });
 
         assert!(app.apply_preview_reloads());
-        let v = app.view.right_pager.as_ref().unwrap();
+        let v = app.view.project().right_pager.as_ref().unwrap();
         assert_eq!(v.lines.len(), 7, "last-good render kept");
         assert!(v.flash.is_some(), "error surfaced in the preview footer");
     }

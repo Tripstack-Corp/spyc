@@ -208,6 +208,7 @@ fn codex_scrollback_reads_only_the_active_panes_home() {
             app.drain_pager_stream();
             if app
                 .view
+                .project()
                 .scroll_pager
                 .as_ref()
                 .is_some_and(|pager| !pager.streaming)
@@ -218,6 +219,7 @@ fn codex_scrollback_reads_only_the_active_panes_home() {
         }
         let pager = app
             .view
+            .project()
             .scroll_pager
             .as_ref()
             .expect("the custom-home transcript is mounted");

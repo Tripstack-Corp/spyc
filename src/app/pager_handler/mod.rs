@@ -27,23 +27,25 @@ use super::{App, Effect, EntryKind, PagerView, state};
 /// while holding the pager. Yields `Option<&mut PagerView>` — use with
 /// `?` or `let Some(view) = active_pager_mut!(self) else { … }`.
 macro_rules! active_pager_mut {
-    ($self:ident) => {
+    ($self:ident) => {{
         // One decision ([`App::active_pager_slot`]) shared with `active_pager_ref`;
         // this only maps the slot to its field (`&mut`). The slot pick is a
         // separate `&self` call returning a `Copy` enum, so the borrow here stays
         // field-level — a `fn(&mut self) -> &mut PagerView` would borrow all of
-        // `*self` and collide with handlers touching sibling fields.
-        match $self.active_pager_slot() {
+        // `*self` and collide with handlers touching sibling fields. The same
+        // holds one level down: `project_in` borrows only `view.projects`, where
+        // `view.project_mut()` would also lock `view.pending_history_pick`.
+        let slot = $self.active_pager_slot();
+        let pv = $crate::app::ViewState::project_in(&mut $self.view.projects, $self.view.active);
+        match slot {
             $crate::app::pager_handler::PagerSlot::Modal
-            | $crate::app::pager_handler::PagerSlot::Top => $self.view.pager.as_mut(),
-            $crate::app::pager_handler::PagerSlot::Scrollback => $self.view.scroll_pager.as_mut(),
-            $crate::app::pager_handler::PagerSlot::Right => $self
-                .view
-                .pager_right
-                .as_mut()
-                .or($self.view.right_pager.as_mut()),
+            | $crate::app::pager_handler::PagerSlot::Top => pv.pager.as_mut(),
+            $crate::app::pager_handler::PagerSlot::Scrollback => pv.scroll_pager.as_mut(),
+            $crate::app::pager_handler::PagerSlot::Right => {
+                pv.pager_right.as_mut().or(pv.right_pager.as_mut())
+            }
         }
-    };
+    }};
 }
 
 mod file_view;
@@ -203,13 +205,13 @@ impl App {
         // own `D` slot, else the shared (left / modal / no-split) slot.
         if !self.state.pane_focused()
             && self.focused_side() == state::Side::Right
-            && self.view.pager_right.is_some()
+            && self.view.project().pager_right.is_some()
         {
             // `pager_right` doesn't use `overlay_column` (the right slot's column
             // is implicit) — leave it alone so an OPEN left pager stays pinned.
-            self.view.pager_right = None;
+            self.view.project_mut().pager_right = None;
         } else {
-            self.view.pager = None;
+            self.view.project_mut().pager = None;
             // Unpin the column only when nothing else is still anchored to it.
             // A `V`/`;` top-overlay pty can still be open in that column (a
             // modal `Overlay` pager like `?` help opened *over* the editor after
@@ -217,7 +219,7 @@ impl App {
             // in place — clearing it would move the editor into the other column
             // (blanking this one, artifacting that one).
             if self.runtime.project().top_overlay.is_none() {
-                self.view.overlay_column = None;
+                self.view.project_mut().overlay_column = None;
             }
         }
         // The top pager just closed — drop any stale `Pager(_)` focus this
@@ -232,7 +234,7 @@ impl App {
     /// when no pane_scroll pager is open — so the scrollback Esc/`q`
     /// close path (`pager_handler::motion`) can call it unconditionally.
     pub fn close_pane_scroll_pager(&mut self) {
-        if self.view.scroll_pager.is_none() {
+        if self.view.project().scroll_pager.is_none() {
             return;
         }
         if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
@@ -240,7 +242,7 @@ impl App {
         }
         // The scrollback lives in its own region slot; the top/overlay pager
         // (if any) stays put.
-        self.view.scroll_pager = None;
+        self.view.project_mut().scroll_pager = None;
         // A `T` flip lives exactly as long as the view it was made in, so the
         // next `^a v` starts from the automatic source choice again.
         self.view.scroll_source_override = None;
@@ -256,7 +258,7 @@ impl App {
     /// another, then later wants to come back to the first one.
     pub fn set_pager(&mut self, view: PagerView) {
         self.remember_pager_position();
-        self.view.pager = Some(view);
+        self.view.project_mut().pager = Some(view);
     }
 
     /// Build a [`PagerView`] from a [`state::PagerRequest`] and install it.
@@ -289,7 +291,14 @@ impl App {
         );
         let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
-        match Pane::spawn(cmd, rows, cols, &cwd, &self.view.context_path, wake) {
+        match Pane::spawn(
+            cmd,
+            rows,
+            cols,
+            &cwd,
+            &self.view.project().context_path,
+            wake,
+        ) {
             Ok(p) => self.install_overlay_pty(p),
             Err(e) => self.state.flash_error(format!("spawn: {e:#}")),
         }
@@ -302,11 +311,11 @@ impl App {
             self.runtime.project_mut().top_overlay = Some(p);
             // Interactive overlay (editor / pager): on exit, return to spyc
             // immediately rather than holding a "press any key" frame.
-            self.view.overlay_auto_dismiss = true;
+            self.view.project_mut().overlay_auto_dismiss = true;
             // This is the LEFT / single slot, so it scopes to the left column
             // when split (`None` when no split). The right column uses its own
             // slot above and never sets this.
-            self.view.overlay_column = self
+            self.view.project_mut().overlay_column = self
                 .state
                 .active_project()
                 .vsplit
@@ -323,12 +332,12 @@ impl App {
     pub(super) fn install_top_pager(&mut self, view: PagerView) {
         if self.overlay_targets_right() {
             self.remember_pager_position();
-            self.view.pager_right = Some(view);
+            self.view.project_mut().pager_right = Some(view);
         } else {
             self.set_pager(view);
             // LEFT / single slot → scopes to the left column when split (`None`
             // with no split). The right column uses its own `pager_right` slot.
-            self.view.overlay_column = self
+            self.view.project_mut().overlay_column = self
                 .state
                 .active_project()
                 .vsplit
@@ -351,16 +360,16 @@ impl App {
     /// return's lifetime, which collides with handlers that also touch sibling
     /// fields (`pending_history_pick`, `state.config`) while
     /// holding the pager. The macro inlines the slot pick so the borrow stays
-    /// field-level (`view.pager` / `view.scroll_pager` only).
+    /// field-level (`view.projects` only).
     pub(super) fn active_pager_ref(&self) -> Option<&PagerView> {
         match self.active_pager_slot() {
-            PagerSlot::Modal | PagerSlot::Top => self.view.pager.as_ref(),
-            PagerSlot::Scrollback => self.view.scroll_pager.as_ref(),
-            PagerSlot::Right => self
+            PagerSlot::Modal | PagerSlot::Top => self.view.project().pager.as_ref(),
+            PagerSlot::Scrollback => self.view.project().scroll_pager.as_ref(),
+            PagerSlot::Right => self.view.project().pager_right.as_ref().or(self
                 .view
-                .pager_right
-                .as_ref()
-                .or(self.view.right_pager.as_ref()),
+                .project()
+                .right_pager
+                .as_ref()),
         }
     }
 
@@ -370,13 +379,12 @@ impl App {
     /// `active_pager_mut!` without the macro, which the `effect` module can't see.
     pub(crate) fn set_active_pager_flash(&mut self, msg: String) {
         let view = match self.active_pager_slot() {
-            PagerSlot::Modal | PagerSlot::Top => self.view.pager.as_mut(),
-            PagerSlot::Scrollback => self.view.scroll_pager.as_mut(),
-            PagerSlot::Right => self
-                .view
-                .pager_right
-                .as_mut()
-                .or(self.view.right_pager.as_mut()),
+            PagerSlot::Modal | PagerSlot::Top => self.view.project_mut().pager.as_mut(),
+            PagerSlot::Scrollback => self.view.project_mut().scroll_pager.as_mut(),
+            PagerSlot::Right => {
+                let pv = self.view.project_mut();
+                pv.pager_right.as_mut().or(pv.right_pager.as_mut())
+            }
         };
         if let Some(view) = view {
             view.flash = Some(msg);
@@ -393,13 +401,12 @@ impl App {
     /// or silently nothing.
     pub(super) fn pager_in_slot_mut(&mut self, slot: PagerSlot) -> Option<&mut PagerView> {
         match slot {
-            PagerSlot::Modal | PagerSlot::Top => self.view.pager.as_mut(),
-            PagerSlot::Scrollback => self.view.scroll_pager.as_mut(),
-            PagerSlot::Right => self
-                .view
-                .pager_right
-                .as_mut()
-                .or(self.view.right_pager.as_mut()),
+            PagerSlot::Modal | PagerSlot::Top => self.view.project_mut().pager.as_mut(),
+            PagerSlot::Scrollback => self.view.project_mut().scroll_pager.as_mut(),
+            PagerSlot::Right => {
+                let pv = self.view.project_mut();
+                pv.pager_right.as_mut().or(pv.right_pager.as_mut())
+            }
         }
     }
 
@@ -434,27 +441,34 @@ impl App {
                 && row < a.y.saturating_add(a.height)
         };
         // A full-frame modal paints last, so it wins wherever it covers.
-        if let Some(v) = self.view.pager.as_ref()
+        if let Some(v) = self.view.project().pager.as_ref()
             && matches!(v.mount, crate::ui::pager::Mount::Overlay)
             && covers(v)
         {
             return Some(PagerSlot::Modal);
         }
-        if let Some(v) = self.view.scroll_pager.as_ref().filter(|v| covers(v)) {
+        if let Some(v) = self
+            .view
+            .project()
+            .scroll_pager
+            .as_ref()
+            .filter(|v| covers(v))
+        {
             let _ = v;
             return Some(PagerSlot::Scrollback);
         }
         if let Some(v) = self
             .view
+            .project()
             .pager_right
             .as_ref()
-            .or(self.view.right_pager.as_ref())
+            .or(self.view.project().right_pager.as_ref())
             .filter(|v| covers(v))
         {
             let _ = v;
             return Some(PagerSlot::Right);
         }
-        if let Some(v) = self.view.pager.as_ref().filter(|v| covers(v)) {
+        if let Some(v) = self.view.project().pager.as_ref().filter(|v| covers(v)) {
             let _ = v;
             return Some(PagerSlot::Top);
         }
@@ -493,7 +507,7 @@ impl App {
             PagerSlot::Modal
         } else if !self.state.pane_focused() && self.focused_side() == state::Side::Right {
             PagerSlot::Right
-        } else if self.state.pane_focused() && self.view.scroll_pager.is_some() {
+        } else if self.state.pane_focused() && self.view.project().scroll_pager.is_some() {
             PagerSlot::Scrollback
         } else {
             PagerSlot::Top
@@ -507,13 +521,14 @@ impl App {
     /// closing `b`'s — both columns went dark).
     pub(super) fn take_active_pager(&mut self) -> Option<PagerView> {
         match self.active_pager_slot() {
-            PagerSlot::Modal | PagerSlot::Top => self.view.pager.take(),
-            PagerSlot::Scrollback => self.view.scroll_pager.take(),
+            PagerSlot::Modal | PagerSlot::Top => self.view.project_mut().pager.take(),
+            PagerSlot::Scrollback => self.view.project_mut().scroll_pager.take(),
             PagerSlot::Right => self
                 .view
+                .project_mut()
                 .pager_right
                 .take()
-                .or_else(|| self.view.right_pager.take()),
+                .or_else(|| self.view.project_mut().right_pager.take()),
         }
     }
 
@@ -521,7 +536,7 @@ impl App {
     /// in the shared slot — it owns input regardless of which column is focused.
     fn modal_pager_open(&self) -> bool {
         matches!(
-            self.view.pager.as_ref().map(|v| v.mount),
+            self.view.project().pager.as_ref().map(|v| v.mount),
             Some(crate::ui::pager::Mount::Overlay)
         )
     }
@@ -656,7 +671,7 @@ impl App {
         if let Some(mut view) = self.build_pager_view_for_file(path, Some(wrap)) {
             view.mount = crate::ui::pager::Mount::RightPane;
             view.no_history = true;
-            self.view.right_pager = Some(view);
+            self.view.project_mut().right_pager = Some(view);
             true
         } else {
             false
