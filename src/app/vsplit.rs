@@ -167,7 +167,9 @@ impl App {
         // The user asking for `b` takes ownership of the column: any preview an
         // agent displaced earlier stops being owed back.
         self.view.project_mut().displaced_preview = None;
-        self.open_second_commander_at_inner(dir, true);
+        if let Err(e) = self.open_second_commander_at_inner(dir, true) {
+            self.state.flash_error(format!("open: {e:#}"));
+        }
     }
 
     /// Agent-initiated open (MCP `create_worktree open=true` / `open_worktree`):
@@ -180,15 +182,32 @@ impl App {
     ///
     /// A preview open in that column is **set aside, not discarded**: the user
     /// was reading it and never asked for the commander, so closing `b` puts the
-    /// file (and the split shape it had) straight back.
-    pub(super) fn open_second_commander_at_background(&mut self, dir: &std::path::Path) {
-        if let (Some(shape), Some(preview)) = (
+    /// file (and the split shape it had) straight back. If `b` fails to open,
+    /// the preview stays where it was and the caller gets the error, to report
+    /// to whoever asked.
+    pub(super) fn open_second_commander_at_background(
+        &mut self,
+        dir: &std::path::Path,
+    ) -> anyhow::Result<()> {
+        let set_aside = if let (Some(shape), Some(preview)) = (
             self.state.active_project().vsplit,
             self.view.project_mut().right_pager.take(),
         ) {
             self.view.project_mut().displaced_preview = Some((shape, preview));
+            true
+        } else {
+            false
+        };
+        let opened = self.open_second_commander_at_inner(dir, false);
+        // Only a preview this call set aside goes back: an earlier agent open
+        // may hold one for a `b` that is still open.
+        if opened.is_err()
+            && set_aside
+            && let Some((_, preview)) = self.view.project_mut().displaced_preview.take()
+        {
+            self.view.project_mut().right_pager = Some(preview);
         }
-        self.open_second_commander_at_inner(dir, false);
+        opened
     }
 
     /// Shared core of the two open paths. `grab_keyboard` moves keyboard focus
@@ -204,18 +223,15 @@ impl App {
     /// rarely what two peer browsers sharing one pane want — so the pane stays
     /// full-width below both columns and `b` occupies the top-right region.
     /// `^s f` flips it to full-height for the cases that do want that.
-    fn open_second_commander_at_inner(&mut self, dir: &std::path::Path, grab_keyboard: bool) {
+    fn open_second_commander_at_inner(
+        &mut self,
+        dir: &std::path::Path,
+        grab_keyboard: bool,
+    ) -> anyhow::Result<()> {
         // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
         // `cur().listing.dir` matches what later path comparisons expect).
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        let mut commander =
-            match state::Commander::for_dir(&dir, &self.state.active_project().config) {
-                Ok(c) => c,
-                Err(e) => {
-                    self.state.flash_error(format!("open: {e:#}"));
-                    return;
-                }
-            };
+        let mut commander = state::Commander::for_dir(&dir, &self.state.active_project().config)?;
         // Inherit the worker-available flag from `left` (set at bootstrap) so
         // `b`'s git cache-misses go to the background worker, not a blocking
         // synchronous walk. `Commander::for_dir` defaults it `false`.
@@ -255,6 +271,7 @@ impl App {
                 "second commander (^s x / ^d to close)"
             });
         self.view.needs_full_repaint = true;
+        Ok(())
     }
 
     /// `^s x` — close the second commander: drop `state.right` and the split,
