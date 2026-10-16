@@ -15,11 +15,13 @@ use crate::state::wiring_consent;
 use crate::wiring::{self, Env, Status};
 
 /// What a worker does to one agent's wiring.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum WiringOp {
-    /// Install it; then restart the claude tab at `restart` (`:hooks on!`).
+    /// Install it; then restart the claude tab whose id is `restart`
+    /// (`:hooks on!`). An id, not an index: tabs can close or move while the
+    /// install runs.
     Install {
-        restart: Option<usize>,
+        restart: Option<String>,
     },
     Remove,
 }
@@ -235,10 +237,10 @@ impl App {
             self.state.flash_info(text);
         }
         if let WiringOp::Install {
-            restart: Some(tab_idx),
+            restart: Some(tab_id),
         } = outcome.op
         {
-            self.restart_claude_tab(tab_idx);
+            self.restart_claude_tab(&tab_id);
         }
     }
 
@@ -256,7 +258,7 @@ impl App {
     }
 
     /// Record the user's answer for `kind` and act on it.
-    fn set_wiring(&mut self, kind: AgentKind, answer: Option<bool>, restart: Option<usize>) {
+    fn set_wiring(&mut self, kind: AgentKind, answer: Option<bool>, restart: Option<String>) {
         wiring_consent::set(kind, answer);
         let name = wiring::name(kind);
         match answer {
@@ -297,12 +299,13 @@ impl App {
         }
         let active = self.runtime.project().pane_tabs.as_ref().map(|t| {
             let info = t.active_info();
-            (t.active_index(), info.agent().kind())
+            (info.id.clone(), info.agent().kind())
         });
         let kind = match words.next() {
             Some(name) => wiring::named(name),
             None => active
-                .map(|(_, kind)| kind)
+                .as_ref()
+                .map(|(_, kind)| *kind)
                 .filter(|kind| wiring::KINDS.contains(kind)),
         };
         let Some(kind) = kind else {
@@ -315,7 +318,7 @@ impl App {
             "on!" | "enable!" => {
                 let restart = active
                     .filter(|(_, active)| *active == AgentKind::Claude && kind == AgentKind::Claude)
-                    .map(|(idx, _)| idx);
+                    .map(|(id, _)| id);
                 self.set_wiring(kind, Some(true), restart);
             }
             "off" | "disable" | "no" | "n" => self.set_wiring(kind, Some(false), None),
@@ -542,6 +545,80 @@ mod tests {
             assert!(
                 !app.apply_wiring_outcomes(),
                 "an unchanged home reports nothing"
+            );
+        });
+    }
+
+    /// What a restart says when it reaches a shell tab running claude: it
+    /// reports instead of respawning, since a respawn would restart the shell.
+    /// So a test sees which tab a restart reached without starting claude.
+    const SHELL_TAB_RESTART: &str = "claude runs in a shell here";
+
+    /// A shell tab running claude (#544), over a `cat` standing in for both.
+    fn shell_running_claude(app: &mut App, dir: &Path) -> crate::pane::TabEntry {
+        let wake = app.make_pane_wake();
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
+        let mut info = crate::pane::TabInfo::new("zsh", dir);
+        info.running = Some(crate::pane::RunningAgent {
+            kind: AgentKind::Claude,
+            pid: 1,
+            started_epoch_secs: 0,
+            backgrounded: false,
+            on_shared_daemon: false,
+        });
+        crate::pane::TabEntry::new(pane, info)
+    }
+
+    /// Two claude tabs, the first one active: where `:hooks on!` is typed.
+    fn two_claude_tabs(app: &mut App, dir: &Path) {
+        let first = shell_running_claude(app, dir);
+        let second = shell_running_claude(app, dir);
+        let mut tabs = crate::pane::PaneTabs::new(first);
+        tabs.push(second);
+        tabs.switch_to(0);
+        app.runtime.project_mut().pane_tabs = Some(tabs);
+    }
+
+    /// `:hooks on!` restarts the claude tab it was typed in once the install
+    /// lands. The positive control for the case below: the restart's report is
+    /// how these tests see where it went.
+    #[test]
+    fn hooks_on_bang_restarts_the_tab_it_was_typed_in() {
+        with_app(|app, root| {
+            two_claude_tabs(app, root);
+            app.hooks_command("on! claude");
+            app.state.flash = None;
+            app.apply_wiring_outcomes();
+            assert!(
+                app.flash_text()
+                    .unwrap_or_default()
+                    .contains(SHELL_TAB_RESTART),
+                "the restart never reached the tab: {:?}",
+                app.flash_text()
+            );
+        });
+    }
+
+    /// The install takes a moment, and the tab `:hooks on!` was typed in can
+    /// close meanwhile. Its restart must go nowhere, not to whichever claude
+    /// tab moved into its place.
+    #[test]
+    fn a_restart_for_a_closed_tab_goes_to_no_other_tab() {
+        with_app(|app, root| {
+            two_claude_tabs(app, root);
+            app.hooks_command("on! claude");
+            let tabs = app.runtime.project_mut().pane_tabs.as_mut().expect("tabs");
+            tabs.remove_at(0);
+            app.state.flash = None;
+            app.apply_wiring_outcomes();
+            assert!(
+                !app.flash_text()
+                    .unwrap_or_default()
+                    .contains(SHELL_TAB_RESTART),
+                "a closed tab's restart reached the tab that took its place: {:?}",
+                app.flash_text()
             );
         });
     }
