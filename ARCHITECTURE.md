@@ -741,16 +741,18 @@ All persistent state lives under XDG paths (`$XDG_STATE_HOME` or
 - `pager_positions.json` — persisted pager scroll offsets (LRU).
 - `sessions/<epoch-ms>.json` — workspace snapshots from quit.
 - `mcp-<pid>.sock` — PID-scoped MCP socket.
-- `.spyc-context-<pid>.json` — the MCP context: the focused column's
-  state and the session's root, which the read tools validate a `root`
-  argument against. It lives here, not in the working directory, so its
-  path never moves with the root (#523).
-- `mcp-<pid>.root` — the root sidecar: the directory that spyc is
-  rooted at (`start_dir`, which `spyc -r` moves). It is stdio
-  discovery's only record of where a spyc is rooted, and it is
-  owner-private, so nothing an attacker can plant in a cloned repo takes
-  part. Written at socket start, rewritten when the root moves, removed
-  on cleanup; a crashed spyc's is swept at the next start.
+- `.spyc-context-<pid>-<project>.json` — the MCP context, one per open
+  project (#99): that project's focused column's state and its root,
+  which the read tools validate a `root` argument against. It lives here,
+  not in the working directory, so its path never moves with the root
+  (#523).
+- `mcp-<pid>.root` — the root sidecar: the directories that spyc is
+  rooted at, one per line and one per open project (each project's
+  `start_dir`, which `spyc -r` moves). It is stdio discovery's only
+  record of where a spyc is rooted, and it is owner-private, so nothing
+  an attacker can plant in a cloned repo takes part. Written at socket
+  start, rewritten when a root moves, removed on cleanup; a crashed
+  spyc's is swept at the next start.
 
 The debug log is the exception: `spyc_debug!` output goes to
 `/tmp/spyc-debug-<ts>.log` (timestamped per run, not under XDG) so
@@ -860,19 +862,31 @@ uncommitted content goes to the graveyard; a branch is deleted only if merged),
 and a worktree can be **leased** (`claim_worktree` writes git's native lock) so a
 second agent's cleanup refuses it.
 
-**A connection is attributed to the pane that opened it.** An agent pane's env
-carries `SPYC_PANE_ID`; its `spyc --mcp` proxy reads it once and adds it to the
-`initialize` it forwards, under `params._meta["spyc/paneId"]`. The connection
-thread asks the loop whether a live tab carries that id
-(`McpCommand::PaneContext`) and binds it only if one does: once, for the
-connection's lifetime, and never from a tool argument, since a per-call id is
-one an agent can forget to send. A bound connection's `get_spyc_context` adds
-`pane`, that tab's live cwd, worktree root and branch, beside the fields that
-describe the user's view; `report_status`, `register_scope` and
-`wait_for_scope_clear` default to that tab instead of the focused one. An
-unbound connection (an older proxy, the status hook, an id no live tab has) is
-served exactly as before, and the read tools' default scope and allowed roots
-don't depend on attribution at all. A proxy or status hook that codex's shared
+**A connection is attributed to the pane that opened it, and to that pane's
+project (#99).** An agent pane's env carries `SPYC_PANE_ID`; its `spyc --mcp`
+proxy reads it once and adds it to the `initialize` it forwards, under
+`params._meta["spyc/paneId"]`, beside its cwd under `spyc/cwd`. The connection
+thread asks the loop to bind it (`McpCommand::Bind`): to the live tab carrying
+that id, in whichever project holds it; else to the open project whose root
+holds the cwd; else to the active project. It binds once, for the connection's
+lifetime, and never from a tool argument, since a per-call id is one an agent
+can forget to send.
+
+A bound connection's reads answer from its project's context file, so
+`search_root`, the set a `root` argument is checked against, and every read tool
+follow the agent's project rather than the one the user is looking at. Its
+driving tools (`navigate_to`, `pick_files`, `set_filter`, `open_worktree`, the
+worktree jobs) act on that project too: the loop serves each request inside
+`App::in_project` (`app/mcp_routing.rs`), which points every handle at the
+caller's project and leaves the user's process cwd, frecency, harpoon menu and
+flash alone. `get_spyc_context` adds `project` (its id, label, home, and whether
+the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
+beside the fields that describe the user's view. `report_status`,
+`register_scope` and `wait_for_scope_clear` default to that tab instead of the
+focused one, and a report naming a pane finds it in whichever project holds it.
+An `initialize` naming neither a pane nor a cwd (an older proxy) and a
+connection that never initializes (the status hook) are served exactly as
+before. A proxy or status hook that codex's shared
 daemon spawned (`codex app-server … --managed-daemon` among its ancestors,
 `proc_group::has_ancestor`) inherited its `SPYC_PANE_ID` from whichever codex
 started that daemon, so it names that tab, not its own session's: the reporter

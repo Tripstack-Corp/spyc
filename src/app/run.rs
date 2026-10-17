@@ -506,7 +506,9 @@ impl App {
     /// run on every exit path (the PR8b guarantee) — `main` calls it
     /// unconditionally regardless of the run loop's result.
     pub fn run_teardown(&mut self) {
-        crate::context::remove_context_file(&self.view.project().context_path);
+        for path in self.view.context_paths() {
+            crate::context::remove_context_file(path);
+        }
         // Drop every archive staging tree this session created. The startup
         // sweep is the backstop for a process that never gets here.
         self.clean_all_staging();

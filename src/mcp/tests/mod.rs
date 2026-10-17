@@ -784,7 +784,6 @@ fn collect_pids_prefers_the_nearest_root() {
 /// under any of them finds it, and the nearest root wins across every line of
 /// every sidecar.
 #[test]
-#[ignore = "red: #99 step 3 — the sidecar is read as one path"]
 fn collect_pids_matches_any_root_a_sidecar_lists() {
     let tmp = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();

@@ -336,4 +336,29 @@ impl Runtime {
             .get_mut(&self.active)
             .expect("active always names a live project")
     }
+
+    /// The project holding the live tab `pane_id`, whichever one that is.
+    pub(super) fn project_of_pane(&self, pane_id: &str) -> Option<super::state::ProjectId> {
+        self.projects.iter().find_map(|(id, project)| {
+            let tabs = project.pane_tabs.as_ref()?;
+            tabs.tabs()
+                .iter()
+                .any(|t| t.info.id == pane_id)
+                .then_some(*id)
+        })
+    }
+
+    /// The tab `pane_id` in whichever project holds it, with its 1-based
+    /// number there.
+    pub(super) fn tab_of_pane(&self, pane_id: &str) -> Option<(usize, &crate::pane::TabEntry)> {
+        self.projects.values().find_map(|project| {
+            let tabs = project.pane_tabs.as_ref()?;
+            let (index, tab) = tabs
+                .tabs()
+                .iter()
+                .enumerate()
+                .find(|(_, t)| t.info.id == pane_id)?;
+            Some((index + 1, tab))
+        })
+    }
 }

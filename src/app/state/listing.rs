@@ -341,6 +341,9 @@ impl AppState {
     /// a background column (e.g. `b` after its worktree is removed) must not yank
     /// the process cwd or back-nav history out from under the focused one.
     /// `chdir` is the `side == focused_side()` case, behaviour-for-behaviour.
+    /// In a project an agent drives in the background (`in_background`, #99)
+    /// even the focused column leaves the process cwd and frecency alone: both
+    /// are the user's.
     pub fn chdir_side(&mut self, side: Side, path: &Path) -> Result<()> {
         // A path inside a mounted archive is virtual — there is no directory to
         // canonicalize and nothing to `chdir` into, since the "directory" is a
@@ -352,10 +355,11 @@ impl AppState {
             std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
         let new_listing = Listing::read(&canonical)?;
         let focused = self.focused_side() == side;
+        let users = focused && !self.in_background;
         if focused && self.col(side).listing.dir != canonical {
             self.active_project_mut().prev_dir = Some(self.col(side).listing.dir.clone());
         }
-        if focused {
+        if users {
             let _ = std::env::set_current_dir(&canonical);
         }
         // If the directory had more than `MAX_ENTRIES`, the read
@@ -394,7 +398,7 @@ impl AppState {
         self.col_mut(side).cursor = Cursor::new();
         self.col_mut(side).view = View::Dir;
         self.rebuild_rows();
-        if focused {
+        if users {
             self.frecency.record(&canonical);
         }
         Ok(())

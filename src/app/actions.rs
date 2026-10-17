@@ -72,8 +72,12 @@ impl App {
         self.state.col_mut(side).harpoon = want.as_deref().map(Harpoon::load);
         self.sync_harpoon_filter_set_for(side);
         if side == self.state.focused_side() {
-            // The menu's cursor referenced the old list — close it.
-            self.view.harpoon_menu = None;
+            // The menu's cursor referenced the old list — close it, unless the
+            // column is in a project an agent drives in the background: the
+            // open menu is the user's, over a list in their own project.
+            if !self.state.in_background {
+                self.view.harpoon_menu = None;
+            }
             // If `=h` was active, the now-stale set may render an empty list
             // silently; rebuild rows so the user sees the new state. Only the
             // focused column's rows are rebuilt by `rebuild_rows`.

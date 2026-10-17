@@ -79,16 +79,26 @@ where
 /// `$SPYC_PANE_ID` under.
 pub(super) const PANE_ID_META: &str = "spyc/paneId";
 
+/// The `initialize` `_meta` key the `spyc --mcp` proxy puts its cwd under, so
+/// a connection with no pane still finds its project (#99).
+pub(super) const CWD_META: &str = "spyc/cwd";
+
 /// Who is on the other end of one connection: the pane its `initialize`
-/// named, once the main loop has confirmed that tab is live. Bound once, for
-/// the connection's lifetime, and never taken from a tool call. `None` is an
-/// unattributed caller (an older proxy, the status hook, the read-only
-/// fallback), which behaves as every caller did before attribution existed.
+/// named, once the main loop has confirmed that tab is live, and the project
+/// it belongs to (#99). Bound once, for the connection's lifetime, and never
+/// taken from a tool call. An unbound caller (an older proxy, the status hook,
+/// the read-only fallback) behaves as every caller did before attribution
+/// existed.
 #[derive(Debug, Default)]
 pub(super) struct Caller {
     /// This socket connection's number; `None` in the read-only fallback.
     conn: Option<u64>,
     pane_id: Option<String>,
+    /// The project its driving tools act on.
+    project: Option<crate::project_id::ProjectId>,
+    /// That project's context file, which its reads answer from; `None` reads
+    /// the file the server was started with.
+    context: Option<PathBuf>,
     /// Whether it has sent `initialize`, which is what makes it an agent's
     /// session rather than the status hook's one-shot call.
     initialized: bool,
@@ -116,18 +126,18 @@ fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
     let _ = tx.send(McpRequest {
         command,
         reply: reply_tx,
+        project: None,
     });
 }
 
-/// The live tab `pane_id` names, as the main loop describes it; `None` once
-/// that tab is gone (or the loop doesn't answer).
-fn pane_context(tx: &std::sync::mpsc::Sender<McpRequest>, pane_id: &str) -> Option<Value> {
+/// The loop's JSON answer to `command`; `None` when it answers with an error,
+/// or not in time.
+fn ask(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) -> Option<Value> {
     let (reply_tx, reply_rx) = std::sync::mpsc::channel();
     tx.send(McpRequest {
-        command: McpCommand::PaneContext {
-            pane_id: pane_id.to_string(),
-        },
+        command,
         reply: reply_tx,
+        project: None,
     })
     .ok()?;
     match reply_rx
@@ -136,6 +146,40 @@ fn pane_context(tx: &std::sync::mpsc::Sender<McpRequest>, pane_id: &str) -> Opti
     {
         McpResponse::Ok { message } => serde_json::from_str(&message).ok(),
         McpResponse::Error { .. } => None,
+    }
+}
+
+/// Bind `caller` to the pane and project its `initialize` names: the pane id
+/// the proxy sent, else its cwd (`McpCommand::Bind`). One that names neither
+/// stays unbound, as does one the loop doesn't answer.
+fn bind(tx: &std::sync::mpsc::Sender<McpRequest>, meta: &Value, caller: &mut Caller) {
+    let pane_id = meta[PANE_ID_META].as_str().filter(|p| !p.is_empty());
+    let cwd = meta[CWD_META].as_str().filter(|c| !c.is_empty());
+    if pane_id.is_none() && cwd.is_none() {
+        return;
+    }
+    let command = McpCommand::Bind {
+        pane_id: pane_id.map(String::from),
+        cwd: cwd.map(PathBuf::from),
+    };
+    let Some(bound) = ask(tx, command) else {
+        mcp_log("initialize: the loop didn't answer the bind; unattributed");
+        return;
+    };
+    caller.project = bound["project"].as_str().and_then(|p| p.parse().ok());
+    caller.context = bound["context_file"].as_str().map(PathBuf::from);
+    let project = bound["project"].as_str().unwrap_or("none");
+    match pane_id {
+        Some(pane_id) if bound["pane"] == true => {
+            mcp_log(&format!(
+                "initialize: connection bound to pane {pane_id}, project {project}"
+            ));
+            caller.pane_id = Some(pane_id.to_string());
+        }
+        Some(pane_id) => mcp_log(&format!(
+            "initialize: no live pane {pane_id}; bound to project {project}"
+        )),
+        None => mcp_log(&format!("initialize: bound by cwd to project {project}")),
     }
 }
 
@@ -225,17 +269,16 @@ pub(super) fn dispatch_for(
             && let Some(tx) = cmd_tx
         {
             let new_pid = parsed["params"]["new_pid"].as_u64().unwrap_or(0) as u32;
-            let (reply_tx, _) = std::sync::mpsc::channel();
-            let _ = tx.send(McpRequest {
-                command: McpCommand::Disconnected { new_pid },
-                reply: reply_tx,
-            });
+            tell(tx, McpCommand::Disconnected { new_pid });
         }
         return Ok(());
     }
 
     let id = parsed["id"].clone();
     let method = parsed["method"].as_str().unwrap_or("");
+    // A bound connection reads its own project's context file (#99).
+    let bound = caller.context.clone();
+    let ctx_path = bound.as_deref().unwrap_or(ctx_path);
 
     match method {
         "initialize" => handle_initialize(w, &id, &parsed["params"], cmd_tx, caller),
@@ -258,18 +301,10 @@ fn handle_initialize(
     cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
     caller: &mut Caller,
 ) -> io::Result<()> {
-    if caller.pane_id.is_none()
+    if caller.project.is_none()
         && let Some(tx) = cmd_tx
-        && let Some(pane_id) = params["_meta"][PANE_ID_META]
-            .as_str()
-            .filter(|p| !p.is_empty())
     {
-        if pane_context(tx, pane_id).is_some() {
-            mcp_log(&format!("initialize: connection bound to pane {pane_id}"));
-            caller.pane_id = Some(pane_id.to_string());
-        } else {
-            mcp_log(&format!("initialize: no live pane {pane_id}; unattributed"));
-        }
+        bind(tx, &params["_meta"], caller);
     }
     if !caller.initialized
         && let (Some(tx), Some(conn)) = (cmd_tx, caller.conn)
@@ -375,19 +410,12 @@ fn handle_tools_call(
                 conn: caller.conn,
             },
             reply: reply_tx,
+            project: None,
         });
     }
 
     match name {
-        "get_spyc_context" => {
-            let text = read_context_or_empty(ctx_path);
-            let own = caller.pane_id.as_deref().zip(cmd_tx);
-            let text = match own.and_then(|(pane_id, tx)| pane_context(tx, pane_id)) {
-                Some(pane) => with_pane(text, pane),
-                None => text,
-            };
-            send_tool_result(w, id, &text)
-        }
+        "get_spyc_context" => get_spyc_context(w, id, ctx_path, cmd_tx, caller),
         "get_file_content" => {
             // Read-only — handled inline, no command channel needed.
             let path_str = args["path"].as_str().unwrap_or("");
@@ -743,6 +771,7 @@ fn handle_tools_call(
                 .send(McpRequest {
                     command,
                     reply: reply_tx,
+                    project: caller.project,
                 })
                 .is_err()
             {
@@ -784,12 +813,34 @@ fn handle_tools_call(
     }
 }
 
-/// The context file's JSON with the caller's own tab under `pane`, beside the
-/// fields that describe what the user is looking at.
-fn with_pane(context: String, pane: Value) -> String {
-    match serde_json::from_str::<Value>(&context) {
-        Ok(Value::Object(mut map)) => {
-            map.insert("pane".into(), pane);
+/// `get_spyc_context`: the caller's project's context file, plus what the loop
+/// says about the caller (`McpCommand::CallerContext`). A connection bound to
+/// no project gets the file alone, as does one the loop doesn't answer.
+fn get_spyc_context(
+    w: &mut impl Write,
+    id: &Value,
+    ctx_path: &Path,
+    cmd_tx: Option<&std::sync::mpsc::Sender<McpRequest>>,
+    caller: &Caller,
+) -> io::Result<()> {
+    let text = read_context_or_empty(ctx_path);
+    let about = cmd_tx.zip(caller.project).and_then(|(tx, project)| {
+        let pane_id = caller.pane_id.clone();
+        ask(tx, McpCommand::CallerContext { pane_id, project })
+    });
+    let text = match about {
+        Some(about) => with_caller(text, about),
+        None => text,
+    };
+    send_tool_result(w, id, &text)
+}
+
+/// The context file's JSON with the caller's `project` and own tab (`pane`)
+/// beside the fields that describe what the user is looking at.
+fn with_caller(context: String, about: Value) -> String {
+    match (serde_json::from_str::<Value>(&context), about) {
+        (Ok(Value::Object(mut map)), Value::Object(about)) => {
+            map.extend(about);
             Value::Object(map).to_string()
         }
         _ => context,

@@ -70,25 +70,15 @@ impl App {
         self.state.flash.as_ref().map(|f| f.text.as_str())
     }
 
-    /// Run `f` with project `id` active in `state`, `runtime` and `view` alike,
-    /// then put the active project back: how a test sets up a project the
-    /// keyboard isn't in (#99).
+    /// Run `f` inside project `id`, as an MCP call from its agent runs, then
+    /// put the active project back: how a test sets up and inspects a project
+    /// the keyboard isn't in (#99).
     pub(crate) fn as_project<R>(
         &mut self,
         id: state::ProjectId,
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let was = self.state.active;
-        self.set_test_active(id);
-        let out = f(self);
-        self.set_test_active(was);
-        out
-    }
-
-    fn set_test_active(&mut self, id: state::ProjectId) {
-        self.state.active = id;
-        self.runtime.active = id;
-        self.view.active = id;
+        self.in_project(id, f)
     }
 
     /// Ready project `id` for MCP: `home` is its home, its column lists `home`

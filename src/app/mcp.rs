@@ -91,31 +91,6 @@ impl App {
         }
     }
 
-    /// Where the tab with `pane_id` runs, for an MCP connection bound to it:
-    /// the tab's live cwd and that cwd's worktree root and branch, not the
-    /// column the user is browsing. `None` when no live tab has the id.
-    fn pane_context(&self, pane_id: &str) -> Option<serde_json::Value> {
-        let tabs = self.runtime.project().pane_tabs.as_ref()?;
-        let (index, entry) = tabs
-            .tabs()
-            .iter()
-            .enumerate()
-            .find(|(_, t)| t.info.id == pane_id)?;
-        let cwd = entry.live_cwd();
-        let worktree_root = super::state::find_repo_root(&cwd);
-        let git_branch = worktree_root
-            .as_deref()
-            .and_then(crate::git::discovery::head_branch);
-        Some(serde_json::json!({
-            "id": pane_id,
-            "tab": index + 1,
-            "label": entry.info.label,
-            "cwd": cwd,
-            "worktree_root": worktree_root,
-            "git_branch": git_branch,
-        }))
-    }
-
     /// Write the context file (best-effort, errors are silently ignored).
     /// Skips the disk write when the serialized JSON is unchanged.
     pub fn write_context(&mut self) {
@@ -135,8 +110,9 @@ impl App {
         // into a stale file. (The 500ms cap used to mask this by re-running the
         // debounced writer; it's gone now.)
         if crate::context::write_context_file(&self.view.project().context_path, &ctx).is_ok() {
-            // The sidecar is discovery's record of the root, so it moves when
-            // the root does (a `spyc -r` restoring a project elsewhere, #523).
+            // The sidecar is discovery's record of the roots, every open
+            // project's (#99), so it moves when one does (a `spyc -r` restoring
+            // a project elsewhere, #523).
             let moved = self
                 .view
                 .project()
@@ -144,7 +120,12 @@ impl App {
                 .as_ref()
                 .is_none_or(|c| c.root != ctx.root);
             if moved && self.view.mcp_running {
-                crate::mcp::record_root(&ctx.root);
+                let roots: Vec<&std::path::Path> = self
+                    .state
+                    .open_projects()
+                    .map(|p| p.start_dir.as_path())
+                    .collect();
+                crate::mcp::record_roots(&roots);
             }
             self.view.project_mut().last_context = Some(ctx);
         }
@@ -453,14 +434,9 @@ impl App {
             McpCommand::WaitForScopeClear { .. } => McpResponse::Error {
                 message: "wait_for_scope_clear is handled by the loop's park path".into(),
             },
-            McpCommand::PaneContext { pane_id } => match self.pane_context(&pane_id) {
-                Some(pane) => McpResponse::Ok {
-                    message: pane.to_string(),
-                },
-                None => McpResponse::Error {
-                    message: format!("no pane with id {pane_id} (closed?)"),
-                },
-            },
+            c @ (McpCommand::Bind { .. } | McpCommand::CallerContext { .. }) => {
+                self.answer_binding(c)
+            }
             // Notices, which `execute_notice` took before this match.
             McpCommand::Statusline { .. }
             | McpCommand::Disconnected { .. }

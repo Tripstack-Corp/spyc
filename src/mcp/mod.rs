@@ -147,7 +147,7 @@ pub use hooks::{
     codex_hooks_json_without_spyc, find_on_path, merged_agy_status_hooks_json,
     merged_status_hooks_json, spyc_binary,
 };
-pub use server::{cleanup_socket, record_root, start_socket_server, sweep_orphan_root_markers};
+pub use server::{cleanup_socket, record_roots, start_socket_server, sweep_orphan_root_markers};
 
 use server::{discover_live_socket, run_direct, run_inert, run_proxy};
 
@@ -463,11 +463,11 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
         mcp_log(&format!("stdio: trying env socket {}", sock.display()));
         if let Ok(stream) = UnixStream::connect(sock) {
             mcp_log("stdio: connected via env socket, proxying");
-            return run_proxy(stream, env.pane_id.as_deref());
+            return run_proxy(stream, env.pane_id.as_deref(), Some(&project_root));
         }
     }
     if let Some(stream) = discover_live_socket(&project_root) {
-        return run_proxy(stream, env.pane_id.as_deref());
+        return run_proxy(stream, env.pane_id.as_deref(), Some(&project_root));
     }
     if route == Route::SharedDaemon {
         mcp_log("stdio: no spyc rooted at this codex session; serving no tools");

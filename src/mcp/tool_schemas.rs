@@ -10,7 +10,7 @@ pub fn tools() -> Value {
         "tools": [
             {
                 "name": "get_spyc_context",
-                "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), session_name, plus the running spyc's pid and version ('<x.y.z> (<git-sha>)'). Use this to understand what the user is looking at — and to detect a stale server: if a tool you expect is missing, compare version's git SHA against the repo HEAD and ask the user to restart spyc (pid identifies the process). From an agent pane it also returns `pane`: YOUR own tab (id, tab, label, cwd, worktree_root, git_branch) — where you run, which can differ from the directory the user is browsing.",
+                "description": "Get the current spyc file manager state: working directory, cursor position, picked files, inventory, active filter, git branch, project_home (sticky project root), session_name, plus the running spyc's pid and version ('<x.y.z> (<git-sha>)'). Use this to understand what the user is looking at — and to detect a stale server: if a tool you expect is missing, compare version's git SHA against the repo HEAD and ask the user to restart spyc (pid identifies the process). From an agent pane it also returns `pane`: YOUR own tab (id, tab, label, cwd, worktree_root, git_branch) — where you run, which can differ from the directory the user is browsing — and `project`: the spyc project your tab belongs to (id, label, home, and `active`: whether the user is looking at it). The other fields, and every tool, answer for that project.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {},

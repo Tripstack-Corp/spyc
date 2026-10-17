@@ -116,6 +116,7 @@ pub(super) fn handle(
                 statusline,
             },
             reply,
+            project: None,
         });
     }
     send_result(w, id, json!({}))

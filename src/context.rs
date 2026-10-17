@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use crate::project_id::ProjectId;
+
 /// Snapshot of spyc's user-visible state, serialized to JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpycContext {
@@ -81,12 +83,18 @@ pub fn context_path(dir: &Path) -> PathBuf {
     dir.join(format!(".spyc-context-{pid}.json"))
 }
 
-/// Where this process keeps its context: the owner-private state dir, so
-/// nothing lands in the directory the user works in, and the path stays put
-/// when the root moves. With no state dir there is no MCP socket either, and
-/// the file goes in `launch_dir` for `SPYC_CONTEXT`'s direct mode.
-pub fn process_context_path(launch_dir: &Path) -> PathBuf {
-    context_path(&crate::state::state_root().unwrap_or_else(|| launch_dir.to_path_buf()))
+/// Where this process keeps `project`'s context: the owner-private state dir,
+/// so nothing lands in the directory the user works in, and the path stays put
+/// when the root moves. Each project has its own file,
+/// `.spyc-context-<pid>-<project>.json` (#99). With no state dir there is no
+/// MCP socket either, and the file goes in `launch_dir` for `SPYC_CONTEXT`'s
+/// direct mode.
+pub fn process_context_path(launch_dir: &Path, project: ProjectId) -> PathBuf {
+    let dir = crate::state::state_root().unwrap_or_else(|| launch_dir.to_path_buf());
+    dir.join(format!(
+        ".spyc-context-{}-{project}.json",
+        std::process::id()
+    ))
 }
 
 /// Write context atomically: write to a temp file in the same directory,
@@ -96,7 +104,8 @@ pub fn write_context_file(path: &Path, ctx: &SpycContext) -> std::io::Result<()>
     let json = serde_json::to_string_pretty(ctx).map_err(std::io::Error::other)?;
     let dir = path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(".spyc-context-{}.tmp", std::process::id()));
+    // Named after its target, so two projects' writes never share one.
+    let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, json.as_bytes())?;
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -107,11 +116,26 @@ pub fn remove_context_file(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
-/// Reap orphaned `.spyc-context-<pid>.json` files in `dir` whose owning process
-/// is dead. Each spyc removes its own context file on a clean exit
-/// ([`remove_context_file`]), but a SIGKILL / panic / `kill -9` leaves it
-/// behind, so they accumulate in the project root over time. Called once at
-/// startup (in the launch dir, where every instance's context file lands).
+/// The pid in a context file's name: `.spyc-context-<pid>.json`, a project's
+/// `.spyc-context-<pid>-<project>.json` (#99), or either's `.tmp`. `None` for
+/// any other name.
+pub fn context_file_pid(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(".spyc-context-")?;
+    let stem = rest
+        .strip_suffix(".json")
+        .or_else(|| rest.strip_suffix(".tmp"))?;
+    stem.split_once('-')
+        .map_or(stem, |(pid, _)| pid)
+        .parse()
+        .ok()
+}
+
+/// Reap orphaned context files in `dir` whose owning process is dead:
+/// `.spyc-context-<pid>.json`, each project's `.spyc-context-<pid>-<project>.json`
+/// (#99), and a write's leftover `.tmp`. Each spyc removes its own on a clean
+/// exit ([`remove_context_file`]), but a SIGKILL / panic / `kill -9` leaves
+/// them behind. Called once at startup, in the state dir and in the launch dir,
+/// where older spycs wrote theirs.
 ///
 /// Conservative: only removes a file whose embedded PID is **definitely** dead
 /// ([`crate::sysinfo::pid_alive`] — ESRCH only) and isn't `our_pid` (we write
@@ -124,12 +148,7 @@ pub fn sweep_orphan_context_files(dir: &Path, our_pid: u32) -> usize {
     let mut removed = 0;
     for entry in rd.flatten() {
         let name = entry.file_name();
-        let Some(pid) = name
-            .to_str()
-            .and_then(|n| n.strip_prefix(".spyc-context-"))
-            .and_then(|rest| rest.strip_suffix(".json"))
-            .and_then(|p| p.parse::<u32>().ok())
-        else {
+        let Some(pid) = name.to_str().and_then(context_file_pid) else {
             continue;
         };
         if pid == our_pid || crate::sysinfo::pid_alive(pid) {
@@ -147,14 +166,23 @@ mod tests {
     use super::*;
 
     /// #523: the context lives in the owner-private state dir, never in the
-    /// directory the user launched spyc from.
+    /// directory the user launched spyc from. #99: one file per project, named
+    /// for this process and the project.
     #[test]
     fn the_context_file_lives_in_the_state_dir() {
         let state = tempfile::tempdir().unwrap();
         let launch = tempfile::tempdir().unwrap();
         crate::state::with_state_root(state.path(), || {
-            let path = process_context_path(launch.path());
+            let (a, b) = (ProjectId::new(), ProjectId::new());
+            let path = process_context_path(launch.path(), a);
             assert_eq!(path.parent(), Some(state.path()));
+            let name = path.file_name().unwrap().to_str().unwrap();
+            assert_eq!(
+                name,
+                format!(".spyc-context-{}-{a}.json", std::process::id())
+            );
+            assert_ne!(process_context_path(launch.path(), b), path);
+            assert_eq!(context_file_pid(name), Some(std::process::id()));
         });
     }
 
@@ -257,7 +285,6 @@ mod tests {
     /// #99: each project has its own file, `.spyc-context-<pid>-<project>.json`,
     /// and a dead spyc's are reaped like its one file was.
     #[test]
-    #[ignore = "red: #99 step 3 — the sweep parses only `<pid>.json`"]
     fn sweep_reaps_a_dead_spycs_project_context_files() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();

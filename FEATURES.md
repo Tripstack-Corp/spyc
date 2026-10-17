@@ -1606,7 +1606,9 @@ Claude can query and control the workspace through these tools:
   missing → compare the git SHA to the repo HEAD → restart spyc). Called
   from an agent pane it also returns `pane`, the caller's own tab (id,
   index, label, live cwd, worktree root, branch), so an agent in worktree
-  X learns X while the user browses Y
+  X learns X while the user browses Y, and `project`, the project that tab
+  belongs to (id, label, home, and whether it is the one the user is in).
+  Every tool answers for and acts on the caller's project
 - **`get_file_content`** -- reads a file's text content (up to 100KB)
 
 **Write tools (Claude can mutate the TUI):**

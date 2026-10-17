@@ -343,14 +343,14 @@ dir = "#88c0d0"              # e.g. tint each project so a glance says which one
 ## 2. MCP socket topology (question 2)
 
 **Decision: one socket per process, as today.** `<state>/mcp-<pid>.sock`, one
-accept thread (`server.rs:421-489`). What becomes per-project is the context the
+accept thread (`start_socket_server`). What becomes per-project is the context the
 socket answers from, which the connection's pane selects.
 
 Why not a socket per project: the socket isn't a security boundary (one uid, see
 SECURITY.md), and the routing a second socket would provide already exists. Each
-agent pane gets `SPYC_MCP_SOCK` and `SPYC_PANE_ID` (`pane_tabs.rs:175-188`), the
+agent pane gets `SPYC_MCP_SOCK` and `SPYC_PANE_ID` (`spawn_pane_tab`), the
 proxy names the pane in `initialize` (#507), and the connection binds once to a
-live tab (`protocol.rs:211-242`). A pane belongs to exactly one project, so a
+live tab (`handle_initialize`). A pane belongs to exactly one project, so a
 bound connection already knows its project. That is the lookup the
 pane-identity proposal promised: "which pane called" and "which project it
 belongs to" are one lookup.
@@ -374,7 +374,7 @@ home.
 What changes:
 
 1. **Binding resolves to a project.** `McpCommand::PaneContext` searches every
-   project's tabs (today it searches the one list, `app/mcp.rs:239-259`) and
+   project's tabs (before step 3 it searched the one list) and
    returns the project id with the tab. `Caller` stores it.
 2. **One context file per project, in the state directory.** Since #525 a spyc
    keeps one file, `<state>/.spyc-context-<pid>.json`, whose `root` is the
@@ -412,7 +412,7 @@ What changes:
    authorization" footing as the pane id. The cwd is a routing hint from a
    process the user runs, and SECURITY.md already says which.
 7. **Unattributed fallbacks stay "the focused tab"**, meaning the active tab of
-   the active project (`resolve_report_target`, `app/mcp.rs:819-836`).
+   the active project (`resolve_report_target`).
 
 **The same principle, applied further (#619, landed in 2.2).** spyc no longer
 writes agent config into working directories. Since #509 the MCP entry names no
@@ -427,8 +427,32 @@ What doesn't change: MCP entries still name no socket (SPYC-TRAP
 takeover machinery the §7 brief asks about. Wiring consent is per agent, not
 per project. The orphan sweep already runs
 in the state directory (#525), where dead spycs' context files, sidecars and
-sockets now live, so it needs nothing per project. Its pass over the launch
-directory only clears markers that older spycs wrote there.
+sockets now live; step 3 taught it the per-project file name. Its pass over the
+launch directory only clears markers that older spycs wrote there.
+
+**Landed in step 3, and what the code changed in this design.**
+
+- **The socket server never read `SPYC_CONTEXT`.** It reads one path, fixed
+  when it starts, so item 2's per-pane env can't route reads. Instead
+  `McpCommand::Bind`, which replaced `PaneContext`, replies with the bound
+  project's context file, and `Caller` keeps it beside the project.
+  `McpCommand::CallerContext` answers `get_spyc_context`'s `pane` and `project`
+  per call.
+- **A context file's `root` is its project's `start_dir`, not its home.** That
+  was #525's choice, and step 3 kept it. Item 6 matches a cwd against the same
+  root the sidecar lists, so binding and discovery agree.
+- **Two matchers parse the context file's name:** the orphan sweep and the
+  fs-watch filter that ignores spyc's own writes. Both learned
+  `.spyc-context-<pid>-<project>.json`.
+- **A report with no pane follows its connection's project.** Item 7's
+  "focused tab" is the focused tab of the connection's project when it has one
+  (bound by cwd), and the active project's only for a connection bound to none
+  (the status hook, `spyc --statusline`). A tab number also counts in the
+  connection's project.
+- **Driving tools run inside `App::in_project`,** which points every handle at
+  the caller's project. Whatever belongs to the user's view stays with it: the
+  process cwd, frecency, an open harpoon menu and the flash. A call from a
+  project that has closed is refused.
 
 ---
 
@@ -731,7 +755,8 @@ PR:
    landed in #525), `PaneContext` returning the project, reads and driving tools
    on the caller's project, the sidecar as a list of homes, and `spyc/cwd` for
    unbound connections. Tests land first, against two
-   projects in one test app.
+   projects in one test app. Landed; the corrections it made are at the end of
+   §2.
 4. **Manifest v2.** The v1 reader, `left_cwd`, `pid` and the picker labels.
 5. **Open, close and switch.** The `Space` keys, the switcher, stashing on a
    switch, watch and poll on the active project only, and refresh on
@@ -757,9 +782,15 @@ PR:
    - **The git outbox needs nothing.** `flush_git_requests` drains only the
      active project, so an outgoing project's requests wait in its own columns,
      already stamped.
-   - **With a context file per project (step 3),** a worktree removal's orphan
-     reset and context write must also cover the caller's project, not only the
-     active one.
+   - **Opening and closing a project own its MCP files.** Opening writes the
+     new project's context file and rewrites the sidecar with every root.
+     Closing removes the file, rewrites the sidecar, and refuses that project's
+     later calls (step 3 already refuses a call from a closed project). A
+     worktree removal already resets columns, and rewrites the context, in the
+     caller's project and the active one (step 3); activation re-lists the
+     rest.
+   - **Quit shuts down every project's tabs.** `run_teardown` removes every
+     project's context file, but waits on the active project's tabs only.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
