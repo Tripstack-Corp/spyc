@@ -498,6 +498,7 @@ mod mcp;
 mod pane;
 mod pane_fork;
 mod per_column;
+mod projects_mcp;
 mod prompt_templates;
 mod second_commander;
 mod send_selection;

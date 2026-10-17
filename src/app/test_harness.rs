@@ -69,4 +69,72 @@ impl App {
     pub(crate) fn flash_text(&self) -> Option<&str> {
         self.state.flash.as_ref().map(|f| f.text.as_str())
     }
+
+    /// Run `f` with project `id` active in `state`, `runtime` and `view` alike,
+    /// then put the active project back: how a test sets up a project the
+    /// keyboard isn't in (#99).
+    pub(crate) fn as_project<R>(
+        &mut self,
+        id: state::ProjectId,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let was = self.state.active;
+        self.set_test_active(id);
+        let out = f(self);
+        self.set_test_active(was);
+        out
+    }
+
+    fn set_test_active(&mut self, id: state::ProjectId) {
+        self.state.active = id;
+        self.runtime.active = id;
+        self.view.active = id;
+    }
+
+    /// Ready project `id` for MCP: `home` is its home, its column lists `home`
+    /// for real, and its context file is written.
+    pub(crate) fn ready_test_project(&mut self, id: state::ProjectId, home: &std::path::Path) {
+        self.as_project(id, |app| {
+            let listing = crate::fs::listing::Listing::read(home).expect("home lists");
+            let project = app.state.active_project_mut();
+            project.home = Some(home.to_path_buf());
+            project.left.listing = listing;
+            app.state.rebuild_rows();
+            app.write_context();
+        });
+    }
+
+    /// A second project homed at `home`, beside the active one, readied by
+    /// [`Self::ready_test_project`] with its context file in `home`. The
+    /// active project stays active.
+    pub(crate) fn add_test_project(&mut self, home: &std::path::Path) -> state::ProjectId {
+        let project = state::AppState::test_default(home.to_path_buf())
+            .projects
+            .remove(0);
+        let id = project.id;
+        self.state.projects.push(project);
+        self.runtime
+            .projects
+            .insert(id, super::runtime::ProjectRuntime::default());
+        self.view.projects.insert(
+            id,
+            super::view_state::ProjectView::new(crate::context::context_path(home), false),
+        );
+        self.ready_test_project(id, home);
+        id
+    }
+
+    /// Open a `cat` tab in project `id`, as that project's keyboard would, and
+    /// return the tab's pane id.
+    pub(crate) fn open_tab_in_project(
+        &mut self,
+        id: state::ProjectId,
+        cwd: &std::path::Path,
+    ) -> String {
+        self.as_project(id, |app| {
+            assert!(app.open_pane_tab_in("cat", cwd), "the tab opens");
+            let tabs = app.runtime.project().pane_tabs.as_ref().expect("a tab");
+            tabs.tabs().last().expect("a tab").info.id.clone()
+        })
+    }
 }

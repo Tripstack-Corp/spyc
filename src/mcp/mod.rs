@@ -481,4 +481,6 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
+pub mod test_support;
+#[cfg(test)]
 mod tests;
