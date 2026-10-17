@@ -6,6 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use super::*;
 use crate::mcp::protocol::PANE_ID_META;
 use crate::mcp::server::annotate_initialize;
+use crate::mcp::test_support::Conn;
 use crate::mcp_cmd::{McpRequest, McpResponse};
 
 /// A stand-in for the main loop that knows the pane ids in `live`. Every
@@ -59,57 +60,11 @@ fn user_browsing_y(tmp: &tempfile::TempDir) -> PathBuf {
     ctx_path
 }
 
-/// One socket connection to `handle_socket_connection`, over
-/// [`user_browsing_y`].
-struct Conn {
-    reader: io::BufReader<UnixStream>,
-    writer: UnixStream,
-    next_id: u64,
-    _tmp: tempfile::TempDir,
-}
-
-impl Conn {
-    fn open(cmd_tx: Sender<McpRequest>) -> Self {
-        let tmp = tempfile::tempdir().unwrap();
-        let ctx_path = user_browsing_y(&tmp);
-        let sock = tmp.path().join("attr.sock");
-        let listener = bind_test_socket(&sock);
-        std::thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            handle_socket_connection(stream, &ctx_path, &cmd_tx).unwrap_or(());
-        });
-        let stream = UnixStream::connect(&sock).unwrap();
-        Self {
-            reader: io::BufReader::new(stream.try_clone().unwrap()),
-            writer: stream,
-            next_id: 1,
-            _tmp: tmp,
-        }
-    }
-
-    fn call(&mut self, method: &str, params: Value) -> Value {
-        let body =
-            json!({"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params});
-        self.next_id += 1;
-        send_message(&mut self.writer, &body.to_string()).unwrap();
-        serde_json::from_str(&read_lsp_message(&mut self.reader).unwrap()).unwrap()
-    }
-
-    fn initialize(&mut self, pane_id: Option<&str>) {
-        let params = pane_id.map_or_else(|| json!({}), |p| json!({"_meta": {PANE_ID_META: p}}));
-        let resp = self.call("initialize", params);
-        assert!(resp["result"]["serverInfo"].is_object(), "{resp}");
-    }
-
-    /// A tool's text result, parsed when it is JSON.
-    fn tool(&mut self, name: &str, args: Value) -> Value {
-        let resp = self.call("tools/call", json!({"name": name, "arguments": args}));
-        let text = resp["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{resp}"))
-            .to_string();
-        serde_json::from_str(&text).unwrap_or(Value::String(text))
-    }
+/// A connection over [`user_browsing_y`], and the temp dir its context lives in.
+fn open(cmd_tx: Sender<McpRequest>) -> (Conn, tempfile::TempDir) {
+    let tmp = tempfile::tempdir().unwrap();
+    let conn = Conn::open(user_browsing_y(&tmp), cmd_tx);
+    (conn, tmp)
 }
 
 /// What a `report_status` targeted: its `pane_id`, then its `pane` index.
@@ -135,7 +90,7 @@ fn reports(seen: &Receiver<McpCommand>) -> (Vec<Target>, bool) {
 #[test]
 fn a_connection_naming_a_live_pane_answers_for_that_pane() {
     let (tx, seen) = fake_loop(&["abc"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.initialize(Some("abc"));
 
     let ctx = conn.tool("get_spyc_context", json!({}));
@@ -155,7 +110,7 @@ fn a_connection_naming_a_live_pane_answers_for_that_pane() {
 #[test]
 fn an_initialize_without_a_pane_id_is_served_as_before() {
     let (tx, seen) = fake_loop(&["abc"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.initialize(None);
 
     let ctx = conn.tool("get_spyc_context", json!({}));
@@ -176,7 +131,7 @@ fn an_initialize_without_a_pane_id_is_served_as_before() {
 #[test]
 fn a_pane_id_no_live_tab_has_is_dropped() {
     let (tx, seen) = fake_loop(&["abc"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.initialize(Some("gone"));
 
     let ctx = conn.tool("get_spyc_context", json!({}));
@@ -190,7 +145,7 @@ fn a_pane_id_no_live_tab_has_is_dropped() {
 #[test]
 fn a_call_that_names_its_target_keeps_it() {
     let (tx, seen) = fake_loop(&["abc"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.initialize(Some("abc"));
 
     conn.tool(
@@ -208,7 +163,7 @@ fn a_call_that_names_its_target_keeps_it() {
 #[test]
 fn a_second_initialize_does_not_rebind() {
     let (tx, seen) = fake_loop(&["abc", "def"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.initialize(Some("abc"));
     conn.initialize(Some("def"));
 
@@ -286,7 +241,7 @@ fn the_proxy_passes_everything_else_through_verbatim() {
 #[test]
 fn the_loop_hears_a_connection_start_and_end() {
     let (tx, seen) = fake_loop(&["abc"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.initialize(Some("abc"));
     conn.tool("git_status", json!({}));
     drop(conn);
@@ -315,7 +270,7 @@ fn the_loop_hears_a_connection_start_and_end() {
 #[test]
 fn an_unattributed_connection_is_reported_without_a_pane() {
     let (tx, seen) = fake_loop(&["abc"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.initialize(None);
     drop(conn);
     let reported = std::iter::from_fn(|| seen.recv_timeout(std::time::Duration::from_secs(5)).ok())
@@ -331,7 +286,7 @@ fn an_unattributed_connection_is_reported_without_a_pane() {
 #[test]
 fn a_connection_that_never_initializes_is_not_listed() {
     let (tx, seen) = fake_loop(&["abc"]);
-    let mut conn = Conn::open(tx);
+    let (mut conn, _tmp) = open(tx);
     conn.tool("report_status", json!({"status": "working"}));
     drop(conn);
     std::thread::sleep(std::time::Duration::from_millis(200));
@@ -351,7 +306,7 @@ fn a_connection_that_never_initializes_is_not_listed() {
 fn create_worktree_carries_the_callers_pane() {
     let created = |pane: Option<&str>| {
         let (tx, seen) = fake_loop(&["abc"]);
-        let mut conn = Conn::open(tx);
+        let (mut conn, _tmp) = open(tx);
         conn.initialize(pane);
         conn.tool("create_worktree", json!({"branch": "wt"}));
         seen.try_iter()

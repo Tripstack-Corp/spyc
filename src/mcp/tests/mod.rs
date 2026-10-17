@@ -780,6 +780,29 @@ fn collect_pids_prefers_the_nearest_root() {
     assert_eq!(collect_project_pids_in(&proj, state.path()), vec![1]);
 }
 
+/// #99: a spyc with several projects open lists one root per line. An agent
+/// under any of them finds it, and the nearest root wins across every line of
+/// every sidecar.
+#[test]
+#[ignore = "red: #99 step 3 — the sidecar is read as one path"]
+fn collect_pids_matches_any_root_a_sidecar_lists() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let (a, b, inner) = (base.join("a"), base.join("b"), base.join("b/inner"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&inner).unwrap();
+    std::fs::write(
+        state.path().join("mcp-42.root"),
+        format!("{}\n{}", a.display(), b.display()),
+    )
+    .unwrap();
+    touch_root_marker(state.path(), 7, &inner);
+    assert_eq!(collect_project_pids_in(&a, state.path()), vec![42]);
+    assert_eq!(collect_project_pids_in(&b, state.path()), vec![42]);
+    assert_eq!(collect_project_pids_in(&inner, state.path()), vec![7]);
+}
+
 #[test]
 fn collect_pids_returns_all_pids_at_same_dir() {
     // Two spyc instances rooted at the same dir → both candidates.

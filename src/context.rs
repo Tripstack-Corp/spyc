@@ -254,6 +254,27 @@ mod tests {
         assert!(malformed.exists(), "unparsable name skipped");
     }
 
+    /// #99: each project has its own file, `.spyc-context-<pid>-<project>.json`,
+    /// and a dead spyc's are reaped like its one file was.
+    #[test]
+    #[ignore = "red: #99 step 3 — the sweep parses only `<pid>.json`"]
+    fn sweep_reaps_a_dead_spycs_project_context_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let our_pid = std::process::id();
+        let project = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5a6b";
+        let dead = dir.join(format!(".spyc-context-999999999-{project}.json"));
+        let ours = dir.join(format!(".spyc-context-{our_pid}-{project}.json"));
+        for f in [&dead, &ours] {
+            std::fs::write(f, b"{}").unwrap();
+        }
+
+        let removed = sweep_orphan_context_files(dir, our_pid);
+        assert!(!dead.exists(), "a dead spyc's project file is reaped");
+        assert!(ours.exists(), "our own project file is spared");
+        assert_eq!(removed, 1);
+    }
+
     /// `App::write_context` dedups by comparing the snapshot struct instead
     /// of its serialized JSON. That's only valid if equal structs serialize
     /// identically and unequal ones differ — lock that invariant here.
