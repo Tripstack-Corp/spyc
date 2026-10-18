@@ -74,8 +74,8 @@ impl App {
     }
 
     /// `(is_shell, suspended)` for the active tab, with no pane open treated
-    /// as a non-shell (so `^z` is forwarded rather than toggling a suspend
-    /// that has nothing to act on — see `pane_suspend_key_action`).
+    /// as a shell (so `^z` is forwarded rather than toggling a suspend that
+    /// has nothing to act on — see `pane_suspend_key_action`).
     pub(super) fn active_tab_shell_and_suspended(&self) -> (bool, bool) {
         self.runtime
             .project()

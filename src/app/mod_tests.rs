@@ -107,7 +107,7 @@ mod guard_tests {
         );
     }
 
-    /// `state.left` / `state.right` name a SPECIFIC column. Everywhere else a
+    /// A project's `left` / `right` name a SPECIFIC column. Everywhere else a
     /// column is reached by handle — `cur()` / `cur_mut()` for the one the user
     /// is working in, `col(side)` / `get_col(side)` for a named one,
     /// `active_sides()` / `columns_mut()` for every open one — so what a column
@@ -117,16 +117,13 @@ mod guard_tests {
     /// one field found nine more (#502), among them a graveyard purge in `b`
     /// that trashed the entry under `a`'s cursor.
     ///
-    /// `state.projects` names a SPECIFIC project the same way (#99 step 1,
-    /// `docs/drafts/PROJECTS_PLAN.md`): everywhere reaches the active one via
-    /// `active_project()` / `active_project_mut()`, both defined alongside the
-    /// column handles in `state/mod.rs`. `self.left`/`self.right` moved onto
-    /// `Project` behind those two methods, so this guard no longer finds them
-    /// reached directly off `state`/`self` anywhere — which is why `render/
-    /// mod.rs`, `render/inner.rs` and `watch.rs` dropped out of `ALLOW` below:
-    /// they still draw/watch each column separately, just through
-    /// `active_project()` first, which this scan doesn't (and shouldn't) see
-    /// as naming a column directly.
+    /// The columns live on `Project` (#99), so the scan counts a column reached
+    /// through one — `state.active_project().left`, a local bound to
+    /// `active_project_mut()`, a loop over `open_projects()` — as named off
+    /// `state` (see `column_field_receivers`). `state.projects` names a SPECIFIC
+    /// project the same way; everywhere reaches the active one through
+    /// `active_project()` / `active_project_mut()`, defined beside the column
+    /// handles in `state/mod.rs`.
     ///
     /// `ALLOW` is the code that draws or watches each column separately, each
     /// with why. An entry that stops matching fails too, because an exemption
@@ -139,11 +136,22 @@ mod guard_tests {
     /// and only `state/mod.rs`, where the handles live, may name them.
     #[test]
     fn columns_are_addressed_through_handles() {
-        const ALLOW: &[(&str, &str)] = &[(
-            "pager_handler/mod.rs",
-            "`active_pager_mut!` borrows `view.projects` alone, so a handler can hold \
-             `pending_history_pick` beside the pager",
-        )];
+        const ALLOW: &[(&str, &str)] = &[
+            (
+                "pager_handler/mod.rs",
+                "`active_pager_mut!` borrows `view.projects` alone, so a handler can hold \
+                 `pending_history_pick` beside the pager",
+            ),
+            (
+                "render/mod.rs",
+                "each column settles its own row cache and grid, in its own rect",
+            ),
+            ("render/inner.rs", "each column draws into its own rect"),
+            (
+                "watch.rs",
+                "each column's tree and gitdir are watched under their own dedup key",
+            ),
+        ];
         let app = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app");
         let mut offenders = Vec::new();
         let mut matched = std::collections::BTreeSet::new();
@@ -224,14 +232,59 @@ mod guard_tests {
     /// A longer field (`right_pager`) is not a column. `view` and `runtime`
     /// have no `left`/`right`, so for those receivers a hit is their own
     /// `projects` map named outside its `project()` accessors.
+    ///
+    /// The columns live on `Project`, so a column reached through a project
+    /// has the receiver the project was reached from: `state` in
+    /// `self.state.active_project().left`, `self` inside `state/`. That holds
+    /// for the call `active_project()` / `active_project_mut()`, a local bound
+    /// to one (`let p = …active_project_mut();`, until the next `fn`), and a
+    /// loop variable over `open_projects()`. A rustfmt-split chain is joined
+    /// first, so a `.left` on its own line sees what it hangs off.
     fn column_field_receivers(src: &str) -> Vec<String> {
         let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
-        let mut out = Vec::new();
+        let ident_at_end = |s: &str| -> String {
+            let start = s
+                .char_indices()
+                .rev()
+                .find(|&(_, c)| !ident(c))
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            s[start..].to_string()
+        };
+        let bind_let = regex::Regex::new(
+            r"\blet\s+(?:mut\s+)?(\w+)\s*=[^;]*?\b(\w+)\.active_project(?:_mut)?\(\)\s*;",
+        )
+        .expect("valid regex");
+        let bind_for = regex::Regex::new(r"\bfor\s+(\w+)\s+in\s+[^{]*?\b(\w+)\.open_projects\(\)")
+            .expect("valid regex");
+        let fn_start = regex::Regex::new(
+            r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*fn\s+\w",
+        )
+        .expect("valid regex");
+        let mut lines: Vec<String> = Vec::new();
         for line in src.lines() {
-            if line.trim_start().starts_with("//") {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") {
                 continue;
             }
             let code = line.find(" //").map_or(line, |i| &line[..i]);
+            match lines.last_mut() {
+                Some(prev) if trimmed.starts_with('.') => prev.push_str(code.trim()),
+                _ => lines.push(code.to_string()),
+            }
+        }
+        // (local name, the receiver its project was reached from)
+        let mut project_locals: Vec<(String, String)> = Vec::new();
+        let mut out = Vec::new();
+        for code in &lines {
+            if fn_start.is_match(code) {
+                project_locals.clear();
+            }
+            for binding in bind_let
+                .captures_iter(code)
+                .chain(bind_for.captures_iter(code))
+            {
+                project_locals.push((binding[1].to_string(), binding[2].to_string()));
+            }
             for field in [".left", ".right", ".projects"] {
                 for (at, _) in code.match_indices(field) {
                     let after = code[at + field.len()..].chars().next();
@@ -239,12 +292,22 @@ mod guard_tests {
                         continue;
                     }
                     let before = &code[..at];
-                    let start = before
-                        .char_indices()
+                    let through_call = ["active_project()", "active_project_mut()"]
+                        .iter()
+                        .find_map(|call| before.strip_suffix(call)?.strip_suffix('.'));
+                    if let Some(head) = through_call {
+                        out.push(ident_at_end(head));
+                        continue;
+                    }
+                    let receiver = ident_at_end(before);
+                    match project_locals
+                        .iter()
                         .rev()
-                        .find(|&(_, c)| !ident(c))
-                        .map_or(0, |(i, c)| i + c.len_utf8());
-                    out.push(before[start..].to_string());
+                        .find(|(name, _)| *name == receiver)
+                    {
+                        Some((_, reached_from)) => out.push(reached_from.clone()),
+                        None => out.push(receiver),
+                    }
                 }
             }
         }
@@ -256,7 +319,6 @@ mod guard_tests {
     /// `self.state.active_project().left` as having no receiver, so the guard
     /// passed every such access without looking.
     #[test]
-    #[ignore = "red: the scan reads a column reached through active_project() as no receiver"]
     fn a_column_reached_through_the_active_project_is_a_state_column() {
         let forms = [
             "let d = &self.state.active_project().left.listing.dir;",
