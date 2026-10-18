@@ -33,7 +33,8 @@ clobber your user defaults.
 effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an untrusted
 clone can't bind a key to run code, and its
 [`[prompts]`](#prompt-templates--prompts) are ignored, so a repo can't choose
-what gets typed at your agent. A project file's
+what gets typed at your agent. Nor can it name the
+[`[clipboard] command`](#clipboard), which runs on every yank. A project file's
 [startup tabs](#startup-tabs--pane-tabs) run their commands at launch with no
 keypress at all, so they open only after you approve that exact list, and an
 edited list asks again. Lua scripts load only from `~/.config/spyc/`.
@@ -349,7 +350,8 @@ verbatim — whitespace-split into argv, same "no shell features" contract as
 redirection — and pipes the yanked text to its stdin. `via`/OSC-52 are skipped
 entirely, not layered underneath. `$SPYC_CLIPBOARD` is the env-var form and wins
 over the config key if both are set, matching how other spyc envs layer over
-static config.
+static config. Only `~/.spycrc.toml` may set `command`: a project file's is
+ignored with a warning, since it would run the repo's command on a keypress.
 
 ## Notifications — `[notify]`
 

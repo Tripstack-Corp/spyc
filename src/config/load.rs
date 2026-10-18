@@ -3,7 +3,10 @@
 
 use std::path::Path;
 
-use super::{Config, FileConfig, FilePane, FilePaneTab, PaneTabConfig, ProjectTabs, dsl, home_dir};
+use super::{
+    Config, FileClipboard, FileConfig, FilePane, FilePaneTab, PaneTabConfig, ProjectTabs, dsl,
+    home_dir,
+};
 
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
 /// attacker-controllable, so its executing keymap bindings are dropped;
@@ -76,6 +79,24 @@ impl Config {
         let file: FileConfig = toml::from_str(&text)
             .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
         self.merge_file(file, path, trust)
+    }
+
+    /// `[clipboard]`, per field. The command runs on every yank, so a project
+    /// rc may not name one: it would run the repo's command on a keypress.
+    fn merge_clipboard(&mut self, file: FileClipboard, source: &Path, trust: Trust) {
+        if let Some(v) = file.via {
+            self.clipboard.via = v;
+        }
+        if let Some(c) = file.command {
+            if trust == Trust::Trusted {
+                self.clipboard.command = Some(c);
+            } else {
+                self.warnings.push(format!(
+                    "{}: [clipboard] command ignored — only ~/.spycrc.toml may name one",
+                    source.display()
+                ));
+            }
+        }
     }
 
     fn merge_pane_preferences(&mut self, file: &mut FilePane, trust: Trust) {
@@ -241,13 +262,7 @@ impl Config {
             self.archive.snapshot_max_mb = v;
         }
 
-        // Clipboard: per-field merge.
-        if let Some(v) = file.clipboard.via {
-            self.clipboard.via = v;
-        }
-        if let Some(c) = file.clipboard.command {
-            self.clipboard.command = Some(c);
-        }
+        self.merge_clipboard(file.clipboard, source, trust);
         if let Some(b) = file.notify.desktop {
             self.notify.desktop = b;
         }
