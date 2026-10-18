@@ -641,26 +641,23 @@ impl App {
         }
     }
 
-    /// MVU Phase 6 PR-C: handle a terminal resize — immediately resize all pty
-    /// tabs + the top overlay so child shells re-render at the correct width,
-    /// and rebuild the help overlay (its wrap points are baked at open time).
-    /// Verbatim move of the loop's `Event::Resize` arm.
+    /// MVU Phase 6 PR-C: handle a terminal resize — immediately resize every
+    /// project's pty tabs + the top overlay so child shells re-render at the
+    /// correct width, and rebuild the help overlay (its wrap points are baked
+    /// at open time). Verbatim move of the loop's `Event::Resize` arm.
     pub(crate) fn handle_resize(&mut self, cols: u16, rows: u16) {
         self.view.term_size = (cols, rows);
         let area = ratatui::layout::Rect::new(0, 0, cols, rows);
         let pane_pct = self.effective_pane_pct();
-        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
-            let layout = Self::compute_layout(
-                area,
-                true,
-                pane_pct,
-                self.state.active_project().config.layout.status_position,
-            );
-            if let Some(pane_rect) = layout.pane {
-                for entry in tabs.tabs_mut() {
-                    let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
-                }
-            }
+        // A project the user isn't in is resized too, each to its own layout,
+        // so its children draw at the size they will be shown at.
+        let projects: Vec<super::state::ProjectId> = self
+            .state
+            .open_projects()
+            .map(|project| project.id)
+            .collect();
+        for id in projects {
+            self.in_project(id, |app| app.resize_tabs_to(area));
         }
         let pane_tabs_present = self.runtime.project().pane_tabs.is_some();
         if let Some(overlay) = self.runtime.project_mut().top_overlay.as_mut() {
@@ -686,6 +683,21 @@ impl App {
         // width so it reflows. No-op when no git-view pager is open; the syntax
         // highlight is cached on the stream, so this is layout-only (no syntect).
         self.dispatch_pager_command(crate::app::pager_stream::PagerStreamCmd::Rerender);
+    }
+
+    /// Resize the active project's pty tabs to the pane rect its layout gives
+    /// in `area`.
+    fn resize_tabs_to(&mut self, area: ratatui::layout::Rect) {
+        let pane_pct = self.effective_pane_pct();
+        let status_position = self.state.active_project().config.layout.status_position;
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
+            && let Some(pane_rect) =
+                Self::compute_layout(area, true, pane_pct, status_position).pane
+        {
+            for entry in tabs.tabs_mut() {
+                let _ = entry.pane.resize(pane_rect.height, pane_rect.width);
+            }
+        }
     }
 
     /// Dispatch a user-defined binding. Inline-data actions (unix command,

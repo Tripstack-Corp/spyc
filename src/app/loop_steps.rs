@@ -214,10 +214,10 @@ impl App {
     pub(crate) fn handle_restore_resumes(&mut self, now_pre: Instant, ctx: &mut RunCtx) {
         self.send_pending_resumes(now_pre);
         // Arm RestoreSettle/ResumeEnter at the earliest pending resume across
-        // all tabs so the wait can wake for it.
+        // every project's tabs so the wait can wake for it.
         arm_resume_deadlines(
             &mut ctx.scheduler,
-            self.runtime.project().pane_tabs.as_ref(),
+            self.runtime.every_tab_set().map(|(_, tabs)| tabs),
         );
     }
 

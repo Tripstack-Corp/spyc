@@ -1028,7 +1028,7 @@ fn git_worker_available_enqueues_request_instead_of_spawning() {
 
     // Wire the "worker" and force a clean cache-miss baseline so the
     // asserted call takes the enqueue branch deterministically.
-    s.active_project_mut().left.git_cache.git_worker_available = true;
+    s.git_worker_available = true;
     s.active_project_mut().left.git_cache.git_status_cache = None;
     s.active_project_mut()
         .left
@@ -1108,7 +1108,7 @@ fn forced_rewalk_keeps_stale_markers_and_star_instead_of_blanking() {
     let mut s = test_state();
     s.active_project_mut().left.listing.dir = root.clone();
     s.update_repo_root(Side::Left, &root);
-    s.active_project_mut().left.git_cache.git_worker_available = true;
+    s.git_worker_available = true;
 
     // Seed a populated cache stamped with the CURRENT mtimes, so the reuse check
     // would normally skip the walk — `force` must re-walk anyway. This is exactly

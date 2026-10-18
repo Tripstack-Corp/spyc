@@ -155,14 +155,6 @@ pub struct GitCache {
     /// `.git/HEAD` mtimes match) and skips the walk; only the
     /// per-listing-dir prefix re-parse is paid.
     pub git_status_cache: Option<GitStatusCache>,
-    /// Whether a background git-status worker is wired. Set by `App::new`
-    /// once the worker thread spawns; `false` in tests and during the
-    /// AppState bootstrap before the worker exists. When `true`, a
-    /// cache-miss in `git_file_statuses_cached` enqueues a request into
-    /// `pending_git_requests` — the Model holds no channel, so the App run
-    /// loop flushes that outbox to the Runtime-owned `git_worker_tx`. When
-    /// `false`, the synchronous `git status` spawn path runs inline.
-    pub git_worker_available: bool,
     /// Outbox of git-status worker requests the Model wants dispatched.
     /// `git_file_statuses_cached` pushes here on a cache miss; the App run
     /// loop drains it via `flush_git_requests` (sending each over the

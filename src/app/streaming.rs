@@ -347,9 +347,12 @@ impl App {
         false
     }
 
-    /// MVU Phase 6 PR-C: the pre-recv pane-output scan. Drains every tab + the
-    /// top overlay (Acquire-load on each worker's `parser_gen`), flips the
-    /// background-tab `has_activity` divider glyph, and marks exited tabs.
+    /// MVU Phase 6 PR-C: the pre-recv pane-output scan. Drains every project's
+    /// tabs + the top overlays of the project in view (Acquire-load on each
+    /// worker's `parser_gen`), flips the background-tab `has_activity` divider
+    /// glyph, and marks exited tabs. A tab in a project the user isn't in is
+    /// stamped, flagged and marked like any other, but asks for no redraw:
+    /// nothing on screen shows it.
     /// Returns `(needs_draw, draw_reason)` — `draw_reason` is 1 for pane output
     /// and 3 for a newly-exited tab (last-writer-wins, matching the inline
     /// order); the caller folds them into the loop's `needs_draw`/`draw_reason`.
@@ -363,12 +366,13 @@ impl App {
         let mut needs_draw = false;
         let mut draw_reason = 0u8;
         let mut pane_had_output = false;
-        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
+        let in_view = self.runtime.active;
+        // Stamp the moment of output for the agent-activity signal (P0).
+        // `&mut` settle step, so reading the clock here is fine (render is
+        // the pure half). The Working↔Idle derive is `settle_agent_activity`.
+        let now = std::time::Instant::now();
+        for (project, tabs) in self.runtime.every_tab_set_mut() {
             let active_idx = tabs.active_index();
-            // Stamp the moment of output for the agent-activity signal (P0).
-            // `&mut` settle step, so reading the clock here is fine (render is
-            // the pure half). The Working↔Idle derive is `settle_agent_activity`.
-            let now = std::time::Instant::now();
             for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
                 // Clear the wake edge BEFORE the gen load (clear-before-read).
                 // SOLE clear site — see the fn doc.
@@ -386,11 +390,13 @@ impl App {
                         entry.info.scrape_dirty = true;
                     }
                     if i == active_idx {
-                        pane_had_output = true;
+                        pane_had_output |= project == in_view;
                     } else {
                         entry.info.has_activity = true;
-                        needs_draw = true;
-                        draw_reason = 1;
+                        if project == in_view {
+                            needs_draw = true;
+                            draw_reason = 1;
+                        }
                     }
                 }
             }
@@ -438,11 +444,11 @@ impl App {
         // Mark exited tabs AFTER drain so the Closed event has been processed
         // and `is_closed()` returns true; the "[exited N]" label appears
         // immediately.
-        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
-            && tabs.mark_exited()
-        {
-            needs_draw = true;
-            draw_reason = 3;
+        for (project, tabs) in self.runtime.every_tab_set_mut() {
+            if tabs.mark_exited() && project == in_view {
+                needs_draw = true;
+                draw_reason = 3;
+            }
         }
         (needs_draw, draw_reason)
     }

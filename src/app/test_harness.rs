@@ -122,10 +122,7 @@ impl App {
     /// Wire the background git worker as `App::new` does once its thread
     /// spawns, so a cache miss enqueues a walk instead of running it inline.
     pub(crate) fn wire_git_worker(&mut self) {
-        self.state
-            .col_mut(state::Side::Left)
-            .git_cache
-            .git_worker_available = true;
+        self.state.git_worker_available = true;
     }
 
     /// Ready project `id` for MCP: `home` is its home, its column lists `home`

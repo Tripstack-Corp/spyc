@@ -407,6 +407,15 @@ pub struct AppState {
     /// to the user's view stays with it: the process cwd, frecency and the
     /// harpoon menu.
     pub in_background: bool,
+    /// Whether the background git-status worker is wired. Set by `App::new`
+    /// once the worker thread spawns; `false` in tests and during the
+    /// AppState bootstrap before the worker exists. When `true`, a
+    /// cache-miss in `git_file_statuses_cached` enqueues a request into the
+    /// column's `pending_git_requests` — the Model holds no channel, so the
+    /// App run loop flushes that outbox to the Runtime-owned `git_worker_tx`.
+    /// When `false`, the synchronous `git status` spawn path runs inline. One
+    /// worker serves every project's columns, so the flag is app-wide.
+    pub git_worker_available: bool,
 }
 
 impl AppState {
@@ -923,6 +932,7 @@ impl AppState {
             projects: vec![project],
             active,
             in_background: false,
+            git_worker_available: false,
             inventory: Inventory::new(),
             marks: Marks::default(),
             resolver: Resolver::new(),

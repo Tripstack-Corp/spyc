@@ -623,9 +623,12 @@ impl App {
             self.state.should_quit = true;
         } else {
             self.state.quit_pending = Some(now);
-            let running_panes = self.runtime.project().pane_tabs.as_ref().map_or(0, |tabs| {
-                tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count()
-            });
+            // Every project's tabs: quitting ends them all.
+            let running_panes: usize = self
+                .runtime
+                .every_tab_set()
+                .map(|(_, tabs)| tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count())
+                .sum();
             let running_bg = self.runtime.background_tasks.running_count();
             let running = running_panes + running_bg;
             // Pending archive changes live only in memory, so quitting drops

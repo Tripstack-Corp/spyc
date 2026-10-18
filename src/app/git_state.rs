@@ -515,11 +515,7 @@ mod tests {
             .clone()
             .expect("repo root resolved");
         // Take the off-thread path, where a walk is a request + a generation bump.
-        app.state
-            .active_project_mut()
-            .left
-            .git_cache
-            .git_worker_available = true;
+        app.state.git_worker_available = true;
 
         let (entries, index_mtime, head_mtime) = crate::git::status::repo_status_stable(&root);
         let generation = app.state.active_project().left.git_cache.git_generation;

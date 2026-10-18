@@ -64,13 +64,13 @@ impl App {
             .map(PaneTabs::active_info)
     }
 
-    /// How many pane tabs are open, for the activity HUD's `panes:` cell.
+    /// How many pane tabs are open in every project, for the activity HUD's
+    /// `panes:` cell.
     pub(super) fn pane_tab_count(&self) -> usize {
         self.runtime
-            .project()
-            .pane_tabs
-            .as_ref()
-            .map_or(0, |t| t.tabs().len())
+            .every_tab_set()
+            .map(|(_, tabs)| tabs.tabs().len())
+            .sum()
     }
 
     /// `(is_shell, suspended)` for the active tab, with no pane open treated

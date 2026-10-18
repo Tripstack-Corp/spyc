@@ -55,7 +55,7 @@ impl App {
         let (worker, in_repo, dir) = {
             let col = self.state.cur();
             (
-                col.git_cache.git_worker_available,
+                self.state.git_worker_available,
                 col.git_cache.current_repo_root.is_some(),
                 col.listing.dir.clone(),
             )

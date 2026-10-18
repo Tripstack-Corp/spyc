@@ -800,18 +800,14 @@ PR, except step 5's stages:
    - **5b. Archive, image and Lua results land in their project, and the
      pending git view moves into `ProjectRuntime`.** Landed in two PR pairs;
      see below.
-   - **5c. Every tab is walked again.** Step 1 (#698) narrowed each loop over
-     "all tabs" to the active project's. These walk every project's tabs again:
-     - the pane drain and the exit sweep;
-     - teardown's shutdown;
-     - the quit-confirm count;
-     - the HUD's tab count;
-     - the agent-status settle walk (only the active project's active tab is
-       focused);
-     - the codex pin scans.
-
-     `git_worker_available` moves to `AppState` (one worker, one flag), so a
-     new project's status walks never run on the UI thread.
+   - **5c. Every tab is walked again**, in two PR pairs. Step 1 (#698)
+     narrowed each loop over "all tabs" to the active project's.
+     - **Pane loops and the git worker flag** landed; see below.
+     - **Agent-status loops:** the scrape-quiet scan and the activity settle
+       (only the active project's active tab is focused, and `codex_recovery`
+       is pruned against every project's tabs), the shell-agent looks, the
+       codex pin scans (one claimed set across projects), and the wiring
+       restart flag.
    - **5d. The switch.** `App::switch_project` does the following:
      - it stashes the leaving project's pager stream and scroll stream, which
        the drain drops today;
@@ -906,6 +902,26 @@ PR, except step 5's stages:
    The pending git view lives on `ProjectRuntime`, and the drain reads only
    the active project's, so a diff opened in one project mounts in that
    project's pager when it is next in view.
+
+   **Landed in 5c (pane loops).** `Runtime::every_tab_set` /
+   `every_tab_set_mut` walk every open project's tabs. Through them:
+   - **The pane drain** stamps, flags and marks exited every project's tabs.
+     Only the project in view asks for a redraw, since nothing on screen shows
+     another project's tabs.
+   - **Teardown** shuts down every project's tabs, and **the quit confirm**
+     counts them.
+   - **The activity monitor's `panes:` cell** counts every project's tabs.
+   - **A terminal resize** resizes each project's tabs to that project's own
+     layout (`in_project`), so a child draws at the size it will be shown at.
+   - **A restored tab's `/resume`** is sent and its deadlines armed in every
+     project, ready for `-r` opening every project (5e).
+
+   The top overlays stay with the project in view: nothing reads them while
+   it is hidden. `git_worker_available` is now one flag on `AppState`, since
+   one worker serves every project's columns; it used to be per column, set
+   only on the first project's `a`, so any other project walked git on the UI
+   thread. The harness's `add_test_project` keeps a project's context file
+   where production does (`process_context_path`).
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

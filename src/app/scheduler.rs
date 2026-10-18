@@ -131,19 +131,22 @@ impl Scheduler {
 }
 
 /// Arm `RestoreSettle`/`ResumeEnter`/`ResumeVerify` at the earliest
-/// pending resume across all tabs, or disarm when none is pending. The
+/// pending resume across every tab in `tab_sets`, or disarm when none is pending. The
 /// absolute fire instants already live per-tab in `pending_resume_send`;
 /// the scheduler only needs the min so the wait can wake for it (the
 /// floor dominates when a pane is present, so this is byte-identical on
 /// the real restore path — it only tightens the no-pane edge).
 /// Re-scanned every iteration since `Text → Enter → Verify` transitions
 /// change which is pending.
-pub fn arm_resume_deadlines(scheduler: &mut Scheduler, tabs: Option<&PaneTabs>) {
+pub fn arm_resume_deadlines<'a>(
+    scheduler: &mut Scheduler,
+    tab_sets: impl IntoIterator<Item = &'a PaneTabs>,
+) {
     use crate::pane::tabs::PendingResumeSend;
     let mut settle: Option<Instant> = None;
     let mut enter: Option<Instant> = None;
     let mut verify: Option<Instant> = None;
-    if let Some(tabs) = tabs {
+    for tabs in tab_sets {
         for entry in tabs.tabs() {
             match &entry.info.pending_resume_send {
                 Some(PendingResumeSend::Text { after, .. }) => {
