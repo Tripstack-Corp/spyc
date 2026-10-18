@@ -883,7 +883,13 @@ driving tools (`navigate_to`, `pick_files`, `set_filter`, `open_worktree`, the
 worktree jobs) act on that project too: the loop serves each request inside
 `App::in_project` (`app/mcp_routing.rs`), which points every handle at the
 caller's project and leaves the user's process cwd, frecency, harpoon menu and
-flash alone. `get_spyc_context` adds `project` (its id, label, home, and whether
+flash alone. Work an off-thread worker does for a project lands there the same
+way: the worker's result is tagged at the spawn with the project that asked,
+and the drain applies one for another open project through `App::land_in`,
+which runs it in that project and shows the user any flash it raises, named
+for that project (the user started the work, so its end is news). A result
+that would act on the view in front of the user instead (a pipe into the
+active pane) is dropped, and the flash says so. `get_spyc_context` adds `project` (its id, label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,
 `register_scope` and `wait_for_scope_clear` default to that tab instead of the

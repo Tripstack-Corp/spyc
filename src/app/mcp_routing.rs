@@ -41,6 +41,42 @@ impl App {
         out
     }
 
+    /// Apply a worker's result in `origin`, the project that started the work:
+    /// `f` runs as [`Self::in_project`] runs it, and a flash it raises in a
+    /// project the user isn't in is shown to them named for that project —
+    /// the user started the work, so its end is news. Nothing runs, and `None`
+    /// returns, once `origin` has closed.
+    pub(super) fn land_in<R>(
+        &mut self,
+        origin: ProjectId,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> Option<R> {
+        if origin == self.state.active {
+            return Some(f(self));
+        }
+        let label = self.state.project(origin)?.label();
+        let mut raised = None;
+        let out = self.in_project(origin, |app| {
+            let out = f(app);
+            raised = app.state.flash.take();
+            out
+        });
+        if let Some(mut flash) = raised {
+            flash.text = format!("{label}: {}", flash.text);
+            self.state.flash = Some(flash);
+        }
+        Some(out)
+    }
+
+    /// Tell the user a result from `origin` was dropped because it would have
+    /// acted on the project in view; `what` says which (`"pipe dropped"`).
+    pub(super) fn drop_landing(&mut self, origin: ProjectId, what: &str) {
+        if let Some(project) = self.state.project(origin) {
+            let label = project.label();
+            self.state.flash_error(format!("{label}: {what}"));
+        }
+    }
+
     /// The three records of which project is active, moved together.
     const fn set_active(&mut self, id: ProjectId) {
         self.state.active = id;

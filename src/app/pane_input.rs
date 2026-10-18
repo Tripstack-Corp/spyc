@@ -138,15 +138,14 @@ mod tests {
     }
 
     fn apply_pipe(app: &mut App, payload: Vec<u8>) -> Vec<Effect> {
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::PipedContent {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::PipedContent {
                 payload,
                 count: 1,
                 skipped: 0,
-            });
+            },
+        ));
         app.apply_file_outcomes().1
     }
 
@@ -421,7 +420,12 @@ mod tests {
                 panic!("pipe outcome");
             };
             let expected = payload.clone();
-            app.runtime.file_results.lock().unwrap().push(outcome);
+            let origin = app.state.active;
+            app.runtime
+                .file_results
+                .lock()
+                .unwrap()
+                .push((origin, outcome));
             assert!(app.apply_file_outcomes().1.is_empty());
             assert!(!received.exists() || std::fs::metadata(&received).unwrap().len() == 0);
             let effects = app
