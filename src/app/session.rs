@@ -1392,6 +1392,58 @@ mod tests {
         });
     }
 
+    /// Two projects, each homed in its own directory under a temp dir, `a`
+    /// active with a tab.
+    fn two_projects(body: impl FnOnce(&mut App, crate::app::state::ProjectId, &std::path::Path)) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        crate::state::with_state_root(tmp.path(), || {
+            let base = std::fs::canonicalize(tmp.path()).expect("canonical");
+            let (a, b) = (base.join("a"), base.join("b"));
+            std::fs::create_dir_all(&a).expect("a");
+            std::fs::create_dir_all(&b).expect("b");
+            let mut app = App::test_app(a.clone());
+            app.open_pane_tab_in("cat", &a);
+            let b_id = app.add_test_project(&b);
+            body(&mut app, b_id, &b);
+        });
+    }
+
+    /// A tab opening in a project the user isn't in is saved, so the autosave
+    /// has to see it.
+    #[test]
+    #[ignore = "red: #99 step 4 — the fingerprint covers the active project only"]
+    fn a_tab_in_a_background_project_moves_the_autosave_fingerprint() {
+        two_projects(|app, b_id, b| {
+            let before = app.session_fingerprint();
+            app.open_tab_in_project(b_id, b);
+            assert_ne!(app.session_fingerprint(), before);
+        });
+    }
+
+    /// Column `a`'s directory is saved, so moving it is a change to save.
+    #[test]
+    #[ignore = "red: #99 step 4 — column a's directory isn't saved"]
+    fn navigating_column_a_moves_the_autosave_fingerprint() {
+        two_projects(|app, _, b| {
+            let before = app.session_fingerprint();
+            app.state.active_project_mut().left.listing =
+                crate::fs::listing::Listing::empty(b.to_path_buf());
+            assert_ne!(app.session_fingerprint(), before);
+        });
+    }
+
+    /// A project's start directory is saved and restored, so changing it is a
+    /// change to save.
+    #[test]
+    #[ignore = "red: #99 step 4 — the start directory isn't saved"]
+    fn a_new_start_dir_moves_the_autosave_fingerprint() {
+        two_projects(|app, _, b| {
+            let before = app.session_fingerprint();
+            app.state.active_project_mut().start_dir = b.to_path_buf();
+            assert_ne!(app.session_fingerprint(), before);
+        });
+    }
+
     #[test]
     fn autosave_idle_when_not_dirty() {
         let now = Instant::now();
