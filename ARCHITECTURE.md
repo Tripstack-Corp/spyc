@@ -889,7 +889,10 @@ and the drain applies one for another open project through `App::land_in`,
 which runs it in that project and shows the user any flash it raises, named
 for that project (the user started the work, so its end is news). A result
 that would act on the view in front of the user instead (a pipe into the
-active pane) is dropped, and the flash says so. `get_spyc_context` adds `project` (its id, label, home, and whether
+active pane, an image for the full-screen overlay, a Lua script's requests) is
+dropped, and the flash says so. A git view still being built is held on its
+project's `ProjectRuntime` instead, and mounts in that project's pager when it
+is next in view. `get_spyc_context` adds `project` (its id, label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,
 `register_scope` and `wait_for_scope_clear` default to that tab instead of the

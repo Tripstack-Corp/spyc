@@ -206,11 +206,15 @@ impl App {
     /// Submit `job` to the worker, flashing on a send error (worker gone). On a
     /// successful submit, record `lua_inflight` (the `name` is the runaway
     /// modal's display label) so the watchdog can raise the "keep waiting?"
-    /// prompt if the job runs past `LUA_RUNAWAY_SOFT`.
+    /// prompt if the job runs past `LUA_RUNAWAY_SOFT`. With nothing in flight,
+    /// also record the project it was started in (`lua_origin`).
     pub(super) fn submit_lua_job(&mut self, name: String, job: LuaJob) {
         if let Some(worker) = self.runtime.lua.as_ref() {
             match worker.submit(job) {
                 Ok(()) => {
+                    if self.runtime.lua_inflight.is_none() {
+                        self.runtime.lua_origin = self.state.active;
+                    }
                     self.runtime.lua_inflight = Some(LuaInflight {
                         name,
                         started_at: Instant::now(),
@@ -226,6 +230,11 @@ impl App {
     /// mirroring `apply_file_outcomes`: an error flashes; a failed/aborted run
     /// applied nothing; a successful run's requests translate to effects/actions
     /// and its registrations (from a `Load`/`Reload`) install live bindings.
+    ///
+    /// A run started in a project the user has since left
+    /// (`runtime.lua_origin`) has its error named for that project, and its
+    /// requests are dropped and said so: they would act on the view in front
+    /// of the user. Its registrations still install.
     pub(super) fn handle_lua_done(&mut self) -> (bool, Vec<Effect>) {
         let Some(worker) = self.runtime.lua.as_ref() else {
             return (false, Vec::new());
@@ -253,22 +262,35 @@ impl App {
         // `spyc.on` registrations are now installed, so `startup` may fire.
         let fire_startup = self.runtime.lua_events.startup_pending;
         self.runtime.lua_events.startup_pending = false;
+        let origin = self.runtime.lua_origin;
+        let here = origin == self.state.active;
         let mut effects = Vec::new();
         let mut applied_a_request = false;
+        let mut dropped = false;
         for outcome in outcomes {
             if let Some(err) = outcome.error {
                 if !user_aborted {
-                    self.state.flash_error(err);
+                    self.land_in(origin, |app| app.state.flash_error(err));
                 }
                 continue;
             }
             for Registration { kind, fn_id } in outcome.registrations {
                 self.apply_lua_registration(kind, fn_id);
             }
+            if !here {
+                dropped |= !outcome.requests.is_empty();
+                continue;
+            }
             for req in outcome.requests {
                 applied_a_request = true;
                 effects.extend(self.apply_lua_request(req));
             }
+        }
+        if dropped {
+            self.drop_landing(
+                origin,
+                "lua: what the script asked for was dropped; run it again there",
+            );
         }
         // Re-entrancy guard: a request applied this iteration may have changed
         // the focused cwd / PROJECT_HOME (a handler that navigated). Mark it so

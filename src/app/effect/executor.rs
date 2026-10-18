@@ -274,88 +274,34 @@ impl App {
                 // shape as Graveyard. A streamed mount can run for seconds, so
                 // it also gets the shared cancel flag (`Esc` sets it).
                 Effect::Archive(op) => self.spawn_archive_op(op),
-                // Render the mermaid diagram + open it externally on a detached
-                // worker (same shape as Graveyard); the outcome lands in
-                // `image_results` and `apply_image_outcomes` installs/flashes it.
+                // Every image producer runs on a detached worker (same shape as
+                // Graveyard); its outcome lands in `image_results`, tagged with
+                // this project, and `apply_image_outcomes` installs/flashes it.
+                // Render the mermaid diagram + open it externally.
                 Effect::RenderMermaid(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.image_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    // The picker (graphics-protocol capability, detected once at
-                    // startup) lives in Runtime; inject it so the View mode can
-                    // build a Protocol off-thread. `None` ⇒ no graphics protocol.
-                    let picker = self.runtime.picker.clone();
-                    std::thread::spawn(move || {
-                        let outcome = mermaid_ops::render_mermaid_op(op, picker);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Image));
-                        }
-                    });
+                    self.spawn_image_work(move |picker| mermaid_ops::render_mermaid_op(op, picker));
                 }
                 // Build an overlay from bytes already in hand.
                 Effect::ShowImageBytes(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.image_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    let picker = self.runtime.picker.clone();
-                    std::thread::spawn(move || {
-                        let outcome = image_ops::show_image_bytes(op, picker);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Image));
-                        }
-                    });
+                    self.spawn_image_work(move |picker| image_ops::show_image_bytes(op, picker));
                 }
-                // Grab the clipboard image off-thread as the user pastes.
+                // Grab the clipboard image as the user pastes.
                 Effect::CaptureClipboardImage(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.image_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    std::thread::spawn(move || {
-                        let outcome = image_ops::capture_clipboard_image(op);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Image));
-                        }
-                    });
+                    self.spawn_image_work(move |_| image_ops::capture_clipboard_image(op));
                 }
-                // Index an agent transcript's images off-thread; same slot and
-                // wake as every other image producer.
+                // Index an agent transcript's images.
                 Effect::IndexTranscriptImages(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.image_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    std::thread::spawn(move || {
-                        let outcome = image_ops::index_transcript(op);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Image));
-                        }
-                    });
+                    self.spawn_image_work(move |_| image_ops::index_transcript(op));
                 }
-                // Re-read + decode one indexed transcript image off-thread.
+                // Re-read + decode one indexed transcript image.
                 Effect::OpenTranscriptImage(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.image_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    let picker = self.runtime.picker.clone();
-                    std::thread::spawn(move || {
-                        let outcome = image_ops::open_transcript_image(op, picker);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Image));
-                        }
+                    self.spawn_image_work(move |picker| {
+                        image_ops::open_transcript_image(op, picker)
                     });
                 }
-                // Read + decode an image file off-thread; same slot and wake as
-                // the mermaid render above.
+                // Read + decode an image file.
                 Effect::OpenImage(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.image_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    let picker = self.runtime.picker.clone();
-                    std::thread::spawn(move || {
-                        let outcome = image_ops::open_image_file(op, picker);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Image));
-                        }
-                    });
+                    self.spawn_image_work(move |picker| image_ops::open_image_file(op, picker));
                 }
                 // The single spawn site lives in `file_ops` (shared with the gF
                 // executor open); this arm just hands it the op.

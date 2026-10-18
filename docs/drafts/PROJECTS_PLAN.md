@@ -798,11 +798,8 @@ PR, except step 5's stages:
    own projects (`add_test_project`, `make_active`).
    - **5a. File-op results land in their project.** Landed; see below.
    - **5b. Archive, image and Lua results land in their project, and the
-     pending git view moves into `ProjectRuntime`**, in two PR pairs.
-     - **Archives** landed; see below.
-     - A captured image is routed to the project holding its tab.
-     - A viewed image is dropped, since the viewer is global modal UI.
-     - A Lua request from a project the user has left is dropped with a flash.
+     pending git view moves into `ProjectRuntime`.** Landed in two PR pairs;
+     see below.
    - **5c. Every tab is walked again.** Step 1 (#698) narrowed each loop over
      "all tabs" to the active project's. These walk every project's tabs again:
      - the pane drain and the exit sweep;
@@ -883,6 +880,32 @@ PR, except step 5's stages:
    5e has to decide what happens to a project's in-flight archive work when
    the project closes. A `Written` outcome for a closed project is dropped
    today, which leaves its mount's journal pending.
+
+   **Landed in 5b (images, Lua, git views).** `spawn_image_work`, the image
+   worker's one spawn site, tags each outcome the same way. For another open
+   project:
+   - **A decoded image** is dropped and said so. The overlay covers the screen
+     and its verbs act on the project in view.
+   - **A captured paste** is kept for its tab in that project. It used to be
+     kept only for a tab in the active project, and lost otherwise.
+   - **A gallery index** reaches the gallery that asked for it, which matches
+     it by tab.
+   - **A message** (an open in the external viewer, a failure) reaches the
+     user named for the project, never that project's pager, which they can't
+     see.
+
+   A Lua run records the project it was started in (`runtime.lua_origin`).
+   Only a submit with nothing in flight sets it: a key or an event is refused
+   while a script runs, and an `init.lua` reload queued behind one must not
+   claim that script's requests. The record outlives the first outcome of an
+   event's run of handlers, which `lua_inflight` does not. A finished run from
+   a project the user has left has its requests dropped and said so, and its
+   error named for that project. Its registrations still install; 5e replays
+   `@map:` entries into each project's keymap.
+
+   The pending git view lives on `ProjectRuntime`, and the drain reads only
+   the active project's, so a diff opened in one project mounts in that
+   project's pager when it is next in view.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

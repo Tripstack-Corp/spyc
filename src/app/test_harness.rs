@@ -107,11 +107,16 @@ impl App {
             .push((origin, outcome));
     }
 
-    /// File an image worker's outcome as `run_effects`' image workers do, for
-    /// the drain (`apply_image_outcomes`) to apply. Tests run the worker inline
-    /// and hand its outcome here.
+    /// File an image worker's outcome as `spawn_image_work` does, tagged with
+    /// the active project, for the drain (`apply_image_outcomes`) to apply.
+    /// Tests run the worker inline and hand its outcome here.
     pub(crate) fn file_image_outcome(&self, outcome: super::image_ops::ImageOutcome) {
-        self.runtime.image_results.lock().unwrap().push(outcome);
+        let origin = self.state.active;
+        self.runtime
+            .image_results
+            .lock()
+            .unwrap()
+            .push((origin, outcome));
     }
 
     /// Ready project `id` for MCP: `home` is its home, its column lists `home`
