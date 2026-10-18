@@ -109,7 +109,9 @@ fn a_pane_forwards_the_projection_to_its_spyc() {
         reader.read_exact(&mut body).unwrap();
         let reply = r#"{"jsonrpc":"2.0","id":1,"result":{}}"#;
         let mut writer = stream;
-        write!(writer, "Content-Length: {}\r\n\r\n{reply}", reply.len()).unwrap();
+        // The forwarder stops waiting at its timeout, and a loaded runner
+        // can get here later than that: the reply is not what's under test.
+        let _ = write!(writer, "Content-Length: {}\r\n\r\n{reply}", reply.len());
         String::from_utf8(body).unwrap()
     });
     let (out, code) = run(
