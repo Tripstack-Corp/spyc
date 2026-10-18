@@ -1693,7 +1693,6 @@ dir = "#aabbcc"
     /// one: a project rc's would run the repo's command on a keypress. It is
     /// dropped and the warning says why; the rest of `[clipboard]` loads.
     #[test]
-    #[ignore = "red: a project rc's [clipboard] command merges like a cosmetic setting"]
     fn the_clipboard_command_comes_only_from_home() {
         let tmp = tempdir().unwrap();
         let home = tmp.path().join("home.toml");
