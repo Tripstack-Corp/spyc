@@ -770,8 +770,10 @@ template suitable for `>` redirect.
 The project file is **untrusted** (spyc is routinely pointed at
 hostile content): its cosmetic/behavioural settings and plain
 rebindings are honoured, but *executing* keymap bindings (`unix`
-shell commands, `jump`) are dropped — those take effect only from
-`~/.spycrc.toml`. `[pane]` startup tabs spawn their commands at launch
+shell commands, `jump`), `[prompts]` and the `[clipboard] command` a
+yank runs are dropped — those take effect only from `~/.spycrc.toml`.
+Started in `$HOME`, the project file is the user file, read once and
+trusted. `[pane]` startup tabs spawn their commands at launch
 with no keypress, so a project file's list is held apart
 (`pane.project_tabs`) and opens only after the user approves that exact
 list (`state::tab_consent`, `app::startup_tabs`); an edited list asks
