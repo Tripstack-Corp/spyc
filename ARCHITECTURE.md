@@ -893,9 +893,10 @@ active pane, an image for the full-screen overlay, a Lua script's requests) is
 dropped, and the flash says so. A git view still being built is held on its
 project's `ProjectRuntime` instead, and mounts in that project's pager when it
 is next in view. What spyc does for its tabs in the background (draining
-output, marking exits, resizing, sending a restored tab's `/resume`, shutting
-down at quit) it does for every project's tabs (`Runtime::every_tab_set`),
-and only the project in view asks for a redraw. `get_spyc_context` adds `project` (its id, label, home, and whether
+output, marking exits, resizing, sending a restored tab's `/resume`, settling
+agent status and notifying, pinning codex sessions, shutting down at quit) it
+does for every project's tabs (`Runtime::every_tab_set`). Only the project in
+view asks for a redraw, and only its active tab can be the focused one. `get_spyc_context` adds `project` (its id, label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,
 `register_scope` and `wait_for_scope_clear` default to that tab instead of the

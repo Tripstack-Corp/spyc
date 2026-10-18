@@ -66,20 +66,21 @@ fn forget_agent(info: &mut TabInfo) {
 }
 
 impl App {
-    /// Look at every shell tab whose look is due, and apply what changed.
-    /// Armed only while a look is pending, so an idle spyc does no work.
-    /// `&mut` settle step, PRE-recv. Returns whether any tab changed.
+    /// Look at every shell tab whose look is due, in every project, and apply
+    /// what changed in that tab's project. Armed only while a look is pending,
+    /// so an idle spyc does no work. `&mut` settle step, PRE-recv. Returns
+    /// whether any tab changed.
     pub(crate) fn settle_shell_agents(&mut self, now: Instant, ctx: &mut RunCtx) -> bool {
         let mut changes = Vec::new();
         let mut next: Option<Instant> = None;
-        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
+        for (project, tabs) in self.runtime.every_tab_set_mut() {
             for (idx, entry) in tabs.tabs_mut().iter_mut().enumerate() {
                 match entry.info.fg_check_due {
                     Some(due) if due <= now => {
                         entry.info.fg_check_due = None;
                         entry.info.fg_checked_at = Some(now);
                         let (seen, alive) = look(&entry.pane, entry.info.running);
-                        changes.push((idx, transition(entry.info.running, seen, alive)));
+                        changes.push((project, idx, transition(entry.info.running, seen, alive)));
                     }
                     Some(due) => next = Some(next.map_or(due, |n| n.min(due))),
                     None => {}
@@ -91,8 +92,10 @@ impl App {
             None => ctx.scheduler.disarm(Deadline::ShellAgentLook),
         }
         let mut changed = false;
-        for (idx, change) in changes {
-            changed |= self.apply_shell_agent_change(idx, change);
+        for (project, idx, change) in changes {
+            changed |= self
+                .land_in(project, |app| app.apply_shell_agent_change(idx, change))
+                .unwrap_or(false);
         }
         changed
     }

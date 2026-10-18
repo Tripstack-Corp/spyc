@@ -236,21 +236,25 @@ impl App {
         } else {
             self.state.flash_info(text);
         }
+        // The tab restarts in its own project, which need not be the one in
+        // view by the time the install lands.
         if let WiringOp::Install {
             restart: Some(tab_id),
         } = outcome.op
+            && let Some(project) = self.runtime.project_of_pane(&tab_id)
         {
-            self.restart_claude_tab(&tab_id);
+            self.land_in(project, |app| app.restart_claude_tab(&tab_id));
         }
     }
 
-    /// Mark `kind`'s tabs as needing a restart: they read their hooks at
-    /// startup, before this change.
+    /// Mark `kind`'s tabs, in every project, as needing a restart: they read
+    /// their hooks at startup, before this change.
     fn flag_wiring_restart(&mut self, kind: AgentKind) {
-        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
-            return;
-        };
-        for entry in tabs.tabs_mut() {
+        let entries = self
+            .runtime
+            .every_tab_set_mut()
+            .flat_map(|(_, tabs)| tabs.tabs_mut().iter_mut());
+        for entry in entries {
             if entry.info.agent().kind() == kind {
                 entry.info.status_hooks_restart_needed = true;
             }
@@ -619,6 +623,84 @@ mod tests {
                     .contains(SHELL_TAB_RESTART),
                 "a closed tab's restart reached the tab that took its place: {:?}",
                 app.flash_text()
+            );
+        });
+    }
+
+    /// A second project, `yproj` under `root`, made the one the user is in.
+    fn move_to_another_project(app: &mut App, root: &Path) {
+        let home = root.join("yproj");
+        std::fs::create_dir_all(&home).unwrap();
+        let other = app.add_test_project(&home);
+        app.make_active(other);
+    }
+
+    /// `:hooks on!` typed in one project restarts the claude tab it was typed
+    /// in, though the install lands after the user moved to another project.
+    #[test]
+    fn a_restart_reaches_its_tab_in_another_project() {
+        with_app(|app, root| {
+            two_claude_tabs(app, root);
+            app.hooks_command("on! claude");
+            move_to_another_project(app, root);
+            app.state.flash = None;
+            app.apply_wiring_outcomes();
+            assert!(
+                app.flash_text()
+                    .unwrap_or_default()
+                    .contains(SHELL_TAB_RESTART),
+                "the restart never reached the tab: {:?}",
+                app.flash_text()
+            );
+        });
+    }
+
+    /// A codex tab (`cat` under codex's name) in the active project.
+    fn codex_tab(app: &mut App, dir: &Path) {
+        let wake = app.make_pane_wake();
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
+        let entry = crate::pane::TabEntry::new(pane, crate::pane::TabInfo::new("codex", dir));
+        app.runtime.project_mut().pane_tabs = Some(crate::pane::PaneTabs::new(entry));
+    }
+
+    /// The control: wiring codex, which reads its hooks only at startup, flags
+    /// its tab for a restart.
+    #[test]
+    fn wiring_flags_a_tab_for_restart() {
+        with_app(|app, root| {
+            codex_tab(app, root);
+            app.start_wiring(AgentKind::Codex, WiringOp::Install { restart: None });
+            app.apply_wiring_outcomes();
+            let tabs = app.runtime.project().pane_tabs.as_ref().expect("the tab");
+            assert!(tabs.tabs()[0].info.status_hooks_restart_needed);
+        });
+    }
+
+    /// Wiring an agent that reads its hooks only at startup flags its tabs in
+    /// every project for a restart, not only the project in view.
+    #[test]
+    fn wiring_flags_a_tab_in_another_project_for_restart() {
+        with_app(|app, root| {
+            let first = app.state.active;
+            codex_tab(app, root);
+            move_to_another_project(app, root);
+            app.start_wiring(AgentKind::Codex, WiringOp::Install { restart: None });
+            app.apply_wiring_outcomes();
+            let flagged = app.as_project(first, |app| {
+                app.runtime
+                    .project()
+                    .pane_tabs
+                    .as_ref()
+                    .expect("the tab")
+                    .tabs()[0]
+                    .info
+                    .status_hooks_restart_needed
+            });
+            assert!(
+                flagged,
+                "the codex tab in the first project was never flagged"
             );
         });
     }
