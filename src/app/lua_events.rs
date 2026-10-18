@@ -363,6 +363,42 @@ mod tests {
         });
     }
 
+    /// A switch to another project changes the directory and PROJECT_HOME in
+    /// one settle, and a handler for each runs.
+    #[test]
+    #[ignore = "red: the second event is dropped as busy once the worker has picked up the first one's job"]
+    fn a_switch_fires_dir_changed_and_project_changed() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let (x_home, y_home) = (tmp.path().join("x"), tmp.path().join("y"));
+            std::fs::create_dir(&x_home).unwrap();
+            std::fs::create_dir(&y_home).unwrap();
+            let mut app = App::test_app(x_home.clone());
+            let x = app.state.active;
+            app.ready_test_project(x, &x_home);
+            let y = app.add_test_project(&y_home);
+            let rx = attach_lua_worker(&mut app);
+            let _cfg = load_init(
+                &mut app,
+                &rx,
+                "local seen = ''\n\
+                 spyc.on('dir_changed', function() seen = seen .. 'dir;' spyc.notify(seen) end)\n\
+                 spyc.on('project_changed', function() seen = seen .. 'project;' spyc.notify(seen) end)",
+            );
+            app.settle_lua_events();
+            app.switch_project(y);
+            app.state.flash = None;
+            app.settle_lua_events();
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while app.flash_text() != Some("dir;project;") && std::time::Instant::now() < deadline {
+                if rx.recv_timeout(Duration::from_millis(100)).is_ok() {
+                    let _ = app.handle_lua_done();
+                }
+            }
+            assert_eq!(app.flash_text(), Some("dir;project;"));
+        });
+    }
+
     /// Re-entrancy: an `on("dir_changed")` handler whose OWN request changes the
     /// cwd must not infinite-loop. The `applying_requests` guard makes
     /// `settle_lua_events` re-baseline (not re-fire) a Lua-caused change, so the

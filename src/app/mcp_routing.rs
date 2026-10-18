@@ -78,7 +78,7 @@ impl App {
     }
 
     /// The three records of which project is active, moved together.
-    const fn set_active(&mut self, id: ProjectId) {
+    pub(super) const fn set_active(&mut self, id: ProjectId) {
         self.state.active = id;
         self.runtime.active = id;
         self.view.active = id;
