@@ -168,7 +168,6 @@ fn a_stream_in_the_project_in_view_fills_its_pager() {
 /// A `:grep` still running when the user leaves fills its pager while
 /// they are away, or on their return; it is never cut off.
 #[test]
-#[ignore = "red: the stream drain reads the project in view's pager, finds no pager for X's stream there, and drops it"]
 fn a_stream_left_running_in_x_fills_its_pager_on_return() {
     with_two(|t| {
         let app = &mut t.app;
@@ -187,7 +186,6 @@ fn a_stream_left_running_in_x_fills_its_pager_on_return() {
 /// The same for the lower pane's transcript read, which streams on a slot of
 /// its own.
 #[test]
-#[ignore = "red: the stream drain reads the project in view's scroll pager, finds no pager for X's transcript there, and drops it"]
 fn a_transcript_left_loading_in_x_fills_its_pager_on_return() {
     with_two(|t| {
         let app = &mut t.app;
@@ -207,7 +205,6 @@ fn a_transcript_left_loading_in_x_fills_its_pager_on_return() {
 /// A transcript parked on a tab of Y's (the user switched tabs while it
 /// loaded) belongs to that tab: closing a tab in X leaves it alone.
 #[test]
-#[ignore = "red: a tab closing prunes parked streams against the tabs of the project in view, which hold none of Y's"]
 fn a_transcript_parked_in_y_survives_a_tab_closing_in_x() {
     with_two(|t| {
         let app = &mut t.app;
@@ -242,7 +239,6 @@ fn relisted(app: &mut App, side: Side, name: &str) -> bool {
 
 /// A file made in X while the user was in Y is listed when they come back.
 #[test]
-#[ignore = "red: a switch re-reads nothing, and no watcher looked at X while the user was in Y"]
 fn a_file_made_in_x_while_away_is_listed_on_return() {
     with_two(|t| {
         let app = &mut t.app;
@@ -255,7 +251,6 @@ fn a_file_made_in_x_while_away_is_listed_on_return() {
 
 /// Both of X's columns are re-read, not only the focused one.
 #[test]
-#[ignore = "red: a switch re-reads nothing, and no watcher looked at X while the user was in Y"]
 fn both_of_xs_columns_are_reread_on_return() {
     with_two(|t| {
         let app = &mut t.app;
@@ -275,7 +270,6 @@ fn both_of_xs_columns_are_reread_on_return() {
 /// made when they came back: it was read first, so it misses what changed
 /// since.
 #[test]
-#[ignore = "red: a switch re-reads nothing, so X's older read installs"]
 fn a_listing_read_before_the_trip_never_replaces_the_one_after() {
     with_two(|t| {
         let app = &mut t.app;
@@ -299,11 +293,53 @@ fn a_listing_read_before_the_trip_never_replaces_the_one_after() {
     });
 }
 
+/// The switch's read still lands once the column's rows were rebuilt for
+/// something else, as a git result landing first rebuilds them.
+#[test]
+fn the_switchs_read_lands_after_an_unrelated_row_rebuild() {
+    with_two(|t| {
+        let app = &mut t.app;
+        app.switch_project(t.y);
+        std::fs::write(t.x_home.join("fresh.txt"), "x").unwrap();
+        app.switch_project(t.x);
+        app.state.rebuild_rows_for(Side::Left);
+        assert!(relisted(app, Side::Left, "fresh.txt"));
+    });
+}
+
+/// A column moved right after the switch keeps where it went: the switch's
+/// read of where it was lands later, and is dropped.
+#[test]
+fn a_column_moved_after_the_switch_is_not_put_back_by_its_read() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let (sub, other) = (t.x_home.join("sub"), t.x_home.join("other"));
+        for d in [&sub, &other] {
+            std::fs::create_dir(d).unwrap();
+        }
+        std::fs::write(other.join("there.txt"), "x").unwrap();
+        // `b` keeps the keyboard, so moving `a` leaves the process cwd alone.
+        app.open_second_commander_at(&sub);
+        app.switch_project(t.y);
+        std::fs::write(sub.join("right.txt"), "x").unwrap();
+        app.switch_project(t.x);
+        assert_eq!(app.state.focused_side(), Side::Right);
+        app.state.chdir_side(Side::Left, &other).unwrap();
+        // `b`'s read and `a`'s land together.
+        assert!(
+            relisted(app, Side::Right, "right.txt"),
+            "the switch's reads never landed"
+        );
+        let left = &app.state.col(Side::Left).listing;
+        assert_eq!(left.dir, other, "the switch's read put `a` back");
+        assert!(left.entries.iter().any(|e| e.name == "there.txt"));
+    });
+}
+
 /// An edit made in X's tree while the user was away shows in its git markers
 /// when they come back, though it moved neither `.git/index` nor `HEAD`, the
 /// two files the poll's mtime key watches.
 #[test]
-#[ignore = "red: a switch re-walks nothing, and the poll skips X's walk on its unchanged mtime key"]
 fn an_edit_in_x_while_away_shows_in_its_git_markers_on_return() {
     with_two(|t| {
         let app = &mut t.app;
@@ -334,7 +370,6 @@ fn an_edit_in_x_while_away_shows_in_its_git_markers_on_return() {
 /// A file X previews in its split was saved while the user was away: the
 /// preview shows what is on disk when they come back.
 #[test]
-#[ignore = "red: a switch reloads no preview, and no watcher looked at X's previewed file while the user was in Y"]
 fn xs_preview_shows_a_save_made_while_away() {
     with_two(|t| {
         let app = &mut t.app;
@@ -363,7 +398,6 @@ fn xs_preview_shows_a_save_made_while_away() {
 /// `.spycrc.toml`), and the user's colours-off toggle is theirs across a
 /// switch.
 #[test]
-#[ignore = "red: a switch leaves the theme the project left behind built"]
 fn the_arriving_projects_colours_are_in_force() {
     with_two(|t| {
         let app = &mut t.app;
@@ -388,7 +422,6 @@ fn the_arriving_projects_colours_are_in_force() {
 /// A terminal-scrollback snapshot armed in X is abandoned by a switch, as it
 /// is by a tab switch, never taken of Y's tab.
 #[test]
-#[ignore = "red: the armed snapshot names a tab index, and Y's active tab has the same one"]
 fn a_scrollback_snapshot_armed_in_x_is_never_taken_of_ys_tab() {
     with_two(|t| {
         let app = &mut t.app;
@@ -407,7 +440,6 @@ fn a_scrollback_snapshot_armed_in_x_is_never_taken_of_ys_tab() {
 /// What X's agents read about it, its context file, is where the user left
 /// it, though they switched away before the write's typing-burst wait ran out.
 #[test]
-#[ignore = "red: only the project in view's context file is written, so X's keeps the cursor it had before the user moved"]
 fn xs_context_file_holds_where_the_user_left_it() {
     with_two(|t| {
         let app = &mut t.app;
@@ -436,7 +468,6 @@ fn xs_context_file_holds_where_the_user_left_it() {
 /// A terminal resize while the user was away lays X's help out again for
 /// the new width, as it does the project in view's.
 #[test]
-#[ignore = "red: a resize lays out the project in view's pagers and overlay only"]
 fn a_resize_while_away_lays_xs_help_out_again() {
     with_two(|t| {
         let app = &mut t.app;

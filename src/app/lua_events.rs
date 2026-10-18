@@ -94,11 +94,21 @@ impl App {
     /// No user-facing flash — events are automatic, so an event that can't fire
     /// (busy) is silent, never a "lua busy" line.
     pub(super) fn fire_lua_event(&mut self, event: &str, payload: serde_json::Value) {
-        let fn_ids = match self.runtime.lua_registry.events.get(event) {
-            Some(ids) if !ids.is_empty() => ids.clone(),
-            _ => return,
-        };
-        if !self.ensure_lua_worker() {
+        self.fire_lua_events(vec![(event, payload)]);
+    }
+
+    /// Fire each of `events` as [`Self::fire_lua_event`] does, behind one busy
+    /// check made before any job is submitted: the worker starts a submitted
+    /// job at once, so a check after it would drop the events behind it.
+    fn fire_lua_events(&mut self, events: Vec<(&str, serde_json::Value)>) {
+        let handled: Vec<_> = events
+            .into_iter()
+            .filter_map(|(event, payload)| {
+                let fn_ids = self.runtime.lua_registry.events.get(event)?;
+                (!fn_ids.is_empty()).then(|| (event, fn_ids.clone(), payload))
+            })
+            .collect();
+        if handled.is_empty() || !self.ensure_lua_worker() {
             return;
         }
         // Skip (drop) rather than queue when a script is running: bounds runaway
@@ -109,15 +119,17 @@ impl App {
         let snapshot = self.snapshot_context();
         // One job per handler. Serial worker → they run back-to-back; each
         // finished run drains through `handle_lua_done` like any trigger.
-        for fn_id in fn_ids {
-            self.submit_lua_job(
-                format!("on:{event}"),
-                LuaJob::RunRegistered {
-                    fn_id,
-                    snapshot: snapshot.clone(),
-                    event: Some(payload.clone()),
-                },
-            );
+        for (event, fn_ids, payload) in handled {
+            for fn_id in fn_ids {
+                self.submit_lua_job(
+                    format!("on:{event}"),
+                    LuaJob::RunRegistered {
+                        fn_id,
+                        snapshot: snapshot.clone(),
+                        event: Some(payload.clone()),
+                    },
+                );
+            }
         }
     }
 
@@ -158,25 +170,28 @@ impl App {
             return;
         }
 
+        // A switch to another project changes both at once, and both fire.
+        let mut events = Vec::new();
         if self.runtime.lua_events.last_cwd.as_deref() != Some(cwd.as_path()) {
             self.runtime.lua_events.last_cwd = Some(cwd.clone());
             if !suppress {
-                self.fire_lua_event(
+                events.push((
                     EV_DIR_CHANGED,
                     serde_json::json!({ "cwd": cwd.to_string_lossy() }),
-                );
+                ));
             }
         }
         if self.runtime.lua_events.last_project_home != project {
             self.runtime.lua_events.last_project_home = project.clone();
             if !suppress {
                 let home = project.map(|p| p.to_string_lossy().into_owned());
-                self.fire_lua_event(
+                events.push((
                     EV_PROJECT_CHANGED,
                     serde_json::json!({ "project_home": home }),
-                );
+                ));
             }
         }
+        self.fire_lua_events(events);
     }
 
     /// Whether any `spyc.on('agent_status', …)` handler is registered — the
@@ -364,9 +379,10 @@ mod tests {
     }
 
     /// A switch to another project changes the directory and PROJECT_HOME in
-    /// one settle, and a handler for each runs.
+    /// one settle, and a handler for each runs. A busy check per event raced
+    /// the worker starting the first job, so a return to one fails this only
+    /// some of the time.
     #[test]
-    #[ignore = "red: the second event is dropped as busy once the worker has picked up the first one's job"]
     fn a_switch_fires_dir_changed_and_project_changed() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {

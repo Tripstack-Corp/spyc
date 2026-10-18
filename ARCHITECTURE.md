@@ -892,11 +892,19 @@ that would act on the view in front of the user instead (a pipe into the
 active pane, an image for the full-screen overlay, a Lua script's requests) is
 dropped, and the flash says so. A git view still being built is held on its
 project's `ProjectRuntime` instead, and mounts in that project's pager when it
-is next in view. What spyc does for its tabs in the background (draining
-output, marking exits, resizing, sending a restored tab's `/resume`, settling
-agent status and notifying, pinning codex sessions, shutting down at quit) it
-does for every project's tabs (`Runtime::every_tab_set`). Only the project in
-view asks for a redraw, and only its active tab can be the focused one. `get_spyc_context` adds `project` (its id, label, home, and whether
+is next in view; a project's pager streams are held there too, so a `:grep` or
+transcript left running fills its pager on the user's return. What spyc does
+for its tabs in the background (draining output, marking exits, resizing,
+sending a restored tab's `/resume`, settling agent status and notifying,
+pinning codex sessions, shutting down at quit) it does for every project's
+tabs (`Runtime::every_tab_set`), and a resize lays out every project's
+overlay and width-baked pagers too. Only the project in view asks for a
+redraw, and only its active tab can be the focused one. Neither the watcher
+nor the git poll looks at a project out of view, so a switch
+(`App::switch_project`) re-reads (on a worker) and re-walks every column of
+the arriving project and reloads its preview, and writes the departing
+project's context file if it is behind. `get_spyc_context` adds `project` (its id,
+label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,
 `register_scope` and `wait_for_scope_clear` default to that tab instead of the

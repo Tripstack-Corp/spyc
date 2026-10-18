@@ -171,12 +171,16 @@ impl App {
         if let Some(id) = view.stream_id
             && self
                 .runtime
+                .project()
                 .scroll_stream
                 .as_ref()
                 .is_some_and(|s| s.id() == id)
-            && let Some(stream) = self.runtime.scroll_stream.take()
+            && let Some(stream) = self.runtime.project_mut().scroll_stream.take()
         {
-            self.runtime.stashed_pager_streams.insert(id, stream);
+            self.runtime
+                .project_mut()
+                .stashed_pager_streams
+                .insert(id, stream);
         }
         if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
             tabs.active_entry_mut().stashed_scrollback_pager = Some(view);
@@ -202,9 +206,9 @@ impl App {
         // resumes draining (`tabs` borrow ends at the `take` above). Scroll
         // pagers always use `scroll_stream`.
         if let Some(id) = view.stream_id
-            && let Some(stream) = self.runtime.stashed_pager_streams.remove(&id)
+            && let Some(stream) = self.runtime.project_mut().stashed_pager_streams.remove(&id)
         {
-            self.runtime.scroll_stream = Some(stream);
+            self.runtime.project_mut().scroll_stream = Some(stream);
         }
         self.view.project_mut().scroll_pager = Some(view);
     }
@@ -230,8 +234,8 @@ impl App {
     }
 
     /// Drop parked pager streams whose owning tab no longer exists. A scrollback
-    /// pager's backing stream is parked in `runtime.stashed_pager_streams` (keyed
-    /// by id) while its tab is off-screen — see
+    /// pager's backing stream is parked in its project's `stashed_pager_streams`
+    /// (keyed by id) while its tab is off-screen — see
     /// [`stash_scrollback_pager_to_active_tab`](Self::stash_scrollback_pager_to_active_tab) —
     /// and [`restore_active_tab_scrollback_pager`](Self::restore_active_tab_scrollback_pager)
     /// is the *only* other drain. So a tab dropped while stashed — closed
@@ -242,11 +246,11 @@ impl App {
     /// call from any removal site sweeps every now-orphaned stream, so a future
     /// removal path is covered as long as it (or a later call) reaches here.
     pub fn prune_orphaned_pager_streams(&mut self) {
-        if self.runtime.stashed_pager_streams.is_empty() {
+        if self.runtime.project().stashed_pager_streams.is_empty() {
             return; // common case: nothing parked — skip the tab walk
         }
         let live = self.live_stashed_stream_ids();
-        retain_live_streams(&mut self.runtime.stashed_pager_streams, &live);
+        retain_live_streams(&mut self.runtime.project_mut().stashed_pager_streams, &live);
     }
 
     /// Inputs to the `^a v` source decision for the active tab.
@@ -781,11 +785,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
-            app.runtime.stashed_pager_streams = parked(&[1, 2]);
+            app.runtime.project_mut().stashed_pager_streams = parked(&[1, 2]);
             assert!(app.runtime.project().pane_tabs.is_none());
             app.prune_orphaned_pager_streams();
             assert!(
-                app.runtime.stashed_pager_streams.is_empty(),
+                app.runtime.project().stashed_pager_streams.is_empty(),
                 "no tabs ⇒ all parked streams orphaned"
             );
         });

@@ -331,6 +331,58 @@ impl AppState {
         self.rebuild_rows();
     }
 
+    /// Ready every column of the active project to be re-read, and flag each
+    /// for a git re-walk, which the next [`Self::refresh_git_state`] makes: a
+    /// switch does this for a project neither the watcher nor the poll looked
+    /// at while the user was away (#99). A column whose directory has gone is
+    /// sent home first, as a refresh does, and one inside an archive is
+    /// re-listed now from its index. Returns the directories left for a worker
+    /// to read ([`Self::apply_relisted_columns`]).
+    pub fn relist_columns(&mut self) -> Vec<(Side, PathBuf)> {
+        self.reset_orphaned_columns_to_home();
+        let mut reads = Vec::new();
+        for side in self.active_sides() {
+            self.col_mut(side).git_cache.pending_worktree_rewalk = true;
+            let dir = self.col(side).listing.dir.clone();
+            if let Some((mount, inner)) = self.mounts.resolve(&dir) {
+                let listing = mount.listing_for(&inner);
+                self.install_listing(side, listing);
+                self.rebuild_rows_for(side);
+            } else {
+                reads.push((side, dir));
+            }
+        }
+        reads
+    }
+
+    /// Install the listings a worker read for [`Self::relist_columns`], each
+    /// in its column if that column is still in the directory read. The
+    /// directory, not `list_generation`, is the check: a git result landing
+    /// first rebuilds the column's rows and bumps it. An install bumps it too,
+    /// so a watcher read started before the switch is either replaced (it
+    /// landed first) or dropped (it lands after). Returns whether any was
+    /// installed.
+    pub fn apply_relisted_columns(
+        &mut self,
+        reads: Vec<(Side, PathBuf, Result<Listing, String>)>,
+    ) -> bool {
+        let mut installed = false;
+        for (side, dir, result) in reads {
+            if self.get_col(side).is_none_or(|c| c.listing.dir != dir) {
+                continue;
+            }
+            match result {
+                Ok(listing) => {
+                    self.install_listing(side, listing);
+                    self.rebuild_rows_for(side);
+                    installed = true;
+                }
+                Err(e) => crate::spyc_debug!("relist: reading {side:?}'s directory failed: {e}"),
+            }
+        }
+        installed
+    }
+
     pub fn chdir(&mut self, path: &Path) -> Result<()> {
         self.chdir_side(self.focused_side(), path)
     }
