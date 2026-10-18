@@ -494,6 +494,7 @@ mod codex_questions;
 mod focused_column;
 mod history_editor;
 mod jump_default;
+mod manifest_v2;
 mod mcp;
 mod pane;
 mod pane_fork;
