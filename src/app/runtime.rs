@@ -192,7 +192,11 @@ pub(super) struct Runtime {
     /// Landing slot for off-thread archive ops (`Effect::Archive`): mount,
     /// materialize, clean. Same shape as `graveyard_results` — the worker pushes
     /// and wakes with `Message::Wake(Wake::Archive)`, `apply_archive_outcomes` drains.
-    pub(super) archive_results: std::sync::Arc<std::sync::Mutex<Vec<archive_ops::ArchiveOutcome>>>,
+    /// Each outcome is tagged with the project that started it
+    /// (`App::spawn_archive_op`).
+    pub(super) archive_results: std::sync::Arc<
+        std::sync::Mutex<Vec<(super::state::ProjectId, archive_ops::ArchiveOutcome)>>,
+    >,
     /// Cancel flag handed to the in-flight streamed mount, so a long tarball can
     /// be abandoned with `:archive cancel`. Replaced per mount, so cancelling one
     /// can never cancel the next.

@@ -46,7 +46,7 @@ fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
         matches!(outcome, ArchiveOutcome::Mounted { .. }),
         "fixture should mount: {outcome:?}"
     );
-    app.runtime.archive_results.lock().unwrap().push(outcome);
+    app.file_archive_outcome(outcome);
     let (_, fx) = app.apply_archive_outcomes();
     fx
 }
@@ -82,7 +82,7 @@ fn apply_effects(app: &mut App, effects: Vec<Effect>) {
                 .change_dir(&path, focus.as_deref(), on_ok.as_deref(), err_prefix),
             Effect::Archive(op) => {
                 let outcome = run_archive_op(op);
-                app.runtime.archive_results.lock().unwrap().push(outcome);
+                app.file_archive_outcome(outcome);
                 app.apply_archive_outcomes();
             }
             _ => {}
@@ -121,7 +121,7 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
             match effect {
                 Effect::Archive(op) => {
                     let outcome = run_archive_op(op);
-                    app.runtime.archive_results.lock().unwrap().push(outcome);
+                    app.file_archive_outcome(outcome);
                 }
                 Effect::Inventory(op) => {
                     let outcome = crate::app::inventory_ops::run_inventory_op(op);

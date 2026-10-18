@@ -1090,6 +1090,12 @@ Middle and right are never forwarded to a child.
 is an **index, not a directory**: entering a multi-gigabyte zip writes zero
 bytes, and a member is materialized only when something reads it.
 
+The mount table is the process's, shared by every project (#99). A worker's
+outcome lands in the project that started it, as other background work does
+(see "MCP server"). An archive op that outcome starts runs for that project
+too. Anything guarding the table (eviction, `:archive unmount`) counts every
+open project's columns.
+
 **Containment is decided against the filesystem, never against the name.**
 Names are only half the problem — `index` normalization makes a zip-slip *name*
 structurally impossible by rejecting unsafe names on the way in, but a member is

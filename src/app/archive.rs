@@ -14,6 +14,7 @@ use crate::archive::mount::ArchiveMount;
 use crate::archive::{Journal, journal::StagedStats};
 
 use super::archive_ops::{ArchiveOp, ArchiveOutcome, MaterializeThen, mount_notes};
+use super::state::ProjectId;
 use super::{App, Effect, Mode, Prompt, PromptKind};
 
 mod command;
@@ -243,16 +244,63 @@ impl App {
     /// Drain landed archive outcomes. Returns whether to redraw, plus any
     /// follow-on effects (a pager open after a materialize).
     pub(crate) fn apply_archive_outcomes(&mut self) -> (bool, Vec<Effect>) {
-        let landed: Vec<ArchiveOutcome> =
+        let landed: Vec<(ProjectId, ArchiveOutcome)> =
             std::mem::take(&mut *self.runtime.archive_results.lock().unwrap());
         if landed.is_empty() {
             return (false, Vec::new());
         }
         let mut effects = Vec::new();
-        for outcome in landed {
-            effects.extend(self.apply_one_archive_outcome(outcome));
+        for (origin, outcome) in landed {
+            if origin == self.state.active {
+                effects.extend(self.apply_one_archive_outcome(outcome));
+            } else {
+                self.apply_archive_outcome_elsewhere(origin, outcome);
+            }
         }
         (true, effects)
+    }
+
+    /// An outcome for a project the user isn't in. It lands there
+    /// ([`App::land_in`]), and an archive op it starts (a re-read after a
+    /// write, a nested mount, a staging clean) is spawned there too, so its
+    /// outcome comes back to that project. A size question or an editor would
+    /// act on the view in front of the user, so each is dropped and said so
+    /// (the arms check `in_background`), as is an effect held back for the
+    /// mount.
+    fn apply_archive_outcome_elsewhere(&mut self, origin: ProjectId, outcome: ArchiveOutcome) {
+        // The in-flight message announced this project's op, which is over.
+        self.state.clear_progress_flash();
+        self.land_in(origin, |app| {
+            let mut held_back = false;
+            for effect in app.apply_one_archive_outcome(outcome) {
+                match effect {
+                    Effect::Archive(op) => app.spawn_archive_op(op),
+                    _ => held_back = true,
+                }
+            }
+            if held_back {
+                app.state
+                    .flash_error("what was waiting on the archive was dropped; run it again there");
+            }
+        });
+    }
+
+    /// Spawn the detached archive worker: run `op`, push its outcome onto
+    /// `runtime.archive_results`, and wake the loop. The single spawn site, so
+    /// every outcome is tagged with the project active at the spawn: the one
+    /// whose handler asked (`run_effects` runs in the user's project), or the
+    /// one an outcome landed in (`apply_archive_outcome_elsewhere`).
+    pub(super) fn spawn_archive_op(&self, op: ArchiveOp) {
+        let origin = self.state.active;
+        let results = std::sync::Arc::clone(&self.runtime.archive_results);
+        let wake = self.runtime.pane_wake_tx.clone();
+        std::thread::spawn(move || {
+            let outcome = super::archive_ops::run_archive_op(op);
+            results.lock().unwrap().push((origin, outcome));
+            if let Some(tx) = wake {
+                let _ = tx.send(super::Message::Wake(super::Wake::Archive));
+            }
+        });
     }
 
     fn apply_one_archive_outcome(&mut self, outcome: ArchiveOutcome) -> Vec<Effect> {
@@ -271,49 +319,15 @@ impl App {
                 staging_root,
                 then,
                 depth,
-            } => {
-                let archive = index.archive.clone();
-                let notes = mount_notes(&capability, &warnings);
-                let protected = self.protected_archives();
-                let mut mount = ArchiveMount {
-                    index: *index,
-                    journal: Journal::default(),
-                    staged: StagedStats::new(),
-                    capability,
-                    warnings,
-                    staging_root,
-                    last_used: 0,
-                    depth,
-                    editing: Vec::new(),
-                };
-                // Whatever is on disk at mount time is what spyc just put there —
-                // a streamed mount wrote every member during the pass. Recording
-                // it is what stops the first dirty check from reading the whole
-                // archive as edited behind our back.
-                mount.staged = current_staged_stats(&mount);
-                let evicted = self.state.mounts.insert(mount, &protected);
-                // Enter it, then say what was odd about it — the flash outlives
-                // the chdir, so the note is what the user is left reading. A
-                // held-back effect names where to land instead, and re-running it
-                // is what gets the cursor and the message it came with.
-                let mut effects = clean_effects(evicted);
-                match then {
-                    Some(effect) => {
-                        self.state.mounts.touch(&archive);
-                        effects.push(*effect);
-                    }
-                    None => self.enter_mount(&archive),
-                }
-                if let Some(note) = notes.first() {
-                    let extra = notes.len().saturating_sub(1);
-                    self.state.flash_info(if extra > 0 {
-                        format!("{note} (+{extra} more — :archive info)")
-                    } else {
-                        note.clone()
-                    });
-                }
-                self.view.needs_full_repaint = true;
-                effects
+            } => self.apply_mounted(*index, capability, warnings, staging_root, then, depth),
+            // A question is modal: asked over another project, it would be
+            // answered for the wrong place.
+            ArchiveOutcome::NeedsConfirm { path, .. } if self.state.in_background => {
+                self.state.flash_error(format!(
+                    "{} asks before it opens; open it again there",
+                    display_name(&path)
+                ));
+                Vec::new()
             }
             ArchiveOutcome::NeedsConfirm {
                 path,
@@ -367,52 +381,7 @@ impl App {
                 self.state.flash_error(error);
                 Vec::new()
             }
-            ArchiveOutcome::Written { archive, report } => {
-                // The journal is only cleared once the archive on disk actually
-                // holds the changes — a failed write leaves them pending.
-                if let Some(mount) = self.state.mounts.get_mut(&archive) {
-                    mount.journal.clear();
-                    mount.staged.clear();
-                }
-                let snapshot = report
-                    .snapshot
-                    .as_ref()
-                    .map_or_else(String::new, |_| " (original in the graveyard)".to_string());
-                self.state.flash_info(format!(
-                    "wrote {} — {} member(s), {}{snapshot}",
-                    display_name(&archive),
-                    report.members,
-                    crate::fs::ops::format_size(report.bytes),
-                ));
-                // Re-read it: a repack renumbers a zip's entries and moves a tar's
-                // offsets, so every locator in the old index now points at the
-                // wrong bytes. The mount has to be *dropped* for that to happen —
-                // a live one is re-entered rather than re-indexed, which is right
-                // everywhere except here. A nested archive is read from its staged
-                // copy, which the write just replaced in place.
-                let nested = self
-                    .state
-                    .mounts
-                    .get(&archive)
-                    .and_then(|m| (m.depth > 0).then(|| m.source().to_path_buf()));
-                self.state.mounts.remove(&archive);
-                let effects = self.request_remount(&archive, nested);
-                // Writing an archive that lives inside another one changes a file
-                // in that one's staging, so the outer now has a pending change of
-                // its own. Say so rather than leaving it to the quit warning.
-                let outer = self
-                    .state
-                    .mounts
-                    .member_of(&archive)
-                    .map(|(outer, _)| display_name(outer.archive()));
-                if let Some(outer) = outer {
-                    self.state.flash_info(format!(
-                        "wrote {} into {outer} — :archive write there too",
-                        display_name(&archive)
-                    ));
-                }
-                effects
-            }
+            ArchiveOutcome::Written { archive, report } => self.apply_written(archive, report),
             ArchiveOutcome::WriteFailed { archive, error } => {
                 self.state.flash_error(format!(
                     "{} NOT written: {error} — changes are still pending",
@@ -422,6 +391,113 @@ impl App {
             }
             ArchiveOutcome::Cleaned => Vec::new(),
         }
+    }
+
+    /// A mount landed: record it in the (global) mount table, then enter it,
+    /// or hand back the effect that was waiting for it.
+    fn apply_mounted(
+        &mut self,
+        index: crate::archive::index::ArchiveIndex,
+        capability: crate::archive::scan::Capability,
+        warnings: Vec<String>,
+        staging_root: PathBuf,
+        then: Option<Box<Effect>>,
+        depth: usize,
+    ) -> Vec<Effect> {
+        let archive = index.archive.clone();
+        let notes = mount_notes(&capability, &warnings);
+        let protected = self.protected_archives();
+        let mut mount = ArchiveMount {
+            index,
+            journal: Journal::default(),
+            staged: StagedStats::new(),
+            capability,
+            warnings,
+            staging_root,
+            last_used: 0,
+            depth,
+            editing: Vec::new(),
+        };
+        // Whatever is on disk at mount time is what spyc just put there —
+        // a streamed mount wrote every member during the pass. Recording
+        // it is what stops the first dirty check from reading the whole
+        // archive as edited behind our back.
+        mount.staged = current_staged_stats(&mount);
+        let evicted = self.state.mounts.insert(mount, &protected);
+        // Enter it, then say what was odd about it — the flash outlives
+        // the chdir, so the note is what the user is left reading. A
+        // held-back effect names where to land instead, and re-running it
+        // is what gets the cursor and the message it came with.
+        let mut effects = clean_effects(evicted);
+        match then {
+            Some(effect) => {
+                self.state.mounts.touch(&archive);
+                effects.push(*effect);
+            }
+            None => self.enter_mount(&archive),
+        }
+        if let Some(note) = notes.first() {
+            let extra = notes.len().saturating_sub(1);
+            self.state.flash_info(if extra > 0 {
+                format!("{note} (+{extra} more — :archive info)")
+            } else {
+                note.clone()
+            });
+        }
+        self.view.needs_full_repaint = true;
+        effects
+    }
+
+    /// A write-back landed: the journal is clean, and the archive is re-read.
+    fn apply_written(
+        &mut self,
+        archive: PathBuf,
+        report: crate::archive::write::RepackReport,
+    ) -> Vec<Effect> {
+        // The journal is only cleared once the archive on disk actually
+        // holds the changes — a failed write leaves them pending.
+        if let Some(mount) = self.state.mounts.get_mut(&archive) {
+            mount.journal.clear();
+            mount.staged.clear();
+        }
+        let snapshot = report
+            .snapshot
+            .as_ref()
+            .map_or_else(String::new, |_| " (original in the graveyard)".to_string());
+        self.state.flash_info(format!(
+            "wrote {} — {} member(s), {}{snapshot}",
+            display_name(&archive),
+            report.members,
+            crate::fs::ops::format_size(report.bytes),
+        ));
+        // Re-read it: a repack renumbers a zip's entries and moves a tar's
+        // offsets, so every locator in the old index now points at the
+        // wrong bytes. The mount has to be *dropped* for that to happen —
+        // a live one is re-entered rather than re-indexed, which is right
+        // everywhere except here. A nested archive is read from its staged
+        // copy, which the write just replaced in place.
+        let nested = self
+            .state
+            .mounts
+            .get(&archive)
+            .and_then(|m| (m.depth > 0).then(|| m.source().to_path_buf()));
+        self.state.mounts.remove(&archive);
+        let effects = self.request_remount(&archive, nested);
+        // Writing an archive that lives inside another one changes a file
+        // in that one's staging, so the outer now has a pending change of
+        // its own. Say so rather than leaving it to the quit warning.
+        let outer = self
+            .state
+            .mounts
+            .member_of(&archive)
+            .map(|(outer, _)| display_name(outer.archive()));
+        if let Some(outer) = outer {
+            self.state.flash_info(format!(
+                "wrote {} into {outer} — :archive write there too",
+                display_name(&archive)
+            ));
+        }
+        effects
     }
 
     /// Carry out what was waiting on a member's bytes.
@@ -434,6 +510,13 @@ impl App {
             // A container inside a container: the bytes are on disk now, so mount
             // them — addressed where the user sees them, read from where they are.
             MaterializeThen::Mount { at, then } => self.request_nested_mount(&at, real, then),
+            // An editor takes the terminal, or an overlay in a project the user
+            // isn't looking at, where it would wait unseen.
+            MaterializeThen::Edit { .. } if self.state.in_background => {
+                self.state
+                    .flash_error("edit not started; open it again there");
+                Vec::new()
+            }
             MaterializeThen::Edit { in_pane } => {
                 // Watch it from here: whatever the editor writes to this copy is
                 // the only record that the member changed.
@@ -483,7 +566,7 @@ impl App {
     /// carrying changes the user hasn't written back.
     fn protected_archives(&self) -> Vec<PathBuf> {
         let mut out: Vec<PathBuf> = Vec::new();
-        for dir in self.state.column_dirs() {
+        for (_, dir) in self.state.every_column_dir() {
             if let Some((mount, _)) = self.state.mounts.resolve(&dir) {
                 out.push(mount.archive().to_path_buf());
             }

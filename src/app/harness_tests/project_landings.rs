@@ -270,7 +270,6 @@ fn an_archive_entered_where_it_started_reads_as_before() {
 
 /// `Enter` on an archive in X; the mount lands after the user moved to Y.
 #[test]
-#[ignore = "red: entering an archive moves whichever project's column is active"]
 fn an_archive_entered_from_x_lands_in_xs_column() {
     with_two(|t| {
         let app = &mut t.app;
@@ -304,7 +303,6 @@ fn an_archive_entered_from_x_lands_in_xs_column() {
 /// A write-back in X lands after the user moved to Y. The write re-reads the
 /// archive, and that re-read enters the archive's column: X's, not Y's.
 #[test]
-#[ignore = "red: the re-read after a write lands in whichever project is active"]
 fn a_reread_after_a_write_from_x_lands_in_xs_column() {
     with_two(|t| {
         let app = &mut t.app;
@@ -347,7 +345,6 @@ fn a_reread_after_a_write_from_x_lands_in_xs_column() {
 /// A mount big enough to ask first, landing after the user moved to Y. The
 /// question is about X's archive, so it never opens over Y.
 #[test]
-#[ignore = "red: a mount's size question opens in whichever project is active"]
 fn a_mount_that_asks_first_from_x_never_prompts_in_y() {
     with_two(|t| {
         let app = &mut t.app;
@@ -375,7 +372,6 @@ fn a_mount_that_asks_first_from_x_never_prompts_in_y() {
 /// A member opened from X lands after the user moved to Y: it opens in X's
 /// pager, not over Y.
 #[test]
-#[ignore = "red: an extracted member opens in whichever project's pager is active"]
 fn a_member_opened_from_x_opens_in_xs_pager() {
     with_two(|t| {
         let app = &mut t.app;
@@ -397,7 +393,6 @@ fn a_member_opened_from_x_opens_in_xs_pager() {
 /// editor would take the terminal away from Y, so the edit is dropped and the
 /// flash says so.
 #[test]
-#[ignore = "red: an extracted member's editor starts over whichever project is active"]
 fn a_member_edit_from_x_never_takes_the_terminal_from_y() {
     with_two(|t| {
         let app = &mut t.app;
@@ -425,7 +420,6 @@ fn a_member_edit_from_x_never_takes_the_terminal_from_y() {
 /// unmounted from X, or Y's column is left inside an archive that no longer
 /// exists.
 #[test]
-#[ignore = "red: unmounting checks only the active project's columns"]
 fn an_archive_ys_column_stands_in_is_never_unmounted_from_x() {
     with_two(|t| {
         let app = &mut t.app;
@@ -454,7 +448,6 @@ fn an_archive_ys_column_stands_in_is_never_unmounted_from_x() {
 /// used. One Y's column stands in is never the one evicted, however many X
 /// opens after it.
 #[test]
-#[ignore = "red: eviction protects only the active project's columns"]
 fn an_archive_ys_column_stands_in_is_never_evicted_by_xs_mounts() {
     with_two(|t| {
         let app = &mut t.app;
@@ -481,7 +474,6 @@ fn an_archive_ys_column_stands_in_is_never_evicted_by_xs_mounts() {
 /// A member extracted for editing in the pane, landing after the user moved
 /// to Y: no editor overlay opens, neither over Y nor unseen in X.
 #[test]
-#[ignore = "red: an extracted member's pane editor opens over whichever project is active"]
 fn a_member_edited_in_the_pane_from_x_opens_no_overlay() {
     with_two(|t| {
         let app = &mut t.app;

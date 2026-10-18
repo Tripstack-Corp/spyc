@@ -494,12 +494,20 @@ impl AppState {
         }
     }
 
-    /// Every live column's listing dir — `left`, plus `right` when the split is
-    /// open. Deliberately both columns, not the focused one: callers ask "is any
-    /// column standing here?", which is what makes evicting or unmounting an
-    /// archive safe.
-    pub fn column_dirs(&self) -> Vec<std::path::PathBuf> {
-        self.columns().map(|c| c.listing.dir.clone()).collect()
+    /// Every live column's listing dir in every open project — `left`, plus
+    /// `right` when the split is open — with the project it is in. Deliberately
+    /// every column, not the focused one nor only the active project's: callers
+    /// ask "is any column standing here?" of the global mount table, which is
+    /// what makes evicting or unmounting an archive safe.
+    pub fn every_column_dir(&self) -> Vec<(ProjectId, std::path::PathBuf)> {
+        self.projects
+            .iter()
+            .flat_map(|p| {
+                std::iter::once(&p.left)
+                    .chain(p.right.as_ref())
+                    .map(move |c| (p.id, c.listing.dir.clone()))
+            })
+            .collect()
     }
 
     /// The working directory a freshly-spawned pane tab opens in, honouring
@@ -572,13 +580,7 @@ impl AppState {
         }
     }
 
-    /// Every open commander, `left` first.
-    pub fn columns(&self) -> impl Iterator<Item = &Commander> {
-        let p = self.active_project();
-        std::iter::once(&p.left).chain(p.right.as_ref())
-    }
-
-    /// Mutable [`Self::columns`].
+    /// Every open commander, `left` first, mutably.
     pub fn columns_mut(&mut self) -> impl Iterator<Item = &mut Commander> {
         let p = self.active_project_mut();
         std::iter::once(&mut p.left).chain(p.right.as_mut())

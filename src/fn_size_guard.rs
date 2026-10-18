@@ -32,7 +32,6 @@ const FUNCTION: Rule = Rule {
     pins: &[
         ("src/app/actions.rs::App::apply_inner", 360),
         ("src/app/agent_status.rs::App::settle_agent_activity", 139),
-        ("src/app/archive.rs::App::apply_one_archive_outcome", 134),
         ("src/app/archive_route.rs::classify", 142),
         ("src/app/bootstrap.rs::App::new", 211),
         ("src/app/effect/executor.rs::App::run_effects", 242),
