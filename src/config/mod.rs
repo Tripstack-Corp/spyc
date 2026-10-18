@@ -1717,6 +1717,34 @@ dir = "#aabbcc"
         );
     }
 
+    /// spyc started in `$HOME` finds `~/.spycrc.toml` as both the user file and
+    /// the project file. It is the user's own file, read once and trusted: no
+    /// warning that it may not name its own clipboard command or prompts, no
+    /// binding twice, and no consent asked for its own startup tabs.
+    #[test]
+    #[ignore = "red: the home rc is loaded a second time as a project rc"]
+    fn the_home_rc_is_read_once_when_spyc_starts_in_home() {
+        let tmp = tempdir().unwrap();
+        let home = tmp.path().join(".spycrc.toml");
+        std::fs::write(
+            &home,
+            "keymap = [\"map K down\"]\n\n[clipboard]\ncommand = \"pbcopy\"\n\n\
+             [prompts]\nreview = \"Review %\"\n\n[pane]\ntabs = [\"zsh\"]\n",
+        )
+        .unwrap();
+
+        let cfg = Config::load_layered(Some(&home), &home).unwrap();
+
+        assert!(cfg.warnings.is_empty(), "{:?}", cfg.warnings);
+        assert_eq!(cfg.clipboard.command.as_deref(), Some("pbcopy"));
+        assert!(cfg.prompts.contains_key("review"));
+        assert_eq!(cfg.bindings.len(), 1, "the binding is loaded once");
+        assert!(
+            cfg.pane.project_tabs.is_none(),
+            "home's tabs need no consent"
+        );
+    }
+
     /// The control: `$HOME`'s clipboard command is in force.
     #[test]
     fn a_clipboard_command_in_home_is_honoured() {
