@@ -105,7 +105,7 @@ fn codex_gallery_indexes_only_the_pinned_home_and_opens_its_attachment() {
             .expect("Codex supports received images")
             .clone();
         let outcome = image_ops::index_transcript(op);
-        app.runtime.image_results.lock().unwrap().push(outcome);
+        app.file_image_outcome(outcome);
         app.apply_image_outcomes();
         let gallery = app.view.image_gallery.as_ref().unwrap();
         assert_eq!(gallery.received.len(), 1);
@@ -120,16 +120,12 @@ fn codex_gallery_indexes_only_the_pinned_home_and_opens_its_attachment() {
 }
 
 fn land_capture(app: &mut App, tab_id: &str, epoch: u64) {
-    app.runtime
-        .image_results
-        .lock()
-        .unwrap()
-        .push(image_ops::ImageOutcome::Captured {
-            tab_id: tab_id.into(),
-            epoch,
-            encoded: vec![1, 2, 3],
-            dims: (1, 1),
-        });
+    app.file_image_outcome(image_ops::ImageOutcome::Captured {
+        tab_id: tab_id.into(),
+        epoch,
+        encoded: vec![1, 2, 3],
+        dims: (1, 1),
+    });
     app.apply_image_outcomes();
 }
 
@@ -243,7 +239,7 @@ fn gallery_worker_resolves_after_dispatch_using_the_captured_home() {
             .active_info_mut()
             .codex_home = Some(cwd.join("replacement"));
         let outcome = image_ops::index_transcript(op);
-        app.runtime.image_results.lock().unwrap().push(outcome);
+        app.file_image_outcome(outcome);
         app.apply_image_outcomes();
         assert_eq!(
             app.view.image_gallery.as_ref().unwrap().received[0].prompt_excerpt,
@@ -264,22 +260,14 @@ fn gallery_worker_result_from_a_closed_popup_cannot_fill_a_reopened_one() {
         let old = app.open_image_gallery().transcript_index().unwrap().clone();
         app.close_image_gallery();
         let current = app.open_image_gallery().transcript_index().unwrap().clone();
-        app.runtime
-            .image_results
-            .lock()
-            .unwrap()
-            .push(image_ops::index_transcript(old));
+        app.file_image_outcome(image_ops::index_transcript(old));
         app.apply_image_outcomes();
         assert!(
             app.view.image_gallery.as_ref().unwrap().loading,
             "old result must not end the new request's loading state"
         );
         assert_eq!(app.gallery_counts(), (0, 0));
-        app.runtime
-            .image_results
-            .lock()
-            .unwrap()
-            .push(image_ops::index_transcript(current));
+        app.file_image_outcome(image_ops::index_transcript(current));
         app.apply_image_outcomes();
         assert_eq!(app.gallery_counts(), (0, 1));
         assert!(!app.view.image_gallery.as_ref().unwrap().loading);
@@ -305,11 +293,7 @@ fn gallery_worker_miss_keeps_unsent_images_and_reports_only_for_its_live_popup()
             .clone();
         land_capture(&mut app, &tab_id, 0);
         let pending = app.open_image_gallery().transcript_index().unwrap().clone();
-        app.runtime
-            .image_results
-            .lock()
-            .unwrap()
-            .push(image_ops::index_transcript(pending));
+        app.file_image_outcome(image_ops::index_transcript(pending));
         app.apply_image_outcomes();
         assert_eq!(
             app.gallery_counts(),
@@ -325,20 +309,12 @@ fn gallery_worker_miss_keeps_unsent_images_and_reports_only_for_its_live_popup()
             None,
         );
         let missing = app.open_image_gallery().transcript_index().unwrap().clone();
-        app.runtime
-            .image_results
-            .lock()
-            .unwrap()
-            .push(image_ops::index_transcript(missing.clone()));
+        app.file_image_outcome(image_ops::index_transcript(missing.clone()));
         app.apply_image_outcomes();
         assert!(app.view.image_gallery.is_none());
         assert!(app.flash_text().unwrap().contains("no transcript"));
         app.state.flash_info("keep this status");
-        app.runtime
-            .image_results
-            .lock()
-            .unwrap()
-            .push(image_ops::index_transcript(missing));
+        app.file_image_outcome(image_ops::index_transcript(missing));
         app.apply_image_outcomes();
         assert_eq!(
             app.flash_text(),
@@ -389,11 +365,7 @@ fn image_routing_follows_the_agent_in_a_shells_foreground() {
             op.query.spawn_epoch_secs, 500,
             "lookup belongs to this agent's start, not the shell's"
         );
-        app.runtime
-            .image_results
-            .lock()
-            .unwrap()
-            .push(image_ops::index_transcript(op));
+        app.file_image_outcome(image_ops::index_transcript(op));
         app.apply_image_outcomes();
         assert_eq!(app.gallery_counts(), (0, 1));
         app.close_image_gallery();

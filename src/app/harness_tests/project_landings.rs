@@ -499,3 +499,280 @@ fn a_member_edited_in_the_pane_from_x_opens_no_overlay() {
         );
     });
 }
+
+// ── Images (step 5b) ─────────────────────────────────────────────────────────
+//
+// The image worker runs inline and its outcome is filed for the drain
+// (`file_image_outcome`) while X is in view, as `run_effects`' worker does.
+
+use crate::app::image_ops::{self, ImageOutcome};
+
+/// A 2×3 PNG in `dir`, encoded at test time.
+fn write_png(dir: &Path) -> PathBuf {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(2, 3)
+        .write_to(&mut buf, image::ImageFormat::Png)
+        .unwrap();
+    let path = dir.join("shot.png");
+    std::fs::write(&path, buf.into_inner()).unwrap();
+    path
+}
+
+/// Open `path` from the project in view, leaving the worker's outcome filed.
+/// `picker: None` is a terminal with no image protocol.
+fn kick_image(app: &App, path: &Path, picker: Option<ratatui_image::picker::Picker>) {
+    let Some(Effect::OpenImage(op)) = app.plan_image_open(path) else {
+        panic!("{} opens as an image", path.display());
+    };
+    app.file_image_outcome(image_ops::open_image_file(op, picker));
+}
+
+/// The control: an image opened where it started is shown.
+#[test]
+fn an_image_opened_where_it_started_is_shown() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let png = write_png(&t.x_home);
+        kick_image(app, &png, Some(ratatui_image::picker::Picker::halfblocks()));
+        app.apply_image_outcomes();
+        assert!(app.view.image_view.is_some(), "the image is shown");
+    });
+}
+
+/// An image opened in X, decoded after the user moved to Y. The overlay
+/// covers the whole screen and its verbs act on the project in view, so it is
+/// not shown over Y, and the flash says so.
+#[test]
+#[ignore = "red: an image opens over whichever project is active"]
+fn an_image_opened_in_x_is_never_shown_over_y() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let png = write_png(&t.x_home);
+        kick_image(app, &png, Some(ratatui_image::picker::Picker::halfblocks()));
+        app.make_active(t.y);
+        app.apply_image_outcomes();
+        assert!(app.view.image_view.is_none(), "X's image covers Y");
+        assert!(
+            app.flash_text().is_some_and(|f| f.starts_with("xproj: ")),
+            "the flash names X: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// An image X failed to open, while the user, now in Y, was last reading a
+/// pager in X. The failure reaches the user, named for X, rather than X's
+/// pager, which they can't see.
+#[test]
+#[ignore = "red: an image failure from another project is shown unnamed"]
+fn an_image_failure_from_x_reaches_the_user_named_for_x() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let png = write_png(&t.x_home);
+        app.open_help();
+        kick_image(app, &png, None);
+        app.make_active(t.y);
+        app.apply_image_outcomes();
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.starts_with("xproj: ") && f.contains("no image protocol")),
+            "the failure reaches the user, named for X: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// An image pasted into X's agent, captured after the user moved to Y. It is
+/// kept for X's tab: that tab's next prompt carries it.
+#[test]
+#[ignore = "red: a capture is kept only for a tab in the active project"]
+fn a_paste_captured_in_x_is_kept_for_xs_tab() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = t.x;
+        let tab = app.open_tab_in_project(x, &t.x_home);
+        app.open_tab_in_project(t.y, &t.y_home);
+        let epoch = app
+            .state
+            .active_project()
+            .pane
+            .image_capture_epochs
+            .get(&tab)
+            .copied()
+            .unwrap_or(0);
+        app.file_image_outcome(ImageOutcome::Captured {
+            tab_id: tab.clone(),
+            epoch,
+            encoded: vec![1, 2, 3],
+            dims: (1, 1),
+        });
+        app.make_active(t.y);
+        app.apply_image_outcomes();
+        let kept = app.as_project(x, |app| {
+            app.state
+                .active_project()
+                .pane
+                .pending_images
+                .get(&tab)
+                .map_or(0, Vec::len)
+        });
+        assert_eq!(kept, 1, "X's tab keeps the pasted image");
+        assert!(
+            app.flash_text().is_some_and(|f| f.starts_with("xproj: ")),
+            "the flash names X: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+// ── Lua (step 5b) ────────────────────────────────────────────────────────────
+//
+// A script runs on the real worker. It is started in X, and its requests are
+// drained (`handle_lua_done`) once the worker wakes the loop.
+
+/// Give `app` a Lua worker whose wakes arrive on the returned receiver.
+fn attach_lua(app: &mut App) -> std::sync::mpsc::Receiver<Message> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.runtime.pane_wake_tx = Some(tx.clone());
+    app.runtime.lua = Some(crate::lua::LuaWorker::spawn(move || {
+        let _ = tx.send(Message::Wake(Wake::Lua));
+    }));
+    rx
+}
+
+/// Run `<config>/lua/<name>.lua`, holding `body`, from the project in view.
+fn kick_lua(app: &mut App, config: &Path, name: &str, body: &str) {
+    std::fs::create_dir_all(config.join("lua")).unwrap();
+    std::fs::write(config.join("lua").join(format!("{name}.lua")), body).unwrap();
+    crate::state::with_config_root(config, || app.apply_lua_binding(name));
+}
+
+/// Wait for the script to finish, then drain it as the loop does.
+fn finish_lua(app: &mut App, rx: &std::sync::mpsc::Receiver<Message>) -> Vec<Effect> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let (landed, effects) = app.handle_lua_done();
+        if landed {
+            return effects;
+        }
+        assert!(Instant::now() < deadline, "the script never finished");
+        let _ = rx.recv_timeout(Duration::from_millis(50));
+    }
+}
+
+/// The control: a script's request applies in the project it started in.
+#[test]
+fn a_lua_script_run_where_it_started_applies() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let rx = attach_lua(app);
+        let config = t.x_home.with_file_name("config");
+        kick_lua(app, &config, "narrow", "spyc.filter('*.txt')");
+        finish_lua(app, &rx);
+        assert_eq!(app.state.cur().temp_filter.as_deref(), Some("*.txt"));
+    });
+}
+
+/// A script started in X, finished after the user moved to Y. What it asks
+/// for would act on Y's view, so it is dropped, and the flash says so.
+#[test]
+#[ignore = "red: a script's requests act on whichever project is active"]
+fn a_lua_script_run_from_x_never_acts_on_y() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let rx = attach_lua(app);
+        let config = t.x_home.with_file_name("config");
+        kick_lua(app, &config, "narrow", "spyc.filter('*.txt')");
+        app.make_active(t.y);
+        let effects = finish_lua(app, &rx);
+        assert!(effects.is_empty(), "nothing runs in Y: {effects:?}");
+        assert_eq!(
+            app.state.cur().temp_filter,
+            None,
+            "X's script narrowed Y's column"
+        );
+        assert!(
+            app.flash_text().is_some_and(|f| f.starts_with("xproj: ")),
+            "the flash names X: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// A script started in X fails after the user moved to Y: the error is news,
+/// named for X.
+#[test]
+#[ignore = "red: a script's error from another project is shown unnamed"]
+fn a_lua_error_from_x_is_named_for_x() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let rx = attach_lua(app);
+        let config = t.x_home.with_file_name("config");
+        kick_lua(app, &config, "broken", "error('boom')");
+        app.make_active(t.y);
+        finish_lua(app, &rx);
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.starts_with("xproj: ") && f.contains("boom")),
+            "the error names X: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+// ── Git views (step 5b) ──────────────────────────────────────────────────────
+
+use crate::app::git_view_session::{DiffScope, GitViewKind};
+
+/// Commit `one.txt` in `dir`, then change it.
+fn changed_repo(dir: &Path) {
+    let run_git = crate::git::test_support::run_git;
+    run_git(dir, &["init", "-q", "--initial-branch=main"]);
+    run_git(dir, &["add", "one.txt"]);
+    run_git(dir, &["commit", "-q", "-m", "v1"]);
+    std::fs::write(dir.join("one.txt"), "one\nmore\n").unwrap();
+}
+
+/// Drain the git view until it mounts, for at most `limit`.
+fn mount_git_view(app: &mut App, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        if app.drain_pending_git_view() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// A diff opened in X, built after the user moved to Y. It mounts in X's
+/// pager when X is next in view, and never in Y's.
+#[test]
+#[ignore = "red: a git view mounts in whichever project is active"]
+fn a_git_view_opened_in_x_mounts_in_xs_pager() {
+    with_two(|t| {
+        let app = &mut t.app;
+        changed_repo(&t.x_home);
+        app.open_git_view(
+            GitViewKind::Diff {
+                repo_root: t.x_home.clone(),
+                paths: vec!["one.txt".into()],
+                scope: DiffScope::HeadToWorktree,
+            },
+            "git diff one.txt".into(),
+        );
+        app.make_active(t.y);
+        // Long enough for the worker to finish: in Y nothing may mount.
+        mount_git_view(app, Duration::from_secs(1));
+        assert!(app.view.project().pager.is_none(), "X's diff mounted in Y");
+        app.make_active(t.x);
+        assert!(
+            mount_git_view(app, Duration::from_secs(10)),
+            "X's diff mounts once X is in view"
+        );
+        let pager = app.view.project().pager.as_ref().expect("X's pager");
+        assert_eq!(pager.title, "git diff one.txt");
+    });
+}
