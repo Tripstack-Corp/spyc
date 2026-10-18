@@ -426,16 +426,8 @@ impl AppState {
                 }
                 None => self.flash_error("not in a git repository"),
             },
-            Action::SetProjectHomeHere => {
-                let dir = self.cur().listing.dir.clone();
-                self.flash_info(format!("PROJECT_HOME: {}", dir.display()));
-                self.active_project_mut().home = Some(dir);
-            }
-            Action::SetStartDirHere => {
-                let dir = self.cur().listing.dir.clone();
-                self.flash_info(format!("start dir: {}", dir.display()));
-                self.active_project_mut().start_dir = dir;
-            }
+            Action::SetProjectHomeHere => self.set_project_home(self.cur().listing.dir.clone()),
+            Action::SetStartDirHere => self.move_start_dir(self.cur().listing.dir.clone()),
             Action::JumpPrevDir => match self.active_project().prev_dir.clone() {
                 Some(prev) => {
                     return ApplyResult::Post(vec![Effect::ChangeDir {

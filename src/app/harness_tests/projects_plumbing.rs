@@ -45,7 +45,6 @@ fn home(app: &App) -> Option<PathBuf> {
 /// directory is one project's home, so which project it belongs to is never
 /// in doubt.
 #[test]
-#[ignore = "red: re-homing checks no other project's home"]
 fn space_p_onto_another_projects_home_refuses() {
     with_two(|t| {
         let app = &mut t.app;
@@ -66,7 +65,6 @@ fn space_p_onto_another_projects_home_refuses() {
 
 /// `:project <dir>` refuses another open project's home the same way.
 #[test]
-#[ignore = "red: re-homing checks no other project's home"]
 fn project_command_onto_another_projects_home_refuses() {
     with_two(|t| {
         let app = &mut t.app;
@@ -87,7 +85,6 @@ fn project_command_onto_another_projects_home_refuses() {
 /// `:project clear` leaves a project anchored at its start directory, so it
 /// is refused when another project has that directory as its home.
 #[test]
-#[ignore = "red: clearing a home checks no other project's"]
 fn clearing_a_home_onto_another_projects_refuses() {
     with_two(|t| {
         let app = &mut t.app;
@@ -114,7 +111,6 @@ fn clearing_a_home_onto_another_projects_refuses() {
 /// Moving a homeless project's start directory (`gS`, `:startdir`) moves its
 /// anchor, so onto another project's home it is refused.
 #[test]
-#[ignore = "red: moving a start directory checks no other project's home"]
 fn moving_a_homeless_projects_start_onto_another_home_refuses() {
     with_two(|t| {
         let app = &mut t.app;
@@ -136,6 +132,22 @@ fn moving_a_homeless_projects_start_onto_another_home_refuses() {
             start(),
             ":startdir took Y's home"
         );
+    });
+}
+
+/// A project whose home was cleared (`:project clear`) is anchored at its
+/// start directory, which no other project may take as its home.
+#[test]
+fn a_project_with_no_home_still_holds_its_start_directory() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x_start = app.state.active_project().start_dir.clone();
+        let _ = app.state.dispatch_command("project clear");
+        app.make_active(t.y);
+        let _ = app
+            .state
+            .dispatch_command(&format!("project {}", x_start.display()));
+        assert_eq!(home(app), Some(t.y_home.clone()), "Y took X's anchor");
     });
 }
 

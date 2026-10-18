@@ -99,6 +99,9 @@ pub(super) struct Caller {
     /// That project's context file, which its reads answer from; `None` reads
     /// the file the server was started with.
     context: Option<PathBuf>,
+    /// The cwd its proxy named at `initialize`, which binds it again when its
+    /// project closes.
+    cwd: Option<PathBuf>,
     /// Whether it has sent `initialize`, which is what makes it an agent's
     /// session rather than the status hook's one-shot call.
     initialized: bool,
@@ -168,6 +171,7 @@ fn bind(tx: &std::sync::mpsc::Sender<McpRequest>, meta: &Value, caller: &mut Cal
     };
     caller.project = bound["project"].as_str().and_then(|p| p.parse().ok());
     caller.context = bound["context_file"].as_str().map(PathBuf::from);
+    caller.cwd = cwd.map(PathBuf::from);
     let project = bound["project"].as_str().unwrap_or("none");
     match pane_id {
         Some(pane_id) if bound["pane"] == true => {
@@ -246,6 +250,9 @@ pub(super) fn dispatch(
     dispatch_for(w, msg, ctx_path, cmd_tx, &mut Caller::default())
 }
 
+/// What a connection bound to a project that has since closed is told.
+const PROJECT_CLOSED: &str = "the project this agent belongs to has closed";
+
 /// Dispatch a JSON-RPC request and write the response to `w`.
 /// `cmd_tx` is `Some` when running as the socket server
 /// (writable actions available), `None` for read-only fallback. `caller` is
@@ -276,15 +283,30 @@ pub(super) fn dispatch_for(
 
     let id = parsed["id"].clone();
     let method = parsed["method"].as_str().unwrap_or("");
-    // A bound connection reads its own project's context file (#99).
+    // A bound connection reads its own project's context file (#99), which a
+    // project that has closed took with it. A connection bound by cwd belongs
+    // to no tab, so it outlives the close and binds again, as it would at
+    // `initialize`. One bound to a pane lost its tab with the project, and
+    // reads nothing rather than whatever directory spyc's process cwd is,
+    // which is another project's.
+    let gone = |caller: &Caller| caller.context.as_deref().is_some_and(|p| !p.exists());
+    if gone(caller)
+        && caller.pane_id.is_none()
+        && let (Some(tx), Some(cwd)) = (cmd_tx, caller.cwd.clone())
+    {
+        bind(tx, &json!({ CWD_META: cwd }), caller);
+    }
+    let closed = gone(caller);
     let bound = caller.context.clone();
     let ctx_path = bound.as_deref().unwrap_or(ctx_path);
 
     match method {
         "initialize" => handle_initialize(w, &id, &parsed["params"], cmd_tx, caller),
         "resources/list" => handle_resources_list(w, &id),
+        "resources/read" if closed => send_error(w, id, -32000, PROJECT_CLOSED),
         "resources/read" => handle_resources_read(w, &id, &parsed["params"], ctx_path),
         "tools/list" => handle_tools_list(w, &id),
+        "tools/call" if closed => send_tool_error(w, &id, PROJECT_CLOSED),
         "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx, caller),
         "ping" => send_result(w, &id, json!({})),
         super::statusline::METHOD => super::statusline::handle(w, &id, &parsed["params"], cmd_tx),

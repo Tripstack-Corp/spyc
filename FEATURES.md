@@ -1233,6 +1233,9 @@ shown on the top bar and persist across `spyc -r`.
   upward walk — the concept is explicit and predictable.
 - **Keys** — `Space p` jumps to `PROJECT_HOME`; `gP` (or `Space P`) sets it
   to the current directory; `gS` re-points the start directory (target of `` ` ``).
+  A directory is one project's home: setting another open project's home (or
+  clearing a home onto one, or moving a homeless project's start directory
+  onto one) is refused, naming that project.
 - **Commands** — `:project` prints; `:project .`, `:project <path>`,
   `:project clear` manage the value. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to

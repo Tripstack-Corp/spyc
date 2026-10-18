@@ -182,10 +182,7 @@ impl AppState {
         }
         if let Some(arg) = input.strip_prefix("startdir ") {
             match self.resolve_dir_arg(arg.trim()) {
-                Ok(canon) => {
-                    self.flash_info(format!("start dir: {}", canon.display()));
-                    self.active_project_mut().start_dir = canon;
-                }
+                Ok(canon) => self.move_start_dir(canon),
                 Err(e) => self.flash_error(format!("startdir: {e:#}")),
             }
             return CommandResult::Handled;
@@ -199,15 +196,11 @@ impl AppState {
         if let Some(arg) = input.strip_prefix("project ") {
             let arg = arg.trim();
             if arg == "clear" {
-                self.active_project_mut().home = None;
-                self.flash_info("PROJECT_HOME cleared");
+                self.clear_project_home();
                 return CommandResult::Handled;
             }
             match self.resolve_dir_arg(arg) {
-                Ok(canon) => {
-                    self.flash_info(format!("PROJECT_HOME: {}", canon.display()));
-                    self.active_project_mut().home = Some(canon);
-                }
+                Ok(canon) => self.set_project_home(canon),
                 Err(e) => self.flash_error(format!("project: {e:#}")),
             }
             return CommandResult::Handled;

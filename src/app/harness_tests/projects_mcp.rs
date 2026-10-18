@@ -562,7 +562,6 @@ fn driving_another_project_leaves_the_users_view_alone() {
 /// file is gone, and answering from wherever spyc's process cwd is would hand
 /// it another project's tree.
 #[test]
-#[ignore = "red: a bound connection whose context file is gone reads from the process cwd"]
 fn a_read_from_a_closed_projects_agent_answers_closed() {
     with_projects(|p| {
         let b_file = p.in_b(|app| app.view.project().context_path.clone());
@@ -583,7 +582,6 @@ fn a_read_from_a_closed_projects_agent_answers_closed() {
 /// its cwd, as it would at `initialize`: to the project holding it, else the
 /// active one, never to nothing.
 #[test]
-#[ignore = "red: a connection whose bound project closed reads from the process cwd"]
 fn a_connection_bound_by_cwd_binds_again_when_its_project_closes() {
     with_projects(|p| {
         let (tx, rx) = std::sync::mpsc::channel();

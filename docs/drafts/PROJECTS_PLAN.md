@@ -962,6 +962,35 @@ PR, except step 5's stages:
      each in its own project. The split preview's reload slot serves every
      project, so a resize reloads the project in view's and a switch reloads
      the arriving one's.
+
+   **Landed in 5e, before any key opens a project** (#727–#732, then pair
+   1a). A repo's `.spycrc.toml` may not name the `[clipboard] command` a yank
+   runs, nor give a scan pattern a `url` other than an http(s) page, since
+   `Space n` lets a user open any directory; spyc started in `$HOME` reads its
+   rc once. Then what has to hold once a project can close:
+   - **Homes are unique.** `AppState::home_taken` compares a directory with
+     every other open project's home, else its `start_dir`. Each way a
+     project's anchor moves checks it: `Space P`, `gP` and `:project <dir>`
+     (`set_project_home`), `:project clear`, which falls back to the start
+     directory (`clear_project_home`), and for a homeless project `gS` and
+     `:startdir` (`move_start_dir`). Session restore sets a home unchecked;
+     pair 3's restore of every project checks it.
+   - **A closed project's archive work.** The mount table is the process's,
+     so `apply_archive_outcome_orphaned` applies what an op did to it as it
+     would anywhere, and drops what would act on a project. A mount is
+     recorded and entered nowhere; an extracted member is recorded as
+     spyc's own, so it never reads as an edit; a write clears the journal and
+     has the archive read again from clean staging (`request_remount`), that
+     read spawned for the closed project so it lands here too
+     (`spawn_archive_op_from`); a failed write says so. This answers what
+     step 5's notes left open.
+   - **A closed project's agents.** A connection bound to a pane lost its
+     tab with the project: once the project's context file is gone, every
+     tool and resource answers "the project this agent belongs to has
+     closed", where it read from spyc's process cwd, another project's tree.
+     A connection bound by cwd (a session codex's shared daemon runs)
+     belongs to no tab and outlives the close: it binds again from its cwd,
+     as at `initialize`, to the project holding it, else the active one.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
