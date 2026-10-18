@@ -1,13 +1,19 @@
 //! Session save / restore.
 //!
-//! Each session is a JSON snapshot of the workspace layout at quit time.
-//! Stored in `$XDG_STATE_HOME/spyc/sessions/` (or `~/.local/state/spyc/sessions/`),
-//! one `<id>.json` per session. The id is the session's creation time in epoch
-//! millis, and a restore keeps it, so the name says nothing about recency.
+//! Each session is a JSON [`Manifest`] of every open project's layout, written
+//! at quit and by the autosave. Stored in `$XDG_STATE_HOME/spyc/sessions/` (or
+//! `~/.local/state/spyc/sessions/`), one `<id>.json` per session. The id is the
+//! session's creation time in epoch millis, and a restore that adopts the file
+//! keeps it, so the name says nothing about recency.
 
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+
+mod manifest;
+pub use manifest::{
+    MANIFEST_VERSION, Manifest, SavedProject, label_of, parse_manifest, project_list_label,
+};
 
 const MAX_SESSIONS: usize = 20;
 
@@ -28,7 +34,7 @@ pub enum AgentKind {
 }
 
 /// Hand-written so an unrecognized kind degrades to [`AgentKind::Other`]
-/// instead of failing the parse. `load_sessions` drops any session file it
+/// instead of failing the parse. `load_manifests` drops any session file it
 /// can't deserialize, so a derived impl turns "spyc retired an agent" into
 /// "every tab, cwd and vsplit in that restore point silently disappears from
 /// `-r`" — which is what dropping the `gemini` variant did.
@@ -120,40 +126,6 @@ impl SavedTab {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    pub id: u64,
-    pub saved_at: String,
-    pub epoch_secs: u64,
-    pub cwd: PathBuf,
-    pub tabs: Vec<SavedTab>,
-    pub active_tab: usize,
-    pub pane_height_pct: u16,
-    pub pane_focused: bool,
-    /// Spice-pair display name (e.g. `SAFFRON_PAPRIKA`). Assigned on
-    /// session creation; user-editable via `:name <NEW>`.
-    #[serde(default)]
-    pub name: String,
-    /// Sticky "project root" — target of `gh`, default cwd for new panes.
-    /// Auto-set at startup when launch dir contains `.git`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_home: Option<PathBuf>,
-    /// The vertical (left/right) split open at save time — its shape and the
-    /// previewed file — restored on `-r`. `None` when no split was open.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vsplit: Option<SavedVsplit>,
-    /// P2 merge/scope coordination registry (`AppState::scope_registry`) at
-    /// save time — so a crash mid-merge-train doesn't lose in-flight claims.
-    /// Restored verbatim; each claim re-binds to its owning tab via
-    /// `SavedTab::claim_owner`. Absent on older saves.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scope_claims: Vec<crate::state::scope_registry::ScopeClaim>,
-    /// What `:agent hud` chose, restored on `-r`. `None` when the session left
-    /// the config file's preference alone.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_hud: Option<crate::config::AgentHudMode>,
-}
-
 /// Persisted vertical-split state for `-r` restore. Primitives only, so the
 /// `sessions` layer stays free of `app::state` types (the app layer converts).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,13 +214,13 @@ fn sessions_dir() -> Option<PathBuf> {
     crate::state::state_root().map(|r| r.join("sessions"))
 }
 
-pub fn save_session(session: &Session) -> std::io::Result<()> {
+pub fn save_session(manifest: &Manifest) -> std::io::Result<()> {
     let Some(dir) = sessions_dir() else {
         return Ok(());
     };
     std::fs::create_dir_all(&dir)?;
-    let path = dir.join(session_file_name(session.id));
-    let json = serde_json::to_string_pretty(session).map_err(std::io::Error::other)?;
+    let path = dir.join(session_file_name(manifest.id));
+    let json = serde_json::to_string_pretty(manifest).map_err(std::io::Error::other)?;
     // Atomic write (temp + rename) so a SIGKILL mid-write can't leave a
     // truncated/corrupt `<id>.json` — the crash-sufficiency contract the P3-2
     // debounced autosave relies on (and a free win for the quit-time save).
@@ -266,19 +238,20 @@ pub fn session_exists(id: u64) -> bool {
     sessions_dir().is_some_and(|dir| dir.join(session_file_name(id)).is_file())
 }
 
-pub fn load_sessions() -> Vec<Session> {
+/// Every saved session this build can read, newest first.
+pub fn load_manifests() -> Vec<Manifest> {
     let Some(dir) = sessions_dir() else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
-    let mut sessions: Vec<Session> = entries
+    let mut sessions: Vec<Manifest> = entries
         .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .filter_map(|e| {
             let text = std::fs::read_to_string(e.path()).ok()?;
-            serde_json::from_str(&text).ok()
+            parse_manifest(serde_json::from_str(&text).ok()?)
         })
         .collect();
     sessions.sort_by_key(|s| std::cmp::Reverse(s.epoch_secs));

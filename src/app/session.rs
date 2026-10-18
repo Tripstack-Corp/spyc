@@ -13,13 +13,13 @@
 //! `pane_tabs.rs`.
 
 use crate::pane::PaneTabs;
-use crate::state::sessions::AgentKind;
+use crate::state::sessions::{AgentKind, Manifest, SavedProject, SavedTab, SavedVsplit};
 use crate::ui::line_edit::LineEditor;
 use crate::ui::pager::{self, PagerView};
 
 use std::time::{Duration, Instant};
 
-use super::state::{Side, VsplitMode};
+use super::state::{ProjectId, Side, VsplitMode};
 use super::{App, Deadline, RunCtx};
 
 /// P3-2 debounce window: persist this long after the last session-relevant
@@ -92,6 +92,72 @@ pub(super) fn tab_conversation(
     }
 }
 
+/// One `-r` picker row. With one project it reads as a session always has: the
+/// project's path, its tab labels and its agents' conversations. With several,
+/// the projects take the path's place. `running_column` makes room for the
+/// `running` mark when any row carries it.
+fn picker_row(index: usize, manifest: &Manifest, running: bool, running_column: bool) -> String {
+    let age = crate::state::sessions::format_relative_time(manifest.epoch_secs);
+    let name = if manifest.name.is_empty() {
+        "(unnamed)"
+    } else {
+        manifest.name.as_str()
+    };
+    let status = if running_column {
+        format!("{:<9}", if running { "running" } else { "" })
+    } else {
+        String::new()
+    };
+    let place = match manifest.projects.as_slice() {
+        [project] => project_row(project),
+        projects => crate::state::sessions::project_list_label(projects),
+    };
+    format!("  [{}]  {name:<22} {status}{age:<14} {place}", index + 1)
+}
+
+/// A one-project row's place: the project's path, its tab labels, and the
+/// conversations its agents were in.
+fn project_row(project: &SavedProject) -> String {
+    use crate::state::sessions;
+    let tab_count = project.tabs.len();
+    let names: Vec<&str> = project.tabs.iter().map(|t| t.label.as_str()).collect();
+    // Show agent session info (claude/codex) for tabs that have it.
+    // Picker tooltips group by kind so a session with mixed
+    // claude+codex panes is legible at a glance.
+    let agent_info: Vec<String> = project
+        .tabs
+        .iter()
+        .filter_map(|t| {
+            let sid = t.agent_session_id.as_deref()?;
+            let short_id = sessions::short_id(sid);
+            let kind = t.effective_kind();
+            if kind == AgentKind::Other {
+                return None;
+            }
+            Some(
+                crate::agent::profile_for(kind)
+                    .picker_label(&short_id, t.agent_session_name.as_deref()),
+            )
+        })
+        .collect();
+    let tab_info = if tab_count == 0 {
+        String::new()
+    } else {
+        format!("  [{}]", names.join(", "))
+    };
+    let agent_suffix = if agent_info.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", agent_info.join(", "))
+    };
+    format!("{}{tab_info}{agent_suffix}", project.anchor().display())
+}
+
+/// Conversations already saved for an earlier tab, by the codex home they live
+/// under (see `App::saved_tabs`).
+type ConversationClaims =
+    std::collections::HashMap<Option<std::path::PathBuf>, std::collections::HashSet<String>>;
+
 impl App {
     pub fn save_session(&mut self) {
         // SPYC-TRAP(session-prune-by-last-save): every file holds a picker slot,
@@ -106,30 +172,29 @@ impl App {
             self.exit_summary = Some("no session saved — no tabs or split to restore".into());
             return;
         }
-        let session = self.build_session_snapshot();
-        let save_result = crate::state::sessions::save_session(&session);
+        let manifest = self.build_manifest();
+        let save_result = crate::state::sessions::save_session(&manifest);
         // A successful save resets the autosave baseline so a follow-up
         // `settle_autosave` doesn't immediately re-write the identical session.
         if save_result.is_ok() {
             self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
         }
-        self.build_exit_summary(&session, &save_result);
+        self.build_exit_summary(&manifest, &save_result);
     }
 
     /// P3-2 debounced autosave: persist the current session silently (no exit
     /// summary), returning whether the write succeeded. Called by
     /// [`Self::settle_autosave`] when the debounce window elapses.
     fn autosave_session(&mut self) -> bool {
-        let session = self.build_session_snapshot();
-        crate::state::sessions::save_session(&session).is_ok()
+        let manifest = self.build_manifest();
+        crate::state::sessions::save_session(&manifest).is_ok()
     }
 
-    /// Build the `Session` snapshot from live state (tabs + per-agent resume
-    /// ids, vsplit, project home, geometry). Shared by the quit-time
-    /// [`Self::save_session`] and the debounced [`Self::autosave_session`].
-    fn build_session_snapshot(&mut self) -> crate::state::sessions::Session {
-        use crate::state::sessions::{SavedTab, Session};
-        let epoch_secs = crate::sysinfo::epoch_secs();
+    /// Build the [`Manifest`] from live state: every open project, in switcher
+    /// order, each read inside it so the column and pane handles name its own.
+    /// Shared by the quit-time [`Self::save_session`] and the debounced
+    /// [`Self::autosave_session`].
+    fn build_manifest(&mut self) -> Manifest {
         // Stable per-process session id (see `AppState::session_id`) so every
         // save overwrites one `<id>.json`; fresh-millis fallback only if it was
         // somehow never assigned.
@@ -137,19 +202,81 @@ impl App {
             .state
             .session_id
             .unwrap_or_else(|| (crate::sysinfo::epoch_nanos() / 1_000_000) as u64);
+        debug_assert!(
+            !self.state.in_background,
+            "a save starts in the user's project"
+        );
+        let users = self.state.active;
+        let mut claims = ConversationClaims::new();
+        let mut projects = Vec::new();
+        for project in self.open_project_ids() {
+            projects.push(self.in_project(project, |app| app.saved_project(&mut claims)));
+        }
+        Manifest {
+            version: crate::state::sessions::MANIFEST_VERSION,
+            id,
+            epoch_secs: crate::sysinfo::epoch_secs(),
+            saved_at: crate::sysinfo::format_now(),
+            name: self.state.session_name.clone().unwrap_or_default(),
+            pid: Some(std::process::id()),
+            process_started: crate::proc_group::own_start_secs(),
+            active_project: Some(users),
+            projects,
+            scope_claims: self.state.scope_registry.clone(),
+        }
+    }
 
-        // Track session IDs already assigned to earlier tabs so each
-        // Claude/Codex pane gets a distinct `agent_session_id` even
-        // when several tabs share a cwd. Without this, the resolver's
-        // "most-recent JSONL for cwd" fallback handed every Claude
-        // pane the same ID and they all collapsed onto one
-        // conversation at restore.
-        let mut claims: std::collections::HashMap<
-            Option<std::path::PathBuf>,
-            std::collections::HashSet<String>,
-        > = std::collections::HashMap::new();
-        let tabs: Vec<SavedTab> = self
+    /// Every open project's id, in switcher order.
+    fn open_project_ids(&self) -> Vec<ProjectId> {
+        self.state.open_projects().map(|p| p.id).collect()
+    }
+
+    /// The active project as the manifest saves it, column `a`'s directory
+    /// included.
+    fn saved_project(&mut self, claims: &mut ConversationClaims) -> SavedProject {
+        let tabs = self.saved_tabs(claims);
+        // SPYC-TRAP(partial-restore-keeps-saved-tabs): autosave overwrites the
+        // original session, so unopened entries must survive every snapshot.
+        let live_active = self
             .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or(0, PaneTabs::active_index);
+        let (tabs, active_tab) = super::state::restore::merge_saved_tabs(
+            tabs,
+            live_active,
+            &self.state.active_project().deferred_tabs,
+        );
+        let vsplit = self.saved_vsplit();
+        let pane_focused = self.state.pane_focused();
+        let left_cwd = self.state.col(Side::Left).listing.dir.clone();
+        let project = self.state.active_project();
+        SavedProject {
+            id: project.id,
+            home: project.home.clone(),
+            label: project.label(),
+            start_dir: project.start_dir.clone(),
+            left_cwd: Some(left_cwd),
+            vsplit,
+            pane_height_pct: project.pane.pane_height_pct,
+            pane_focused,
+            tabs,
+            active_tab,
+            agent_hud: project.pane.agent_hud.choice,
+        }
+    }
+
+    /// The active project's live tabs, each with the conversation it runs.
+    ///
+    /// `claims` holds the session IDs already assigned to earlier tabs, in any
+    /// project, so each Claude/Codex pane gets a distinct `agent_session_id`
+    /// even when several tabs share a cwd. Without this, the resolver's
+    /// "most-recent JSONL for cwd" fallback handed every Claude
+    /// pane the same ID and they all collapsed onto one
+    /// conversation at restore.
+    fn saved_tabs(&mut self, claims: &mut ConversationClaims) -> Vec<SavedTab> {
+        self.runtime
             .project_mut()
             .pane_tabs
             .as_mut()
@@ -205,92 +332,48 @@ impl App {
                     })
                     .collect()
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
 
-        // SPYC-TRAP(partial-restore-keeps-saved-tabs): autosave overwrites the
-        // original session, so unopened entries must survive every snapshot.
-        let live_active = self
-            .runtime
-            .project()
-            .pane_tabs
-            .as_ref()
-            .map_or(0, PaneTabs::active_index);
-        let (tabs, active_tab) =
-            super::state::restore::merge_saved_tabs(tabs, live_active, &self.state.deferred_tabs);
-
-        // Anchor the session on `project_home` (explicit) → `start_dir`
-        // (where spyc was launched) → `listing.dir` (last resort).
-        // `load_sessions` dedups on cwd + tab commands, so saving from
-        // a deep subdir produced a fresh entry that restored at the
-        // subdir instead of the user's project root.
-        //
-        // We don't walk up for `.git` here: a Java monorepo cloned into
-        // `~/src/foo/inner-repo` may have `.git` at `inner-repo`, but
-        // the user thinks of the *whole workspace* (`~/src/foo`) as
-        // their project. Honouring `start_dir` matches that — the user
-        // launched spyc there, so that's the natural anchor. Anyone
-        // who wants a different anchor can set `project_home`
-        // explicitly with `:project` or `gP`.
-        let session_cwd = self
-            .state
-            .active_project()
-            .home
-            .clone()
-            .unwrap_or_else(|| self.state.active_project().start_dir.clone());
-        Session {
-            id,
-            saved_at: crate::sysinfo::format_now(),
-            epoch_secs,
-            cwd: session_cwd,
-            tabs,
-            active_tab,
-            pane_height_pct: self.state.active_project().pane.pane_height_pct,
-            pane_focused: self.state.pane_focused(),
-            name: self.state.session_name.clone().unwrap_or_default(),
-            project_home: self.state.active_project().home.clone(),
-            // Persist the open vertical split's shape + its content key: a
-            // second *commander*'s cwd (`right_cwd`, reopened on restore — PR G)
-            // or a Stage-1 *preview* file (`preview_path`). The two are mutually
-            // exclusive (a commander clears `right_pager`).
-            vsplit: self.state.active_project().vsplit.map(|v| {
-                crate::state::sessions::SavedVsplit {
-                    width_pct: v.width_pct,
-                    full_height: matches!(v.mode, VsplitMode::FullHeight),
-                    focus_right: matches!(v.focus, Side::Right),
-                    preview_path: self
-                        .view
-                        .project()
-                        .right_pager
-                        .as_ref()
-                        .and_then(|p| p.source_path.clone()),
-                    right_cwd: self
-                        .state
-                        .get_col(Side::Right)
-                        .map(|c| c.listing.dir.clone()),
-                }
-            }),
-            scope_claims: self.state.scope_registry.clone(),
-            agent_hud: self.state.active_project().pane.agent_hud.choice,
-        }
+    /// Persist the open vertical split's shape + its content key: a
+    /// second *commander*'s cwd (`right_cwd`, reopened on restore — PR G)
+    /// or a Stage-1 *preview* file (`preview_path`). The two are mutually
+    /// exclusive (a commander clears `right_pager`).
+    fn saved_vsplit(&self) -> Option<SavedVsplit> {
+        self.state.active_project().vsplit.map(|v| SavedVsplit {
+            width_pct: v.width_pct,
+            full_height: matches!(v.mode, VsplitMode::FullHeight),
+            focus_right: matches!(v.focus, Side::Right),
+            preview_path: self
+                .view
+                .project()
+                .right_pager
+                .as_ref()
+                .and_then(|p| p.source_path.clone()),
+            right_cwd: self
+                .state
+                .get_col(Side::Right)
+                .map(|c| c.listing.dir.clone()),
+        })
     }
 
     /// Post-TUI exit summary line (`self.exit_summary`) from a just-saved
     /// session + its write result. Quit-path only — the debounced autosave
     /// persists silently.
-    fn build_exit_summary(
-        &mut self,
-        session: &crate::state::sessions::Session,
-        save_result: &std::io::Result<()>,
-    ) {
+    fn build_exit_summary(&mut self, manifest: &Manifest, save_result: &std::io::Result<()>) {
         // Report the write result truthfully — a failed write (disk full,
         // unwritable state dir) must not tell the user their session was safe
         // when `spyc -r` would later find nothing.
-        let cwd_display = crate::paths::display_tilde(&session.cwd);
-        let tab_count = session.tabs.len();
+        let place = match manifest.projects.as_slice() {
+            [project] => crate::paths::display_tilde(project.anchor()),
+            projects => crate::state::sessions::project_list_label(projects),
+        };
+        let tabs: Vec<&SavedTab> = manifest.projects.iter().flat_map(|p| &p.tabs).collect();
+        let tab_count = tabs.len();
         let saved_ok = save_result.is_ok();
         let mut parts = match save_result {
-            Ok(()) => vec![format!("session saved — {cwd_display}")],
-            Err(e) => vec![format!("session NOT saved ({e}) — {cwd_display}")],
+            Ok(()) => vec![format!("session saved — {place}")],
+            Err(e) => vec![format!("session NOT saved ({e}) — {place}")],
         };
         if tab_count > 0 {
             parts.push(format!(
@@ -306,8 +389,7 @@ impl App {
             let kind = profile.kind();
             match profile.exit_summary_mode() {
                 crate::agent::ExitSummaryMode::Names => {
-                    let names: Vec<String> = session
-                        .tabs
+                    let names: Vec<String> = tabs
                         .iter()
                         .filter(|t| t.effective_kind() == kind)
                         .filter_map(|t| t.agent_session_name.clone())
@@ -317,8 +399,7 @@ impl App {
                     }
                 }
                 crate::agent::ExitSummaryMode::Count => {
-                    let count = session
-                        .tabs
+                    let count = tabs
                         .iter()
                         .filter(|t| t.effective_kind() == kind && t.agent_session_id.is_some())
                         .count();
@@ -343,62 +424,73 @@ impl App {
     /// Cheap structural fingerprint of the session-relevant state, so
     /// [`Self::settle_autosave`] detects a genuine change without a full
     /// snapshot build (which resolves agent resume ids off the filesystem).
-    /// Read-only; must track what [`Self::build_session_snapshot`] persists.
-    fn session_fingerprint(&self) -> u64 {
+    /// Must track what [`Self::build_manifest`] persists, in every project.
+    fn session_fingerprint(&mut self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        if let Some(pt) = self.runtime.project().pane_tabs.as_ref() {
-            pt.active_index().hash(&mut h);
-            for t in pt.tabs() {
-                t.info.command.hash(&mut h);
-                t.info.cwd.hash(&mut h);
-                // A pin usually lands after the tab's first save, which then
-                // recorded no conversation, or a guessed one (#584).
-                t.info.pinned_session_id().hash(&mut h);
-                t.info.codex_home.hash(&mut h);
-                // `^a R` respawns in place with the same command and a new id.
-                t.info.id.hash(&mut h);
-            }
+        for project in self.open_project_ids() {
+            project.hash(&mut h);
+            self.in_project(project, |app| app.hash_project(&mut h));
         }
-        super::state::restore::hash_deferred_tabs(&self.state.deferred_tabs, &mut h);
-        self.state.active_project().home.hash(&mut h);
-        self.state
-            .active_project()
-            .pane
-            .pane_height_pct
-            .hash(&mut h);
-        self.state.pane_focused().hash(&mut h);
-        if let Some(v) = self.state.active_project().vsplit {
-            v.width_pct.hash(&mut h);
-            matches!(v.mode, VsplitMode::FullHeight).hash(&mut h);
-            matches!(v.focus, Side::Right).hash(&mut h);
-        }
-        if let Some(c) = self.state.get_col(Side::Right) {
-            c.listing.dir.hash(&mut h);
-        }
+        self.state.active.hash(&mut h);
         // P2: a scope-registry mutation (register/release) is session-relevant
         // — it's exactly what must survive a crash mid-merge-train.
         self.state.scope_registry.hash(&mut h);
-        self.state
-            .active_project()
-            .pane
-            .agent_hud
-            .choice
-            .hash(&mut h);
         h.finish()
     }
 
-    /// Whether a restore would bring anything back: tabs (open or kept
-    /// unopened), a split, or scope claims. A cwd alone doesn't count.
-    fn has_restorable_state(&self) -> bool {
+    /// The active project's part of [`Self::session_fingerprint`].
+    fn hash_project(&self, h: &mut std::collections::hash_map::DefaultHasher) {
+        use std::hash::Hash;
+        if let Some(pt) = self.runtime.project().pane_tabs.as_ref() {
+            pt.active_index().hash(h);
+            for t in pt.tabs() {
+                t.info.command.hash(h);
+                t.info.cwd.hash(h);
+                // A pin usually lands after the tab's first save, which then
+                // recorded no conversation, or a guessed one (#584).
+                t.info.pinned_session_id().hash(h);
+                t.info.codex_home.hash(h);
+                // `^a R` respawns in place with the same command and a new id.
+                t.info.id.hash(h);
+            }
+        }
+        let project = self.state.active_project();
+        super::state::restore::hash_deferred_tabs(&project.deferred_tabs, h);
+        project.home.hash(h);
+        project.start_dir.hash(h);
+        project.pane.pane_height_pct.hash(h);
+        self.state.pane_focused().hash(h);
+        if let Some(v) = project.vsplit {
+            v.width_pct.hash(h);
+            matches!(v.mode, VsplitMode::FullHeight).hash(h);
+            matches!(v.focus, Side::Right).hash(h);
+        }
+        self.state.col(Side::Left).listing.dir.hash(h);
+        if let Some(c) = self.state.get_col(Side::Right) {
+            c.listing.dir.hash(h);
+        }
+        project.pane.agent_hud.choice.hash(h);
+    }
+
+    /// Whether a restore would bring anything back: any project's tabs (open
+    /// or kept unopened) or split, or scope claims. A cwd alone doesn't count.
+    fn has_restorable_state(&mut self) -> bool {
+        !self.state.scope_registry.is_empty()
+            || self
+                .open_project_ids()
+                .into_iter()
+                .any(|project| self.in_project(project, |app| app.project_has_restorable_state()))
+    }
+
+    fn project_has_restorable_state(&self) -> bool {
         self.runtime
             .project()
             .pane_tabs
             .as_ref()
             .is_some_and(|pt| !pt.tabs().is_empty())
-            || !self.state.deferred_tabs.is_empty()
+            || !self.state.active_project().deferred_tabs.is_empty()
             || self.state.active_project().vsplit.is_some()
-            || !self.state.scope_registry.is_empty()
     }
 
     /// P3-2 crash-sufficient autosave (PRE-recv settle). Debounce: on a
@@ -432,64 +524,20 @@ impl App {
 
     pub fn show_session_picker(&mut self) {
         use crate::state::sessions;
-        let sessions = sessions::load_sessions();
-        if sessions.is_empty() {
+        let manifests = sessions::load_manifests();
+        if manifests.is_empty() {
             self.state.flash_info("no saved sessions");
             return;
         }
-        let lines: Vec<String> = sessions
+        let running: Vec<bool> = manifests.iter().map(Manifest::running).collect();
+        let running_column = running.contains(&true);
+        let lines: Vec<String> = manifests
             .iter()
+            .zip(&running)
             .enumerate()
-            .map(|(i, s)| {
-                let age = sessions::format_relative_time(s.epoch_secs);
-                let tab_count = s.tabs.len();
-                let names: Vec<&str> = s.tabs.iter().map(|t| t.label.as_str()).collect();
-                // Show agent session info (claude/codex) for tabs that have it.
-                // Picker tooltips group by kind so a session with mixed
-                // claude+codex panes is legible at a glance.
-                let agent_info: Vec<String> = s
-                    .tabs
-                    .iter()
-                    .filter_map(|t| {
-                        let sid = t.agent_session_id.as_deref()?;
-                        let short_id = sessions::short_id(sid);
-                        let kind = t.effective_kind();
-                        if kind == AgentKind::Other {
-                            return None;
-                        }
-                        Some(
-                            crate::agent::profile_for(kind)
-                                .picker_label(&short_id, t.agent_session_name.as_deref()),
-                        )
-                    })
-                    .collect();
-                let tab_info = if tab_count == 0 {
-                    String::new()
-                } else {
-                    format!("  [{}]", names.join(", "))
-                };
-                let agent_suffix = if agent_info.is_empty() {
-                    String::new()
-                } else {
-                    format!("  {}", agent_info.join(", "))
-                };
-                let name_col = if s.name.is_empty() {
-                    "(unnamed)"
-                } else {
-                    s.name.as_str()
-                };
-                format!(
-                    "  [{}]  {:<22} {:<14} {}{}{}",
-                    i + 1,
-                    name_col,
-                    age,
-                    s.cwd.display(),
-                    tab_info,
-                    agent_suffix
-                )
-            })
+            .map(|(i, (manifest, &running))| picker_row(i, manifest, running, running_column))
             .collect();
-        self.state.pending_sessions = Some(sessions);
+        self.state.pending_sessions = Some(manifests);
         let mut all_lines = vec!["  [n]  new session".to_string()];
         all_lines.extend(lines);
         let mut view = pager::PagerView::new_plain(
@@ -528,10 +576,11 @@ impl App {
         lines.push(format!("marks    : {}", self.state.marks.entries.len()));
         lines.push(format!("rss      : {}", crate::sysinfo::format_rss()));
         lines.push(format!("time     : {}", crate::sysinfo::format_now()));
-        if !self.state.deferred_tabs.is_empty() {
+        let deferred_tabs = &self.state.active_project().deferred_tabs;
+        if !deferred_tabs.is_empty() {
             lines.push(String::new());
             lines.push("unopened tabs (kept saved):".into());
-            for deferred in &self.state.deferred_tabs {
+            for deferred in deferred_tabs {
                 lines.push(format!(
                     "  saved tab {} ({}) — {}",
                     deferred.saved_index + 1,
@@ -743,8 +792,8 @@ mod tests {
                 info.codex_home = Some(tmp.path().join("codex-home"));
             }
 
-            let snapshot = app.build_session_snapshot();
-            let saved = &snapshot.tabs[0];
+            let snapshot = app.build_manifest();
+            let saved = &snapshot.projects[0].tabs[0];
             assert_eq!(saved.agent_session_id.as_deref(), Some(UUID));
             assert_eq!(saved.command, "codex --model test --sandbox read-only");
             // And the id has to survive into the spawn, or saving it changed
@@ -787,11 +836,37 @@ mod tests {
                 entry.info.codex_session_id = Some(UUID.to_string());
             }
 
-            let snapshot = app.build_session_snapshot();
-            assert_eq!(snapshot.tabs.len(), 2);
-            let claims = snapshot
-                .tabs
+            let snapshot = app.build_manifest();
+            let tabs = &snapshot.projects[0].tabs;
+            assert_eq!(tabs.len(), 2);
+            let claims = tabs
                 .iter()
+                .filter(|t| t.agent_session_id.as_deref() == Some(UUID))
+                .count();
+            assert_eq!(claims, 1, "only one tab may claim a conversation");
+        });
+    }
+
+    /// The same holds across projects: a tab in another project pinned to the
+    /// same conversation doesn't save it a second time.
+    #[test]
+    fn tabs_in_two_projects_pinned_to_one_conversation_do_not_both_save_it() {
+        const UUID: &str = "0198c2f4-1a2b-7c3d-8e4f-5a6b7c8d9e0f";
+        two_projects(|app, b_id, b| {
+            app.open_tab_in_project(b_id, b);
+            let pin = |app: &mut App| {
+                let tabs = app.runtime.project_mut().pane_tabs.as_mut().expect("a tab");
+                let info = &mut tabs.tabs_mut()[0].info;
+                info.command = "codex".to_string();
+                info.codex_session_id = Some(UUID.to_string());
+            };
+            pin(app);
+            app.as_project(b_id, pin);
+            let saved = app.build_manifest();
+            let claims = saved
+                .projects
+                .iter()
+                .flat_map(|p| &p.tabs)
                 .filter(|t| t.agent_session_id.as_deref() == Some(UUID))
                 .count();
             assert_eq!(claims, 1, "only one tab may claim a conversation");
@@ -820,10 +895,10 @@ mod tests {
                 entry.info.codex_session_id = Some(UUID.into());
                 entry.info.codex_home = Some(tmp.path().join(format!("home-{index}")));
             }
-            let saved = app.build_session_snapshot();
+            let saved = app.build_manifest();
             let json = serde_json::to_string(&saved).unwrap();
-            let restored: crate::state::sessions::Session = serde_json::from_str(&json).unwrap();
-            for (index, tab) in restored.tabs.iter().enumerate() {
+            let restored = parse(&json);
+            for (index, tab) in restored.projects[0].tabs.iter().enumerate() {
                 assert_eq!(tab.agent_session_id.as_deref(), Some(UUID));
                 assert_eq!(
                     tab.codex_home,
@@ -849,12 +924,10 @@ mod tests {
             entry.info.command = "codex".into();
             entry.info.codex_session_id = Some("019e8b21-9e7c-7553-a118-d1cdada725fd".into());
             entry.info.codex_home = None;
-            let mut saved = app.build_session_snapshot();
-            saved.cwd = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let saved = app.build_manifest().anchored_at(crate_root());
             let id = entry_id(&app).to_owned();
-            let restored: crate::state::sessions::Session =
-                serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap();
-            assert!(restored.tabs[0].codex_home_unresolved);
+            let restored = parse(&serde_json::to_string(&saved).unwrap());
+            assert!(restored.projects[0].tabs[0].codex_home_unresolved);
             app.restore_session(&restored);
             assert_eq!(entry_id(&app), id, "a refused restore keeps the live pane");
             assert!(
@@ -877,7 +950,7 @@ mod tests {
         crate::state::with_state_root(tmp.path(), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.open_pane_tab("cat");
-            assert_eq!(app.build_session_snapshot().agent_hud, None);
+            assert_eq!(app.build_manifest().projects[0].agent_hud, None);
             let before = app.session_fingerprint();
             app.cmd_agent_hud("full");
             assert_ne!(
@@ -885,19 +958,21 @@ mod tests {
                 before,
                 "the autosave must see the choice"
             );
-            let mut saved = app.build_session_snapshot();
-            saved.cwd = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let saved = app.build_manifest().anchored_at(crate_root());
             let json = serde_json::to_string(&saved).unwrap();
-            let restored: crate::state::sessions::Session = serde_json::from_str(&json).unwrap();
+            let restored = parse(&json);
             let mut fresh = App::test_app(tmp.path().to_path_buf());
             assert_eq!(fresh.agent_hud_preference(), AgentHudMode::Off);
             fresh.restore_session(&restored);
             assert_eq!(fresh.agent_hud_preference(), AgentHudMode::Full);
             let mut older: serde_json::Value = serde_json::from_str(&json).unwrap();
-            older.as_object_mut().unwrap().remove("agent_hud");
-            let older: crate::state::sessions::Session = serde_json::from_value(older).unwrap();
+            older["projects"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("agent_hud");
+            let older = crate::state::sessions::parse_manifest(older).unwrap();
             assert_eq!(
-                older.agent_hud, None,
+                older.projects[0].agent_hud, None,
                 "a session saved before the field reads"
             );
         });
@@ -909,25 +984,27 @@ mod tests {
             .id
     }
 
-    /// A restore point the picker can restore. Its `cwd` is the crate root,
-    /// where the test process already runs, because restoring `chdir`s the
-    /// whole process (#576).
-    fn restorable(id: u64, epoch_secs: u64, name: &str) -> crate::state::sessions::Session {
-        crate::state::sessions::Session {
+    fn crate_root() -> &'static std::path::Path {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    /// A saved manifest's text, read back as `spyc -r` reads it.
+    fn parse(json: &str) -> crate::state::sessions::Manifest {
+        crate::state::sessions::parse_manifest(serde_json::from_str(json).unwrap())
+            .expect("a manifest")
+    }
+
+    /// A restore point the picker can restore. Its column `a` is the crate
+    /// root, where the test process already runs, because restoring `chdir`s
+    /// the whole process (#576).
+    fn restorable(id: u64, epoch_secs: u64, name: &str) -> crate::state::sessions::Manifest {
+        crate::state::sessions::Manifest::one_project(
             id,
-            saved_at: String::new(),
             epoch_secs,
-            cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
-            tabs: Vec::new(),
-            active_tab: 0,
-            pane_height_pct: 30,
-            pane_focused: false,
-            name: name.to_string(),
-            project_home: None,
-            vsplit: None,
-            scope_claims: Vec::new(),
-            agent_hud: None,
-        }
+            name,
+            crate_root(),
+            Vec::new(),
+        )
     }
 
     fn press(app: &mut App, code: crossterm::event::KeyCode) {
@@ -960,7 +1037,7 @@ mod tests {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.save_session();
             assert!(
-                crate::state::sessions::load_sessions().is_empty(),
+                crate::state::sessions::load_manifests().is_empty(),
                 "an empty quit must not take a picker slot"
             );
             let summary = app.exit_summary.as_deref().unwrap_or_default();
@@ -980,30 +1057,32 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         crate::state::with_state_root(tmp.path(), || {
             let mut saved = restorable(ID, 1_700_000_000, "OLD");
-            saved.tabs.push(crate::state::sessions::SavedTab {
-                command: "cat".into(),
-                label: "cat".into(),
-                cwd: tmp.path().to_path_buf(),
-                agent_kind: crate::state::sessions::AgentKind::Other,
-                agent_session_id: None,
-                agent_session_name: None,
-                codex_home: None,
-                codex_home_unresolved: false,
-                claim_owner: String::new(),
-                pane_id: String::new(),
-                agent_hint: None,
-            });
+            saved.projects[0]
+                .tabs
+                .push(crate::state::sessions::SavedTab {
+                    command: "cat".into(),
+                    label: "cat".into(),
+                    cwd: tmp.path().to_path_buf(),
+                    agent_kind: crate::state::sessions::AgentKind::Other,
+                    agent_session_id: None,
+                    agent_session_name: None,
+                    codex_home: None,
+                    codex_home_unresolved: false,
+                    claim_owner: String::new(),
+                    pane_id: String::new(),
+                    agent_hint: None,
+                });
             crate::state::sessions::save_session(&saved).expect("seed the restore point");
 
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.state.session_id = Some(ID);
             app.save_session();
 
-            let loaded = crate::state::sessions::load_sessions();
+            let loaded = crate::state::sessions::load_manifests();
             assert_eq!(loaded.len(), 1);
             assert_eq!(loaded[0].id, ID);
             assert!(
-                loaded[0].tabs.is_empty(),
+                loaded[0].projects[0].tabs.is_empty(),
                 "the closed tab must not come back"
             );
         });
@@ -1164,7 +1243,7 @@ mod tests {
     }
 
     fn saved_conversation(app: &mut App) -> Option<String> {
-        app.build_session_snapshot().tabs[0]
+        app.build_manifest().projects[0].tabs[0]
             .agent_session_id
             .clone()
     }
@@ -1411,7 +1490,6 @@ mod tests {
     /// A tab opening in a project the user isn't in is saved, so the autosave
     /// has to see it.
     #[test]
-    #[ignore = "red: #99 step 4 — the fingerprint covers the active project only"]
     fn a_tab_in_a_background_project_moves_the_autosave_fingerprint() {
         two_projects(|app, b_id, b| {
             let before = app.session_fingerprint();
@@ -1422,7 +1500,6 @@ mod tests {
 
     /// Column `a`'s directory is saved, so moving it is a change to save.
     #[test]
-    #[ignore = "red: #99 step 4 — column a's directory isn't saved"]
     fn navigating_column_a_moves_the_autosave_fingerprint() {
         two_projects(|app, _, b| {
             let before = app.session_fingerprint();
@@ -1435,13 +1512,57 @@ mod tests {
     /// A project's start directory is saved and restored, so changing it is a
     /// change to save.
     #[test]
-    #[ignore = "red: #99 step 4 — the start directory isn't saved"]
     fn a_new_start_dir_moves_the_autosave_fingerprint() {
         two_projects(|app, _, b| {
             let before = app.session_fingerprint();
             app.state.active_project_mut().start_dir = b.to_path_buf();
             assert_ne!(app.session_fingerprint(), before);
         });
+    }
+
+    /// A one-project row reads as a session's row always has; several projects
+    /// take the path's place; the running column appears only when asked for,
+    /// and keeps the rows aligned when it does.
+    #[test]
+    fn a_picker_row_names_its_place_and_whether_it_runs() {
+        use crate::state::sessions::{AgentKind, Manifest, SavedTab};
+        let tab = |label: &str| SavedTab {
+            command: label.into(),
+            label: label.into(),
+            cwd: "/w".into(),
+            agent_kind: AgentKind::Other,
+            agent_session_id: None,
+            agent_session_name: None,
+            codex_home: None,
+            codex_home_unresolved: false,
+            claim_owner: String::new(),
+            pane_id: String::new(),
+            agent_hint: None,
+        };
+        let one = Manifest::one_project(1, 0, "ONE", "/w/spyc", vec![tab("vim"), tab("zsh")]);
+        let row = super::picker_row(0, &one, false, false);
+        assert!(row.starts_with("  [1]  ONE "), "{row}");
+        assert!(row.ends_with(" /w/spyc  [vim, zsh]"), "{row}");
+
+        let mut two = one.clone();
+        two.projects.push(
+            Manifest::one_project(2, 0, "", "/w/web", Vec::new())
+                .projects
+                .remove(0),
+        );
+        let row = super::picker_row(1, &two, false, false);
+        assert!(row.starts_with("  [2]  ONE "), "{row}");
+        assert!(row.ends_with(" spyc (2 tabs) · web"), "{row}");
+
+        let running = super::picker_row(0, &one, true, true);
+        let idle = super::picker_row(0, &one, false, true);
+        assert!(running.contains(" running "), "{running}");
+        assert!(!idle.contains("running"), "{idle}");
+        assert_eq!(running.len(), idle.len(), "the column keeps rows aligned");
+        assert_eq!(
+            super::picker_row(0, &one, false, false).len() + 9,
+            idle.len()
+        );
     }
 
     #[test]

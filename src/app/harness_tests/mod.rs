@@ -13,6 +13,11 @@ fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())
 }
 
+/// A saved session's JSON, of either version, read as `spyc -r` reads it.
+fn parsed(json: serde_json::Value) -> crate::state::sessions::Manifest {
+    crate::state::sessions::parse_manifest(json).expect("a session `-r` can read")
+}
+
 /// A stand-in agent `dir/bin/<name>` that writes the arguments it was started
 /// with to `dir/<name>.argv`, one per line, and waits. A path-qualified
 /// command is detected by its last component, so the pane treats it as `name`.

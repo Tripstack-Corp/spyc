@@ -160,13 +160,12 @@ fn codex_restore_preserves_the_requested_settings_in_the_child_argv() {
             r#"{} fork OLD --model test --profile team --sandbox read-only -a never -c 'model_reasoning_effort="high"'"#,
             tabs(&app).tabs()[0].info.command
         );
-        let saved: crate::state::sessions::Session = serde_json::from_value(serde_json::json!({
+        let saved = parsed(serde_json::json!({
             "id": 1, "saved_at": "", "epoch_secs": 0, "cwd": env!("CARGO_MANIFEST_DIR"),
             "tabs": [{ "command": command, "label": "codex", "cwd": dir,
                 "agent_kind": "codex", "agent_session_id": PARENT }],
             "active_tab": 0, "pane_height_pct": 50, "pane_focused": true
-        }))
-        .unwrap();
+        }));
 
         app.restore_session(&saved);
 
@@ -213,13 +212,12 @@ fn codex_refuses_ambiguous_fork_and_restore_without_replacing_live_tabs() {
         let original_id = source.info.id.clone();
         let command = source.info.command.clone();
         let original_name = app.state.session_name.clone();
-        let saved: crate::state::sessions::Session = serde_json::from_value(serde_json::json!({
+        let saved = parsed(serde_json::json!({
             "id": 999, "name": "REFUSED_SESSION", "saved_at": "", "epoch_secs": 0, "cwd": env!("CARGO_MANIFEST_DIR"),
             "tabs": [{ "command": command, "label": "codex", "cwd": dir,
                     "agent_kind": "codex", "agent_session_id": PARENT }],
             "active_tab": 0, "pane_height_pct": 75, "pane_focused": true
-        }))
-        .unwrap();
+        }));
 
         app.apply(&Action::PaneForkTab).unwrap();
         assert_eq!(tabs(&app).tabs().len(), 1);

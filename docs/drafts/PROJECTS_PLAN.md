@@ -503,7 +503,7 @@ changes is the shape inside:
   same session both overwrite one file. The picker marks a manifest whose pid is
   alive as "running", and restoring one gives the new process a fresh id rather
   than adopting the running one's file.
-- **`MAX_SESSIONS = 20`** (`sessions/mod.rs:11`) stays a cap on manifests, not
+- **`MAX_SESSIONS = 20`** (`sessions/mod.rs:12`) stays a cap on manifests, not
   projects.
 
 **What `spyc -r` offers.** The picker keeps its shape and keys
@@ -534,6 +534,38 @@ was never set, so the `ClaudeCrashRecover` prompt couldn't fire. It guarded a
 `claude --resume` mount crash that restore stopped risking in v1.17.9. The
 dead machinery was deleted in 2.2 (#524, closing #522), so 2.3 builds on a
 restore path without it.
+
+**Landed in step 4, and what the code changed in this design.**
+
+- **A v1 file's home is its `project_home`, with no fallback to its `cwd`.**
+  `:project clear` saves no home, and the restored project keeps none; the
+  `cwd` becomes its `start_dir`, which anchors it as before.
+- **A one-project row reads as today's:** the path, its tab labels and its
+  agents' conversations. Every manifest a step-4 spyc writes has one project,
+  and the path says more than a label. The project list takes the path's place
+  only when a manifest holds several, and `running` gets its own column only
+  when a listed manifest is running.
+- **A restore adopts the file only when it carries all of it:** one project,
+  and no other live spyc writing it. Anything else restores the active project
+  as a copy and leaves the file untouched, so a project the restore didn't open
+  is never overwritten. Step 5 widens this to "every project opened".
+- **A copy of a running session starts its agents fresh** (owner decision): a
+  resume would put a second process in the conversations that spyc still has
+  open, and `codex resume --last` would pick one even without an id. The copy
+  takes none of its tab ids or scope claims either.
+- **`running` needs the pid's start time too.** A crashed spyc's pid soon
+  belongs to another process, so a pid alone would mark its manifest running
+  forever. The manifest records `process_started` beside `pid`; a spyc's own
+  file is never running to itself.
+- **Column `a` falls back to the anchor.** A gone `left_cwd`, or one that can't
+  be listed, lands on the home (else the start directory) instead of failing
+  the restore. The restored `start_dir` is the saved one when it still exists.
+- **Refused tabs belong to their project** (`Project::deferred_tabs`), and the
+  autosave fingerprint covers every project, column `a`'s directory and the
+  start directory.
+- **Saved project ids aren't adopted.** A restored project keeps the id it was
+  given at launch, which keys its runtime state and its context file; a saved
+  id only names the active project within its file.
 
 ---
 
@@ -758,6 +790,7 @@ PR:
    projects in one test app. Landed; the corrections it made are at the end of
    §2.
 4. **Manifest v2.** The v1 reader, `left_cwd`, `pid` and the picker labels.
+   Landed; the corrections it made are at the end of §3.
 5. **Open, close and switch.** The `Space` keys, the switcher, stashing on a
    switch, watch and poll on the active project only, and refresh on
    activation. Switching is what makes a project inactive while its work is in
@@ -791,6 +824,9 @@ PR:
      rest.
    - **Quit shuts down every project's tabs.** `run_teardown` removes every
      project's context file, but waits on the active project's tabs only.
+   - **`-r` opens every project in a manifest.** Step 4 restores the active
+     one, and adopts the file only when that is all it holds; with opening in
+     place, the adoption rule becomes "every project opened".
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

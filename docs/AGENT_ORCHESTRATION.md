@@ -333,7 +333,9 @@ a `SIGKILL` / crash / laptop-sleep loses at most that window — not the session
 resumed — claude and agy report their live conversation id as they run, so restore
 replays the right one instead of guessing by spawn time, which collides when
 several panes come up together), the vertical split, **and the scope registry**
-(§4) — coordination survives a restart mid-merge-train.
+(§4) — coordination survives a restart mid-merge-train. A session another spyc
+is still running restores as a copy whose agents start fresh, without that
+spyc's scope claims, which still belong to its live agents.
 
 Restored panes are **fresh shells + resumed conversations**, not PID-preserved
 live processes (spyc is single-process by design; no detach/reattach daemon).

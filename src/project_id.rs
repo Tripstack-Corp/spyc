@@ -4,7 +4,8 @@
 /// Identity of a project — a uuid, never an index (an index drifts when a
 /// project closes) or a path (a path changes identity on a re-home). `Copy`:
 /// cheap to carry wherever "which project" needs naming. It crosses the MCP
-/// socket thread as its hyphenated text (`Display` / `FromStr`).
+/// socket thread and the recovery manifest as its hyphenated text (`Display` /
+/// `FromStr`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProjectId(uuid::Uuid);
 
@@ -30,6 +31,19 @@ impl std::str::FromStr for ProjectId {
     }
 }
 
+impl serde::Serialize for ProjectId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ProjectId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = <String as serde::Deserialize>::deserialize(deserializer)?;
+        text.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,5 +53,14 @@ mod tests {
         let id = ProjectId::new();
         assert_eq!(id.to_string().parse::<ProjectId>().ok(), Some(id));
         assert!("not-a-uuid".parse::<ProjectId>().is_err());
+    }
+
+    #[test]
+    fn an_id_survives_the_manifest() {
+        let id = ProjectId::new();
+        let json = serde_json::to_value(id).unwrap();
+        assert_eq!(json, serde_json::json!(id.to_string()));
+        assert_eq!(serde_json::from_value::<ProjectId>(json).ok(), Some(id));
+        assert!(serde_json::from_value::<ProjectId>(serde_json::json!("nope")).is_err());
     }
 }

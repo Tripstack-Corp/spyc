@@ -388,9 +388,7 @@ pub struct AppState {
     pub user_host: String,
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
-    pub pending_sessions: Option<Vec<crate::state::sessions::Session>>,
-    /// Refused or unspawned tabs from a partial restore, kept verbatim on save.
-    pub deferred_tabs: Vec<restore::DeferredTab>,
+    pub pending_sessions: Option<Vec<crate::state::sessions::Manifest>>,
     /// `spyc -c` commands not yet run: they wait for startup to settle
     /// (`App::settle_startup_commands`).
     pub startup_commands: Vec<String>,
@@ -949,7 +947,6 @@ impl AppState {
             pending_new_tab_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
-            deferred_tabs: Vec::new(),
             startup_commands: Vec::new(),
             frecency: Frecency::default(),
         }

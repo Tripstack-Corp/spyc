@@ -293,11 +293,14 @@ fn session_persists_and_restores_a_commander_split() {
         }
 
         app.save_session();
-        let saved = crate::state::sessions::load_sessions()
+        let saved = crate::state::sessions::load_manifests()
             .into_iter()
             .find(|s| s.name == "vsplit-commander-test")
             .expect("session saved");
-        let sv = saved.vsplit.as_ref().expect("commander split persisted");
+        let sv = saved.projects[0]
+            .vsplit
+            .as_ref()
+            .expect("commander split persisted");
         assert_eq!(
             sv.right_cwd.as_deref(),
             Some(right.as_path()),

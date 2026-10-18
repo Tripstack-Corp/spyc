@@ -176,7 +176,6 @@ fn a_version_1_session_still_restores() {
 /// A save is a version 2 manifest: it names its process and lists the project
 /// with column `a`'s own directory, not just the project's home.
 #[test]
-#[ignore = "red: #99 step 4 — the save has no version, pid or project list"]
 fn a_save_writes_a_version_2_manifest() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -215,24 +214,20 @@ fn a_save_writes_a_version_2_manifest() {
 /// project's home and start directory, and the restore takes the manifest's id
 /// so later saves overwrite that file.
 #[test]
-#[ignore = "red: #99 step 4 — a version 2 manifest doesn't parse"]
 fn a_restore_puts_column_a_back_where_it_was() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
     crate::state::with_state_root(&state_root, || {
         let home = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
-        std::fs::create_dir_all(&home).unwrap();
+        let launched = home.join("launched");
+        std::fs::create_dir_all(&launched).unwrap();
         write_v1_decoy(&state_root);
+        let mut saved = project(P1, &home, &crate_root(), vec![tab("kept", &home)]);
+        saved["start_dir"] = json!(launched);
         write_manifest(
             &state_root,
             502,
-            &manifest(
-                502,
-                "V2_RESTORE",
-                1_700_000_100,
-                P1,
-                vec![project(P1, &home, &crate_root(), vec![tab("kept", &home)])],
-            ),
+            &manifest(502, "V2_RESTORE", 1_700_000_100, P1, vec![saved]),
         );
         let mut app = App::test_app(tmp.path().to_path_buf());
         let lines = picker_lines(&mut app);
@@ -240,7 +235,7 @@ fn a_restore_puts_column_a_back_where_it_was() {
         press(&mut app, KeyCode::Char('1'));
 
         assert_eq!(app.state.cur().listing.dir, crate_root(), "column a");
-        assert_eq!(app.state.active_project().start_dir, home);
+        assert_eq!(app.state.active_project().start_dir, launched);
         assert_eq!(app.state.active_project().home, Some(home));
         assert_eq!(tab_count(&app), 1);
         assert_eq!(
@@ -253,7 +248,6 @@ fn a_restore_puts_column_a_back_where_it_was() {
 
 /// A column `a` whose directory has gone lands on the project's home instead.
 #[test]
-#[ignore = "red: #99 step 4 — a version 2 manifest doesn't parse"]
 fn a_gone_column_a_lands_on_the_projects_home() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -284,7 +278,6 @@ fn a_gone_column_a_lands_on_the_projects_home() {
 /// Every open project is saved with its own tabs and column `a`, and the
 /// manifest names the one the user is in.
 #[test]
-#[ignore = "red: #99 step 4 — only the active project is saved"]
 fn every_open_project_is_saved() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -315,12 +308,13 @@ fn every_open_project_is_saved() {
         assert_eq!(projects[1]["home"], json!(b));
         assert_eq!(projects[1]["left_cwd"], json!(b_deep));
         assert_eq!(projects[1]["tabs"].as_array().map(Vec::len), Some(2));
+        let summary = app.exit_summary.as_deref().unwrap_or_default();
+        assert!(summary.contains("a (1 tab) · b (2)"), "{summary}");
     });
 }
 
 /// A tab in a project the user isn't in is still something to restore.
 #[test]
-#[ignore = "red: #99 step 4 — only the active project counts as restorable"]
 fn a_background_projects_tab_is_worth_saving() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -343,7 +337,6 @@ fn a_background_projects_tab_is_worth_saving() {
 /// copy: this spyc keeps its own file, and the manifest is never overwritten
 /// with only the project that opened.
 #[test]
-#[ignore = "red: #99 step 4 — a version 2 manifest doesn't parse"]
 fn a_two_project_manifest_restores_its_active_project_as_a_copy() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -392,7 +385,6 @@ fn a_two_project_manifest_restores_its_active_project_as_a_copy() {
 /// With several projects in a manifest, its row lists them, each with its tab
 /// count, in place of one directory.
 #[test]
-#[ignore = "red: #99 step 4 — a version 2 manifest doesn't parse"]
 fn the_picker_lists_a_manifests_projects() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -434,7 +426,6 @@ fn the_picker_lists_a_manifests_projects() {
 /// a pid outlives its process, so one now held by a process that started at
 /// another time, or by none, isn't running.
 #[test]
-#[ignore = "red: #99 step 4 — a version 2 manifest doesn't parse"]
 fn the_picker_marks_a_manifest_whose_spyc_is_running() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -471,7 +462,6 @@ fn the_picker_marks_a_manifest_whose_spyc_is_running() {
 /// copy takes nothing that spyc's agents still hold: not its file, its name,
 /// its tab ids, its scope claims, or its conversations, which start fresh.
 #[test]
-#[ignore = "red: #99 step 4 — a version 2 manifest doesn't parse"]
 fn restoring_a_running_manifest_makes_a_copy_whose_agents_start_fresh() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -520,5 +510,47 @@ fn restoring_a_running_manifest_makes_a_copy_whose_agents_start_fresh() {
             !argv.iter().any(|arg| arg == "resume" || arg == UUID),
             "the agent starts fresh: {argv:?}"
         );
+    });
+}
+
+/// Tabs a restore couldn't open stay saved with the project they were restored
+/// into, never with another open project.
+#[test]
+fn unopened_tabs_stay_with_their_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let saved = parsed(json!({
+            "id": 700, "name": "PARTIAL", "saved_at": "", "epoch_secs": 1_700_000_000,
+            "cwd": crate_root(),
+            "tabs": [
+                { "command": "codex --future-option", "label": "refused", "cwd": dir,
+                  "agent_kind": "codex", "agent_session_id": UUID,
+                  "codex_home": dir.join("codex-home") },
+                tab("kept", &dir)
+            ],
+            "active_tab": 1, "pane_height_pct": 30, "pane_focused": false
+        }));
+        let mut app = App::test_app(dir.clone());
+        app.restore_session(&saved);
+        assert_eq!(app.state.active_project().deferred_tabs.len(), 1);
+        let b = dir.join("b");
+        std::fs::create_dir_all(&b).unwrap();
+        let b_id = app.add_test_project(&b);
+        app.open_tab_in_project(b_id, &b);
+        app.save_session();
+
+        let file = read_manifest(&state_root, 700);
+        let labels = |project: usize| -> Vec<String> {
+            file["projects"][project]["tabs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|tab| tab["label"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        assert_eq!(labels(0), ["refused", "kept"]);
+        assert_eq!(labels(1), ["cat"]);
     });
 }

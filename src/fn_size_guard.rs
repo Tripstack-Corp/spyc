@@ -60,7 +60,6 @@ const FUNCTION: Rule = Rule {
             157,
         ),
         ("src/app/render/overlays.rs::App::render_image_gallery", 129),
-        ("src/app/session_restore.rs::App::restore_session", 116),
         ("src/app/state/apply.rs::AppState::apply", 380),
         ("src/app/state/dispatch.rs::AppState::dispatch_command", 201),
         ("src/config/load.rs::Config::merge_file", 159),

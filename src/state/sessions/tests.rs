@@ -499,12 +499,12 @@ fn save_load_prune_and_keep_distinct_sessions() {
     let tmp = tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         // --- roundtrip ---
-        let session = Session {
-            id: 12345,
-            saved_at: "2025-01-01 12:00".to_string(),
-            epoch_secs: 1_700_000_000,
-            cwd: PathBuf::from("/tmp/test"),
-            tabs: vec![SavedTab {
+        let session = Manifest::one_project(
+            12345,
+            1_700_000_000,
+            "SAFFRON_CUMIN",
+            "/tmp/test",
+            vec![SavedTab {
                 command: "bash".to_string(),
                 label: "shell".to_string(),
                 cwd: PathBuf::from("/tmp/test"),
@@ -517,21 +517,13 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 pane_id: String::new(),
                 agent_hint: None,
             }],
-            active_tab: 0,
-            pane_height_pct: 30,
-            pane_focused: false,
-            name: "SAFFRON_CUMIN".to_string(),
-            project_home: None,
-            vsplit: None,
-            scope_claims: Vec::new(),
-            agent_hud: None,
-        };
+        );
         save_session(&session).unwrap();
-        let loaded = load_sessions();
+        let loaded = load_manifests();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].id, 12345);
-        assert_eq!(loaded[0].tabs.len(), 1);
-        assert_eq!(loaded[0].tabs[0].command, "bash");
+        assert_eq!(loaded[0].projects[0].tabs.len(), 1);
+        assert_eq!(loaded[0].projects[0].tabs[0].command, "bash");
 
         // --- clean up for next sub-test ---
         let dir = tmp.path().join("sessions");
@@ -541,12 +533,12 @@ fn save_load_prune_and_keep_distinct_sessions() {
 
         // --- prune ---
         for i in 0..25_u32 {
-            let s = Session {
-                id: u64::from(i),
-                saved_at: format!("2025-01-{i:02}"),
-                epoch_secs: 1_700_000_000 + u64::from(i),
-                cwd: PathBuf::from(format!("/tmp/dir{i}")),
-                tabs: vec![SavedTab {
+            let s = Manifest::one_project(
+                u64::from(i),
+                1_700_000_000 + u64::from(i),
+                "",
+                format!("/tmp/dir{i}"),
+                vec![SavedTab {
                     command: format!("cmd{i}"),
                     label: format!("tab{i}"),
                     cwd: PathBuf::from(format!("/tmp/dir{i}")),
@@ -559,32 +551,24 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     pane_id: String::new(),
                     agent_hint: None,
                 }],
-                active_tab: 0,
-                pane_height_pct: 30,
-                pane_focused: false,
-                name: String::new(),
-                project_home: None,
-                vsplit: None,
-                scope_claims: Vec::new(),
-                agent_hud: None,
-            };
+            );
             save_session(&s).unwrap();
         }
-        let loaded = load_sessions();
+        let loaded = load_manifests();
         assert!(loaded.len() <= MAX_SESSIONS);
 
         // --- clean up for the distinct-sessions test ---
         std::fs::remove_dir_all(&dir).unwrap();
 
         // --- distinct sessions with the same cwd + commands are BOTH kept ---
-        // (each is its own restore point; load_sessions does no lossy dedup)
+        // (each is its own restore point; load_manifests does no lossy dedup)
         for id in [100_u64, 200] {
-            let s = Session {
+            let s = Manifest::one_project(
                 id,
-                saved_at: "2025-01-01".to_string(),
-                epoch_secs: 1_700_000_000 + id,
-                cwd: PathBuf::from("/same/dir"),
-                tabs: vec![SavedTab {
+                1_700_000_000 + id,
+                "",
+                "/same/dir",
+                vec![SavedTab {
                     command: "bash".to_string(),
                     label: "shell".to_string(),
                     cwd: PathBuf::from("/same/dir"),
@@ -597,18 +581,10 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     pane_id: String::new(),
                     agent_hint: None,
                 }],
-                active_tab: 0,
-                pane_height_pct: 30,
-                pane_focused: false,
-                name: String::new(),
-                project_home: None,
-                vsplit: None,
-                scope_claims: Vec::new(),
-                agent_hud: None,
-            };
+            );
             save_session(&s).unwrap();
         }
-        let loaded = load_sessions();
+        let loaded = load_manifests();
         assert_eq!(loaded.len(), 2, "distinct sessions must not be collapsed");
         // Sorted by recency: id=200 (newer) before id=100.
         assert_eq!(loaded[0].id, 200);
@@ -616,22 +592,8 @@ fn save_load_prune_and_keep_distinct_sessions() {
     });
 }
 
-fn tabless_session(id: u64, epoch_secs: u64) -> Session {
-    Session {
-        id,
-        saved_at: String::new(),
-        epoch_secs,
-        cwd: PathBuf::from("/tmp/proj"),
-        tabs: Vec::new(),
-        active_tab: 0,
-        pane_height_pct: 30,
-        pane_focused: false,
-        name: format!("S{id}"),
-        project_home: None,
-        vsplit: None,
-        scope_claims: Vec::new(),
-        agent_hud: None,
-    }
+fn tabless_session(id: u64, epoch_secs: u64) -> Manifest {
+    Manifest::one_project(id, epoch_secs, &format!("S{id}"), "/tmp/proj", Vec::new())
 }
 
 /// A restore keeps the session's id, so a session restored day after day has
@@ -663,7 +625,7 @@ fn pruning_keeps_the_session_just_saved_and_drops_the_least_recently_saved() {
         // The long-lived session: created before all of them, saved after.
         save_session(&tabless_session(1, base + 1_000)).unwrap();
 
-        let ids: std::collections::HashSet<u64> = load_sessions().iter().map(|s| s.id).collect();
+        let ids: std::collections::HashSet<u64> = load_manifests().iter().map(|s| s.id).collect();
         assert!(
             ids.contains(&1),
             "a save must not delete the file it just wrote"
@@ -699,12 +661,12 @@ fn prune_never_selects_the_file_just_written() {
 fn session_round_trips_through_disk_preserving_tabs_in_order() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let session = Session {
-            id: 42,
-            saved_at: "2026-05-30T00:00:00Z".into(),
-            epoch_secs: 1_700_000_000,
-            cwd: PathBuf::from("/tmp/proj"),
-            tabs: vec![
+        let mut session = Manifest::one_project(
+            42,
+            1_700_000_000,
+            "SAFFRON_PAPRIKA",
+            "/tmp/proj",
+            vec![
                 SavedTab {
                     command: "claude".into(),
                     label: "claude".into(),
@@ -732,50 +694,50 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     agent_hint: None,
                 },
             ],
-            active_tab: 1,
-            pane_height_pct: 40,
-            pane_focused: true,
-            name: "SAFFRON_PAPRIKA".into(),
-            project_home: Some(PathBuf::from("/tmp/proj")),
-            vsplit: None,
-            scope_claims: vec![crate::state::scope_registry::ScopeClaim {
-                id: 1,
-                owner: "owner-A".into(),
-                owner_label: "claude".into(),
-                paths: vec!["src/app/session.rs".into()],
-                intent: crate::state::scope_registry::ScopeIntent::Merging,
-                pr: Some("#661".into()),
-                note: None,
-                claimed_at_secs: 1_700_000_000,
-            }],
-            agent_hud: None,
-        };
+        );
+        session.saved_at = "2026-05-30T00:00:00Z".into();
+        session.scope_claims = vec![crate::state::scope_registry::ScopeClaim {
+            id: 1,
+            owner: "owner-A".into(),
+            owner_label: "claude".into(),
+            paths: vec!["src/app/session.rs".into()],
+            intent: crate::state::scope_registry::ScopeIntent::Merging,
+            pr: Some("#661".into()),
+            note: None,
+            claimed_at_secs: 1_700_000_000,
+        }];
+        let project = &mut session.projects[0];
+        project.active_tab = 1;
+        project.pane_height_pct = 40;
+        project.pane_focused = true;
+        project.home = Some(PathBuf::from("/tmp/proj"));
         save_session(&session).unwrap();
 
-        let loaded = load_sessions();
+        let loaded = load_manifests();
         assert_eq!(loaded.len(), 1);
         let s = &loaded[0];
+        let p = &s.projects[0];
         assert_eq!(s.id, 42);
-        assert_eq!(s.cwd, PathBuf::from("/tmp/proj"));
-        assert_eq!(s.active_tab, 1);
-        assert_eq!(s.pane_height_pct, 40);
-        assert!(s.pane_focused);
+        assert_eq!(p.start_dir, PathBuf::from("/tmp/proj"));
+        assert_eq!(p.active_tab, 1);
+        assert_eq!(p.pane_height_pct, 40);
+        assert!(p.pane_focused);
         assert_eq!(s.name, "SAFFRON_PAPRIKA");
-        assert_eq!(s.project_home, Some(PathBuf::from("/tmp/proj")));
-        assert_eq!(s.tabs.len(), 2);
+        assert_eq!(p.home, Some(PathBuf::from("/tmp/proj")));
+        assert_eq!(p.tabs.len(), 2);
         // Order preserved; distinct ids + kinds.
-        assert_eq!(s.tabs[0].command, "claude");
-        assert_eq!(s.tabs[0].label, "claude");
-        assert_eq!(s.tabs[0].cwd, PathBuf::from("/tmp/proj"));
-        assert_eq!(s.tabs[0].agent_kind, AgentKind::Claude);
-        assert_eq!(s.tabs[0].agent_session_id.as_deref(), Some("sid-A"));
-        assert_eq!(s.tabs[0].agent_session_name.as_deref(), Some("AROMA"));
-        assert_eq!(s.tabs[0].claim_owner, "owner-A");
-        assert_eq!(s.tabs[1].command, "codex");
-        assert_eq!(s.tabs[1].agent_kind, AgentKind::Codex);
-        assert_eq!(s.tabs[1].agent_session_id.as_deref(), Some("sid-B"));
-        assert_eq!(s.tabs[1].cwd, PathBuf::from("/tmp/proj/sub"));
-        assert_eq!(s.tabs[1].claim_owner, "", "a tab with no claim omits it");
+        assert_eq!(p.tabs[0].command, "claude");
+        assert_eq!(p.tabs[0].label, "claude");
+        assert_eq!(p.tabs[0].cwd, PathBuf::from("/tmp/proj"));
+        assert_eq!(p.tabs[0].agent_kind, AgentKind::Claude);
+        assert_eq!(p.tabs[0].agent_session_id.as_deref(), Some("sid-A"));
+        assert_eq!(p.tabs[0].agent_session_name.as_deref(), Some("AROMA"));
+        assert_eq!(p.tabs[0].claim_owner, "owner-A");
+        assert_eq!(p.tabs[1].command, "codex");
+        assert_eq!(p.tabs[1].agent_kind, AgentKind::Codex);
+        assert_eq!(p.tabs[1].agent_session_id.as_deref(), Some("sid-B"));
+        assert_eq!(p.tabs[1].cwd, PathBuf::from("/tmp/proj/sub"));
+        assert_eq!(p.tabs[1].claim_owner, "", "a tab with no claim omits it");
         // P2: the scope registry round-trips through disk too.
         assert_eq!(s.scope_claims.len(), 1);
         assert_eq!(s.scope_claims[0].owner, "owner-A");
@@ -813,18 +775,19 @@ fn legacy_session_json_without_name_or_project_home_loads() {
         "pane_focused": false
         // no "name", no "project_home" — an old save predating both
     });
-    let s: Session = serde_json::from_value(json).unwrap();
+    let s = parse_manifest(json).expect("a version 1 session reads");
+    let p = &s.projects[0];
     assert_eq!(s.name, "");
-    assert_eq!(s.project_home, None);
-    assert_eq!(s.tabs.len(), 1);
-    assert_eq!(s.tabs[0].agent_kind, AgentKind::Other);
-    assert_eq!(s.tabs[0].effective_kind(), AgentKind::Claude);
+    assert_eq!(p.home, None);
+    assert_eq!(p.tabs.len(), 1);
+    assert_eq!(p.tabs[0].agent_kind, AgentKind::Other);
+    assert_eq!(p.tabs[0].effective_kind(), AgentKind::Claude);
     assert_eq!(
-        s.tabs[0].agent_session_id.as_deref(),
+        p.tabs[0].agent_session_id.as_deref(),
         Some("22222222-2222-2222-2222-222222222222")
     );
     // P2 fields predate this save too: both must default, not fail to parse.
-    assert_eq!(s.tabs[0].claim_owner, "");
+    assert_eq!(p.tabs[0].claim_owner, "");
     assert!(s.scope_claims.is_empty());
 }
 

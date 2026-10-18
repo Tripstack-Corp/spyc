@@ -101,6 +101,25 @@ fn read_process(sys: &mut sysinfo_crate::System, pid: u32) -> Option<(Vec<String
     None
 }
 
+/// When `pid` started, in seconds since the epoch; `None` when it can't be read.
+pub fn started_epoch_secs(pid: u32) -> Option<u64> {
+    use sysinfo_crate::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let pid = Pid::from_u32(pid);
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    sys.process(pid).map(sysinfo_crate::Process::start_time)
+}
+
+/// When this process started, read once.
+pub fn own_start_secs() -> Option<u64> {
+    static OWN: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *OWN.get_or_init(|| started_epoch_secs(std::process::id()))
+}
+
 /// Whether `pid` is still a process.
 pub fn alive(pid: u32) -> bool {
     i32::try_from(pid)
@@ -147,8 +166,23 @@ fn group_pids(_pgid: u32) -> Vec<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{alive, has_ancestor, members};
+    use super::{alive, has_ancestor, members, own_start_secs, started_epoch_secs};
     use std::os::unix::process::CommandExt;
+
+    /// This process has a start time, it is in the past, and a pid no process
+    /// holds has none.
+    #[test]
+    fn a_running_process_has_a_start_time() {
+        let own = own_start_secs().expect("this process started");
+        assert!(own <= crate::sysinfo::epoch_secs());
+        assert_eq!(started_epoch_secs(std::process::id()), Some(own));
+        let mut child = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn true");
+        let pid = child.id();
+        child.wait().expect("reap");
+        assert_eq!(started_epoch_secs(pid), None);
+    }
 
     /// A process started in a group of its own is that group's member, named
     /// for what it runs, and stops being alive once it is gone.

@@ -255,8 +255,8 @@ fn a_shell_tab_running_an_agent_is_saved_as_its_shell() {
             .map(|e| e.unwrap().path())
             .find(|p| p.extension().is_some_and(|x| x == "json"))
             .expect("the session was saved");
-        let saved: crate::state::sessions::Session =
-            serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+        let saved = parsed(serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap());
+        let saved = &saved.projects[0];
         assert_eq!(saved.tabs[0].command, "sh");
         assert_eq!(saved.tabs[0].agent_kind, AgentKind::Other);
         assert_eq!(saved.tabs[0].agent_session_id, None);
