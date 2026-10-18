@@ -236,21 +236,25 @@ impl App {
         } else {
             self.state.flash_info(text);
         }
+        // The tab restarts in its own project, which need not be the one in
+        // view by the time the install lands.
         if let WiringOp::Install {
             restart: Some(tab_id),
         } = outcome.op
+            && let Some(project) = self.runtime.project_of_pane(&tab_id)
         {
-            self.restart_claude_tab(&tab_id);
+            self.land_in(project, |app| app.restart_claude_tab(&tab_id));
         }
     }
 
-    /// Mark `kind`'s tabs as needing a restart: they read their hooks at
-    /// startup, before this change.
+    /// Mark `kind`'s tabs, in every project, as needing a restart: they read
+    /// their hooks at startup, before this change.
     fn flag_wiring_restart(&mut self, kind: AgentKind) {
-        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
-            return;
-        };
-        for entry in tabs.tabs_mut() {
+        let entries = self
+            .runtime
+            .every_tab_set_mut()
+            .flat_map(|(_, tabs)| tabs.tabs_mut().iter_mut());
+        for entry in entries {
             if entry.info.agent().kind() == kind {
                 entry.info.status_hooks_restart_needed = true;
             }
@@ -634,7 +638,6 @@ mod tests {
     /// `:hooks on!` typed in one project restarts the claude tab it was typed
     /// in, though the install lands after the user moved to another project.
     #[test]
-    #[ignore = "red: a restart looks for its tab only in the active project"]
     fn a_restart_reaches_its_tab_in_another_project() {
         with_app(|app, root| {
             two_claude_tabs(app, root);
@@ -678,7 +681,6 @@ mod tests {
     /// Wiring an agent that reads its hooks only at startup flags its tabs in
     /// every project for a restart, not only the project in view.
     #[test]
-    #[ignore = "red: only the active project's tabs are flagged for a restart"]
     fn wiring_flags_a_tab_in_another_project_for_restart() {
         with_app(|app, root| {
             let first = app.state.active;

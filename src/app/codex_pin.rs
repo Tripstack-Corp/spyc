@@ -163,15 +163,12 @@ impl App {
     /// rollout costs one scan per output burst while it is active, not forever.
     fn needs_codex_pin(&self) -> bool {
         self.runtime
-            .project()
-            .pane_tabs
-            .as_ref()
-            .is_some_and(|tabs| {
-                tabs.tabs().iter().any(|e| {
-                    (e.info.codex_session_id.is_none() || e.info.codex_home.is_none())
-                        && codex_pin_window_open(e.info.last_output_at, e.info.spawn_at)
-                        && e.info.agent().kind() == AgentKind::Codex
-                })
+            .every_tab_set()
+            .flat_map(|(_, tabs)| tabs.tabs())
+            .any(|e| {
+                (e.info.codex_session_id.is_none() || e.info.codex_home.is_none())
+                    && codex_pin_window_open(e.info.last_output_at, e.info.spawn_at)
+                    && e.info.agent().kind() == AgentKind::Codex
             })
     }
 
@@ -193,25 +190,20 @@ impl App {
             .store(true, Ordering::Release);
         let records = self
             .runtime
-            .project()
-            .pane_tabs
-            .as_ref()
-            .map_or_else(Vec::new, |tabs| {
-                tabs.tabs()
-                    .iter()
-                    .filter(|entry| entry.info.agent().kind() == AgentKind::Codex)
-                    .map(|entry| LaunchRecord {
-                        id: entry.info.id.clone(),
-                        cwd: entry.info.cwd.clone(),
-                        home: entry.info.codex_home.clone(),
-                        env_file: entry
-                            .pane
-                            .host
-                            .launch_environment_path()
-                            .map(std::path::Path::to_path_buf),
-                    })
-                    .collect()
-            });
+            .every_tab_set()
+            .flat_map(|(_, tabs)| tabs.tabs())
+            .filter(|entry| entry.info.agent().kind() == AgentKind::Codex)
+            .map(|entry| LaunchRecord {
+                id: entry.info.id.clone(),
+                cwd: entry.info.cwd.clone(),
+                home: entry.info.codex_home.clone(),
+                env_file: entry
+                    .pane
+                    .host
+                    .launch_environment_path()
+                    .map(std::path::Path::to_path_buf),
+            })
+            .collect();
         let pending = std::sync::Arc::clone(&self.runtime.codex_pin_pending);
         let flight = std::sync::Arc::clone(&self.runtime.codex_scan_in_flight);
         let wake = self.runtime.pane_wake_tx.clone();
@@ -233,6 +225,8 @@ impl App {
 
     /// Drain a landed rollout snapshot and pin unclaimed sessions onto unpinned
     /// codex tabs (spawn-ordered, shared claimed-set — see [`assign_codex_sessions`]).
+    /// Every project's tabs are one pool: a session one project's tab holds is
+    /// claimed for all of them.
     /// Returns `false`: a pin doesn't change the rendered frame, so it never
     /// forces a redraw. Called from the pre-recv scan.
     pub(crate) fn apply_codex_session_pins(&mut self) -> bool {
@@ -248,12 +242,14 @@ impl App {
                 None => return false,
             }
         };
-        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
-            return false;
-        };
+        let mut tabs: Vec<&mut crate::pane::TabEntry> = self
+            .runtime
+            .every_tab_set_mut()
+            .flat_map(|(_, tabs)| tabs.tabs_mut().iter_mut())
+            .collect();
         let mut learned: Vec<std::path::PathBuf> = Vec::new();
         for snapshot in snapshot {
-            for entry in tabs.tabs_mut() {
+            for entry in &mut tabs {
                 if entry.info.codex_home.is_none()
                     && snapshot.pane_ids.contains(&entry.info.id)
                     && entry.info.agent().kind() == AgentKind::Codex
@@ -265,13 +261,11 @@ impl App {
                 }
             }
             let claimed: HashSet<String> = tabs
-                .tabs()
                 .iter()
                 .filter(|entry| entry.info.codex_home.as_ref() == Some(&snapshot.home))
                 .filter_map(|entry| entry.info.codex_session_id.clone())
                 .collect();
             let mut unpinned: Vec<UnpinnedTab> = tabs
-                .tabs()
                 .iter()
                 .enumerate()
                 .filter(|(_, entry)| {
@@ -295,7 +289,7 @@ impl App {
                 .collect();
             unpinned.sort_by_key(|tab| tab.spawn);
             for (idx, uuid) in assign_codex_sessions(&unpinned, &claimed, &snapshot.rollouts) {
-                if let Some(entry) = tabs.tabs_mut().get_mut(idx) {
+                if let Some(entry) = tabs.get_mut(idx) {
                     entry.info.codex_session_id = Some(uuid);
                 }
             }

@@ -800,14 +800,9 @@ PR, except step 5's stages:
    - **5b. Archive, image and Lua results land in their project, and the
      pending git view moves into `ProjectRuntime`.** Landed in two PR pairs;
      see below.
-   - **5c. Every tab is walked again**, in two PR pairs. Step 1 (#698)
-     narrowed each loop over "all tabs" to the active project's.
-     - **Pane loops and the git worker flag** landed; see below.
-     - **Agent-status loops:** the scrape-quiet scan and the activity settle
-       (only the active project's active tab is focused, and `codex_recovery`
-       is pruned against every project's tabs), the shell-agent looks, the
-       codex pin scans (one claimed set across projects), and the wiring
-       restart flag.
+   - **5c. Every tab is walked again.** Step 1 (#698) narrowed each loop
+     over "all tabs" to the active project's. Landed in two PR pairs, pane
+     loops and agent-status loops; see below.
    - **5d. The switch.** `App::switch_project` does the following:
      - it stashes the leaving project's pager stream and scroll stream, which
        the drain drops today;
@@ -922,6 +917,24 @@ PR, except step 5's stages:
    only on the first project's `a`, so any other project walked git on the UI
    thread. The harness's `add_test_project` keeps a project's context file
    where production does (`process_context_path`).
+
+   **Landed in 5c (agent-status loops).** The same walk serves an agent in a
+   project the user isn't in:
+   - **The activity settle** settles every project's tabs (`ActivityScan`
+     carries one tab's work). Only the project in view's active tab can be
+     the focused one, each project's tabs notify under that project's own
+     `[notify]`, and `codex_recovery` is kept for any project's open tab.
+   - **The scrape-quiet scan** scans every project's quiet agents.
+   - **A shell tab's looks** run in every project, and a change applies in
+     its tab's project (`land_in`), since a tab index means nothing across
+     projects.
+   - **The codex pin** treats every project's tabs as one pool, so a session
+     one project's tab holds is never handed to another's.
+   - **Wiring** flags every project's tabs for a restart, and `:hooks on!`
+     restarts its tab in whichever project holds it.
+
+   The notification still names the tab, not its project: that wording is
+   step 6's.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
