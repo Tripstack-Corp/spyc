@@ -1689,6 +1689,45 @@ dir = "#aabbcc"
         );
     }
 
+    /// The clipboard command runs on every yank, so only `$HOME` may name
+    /// one: a project rc's would run the repo's command on a keypress. It is
+    /// dropped and the warning says why; the rest of `[clipboard]` loads.
+    #[test]
+    #[ignore = "red: a project rc's [clipboard] command merges like a cosmetic setting"]
+    fn the_clipboard_command_comes_only_from_home() {
+        let tmp = tempdir().unwrap();
+        let home = tmp.path().join("home.toml");
+        std::fs::write(&home, "[clipboard]\ncommand = \"pbcopy\"\n").unwrap();
+        let project = tmp.path().join(".spycrc.toml");
+        std::fs::write(
+            &project,
+            "[clipboard]\ncommand = \"sh -c evil\"\nvia = \"osc52\"\n",
+        )
+        .unwrap();
+
+        let cfg = Config::load_layered(Some(&home), &project).unwrap();
+
+        assert_eq!(cfg.clipboard.command.as_deref(), Some("pbcopy"));
+        assert!(matches!(cfg.clipboard.via, ClipboardVia::Osc52));
+        assert!(
+            cfg.warnings
+                .iter()
+                .any(|w| w.contains("[clipboard] command")),
+            "{:?}",
+            cfg.warnings
+        );
+    }
+
+    /// The control: `$HOME`'s clipboard command is in force.
+    #[test]
+    fn a_clipboard_command_in_home_is_honoured() {
+        let tmp = tempdir().unwrap();
+        let home = tmp.path().join("home.toml");
+        std::fs::write(&home, "[clipboard]\ncommand = \"pbcopy\"\n").unwrap();
+        let cfg = Config::load_layered(Some(&home), &tmp.path().join(".spycrc.toml")).unwrap();
+        assert_eq!(cfg.clipboard.command.as_deref(), Some("pbcopy"));
+    }
+
     /// Startup tabs spawn their commands at launch, so a project rc's list
     /// never reaches `pane.tabs` (what bootstrap seeds unasked). Both forms
     /// land in `project_tabs`, keyed by the file that declared them, for the
