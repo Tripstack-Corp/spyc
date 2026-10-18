@@ -17,9 +17,9 @@ use super::{
 use crate::pane::{Pane, PaneTabs};
 
 /// The per-project half of `Runtime` (#99, `docs/drafts/PROJECTS_PLAN.md`
-/// §1c): the bottom pane tabs and the two overlay-subprocess slots, which
-/// belong to one project's columns. The active project's is reached through
-/// [`Runtime::project`] / [`Runtime::project_mut`].
+/// §1c): the bottom pane tabs, the two overlay-subprocess slots and a git view
+/// still being built, which belong to one project's columns. The active
+/// project's is reached through [`Runtime::project`] / [`Runtime::project_mut`].
 #[derive(Default)]
 pub(super) struct ProjectRuntime {
     /// Bottom pane tabs (each owns a `PtyHost`).
@@ -33,6 +33,13 @@ pub(super) struct ProjectRuntime {
     /// ever holds an auto-dismiss editor/pager (never a `;cmd`), so it has no
     /// await-dismiss state. `None` outside a split or when `b` has no overlay.
     pub(super) top_overlay_right: Option<Pane>,
+    /// A git view whose model is being built off-thread, before any pager is
+    /// mounted. `drain_pending_git_view` mounts the overlay only when a
+    /// non-empty model arrives (an empty result just flashes "no changes"), so
+    /// `gd` over a clean path doesn't pop an overlay up and tear it back down.
+    /// The drain reads the active project's only, so a view opened here mounts
+    /// in this project's pager when it is next in view.
+    pub(super) pending_git_view: Option<git_view_session::PendingGitView>,
 }
 
 /// A parked `wait_for_scope_clear` MCP call (P2): the caller's resolved owner
@@ -114,6 +121,14 @@ pub(super) struct Runtime {
     /// its outcome drains. The `Instant` it carries is an OS-ish clock value,
     /// correctly in `Runtime` (never the pure Model).
     pub(super) lua_inflight: Option<lua::LuaInflight>,
+    /// The project the jobs now in the Lua worker were started in, for
+    /// `handle_lua_done` to apply a finished script's requests only there.
+    /// Set by a submit with nothing in flight (`submit_lua_job`): a key or an
+    /// event is refused while a script runs, and an `init.lua` reload queued
+    /// behind one must not claim the running script's requests. Unlike
+    /// `lua_inflight`, it outlives the first outcome of an event's run of
+    /// handlers.
+    pub(super) lua_origin: super::state::ProjectId,
     /// Bookkeeping for `spyc.on` event dispatch (the Tier-C seam). Tracks the
     /// last-fired baselines so `settle_lua_events` fires only on a genuine
     /// change, plus the re-entrancy guard that stops a Lua event handler whose
@@ -156,11 +171,6 @@ pub(super) struct Runtime {
     /// `scroll_stream` by `restore_active_tab_scrollback_pager`.
     pub(super) stashed_pager_streams:
         std::collections::HashMap<u32, Box<dyn pager_stream::PagerStream>>,
-    /// An in-flight git-view whose model is being built off-thread, before any
-    /// pager is mounted. `drain_pending_git_view` mounts the overlay only when a
-    /// non-empty model arrives (an empty result just flashes "no changes"), so
-    /// `gd` over a clean path doesn't pop an overlay up and tear it back down.
-    pub(super) pending_git_view: Option<git_view_session::PendingGitView>,
     /// Off-render-thread agent-status resolve: the landing slot + in-flight
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     pub(super) agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
@@ -188,7 +198,10 @@ pub(super) struct Runtime {
     /// it. The worker pushes an `ImageOutcome` here and wakes with
     /// `Message::Wake(Wake::Image)`; `apply_image_outcomes` drains it each pre-recv scan
     /// and installs or flashes the result. Same shape as `graveyard_results`.
-    pub(super) image_results: std::sync::Arc<std::sync::Mutex<Vec<image_ops::ImageOutcome>>>,
+    /// Each outcome is tagged with the project that started it
+    /// (`App::spawn_image_work`).
+    pub(super) image_results:
+        std::sync::Arc<std::sync::Mutex<Vec<(super::state::ProjectId, image_ops::ImageOutcome)>>>,
     /// Landing slot for off-thread archive ops (`Effect::Archive`): mount,
     /// materialize, clean. Same shape as `graveyard_results` — the worker pushes
     /// and wakes with `Message::Wake(Wake::Archive)`, `apply_archive_outcomes` drains.
@@ -293,6 +306,7 @@ impl Runtime {
             lua: None,
             lua_registry: lua::LuaRegistry::default(),
             lua_inflight: None,
+            lua_origin: active,
             lua_events: lua_events::LuaEventState::default(),
             agent_hud: None,
             pending_capture: None,
@@ -303,7 +317,6 @@ impl Runtime {
             scroll_stream: None,
             next_stream_id: 0,
             stashed_pager_streams: std::collections::HashMap::new(),
-            pending_git_view: None,
             agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
             agent_status_refreshing: std::sync::Arc::default(),
             codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),

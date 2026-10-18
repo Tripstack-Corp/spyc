@@ -19,6 +19,8 @@ use std::path::PathBuf;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
 
+use crate::app::state::ProjectId;
+
 /// Encoded image limit, shared by file and transcript reads.
 pub const MAX_IMAGE_BYTES: u64 = crate::state::transcript_images::MAX_IMAGE_BYTES;
 /// The decoder's output and working allocations have a separate budget:
@@ -454,10 +456,36 @@ const fn ext_for(format: image::ImageFormat) -> &'static str {
 }
 
 impl super::App {
+    /// Run `work` on a detached image worker, push its outcome onto
+    /// `runtime.image_results`, and wake the loop. `work` is handed the
+    /// graphics-protocol picker (detected once at startup; `None` ⇒ no
+    /// protocol) so it can build a `Protocol` off-thread. The single spawn
+    /// site, so every outcome is tagged with the project active at the spawn:
+    /// the one whose handler asked (`run_effects` runs in the user's project).
+    pub(super) fn spawn_image_work(
+        &self,
+        work: impl FnOnce(Option<Picker>) -> ImageOutcome + Send + 'static,
+    ) {
+        let origin = self.state.active;
+        let results = std::sync::Arc::clone(&self.runtime.image_results);
+        let wake = self.runtime.pane_wake_tx.clone();
+        let picker = self.runtime.picker.clone();
+        std::thread::spawn(move || {
+            let outcome = work(picker);
+            results
+                .lock()
+                .expect("image_results mutex poisoned only by a panicking worker")
+                .push((origin, outcome));
+            if let Some(tx) = wake {
+                let _ = tx.send(super::Message::Wake(super::Wake::Image));
+            }
+        });
+    }
+
     /// Pre-recv drain: install finished image renders and flash failures.
     /// Returns whether a redraw is needed. Mirrors `apply_graveyard_outcomes`.
     pub(crate) fn apply_image_outcomes(&mut self) -> bool {
-        let outcomes: Vec<ImageOutcome> = {
+        let landed: Vec<(ProjectId, ImageOutcome)> = {
             let mut slot = self
                 .runtime
                 .image_results
@@ -469,48 +497,93 @@ impl super::App {
             std::mem::take(&mut *slot)
         };
         let mut redraw = false;
-        for outcome in outcomes {
+        for (origin, outcome) in landed {
             // Per-outcome, not blanket: an empty clipboard capture must not
             // force a frame (see `NothingCaptured`), and it can share a batch
             // with outcomes that do.
             redraw |= !matches!(outcome, ImageOutcome::NothingCaptured);
-            match outcome {
-                ImageOutcome::Viewed {
-                    protocol,
+            if origin == self.state.active {
+                self.apply_one_image_outcome(outcome);
+            } else {
+                self.apply_image_outcome_elsewhere(origin, outcome);
+            }
+        }
+        redraw
+    }
+
+    /// An outcome for a project the user isn't in ([`App::land_in`]). The
+    /// overlay covers the screen and its verbs act on the project in view, so
+    /// an image is not shown, and the user is told. A capture is kept for its
+    /// tab, and an index reaches the gallery that asked for it, if that is
+    /// still open. A message reaches the user named for the project, never
+    /// that project's pager, which they can't see.
+    fn apply_image_outcome_elsewhere(&mut self, origin: ProjectId, outcome: ImageOutcome) {
+        match outcome {
+            ImageOutcome::Viewed { .. } => {
+                self.drop_landing(origin, "image not shown; open it again there");
+            }
+            ImageOutcome::Indexed(result) => {
+                self.land_in(origin, |app| app.apply_gallery_index(result));
+            }
+            ImageOutcome::Captured {
+                tab_id,
+                epoch,
+                encoded,
+                dims,
+            } => {
+                self.land_in(origin, |app| {
+                    app.stash_pending_image(tab_id, epoch, encoded, dims);
+                });
+            }
+            ImageOutcome::NothingCaptured => {}
+            ImageOutcome::Opened => {
+                self.land_in(origin, |app| {
+                    app.state.flash_error("opened in external viewer");
+                });
+            }
+            ImageOutcome::Failed(reason) => {
+                self.land_in(origin, |app| app.state.flash_error(reason));
+            }
+        }
+    }
+
+    /// An outcome for the project in view.
+    fn apply_one_image_outcome(&mut self, outcome: ImageOutcome) {
+        match outcome {
+            ImageOutcome::Viewed {
+                protocol,
+                encoded,
+                ext,
+                dims,
+                origin,
+                dark,
+            } => {
+                // Install the full-screen overlay; the draw blits it.
+                self.view.image_view = Some(super::ImageView {
+                    protocol: *protocol,
                     encoded,
                     ext,
                     dims,
                     origin,
                     dark,
-                } => {
-                    // Install the full-screen overlay; the draw blits it.
-                    self.view.image_view = Some(super::ImageView {
-                        protocol: *protocol,
-                        encoded,
-                        ext,
-                        dims,
-                        origin,
-                        dark,
-                        flash: None,
-                    });
-                }
-                ImageOutcome::Indexed(result) => self.apply_gallery_index(result),
-                ImageOutcome::Captured {
-                    tab_id,
-                    epoch,
-                    encoded,
-                    dims,
-                } => self.stash_pending_image(tab_id, epoch, encoded, dims),
-                // Nothing on the clipboard: stay silent. The redraw is already
-                // suppressed above — this fires on every paste keystroke, so a
-                // frame per press would be a self-inflicted repaint storm at
-                // the exact moment the user is typing.
-                ImageOutcome::NothingCaptured => {}
-                ImageOutcome::Opened => self.flash_image_status("opened in external viewer"),
-                ImageOutcome::Failed(reason) => self.flash_image_status(&reason),
+                    flash: None,
+                });
             }
+            ImageOutcome::Indexed(result) => self.apply_gallery_index(result),
+            ImageOutcome::Captured {
+                tab_id,
+                epoch,
+                encoded,
+                dims,
+            } => self.stash_pending_image(tab_id, epoch, encoded, dims),
+            // Nothing on the clipboard: stay silent. The redraw is already
+            // suppressed by the drain — this fires on every paste keystroke, so a
+            // frame per press would be a self-inflicted repaint storm at
+            // the exact moment the user is typing.
+            ImageOutcome::NothingCaptured => {}
+            ImageOutcome::Opened => self.flash_image_status("opened in external viewer"),
+            ImageOutcome::Failed(reason) => self.flash_image_status(&reason),
         }
-        redraw
     }
 
     /// File a freshly captured clipboard image against its tab and tell the

@@ -185,7 +185,8 @@ fn git_view_body_width(full_width: bool) -> usize {
 /// pager is mounted yet. [`App::drain_pending_git_view`] mounts the overlay
 /// only when a non-empty model arrives; an empty result just flashes "no
 /// changes" (so `gd` over a clean path doesn't pop an overlay up and instantly
-/// tear it back down). Held in `Runtime` until the worker reports.
+/// tear it back down). Held on its project's `ProjectRuntime` until the worker
+/// reports, so it mounts in that project's pager.
 pub struct PendingGitView {
     id: u32,
     rx: std::sync::mpsc::Receiver<GitViewPayload>,
@@ -309,7 +310,7 @@ impl App {
             let _ = tx.send(build_payload(kind));
             final_wake();
         });
-        self.runtime.pending_git_view = Some(PendingGitView {
+        self.runtime.project_mut().pending_git_view = Some(PendingGitView {
             id,
             rx,
             title,
@@ -318,15 +319,16 @@ impl App {
         });
     }
 
-    /// Poll the in-flight git-view (if any). On a non-empty model, mount the
-    /// overlay now and render it; on an empty result, flash "no changes" (no
-    /// overlay); on error / dead worker, flash the error. Called every tick from
-    /// the run loop alongside `drain_pager_stream`. Returns true when something
-    /// changed so the caller can redraw.
+    /// Poll the active project's in-flight git-view (if any); another
+    /// project's waits until that project is in view. On a non-empty model,
+    /// mount the overlay now and render it; on an empty result, flash "no
+    /// changes" (no overlay); on error / dead worker, flash the error. Called
+    /// every tick from the run loop alongside `drain_pager_stream`. Returns
+    /// true when something changed so the caller can redraw.
     pub(crate) fn drain_pending_git_view(&mut self) -> bool {
         // Peek the worker's result without holding the borrow across the mutate.
         let result = {
-            let Some(pending) = self.runtime.pending_git_view.as_ref() else {
+            let Some(pending) = self.runtime.project().pending_git_view.as_ref() else {
                 return false;
             };
             pending.rx.try_recv()
@@ -334,19 +336,19 @@ impl App {
         let payload = match result {
             Ok(GitViewPayload::Empty) => {
                 self.state.flash_info("no changes");
-                self.runtime.pending_git_view = None;
+                self.runtime.project_mut().pending_git_view = None;
                 return true;
             }
             Ok(GitViewPayload::Error(msg)) => {
                 self.state.flash_error(msg);
-                self.runtime.pending_git_view = None;
+                self.runtime.project_mut().pending_git_view = None;
                 return true;
             }
             Ok(payload) => payload,
             Err(std::sync::mpsc::TryRecvError::Empty) => return false,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.state.flash_error("git: worker failed");
-                self.runtime.pending_git_view = None;
+                self.runtime.project_mut().pending_git_view = None;
                 return true;
             }
         };
@@ -355,6 +357,7 @@ impl App {
         // thread only lays them out.
         let pending = self
             .runtime
+            .project_mut()
             .pending_git_view
             .take()
             .expect("pending git-view present (checked above)");
@@ -478,7 +481,7 @@ mod tests {
         with_app(|app| {
             let (tx, rx) = std::sync::mpsc::channel();
             tx.send(GitViewPayload::Empty).unwrap();
-            app.runtime.pending_git_view = Some(PendingGitView {
+            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
                 id: 1,
                 rx,
                 title: "git diff HEAD".into(),
@@ -490,7 +493,7 @@ mod tests {
                 "an empty result must not mount an overlay"
             );
             assert!(app.runtime.pager_stream.is_none());
-            assert!(app.runtime.pending_git_view.is_none());
+            assert!(app.runtime.project().pending_git_view.is_none());
             assert_eq!(app.flash_text(), Some("no changes"));
         });
     }
@@ -508,7 +511,7 @@ mod tests {
             let hl = diff_render::highlight_diff(&model);
             tx.send(GitViewPayload::Built(GitViewContent::Diff(model, hl)))
                 .unwrap();
-            app.runtime.pending_git_view = Some(PendingGitView {
+            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
                 id: 7,
                 rx,
                 title: "git diff HEAD".into(),
@@ -526,7 +529,7 @@ mod tests {
                 app.runtime.pager_stream.is_some(),
                 "retained stream installed for the `|` toggle"
             );
-            assert!(app.runtime.pending_git_view.is_none());
+            assert!(app.runtime.project().pending_git_view.is_none());
         });
     }
 
@@ -576,7 +579,7 @@ mod tests {
             let hl = diff_render::highlight_diff(&content);
             tx.send(GitViewPayload::Built(GitViewContent::Diff(content, hl)))
                 .unwrap();
-            app.runtime.pending_git_view = Some(PendingGitView {
+            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
                 id: 9,
                 rx,
                 title: "git diff HEAD".into(),
@@ -662,7 +665,7 @@ mod tests {
             let (tx, rx) = std::sync::mpsc::channel();
             tx.send(GitViewPayload::Built(GitViewContent::Blame(model, hl)))
                 .unwrap();
-            app.runtime.pending_git_view = Some(PendingGitView {
+            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
                 id: 3,
                 rx,
                 title: "git blame f.rs".into(),

@@ -539,11 +539,28 @@ fn an_image_opened_where_it_started_is_shown() {
     });
 }
 
+/// The worker's own tag: work started in X lands in X when it finishes after
+/// the user moved to Y.
+#[test]
+fn an_image_worker_started_in_x_lands_in_x() {
+    with_two(|t| {
+        let app = &mut t.app;
+        app.spawn_image_work(|_| ImageOutcome::Failed("boom".into()));
+        app.make_active(t.y);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.runtime.image_results.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "the image worker never finished");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        app.apply_image_outcomes();
+        assert_eq!(app.flash_text(), Some("xproj: boom"));
+    });
+}
+
 /// An image opened in X, decoded after the user moved to Y. The overlay
 /// covers the whole screen and its verbs act on the project in view, so it is
 /// not shown over Y, and the flash says so.
 #[test]
-#[ignore = "red: an image opens over whichever project is active"]
 fn an_image_opened_in_x_is_never_shown_over_y() {
     with_two(|t| {
         let app = &mut t.app;
@@ -564,7 +581,6 @@ fn an_image_opened_in_x_is_never_shown_over_y() {
 /// pager in X. The failure reaches the user, named for X, rather than X's
 /// pager, which they can't see.
 #[test]
-#[ignore = "red: an image failure from another project is shown unnamed"]
 fn an_image_failure_from_x_reaches_the_user_named_for_x() {
     with_two(|t| {
         let app = &mut t.app;
@@ -585,7 +601,6 @@ fn an_image_failure_from_x_reaches_the_user_named_for_x() {
 /// An image pasted into X's agent, captured after the user moved to Y. It is
 /// kept for X's tab: that tab's next prompt carries it.
 #[test]
-#[ignore = "red: a capture is kept only for a tab in the active project"]
 fn a_paste_captured_in_x_is_kept_for_xs_tab() {
     with_two(|t| {
         let app = &mut t.app;
@@ -673,10 +688,23 @@ fn a_lua_script_run_where_it_started_applies() {
     });
 }
 
+/// A script started in a project the user switched to applies there.
+#[test]
+fn a_lua_script_run_after_a_switch_applies_where_it_started() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let rx = attach_lua(app);
+        app.make_active(t.y);
+        let config = t.y_home.with_file_name("config");
+        kick_lua(app, &config, "narrow", "spyc.filter('*.txt')");
+        finish_lua(app, &rx);
+        assert_eq!(app.state.cur().temp_filter.as_deref(), Some("*.txt"));
+    });
+}
+
 /// A script started in X, finished after the user moved to Y. What it asks
 /// for would act on Y's view, so it is dropped, and the flash says so.
 #[test]
-#[ignore = "red: a script's requests act on whichever project is active"]
 fn a_lua_script_run_from_x_never_acts_on_y() {
     with_two(|t| {
         let app = &mut t.app;
@@ -699,10 +727,30 @@ fn a_lua_script_run_from_x_never_acts_on_y() {
     });
 }
 
+/// An `init.lua` reload from Y, queued behind a script X started, never
+/// claims that script's requests for Y.
+#[test]
+fn a_reload_queued_behind_xs_script_never_claims_its_requests() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let rx = attach_lua(app);
+        let config = t.x_home.with_file_name("config");
+        kick_lua(app, &config, "narrow", "spyc.filter('*.txt')");
+        app.make_active(t.y);
+        std::fs::write(config.join("init.lua"), "").unwrap();
+        crate::state::with_config_root(&config, || app.reload_init_lua(false));
+        finish_lua(app, &rx);
+        assert_eq!(
+            app.state.cur().temp_filter,
+            None,
+            "X's script narrowed Y's column"
+        );
+    });
+}
+
 /// A script started in X fails after the user moved to Y: the error is news,
 /// named for X.
 #[test]
-#[ignore = "red: a script's error from another project is shown unnamed"]
 fn a_lua_error_from_x_is_named_for_x() {
     with_two(|t| {
         let app = &mut t.app;
@@ -750,7 +798,6 @@ fn mount_git_view(app: &mut App, limit: Duration) -> bool {
 /// A diff opened in X, built after the user moved to Y. It mounts in X's
 /// pager when X is next in view, and never in Y's.
 #[test]
-#[ignore = "red: a git view mounts in whichever project is active"]
 fn a_git_view_opened_in_x_mounts_in_xs_pager() {
     with_two(|t| {
         let app = &mut t.app;
