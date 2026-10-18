@@ -370,7 +370,7 @@ const SECTIONS: &[Section] = &[
             (";", "interactive → runs in top pane (top, vim, htop, less)"),
             (
                 "$",
-                "drop into $SHELL in current dir (top row marks the subshell)",
+                "drop into $SHELL in current dir (sets SPYC_SUBSHELL=1)",
             ),
             (
                 ":",

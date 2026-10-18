@@ -1,57 +1,77 @@
-//! The escape sequences that mark spyc's `$` subshell handoff (#686):
-//! DECSTBM reserves the top row of the real host terminal so a reverse-video
-//! marker survives a `clear` run inside the subshell — `clear` erases screen
-//! content (ED) but never the scroll region. `run_child_in_foreground`
-//! writes [`enter`] right after `suspend_tui` and [`leave`] right before
-//! `resume_tui`; both are pure string builders so the byte sequences are
-//! unit-tested without a real terminal.
+//! The marker that opens spyc's `$` subshell (#686): one reverse-video line
+//! naming the subshell, which scrolls away with the shell's own output. What
+//! lasts is the window title and `SPYC_SUBSHELL=1`, which a prompt can show.
+//! Nothing reserves screen space: the scroll region is terminal-wide and
+//! survives a screen switch, so a reserved row confined every program the
+//! subshell ran (`less` froze its top line, `clear` pinned a stale one).
+//! `run_child_in_foreground` writes [`enter`] right after `suspend_tui`; it is
+//! a pure string builder, so its bytes are unit-tested without a terminal.
 
-/// Shown in the reserved row and reused as the window title while the
-/// subshell runs — `run_child_in_foreground` sets both from this one string.
+/// Printed as the subshell's first line and reused as the window title while
+/// it runs — `run_child_in_foreground` sets both from this one string.
 pub const MARKER: &str = "🌶️ spyc subshell — exit or ^D to return";
 
-/// Sequence to write immediately after `suspend_tui`, before the child
-/// spawns: set the scroll region to rows `2..=rows` (DECSTBM also homes the
-/// cursor, hence the explicit `1;1H`), paint [`MARKER`] across row 1 in
-/// reverse video, then park the cursor at the top of the region now carved
-/// out for the child's own prompt. Empty when there's no row to spare.
+/// The line to write right after `suspend_tui`, which leaves the cursor home
+/// on a cleared screen: [`MARKER`] in reverse video, padded with spaces to the
+/// full width (an erase-to-end-of-line fills with the default background on
+/// xterm and ghostty, not with reverse video), then a line break for the
+/// shell's prompt. Empty below two rows, where the prompt would scroll the
+/// line away before it could be read.
 pub fn enter(cols: u16, rows: u16) -> String {
     if rows < 2 {
         return String::new();
     }
-    let text = crate::ui::display_truncate(MARKER, cols as usize);
-    format!("\x1b[2;{rows}r\x1b[1;1H\x1b[7m{text}\x1b[K\x1b[0m\x1b[2;1H")
-}
-
-/// Sequence to write once the child exits, before `resume_tui`: drop the
-/// scroll region back to the whole screen. `CSI r` with no parameters is
-/// the full-screen default, so spyc's own repaint isn't left confined to
-/// the child's carved-out area.
-pub const fn leave() -> &'static str {
-    "\x1b[r"
+    let cols = usize::from(cols);
+    let text = crate::ui::display_truncate(MARKER, cols);
+    let pad = cols.saturating_sub(crate::ui::display_width(text));
+    format!("\x1b[7m{text}{}\x1b[0m\r\n", " ".repeat(pad))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn enter_carves_top_row_and_parks_cursor_below_it() {
-        let seq = enter(60, 24);
-        assert!(seq.starts_with("\x1b[2;24r"), "{seq:?}");
-        assert!(seq.contains(MARKER));
-        assert!(seq.ends_with("\x1b[2;1H"), "{seq:?}");
+    /// The visible text of `seq`: every CSI sequence and line break removed.
+    fn visible(seq: &str) -> String {
+        let mut out = String::new();
+        let mut chars = seq.chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '\x1b' => {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+                '\r' | '\n' => {}
+                c => out.push(c),
+            }
+        }
+        out
     }
 
     #[test]
-    fn enter_fills_the_rest_of_the_row_before_resetting_style() {
+    fn enter_is_one_reverse_video_line() {
         let seq = enter(60, 24);
-        // Reverse video turns on before the text and the row is erased
-        // (filling with that same attribute) before it turns back off.
-        let on = seq.find("\x1b[7m").expect("reverse video on");
-        let erase = seq.find("\x1b[K").expect("erase to end of line");
-        let off = seq.find("\x1b[0m").expect("reverse video off");
-        assert!(on < erase && erase < off, "{seq:?}");
+        assert!(seq.starts_with("\x1b[7m"), "{seq:?}");
+        assert!(seq.contains(MARKER), "{seq:?}");
+        assert!(seq.ends_with("\x1b[0m\r\n"), "{seq:?}");
+        assert_eq!(seq.matches('\n').count(), 1, "{seq:?}");
+    }
+
+    #[test]
+    fn enter_pads_the_bar_to_the_full_width() {
+        let marker = crate::ui::display_width(MARKER);
+        for cols in [60, 120, marker, 5] {
+            let shown = visible(&enter(u16::try_from(cols).expect("small"), 24));
+            assert_eq!(
+                crate::ui::display_width(&shown),
+                cols,
+                "{cols} columns: {shown:?}"
+            );
+        }
     }
 
     #[test]
@@ -66,17 +86,11 @@ mod tests {
         assert_eq!(enter(80, 0), "");
     }
 
-    #[test]
-    fn leave_resets_to_the_full_screen_region() {
-        assert_eq!(leave(), "\x1b[r");
-    }
-
     /// The scroll region is terminal-wide and survives a screen switch, so a
     /// region reserved for the marker confines every program the subshell
     /// runs: `less` freezes its top line and can't scroll back, and `clear`
     /// pins a stale line above the region.
     #[test]
-    #[ignore = "red: entering the subshell reserves the top row with DECSTBM"]
     fn entering_the_subshell_sets_no_scroll_region() {
         let seq = enter(80, 24);
         let sets_region = seq.match_indices("\x1b[").any(|(at, csi)| {

@@ -546,16 +546,6 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
 /// we bounce right back before anything is visible.
 pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
     enable_raw_mode()?;
-    // Re-push the kitty keyboard-enhancement flag `suspend_tui` popped, iff
-    // the terminal answered the one-time query in `setup_terminal` — reusing
-    // that cached answer instead of re-querying (and waiting on a reply) on
-    // every return from an editor/pager/shell.
-    if KEYBOARD_ENHANCEMENT_SUPPORTED.load(Ordering::Relaxed) {
-        let _ = execute!(
-            terminal.backend_mut(),
-            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-        );
-    }
     execute!(
         terminal.backend_mut(),
         EnterAlternateScreen,
@@ -578,6 +568,18 @@ pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
         DisableWheelReporting,
         EnableAlternateScroll
     )?;
+    // Re-push the kitty keyboard-enhancement flag `suspend_tui` popped, iff
+    // the terminal answered the one-time query in `setup_terminal` (cached,
+    // so no reply is awaited on every return). Only once back on the
+    // alternate screen: a terminal keeps one flag stack per screen, and a
+    // child that exits on the main screen (vim's `rmcup`) would otherwise
+    // take the push there, where the login shell inherits it after spyc quits.
+    if KEYBOARD_ENHANCEMENT_SUPPORTED.load(Ordering::Relaxed) {
+        let _ = execute!(
+            terminal.backend_mut(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
     terminal.hide_cursor()?;
     force_full_repaint(terminal)?;
     Ok(())
@@ -926,7 +928,6 @@ mod keyboard_enhancement_tests {
     /// the main screen's stack: spyc runs without the flag, and once it quits
     /// the login shell keeps it, so Ctrl+C and Ctrl+D stop working there.
     #[test]
-    #[ignore = "red: resume_tui pushes the flag before re-entering the alternate screen"]
     fn resume_pushes_the_flag_onto_the_alt_screen() {
         let production = crate::guard_support::production_half(include_str!("terminal.rs"));
         let body: String = production
