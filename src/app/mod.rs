@@ -161,6 +161,7 @@ mod pre_recv;
 mod preview_ops;
 mod proc;
 mod process_cwd;
+mod project_switch;
 mod prompt;
 mod prompt_templates;
 mod quick_select;
