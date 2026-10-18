@@ -34,7 +34,9 @@ effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an untrus
 clone can't bind a key to run code, and its
 [`[prompts]`](#prompt-templates--prompts) are ignored, so a repo can't choose
 what gets typed at your agent. Nor can it name the
-[`[clipboard] command`](#clipboard), which runs on every yank. A project file's
+[`[clipboard] command`](#clipboard), which runs on every yank, or give a
+[scan pattern](#quick-select-patterns--scanpatterns) a `url` other than a web
+page. A project file's
 [startup tabs](#startup-tabs--pane-tabs) run their commands at launch with no
 keypress at all, so they open only after you approve that exact list, and an
 edited list asks again. Lua scripts load only from `~/.config/spyc/`.
@@ -678,6 +680,12 @@ url   = "https://tracker.example.com/browse/{}"   # uppercase-open target; {} = 
 ```
 
 A pattern with an un-compilable regex is skipped with a warning, not a crash.
+
+An uppercase label hands the filled `url` to your system opener, so a project
+`.spycrc.toml`'s template is kept only when it opens a web page (`http://` or
+`https://`). One naming a local file (`./{}.command`, `file://…`) would launch a
+program from the repo, so it is dropped with a warning; the pattern still labels
+and yanks. `~/.spycrc.toml` may use any template.
 
 ---
 
