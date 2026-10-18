@@ -1,9 +1,10 @@
 //! #99 step 3: an MCP connection answers for, and acts on, its own project.
 //!
 //! Two projects in one `App`: `a` is active, the one the user sees, and `b` is
-//! another, whose agent must neither read `a` nor move it. The tests speak the
+//! another, whose agent must neither read `a` nor move it. Most tests speak the
 //! wire protocol to the server's own connection handler, and its commands land
-//! in the loop's own drain, so they hold whatever routes a call to its project.
+//! in the loop's own drain, so they hold whatever routes a call to its project;
+//! the rest hand the drain's router a request directly.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -12,7 +13,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::mcp::test_support::Conn;
-use crate::mcp_cmd::McpCommand;
+use crate::mcp_cmd::{McpCommand, McpResponse};
 use crate::pane::tabs::AgentActivity;
 
 /// Two projects in sibling directories, each with a real listing, a written
@@ -149,7 +150,6 @@ fn an_agent_in_the_active_project_is_served_over_the_wire() {
 }
 
 #[test]
-#[ignore = "red: #99 step 3 — binding searches only the active project's tabs"]
 fn an_agent_in_another_project_binds_to_its_pane() {
     with_projects(|p| {
         let b_pane = p.b_pane.clone();
@@ -159,7 +159,6 @@ fn an_agent_in_another_project_binds_to_its_pane() {
 }
 
 #[test]
-#[ignore = "red: #99 step 3 — reads answer from the server's one context file"]
 fn an_agent_in_another_project_reads_its_own_project() {
     with_projects(|p| {
         let b_pane = p.b_pane.clone();
@@ -179,7 +178,6 @@ fn an_agent_in_another_project_reads_its_own_project() {
 
 /// An agent can tell whether the user is in its project, and which one it is.
 #[test]
-#[ignore = "red: #99 step 3 — get_spyc_context names no project"]
 fn get_spyc_context_names_the_callers_project() {
     with_projects(|p| {
         let (a_pane, b_pane) = (p.a_pane.clone(), p.b_pane.clone());
@@ -199,7 +197,6 @@ fn get_spyc_context_names_the_callers_project() {
 /// both belong to the project they're looking at. Run it alone: until it
 /// passes, the agent's `navigate_to` moves the user's column and the process.
 #[test]
-#[ignore = "red: #99 step 3 — navigate_to moves the user's column"]
 fn navigate_to_moves_the_callers_project_not_the_users_view() {
     with_projects(|p| {
         let _cwd = CwdGuard;
@@ -223,7 +220,6 @@ fn navigate_to_moves_the_callers_project_not_the_users_view() {
 }
 
 #[test]
-#[ignore = "red: #99 step 3 — set_filter and pick_files act on the user's column"]
 fn set_filter_and_pick_files_act_on_the_callers_project() {
     with_projects(|p| {
         let b_pane = p.b_pane.clone();
@@ -248,7 +244,6 @@ fn set_filter_and_pick_files_act_on_the_callers_project() {
 }
 
 #[test]
-#[ignore = "red: #99 step 3 — open_worktree opens b in the user's project"]
 fn open_worktree_opens_b_in_the_callers_project() {
     with_projects(|p| {
         let tree = p.b_home.join("tree");
@@ -275,7 +270,6 @@ fn open_worktree_opens_b_in_the_callers_project() {
 /// cwd, and the connection binds to the project whose root contains it, else
 /// to the active project.
 #[test]
-#[ignore = "red: #99 step 3 — spyc/cwd is ignored"]
 fn an_agent_with_no_pane_binds_by_its_cwd() {
     with_projects(|p| {
         let deep = p.b_home.join("deep");
@@ -299,7 +293,6 @@ fn an_agent_with_no_pane_binds_by_its_cwd() {
 
 /// A tab number is a tab of the caller's own project, like its default.
 #[test]
-#[ignore = "red: #99 step 3 — report_status lands on the active project's tab"]
 fn report_status_from_another_project_lands_on_its_tab() {
     with_projects(|p| {
         let b_pane = p.b_pane.clone();
@@ -320,8 +313,21 @@ fn report_status_from_another_project_lands_on_its_tab() {
     });
 }
 
+/// The status hook never initializes, so its connection belongs to no project:
+/// the pane id it names is what finds the tab, in whichever project holds it.
 #[test]
-#[ignore = "red: #99 step 3 — register_scope claims for the active project's tab"]
+fn a_hook_report_for_another_projects_pane_lands_on_its_tab() {
+    with_projects(|p| {
+        let b_pane = p.b_pane.clone();
+        let args = json!({"status": "working", "pane_id": b_pane});
+        p.wire(move |c| c.tool("report_status", args));
+        assert_eq!(Projects::reported(&p.app, &p.a_pane), None, "a's tab");
+        let b_status = p.in_b(|app| Projects::reported(app, &b_pane));
+        assert_eq!(b_status, Some(AgentActivity::Working));
+    });
+}
+
+#[test]
 fn register_scope_from_another_project_claims_for_its_tab() {
     with_projects(|p| {
         let b_pane = p.b_pane.clone();
@@ -343,7 +349,6 @@ fn register_scope_from_another_project_claims_for_its_tab() {
 /// `b`'s agent waits on `a`'s merge: its owner is its own tab, so `a`'s claim
 /// is someone else's.
 #[test]
-#[ignore = "red: #99 step 3 — wait_for_scope_clear resolves the active project's tab"]
 fn wait_for_scope_clear_from_another_project_waits_on_others_claims() {
     with_projects(|p| {
         let (a_pane, b_pane) = (p.a_pane.clone(), p.b_pane.clone());
@@ -362,7 +367,6 @@ fn wait_for_scope_clear_from_another_project_waits_on_others_claims() {
 }
 
 #[test]
-#[ignore = "red: #99 step 3 — a statusline lands only on the active project's tabs"]
 fn a_statusline_from_another_projects_claude_tab_reaches_it() {
     fn info<'a>(app: &'a mut App, pane: &str) -> &'a mut crate::pane::tabs::TabInfo {
         let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
@@ -391,7 +395,6 @@ fn a_statusline_from_another_projects_claude_tab_reaches_it() {
 }
 
 #[test]
-#[ignore = "red: #99 step 3 — create_worktree plans and opens in the active project"]
 fn create_worktree_from_another_project_opens_b_there() {
     with_projects(|p| {
         init_repo(&p.b_home);
@@ -417,7 +420,6 @@ fn create_worktree_from_another_project_opens_b_there() {
 /// The tree under `b`'s column goes, so `b`'s column goes home: the orphan
 /// reset covers the caller's project, not only the user's.
 #[test]
-#[ignore = "red: #99 step 3 — a removal resets only the active project's columns"]
 fn remove_worktree_from_another_project_resets_its_columns() {
     with_projects(|p| {
         let _cwd = CwdGuard;
@@ -444,7 +446,6 @@ fn remove_worktree_from_another_project_resets_its_columns() {
 }
 
 #[test]
-#[ignore = "red: #99 step 3 — the dump looks a connection's tab up in the active project"]
 fn the_activity_dump_names_the_tab_of_a_connection_in_another_project() {
     with_projects(|p| {
         p.app
@@ -475,7 +476,6 @@ fn the_activity_dump_names_the_tab_of_a_connection_in_another_project() {
 /// Discovery finds this spyc from under any project it has open: the sidecar
 /// holds every project's root, and `start_dir` moving rewrites all of them.
 #[test]
-#[ignore = "red: #99 step 3 — the sidecar holds one root"]
 fn the_sidecar_lists_every_projects_root() {
     with_projects(|p| {
         p.app.view.mcp_running = true;
@@ -497,5 +497,98 @@ fn the_sidecar_lists_every_projects_root() {
             roots,
             [p.b_home.to_str().unwrap(), restored.to_str().unwrap()]
         );
+    });
+}
+
+/// Serve `command` as the loop does for a connection bound to `project`, and
+/// return its inline reply.
+fn serve(app: &mut App, command: McpCommand, project: Option<state::ProjectId>) -> McpResponse {
+    let (reply, rx) = std::sync::mpsc::channel();
+    app.route_mcp_request(crate::mcp_cmd::McpRequest {
+        command,
+        reply,
+        project,
+    });
+    rx.try_recv().expect("answered inline")
+}
+
+/// A call from a project that has since closed is refused, and moves nothing,
+/// least of all the user's view.
+#[test]
+fn a_closed_projects_driving_call_is_refused() {
+    with_projects(|p| {
+        let filter = McpCommand::SetFilter {
+            pattern: Some("*.rs".into()),
+        };
+        let reply = serve(&mut p.app, filter, Some(state::ProjectId::new()));
+        assert!(matches!(reply, McpResponse::Error { .. }), "{reply:?}");
+        assert_eq!(p.app.state.cur().temp_filter, None);
+    });
+}
+
+/// What belongs to the user's view stays as it was while an agent drives
+/// another project: the flash they're reading, `J`'s frecency, an open
+/// harpoon menu, and the process cwd.
+#[test]
+fn driving_another_project_leaves_the_users_view_alone() {
+    with_projects(|p| {
+        let _cwd = CwdGuard;
+        let (sub, tree) = (p.b_home.join("sub"), p.b_home.join("tree"));
+        for d in [&sub, &tree] {
+            std::fs::create_dir(d).unwrap();
+        }
+        p.app.state.flash_info("the user's");
+        p.app.view.harpoon_menu = Some(crate::app::view_state::HarpoonMenu {
+            cursor: 0,
+            delete_armed: false,
+        });
+        let b = Some(p.b);
+        let path = sub.to_str().unwrap().to_string();
+        serve(&mut p.app, McpCommand::NavigateTo { path }, b);
+        let path = tree.to_str().unwrap().to_string();
+        serve(&mut p.app, McpCommand::OpenWorktree { path }, b);
+
+        assert_eq!(p.app.flash_text(), Some("the user's"));
+        assert!(p.app.view.harpoon_menu.is_some(), "the user's harpoon menu");
+        assert!(
+            p.app.state.frecency.search("sub").is_empty(),
+            "J learned another project's navigation"
+        );
+        assert_ne!(std::env::current_dir().ok(), Some(sub));
+    });
+}
+
+#[test]
+fn teardown_removes_every_projects_context_file() {
+    with_projects(|p| {
+        let files: Vec<PathBuf> = p.app.view.context_paths().map(Path::to_path_buf).collect();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().all(|f| f.exists()), "{files:?}");
+        p.app.run_teardown();
+        assert!(files.iter().all(|f| !f.exists()), "{files:?}");
+    });
+}
+
+/// A connection's reads answer from its project's file, so binding to a
+/// project whose file was never written writes it.
+#[test]
+fn binding_writes_the_bound_projects_context_file() {
+    with_projects(|p| {
+        let path = p.in_b(|app| {
+            app.view.project_mut().last_context = None;
+            app.view.project().context_path.clone()
+        });
+        std::fs::remove_file(&path).unwrap();
+        let reply = p.app.execute_mcp_command(McpCommand::Bind {
+            pane_id: Some(p.b_pane.clone()),
+            cwd: None,
+        });
+        let McpResponse::Ok { message } = reply else {
+            panic!("{reply:?}");
+        };
+        let bound: Value = serde_json::from_str(&message).unwrap();
+        assert_eq!(bound["pane"], true, "{bound}");
+        assert_eq!(bound["context_file"], path.to_str().unwrap(), "{bound}");
+        assert!(path.exists(), "the bound project's context is on disk");
     });
 }

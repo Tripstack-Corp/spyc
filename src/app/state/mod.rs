@@ -396,15 +396,19 @@ pub struct AppState {
     pub startup_commands: Vec<String>,
     pub frecency: Frecency,
     /// Every open project, in switcher order; looked up by `active` via
-    /// [`Self::active_project`] / [`Self::active_project_mut`]. Exactly one
-    /// today (#99 step 1, `docs/drafts/PROJECTS_PLAN.md`) — the switcher, a
-    /// second project, and per-project MCP routing are later steps. Action
-    /// handlers reach the active project's **focused** column via
-    /// [`Self::cur`] / [`Self::cur_mut`]; render draws `left`/`right`
-    /// explicitly off [`Self::active_project`].
+    /// [`Self::active_project`] / [`Self::active_project_mut`]
+    /// (`docs/drafts/PROJECTS_PLAN.md`, #99). Action handlers reach the active
+    /// project's **focused** column via [`Self::cur`] / [`Self::cur_mut`];
+    /// render draws `left`/`right` explicitly off [`Self::active_project`].
     pub projects: Vec<Project>,
-    /// Which of `projects` is drawn and driven by the keyboard.
+    /// Which of `projects` is drawn and driven by the keyboard — or, while
+    /// [`Self::in_background`] is set, the project an agent's MCP call acts on.
     pub active: ProjectId,
+    /// Set while `App::in_project` has made `active` a project the user isn't
+    /// looking at, to serve an MCP call from that project's agent. What belongs
+    /// to the user's view stays with it: the process cwd, frecency and the
+    /// harpoon menu.
+    pub in_background: bool,
 }
 
 impl AppState {
@@ -425,6 +429,20 @@ impl AppState {
             .iter_mut()
             .find(|p| p.id == self.active)
             .expect("active always names a live project")
+    }
+
+    /// The open project `id`; `None` once it has closed.
+    pub fn project(&self, id: ProjectId) -> Option<&Project> {
+        self.projects.iter().find(|p| p.id == id)
+    }
+
+    pub fn has_project(&self, id: ProjectId) -> bool {
+        self.project(id).is_some()
+    }
+
+    /// Every open project, in switcher order.
+    pub fn open_projects(&self) -> impl Iterator<Item = &Project> {
+        self.projects.iter()
     }
 
     /// Feed `key` to the resolver. `resolver` lives flat on `AppState` while
@@ -904,6 +922,7 @@ impl AppState {
             mounts: Mounts::default(),
             projects: vec![project],
             active,
+            in_background: false,
             inventory: Inventory::new(),
             marks: Marks::default(),
             resolver: Resolver::new(),

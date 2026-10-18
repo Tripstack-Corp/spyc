@@ -563,6 +563,11 @@ impl ViewState {
         Self::project_in(&mut self.projects, self.active)
     }
 
+    /// Every open project's context file.
+    pub(super) fn context_paths(&self) -> impl Iterator<Item = &std::path::Path> {
+        self.projects.values().map(|p| p.context_path.as_path())
+    }
+
     /// [`Self::project_mut`] borrowing only the `projects` field, for a caller
     /// that holds another `ViewState` field at the same time — a method
     /// borrows all of `self`. `active_pager_mut!` is the one that needs it.

@@ -85,7 +85,8 @@ impl App {
     }
 
     /// Execute writable MCP commands the recv arm buffered into `mcp_pending`,
-    /// replying on each one-shot Sender. Kept at its early loop position so a
+    /// each in the project it acts on (`route_mcp_request`, #99), replying on
+    /// each one-shot Sender. Kept at its early loop position so a
     /// queued request never sits behind a TUI-tearing ForegroundExec and
     /// breaches the client's 5 s timeout. `execute_mcp_command` writes the
     /// context file synchronously, then `reply.send` — preserving
@@ -97,37 +98,7 @@ impl App {
             // for every tools/call), so it's not counted here — that would
             // double-count writable commands, which arrive as their own command
             // *in addition to* a `ToolCalled`.
-            let crate::mcp_cmd::McpRequest { command, reply } = req;
-            // `wait_for_scope_clear` blocks: it doesn't reply inline — the loop
-            // parks its reply sender (or answers at once if already clear) and
-            // `settle_scope_waiters` fires it later. Heavy worktree ops
-            // (create/remove/clean) run off the loop: validate synchronously
-            // (cheap, reads App state incl. the occupied guard), then hand the
-            // gix/copy IO to a worker that replies once the main loop has
-            // re-applied refresh+context. Everything else is served
-            // synchronously, replying inline.
-            if let crate::mcp_cmd::McpCommand::WaitForScopeClear {
-                pane_id,
-                pane,
-                paths,
-                timeout_ms,
-            } = command
-            {
-                self.handle_scope_wait(pane_id, pane, paths, timeout_ms, reply);
-            } else if let Some(planned) = self.plan_worktree_job(&command) {
-                match planned {
-                    Ok(job) => self.spawn_worktree_job(
-                        job,
-                        super::worktree_ops::WorktreeCompletion::Mcp(reply),
-                    ),
-                    Err(resp) => {
-                        let _ = reply.send(resp);
-                    }
-                }
-            } else {
-                let resp = self.execute_mcp_command(command);
-                let _ = reply.send(resp);
-            }
+            self.route_mcp_request(req);
             needs_draw = true;
         }
         needs_draw

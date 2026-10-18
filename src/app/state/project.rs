@@ -13,20 +13,7 @@ use crate::config::Config;
 use crate::keymap::UserKeymap;
 
 use super::{Commander, Focus, PaneLayout, VSplit};
-
-/// Identity of a project — a uuid, never an index (an index drifts when a
-/// project closes) or a path (a path changes identity on a re-home). `Copy`:
-/// cheap to carry wherever "which project" needs naming.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ProjectId(uuid::Uuid);
-
-impl ProjectId {
-    /// A fresh id. Named `new`, not `default`, so a `ProjectId` is never
-    /// conjured implicitly — every one names a real, just-created project.
-    pub fn new() -> Self {
-        Self(uuid::Uuid::now_v7())
-    }
-}
+pub use crate::project_id::ProjectId;
 
 /// A home directory and everything the user is doing under it: the file
 /// columns, the split's shape, the pane layout, and where the keyboard was.
@@ -84,5 +71,15 @@ impl Project {
             config,
             user_keymap,
         }
+    }
+
+    /// What the project is called: its home's last component, else its start
+    /// directory's.
+    pub fn label(&self) -> String {
+        let dir = self.home.as_deref().unwrap_or(&self.start_dir);
+        dir.file_name().map_or_else(
+            || dir.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     }
 }

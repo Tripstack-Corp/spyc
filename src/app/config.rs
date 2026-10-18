@@ -115,18 +115,19 @@ impl App {
     pub fn is_listing_path(&self, path: &Path) -> bool {
         // Ignore OUR OWN context-file writes -- the ~150ms snapshot churn lands
         // in the listing dir and would otherwise spin refresh_listing →
-        // git-status → redraw. Only *our* pid's file (and its write-temp
-        // sibling) is filtered: other instances' context files appearing /
-        // vanishing (e.g. another spyc's startup orphan sweep) are real listing
-        // changes the user must see, so they pass through (the refresh debounce
-        // bounds any residual churn from a second active instance).
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            let pid = std::process::id();
-            if name == format!(".spyc-context-{pid}.json")
-                || name == format!(".spyc-context-{pid}.tmp")
-            {
-                return false;
-            }
+        // git-status → redraw. Only *our* pid's files (every project's, and
+        // their write-temps) are filtered: other instances' context files
+        // appearing / vanishing (e.g. another spyc's startup orphan sweep) are
+        // real listing changes the user must see, so they pass through (the
+        // refresh debounce bounds any residual churn from a second active
+        // instance).
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(crate::context::context_file_pid)
+            == Some(std::process::id())
+        {
+            return false;
         }
         // Accept if the path is a listing path for EITHER active column — both
         // columns' trees are watched (dual fs-watch), so `b`'s edits refresh
@@ -281,6 +282,17 @@ mod tests {
             app.is_listing_path(Path::new("/repo/notes.txt")),
             "ordinary cwd file → relevant"
         );
+        // #99: each project has its own file, and its write-temp.
+        let project = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5a6b";
+        for ours in ["json", "tmp"].map(|ext| format!("/repo/.spyc-context-{our}-{project}.{ext}"))
+        {
+            assert!(
+                !app.is_listing_path(Path::new(&ours)),
+                "{ours} → suppressed"
+            );
+        }
+        let other = format!("/repo/.spyc-context-{}-{project}.json", our.wrapping_add(1));
+        assert!(app.is_listing_path(Path::new(&other)), "{other} → visible");
     }
 
     /// `is_listing_path`'s gitdir carve-out: ACCEPT `.git/index` / `.git/HEAD`

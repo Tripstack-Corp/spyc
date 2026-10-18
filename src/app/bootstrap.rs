@@ -165,6 +165,7 @@ impl App {
         let app_state = state::AppState {
             projects: vec![project],
             active,
+            in_background: false,
             inventory: Inventory::load(),
             marks: Marks::load(),
             mounts: state::Mounts::default(),
@@ -201,7 +202,7 @@ impl App {
             should_quit: false,
         };
         let start_dir = app_state.active_project().start_dir.clone();
-        let context_path = crate::context::process_context_path(&start_dir);
+        let context_path = crate::context::process_context_path(&start_dir, active);
         // Reap orphaned artifacts left by instances that exited WITHOUT running
         // teardown (SIGKILL / crash / `kill -9`): stale `.spyc-context-<pid>.json`
         // files and dead-PID `spyc` MCP entries in `.mcp.json` / `.codex/config.toml`.

@@ -703,10 +703,11 @@ fn created_worktree_outcome(
     }
 }
 
-/// `create_worktree open:true` opens `b` in the project that asked (#99): a
-/// checkout can take seconds, and if another project is active by the time it
+/// `create_worktree open:true` opens `b` only in the project that asked (#99):
+/// a checkout can take seconds, and if that project has closed by the time it
 /// lands, the tree is still created and the agent still answered, but nobody
-/// else's columns move.
+/// else's columns move. An open project that asked gets `b` whether or not the
+/// user is in it (`create_worktree_from_another_project_opens_b_there`).
 #[test]
 fn a_created_worktree_opens_b_only_in_the_project_that_asked() {
     use crate::app::worktree_ops::WorktreeCompletion;
@@ -1139,9 +1140,9 @@ fn mcp_create_worktree_works_while_the_column_is_inside_an_archive() {
     });
 }
 
-/// `PaneContext` describes the tab, not the column: an agent tab started in
+/// `CallerContext` describes the tab, not the column: an agent tab started in
 /// worktree X is told X — its cwd, root and branch — while the user browses Y.
-/// An id no live tab carries is an error, so a connection never binds to it.
+/// An id no live tab carries is described as no tab at all.
 #[test]
 fn pane_context_answers_for_the_tab_while_the_user_browses_elsewhere() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1158,13 +1159,19 @@ fn pane_context_answers_for_the_tab_while_the_user_browses_elsewhere() {
             .id
             .clone();
 
-        let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::PaneContext {
-            pane_id: id.clone(),
-        });
-        let crate::mcp_cmd::McpResponse::Ok { message } = resp else {
-            panic!("a live tab resolves: {resp:?}");
+        let project = app.state.active;
+        let mut about = |pane_id: &str| {
+            let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::CallerContext {
+                pane_id: Some(pane_id.to_string()),
+                project,
+            });
+            let crate::mcp_cmd::McpResponse::Ok { message } = resp else {
+                panic!("an open project resolves: {resp:?}");
+            };
+            serde_json::from_str::<serde_json::Value>(&message).unwrap()
         };
-        let pane: serde_json::Value = serde_json::from_str(&message).unwrap();
+        let pane = about(&id)["pane"].clone();
+        let gone = about("no-such-pane");
         assert_eq!(pane["id"], id.as_str());
         assert_eq!(pane["tab"], 1);
         assert_eq!(pane["cwd"], wt.to_str().unwrap());
@@ -1176,13 +1183,7 @@ fn pane_context_answers_for_the_tab_while_the_user_browses_elsewhere() {
             "the user's view is unchanged"
         );
 
-        let gone = app.execute_mcp_command(crate::mcp_cmd::McpCommand::PaneContext {
-            pane_id: "no-such-pane".into(),
-        });
-        assert!(
-            matches!(gone, crate::mcp_cmd::McpResponse::Error { .. }),
-            "{gone:?}"
-        );
+        assert!(gone.get("pane").is_none(), "{gone}");
     });
 }
 

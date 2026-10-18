@@ -42,6 +42,7 @@ mod pane;
 mod paths;
 mod proc_cwd;
 mod proc_group;
+mod project_id;
 mod shell;
 mod skill;
 mod state;

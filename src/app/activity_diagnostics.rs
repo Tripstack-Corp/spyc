@@ -131,18 +131,13 @@ pub(super) fn activity_dump_lines(app: &App) -> Vec<String> {
         app.view.activity.mcp_connection_summary()
     ));
     for (conn, c) in &app.view.activity.mcp_connections {
-        let tab = c.pane_id.as_deref().and_then(|id| {
-            app.runtime
-                .project()
-                .pane_tabs
-                .as_ref()?
-                .tabs()
-                .iter()
-                .enumerate()
-                .find(|(_, t)| t.info.id == id)
-        });
+        // In whichever project holds it (#99).
+        let tab = c
+            .pane_id
+            .as_deref()
+            .and_then(|id| app.runtime.tab_of_pane(id));
         let who = match (c.pane_id.as_deref(), tab) {
-            (_, Some((i, t))) => format!("tab [{}] \"{}\"", i + 1, t.info.label),
+            (_, Some((n, t))) => format!("tab [{n}] \"{}\"", t.info.label),
             (Some(id), None) => format!("pane {id} (tab closed)"),
             (None, None) => "unattributed (an older proxy, or no live tab had its id)".into(),
         };

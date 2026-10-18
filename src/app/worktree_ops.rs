@@ -324,7 +324,8 @@ impl App {
         let results = std::sync::Arc::clone(&self.runtime.worktree_results);
         let wake = self.runtime.pane_wake_tx.clone();
         // Both callers spawn in the same pass as the key or MCP command that
-        // asked, so the active project is the one that asked.
+        // asked, and an MCP command is served inside its caller's project
+        // (`in_project`), so the active project is the one that asked.
         let project = self.state.active;
         std::thread::spawn(move || {
             let result = run_worktree_job(job);
@@ -366,10 +367,7 @@ impl App {
             match completion {
                 WorktreeCompletion::Mcp(reply) => {
                     if mutated {
-                        // The filesystem changed under every project, but
-                        // opening `b` was this project's request.
-                        let open_path = open_path.filter(|_| still_active);
-                        self.after_worktree_mutation(flash, open_path);
+                        self.land_worktree_mutation(project, flash, open_path);
                     }
                     // The client may have timed out (5 s) and dropped its
                     // receiver — a failed send is fine; the refresh/context
@@ -401,6 +399,27 @@ impl App {
             }
         }
         true
+    }
+
+    /// An agent's worktree job, landed (#99). What it asked for happens in its
+    /// own project (`b` opened, columns left in a removed tree sent home, the
+    /// context rewritten), whichever project the user is in. The user's
+    /// project, if that's another, gets the same reset and rewrite, since a
+    /// removed tree can sit under either. A job whose project has since closed
+    /// opens nothing.
+    fn land_worktree_mutation(
+        &mut self,
+        project: super::state::ProjectId,
+        flash: Option<String>,
+        open_path: Option<std::path::PathBuf>,
+    ) {
+        if project != self.state.active && self.state.has_project(project) {
+            self.in_project(project, |app| app.after_worktree_mutation(flash, open_path));
+            self.after_worktree_mutation(None, None);
+        } else {
+            let open_path = open_path.filter(|_| project == self.state.active);
+            self.after_worktree_mutation(flash, open_path);
+        }
     }
 
     /// Shared post-mutation step: optionally open the freshly-created worktree

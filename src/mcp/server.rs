@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::mcp_cmd::{McpCommand, McpRequest};
 
 use super::protocol::{
-    Caller, PANE_ID_META, dispatch, dispatch_for, read_lsp_message, send_message,
+    CWD_META, Caller, PANE_ID_META, dispatch, dispatch_for, read_lsp_message, send_message,
 };
 use super::{
     PROXY_IO_TIMEOUT, log_bodies, mcp_log, root_marker_path_in, socket_path, socket_path_for,
@@ -97,7 +97,9 @@ pub(super) fn collect_project_pids(start: &Path) -> Vec<u32> {
 /// Only the sidecars count. They live in the owner-private state dir, so
 /// nothing a repository ships can name a spyc: a marker planted in a cloned
 /// tree, the attack an in-tree marker invited, is never read. Roots and `start`
-/// compare canonically, so a symlinked path finds the same spyc.
+/// compare canonically, so a symlinked path finds the same spyc. A sidecar
+/// lists one root per line, one per open project (#99), and the nearest root
+/// wins across every line of every sidecar.
 pub(super) fn collect_project_pids_in(start: &Path, state_dir: &Path) -> Vec<u32> {
     let start = std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
     let Ok(entries) = std::fs::read_dir(state_dir) else {
@@ -117,10 +119,12 @@ pub(super) fn collect_project_pids_in(start: &Path, state_dir: &Path) -> Vec<u32
         let Ok(recorded) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
-        let root = Path::new(recorded.trim());
-        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-        if start.starts_with(&root) {
-            rooted.push((root, pid));
+        for line in recorded.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            let root = Path::new(line);
+            let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+            if start.starts_with(&root) {
+                rooted.push((root, pid));
+            }
         }
     }
     let Some(nearest) = rooted.iter().map(|(r, _)| r.components().count()).max() else {
@@ -133,28 +137,37 @@ pub(super) fn collect_project_pids_in(start: &Path, state_dir: &Path) -> Vec<u32
         .collect()
 }
 
-/// Record `root` as this process's in its sidecar: discovery's only evidence
-/// of where a spyc is rooted. Best-effort — a missing sidecar fails safe,
-/// leaving the spyc undiscovered rather than misattributed.
-fn write_root_marker(state_dir: &Path, root: &Path) {
-    let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+/// Record `roots` as this process's in its sidecar, one per line and one per
+/// open project (#99): discovery's only evidence of where a spyc is rooted.
+/// Best-effort — a missing sidecar fails safe, leaving the spyc undiscovered
+/// rather than misattributed.
+fn write_root_marker(state_dir: &Path, roots: &[&Path]) {
+    let lines: Vec<String> = roots
+        .iter()
+        .map(|root| {
+            let canon = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+            canon.to_string_lossy().into_owned()
+        })
+        // A root with a newline in it would read back as two roots; refuse it.
+        .filter(|line| !line.contains('\n'))
+        .collect();
     let path = root_marker_path_in(state_dir, std::process::id());
     // A non-UTF-8 root would be stored lossily and later fail the
     // canonical compare → refuse; an acceptable (and safe) edge.
-    if crate::fs::write_atomic(&path, canon.to_string_lossy().as_bytes()).is_ok() {
-        // Match the socket's owner-only posture: the file only holds a
-        // directory path, but no reason to expose project roots to other
+    if crate::fs::write_atomic(&path, lines.join("\n").as_bytes()).is_ok() {
+        // Match the socket's owner-only posture: the file only holds
+        // directory paths, but no reason to expose project roots to other
         // local users.
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
 }
 
-/// Move this process's recorded root to `root` (#523): a `spyc -r` that
-/// restores a project elsewhere moves the root, and discovery must follow.
-pub fn record_root(root: &Path) {
+/// Rewrite this process's recorded roots (#523, #99): a `spyc -r` that
+/// restores a project elsewhere moves its root, and discovery must follow.
+pub fn record_roots(roots: &[&Path]) {
     if let Some(dir) = state_dir() {
-        write_root_marker(&dir, root);
+        write_root_marker(&dir, roots);
     }
 }
 
@@ -275,13 +288,20 @@ pub(super) fn inert_reply(msg: &str) -> Option<Value> {
     Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
 }
 
-/// `msg` with `pane_id` under `params._meta` when it is an `initialize`
-/// request, so the server can bind this connection to the pane; anything
-/// else, or no pane id, passes through untouched.
-pub(super) fn annotate_initialize<'a>(msg: &'a str, pane_id: Option<&str>) -> Cow<'a, str> {
-    let Some(pane_id) = pane_id.filter(|p| !p.is_empty()) else {
+/// `msg` with this proxy's `pane_id` and `cwd` under `params._meta` when it is
+/// an `initialize` request, so the server can bind the connection to its pane,
+/// or with no pane to the project holding its cwd (#99). Anything else, or
+/// neither, passes through untouched.
+pub(super) fn annotate_initialize<'a>(
+    msg: &'a str,
+    pane_id: Option<&str>,
+    cwd: Option<&Path>,
+) -> Cow<'a, str> {
+    let pane_id = pane_id.filter(|p| !p.is_empty());
+    let cwd = cwd.and_then(Path::to_str).filter(|c| !c.is_empty());
+    if pane_id.is_none() && cwd.is_none() {
         return Cow::Borrowed(msg);
-    };
+    }
     let Ok(mut request) = serde_json::from_str::<Value>(msg) else {
         return Cow::Borrowed(msg);
     };
@@ -297,23 +317,39 @@ pub(super) fn annotate_initialize<'a>(msg: &'a str, pane_id: Option<&str>) -> Co
     let Some(meta) = meta else {
         return Cow::Borrowed(msg);
     };
-    meta.insert(PANE_ID_META.into(), Value::String(pane_id.into()));
+    if let Some(pane_id) = pane_id {
+        meta.insert(PANE_ID_META.into(), Value::String(pane_id.into()));
+    }
+    if let Some(cwd) = cwd {
+        meta.insert(CWD_META.into(), Value::String(cwd.into()));
+    }
     Cow::Owned(request.to_string())
 }
 
-/// Proxy stdin/stdout ↔ Unix socket, naming `pane_id` in the `initialize` it
-/// forwards. Messages use Content-Length framing on both sides.
-pub(super) fn run_proxy(stream: UnixStream, pane_id: Option<&str>) -> anyhow::Result<()> {
-    proxy_io(io::stdin().lock(), io::stdout().lock(), stream, pane_id)
+/// Proxy stdin/stdout ↔ Unix socket, naming `pane_id` and `cwd` in the
+/// `initialize` it forwards. Messages use Content-Length framing on both sides.
+pub(super) fn run_proxy(
+    stream: UnixStream,
+    pane_id: Option<&str>,
+    cwd: Option<&Path>,
+) -> anyhow::Result<()> {
+    proxy_io(
+        io::stdin().lock(),
+        io::stdout().lock(),
+        stream,
+        pane_id,
+        cwd,
+    )
 }
 
-/// [`run_proxy`] over any agent-side reader and writer, naming `pane_id` in
-/// the `initialize` it forwards.
+/// [`run_proxy`] over any agent-side reader and writer, naming `pane_id` and
+/// `cwd` in the `initialize` it forwards.
 pub(super) fn proxy_io(
     mut stdin_reader: impl BufRead,
     mut stdout_writer: impl Write,
     stream: UnixStream,
     pane_id: Option<&str>,
+    cwd: Option<&Path>,
 ) -> anyhow::Result<()> {
     let sock_clone = match stream.try_clone() {
         Ok(c) => c,
@@ -354,7 +390,7 @@ pub(super) fn proxy_io(
         if msg.is_empty() {
             continue; // skip blank lines
         }
-        let msg = &*annotate_initialize(msg, pane_id);
+        let msg = &*annotate_initialize(msg, pane_id, cwd);
         if log_bodies() {
             mcp_log(&format!(
                 "proxy: stdin → socket ({} bytes): {}",
@@ -474,7 +510,7 @@ pub fn start_socket_server(
     // Record the directory this spyc is rooted at, next to the socket, for
     // stdio discovery. Done before any connection is served.
     if let Some(dir) = state_dir() {
-        write_root_marker(&dir, root);
+        write_root_marker(&dir, &[root]);
     }
 
     let ctx_path = Arc::new(ctx_path);
@@ -570,6 +606,7 @@ fn serve_connection(
                         detail: e.to_string(),
                     },
                     reply: reply_tx,
+                    project: None,
                 });
                 break;
             }

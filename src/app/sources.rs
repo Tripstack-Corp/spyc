@@ -502,6 +502,7 @@ mod tests {
         tx.send(Message::Mcp(crate::mcp_cmd::McpRequest {
             command: crate::mcp_cmd::McpCommand::ClearPicks,
             reply,
+            project: None,
         }))
         .unwrap();
 

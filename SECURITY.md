@@ -105,8 +105,11 @@ if a live one carries the id. That lets `get_spyc_context` describe the
 caller's own tab, lets `report_status` and a scope claim land on the
 caller's tab rather than whichever one has focus, and puts the binding in
 `mcp.log`. Those are ergonomics and auditability. The id is exactly as
-forgeable as the list above says, and the read tools' allowed set does
-not depend on it. Real containment needs OS-level isolation — a separate
+forgeable as the list above says. With several projects open in one spyc
+(#99), the binding also picks the project a connection's read tools
+answer from, and with it their allowed set. That is routing, not a
+boundary: a forged id reaches another of the same user's open projects,
+none of which is out of the agent's own shell's reach. Real containment needs OS-level isolation — a separate
 uid, a container — which is outside spyc's scope.
 
 ## Supply-chain controls (what we do)

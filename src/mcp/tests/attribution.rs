@@ -4,33 +4,36 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 
 use super::*;
-use crate::mcp::protocol::PANE_ID_META;
+use crate::mcp::protocol::{CWD_META, PANE_ID_META};
 use crate::mcp::server::annotate_initialize;
 use crate::mcp::test_support::Conn;
 use crate::mcp_cmd::{McpRequest, McpResponse};
 
-/// A stand-in for the main loop that knows the pane ids in `live`. Every
-/// command it receives is recorded on the returned channel before it replies,
-/// so a caller that has its answer can read what the loop saw.
+/// The one project [`fake_loop`] binds every connection to.
+const PROJECT: &str = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5a6b";
+
+/// A stand-in for the main loop that knows the pane ids in `live`, all in
+/// [`PROJECT`]. Every command it receives is recorded on the returned channel
+/// before it replies, so a caller that has its answer can read what the loop
+/// saw.
 fn fake_loop(live: &'static [&'static str]) -> (Sender<McpRequest>, Receiver<McpCommand>) {
     let (tx, rx) = mpsc::channel::<McpRequest>();
     let (seen_tx, seen_rx) = mpsc::channel();
+    let is_live = move |p: &Option<String>| p.as_deref().is_some_and(|p| live.contains(&p));
     std::thread::spawn(move || {
-        for McpRequest { command, reply } in rx {
-            let resp = match &command {
-                McpCommand::PaneContext { pane_id } if live.contains(&pane_id.as_str()) => {
-                    McpResponse::Ok {
-                        message: json!({"id": pane_id, "cwd": format!("/wt/{pane_id}")})
-                            .to_string(),
-                    }
+        for McpRequest { command, reply, .. } in rx {
+            let message = match &command {
+                McpCommand::Bind { pane_id, .. } => {
+                    json!({"pane": is_live(pane_id), "project": PROJECT}).to_string()
                 }
-                McpCommand::PaneContext { pane_id } => McpResponse::Error {
-                    message: format!("no pane with id {pane_id} (closed?)"),
-                },
-                _ => McpResponse::Ok {
-                    message: "ok".into(),
-                },
+                McpCommand::CallerContext { pane_id, .. } if is_live(pane_id) => {
+                    let pane_id = pane_id.as_deref().unwrap_or_default();
+                    json!({"pane": {"id": pane_id, "cwd": format!("/wt/{pane_id}")}}).to_string()
+                }
+                McpCommand::CallerContext { .. } => "{}".into(),
+                _ => "ok".into(),
             };
+            let resp = McpResponse::Ok { message };
             let _ = seen_tx.send(command);
             let _ = reply.send(resp);
         }
@@ -71,14 +74,14 @@ fn open(cmd_tx: Sender<McpRequest>) -> (Conn, tempfile::TempDir) {
 type Target = (Option<String>, Option<usize>);
 
 /// The target of each `report_status` the loop received, and whether any
-/// `PaneContext` lookup reached it.
+/// lookup of the caller (`Bind`, `CallerContext`) reached it.
 fn reports(seen: &Receiver<McpCommand>) -> (Vec<Target>, bool) {
     let mut out = Vec::new();
     let mut looked_up = false;
     for c in seen.try_iter() {
         match c {
             McpCommand::ReportStatus { pane_id, pane, .. } => out.push((pane_id, pane)),
-            McpCommand::PaneContext { .. } => looked_up = true,
+            McpCommand::Bind { .. } | McpCommand::CallerContext { .. } => looked_up = true,
             _ => {}
         }
     }
@@ -191,7 +194,14 @@ fn the_proxy_carries_its_pane_to_the_server() {
     .concat();
     let mut stdout = Vec::new();
 
-    crate::mcp::server::proxy_io(Cursor::new(stdin), &mut stdout, agent_side, Some("abc")).unwrap();
+    crate::mcp::server::proxy_io(
+        Cursor::new(stdin),
+        &mut stdout,
+        agent_side,
+        Some("abc"),
+        None,
+    )
+    .unwrap();
 
     let replies: Vec<Value> = std::str::from_utf8(&stdout)
         .unwrap()
@@ -206,7 +216,7 @@ fn the_proxy_carries_its_pane_to_the_server() {
 #[test]
 fn the_proxy_names_its_pane_in_initialize() {
     let msg = r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","_meta":{"k":1}}}"#;
-    let out: Value = serde_json::from_str(&annotate_initialize(msg, Some("abc"))).unwrap();
+    let out: Value = serde_json::from_str(&annotate_initialize(msg, Some("abc"), None)).unwrap();
     assert_eq!(out["params"]["_meta"][PANE_ID_META], "abc");
     assert_eq!(
         out["params"]["_meta"]["k"], 1,
@@ -216,8 +226,54 @@ fn the_proxy_names_its_pane_in_initialize() {
     assert_eq!(out["id"], 0);
 
     let bare = r#"{"jsonrpc":"2.0","id":0,"method":"initialize"}"#;
-    let out: Value = serde_json::from_str(&annotate_initialize(bare, Some("abc"))).unwrap();
+    let out: Value = serde_json::from_str(&annotate_initialize(bare, Some("abc"), None)).unwrap();
     assert_eq!(out["params"]["_meta"][PANE_ID_META], "abc");
+}
+
+/// With no pane, the proxy names its cwd, so the server can bind the
+/// connection to the project holding it (#99). With both, it names both.
+#[test]
+fn the_proxy_names_its_cwd_in_initialize() {
+    let msg = r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#;
+    let cwd = Some(Path::new("/work/b"));
+    let out: Value = serde_json::from_str(&annotate_initialize(msg, None, cwd)).unwrap();
+    assert_eq!(out["params"]["_meta"][CWD_META], "/work/b");
+    assert!(out["params"]["_meta"].get(PANE_ID_META).is_none(), "{out}");
+
+    let out: Value = serde_json::from_str(&annotate_initialize(msg, Some("abc"), cwd)).unwrap();
+    assert_eq!(out["params"]["_meta"][CWD_META], "/work/b");
+    assert_eq!(out["params"]["_meta"][PANE_ID_META], "abc");
+}
+
+/// The whole path for a session with no pane: the proxy's cwd reaches the loop
+/// as the cwd to bind by.
+#[test]
+fn the_proxy_carries_its_cwd_to_the_loop() {
+    let (tx, seen) = fake_loop(&[]);
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx_path = user_browsing_y(&tmp);
+    let (agent_side, server_side) = UnixStream::pair().unwrap();
+    std::thread::spawn(move || {
+        handle_socket_connection(server_side, &ctx_path, &tx).unwrap_or(());
+    });
+    let stdin = json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}});
+    let mut stdout = Vec::new();
+    let cwd = Path::new("/work/b");
+
+    crate::mcp::server::proxy_io(
+        Cursor::new(stdin.to_string() + "\n"),
+        &mut stdout,
+        agent_side,
+        None,
+        Some(cwd),
+    )
+    .unwrap();
+
+    let bound_by = seen.try_iter().find_map(|c| match c {
+        McpCommand::Bind { cwd, .. } => cwd,
+        _ => None,
+    });
+    assert_eq!(bound_by.as_deref(), Some(cwd));
 }
 
 #[test]
@@ -232,7 +288,11 @@ fn the_proxy_passes_everything_else_through_verbatim() {
         (init, None),
         (init, Some("")),
     ] {
-        assert_eq!(annotate_initialize(msg, pane), msg, "{msg} / {pane:?}");
+        assert_eq!(
+            annotate_initialize(msg, pane, None),
+            msg,
+            "{msg} / {pane:?}"
+        );
     }
 }
 

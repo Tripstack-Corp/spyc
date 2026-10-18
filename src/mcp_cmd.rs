@@ -55,6 +55,10 @@ use std::sync::mpsc;
 pub struct McpRequest {
     pub command: McpCommand,
     pub reply: mpsc::Sender<McpResponse>,
+    /// The project of the connection that sent it, from its binding (#99);
+    /// `None` from a connection bound to none. It says who is asking, not what
+    /// to do, so it rides here rather than on each command.
+    pub project: Option<crate::project_id::ProjectId>,
 }
 
 /// Commands that Claude can send to mutate the TUI workspace.
@@ -148,12 +152,24 @@ pub enum McpCommand {
         paths: Vec<String>,
         timeout_ms: u64,
     },
-    /// The tab whose `SPYC_PANE_ID` is `pane_id`, as JSON: its id, 1-based
-    /// index, label, live cwd, worktree root and branch. `Error` when no live
-    /// tab has that id. A connection asks once when its `initialize` names a
-    /// pane (binding the id only if this succeeds), then again for each
-    /// `get_spyc_context`, since the tab can close or move under it.
-    PaneContext { pane_id: String },
+    /// Bind a connection, once, at the `initialize` that names its pane or cwd
+    /// (#99): to the live tab carrying `pane_id`, in whichever project holds
+    /// it; else to the open project whose root holds `cwd`; else to the active
+    /// project. Replies JSON `{pane, project, context_file}`: whether the pane
+    /// bound, the project's id, and the context file its reads answer from.
+    Bind {
+        pane_id: Option<String>,
+        cwd: Option<std::path::PathBuf>,
+    },
+    /// What `get_spyc_context` adds for a bound connection, as JSON: `project`
+    /// (its id, label, home, and whether it is the one the user is in) and,
+    /// while the tab carrying `pane_id` is live, `pane` (its id, 1-based index,
+    /// label, live cwd, worktree root and branch). Asked on every call, since
+    /// the tab can close or move under it.
+    CallerContext {
+        pane_id: Option<String>,
+        project: crate::project_id::ProjectId,
+    },
     /// An older spyc, one that still pins its own socket in the agents' MCP
     /// entry, rewrote this directory's entry and said so (`spyc/disconnected`).
     /// Nothing this version sends; the TUI tells the user who owns the entry.
