@@ -81,6 +81,19 @@ impl App {
         self.in_project(id, f)
     }
 
+    /// Make project `id` the one the user sees and drives, as a switch does.
+    /// Unlike [`Self::as_project`] it stays, and nothing is hidden from the
+    /// user: no `in_background`, and the flash is theirs.
+    pub(crate) fn make_active(&mut self, id: state::ProjectId) {
+        assert!(
+            self.state.has_project(id),
+            "make_active is handed an open project"
+        );
+        self.state.active = id;
+        self.runtime.active = id;
+        self.view.active = id;
+    }
+
     /// Ready project `id` for MCP: `home` is its home, its column lists `home`
     /// for real, and its context file is written.
     pub(crate) fn ready_test_project(&mut self, id: state::ProjectId, home: &std::path::Path) {

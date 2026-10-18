@@ -504,6 +504,7 @@ mod mcp;
 mod pane;
 mod pane_fork;
 mod per_column;
+mod project_landings;
 mod projects_mcp;
 mod prompt_templates;
 mod second_commander;
