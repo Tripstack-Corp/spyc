@@ -22,9 +22,12 @@ fn a_shell_tab_carries_the_agent_env() {
     crate::state::with_state_root(&tmp.path().join("state"), || {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let got = dir.join("env.txt");
+        // Written beside the file and renamed into place: `>` creates the file
+        // before `printf` writes it, and the wait below reads it once it exists.
         let cmd = format!(
-            "sh -c 'printf \"%s|%s\" \"$SPYC_PANE_ID\" \"$SPYC_MCP_SOCK\" > {}; exec sleep 30'",
-            got.display()
+            "sh -c 'printf \"%s|%s\" \"$SPYC_PANE_ID\" \"$SPYC_MCP_SOCK\" > {tmp}; mv {tmp} {got}; exec sleep 30'",
+            tmp = dir.join("env.tmp").display(),
+            got = got.display()
         );
         let mut app = App::test_app(dir.clone());
         assert!(app.open_pane_tab_in(&cmd, &dir));
