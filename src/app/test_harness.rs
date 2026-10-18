@@ -119,6 +119,15 @@ impl App {
             .push((origin, outcome));
     }
 
+    /// Wire the background git worker as `App::new` does once its thread
+    /// spawns, so a cache miss enqueues a walk instead of running it inline.
+    pub(crate) fn wire_git_worker(&mut self) {
+        self.state
+            .col_mut(state::Side::Left)
+            .git_cache
+            .git_worker_available = true;
+    }
+
     /// Ready project `id` for MCP: `home` is its home, its column lists `home`
     /// for real, and its context file is written.
     pub(crate) fn ready_test_project(&mut self, id: state::ProjectId, home: &std::path::Path) {
@@ -133,8 +142,8 @@ impl App {
     }
 
     /// A second project homed at `home`, beside the active one, readied by
-    /// [`Self::ready_test_project`] with its context file in `home`. The
-    /// active project stays active.
+    /// [`Self::ready_test_project`], with its context file where production
+    /// keeps one (`process_context_path`). The active project stays active.
     pub(crate) fn add_test_project(&mut self, home: &std::path::Path) -> state::ProjectId {
         let project = state::AppState::test_default(home.to_path_buf())
             .projects
@@ -146,7 +155,10 @@ impl App {
             .insert(id, super::runtime::ProjectRuntime::default());
         self.view.projects.insert(
             id,
-            super::view_state::ProjectView::new(crate::context::context_path(home), false),
+            super::view_state::ProjectView::new(
+                crate::context::process_context_path(home, id),
+                false,
+            ),
         );
         self.ready_test_project(id, home);
         id
