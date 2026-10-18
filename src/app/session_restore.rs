@@ -61,10 +61,13 @@ impl App {
     /// this; delete the phase when that lands.)
     pub fn send_pending_resumes(&mut self, now: std::time::Instant) {
         use crate::pane::tabs::{PendingResumeSend, resume_still_unsubmitted};
-        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
-            return;
-        };
-        for entry in tabs.tabs_mut() {
+        // Every project's tabs: a restored project the user isn't in still
+        // resumes its conversations.
+        let entries = self
+            .runtime
+            .every_tab_set_mut()
+            .flat_map(|(_, tabs)| tabs.tabs_mut().iter_mut());
+        for entry in entries {
             match entry.info.pending_resume_send.take() {
                 Some(PendingResumeSend::Text { sid, after }) if now >= after => {
                     let _ = entry.pane.send_bytes(format!("/resume {sid}").as_bytes());

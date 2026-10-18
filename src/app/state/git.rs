@@ -151,7 +151,7 @@ impl AppState {
             // (`apply_git_worker_result`). Returning an empty map / nulling here
             // flickers the dirty star + gutter for the ~1 poll the walk takes
             // under worktree churn.
-            if self.col(side).git_cache.git_worker_available {
+            if self.git_worker_available {
                 let generation = self.col(side).git_cache.git_generation.wrapping_add(1);
                 let project = self.active;
                 let c = self.col_mut(side);

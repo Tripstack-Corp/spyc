@@ -314,7 +314,7 @@ fn why_git_lines(app: &App) -> Vec<String> {
         }
         out.push(format!(
             "    generation: {}   pending_rewalk: {}   worker: {}",
-            gc.git_generation, gc.pending_worktree_rewalk, gc.git_worker_available,
+            gc.git_generation, gc.pending_worktree_rewalk, app.state.git_worker_available,
         ));
         out.push(String::new());
     }

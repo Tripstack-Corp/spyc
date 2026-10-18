@@ -357,6 +357,26 @@ impl Runtime {
             .expect("active always names a live project")
     }
 
+    /// Every open project's tab set, by project. What spyc does for its tabs
+    /// in the background (draining output, marking exits, resizing, shutting
+    /// down) it does for every project's, not only the one in view.
+    pub(super) fn every_tab_set(
+        &self,
+    ) -> impl Iterator<Item = (super::state::ProjectId, &PaneTabs)> {
+        self.projects
+            .iter()
+            .filter_map(|(id, project)| Some((*id, project.pane_tabs.as_ref()?)))
+    }
+
+    /// Mutable [`Self::every_tab_set`].
+    pub(super) fn every_tab_set_mut(
+        &mut self,
+    ) -> impl Iterator<Item = (super::state::ProjectId, &mut PaneTabs)> {
+        self.projects
+            .iter_mut()
+            .filter_map(|(id, project)| Some((*id, project.pane_tabs.as_mut()?)))
+    }
+
     /// The project holding the live tab `pane_id`, whichever one that is.
     pub(super) fn project_of_pane(&self, pane_id: &str) -> Option<super::state::ProjectId> {
         self.projects.iter().find_map(|(id, project)| {

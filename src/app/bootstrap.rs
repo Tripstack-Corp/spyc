@@ -166,6 +166,7 @@ impl App {
             projects: vec![project],
             active,
             in_background: false,
+            git_worker_available: false,
             inventory: Inventory::load(),
             marks: Marks::load(),
             mounts: state::Mounts::default(),
@@ -269,12 +270,8 @@ impl App {
             }
         });
         let mut app_state = app_state;
-        // Per-column flag — only `left` exists at bootstrap. A second commander
-        // copies this from `left` when it opens (`open_second_commander_at`).
-        app_state
-            .col_mut(state::Side::Left)
-            .git_cache
-            .git_worker_available = true;
+        // The worker thread is up.
+        app_state.git_worker_available = true;
         let mut app = Self {
             state: app_state,
             // Write context once on startup so claude sees initial state

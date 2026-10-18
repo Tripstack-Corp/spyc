@@ -231,15 +231,7 @@ impl App {
         // Canonicalize so a relative / `..`-laden path resolves cleanly (and so
         // `cur().listing.dir` matches what later path comparisons expect).
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        let mut commander = state::Commander::for_dir(&dir, &self.state.active_project().config)?;
-        // Inherit the worker-available flag from `left` (set at bootstrap) so
-        // `b`'s git cache-misses go to the background worker, not a blocking
-        // synchronous walk. `Commander::for_dir` defaults it `false`.
-        commander.git_cache.git_worker_available = self
-            .state
-            .col(state::Side::Left)
-            .git_cache
-            .git_worker_available;
+        let commander = state::Commander::for_dir(&dir, &self.state.active_project().config)?;
         self.view.project_mut().right_pager = None; // a commander and the preview are exclusive
         self.state.open_second(commander);
         self.state.active_project_mut().vsplit = Some(state::VSplit {

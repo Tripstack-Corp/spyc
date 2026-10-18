@@ -516,7 +516,7 @@ impl App {
         // drop, but do it explicitly so the temp files don't linger if the
         // process exits without unwinding). Capture buffers are session-scoped.
         self.runtime.capture_spill_dir.take();
-        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
+        for (_, tabs) in self.runtime.every_tab_set_mut() {
             for entry in tabs.tabs_mut() {
                 let label = entry.info.label.clone();
                 let pid = entry.pane.process_id();
