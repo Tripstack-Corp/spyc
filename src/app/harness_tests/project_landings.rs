@@ -91,11 +91,27 @@ fn a_copy_that_lands_where_it_started_reads_as_before() {
     });
 }
 
+/// Landing in the project the user is in is a plain apply: the flash is
+/// theirs, with no project named.
+#[test]
+fn landing_in_the_active_project_names_no_project() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let active = app.state.active;
+        assert_eq!(active, t.x);
+        let out = app.land_in(active, |app| {
+            app.state.flash_info("done");
+            7
+        });
+        assert_eq!(out, Some(7));
+        assert_eq!(app.flash_text(), Some("done"));
+    });
+}
+
 /// A watcher-driven read of X's column, landing after the user moved to Y.
 /// The read's staleness tag is a side and a generation, and Y's column can
 /// carry the same pair: both start at the same generation.
 #[test]
-#[ignore = "red: a listing read lands in whichever project is active"]
 fn a_listing_refresh_from_x_never_replaces_ys() {
     with_two(|t| {
         let app = &mut t.app;
@@ -119,7 +135,6 @@ fn a_listing_refresh_from_x_never_replaces_ys() {
 /// A copy started in X finishes while the user is in Y: X's picks clear, Y's
 /// stay, and the flash says which project it was.
 #[test]
-#[ignore = "red: a finished copy clears the picks of whichever project is active"]
 fn a_copy_finished_after_leaving_x_clears_xs_picks_and_names_x() {
     with_two(|t| {
         let app = &mut t.app;
@@ -148,7 +163,6 @@ fn a_copy_finished_after_leaving_x_clears_xs_picks_and_names_x() {
 /// names no tab, so delivering it would type into Y's agent; it is dropped,
 /// and the flash says so.
 #[test]
-#[ignore = "red: a pipe started in X is sent to Y's agent"]
 fn a_pipe_kicked_in_x_never_types_into_ys_agent() {
     with_two(|t| {
         let app = &mut t.app;

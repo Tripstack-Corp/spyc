@@ -71,7 +71,8 @@ What approving this doc agreed to (2026-10-12):
   Pane screens are only ever sent to an attaching client, never saved to disk,
   because the engine's snapshot format is valid only for the same binary.
 
-**Rollout (Sequencing for 2.3).** Eight steps, one PR each.
+**Rollout (Sequencing for 2.3).** Eight steps, one PR each, except step 5,
+which lands in five stages.
 
 - **Steps 1–2 change no behaviour** and land first. Step 1 introduces
   `Project`, holding today's single set of state. Step 2 tags background results
@@ -769,7 +770,7 @@ protocol's decisions rather than the inventory's:
 ## Sequencing for 2.3
 
 Each step is a behaviour-preserving refactor or a guarded feature, so each is one
-PR:
+PR, except step 5's stages:
 
 1. **One `Project`, behaviour-identical.** Introduce `ProjectId`, `Project`,
    `ProjectRuntime` and `ProjectView` holding today's fields, with one project;
@@ -791,42 +792,78 @@ PR:
    §2.
 4. **Manifest v2.** The v1 reader, `left_cwd`, `pid` and the picker labels.
    Landed; the corrections it made are at the end of §3.
-5. **Open, close and switch.** The `Space` keys, the switcher, stashing on a
-   switch, watch and poll on the active project only, and refresh on
-   activation. Switching is what makes a project inactive while its work is in
-   flight, so it also has to close the following, found by inventory during
-   step 2:
-   - **The other off-thread landings that act on the active project.** Each
-     must drop or route a result for a project that isn't active: listing
-     refresh, file-op completions (copy, move, rename, restore and pipe to
-     pane), the inventory and graveyard refreshes, archive mount and remount
-     (which change directory in the focused column), the pagers that file ops
-     and archives open, the pending git view, the `F` finder, `!` capture,
-     image-status flashes and Lua requests.
-   - **Activation re-walks git.** Set `pending_worktree_rewalk` on each of the
-     activated project's columns. A walk dropped while the project was inactive
-     has already spent its force flag and stashed `git_poll_cache`. With the
-     index and `HEAD` mtimes unchanged, clearing the poll cache alone reuses the
-     stale status. The rewalk flag forces past both checks without blanking
-     the markers.
-   - **A new project's columns need `git_worker_available`.** Only bootstrap's
-     `a` sets it, and `b` copies it from `a`. Without it, a new project's status
-     walks run on the UI thread.
-   - **The git outbox needs nothing.** `flush_git_requests` drains only the
-     active project, so an outgoing project's requests wait in its own columns,
-     already stamped.
-   - **Opening and closing a project own its MCP files.** Opening writes the
-     new project's context file and rewrites the sidecar with every root.
-     Closing removes the file, rewrites the sidecar, and refuses that project's
-     later calls (step 3 already refuses a call from a closed project). A
-     worktree removal already resets columns, and rewrites the context, in the
-     caller's project and the active one (step 3); activation re-lists the
-     rest.
-   - **Quit shuts down every project's tabs.** `run_teardown` removes every
-     project's context file, but waits on the active project's tabs only.
-   - **`-r` opens every project in a manifest.** Step 4 restores the active
-     one, and adopts the file only when that is all it holds; with opening in
-     place, the adoption rule becomes "every project opened".
+5. **Open, close and switch**, in five stages, plumbing first (owner decision,
+   2026-10-18). Each stage is a red PR and then its fix. Nothing in production
+   creates a second project until 5e, so 5a–5d are tested through the harness's
+   own projects (`add_test_project`, `make_active`).
+   - **5a. File-op results land in their project.** Landed; see below.
+   - **5b. Archive, image and Lua results land in their project, and the
+     pending git view moves into `ProjectRuntime`.**
+     - An archive mount's table insert applies at once. Entering the mount
+       lands in its project. A mount that would then prompt, or re-run an
+       effect, is dropped with a flash, and its staged edits still record.
+     - A captured image is routed to the project holding its tab.
+     - A viewed image is dropped, since the viewer is global modal UI.
+     - A Lua request from a project the user has left is dropped with a flash.
+   - **5c. Every tab is walked again.** Step 1 (#698) narrowed each loop over
+     "all tabs" to the active project's. These walk every project's tabs again:
+     - the pane drain and the exit sweep;
+     - teardown's shutdown;
+     - the quit-confirm count;
+     - the HUD's tab count;
+     - the agent-status settle walk (only the active project's active tab is
+       focused);
+     - the codex pin scans.
+
+     `git_worker_available` moves to `AppState` (one worker, one flag), so a
+     new project's status walks never run on the UI thread.
+   - **5d. The switch.** `App::switch_project` does the following:
+     - it stashes the leaving project's pager stream and scroll stream, which
+       the drain drops today;
+     - it moves the three active ids;
+     - on each of the arriving project's columns it sets
+       `pending_worktree_rewalk` and re-lists. A walk dropped while the project
+       was inactive has spent its force flag and stashed `git_poll_cache`, so
+       with the index and `HEAD` mtimes unchanged, clearing the cache alone
+       would reuse the stale status;
+     - it refreshes git at once, because the poll's clock lives in `RunCtx`;
+     - it re-kicks the preview and the theme;
+     - it fires `project_changed` and `dir_changed`.
+
+     Until 5e binds a key, the primitive carries an `expect(dead_code)` that
+     the first caller turns into an error.
+   - **5e. Open, close, the keys and the switcher; `-r` opens every project.**
+     - **Opening** writes the project's context file and the sidecar with
+       every root, builds its keymap and replays Lua `@map:` entries.
+     - **Closing** asks the live-children question, shuts down its tabs,
+       removes its file, rewrites the sidecar, and switches away first. Step 3
+       already refuses a call from a closed project.
+     - **The keys** are §4's, and the switcher follows the session picker.
+     - **`-r`'s adoption rule** becomes "every project opened".
+
+   **Found while planning step 5**, by an Opus review (2026-10-18):
+   - **Already correct:** the fs-watch and the git poll already follow the
+     active project, because both read it through the handles. The git outbox
+     needs nothing, since `flush_git_requests` drains only the active project.
+   - **Moot:** five of the landings the step-2 inventory listed can't
+     interleave with a switch. The `F` finder, `!` capture, the `J` default and
+     the image gallery's index are modal while in flight. A preview reload
+     installs only on the path it read. The inventory and graveyard refreshes
+     re-read global stores.
+   - **Missing from that inventory:**
+     - a pipe to the pane names no tab;
+     - a captured image was silently lost;
+     - the narrowed tab loops above.
+
+   **Landed in 5a.** `spawn_file_op` tags each result with the project active
+   at the spawn, which is the one whose handler asked. The drain applies a
+   result for the active project exactly as before. A result for another open
+   project goes through `App::land_in`, which applies it in that project and
+   shows any flash it raises, prefixed with that project's label. What would
+   act on the view in front of the user is dropped and said so: a pipe to the
+   active pane, and a listing read whose project activation will re-list
+   anyway. That read still settles the single in-flight refresh. A result for
+   a closed project is dropped.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

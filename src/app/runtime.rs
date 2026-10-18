@@ -203,8 +203,10 @@ pub(super) struct Runtime {
     /// the in-flight half waits here — beside `archive_cancel`, the other piece of
     /// in-flight mount state.
     pub(super) archive_mount_then: Option<(std::path::PathBuf, Box<Effect>)>,
-    /// Landing slot for off-thread file operations.
-    pub(super) file_results: std::sync::Arc<std::sync::Mutex<Vec<file_ops::FileOutcome>>>,
+    /// Landing slot for off-thread file operations, each tagged with the
+    /// project that started it (`App::spawn_file_op`).
+    pub(super) file_results:
+        std::sync::Arc<std::sync::Mutex<Vec<(super::state::ProjectId, file_ops::FileOutcome)>>>,
     /// Landing slot for the off-thread middle-click clipboard read
     /// (`Effect::PasteFromClipboard`). The worker pushes the read's result here
     /// and wakes with `Message::Wake(Wake::ClipboardPaste)`; `apply_clipboard_pastes`

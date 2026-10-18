@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-use super::state::{PagerRequest, Side};
+use super::state::{PagerRequest, ProjectId, Side};
 use super::{App, Effect, Message, PaneInput, PaneTarget, Wake, pager_handler};
 use crate::fs::listing::Listing;
 use crate::state::inventory::Inventory;
@@ -343,16 +343,47 @@ fn file_name_of(p: &Path) -> String {
 
 impl App {
     pub(crate) fn apply_file_outcomes(&mut self) -> (bool, Vec<Effect>) {
-        let landed: Vec<FileOutcome> =
+        let landed: Vec<(ProjectId, FileOutcome)> =
             std::mem::take(&mut *self.runtime.file_results.lock().unwrap());
         if landed.is_empty() {
             return (false, Vec::new());
         }
         let mut effects = Vec::new();
-        for outcome in landed {
-            self.apply_one_file_outcome(outcome, &mut effects);
+        for (origin, outcome) in landed {
+            if origin == self.state.active {
+                self.apply_one_file_outcome(outcome, &mut effects);
+            } else {
+                self.apply_file_outcome_elsewhere(origin, outcome);
+            }
         }
         (true, effects)
+    }
+
+    /// A result for a project the user isn't in. What it changes lands in
+    /// that project ([`App::land_in`]); what would act on the view in front of
+    /// the user is dropped and said so. A project that has closed gets nothing.
+    fn apply_file_outcome_elsewhere(&mut self, origin: ProjectId, outcome: FileOutcome) {
+        match outcome {
+            // One read is in flight for the whole process, so its bookkeeping
+            // settles whichever project it was for. The listing is dropped:
+            // activation re-lists the project's columns anyway.
+            FileOutcome::ListingRefreshed { .. } => {
+                self.runtime.listing_refresh_inflight = false;
+                if std::mem::take(&mut self.runtime.listing_refresh_dirty) {
+                    self.spawn_listing_refresh();
+                }
+            }
+            // `PaneTarget::Active` names no tab: delivered now, it would type
+            // into the agent the user is looking at.
+            FileOutcome::PipedContent { .. } => self.drop_landing(origin, "pipe dropped"),
+            other => {
+                self.land_in(origin, |app| {
+                    let mut effects = Vec::new();
+                    app.apply_one_file_outcome(other, &mut effects);
+                    debug_assert!(effects.is_empty(), "only a pipe's outcome returns effects");
+                });
+            }
+        }
     }
 
     fn apply_one_file_outcome(&mut self, outcome: FileOutcome, effects: &mut Vec<Effect>) {
@@ -538,12 +569,17 @@ impl App {
     /// (`goto_file_navigate`), so the slot/wake wiring can't drift. `wake` is
     /// `None` only before `run()` / in the test harness, where the outcome
     /// still lands in the slot for a manual drain.
+    ///
+    /// The outcome is tagged with the active project, which is the one whose
+    /// handler asked: `run_effects` runs in the user's project, and an MCP call
+    /// in its caller's (`App::in_project`).
     pub(crate) fn spawn_file_op(&self, op: FileOp) {
+        let origin = self.state.active;
         let results = std::sync::Arc::clone(&self.runtime.file_results);
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {
             let outcome = run_file_op(op);
-            results.lock().unwrap().push(outcome);
+            results.lock().unwrap().push((origin, outcome));
             if let Some(tx) = wake {
                 let _ = tx.send(Message::Wake(Wake::FileOp));
             }
@@ -695,15 +731,14 @@ mod tests {
         assert!(fx.is_empty());
         // A landed PipedContent outcome is drained and surfaced as a SendToPane
         // effect for the run loop to execute (no executor bypass).
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::PipedContent {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::PipedContent {
                 payload: b"\x1b[200~hi\x1b[201~".to_vec(),
                 count: 1,
                 skipped: 0,
-            });
+            },
+        ));
         let (drew, fx) = app.apply_file_outcomes();
         assert!(drew);
         assert_eq!(fx.len(), 1);
@@ -762,15 +797,14 @@ mod tests {
         let generation = app.state.col(side).list_generation;
         let listing = crate::fs::listing::Listing::read(work.path()).unwrap();
         app.runtime.listing_refresh_inflight = true;
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::ListingRefreshed {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::ListingRefreshed {
                 side,
                 generation,
                 result: Ok(listing),
-            });
+            },
+        ));
         let (drew, _fx) = app.apply_file_outcomes();
         assert!(drew, "applying a refreshed listing redraws");
         assert!(!app.runtime.listing_refresh_inflight, "in-flight cleared");
@@ -788,15 +822,14 @@ mod tests {
         app.runtime.listing_refresh_inflight = true;
         // Tag with a generation that no longer matches (a chdir / sync refresh
         // happened since the read was spawned) → the read must be dropped.
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::ListingRefreshed {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::ListingRefreshed {
                 side,
                 generation: generation.wrapping_sub(1),
                 result: Ok(listing),
-            });
+            },
+        ));
         app.apply_file_outcomes();
         assert!(!app.runtime.listing_refresh_inflight, "in-flight cleared");
         // Discarded → apply_refreshed_listing never ran, so no generation bump.
@@ -835,14 +868,13 @@ mod tests {
     fn long_list_outcome_drains_into_a_pager() {
         let work = tempdir().unwrap();
         let mut app = App::test_app(work.path().to_path_buf());
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::LongListReady {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::LongListReady {
                 title: "long listing — x".to_string(),
                 lines: vec!["INODE  MODE".to_string(), "1  -rw-".to_string()],
-            });
+            },
+        ));
         let (drew, fx) = app.apply_file_outcomes();
         assert!(drew);
         assert!(fx.is_empty(), "opening a pager emits no follow-on effect");
@@ -909,14 +941,13 @@ mod tests {
             "dev".to_string(),
             vec!["a".to_string(), "b".to_string(), "c".to_string()],
         );
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::SpecialFileOpened {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::SpecialFileOpened {
                 result: Ok(Box::new(view)),
                 dest: PagerDest::Overlay { scroll: Some(2) },
-            });
+            },
+        ));
         let (drew, fx) = app.apply_file_outcomes();
         assert!(drew);
         assert!(
@@ -940,14 +971,13 @@ mod tests {
         let work = tempdir().unwrap();
         let mut app = App::test_app(work.path().to_path_buf());
         let view = PagerView::new_plain("dev".to_string(), vec!["x".to_string()]);
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::SpecialFileOpened {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::SpecialFileOpened {
                 result: Ok(Box::new(view)),
                 dest: PagerDest::TopPane,
-            });
+            },
+        ));
         let (drew, _) = app.apply_file_outcomes();
         assert!(drew);
         let pager = app
@@ -964,14 +994,13 @@ mod tests {
     fn special_file_outcome_flashes_on_build_error() {
         let work = tempdir().unwrap();
         let mut app = App::test_app(work.path().to_path_buf());
-        app.runtime
-            .file_results
-            .lock()
-            .unwrap()
-            .push(FileOutcome::SpecialFileOpened {
+        app.runtime.file_results.lock().unwrap().push((
+            app.state.active,
+            FileOutcome::SpecialFileOpened {
                 result: Err("s.sock: not a readable file".to_string()),
                 dest: PagerDest::Overlay { scroll: None },
-            });
+            },
+        ));
         let (drew, fx) = app.apply_file_outcomes();
         assert!(drew);
         assert!(fx.is_empty());

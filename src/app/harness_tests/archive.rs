@@ -129,7 +129,12 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
                 }
                 Effect::FileOp(op) => {
                     let outcome = crate::app::file_ops::run_file_op(op);
-                    app.runtime.file_results.lock().unwrap().push(outcome);
+                    let origin = app.state.active;
+                    app.runtime
+                        .file_results
+                        .lock()
+                        .unwrap()
+                        .push((origin, outcome));
                 }
                 Effect::Graveyard(op) => {
                     let outcome = crate::app::graveyard_ops::run_graveyard_op(op);
