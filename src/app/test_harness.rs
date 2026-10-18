@@ -94,6 +94,13 @@ impl App {
         self.view.active = id;
     }
 
+    /// File an archive worker's outcome as the `Effect::Archive` worker does,
+    /// for the drain (`apply_archive_outcomes`) to apply. Tests run the op
+    /// inline (`run_archive_op`) and hand its outcome here.
+    pub(crate) fn file_archive_outcome(&self, outcome: super::archive_ops::ArchiveOutcome) {
+        self.runtime.archive_results.lock().unwrap().push(outcome);
+    }
+
     /// Ready project `id` for MCP: `home` is its home, its column lists `home`
     /// for real, and its context file is written.
     pub(crate) fn ready_test_project(&mut self, id: state::ProjectId, home: &std::path::Path) {
