@@ -303,3 +303,268 @@ fn another_project_walks_git_off_the_ui_thread() {
         );
     });
 }
+
+// ── Agent status ─────────────────────────────────────────────────────────────
+//
+// An agent tab here is `cat` under an agent's name: it reads as that agent
+// without starting one.
+
+use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
+
+/// Give project `id` a tab that reads as `command`, in `dir`. Returns its pane
+/// id.
+fn agent_tab_in(
+    app: &mut App,
+    id: state::ProjectId,
+    dir: &std::path::Path,
+    command: &str,
+) -> String {
+    app.as_project(id, |app| {
+        let wake = app.make_pane_wake();
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
+        let entry = crate::pane::TabEntry::new(pane, TabInfo::new(command, dir));
+        let pane_id = entry.info.id.clone();
+        let slot = &mut app.runtime.project_mut().pane_tabs;
+        match slot.as_mut() {
+            Some(tabs) => tabs.push(entry),
+            None => *slot = Some(crate::pane::PaneTabs::new(entry)),
+        }
+        pane_id
+    })
+}
+
+/// Change project `id`'s first tab.
+fn edit_first_tab(app: &mut App, id: state::ProjectId, f: impl FnOnce(&mut TabInfo)) {
+    app.as_project(id, |app| {
+        let tabs = app.runtime.project_mut().pane_tabs.as_mut().expect("a tab");
+        f(&mut tabs.tabs_mut()[0].info);
+    });
+}
+
+fn report(status: AgentActivity, now: Instant) -> ReportedStatus {
+    ReportedStatus::new(status, now, now + Duration::from_secs(300))
+}
+
+/// An agent in a project the user isn't in keeps its activity dot: its
+/// report lights it.
+#[test]
+#[ignore = "red: only the active project's tabs are settled"]
+fn a_report_in_another_project_lights_its_dot() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Working, now));
+        });
+        app.make_active(t.y);
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        assert_eq!(
+            first_tab(app, x, |tab| tab.info.activity),
+            AgentActivity::Working
+        );
+    });
+}
+
+/// Set project `id`'s `[notify]`.
+fn notify_in(
+    app: &mut App,
+    id: state::ProjectId,
+    f: impl FnOnce(&mut crate::config::NotifyConfig),
+) {
+    app.as_project(id, |app| {
+        f(&mut app.state.active_project_mut().config.notify);
+    });
+}
+
+/// An agent blocked in a project the user isn't in notifies, though the pane
+/// in view is focused, `suppress_focused_tab` is on, and the blocked tab is
+/// its own project's active one: the user can't see it.
+#[test]
+#[ignore = "red: only the active project's tabs are settled"]
+fn a_blocked_agent_in_another_project_notifies_though_the_pane_is_focused() {
+    with_two(|t| {
+        let (app, x, y, x_home) = (&mut t.app, t.x, t.y, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Blocked, now));
+        });
+        for id in [x, y] {
+            notify_in(app, id, |notify| notify.suppress_focused_tab = true);
+        }
+        app.make_active(y);
+        app.state.active_project_mut().focus = state::Focus::Pane;
+        let (_, effects) = app.settle_agent_activity(now, &mut RunCtx::for_test());
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::Notify { .. })),
+            "X's agent is blocked, and nothing told the user: {effects:?}"
+        );
+    });
+}
+
+/// An agent in a project the user isn't in notifies under its own project's
+/// `[notify]`, not the one in view's.
+#[test]
+#[ignore = "red: only the active project's tabs are settled"]
+fn a_blocked_agent_in_another_project_notifies_under_its_own_settings() {
+    with_two(|t| {
+        let (app, x, y, x_home) = (&mut t.app, t.x, t.y, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Blocked, now));
+        });
+        notify_in(app, y, |notify| {
+            notify.desktop = false;
+            notify.bell = false;
+            notify.visual = false;
+        });
+        app.make_active(y);
+        let (_, effects) = app.settle_agent_activity(now, &mut RunCtx::for_test());
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::Notify { .. })),
+            "X's agent notified under Y's settings: {effects:?}"
+        );
+    });
+}
+
+/// A codex question in flight in a project the user isn't in survives a
+/// settle: its tab is still open.
+#[test]
+#[ignore = "red: codex recovery is pruned against the active project's tabs"]
+fn a_codex_question_in_another_project_survives_a_settle() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        let tab = agent_tab_in(app, x, &x_home, "codex");
+        app.state.codex_recovery.insert(
+            tab.clone(),
+            crate::agent::codex_recovery::CodexRecovery::default(),
+        );
+        app.make_active(t.y);
+        app.settle_agent_activity(Instant::now(), &mut RunCtx::for_test());
+        assert!(
+            app.state.codex_recovery.contains_key(&tab),
+            "X's codex question was forgotten"
+        );
+    });
+}
+
+/// A quiet agent in a project the user isn't in is still scanned for a
+/// prompt its hooks can't report.
+#[test]
+#[ignore = "red: only the active project's tabs are scanned"]
+fn a_quiet_agent_in_another_project_is_scanned() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        edit_first_tab(app, x, |info| info.scrape_dirty = true);
+        app.make_active(t.y);
+        app.settle_scrape_quiet(Instant::now(), &mut RunCtx::for_test());
+        assert!(
+            !first_tab(app, x, |tab| tab.info.scrape_dirty),
+            "X's tab was never scanned"
+        );
+    });
+}
+
+/// An agent started in a shell tab in a project the user isn't in is seen,
+/// and in that tab, not in the tab at the same place in the project in view.
+#[test]
+#[ignore = "red: only the active project's shell tabs are looked at"]
+fn an_agent_started_in_a_shell_tab_in_another_project_is_seen() {
+    use crate::state::sessions::AgentKind;
+    with_two(|t| {
+        let (app, x, y) = (&mut t.app, t.x, t.y);
+        let (x_home, y_home) = (t.x_home.clone(), t.y_home.clone());
+        let bin = x_home.with_file_name("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink("/bin/sleep", bin.join("claude")).unwrap();
+        app.as_project(x, |app| assert!(app.open_pane_tab_in("sh", &x_home)));
+        app.as_project(y, |app| assert!(app.open_pane_tab_in("sh", &y_home)));
+        app.make_active(y);
+        type_into(
+            app,
+            x,
+            format!("{} 60\r", bin.join("claude").display()).as_bytes(),
+        );
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while first_tab(app, x, |tab| tab.info.agent().kind()) != AgentKind::Claude {
+            assert!(
+                Instant::now() < deadline,
+                "the claude in X's shell tab was never seen"
+            );
+            app.drain_pane_output();
+            app.settle_shell_agents(Instant::now(), &mut RunCtx::for_test());
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        assert_eq!(
+            first_tab(app, y, |tab| tab.info.agent().kind()),
+            AgentKind::Other,
+            "Y's shell tab took X's agent"
+        );
+        type_into(app, x, b"\x03");
+    });
+}
+
+/// An unpinned codex in a project the user isn't in still gets a session
+/// scan.
+#[test]
+#[ignore = "red: only the active project's codex tabs are scanned for"]
+fn an_unpinned_codex_in_another_project_is_scanned_for() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "codex");
+        app.make_active(t.y);
+        app.kick_codex_session_scan();
+        assert!(
+            app.runtime
+                .codex_scan_in_flight
+                .load(std::sync::atomic::Ordering::Acquire),
+            "no scan started for X's codex"
+        );
+    });
+}
+
+/// A codex session one project's tab has claimed is never handed to a tab in
+/// another project: X's codex gets the other session in its directory.
+#[test]
+#[ignore = "red: codex pins are assigned among the active project's tabs only"]
+fn a_codex_session_claimed_in_one_project_is_not_given_to_another() {
+    use crate::app::codex_pin::HomeSnapshot;
+    use crate::state::codex_transcript::RolloutMeta;
+    const TAKEN: &str = "0193a0b1-c2d3-7e4f-8a9b-0c1d2e3f4a5b";
+    const FREE: &str = "0193a0b1-c2d3-7e4f-8a9b-0c1d2e3f4a5c";
+    with_two(|t| {
+        let (app, x, y, x_home) = (&mut t.app, t.x, t.y, t.x_home.clone());
+        let home = x_home.with_file_name("codex-home");
+        let x_tab = agent_tab_in(app, x, &x_home, "codex");
+        let y_tab = agent_tab_in(app, y, &x_home, "codex");
+        edit_first_tab(app, x, |info| info.codex_home = Some(home.clone()));
+        edit_first_tab(app, y, |info| {
+            info.codex_home = Some(home.clone());
+            info.codex_session_id = Some(TAKEN.into());
+        });
+        app.make_active(y);
+        let spawn = first_tab(app, x, |tab| tab.info.agent_epoch_secs());
+        let cwd = x_home.to_string_lossy().into_owned();
+        let rollout = |uuid: &str, at: u64| RolloutMeta {
+            uuid: uuid.into(),
+            cwd: cwd.clone(),
+            started_secs: at,
+            mtime_secs: at,
+        };
+        *app.runtime.codex_pin_pending.lock().unwrap() = Some(vec![HomeSnapshot {
+            home,
+            pane_ids: [x_tab, y_tab].into_iter().collect(),
+            rollouts: vec![rollout(TAKEN, spawn + 1), rollout(FREE, spawn + 2)],
+        }]);
+        app.apply_codex_session_pins();
+        assert_eq!(
+            first_tab(app, x, |tab| tab.info.codex_session_id.clone()).as_deref(),
+            Some(FREE)
+        );
+    });
+}
