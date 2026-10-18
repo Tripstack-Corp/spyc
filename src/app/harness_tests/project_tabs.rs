@@ -350,7 +350,6 @@ fn report(status: AgentActivity, now: Instant) -> ReportedStatus {
 /// An agent in a project the user isn't in keeps its activity dot: its
 /// report lights it.
 #[test]
-#[ignore = "red: only the active project's tabs are settled"]
 fn a_report_in_another_project_lights_its_dot() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -383,7 +382,6 @@ fn notify_in(
 /// in view is focused, `suppress_focused_tab` is on, and the blocked tab is
 /// its own project's active one: the user can't see it.
 #[test]
-#[ignore = "red: only the active project's tabs are settled"]
 fn a_blocked_agent_in_another_project_notifies_though_the_pane_is_focused() {
     with_two(|t| {
         let (app, x, y, x_home) = (&mut t.app, t.x, t.y, t.x_home.clone());
@@ -408,7 +406,6 @@ fn a_blocked_agent_in_another_project_notifies_though_the_pane_is_focused() {
 /// An agent in a project the user isn't in notifies under its own project's
 /// `[notify]`, not the one in view's.
 #[test]
-#[ignore = "red: only the active project's tabs are settled"]
 fn a_blocked_agent_in_another_project_notifies_under_its_own_settings() {
     with_two(|t| {
         let (app, x, y, x_home) = (&mut t.app, t.x, t.y, t.x_home.clone());
@@ -434,7 +431,6 @@ fn a_blocked_agent_in_another_project_notifies_under_its_own_settings() {
 /// A codex question in flight in a project the user isn't in survives a
 /// settle: its tab is still open.
 #[test]
-#[ignore = "red: codex recovery is pruned against the active project's tabs"]
 fn a_codex_question_in_another_project_survives_a_settle() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -455,7 +451,6 @@ fn a_codex_question_in_another_project_survives_a_settle() {
 /// A quiet agent in a project the user isn't in is still scanned for a
 /// prompt its hooks can't report.
 #[test]
-#[ignore = "red: only the active project's tabs are scanned"]
 fn a_quiet_agent_in_another_project_is_scanned() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -473,7 +468,6 @@ fn a_quiet_agent_in_another_project_is_scanned() {
 /// An agent started in a shell tab in a project the user isn't in is seen,
 /// and in that tab, not in the tab at the same place in the project in view.
 #[test]
-#[ignore = "red: only the active project's shell tabs are looked at"]
 fn an_agent_started_in_a_shell_tab_in_another_project_is_seen() {
     use crate::state::sessions::AgentKind;
     with_two(|t| {
@@ -512,7 +506,6 @@ fn an_agent_started_in_a_shell_tab_in_another_project_is_seen() {
 /// An unpinned codex in a project the user isn't in still gets a session
 /// scan.
 #[test]
-#[ignore = "red: only the active project's codex tabs are scanned for"]
 fn an_unpinned_codex_in_another_project_is_scanned_for() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -531,7 +524,6 @@ fn an_unpinned_codex_in_another_project_is_scanned_for() {
 /// A codex session one project's tab has claimed is never handed to a tab in
 /// another project: X's codex gets the other session in its directory.
 #[test]
-#[ignore = "red: codex pins are assigned among the active project's tabs only"]
 fn a_codex_session_claimed_in_one_project_is_not_given_to_another() {
     use crate::app::codex_pin::HomeSnapshot;
     use crate::state::codex_transcript::RolloutMeta;

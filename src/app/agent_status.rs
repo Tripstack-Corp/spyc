@@ -11,6 +11,7 @@
 //! worker that wakes the loop on completion; render reads the cache and never
 //! blocks.
 
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use super::{
@@ -236,6 +237,135 @@ fn choose_status_suffix(
         cached.map(str::to_string)
     } else {
         Some(name.to_string())
+    }
+}
+
+/// One settle's walk over every project's tabs: what every tab shares, and
+/// what the walk gathers for [`App::settle_agent_activity`] to act on.
+struct ActivityScan<'a> {
+    now: Instant,
+    is_ssh: bool,
+    track_status: bool,
+    codex_recovery: &'a mut HashMap<String, crate::agent::codex_recovery::CodexRecovery>,
+    changed: bool,
+    effects: Vec<Effect>,
+    start_visual: bool,
+    earliest_flip: Option<Instant>,
+    any_working: bool,
+    status_transitions: Vec<(String, AgentActivity)>,
+    live_ids: HashSet<String>,
+}
+
+impl ActivityScan<'_> {
+    /// Settle one tab, `index` its place in its project (0-based). `focused`:
+    /// the user is looking at it, so a transition doesn't ping them.
+    fn settle_tab(
+        &mut self,
+        entry: &mut crate::pane::TabEntry,
+        index: usize,
+        focused: bool,
+        notify_cfg: &NotifyConfig,
+    ) {
+        let kind = entry.info.agent().kind();
+        let closed = entry.pane.is_closed();
+        if closed {
+            forget_closed_agent(&mut entry.info);
+            self.codex_recovery.remove(&entry.info.id);
+        }
+        // Drop a report that's no longer authoritative (expired, or the tab
+        // emitted output that supersedes it) so diagnostics stay honest. A
+        // `Blocked` report is latched — it never expires here and output
+        // never supersedes it (see `effective_activity`); only the Enter-on-
+        // pane clear in `run_effects` or a newer report drops it.
+        if let Some(r) = &entry.info.reported
+            && ((r.status != AgentActivity::Blocked && self.now >= r.expiry)
+                || report_superseded_by_output(r, entry.info.last_output_at, kind))
+        {
+            entry.info.reported = None;
+        }
+        // Retain Codex's current visible wait even behind a semantic block:
+        // a later working/done report need not repaint the unanswered view.
+        // Other agents discard guesses behind live reports.
+        if entry.info.reported.is_some()
+            && !crate::agent::codex_approval::overrides_report(
+                None,
+                entry.info.scrape_status.map(|(status, _)| status),
+                kind,
+            )
+        {
+            entry.info.scrape_status = None;
+        }
+        let new = if closed {
+            App::activity_for(kind != AgentKind::Other, None, self.now)
+        } else {
+            App::effective_activity(
+                entry.info.reported.as_ref(),
+                entry.info.scrape_status.map(|(s, _)| s),
+                kind,
+                entry.info.last_output_at,
+                self.now,
+            )
+        };
+        // Wake-arming: re-evaluate at the earliest of a live report's expiry
+        // or a timing-Working tab's idle-flip, so the dot can't go stale. A
+        // latched `Blocked` report never expires, so don't arm a wake for it
+        // (nothing would flip; an Enter keystroke clears it via its own path).
+        if let Some(r) = &entry.info.reported {
+            if r.status != AgentActivity::Blocked {
+                self.earliest_flip = Some(
+                    self.earliest_flip
+                        .map_or(r.expiry, |m: Instant| m.min(r.expiry)),
+                );
+            }
+        } else if new == AgentActivity::Working
+            && let Some(at) = entry.info.last_output_at
+        {
+            let flip = at + AGENT_ACTIVE_WINDOW;
+            self.earliest_flip = Some(self.earliest_flip.map_or(flip, |m: Instant| m.min(flip)));
+        }
+        if new == AgentActivity::Working {
+            self.any_working = true;
+        }
+        // P3-1 notification edge: compare `new` against `notified` (this
+        // settle owns it), NOT `activity` — the MCP `report_status` handler
+        // pre-sets `activity` for an instant dot, which would otherwise erase
+        // the Idle→Blocked edge before we see it (→ no ping). Decide against
+        // the old `notified`, then advance it.
+        if new != entry.info.notified {
+            let plan = notification_for_transition(
+                entry.info.notified,
+                new,
+                notify_cfg,
+                focused,
+                self.is_ssh,
+                &entry.info.label,
+                index + 1,
+            );
+            if !plan.is_silent() {
+                if plan.system.is_some() || plan.osc9.is_some() || plan.bell {
+                    self.effects.push(Effect::Notify {
+                        system: plan.system,
+                        osc9: plan.osc9,
+                        bell: plan.bell,
+                    });
+                }
+                self.start_visual |= plan.visual;
+            }
+            entry.info.notified = new;
+        }
+        // Render field (the dot): the MCP handler may have already advanced it
+        // for an instant update; keep it in sync here either way.
+        if entry.info.activity != new {
+            entry.info.activity = new;
+            self.changed = true;
+        }
+        // Record this tab's effective status for the `agent_status` event
+        // (dedup + firing happen after the borrow). Keyed by the stable
+        // `SPYC_PANE_ID` so the event survives tab reorder.
+        if self.track_status {
+            self.live_ids.insert(entry.info.id.clone());
+            self.status_transitions.push((entry.info.id.clone(), new));
+        }
     }
 }
 
@@ -487,9 +617,10 @@ impl App {
         }
     }
 
-    /// Scan dirty agent viewports after their debounce. Codex's complete forms
-    /// use the first pending repaint, so a waiting tool's animation cannot keep
-    /// postponing detection. Other agents use the last output's quiet window.
+    /// Scan dirty agent viewports, in every project, after their debounce.
+    /// Codex's complete forms use the first pending repaint, so a waiting
+    /// tool's animation cannot keep postponing detection. Other agents use the
+    /// last output's quiet window.
     ///
     /// **A live report does not cancel the scan**. Skipping the scan behind one
     /// looks like a free optimization and is not: this runs before
@@ -509,13 +640,13 @@ impl App {
         now: std::time::Instant,
         ctx: &mut RunCtx,
     ) -> bool {
-        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
-            ctx.scheduler.disarm(Deadline::ScrapeQuiet);
-            return false;
-        };
         let mut changed = false;
         let mut earliest_fire: Option<std::time::Instant> = None;
-        for entry in tabs.tabs_mut().iter_mut() {
+        let entries = self
+            .runtime
+            .every_tab_set_mut()
+            .flat_map(|(_, tabs)| tabs.tabs_mut().iter_mut());
+        for entry in entries {
             if !entry.info.scrape_dirty {
                 entry.info.scrape_pending_at = None;
                 continue;
@@ -579,141 +710,63 @@ impl App {
         now: Instant,
         ctx: &mut RunCtx,
     ) -> (bool, Vec<Effect>) {
-        // Snapshot the anim epoch + the notify inputs up front so the `pane_tabs`
-        // mutable borrow below doesn't overlap the `self.view` / `self.state`
-        // reads. `pane_focused` + the active tab index drive the P3-1
-        // focused-tab suppression; the config is cloned (5 bools, cheap).
         let anim_epoch = self.view.started_at;
+        // Every project's tabs (#99): an agent in a project the user isn't in
+        // keeps its dot and notifies, under its own project's `[notify]`, and
+        // only the project in view's active tab can be the focused one. The
+        // inputs are gathered up front so the walk's `pane_tabs` borrow doesn't
+        // overlap the `self.view` / `self.state` reads; each config is cloned
+        // (5 bools, cheap).
+        let in_view = self.state.active;
         let pane_focused = self.state.pane_focused();
-        let is_ssh = self.view.is_ssh;
-        let notify_cfg = self.state.active_project().config.notify.clone();
+        let notify: Vec<(super::state::ProjectId, NotifyConfig)> = self
+            .state
+            .open_projects()
+            .map(|project| (project.id, project.config.notify.clone()))
+            .collect();
+        let open: HashSet<String> = self
+            .runtime
+            .every_tab_set()
+            .flat_map(|(_, tabs)| tabs.tabs().iter().map(|tab| tab.info.id.clone()))
+            .collect();
+        self.state.codex_recovery.retain(|id, _| open.contains(id));
         // Only track `agent_status` transitions when a Lua handler wants the
         // event (the common case has none → no per-tab bookkeeping). Collect
-        // during the borrow, fire after it drops (fire needs `&mut self`).
+        // during the walk, fire after it (fire needs `&mut self`).
         let track_status = self.lua_wants_agent_status_event();
-        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
-            self.state.codex_recovery.clear();
-            ctx.scheduler.disarm(Deadline::AgentIdle);
-            ctx.scheduler.disarm(Deadline::AgentAnim);
-            if track_status {
-                // No tabs → prune every stale baseline.
-                self.prune_agent_status_baselines(&std::collections::HashSet::new());
-            }
-            return (false, Vec::new());
+        let mut scan = ActivityScan {
+            now,
+            is_ssh: self.view.is_ssh,
+            track_status,
+            codex_recovery: &mut self.state.codex_recovery,
+            changed: false,
+            effects: Vec::new(),
+            start_visual: false,
+            earliest_flip: None,
+            any_working: false,
+            status_transitions: Vec::new(),
+            live_ids: HashSet::new(),
         };
-        self.state
-            .codex_recovery
-            .retain(|id, _| tabs.tabs().iter().any(|tab| tab.info.id == *id));
-        let active_idx = tabs.active_index();
-
-        let mut changed = false;
-        let mut effects: Vec<Effect> = Vec::new();
-        let mut start_visual = false;
-        let mut earliest_flip: Option<Instant> = None;
-        let mut any_working = false;
-        let mut status_transitions: Vec<(String, AgentActivity)> = Vec::new();
-        let mut live_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
-            let kind = entry.info.agent().kind();
-            let closed = entry.pane.is_closed();
-            if closed {
-                forget_closed_agent(&mut entry.info);
-                self.state.codex_recovery.remove(&entry.info.id);
-            }
-            // Drop a report that's no longer authoritative (expired, or the tab
-            // emitted output that supersedes it) so diagnostics stay honest. A
-            // `Blocked` report is latched — it never expires here and output
-            // never supersedes it (see `effective_activity`); only the Enter-on-
-            // pane clear in `run_effects` or a newer report drops it.
-            if let Some(r) = &entry.info.reported
-                && ((r.status != AgentActivity::Blocked && now >= r.expiry)
-                    || report_superseded_by_output(r, entry.info.last_output_at, kind))
-            {
-                entry.info.reported = None;
-            }
-            // Retain Codex's current visible wait even behind a semantic block:
-            // a later working/done report need not repaint the unanswered view.
-            // Other agents discard guesses behind live reports.
-            if entry.info.reported.is_some()
-                && !crate::agent::codex_approval::overrides_report(
-                    None,
-                    entry.info.scrape_status.map(|(status, _)| status),
-                    kind,
-                )
-            {
-                entry.info.scrape_status = None;
-            }
-            let new = if closed {
-                Self::activity_for(kind != AgentKind::Other, None, now)
-            } else {
-                Self::effective_activity(
-                    entry.info.reported.as_ref(),
-                    entry.info.scrape_status.map(|(s, _)| s),
-                    kind,
-                    entry.info.last_output_at,
-                    now,
-                )
+        for (id, tabs) in self.runtime.every_tab_set_mut() {
+            let Some((_, notify_cfg)) = notify.iter().find(|(project, _)| *project == id) else {
+                continue;
             };
-            // Wake-arming: re-evaluate at the earliest of a live report's expiry
-            // or a timing-Working tab's idle-flip, so the dot can't go stale. A
-            // latched `Blocked` report never expires, so don't arm a wake for it
-            // (nothing would flip; an Enter keystroke clears it via its own path).
-            if let Some(r) = &entry.info.reported {
-                if r.status != AgentActivity::Blocked {
-                    earliest_flip =
-                        Some(earliest_flip.map_or(r.expiry, |m: Instant| m.min(r.expiry)));
-                }
-            } else if new == AgentActivity::Working
-                && let Some(at) = entry.info.last_output_at
-            {
-                let flip = at + AGENT_ACTIVE_WINDOW;
-                earliest_flip = Some(earliest_flip.map_or(flip, |m: Instant| m.min(flip)));
-            }
-            if new == AgentActivity::Working {
-                any_working = true;
-            }
-            // P3-1 notification edge: compare `new` against `notified` (this
-            // settle owns it), NOT `activity` — the MCP `report_status` handler
-            // pre-sets `activity` for an instant dot, which would otherwise erase
-            // the Idle→Blocked edge before we see it (→ no ping). Decide against
-            // the old `notified`, then advance it.
-            if new != entry.info.notified {
-                let tab_focused = i == active_idx && pane_focused;
-                let plan = notification_for_transition(
-                    entry.info.notified,
-                    new,
-                    &notify_cfg,
-                    tab_focused,
-                    is_ssh,
-                    &entry.info.label,
-                    i + 1,
-                );
-                if !plan.is_silent() {
-                    if plan.system.is_some() || plan.osc9.is_some() || plan.bell {
-                        effects.push(Effect::Notify {
-                            system: plan.system,
-                            osc9: plan.osc9,
-                            bell: plan.bell,
-                        });
-                    }
-                    start_visual |= plan.visual;
-                }
-                entry.info.notified = new;
-            }
-            // Render field (the dot): the MCP handler may have already advanced it
-            // for an instant update; keep it in sync here either way.
-            if entry.info.activity != new {
-                entry.info.activity = new;
-                changed = true;
-            }
-            // Record this tab's effective status for the `agent_status` event
-            // (dedup + firing happen after the borrow). Keyed by the stable
-            // `SPYC_PANE_ID` so the event survives tab reorder.
-            if track_status {
-                live_ids.insert(entry.info.id.clone());
-                status_transitions.push((entry.info.id.clone(), new));
+            let active_idx = tabs.active_index();
+            for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
+                let focused = id == in_view && i == active_idx && pane_focused;
+                scan.settle_tab(entry, i, focused, notify_cfg);
             }
         }
+        let ActivityScan {
+            mut changed,
+            effects,
+            start_visual,
+            earliest_flip,
+            any_working,
+            status_transitions,
+            live_ids,
+            ..
+        } = scan;
 
         // Fire `agent_status` for tabs whose SEMANTIC status transitioned (the
         // per-tab baseline in `fire_agent_status_event` dedups a repeat, so an
