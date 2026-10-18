@@ -173,7 +173,7 @@ impl App {
             crate::context::remove_context_file(&view.context_path);
         }
         self.runtime.projects.remove(&id);
-        self.state.projects.retain(|p| p.id != id);
+        self.state.remove_project(id);
     }
 
     /// Open a `cat` tab in project `id`, as that project's keyboard would, and

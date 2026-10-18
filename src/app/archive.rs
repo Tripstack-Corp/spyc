@@ -57,10 +57,7 @@ impl App {
                 .flash_error("archive: no state directory to stage into");
             return Vec::new();
         };
-        // A streamed mount can run for seconds; a fresh flag per mount means an
-        // `Esc` for one can't cancel the next.
-        self.runtime.archive_cancel =
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel = self.mount_cancel();
         self.state
             .flash_progress(format!("reading {}…", display_name(path)));
         vec![Effect::Archive(ArchiveOp::Mount {
@@ -69,7 +66,7 @@ impl App {
             limits: self.state.active_project().config.archive.limits(),
             max_entries: self.state.active_project().config.archive.max_entries,
             confirmed,
-            cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
+            cancel,
             then,
             address: None,
             depth: 0,
@@ -117,8 +114,7 @@ impl App {
                 .flash_error("archive: no state directory to stage into");
             return Vec::new();
         };
-        self.runtime.archive_cancel =
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel = self.mount_cancel();
         self.state
             .flash_progress(format!("reading {}…", display_name(at)));
         vec![Effect::Archive(ArchiveOp::Mount {
@@ -127,7 +123,7 @@ impl App {
             limits: self.state.active_project().config.archive.limits(),
             max_entries: self.state.active_project().config.archive.max_entries,
             confirmed: false,
-            cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
+            cancel,
             then,
             address: Some(at.to_path_buf()),
             depth,
@@ -163,8 +159,7 @@ impl App {
         } else {
             0
         };
-        self.runtime.archive_cancel =
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel = self.mount_cancel();
         vec![Effect::Archive(ArchiveOp::Mount {
             path: nested_source.unwrap_or_else(|| archive.to_path_buf()),
             staging_root,
@@ -173,12 +168,24 @@ impl App {
             // Already read once at this size — re-reading it is not a new
             // decision for the user to make.
             confirmed: true,
-            cancel: std::sync::Arc::clone(&self.runtime.archive_cancel),
+            cancel,
             then: None,
             address: Some(archive.to_path_buf()),
             depth,
             reset_staging: true,
         })]
+    }
+
+    /// A fresh cancel flag for one mount, so a cancel for one can't stop the
+    /// next. A streamed mount can run for seconds, and `:archive cancel`
+    /// stops the last one the user started; one started in the background,
+    /// for a project out of view or closed, keeps its flag to itself.
+    fn mount_cancel(&mut self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if !self.state.in_background {
+            self.runtime.archive_cancel = std::sync::Arc::clone(&cancel);
+        }
+        cancel
     }
 
     /// Ask the in-flight streamed mount to stop. No-op when nothing is running —
@@ -268,10 +275,13 @@ impl App {
     /// (the arms check `in_background`), as is an effect held back for the
     /// mount.
     fn apply_archive_outcome_elsewhere(&mut self, origin: ProjectId, outcome: ArchiveOutcome) {
-        // The in-flight message announced this project's op, which is over.
-        self.state.clear_progress_flash();
+        // An in-flight message of this project's announced the op that is
+        // over; one of the user's announces work still running.
+        self.state.clear_progress_flash_of(origin);
         if !self.state.has_project(origin) {
-            self.apply_archive_outcome_orphaned(origin, outcome);
+            self.land_closed(origin, |app| {
+                app.apply_archive_outcome_orphaned(origin, outcome);
+            });
             return;
         }
         self.land_in(origin, |app| {
@@ -289,17 +299,17 @@ impl App {
         });
     }
 
-    /// Spawn the detached archive worker: run `op`, push its outcome onto
-    /// `runtime.archive_results`, and wake the loop. The single spawn site, so
-    /// every outcome is tagged with the project active at the spawn: the one
-    /// whose handler asked (`run_effects` runs in the user's project), or the
-    /// one an outcome landed in (`apply_archive_outcome_elsewhere`).
+    /// [`Self::spawn_archive_op_from`] the active project: the one whose
+    /// handler asked (`run_effects` runs in the user's project), or the one
+    /// an outcome landed in (`apply_archive_outcome_elsewhere`).
     pub(super) fn spawn_archive_op(&self, op: ArchiveOp) {
         self.spawn_archive_op_from(self.state.active, op);
     }
 
-    /// [`Self::spawn_archive_op`] for the project `origin`, which may have
-    /// closed: a re-read a closed project's write starts lands as its own.
+    /// Spawn the detached archive worker: run `op`, push its outcome onto
+    /// `runtime.archive_results` tagged with `origin`, and wake the loop. The
+    /// single spawn site. `origin` may have closed: a re-read a closed
+    /// project's write starts lands as its own.
     fn spawn_archive_op_from(&self, origin: ProjectId, op: ArchiveOp) {
         let results = std::sync::Arc::clone(&self.runtime.archive_results);
         let wake = self.runtime.pane_wake_tx.clone();
@@ -406,7 +416,8 @@ impl App {
     /// that read tagged with the closed project so it lands here too. What
     /// would act on a project (entering a mount, opening a pager or an editor,
     /// asking a question) has none to act on and is dropped; a failed write
-    /// still says so.
+    /// still says so, as does work held back for a member. It runs in
+    /// [`App::land_closed`], so what it says is named for the closed project.
     fn apply_archive_outcome_orphaned(&mut self, origin: ProjectId, outcome: ArchiveOutcome) {
         let effects = match outcome {
             ArchiveOutcome::Mounted {
@@ -415,15 +426,26 @@ impl App {
                 warnings,
                 staging_root,
                 depth,
-                ..
-            } => self.record_mount(*index, capability, warnings, staging_root, depth),
-            ArchiveOutcome::Materialized { real, .. } => {
+                then,
+            } => {
+                if then.is_some() {
+                    self.flash_held_back_dropped();
+                }
+                self.record_mount(*index, capability, warnings, staging_root, depth)
+            }
+            ArchiveOutcome::Materialized { real, then } => {
                 self.record_staged(&real);
+                if holds_back_work(&then) {
+                    self.flash_held_back_dropped();
+                }
                 Vec::new()
             }
-            ArchiveOutcome::MaterializedMany { staged, .. } => {
+            ArchiveOutcome::MaterializedMany { staged, then } => {
                 for (_, real) in &staged {
                     self.record_staged(real);
+                }
+                if holds_back_work(&then) {
+                    self.flash_held_back_dropped();
                 }
                 Vec::new()
             }
@@ -439,6 +461,13 @@ impl App {
                 self.spawn_archive_op_from(origin, op);
             }
         }
+    }
+
+    /// Say that what a closed project's archive op held back, the yank or
+    /// copy-out a member was extracted for, never ran.
+    fn flash_held_back_dropped(&mut self) {
+        self.state
+            .flash_error("what was waiting on the archive was dropped; the project closed");
     }
 
     fn flash_written(&mut self, archive: &Path, report: &crate::archive::write::RepackReport) {
@@ -508,6 +537,9 @@ impl App {
         staging_root: PathBuf,
         depth: usize,
     ) -> Vec<Effect> {
+        if self.keep_live_mount(&index) {
+            return Vec::new();
+        }
         let protected = self.protected_archives();
         let mut mount = ArchiveMount {
             index,
@@ -526,6 +558,32 @@ impl App {
         // archive as edited behind our back.
         mount.staged = current_staged_stats(&mount);
         clean_effects(self.state.mounts.insert(mount, &protected))
+    }
+
+    /// Whether a read of `index`'s archive, landing while the archive is
+    /// mounted already (another project's read, or two reads raced), leaves
+    /// that mount in place. It does when the mount carries changes the user
+    /// hasn't written, which replacing it would throw away; otherwise the
+    /// landed read replaces it, as a re-read after a write must replace a read
+    /// of the old bytes. The two share a staging tree. A streamed read has
+    /// just rewritten every staged file there, so a staged difference is its
+    /// own rather than an edit: only the journal counts, and a mount kept
+    /// takes what is now on disk as spyc's.
+    fn keep_live_mount(&mut self, index: &crate::archive::index::ArchiveIndex) -> bool {
+        let Some(live) = self.state.mounts.get(&index.archive) else {
+            return false;
+        };
+        if index.format.is_seekable() {
+            return self.mount_is_dirty(&index.archive);
+        }
+        if !live.is_dirty() {
+            return false;
+        }
+        let rewritten = current_staged_stats(live);
+        if let Some(live) = self.state.mounts.get_mut(&index.archive) {
+            live.staged = rewritten;
+        }
+        true
     }
 
     /// A write-back landed: the journal is clean, and the archive is re-read.
@@ -755,6 +813,15 @@ fn staging_root_for(archive: &Path) -> Option<PathBuf> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     archive.hash(&mut hasher);
     Some(archives_root()?.join(format!("{}-{:016x}", std::process::id(), hasher.finish())))
+}
+
+/// Whether `then` carries an effect held back for the member, rather than
+/// acting on the extracted copy in a project's view.
+const fn holds_back_work(then: &MaterializeThen) -> bool {
+    matches!(
+        then,
+        MaterializeThen::Retry(_) | MaterializeThen::Mount { then: Some(_), .. }
+    )
 }
 
 fn display_name(path: &Path) -> String {

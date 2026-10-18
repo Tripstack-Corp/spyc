@@ -973,8 +973,10 @@ PR, except step 5's stages:
      project's anchor moves checks it: `Space P`, `gP` and `:project <dir>`
      (`set_project_home`), `:project clear`, which falls back to the start
      directory (`clear_project_home`), and for a homeless project `gS` and
-     `:startdir` (`move_start_dir`). Session restore sets a home unchecked;
-     pair 3's restore of every project checks it.
+     `:startdir` (`move_start_dir`). A start dir is the root an agent's cwd
+     binds by, so `move_start_dir` refuses another project's for any
+     project. Session restore sets a home unchecked; pair 3's restore of
+     every project checks it.
    - **A closed project's archive work.** The mount table is the process's,
      so `apply_archive_outcome_orphaned` applies what an op did to it as it
      would anywhere, and drops what would act on a project. A mount is
@@ -982,15 +984,19 @@ PR, except step 5's stages:
      spyc's own, so it never reads as an edit; a write clears the journal and
      has the archive read again from clean staging (`request_remount`), that
      read spawned for the closed project so it lands here too
-     (`spawn_archive_op_from`); a failed write says so. This answers what
-     step 5's notes left open.
+     (`spawn_archive_op_from`); a failed write says so. A mount never
+     replaces one holding changes the user hasn't written
+     (`keep_live_mount`), a re-read in the background never takes
+     `:archive cancel` from the user's read (`mount_cancel`), and what it
+     says is named for the closed project (`App::land_closed`,
+     `AppState::closed_labels`). This answers what step 5's notes left open.
    - **A closed project's agents.** A connection bound to a pane lost its
      tab with the project: once the project's context file is gone, every
      tool and resource answers "the project this agent belongs to has
      closed", where it read from spyc's process cwd, another project's tree.
-     A connection bound by cwd (a session codex's shared daemon runs)
-     belongs to no tab and outlives the close: it binds again from its cwd,
-     as at `initialize`, to the project holding it, else the active one.
+     A connection bound to no tab, by cwd (a session codex's shared daemon
+     runs) or to the active project, outlives the close: it binds again as
+     at `initialize`, to the project holding its cwd, else the active one.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

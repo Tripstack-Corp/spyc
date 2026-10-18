@@ -400,6 +400,9 @@ pub struct AppState {
     /// project's **focused** column via [`Self::cur`] / [`Self::cur_mut`];
     /// render draws `left`/`right` explicitly off [`Self::active_project`].
     pub projects: Vec<Project>,
+    /// The labels of projects closed this session, so work one left running
+    /// still lands named for it ([`Self::label_of`]).
+    pub closed_labels: std::collections::HashMap<ProjectId, String>,
     /// Which of `projects` is drawn and driven by the keyboard — or, while
     /// [`Self::in_background`] is set, the project an agent's MCP call acts on.
     pub active: ProjectId,
@@ -446,6 +449,19 @@ impl AppState {
 
     pub fn has_project(&self, id: ProjectId) -> bool {
         self.project(id).is_some()
+    }
+
+    /// Close project `id`: it leaves `projects`, and its label is kept for
+    /// whatever it left running.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "no key closes a project; tests do")
+    )]
+    pub(crate) fn remove_project(&mut self, id: ProjectId) {
+        if let Some(i) = self.projects.iter().position(|p| p.id == id) {
+            let closed = self.projects.remove(i);
+            self.closed_labels.insert(id, closed.label());
+        }
     }
 
     /// Every open project, in switcher order.
@@ -746,19 +762,27 @@ impl AppState {
     pub fn flash_progress<S: Into<String>>(&mut self, text: S) {
         self.flash = Some(FlashMessage {
             text: text.into(),
-            kind: FlashKind::Progress,
+            kind: FlashKind::Progress(self.active),
         });
     }
 
-    /// Drop an in-flight message now that its operation has finished.
-    ///
-    /// Only ever clears a [`FlashKind::Progress`], so a real message that landed
-    /// in the meantime — a warning about the archive, an error — survives.
+    /// Drop the active project's in-flight message now that its operation has
+    /// finished ([`Self::clear_progress_flash_of`]).
     pub fn clear_progress_flash(&mut self) {
+        self.clear_progress_flash_of(self.active);
+    }
+
+    /// Drop the in-flight message project `id` raised, now that its operation
+    /// has finished.
+    ///
+    /// Only ever clears a [`FlashKind::Progress`] of `id`'s, so a real message
+    /// that landed in the meantime — a warning about the archive, an error —
+    /// survives, as does another project's announcement of work still running.
+    pub fn clear_progress_flash_of(&mut self, id: ProjectId) {
         if self
             .flash
             .as_ref()
-            .is_some_and(|f| matches!(f.kind, FlashKind::Progress))
+            .is_some_and(|f| matches!(f.kind, FlashKind::Progress(owner) if owner == id))
         {
             self.flash = None;
         }
@@ -931,6 +955,7 @@ impl AppState {
         Self {
             mounts: Mounts::default(),
             projects: vec![project],
+            closed_labels: std::collections::HashMap::new(),
             active,
             in_background: false,
             git_worker_available: false,

@@ -318,7 +318,7 @@ impl App {
                 let color = match flash.kind {
                     // Progress reads as info: the difference is how long it lives,
                     // not how it looks.
-                    FlashKind::Info | FlashKind::Progress => self.view.theme.take,
+                    FlashKind::Info | FlashKind::Progress(_) => self.view.theme.take,
                     FlashKind::Error => self.view.theme.cursor_bg,
                 };
                 let line = Line::from(Span::styled(

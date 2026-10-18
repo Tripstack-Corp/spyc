@@ -68,6 +68,31 @@ impl App {
         Some(out)
     }
 
+    /// Apply a worker's result for `origin` after it has closed. `f` runs in
+    /// the user's project with `state.in_background` set, since what it does
+    /// is for no project in view, and a flash it raises is named for `origin`
+    /// as [`Self::land_in`] names one; the user's flash stays otherwise.
+    pub(super) fn land_closed<R>(
+        &mut self,
+        origin: ProjectId,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let users = self.state.flash.take();
+        self.state.in_background = true;
+        let out = f(self);
+        self.state.in_background = false;
+        self.state.flash = match self.state.flash.take() {
+            Some(mut flash) => {
+                if let Some(label) = self.state.label_of(origin) {
+                    flash.text = format!("{label}: {}", flash.text);
+                }
+                Some(flash)
+            }
+            None => users,
+        };
+        out
+    }
+
     /// Tell the user a result from `origin` was dropped because it would have
     /// acted on the project in view; `what` says which (`"pipe dropped"`).
     pub(super) fn drop_landing(&mut self, origin: ProjectId, what: &str) {

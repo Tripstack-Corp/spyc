@@ -415,7 +415,7 @@ fn a_write_that_lands_after_its_project_closed_still_counts() {
         assert_eq!(app.state.cur().listing.dir, t.y_home, "Y's column moved");
         assert!(
             app.flash_text()
-                .is_some_and(|f| f.starts_with("wrote pkg.zip")),
+                .is_some_and(|f| f.starts_with("xproj: wrote pkg.zip")),
             "{:?}",
             app.flash_text()
         );
@@ -563,15 +563,101 @@ fn a_read_from_x_never_replaces_ys_live_mount(close_x: bool) {
 }
 
 #[test]
-#[ignore = "red: a closed project's read replaces a live mount of the same archive"]
 fn a_closed_projects_read_never_replaces_a_live_mount() {
     a_read_from_x_never_replaces_ys_live_mount(true);
 }
 
 #[test]
-#[ignore = "red: a read landing in X replaces Y's live mount of the same archive"]
 fn a_read_landing_in_x_never_replaces_ys_live_mount() {
     a_read_from_x_never_replaces_ys_live_mount(false);
+}
+
+fn build_zip_of(path: &Path, members: &[(&str, &str)]) {
+    use std::io::Write as _;
+    let mut w = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
+    for (name, body) in members {
+        w.start_file(*name, opts).unwrap();
+        w.write_all(body.as_bytes()).unwrap();
+    }
+    w.finish().unwrap();
+}
+
+/// A compressed tar, whose mount is streamed: every member is extracted
+/// into the staging tree as the archive is read.
+fn build_tar_gz(path: &Path) {
+    let enc = flate2::write::GzEncoder::new(
+        std::fs::File::create(path).unwrap(),
+        flate2::Compression::default(),
+    );
+    let mut b = tar::Builder::new(enc);
+    for (name, body) in [("README.md", "# pkg\n"), ("src/main.rs", "fn main() {}\n")] {
+        let mut h = tar::Header::new_gnu();
+        h.set_size(body.len() as u64);
+        h.set_mode(0o644);
+        h.set_entry_type(tar::EntryType::Regular);
+        b.append_data(&mut h, name, body.as_bytes()).unwrap();
+    }
+    b.into_inner().unwrap().finish().unwrap();
+}
+
+/// A read landing over a mount with nothing unwritten replaces it. Two reads
+/// of one archive can race, and a re-read after a write must take the place
+/// of the read of the old bytes that landed second.
+#[test]
+fn a_read_landing_over_a_clean_mount_replaces_it() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        let old = run_unfiled(app.request_mount(&zip, false));
+        build_zip_of(&zip, &[("README.md", "# pkg\n"), ("NEW.md", "new\n")]);
+        let new = run_unfiled(app.request_mount(&zip, false));
+        file_as(app, t.x, old);
+        settle_archive(app);
+        file_as(app, t.y, new);
+        settle_archive(app);
+        let mount = app.state.mounts.get(&zip).unwrap();
+        assert!(
+            mount.member_at(&zip.join("NEW.md")).is_some(),
+            "the read of the old bytes is still mounted"
+        );
+    });
+}
+
+/// X's read of a compressed tar streams every member into the staging tree
+/// it shares with Y's mount of the same archive, after Y recorded a change.
+/// Y's mount is kept, with its change, and what X's stream rewrote is spyc's
+/// own copy, not edits for the next write to carry.
+#[test]
+fn a_streamed_read_over_a_changed_mount_keeps_only_the_change() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let tgz = t.x_home.join("pkg.tar.gz");
+        build_tar_gz(&tgz);
+        let xs = app.request_mount(&tgz, false);
+        app.make_active(t.y);
+        kick_mount(app, &tgz);
+        settle_archive(app);
+        app.state
+            .mounts
+            .get_mut(&tgz)
+            .unwrap()
+            .journal
+            .delete("README.md");
+        let xs = run_unfiled(xs);
+        app.remove_test_project(t.x);
+        file_as(app, t.x, xs);
+        settle_archive(app);
+        let mount = app.state.mounts.get_mut(&tgz).unwrap();
+        assert!(mount.is_dirty(), "Y's unwritten change was thrown away");
+        mount.journal.clear();
+        assert!(
+            app.dirty_mounts().is_empty(),
+            "X's stream reads as edits: {:?}",
+            app.dirty_mounts()
+        );
+    });
 }
 
 /// `:archive cancel` stops the read the user started in Y. A re-read that
@@ -605,13 +691,11 @@ fn archive_cancel_stops_ys_read_not_xs(close_x: bool) {
 }
 
 #[test]
-#[ignore = "red: a closed project's re-read takes :archive cancel from the user's read"]
 fn archive_cancel_stops_the_users_read_not_a_closed_projects() {
     archive_cancel_stops_ys_read_not_xs(true);
 }
 
 #[test]
-#[ignore = "red: X's re-read takes :archive cancel from the read in Y"]
 fn archive_cancel_stops_the_users_read_not_xs() {
     archive_cancel_stops_ys_read_not_xs(false);
 }
@@ -620,7 +704,6 @@ fn archive_cancel_stops_the_users_read_not_xs() {
 /// X's landing leaves it, X open or closed. X's own in-flight message going
 /// when X's work lands is `an_archive_entered_from_x_lands_in_xs_column`.
 #[test]
-#[ignore = "red: X's landing clears the in-flight message of Y's read"]
 fn ys_reading_flash_outlives_xs_landings() {
     with_two(|t| {
         let app = &mut t.app;
@@ -651,7 +734,6 @@ fn ys_reading_flash_outlives_xs_landings() {
 /// What a closed project's write says is named for it, as a landing from a
 /// project out of view is: the user is in Y, and Y wrote nothing.
 #[test]
-#[ignore = "red: a closed project's write lands unnamed"]
 fn a_closed_projects_write_is_named_for_it() {
     with_two(|t| {
         let app = &mut t.app;
@@ -688,7 +770,6 @@ fn a_closed_projects_write_is_named_for_it() {
 /// Work held back for a member a closed project extracted is dropped, and
 /// said so: the yank or copy-out the user asked for never happened.
 #[test]
-#[ignore = "red: work held back for a closed project's member is dropped silently"]
 fn work_held_back_for_a_closed_project_says_it_was_dropped() {
     with_two(|t| {
         let app = &mut t.app;
@@ -710,12 +791,27 @@ fn work_held_back_for_a_closed_project_says_it_was_dropped() {
         );
         let effects = settle_archive(app);
         assert!(effects.is_empty(), "the yank ran in Y: {effects:?}");
-        assert!(
+        let dropped = |app: &App| {
             app.flash_text()
-                .is_some_and(|f| f.starts_with("xproj:") && f.contains("dropped")),
-            "{:?}",
-            app.flash_text()
-        );
+                .is_some_and(|f| f.starts_with("xproj:") && f.contains("dropped"))
+        };
+        assert!(dropped(app), "{:?}", app.flash_text());
+        // The same for an effect held back for a mount.
+        app.state.flash = None;
+        let zip = t.y_home.join("pkg.zip");
+        build_zip(&zip);
+        let into = Effect::ChangeDir {
+            path: zip.join("src"),
+            focus: None,
+            on_ok: None,
+            err_prefix: "cd",
+        };
+        let mounted = run_unfiled(app.request_mount_then(&zip, false, Some(Box::new(into))));
+        app.state.flash = None;
+        file_as(app, t.x, mounted);
+        let effects = settle_archive(app);
+        assert!(effects.is_empty(), "Y's column moved: {effects:?}");
+        assert!(dropped(app), "{:?}", app.flash_text());
     });
 }
 

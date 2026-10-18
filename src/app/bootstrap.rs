@@ -164,6 +164,7 @@ impl App {
         let active = project.id;
         let app_state = state::AppState {
             projects: vec![project],
+            closed_labels: std::collections::HashMap::new(),
             active,
             in_background: false,
             git_worker_available: false,

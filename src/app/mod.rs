@@ -260,8 +260,9 @@ pub enum FlashKind {
     /// An operation is in flight. Reads like `Info`, but it names something that
     /// hasn't finished — so whatever the operation lands as replaces it, and a
     /// completion with nothing to say clears it rather than leaving a message
-    /// that claims work is still going on.
-    Progress,
+    /// that claims work is still going on. It names the project whose work it
+    /// announces: the flash is the user's, whichever project's work lands.
+    Progress(state::ProjectId),
 }
 
 /// True when the active prompt is a file/directory-path entry
