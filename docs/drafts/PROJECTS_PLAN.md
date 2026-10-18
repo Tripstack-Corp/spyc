@@ -803,21 +803,10 @@ PR, except step 5's stages:
    - **5c. Every tab is walked again.** Step 1 (#698) narrowed each loop
      over "all tabs" to the active project's. Landed in two PR pairs, pane
      loops and agent-status loops; see below.
-   - **5d. The switch.** `App::switch_project` does the following:
-     - it stashes the leaving project's pager stream and scroll stream, which
-       the drain drops today;
-     - it moves the three active ids;
-     - on each of the arriving project's columns it sets
-       `pending_worktree_rewalk` and re-lists. A walk dropped while the project
-       was inactive has spent its force flag and stashed `git_poll_cache`, so
-       with the index and `HEAD` mtimes unchanged, clearing the cache alone
-       would reuse the stale status;
-     - it refreshes git at once, because the poll's clock lives in `RunCtx`;
-     - it re-kicks the preview and the theme;
-     - it fires `project_changed` and `dir_changed`.
-
-     Until 5e binds a key, the primitive carries an `expect(dead_code)` that
-     the first caller turns into an error.
+   - **5d. The switch.** `App::switch_project` moves the three active ids
+     and brings the arriving project up to date. Landed; see below. Until 5e
+     binds a key, it carries an `expect(dead_code)` that the first caller
+     turns into an error.
    - **5e. Open, close, the keys and the switcher; `-r` opens every project.**
      - **Opening** writes the project's context file and the sidecar with
        every root, builds its keymap and replays Lua `@map:` entries.
@@ -935,6 +924,44 @@ PR, except step 5's stages:
 
    The notification still names the tab, not its project: that wording is
    step 6's.
+
+   **Landed in 5d.** `App::switch_project` (`app/project_switch.rs`) moves the
+   three active ids and brings the arriving project up to date, since neither
+   the watcher nor the git poll looked at it while it was out of view:
+   - `AppState::relist_columns` flags every column for a re-walk, which an
+     immediate `refresh_git_state` makes, and hands its directory reads to the
+     file-op worker (`FileOp::RelistColumns`), since a huge directory or a
+     slow mount would stall the keypress. A walk dropped while the project was
+     inactive spent its force flag and stashed `git_poll_cache`, so with the
+     index and `HEAD` mtimes unchanged the poll alone would reuse the stale
+     status. The switch's read lands only in a column still in the
+     directory it read: a git result landing first bumps `list_generation`,
+     so the generation can't be the check. Installing it bumps the generation,
+     so a watcher read started before the switch is either replaced (it landed
+     first) or dropped (it lands after).
+   - The project left behind has its context file written at once if it is
+     behind: its agents read it while the user is away, and the loop writes
+     only the active project's, after a typing-burst wait a switch can beat.
+   - The split preview reloads, the theme is rebuilt from the arriving
+     project's `[colors]` (the user's colours-off toggle is kept), and a
+     scrollback snapshot armed in the project left behind is abandoned, as a
+     tab switch abandons one.
+
+   What changed in the design:
+   - **Nothing is stashed.** The pager stream, the scroll stream and the
+     parked streams moved onto `ProjectRuntime`, so a project's streams are
+     its own: the drain reads the active project's, and a stream left running
+     waits in its channel until its project is next in view. Parked streams
+     are pruned against their own project's tabs; before, a tab closing in
+     one project dropped a stream parked on another's.
+   - **Lua's `dir_changed` and `project_changed` fire behind one busy
+     check.** A switch changes both in one settle, and the worker starting
+     the first job dropped the second.
+   - **A resize lays every project out again**, not only its tabs (5c): its
+     top overlay, and the pagers baked for a width (help, about, a git view),
+     each in its own project. The split preview's reload slot serves every
+     project, so a resize reloads the project in view's and a switch reloads
+     the arriving one's.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

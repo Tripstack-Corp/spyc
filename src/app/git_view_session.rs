@@ -395,7 +395,7 @@ impl App {
         if let Some(view) = self.view.project_mut().pager.as_mut() {
             stream.render_into(view, &ctx);
         }
-        self.runtime.pager_stream = Some(Box::new(stream));
+        self.runtime.project_mut().pager_stream = Some(Box::new(stream));
         self.view.needs_full_repaint = true;
         true
     }
@@ -492,7 +492,7 @@ mod tests {
                 app.view.project().pager.is_none(),
                 "an empty result must not mount an overlay"
             );
-            assert!(app.runtime.pager_stream.is_none());
+            assert!(app.runtime.project().pager_stream.is_none());
             assert!(app.runtime.project().pending_git_view.is_none());
             assert_eq!(app.flash_text(), Some("no changes"));
         });
@@ -526,7 +526,7 @@ mod tests {
                 .expect("content mounts the overlay");
             assert_eq!(pager.stream_id, Some(7));
             assert!(
-                app.runtime.pager_stream.is_some(),
+                app.runtime.project().pager_stream.is_some(),
                 "retained stream installed for the `|` toggle"
             );
             assert!(app.runtime.project().pending_git_view.is_none());

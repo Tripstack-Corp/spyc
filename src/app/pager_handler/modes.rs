@@ -182,11 +182,12 @@ impl App {
             if let Some(id) = current.stream_id
                 && self
                     .runtime
+                    .project()
                     .pager_stream
                     .as_ref()
                     .is_some_and(|s| s.id() == id)
             {
-                self.runtime.pager_stream = None;
+                self.runtime.project_mut().pager_stream = None;
             }
             current.streaming = false;
             current.stream_id = None;

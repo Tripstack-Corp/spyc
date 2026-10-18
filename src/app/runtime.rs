@@ -17,9 +17,10 @@ use super::{
 use crate::pane::{Pane, PaneTabs};
 
 /// The per-project half of `Runtime` (#99, `docs/drafts/PROJECTS_PLAN.md`
-/// §1c): the bottom pane tabs, the two overlay-subprocess slots and a git view
-/// still being built, which belong to one project's columns. The active
-/// project's is reached through [`Runtime::project`] / [`Runtime::project_mut`].
+/// §1c): the bottom pane tabs, the two overlay-subprocess slots, a git view
+/// still being built and the pager streams, which belong to one project's
+/// columns and pagers. The active project's is reached through
+/// [`Runtime::project`] / [`Runtime::project_mut`].
 #[derive(Default)]
 pub(super) struct ProjectRuntime {
     /// Bottom pane tabs (each owns a `PtyHost`).
@@ -40,6 +41,24 @@ pub(super) struct ProjectRuntime {
     /// The drain reads the active project's only, so a view opened here mounts
     /// in this project's pager when it is next in view.
     pub(super) pending_git_view: Option<git_view_session::PendingGitView>,
+    /// The overlay pager stream (grep / git view), drained into this project's
+    /// `pager` by `drain_pager_stream`, id-gated against its `stream_id`. The
+    /// drain reads the active project's only, so a stream left running here
+    /// waits in its channel until this project is next in view.
+    pub(super) pager_stream: Option<Box<dyn pager_stream::PagerStream>>,
+    /// The lower-pane stream (agent transcript), drained into this project's
+    /// `scroll_pager`. Kept in its own slot so starting a grep or git view
+    /// does not kill a transcript still loading. Stashed / restored alongside
+    /// the scroll pager by `stash/restore_scrollback_pager_to_active_tab`.
+    pub(super) scroll_stream: Option<Box<dyn pager_stream::PagerStream>>,
+    /// In-flight streams parked while their scrollback pager is stashed on a
+    /// tab of this project that is not the active one, keyed by the pager's
+    /// `stream_id`. Kept here rather than on the `pane::TabEntry` because
+    /// `PagerStream` is an `app` type and the dependency runs `app → pane`
+    /// only. Re-installed into `scroll_stream` by
+    /// `restore_active_tab_scrollback_pager`.
+    pub(super) stashed_pager_streams:
+        std::collections::HashMap<u32, Box<dyn pager_stream::PagerStream>>,
 }
 
 /// A parked `wait_for_scope_clear` MCP call (P2): the caller's resolved owner
@@ -151,26 +170,9 @@ pub(super) struct Runtime {
     pub(super) background_tasks: BackgroundTasks,
     /// Active F-finder (holds the walker thread's receiver).
     pub(super) find_picker: Option<FindPicker>,
-    /// Active overlay pager stream (grep / git-view — drains into `view.pager`).
-    /// Drained every tick by `drain_pager_stream` (id-gated against
-    /// `view.pager.stream_id`).
-    pub(super) pager_stream: Option<Box<dyn pager_stream::PagerStream>>,
-    /// Active scroll / lower-pane stream (agent transcript — drains into
-    /// `view.scroll_pager`). Kept in its own slot so starting a grep or
-    /// git-view (which writes to `pager_stream`) does not kill a
-    /// concurrently-loading transcript. Stashed / restored alongside the
-    /// scroll pager by `stash/restore_scrollback_pager_to_active_tab`.
-    pub(super) scroll_stream: Option<Box<dyn pager_stream::PagerStream>>,
     /// Monotonic pager-stream id (stale-stream guard), shared across all
-    /// stream kinds.
+    /// stream kinds and every project.
     pub(super) next_stream_id: u32,
-    /// In-flight pager streams parked while their LowerPane scrollback pager is
-    /// stashed on a backgrounded tab (keyed by the pager's `stream_id`). Kept
-    /// here rather than on the `pane::TabEntry` because `PagerStream` is an
-    /// `app` type and the dependency runs `app → pane` only. Re-installed into
-    /// `scroll_stream` by `restore_active_tab_scrollback_pager`.
-    pub(super) stashed_pager_streams:
-        std::collections::HashMap<u32, Box<dyn pager_stream::PagerStream>>,
     /// Off-render-thread agent-status resolve: the landing slot + in-flight
     /// flag (see `active_agent_status` / `apply_landed_agent_status`).
     pub(super) agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
@@ -313,10 +315,7 @@ impl Runtime {
             capture_spill_dir: None,
             background_tasks: BackgroundTasks::new(),
             find_picker: None,
-            pager_stream: None,
-            scroll_stream: None,
             next_stream_id: 0,
-            stashed_pager_streams: std::collections::HashMap::new(),
             agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
             agent_status_refreshing: std::sync::Arc::default(),
             codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),

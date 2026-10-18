@@ -94,6 +94,11 @@ pub enum FileOp {
         dir: PathBuf,
         generation: u64,
     },
+    /// Read every column's directory off the input thread for a switch to
+    /// another project (`AppState::relist_columns`).
+    RelistColumns {
+        reads: Vec<(Side, PathBuf)>,
+    },
 }
 
 // No `derive(Debug)`: `SpecialFileOpened` carries a `PagerView`, which isn't
@@ -152,6 +157,29 @@ pub enum FileOutcome {
         generation: u64,
         result: Result<Listing, String>,
     },
+    /// The reads of a [`FileOp::RelistColumns`], applied by
+    /// `AppState::apply_relisted_columns`.
+    ColumnsRelisted {
+        reads: Vec<(Side, PathBuf, Result<Listing, String>)>,
+    },
+}
+
+/// Read `dir`'s listing: the heavy 50k-entry walk + sort, off the input thread.
+fn read_listing(dir: &Path) -> Result<Listing, String> {
+    Listing::read(dir).map_err(|e| e.to_string())
+}
+
+/// Read each column's directory for a [`FileOp::RelistColumns`].
+fn relist(reads: Vec<(Side, PathBuf)>) -> FileOutcome {
+    FileOutcome::ColumnsRelisted {
+        reads: reads
+            .into_iter()
+            .map(|(side, dir)| {
+                let result = read_listing(&dir);
+                (side, dir, result)
+            })
+            .collect(),
+    }
 }
 
 pub fn run_file_op(op: FileOp) -> FileOutcome {
@@ -260,15 +288,12 @@ pub fn run_file_op(op: FileOp) -> FileOutcome {
             side,
             dir,
             generation,
-        } => {
-            // The heavy 50k-entry walk + sort, off the input thread.
-            let result = Listing::read(&dir).map_err(|e| e.to_string());
-            FileOutcome::ListingRefreshed {
-                side,
-                generation,
-                result,
-            }
-        }
+        } => FileOutcome::ListingRefreshed {
+            side,
+            generation,
+            result: read_listing(&dir),
+        },
+        FileOp::RelistColumns { reads } => relist(reads),
         FileOp::PipeContent {
             use_inventory,
             inventory_ids,
@@ -515,28 +540,41 @@ impl App {
                 side,
                 generation,
                 result,
-            } => {
-                self.runtime.listing_refresh_inflight = false;
-                if let Ok(listing) = result {
-                    // Apply only if nothing changed this column's view since the
-                    // read was spawned — a chdir / sync `refresh_listing` / focus
-                    // switch all bump `list_generation` (or move focus), and the
-                    // fresh read would otherwise clobber that newer state.
-                    if self.state.focused_side() == side
-                        && self.state.col(side).list_generation == generation
-                    {
-                        self.state.apply_refreshed_listing(listing);
-                        // The fs-driven refresh may have shifted cursor_file /
-                        // git_branch — mirror the old inline `context_dirty`.
-                        self.view.project_mut().context_dirty = true;
-                    }
-                }
-                // A refresh requested while this read was in flight → re-spawn
-                // so the latest on-disk state is eventually shown.
-                if std::mem::take(&mut self.runtime.listing_refresh_dirty) {
-                    self.spawn_listing_refresh();
+            } => self.apply_listing_refreshed(side, generation, result),
+            FileOutcome::ColumnsRelisted { reads } => {
+                if self.state.apply_relisted_columns(reads) {
+                    self.view.project_mut().context_dirty = true;
                 }
             }
+        }
+    }
+
+    /// Land a watcher-driven listing read ([`FileOp::RefreshListing`]).
+    fn apply_listing_refreshed(
+        &mut self,
+        side: Side,
+        generation: u64,
+        result: Result<Listing, String>,
+    ) {
+        self.runtime.listing_refresh_inflight = false;
+        if let Ok(listing) = result {
+            // Apply only if nothing changed this column's view since the
+            // read was spawned — a chdir / sync `refresh_listing` / focus
+            // switch all bump `list_generation` (or move focus), and the
+            // fresh read would otherwise clobber that newer state.
+            if self.state.focused_side() == side
+                && self.state.col(side).list_generation == generation
+            {
+                self.state.apply_refreshed_listing(listing);
+                // The fs-driven refresh may have shifted cursor_file /
+                // git_branch — mirror the old inline `context_dirty`.
+                self.view.project_mut().context_dirty = true;
+            }
+        }
+        // A refresh requested while this read was in flight → re-spawn
+        // so the latest on-disk state is eventually shown.
+        if std::mem::take(&mut self.runtime.listing_refresh_dirty) {
+            self.spawn_listing_refresh();
         }
     }
 
