@@ -10,8 +10,8 @@ fn saved_session(
     dir: &std::path::Path,
     commands: &[String],
     active_tab: usize,
-) -> crate::state::sessions::Session {
-    serde_json::from_value(serde_json::json!({
+) -> crate::state::sessions::Manifest {
+    parsed(serde_json::json!({
         "id": 991, "name": "RESTORE_ISOLATION", "saved_at": "", "epoch_secs": 0,
         "cwd": env!("CARGO_MANIFEST_DIR"),
         "tabs": commands.iter().enumerate().map(|(index, command)| serde_json::json!({
@@ -22,7 +22,6 @@ fn saved_session(
         })).collect::<Vec<_>>(),
         "active_tab": active_tab, "pane_height_pct": 75, "pane_focused": true
     }))
-    .unwrap()
 }
 
 #[test]
@@ -63,11 +62,13 @@ fn mixed_restore_opens_valid_tabs_and_keeps_active_tab_identity() {
     });
 }
 
-fn read_saved(state_root: &std::path::Path, id: u64) -> crate::state::sessions::Session {
-    serde_json::from_slice(
-        &std::fs::read(state_root.join("sessions").join(format!("{id}.json"))).unwrap(),
+fn read_saved(state_root: &std::path::Path, id: u64) -> crate::state::sessions::Manifest {
+    parsed(
+        serde_json::from_slice(
+            &std::fs::read(state_root.join("sessions").join(format!("{id}.json"))).unwrap(),
+        )
+        .unwrap(),
     )
-    .unwrap()
 }
 
 #[test]
@@ -91,11 +92,11 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
         agent_argv(&dir, "codex");
         app.save_session();
         let first_save = read_saved(&state_root, original.id);
-        assert_eq!(first_save.tabs.len(), 3);
-        assert_eq!(first_save.active_tab, 1);
+        assert_eq!(first_save.projects[0].tabs.len(), 3);
+        assert_eq!(first_save.projects[0].active_tab, 1);
         assert_eq!(
-            serde_json::to_value(&first_save.tabs[0]).unwrap(),
-            serde_json::to_value(&original.tabs[0]).unwrap()
+            serde_json::to_value(&first_save.projects[0].tabs[0]).unwrap(),
+            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
         );
         app.show_session_info();
         let text = app
@@ -120,19 +121,19 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
         assert_eq!(tabs.tabs()[0].info.label, "saved-1");
         again.save_session();
         let second_save = read_saved(&state_root, original.id);
-        assert_eq!(second_save.active_tab, 1);
+        assert_eq!(second_save.projects[0].active_tab, 1);
         assert_eq!(
-            serde_json::to_value(&second_save.tabs[0]).unwrap(),
-            serde_json::to_value(&original.tabs[0]).unwrap()
+            serde_json::to_value(&second_save.projects[0].tabs[0]).unwrap(),
+            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
         );
         // Closing all live panes must not drop the unopened records.
         again.runtime.project_mut().pane_tabs = None;
         again.save_session();
         let last_save = read_saved(&state_root, original.id);
-        assert_eq!(last_save.tabs.len(), 1);
+        assert_eq!(last_save.projects[0].tabs.len(), 1);
         assert_eq!(
-            serde_json::to_value(&last_save.tabs[0]).unwrap(),
-            serde_json::to_value(&original.tabs[0]).unwrap()
+            serde_json::to_value(&last_save.projects[0].tabs[0]).unwrap(),
+            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
         );
     });
 }
@@ -163,10 +164,10 @@ fn a_refused_selected_tab_falls_forward_and_new_restore_clears_old_refusals() {
                 .active_index(),
             1
         );
-        assert_eq!(app.state.deferred_tabs.len(), 1);
+        assert_eq!(app.state.active_project().deferred_tabs.len(), 1);
         let supported = saved_session(&dir, &[command], 0);
         app.restore_session(&supported);
-        assert!(app.state.deferred_tabs.is_empty());
+        assert!(app.state.active_project().deferred_tabs.is_empty());
         assert_eq!(
             app.runtime
                 .project()
@@ -197,17 +198,17 @@ fn unopened_tabs_survive_debounced_autosave_without_live_panes() {
         app.settle_autosave(now, &mut ctx);
         app.settle_autosave(now + std::time::Duration::from_secs(3), &mut ctx);
         let saved = read_saved(&state_root, original.id);
-        assert_eq!(saved.tabs.len(), 1);
+        assert_eq!(saved.projects[0].tabs.len(), 1);
         assert_eq!(
-            serde_json::to_value(&saved.tabs[0]).unwrap(),
-            serde_json::to_value(&original.tabs[0]).unwrap()
+            serde_json::to_value(&saved.projects[0].tabs[0]).unwrap(),
+            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
         );
         // A change to unopened metadata must dirty the autosave baseline too.
-        app.state.deferred_tabs[0].tab.label = "renamed deferred".into();
+        app.state.active_project_mut().deferred_tabs[0].tab.label = "renamed deferred".into();
         app.settle_autosave(now + std::time::Duration::from_secs(4), &mut ctx);
         app.settle_autosave(now + std::time::Duration::from_secs(7), &mut ctx);
         assert_eq!(
-            read_saved(&state_root, original.id).tabs[0].label,
+            read_saved(&state_root, original.id).projects[0].tabs[0].label,
             "renamed deferred"
         );
     });
@@ -222,7 +223,7 @@ fn a_refused_tab_does_not_prevent_layout_or_scope_restore() {
         std::fs::create_dir(&right).unwrap();
         let command = fake_agent(&dir, "codex").display().to_string();
         let mut saved = saved_session(&dir, &[format!("{command} --future-option"), command], 1);
-        saved.vsplit = Some(crate::state::sessions::SavedVsplit {
+        saved.projects[0].vsplit = Some(crate::state::sessions::SavedVsplit {
             width_pct: 65,
             full_height: true,
             focus_right: true,
@@ -282,7 +283,7 @@ fn a_restored_tab_takes_back_its_saved_pane_id() {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let command = fake_agent(&dir, "codex").display().to_string();
         let mut saved = saved_session(&dir, &[command], 0);
-        saved.tabs[0].pane_id = "saved-pane".into();
+        saved.projects[0].tabs[0].pane_id = "saved-pane".into();
 
         let mut app = App::test_app(dir.clone());
         app.restore_session(&saved);
@@ -299,7 +300,7 @@ fn a_restored_tab_takes_back_its_saved_pane_id() {
 
         app.save_session();
         assert_eq!(
-            read_saved(&state_root, saved.id).tabs[0].pane_id,
+            read_saved(&state_root, saved.id).projects[0].tabs[0].pane_id,
             "saved-pane"
         );
     });
@@ -314,8 +315,8 @@ fn a_saved_pane_id_is_taken_back_only_once() {
         let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let command = fake_agent(&dir, "codex").display().to_string();
         let mut saved = saved_session(&dir, &[command.clone(), command.clone(), command], 0);
-        saved.tabs[0].pane_id = "dup".into();
-        saved.tabs[1].pane_id = "dup".into();
+        saved.projects[0].tabs[0].pane_id = "dup".into();
+        saved.projects[0].tabs[1].pane_id = "dup".into();
 
         let mut app = App::test_app(dir);
         app.restore_session(&saved);
@@ -352,22 +353,23 @@ fn a_restored_agy_tab_keeps_its_conversation_through_the_next_save() {
         std::fs::write(&transcript, "{}\n").unwrap();
         crate::state::sessions::with_agy_home(&home, || {
             let command = fake_agent(&dir, "agy").display().to_string();
-            let saved: crate::state::sessions::Session =
-                serde_json::from_value(serde_json::json!({
-                    "id": 992, "name": "AGY_RESTORE", "saved_at": "", "epoch_secs": 0,
-                    "cwd": env!("CARGO_MANIFEST_DIR"),
-                    "tabs": [{"command": command, "label": "agy", "cwd": dir,
-                              "agent_kind": "agy", "agent_session_id": SID}],
-                    "active_tab": 0, "pane_height_pct": 50, "pane_focused": false
-                }))
-                .unwrap();
+            let saved = parsed(serde_json::json!({
+                "id": 992, "name": "AGY_RESTORE", "saved_at": "", "epoch_secs": 0,
+                "cwd": env!("CARGO_MANIFEST_DIR"),
+                "tabs": [{"command": command, "label": "agy", "cwd": dir,
+                          "agent_kind": "agy", "agent_session_id": SID}],
+                "active_tab": 0, "pane_height_pct": 50, "pane_focused": false
+            }));
 
             let mut app = App::test_app(dir.clone());
             app.restore_session(&saved);
             assert_eq!(agent_argv(&dir, "agy"), ["--conversation", SID]);
             app.save_session();
             let again = read_saved(&state_root, saved.id);
-            assert_eq!(again.tabs[0].agent_session_id.as_deref(), Some(SID));
+            assert_eq!(
+                again.projects[0].tabs[0].agent_session_id.as_deref(),
+                Some(SID)
+            );
         });
     });
 }

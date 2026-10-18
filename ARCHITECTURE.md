@@ -739,7 +739,11 @@ All persistent state lives under XDG paths (`$XDG_STATE_HOME` or
   (one entry per line).
 - `frecency.json` — directory frecency scores for the `J` jump.
 - `pager_positions.json` — persisted pager scroll offsets (LRU).
-- `sessions/<epoch-ms>.json` — workspace snapshots from quit.
+- `sessions/<epoch-ms>.json` — recovery manifests, written at quit and by the
+  debounced autosave: one per spyc process, holding every open project's
+  columns (column `a`'s directory included), split, pane and tabs, plus the
+  writer's pid and start time (#99). A file without a `version` is a version 1
+  session and reads as a manifest with one project.
 - `mcp-<pid>.sock` — PID-scoped MCP socket.
 - `.spyc-context-<pid>-<project>.json` — the MCP context, one per open
   project (#99): that project's focused column's state and its root,
@@ -1182,7 +1186,19 @@ those records verbatim and the shared snapshot builder merges them back into
 the saved list, mapping the selected live tab past inserted records. Spawn
 failures receive the same protection. Session info lists the unopened tabs and
 their reasons; none of their commands are executed. A wholly refused tab set
-leaves the current session and its identity intact.
+leaves the current session and its identity intact. The records belong to the
+project they were restored into (`Project::deferred_tabs`), so a save with
+several projects open merges each project's own back into its own tabs.
+
+The same rule applies one level up, to whole projects. A restore opens one
+project, so it adopts the file only when that is all the file holds and no
+other live spyc is writing it. Otherwise the restore is a copy: this process
+keeps its own id and file, and the manifest stays as it was, so nothing a
+restore didn't open is ever overwritten. A copy of a running session also
+starts its agents fresh and takes none of that spyc's tab ids or scope claims,
+which still belong to its live agents. "Running" means the recorded pid is
+alive with the recorded start time: a crashed spyc's pid soon belongs to
+another process, and a pid alone would mark its manifest running forever.
 
 
 <!-- SPYC-TRAP: session-prune-by-last-save -->
@@ -1190,7 +1206,8 @@ leaves the current session and its identity intact.
 
 Each session lives in `<id>.json`, where the id is the session's creation time
 in epoch millis, and `save_session` prunes the directory back to
-`MAX_SESSIONS`. A restore keeps the id so later saves overwrite one file. The
+`MAX_SESSIONS`. A restore that adopts the file keeps the id so later saves
+overwrite one file (a copy keeps its own; see the partial-restore trap). The
 filename therefore says nothing about recency: a session restored every day has
 the lowest name in the directory while being the one saved most recently.
 Ranking the prune by name deleted that file in the same call that wrote it,

@@ -205,22 +205,8 @@ fn deleting_a_dirty_mounted_archive_is_refused() {
 // ── coming back to a place inside an archive ──────────────────────────────
 
 /// The smallest session that names a cwd — nothing else about it is under test.
-fn session_at(cwd: PathBuf) -> crate::state::sessions::Session {
-    crate::state::sessions::Session {
-        id: 1,
-        saved_at: String::new(),
-        epoch_secs: 0,
-        cwd,
-        tabs: Vec::new(),
-        active_tab: 0,
-        pane_height_pct: 30,
-        pane_focused: false,
-        name: String::new(),
-        project_home: None,
-        vsplit: None,
-        scope_claims: Vec::new(),
-        agent_hud: None,
-    }
+fn session_at(cwd: PathBuf) -> crate::state::sessions::Manifest {
+    crate::state::sessions::Manifest::one_project(1, 0, "", cwd, Vec::new())
 }
 
 /// A mark inside an archive used to be refused, because the mount it pointed into

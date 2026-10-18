@@ -1431,16 +1431,23 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   kill (`SIGKILL`, crash, laptop sleep) loses at most that couple of
   seconds rather than everything since launch. It only writes when
   something actually changed, so an idle spyc does no disk work.
-- **Auto-save** — on quit, spyc saves the current directory, all pane
+- **Auto-save** — on quit, spyc saves column `a`'s directory, all pane
   tabs (command, label, cwd), active tab, pane height, focus state,
-  the spice-themed session name, `PROJECT_HOME`, and the vertical split
-  (its shape plus the second commander's cwd, or the preview file) —
-  restored on `-r`, reopening column `b` where you left it. A quit with
+  the spice-themed session name, `PROJECT_HOME`, the start directory, and
+  the vertical split (its shape plus the second commander's cwd, or the
+  preview file) — restored on `-r`, reopening columns `a` and `b` where you
+  left them. A column `a` whose directory has gone opens at `PROJECT_HOME`.
+  Sessions saved by an older spyc still restore. A quit with
   nothing to restore (no tabs, split or scope claims) saves nothing, so it
   doesn't take a picker slot; a restored session is still updated.
 - **`spyc --resume`** (or `-r`) — opens a session picker showing
   the session name (primary column), a human-readable timestamp
   ("just now", "2 hours ago", "3 days ago"), and the cwd.
+- **Running sessions** — a session another spyc is still writing is
+  marked `running` in the picker. Restoring it makes a copy with its own
+  file and name, whose agents start fresh rather than resuming the
+  conversations that spyc still has open, and which leaves that spyc's
+  scope claims alone.
 - **j/k navigation** — browse sessions with highlighted cursor row.
   Enter to restore, n for a new session, 1-9 for direct selection.
 - Capped at the 20 most recently saved sessions. A session you restore

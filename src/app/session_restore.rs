@@ -8,6 +8,8 @@ use super::{
     App, Effect, RESTORE_BANNER_SETTLE, RESTORE_RESUME_ENTER_DELAY, RESTORE_RESUME_VERIFY_DELAY,
     RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
 };
+use crate::agent::ResumeAction;
+use crate::state::sessions::{Manifest, SavedProject, SavedTab};
 
 impl App {
     /// Restore's spawn: [`Self::open_pane_tab_in_home`], as the saved tab's
@@ -117,27 +119,40 @@ impl App {
         self.open_restored_pane_tab(command, cwd, home, tab)
     }
 
-    pub fn restore_session(&mut self, session: &crate::state::sessions::Session) -> Vec<Effect> {
-        let plans: Vec<_> = session
-            .tabs
+    /// Restore `manifest`'s active project into this spyc's active project.
+    ///
+    /// The restore adopts the file (its id and name, so later saves overwrite
+    /// it) only when this spyc carries everything in it: one project, and no
+    /// other spyc still writing it. Otherwise it is a copy and the file is left
+    /// as it was, so nothing the restore didn't open is lost. A copy of a
+    /// running session also leaves that spyc's agents alone: their
+    /// conversations, tab ids and scope claims stay with it, and the copy's
+    /// agents start fresh.
+    pub fn restore_session(&mut self, manifest: &Manifest) -> Vec<Effect> {
+        let Some(project) = manifest.active() else {
+            self.state
+                .flash_error("session restore: the session has no projects");
+            return Vec::new();
+        };
+        let running = manifest.running();
+        let adopt = !running && manifest.projects.len() == 1;
+        let saved_tabs: Vec<SavedTab> = if running {
+            project.tabs.iter().map(fresh_tab).collect()
+        } else {
+            project.tabs.clone()
+        };
+        let plans: Vec<_> = saved_tabs
             .iter()
-            .map(|tab| {
-                let cwd = if tab.cwd.is_dir() {
-                    &tab.cwd
-                } else {
-                    &session.cwd
-                };
-                crate::agent::resume::reconstruct_saved_tab(tab, cwd)
-            })
+            .map(|tab| restore_plan(tab, project.anchor(), running))
             .collect();
         // A wholly refused tab set leaves the current session intact. Mixed
         // sessions proceed, without ever spawning a refused command.
         if !plans.is_empty()
             && plans
                 .iter()
-                .all(|plan| matches!(plan.resume, crate::agent::ResumeAction::Refuse { .. }))
+                .all(|plan| matches!(plan.resume, ResumeAction::Refuse { .. }))
         {
-            if let crate::agent::ResumeAction::Refuse { reason } = &plans[0].resume {
+            if let ResumeAction::Refuse { reason } = &plans[0].resume {
                 self.state.flash_error(format!(
                     "session restore refused for all {} tabs: {reason}",
                     plans.len()
@@ -145,136 +160,219 @@ impl App {
             }
             return Vec::new();
         }
-        // Restore working directory and update start_dir so backtick (`)
-        // jumps to the session's home, not where spyc was launched from.
-        let mut effects = Vec::new();
-        if session.cwd.is_dir() {
-            if let Err(e) = self.state.chdir(&session.cwd) {
-                self.state.flash_error(format!("session chdir: {e:#}"));
-                return effects;
-            }
-            self.state.set_start_dir(&session.cwd);
-        } else if super::archive::archive_ancestor_of(&session.cwd).is_some() {
-            // The user quit while browsing an archive. It isn't a directory and
-            // never was — the effect screen mounts it and lands the column back
-            // where they left off. The rest of the restore carries on meanwhile.
-            self.state.set_start_dir(&session.cwd);
-            effects.push(Effect::ChangeDir {
-                path: session.cwd.clone(),
-                focus: None,
-                on_ok: None,
-                err_prefix: "session chdir failed",
-            });
-        } else {
-            self.state
-                .flash_error(format!("session dir gone: {}", session.cwd.display()));
-            return effects;
-        }
-        self.restore_session_settings(session);
-        if !session.tabs.is_empty() {
+        let Some(effects) = self.restore_column_a(project) else {
+            return Vec::new();
+        };
+        self.restore_session_settings(manifest, project, adopt);
+        if !saved_tabs.is_empty() {
             self.runtime.project_mut().pane_tabs = None;
-            let mut restored_indices = Vec::new();
-            for (index, (tab, plan)) in session.tabs.iter().zip(plans).enumerate() {
-                if let crate::agent::ResumeAction::Refuse { reason } = &plan.resume {
-                    self.state.deferred_tabs.push(DeferredTab {
-                        saved_index: index,
-                        tab: tab.clone(),
-                        reason: reason.clone(),
-                    });
-                    continue;
-                }
-                let cwd = if tab.cwd.is_dir() {
-                    &tab.cwd
-                } else {
-                    &session.cwd
-                };
-                // Codex restores by spawning `codex resume <UUID>`
-                // directly — the CLI flag works, no `/resume` stdin
-                // dance needed. Claude has a regression on the CLI
-                // flag (crashes at mount with non-empty initialMessages),
-                // so we always spawn fresh and type `/resume <sid>`
-                // once it has settled.
-                // Reconstruct the spawn command via the agent profile.
-                // Codex/agy bake the resume into the command;
-                // claude spawns fresh and arms the `/resume <sid>` stdin
-                // send below (its `--resume` CLI flag crashes at mount
-                // with non-empty initialMessages).
-                // Only arm the `/resume` injection when the spawn actually
-                // added a tab — `last_mut()` is "the tab we just pushed". If
-                // the spawn failed, the last tab is a *different*, already-
-                // restored pane, and we'd type `/resume <sid>` into the wrong
-                // agent.
-                let spawned = self.spawn_restored_tab(&plan.command, cwd, tab);
-                if spawned
-                    && let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
-                    && let Some(entry) = tabs.tabs_mut().last_mut()
-                {
-                    restored_indices.push(index);
-                    // Label the tab we just pushed from ITS saved entry.
-                    // Setting labels inline (rather than zipping tabs ↔
-                    // session.tabs after the loop) keeps them aligned even
-                    // when an earlier tab's spawn failed and the two vectors
-                    // diverge. Defensive `strip_exit_suffix` heals older
-                    // session files saved before the save-side strip landed.
-                    entry.info.label = crate::pane::tabs::strip_exit_suffix(&tab.label);
-                    // P2: re-bind this respawned tab to its pre-restore scope-
-                    // claim owner key (empty on an older save, or a tab that
-                    // never had one) — leave the fresh one `TabInfo::new` just
-                    // assigned rather than overwrite with an empty string.
-                    if !tab.claim_owner.is_empty() {
-                        entry.info.claim_owner.clone_from(&tab.claim_owner);
-                    }
-                    if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
-                        // Pin the exact session this pane is resuming so the next
-                        // save persists it directly, never re-deriving it from the
-                        // spawn-proximity heuristic that crosses panes restored
-                        // together (they all spawn within the same second).
-                        entry.info.live_session_id = Some(session_id.clone());
-                        entry.info.pending_resume_send =
-                            Some(crate::pane::tabs::PendingResumeSend::Text {
-                                sid: session_id,
-                                after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
-                            });
-                    }
-                } else {
-                    let reason = self
-                        .state
-                        .flash
-                        .as_ref()
-                        .map_or_else(|| "pane could not start".into(), |flash| flash.text.clone());
-                    self.state.deferred_tabs.push(DeferredTab {
-                        saved_index: index,
-                        tab: tab.clone(),
-                        reason,
-                    });
-                }
+            let mut restored = Vec::new();
+            for (index, (tab, plan)) in saved_tabs.iter().zip(plans).enumerate() {
+                self.restore_tab(index, tab, plan, project.anchor(), &mut restored);
             }
             if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
-                tabs.switch_to(restored_active_index(&restored_indices, session.active_tab));
+                tabs.switch_to(restored_active_index(&restored, project.active_tab));
             }
-            let want_pane = session.pane_focused && !restored_indices.is_empty();
+            let want_pane = project.pane_focused && !restored.is_empty();
             self.state.set_focus_pane_or_list(want_pane);
         }
         // Restore the vertical split (shape + previewed file). Independent of
         // the pane block above — a split can exist without a bottom pane.
-        if let Some(sv) = &session.vsplit {
-            self.restore_vsplit(sv, session.pane_focused);
+        if let Some(sv) = &project.vsplit {
+            self.restore_vsplit(sv, project.pane_focused);
         }
         // P2: restore the scope-coordination registry verbatim — independent
         // of tab-restore success, like the vsplit above. A claim whose owning
         // tab failed to respawn (or whose save predates `claim_owner`) just
         // shows up "orphaned" on the registry / orchestration screen, still
-        // informative and releasable rather than silently lost.
-        self.state.scope_registry.clone_from(&session.scope_claims);
-        if self.state.deferred_tabs.is_empty() {
-            self.state.flash_info("session restored");
-        } else {
-            let count = self.state.deferred_tabs.len();
-            self.state.flash_error(format!(
-                "session restored; {count} tab(s) unopened, kept saved — session info shows reasons"
-            ));
+        // informative and releasable rather than silently lost. A running
+        // session's claims belong to its live agents, so a copy leaves them.
+        if !running {
+            self.state.scope_registry.clone_from(&manifest.scope_claims);
         }
+        self.flash_restored(manifest, running, adopt);
         effects
+    }
+
+    /// Land column `a` where the project left it: its own directory, else the
+    /// project's anchor, which is all a version 1 file saved. The first that is
+    /// a directory, or a place inside an archive, wins, and the start
+    /// directory (the `` ` `` target) comes back with it. `None`, flashed, when
+    /// neither is left.
+    fn restore_column_a(&mut self, project: &SavedProject) -> Option<Vec<Effect>> {
+        let anchor = project.anchor();
+        let start_dir = if project.start_dir.is_dir() {
+            project.start_dir.clone()
+        } else {
+            anchor.to_path_buf()
+        };
+        let mut failure = None;
+        for dir in project.left_cwd.as_deref().into_iter().chain([anchor]) {
+            if dir.is_dir() {
+                match self.state.chdir_side(Side::Left, dir) {
+                    Ok(()) => {
+                        self.state.set_start_dir(&start_dir);
+                        return Some(Vec::new());
+                    }
+                    Err(e) => failure = Some(format!("session chdir: {e:#}")),
+                }
+            } else if super::archive::archive_ancestor_of(dir).is_some() {
+                // The user quit while browsing an archive. It isn't a directory
+                // and never was — the effect screen mounts it and lands the
+                // column back where they left off. The rest of the restore
+                // carries on meanwhile.
+                self.state.set_start_dir(&start_dir);
+                return Some(vec![Effect::ChangeDir {
+                    path: dir.to_path_buf(),
+                    focus: None,
+                    on_ok: None,
+                    err_prefix: "session chdir failed",
+                }]);
+            }
+        }
+        self.state.flash_error(
+            failure.unwrap_or_else(|| format!("session dir gone: {}", anchor.display())),
+        );
+        None
+    }
+
+    /// Spawn one saved tab by its plan, or keep it saved, unopened, when the
+    /// plan refuses it or the spawn fails.
+    fn restore_tab(
+        &mut self,
+        index: usize,
+        tab: &SavedTab,
+        plan: crate::agent::RestorePlan,
+        anchor: &std::path::Path,
+        restored: &mut Vec<usize>,
+    ) {
+        if let ResumeAction::Refuse { reason } = &plan.resume {
+            self.state
+                .active_project_mut()
+                .deferred_tabs
+                .push(DeferredTab {
+                    saved_index: index,
+                    tab: tab.clone(),
+                    reason: reason.clone(),
+                });
+            return;
+        }
+        let cwd = if tab.cwd.is_dir() { &tab.cwd } else { anchor };
+        // Codex restores by spawning `codex resume <UUID>`
+        // directly — the CLI flag works, no `/resume` stdin
+        // dance needed. Claude has a regression on the CLI
+        // flag (crashes at mount with non-empty initialMessages),
+        // so we always spawn fresh and type `/resume <sid>`
+        // once it has settled.
+        // Reconstruct the spawn command via the agent profile.
+        // Codex/agy bake the resume into the command;
+        // claude spawns fresh and arms the `/resume <sid>` stdin
+        // send below (its `--resume` CLI flag crashes at mount
+        // with non-empty initialMessages).
+        // Only arm the `/resume` injection when the spawn actually
+        // added a tab — `last_mut()` is "the tab we just pushed". If
+        // the spawn failed, the last tab is a *different*, already-
+        // restored pane, and we'd type `/resume <sid>` into the wrong
+        // agent.
+        let spawned = self.spawn_restored_tab(&plan.command, cwd, tab);
+        if spawned
+            && let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
+            && let Some(entry) = tabs.tabs_mut().last_mut()
+        {
+            restored.push(index);
+            // Label the tab we just pushed from ITS saved entry.
+            // Setting labels inline (rather than zipping tabs ↔
+            // session.tabs after the loop) keeps them aligned even
+            // when an earlier tab's spawn failed and the two vectors
+            // diverge. Defensive `strip_exit_suffix` heals older
+            // session files saved before the save-side strip landed.
+            entry.info.label = crate::pane::tabs::strip_exit_suffix(&tab.label);
+            // P2: re-bind this respawned tab to its pre-restore scope-
+            // claim owner key (empty on an older save, or a tab that
+            // never had one) — leave the fresh one `TabInfo::new` just
+            // assigned rather than overwrite with an empty string.
+            if !tab.claim_owner.is_empty() {
+                entry.info.claim_owner.clone_from(&tab.claim_owner);
+            }
+            if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
+                // Pin the exact session this pane is resuming so the next
+                // save persists it directly, never re-deriving it from the
+                // spawn-proximity heuristic that crosses panes restored
+                // together (they all spawn within the same second).
+                entry.info.live_session_id = Some(session_id.clone());
+                entry.info.pending_resume_send = Some(crate::pane::tabs::PendingResumeSend::Text {
+                    sid: session_id,
+                    after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
+                });
+            }
+        } else {
+            let reason = self
+                .state
+                .flash
+                .as_ref()
+                .map_or_else(|| "pane could not start".into(), |flash| flash.text.clone());
+            self.state
+                .active_project_mut()
+                .deferred_tabs
+                .push(DeferredTab {
+                    saved_index: index,
+                    tab: tab.clone(),
+                    reason,
+                });
+        }
+    }
+
+    /// The session's identity, when the restore adopts it, and the restored
+    /// project's own settings apart from its tabs and split.
+    fn restore_session_settings(
+        &mut self,
+        manifest: &Manifest,
+        project: &SavedProject,
+        adopt: bool,
+    ) {
+        if adopt {
+            // Keep the startup-generated name when an older session file
+            // has no name field; otherwise take the saved one.
+            if !manifest.name.is_empty() {
+                self.state.session_name = Some(manifest.name.clone());
+            }
+            // Continue overwriting the restored session's own `<id>.json` on
+            // subsequent saves/autosaves (P3-2), rather than forking a new file.
+            self.state.session_id = Some(manifest.id);
+        }
+        let restored = self.state.active_project_mut();
+        restored.deferred_tabs.clear();
+        restored.home = project.home.clone().filter(|p| p.is_dir());
+        restored.pane.pane_height_pct = project.pane_height_pct;
+        if let Some(mode) = project.agent_hud {
+            restored.pane.agent_hud.choice = Some(mode);
+        }
+    }
+
+    fn flash_restored(&mut self, manifest: &Manifest, running: bool, adopt: bool) {
+        let name = if manifest.name.is_empty() {
+            "(unnamed)"
+        } else {
+            manifest.name.as_str()
+        };
+        let unopened = self.state.active_project().deferred_tabs.len();
+        if unopened > 0 {
+            self.state.flash_error(format!(
+                "session restored; {unopened} tab(s) unopened, kept saved — session info shows reasons"
+            ));
+        } else if running {
+            self.state.flash_info(format!(
+                "restored a copy of {name}, running in pid {} — its agents start fresh here",
+                manifest.pid.unwrap_or_default()
+            ));
+        } else if !adopt {
+            self.state.flash_info(format!(
+                "restored one project of {name} as a copy — the session keeps all {}",
+                manifest.projects.len()
+            ));
+        } else {
+            self.state.flash_info("session restored");
+        }
     }
 
     /// Restore a saved vertical split: reopen the second commander at its saved
@@ -283,24 +381,6 @@ impl App {
     /// session-cwd `chdir` (which `set_current_dir`s and would race the parallel
     /// test runner) — `open_second_commander_at` / `load_right_preview` don't
     /// touch the process cwd.
-    /// The session's own identity and settings, apart from its tabs and split.
-    fn restore_session_settings(&mut self, session: &crate::state::sessions::Session) {
-        // Keep the startup-generated name when an older session file
-        // has no name field; otherwise take the saved one.
-        if !session.name.is_empty() {
-            self.state.session_name = Some(session.name.clone());
-        }
-        // Continue overwriting the restored session's own `<id>.json` on
-        // subsequent saves/autosaves (P3-2), rather than forking a new file.
-        self.state.session_id = Some(session.id);
-        self.state.deferred_tabs.clear();
-        self.state.active_project_mut().home = session.project_home.clone().filter(|p| p.is_dir());
-        self.state.active_project_mut().pane.pane_height_pct = session.pane_height_pct;
-        if let Some(mode) = session.agent_hud {
-            self.state.active_project_mut().pane.agent_hud.choice = Some(mode);
-        }
-    }
-
     pub(super) fn restore_vsplit(
         &mut self,
         sv: &crate::state::sessions::SavedVsplit,
@@ -392,5 +472,35 @@ impl App {
                 self.state.active_project_mut().vsplit = None;
             }
         }
+    }
+}
+
+/// How `tab` comes back. A copy of a running session's tab starts its agent
+/// fresh: resuming would put a second process in that spyc's conversation, and
+/// a resume with no id still picks one (`codex resume --last`).
+fn restore_plan(
+    tab: &SavedTab,
+    anchor: &std::path::Path,
+    fresh: bool,
+) -> crate::agent::RestorePlan {
+    if fresh {
+        return crate::agent::RestorePlan {
+            command: tab.command.clone(),
+            resume: ResumeAction::None,
+        };
+    }
+    let cwd = if tab.cwd.is_dir() { &tab.cwd } else { anchor };
+    crate::agent::resume::reconstruct_saved_tab(tab, cwd)
+}
+
+/// `tab` as a copy of a running session restores it: without the conversation,
+/// tab id and claim owner its live agent still holds.
+fn fresh_tab(tab: &SavedTab) -> SavedTab {
+    SavedTab {
+        agent_session_id: None,
+        agent_session_name: None,
+        pane_id: String::new(),
+        claim_owner: String::new(),
+        ..tab.clone()
     }
 }

@@ -64,8 +64,8 @@ fn a_wrapper_tab_is_its_agents_and_runs_as_written() {
             .map(|e| e.unwrap().path())
             .find(|p| p.extension().is_some_and(|x| x == "json"))
             .expect("the session was saved");
-        let saved: crate::state::sessions::Session =
-            serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+        let saved = parsed(serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap());
+        let saved = &saved.projects[0];
         assert_eq!(saved.tabs[0].command, cmd);
         assert_eq!(saved.tabs[0].agent_kind, AgentKind::Codex);
         assert_eq!(saved.tabs[0].agent_hint, Some(AgentKind::Codex));

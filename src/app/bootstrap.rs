@@ -185,7 +185,6 @@ impl App {
             last_captured_cmd: None,
             pending_worktrees: None,
             pending_sessions: None,
-            deferred_tabs: Vec::new(),
             startup_commands: Vec::new(),
             last_search: None,
             quit_pending: None,

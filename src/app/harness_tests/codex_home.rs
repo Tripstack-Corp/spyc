@@ -98,11 +98,11 @@ fn codex_home_is_captured_and_preserved_by_fork_restore_and_both_restarts() {
         );
         std::fs::remove_file(cwd.join("codex.argv")).unwrap();
 
-        let session: crate::state::sessions::Session = serde_json::from_value(serde_json::json!({
+        let session = parsed(serde_json::json!({
             "id":1,"saved_at":"","epoch_secs":0,"cwd":env!("CARGO_MANIFEST_DIR"),
             "tabs":[{"command":command,"label":"codex","cwd":cwd,"agent_kind":"codex","agent_session_id":SID,"codex_home":home}],
             "active_tab":0,"pane_height_pct":50,"pane_focused":true
-        })).unwrap();
+        }));
         app.restore_session(&session);
         assert_eq!(agent_argv(&cwd, "codex"), ["--no-daemon", "resume", SID]);
         assert_eq!(

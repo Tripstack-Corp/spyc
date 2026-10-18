@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use crate::config::Config;
 use crate::keymap::UserKeymap;
 
+use super::restore::DeferredTab;
 use super::{Commander, Focus, PaneLayout, VSplit};
 pub use crate::project_id::ProjectId;
 
@@ -41,6 +42,9 @@ pub struct Project {
     pub prev_dir: Option<PathBuf>,
     pub config: Config,
     pub user_keymap: UserKeymap,
+    /// Tabs a restore into this project refused or couldn't spawn, kept
+    /// verbatim on every save of it.
+    pub deferred_tabs: Vec<DeferredTab>,
 }
 
 impl Project {
@@ -70,16 +74,13 @@ impl Project {
             prev_dir: None,
             config,
             user_keymap,
+            deferred_tabs: Vec::new(),
         }
     }
 
     /// What the project is called: its home's last component, else its start
     /// directory's.
     pub fn label(&self) -> String {
-        let dir = self.home.as_deref().unwrap_or(&self.start_dir);
-        dir.file_name().map_or_else(
-            || dir.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        )
+        crate::state::sessions::label_of(self.home.as_deref().unwrap_or(&self.start_dir))
     }
 }
