@@ -251,6 +251,47 @@ mod guard_tests {
         out
     }
 
+    /// A column reached through the active project is still a column. #698
+    /// moved `left`/`right` onto `Project`, and the scan read
+    /// `self.state.active_project().left` as having no receiver, so the guard
+    /// passed every such access without looking.
+    #[test]
+    #[ignore = "red: the scan reads a column reached through active_project() as no receiver"]
+    fn a_column_reached_through_the_active_project_is_a_state_column() {
+        let forms = [
+            "let d = &self.state.active_project().left.listing.dir;",
+            "let r = self\n    .state\n    .active_project_mut()\n    .right\n    .as_mut();",
+            "let p = self.state.active_project_mut();\np.left.cursor.clamp(n);",
+            "for project in self.state.open_projects() {\n    seen.push(&project.left.listing.dir);\n}",
+        ];
+        for src in forms {
+            let receivers = column_field_receivers(src);
+            assert!(
+                receivers.iter().any(|r| r == "state"),
+                "{src:?} → {receivers:?}"
+            );
+        }
+    }
+
+    /// The scan's other edge: a `left` that isn't a column — a geometry
+    /// field, a method, a longer field name — names no state column.
+    #[test]
+    fn a_left_that_is_not_a_column_is_not_a_state_column() {
+        let forms = [
+            "let x = rect.left + margin.left;",
+            "let x = area.left();",
+            "let w = self.state.left_width;",
+            "let p = layout.split(area);\nlet x = p.left();",
+        ];
+        for src in forms {
+            let receivers = column_field_receivers(src);
+            assert!(
+                !receivers.iter().any(|r| r == "state"),
+                "{src:?} → {receivers:?}"
+            );
+        }
+    }
+
     #[test]
     fn column_field_receivers_reads_the_receiver_not_the_field() {
         let src = "let a = self.state.left.cursor;\n\
