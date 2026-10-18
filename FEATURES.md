@@ -807,13 +807,21 @@ Three modes of running commands, each for a different use case:
   down to claude, do work, and pop back up to scroll the doc — all
   without quitting the subprocess. The unfocused side dims; the focus
   flash says `focus: overlay` or `focus: <tab label>`.
-- **$** shell — drop into `$SHELL` in the current directory. Reserves the
-  terminal's top row (DECSTBM) for a reverse-video `spyc subshell — exit or
-  ^D to return` marker, so it's visible at a glance and survives a `clear`
-  (which erases screen content but not the scroll region); also exports
-  `SPYC_SUBSHELL=1` for a prompt to show and sets the window title. A spyc
-  launched with that var already set flashes a warning instead of letting
-  you get lost two subshells deep (#686).
+- **$** shell — drop into `$SHELL` in the current directory. It opens with a
+  reverse-video `spyc subshell — exit or ^D to return` line, sets the window
+  title, and exports `SPYC_SUBSHELL=1`. The line scrolls away with the
+  shell's output; for a marker on every prompt, add one line to your shell's
+  rc file:
+
+  ```sh
+  [[ -n $SPYC_SUBSHELL ]] && PROMPT="[spyc] $PROMPT"   # zsh
+  [[ -n $SPYC_SUBSHELL ]] && PS1="[spyc] $PS1"         # bash
+  ```
+
+  No screen row is reserved for the marker: a scroll region is shared by
+  every program the subshell runs, so `less`, `man` and `clear` would draw
+  inside it. A spyc launched with `SPYC_SUBSHELL` already set flashes a
+  warning instead of letting you get lost two subshells deep (#686).
 
 All three modes invoke `$SHELL -i -c <cmd>` (interactive flag where
 the shell supports it: zsh, bash, fish, ksh) so aliases, functions,

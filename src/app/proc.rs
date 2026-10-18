@@ -264,9 +264,6 @@ fn run_child_in_foreground(
             // before returning the error — otherwise the `?` would skip
             // `resume_tui` and leave the terminal in raw/alt-screen mode on the
             // way out. The caller turns this Err into a flash, not an abort.
-            if subshell {
-                clear_subshell_banner();
-            }
             resume_tui(terminal)?;
             return Err(e.into());
         }
@@ -312,18 +309,16 @@ fn run_child_in_foreground(
         let _ = std::io::Read::read(&mut std::io::stdin(), &mut byte);
     }
 
-    if subshell {
-        clear_subshell_banner();
-    }
     resume_tui(terminal)?;
     Ok(())
 }
 
-/// Paint the #686 subshell marker right after `suspend_tui`: reserve the
-/// real terminal's top row via DECSTBM and set the window title, both from
-/// [`subshell_banner::MARKER`]. Best-effort like every other raw write in
-/// this handoff — a failed `terminal.size()` or write just skips the
-/// on-screen bar, since `$` must still work without one.
+/// Print the #686 subshell marker right after `suspend_tui` and set the
+/// window title, both from [`subshell_banner::MARKER`]. Best-effort like
+/// every other raw write in this handoff — a failed `terminal.size()` or
+/// write just skips the line, since `$` must still work without one. The
+/// title needs no undo: the `ForegroundExec` after-work resets
+/// `last_term_title` to force a re-emit of spyc's own title on the next tick.
 fn paint_subshell_banner(terminal: &Tui) {
     use std::io::Write;
     if let Ok(size) = terminal.size() {
@@ -332,19 +327,6 @@ fn paint_subshell_banner(terminal: &Tui) {
         let _ = stdout.flush();
     }
     let _ = crate::term_title::set(subshell_banner::MARKER);
-}
-
-/// Undo [`paint_subshell_banner`]'s DECSTBM region before `resume_tui`
-/// repaints — best-effort, matching every other raw write in this
-/// handoff: a lost byte here would leave spyc's own render confined to
-/// the carved-out area, not crash it. The title needs no undo: the
-/// `ForegroundExec` after-work resets `last_term_title` to force a
-/// re-emit of spyc's own title on the very next tick.
-fn clear_subshell_banner() {
-    use std::io::Write;
-    let mut stdout = std::io::stdout();
-    let _ = stdout.write_all(subshell_banner::leave().as_bytes());
-    let _ = stdout.flush();
 }
 
 #[cfg(test)]
