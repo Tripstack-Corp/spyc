@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use super::{
-    Config, FileClipboard, FileConfig, FilePane, FilePaneTab, PaneTabConfig, ProjectTabs, dsl,
-    home_dir,
+    Config, FileClipboard, FileConfig, FilePane, FilePaneTab, PaneTabConfig, ProjectTabs,
+    ScanPatternFile, dsl, home_dir,
 };
 
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
@@ -17,6 +17,13 @@ use super::{
 pub(super) enum Trust {
     Trusted,
     Project,
+}
+
+/// Whether a scan pattern's `url` template opens a web page. `{}` is filled
+/// after the scheme, so the match can't change what kind of target it is.
+fn opens_a_web_page(template: &str) -> bool {
+    let lower = template.to_ascii_lowercase();
+    lower.starts_with("https://") || lower.starts_with("http://")
 }
 
 /// Whether `a` and `b` name one file, through symlinks.
@@ -111,6 +118,49 @@ impl Config {
                     source.display()
                 ));
             }
+        }
+    }
+
+    /// `[[scan.patterns]]`, appended. A bad regex is logged and skipped rather
+    /// than failing the whole config — one user-typed typo shouldn't lock them
+    /// out of starting spyc. An uppercase label hands the filled `url` to the
+    /// system opener, so a project rc's template is kept only when it opens a
+    /// web page: one naming a local file would launch a program from the repo
+    /// on a keypress.
+    fn merge_scan_patterns(&mut self, patterns: Vec<ScanPatternFile>, source: &Path, trust: Trust) {
+        for p in patterns {
+            let regex = match regex::Regex::new(&p.regex) {
+                Ok(re) => re,
+                Err(e) => {
+                    crate::spyc_debug!(
+                        "{}: scan pattern {:?}: bad regex — {e}",
+                        source.display(),
+                        p.name
+                    );
+                    // Also surface it to the user (flash), not only under
+                    // --debug: a silently-dropped pattern just looks broken.
+                    self.warnings
+                        .push(format!("scan pattern {:?}: bad regex — {e}", p.name));
+                    continue;
+                }
+            };
+            let url_template = match p.url {
+                Some(url) if trust == Trust::Project && !opens_a_web_page(&url) => {
+                    self.warnings.push(format!(
+                        "{}: scan pattern {:?}: url ignored — a project file's may open only http(s) pages",
+                        source.display(),
+                        p.name
+                    ));
+                    None
+                }
+                url => url,
+            };
+            self.scan_patterns
+                .push(crate::pane::quick_select::CustomPattern {
+                    name: p.name,
+                    regex,
+                    url_template,
+                });
         }
     }
 
@@ -306,31 +356,7 @@ impl Config {
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
 
-        // Scan patterns: append. A bad regex is logged and skipped
-        // rather than failing the whole config — one user-typed
-        // typo shouldn't lock them out of starting spyc.
-        for p in file.scan.patterns {
-            match regex::Regex::new(&p.regex) {
-                Ok(re) => self
-                    .scan_patterns
-                    .push(crate::pane::quick_select::CustomPattern {
-                        name: p.name,
-                        regex: re,
-                        url_template: p.url,
-                    }),
-                Err(e) => {
-                    crate::spyc_debug!(
-                        "{}: scan pattern {:?}: bad regex — {e}",
-                        source.display(),
-                        p.name
-                    );
-                    // Also surface it to the user (flash), not only under
-                    // --debug: a silently-dropped pattern just looks broken.
-                    self.warnings
-                        .push(format!("scan pattern {:?}: bad regex — {e}", p.name));
-                }
-            }
-        }
+        self.merge_scan_patterns(file.scan.patterns, source, trust);
 
         // Prompt templates are text typed at an agent, so a project rc may not
         // define one: it would put the repo's words behind a key the user bound.

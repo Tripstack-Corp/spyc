@@ -1750,7 +1750,6 @@ dir = "#aabbcc"
     /// a program from the repo on a keypress. The pattern itself still labels
     /// and yanks; `$HOME` keeps any template.
     #[test]
-    #[ignore = "red: a project rc's scan pattern url is kept whatever it opens"]
     fn a_project_scan_pattern_opens_only_web_pages() {
         let tmp = tempdir().unwrap();
         let rc = tmp.path().join(".spycrc.toml");
