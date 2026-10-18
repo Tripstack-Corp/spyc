@@ -342,6 +342,175 @@ fn a_reread_after_a_write_from_x_lands_in_xs_column() {
     });
 }
 
+fn written(zip: &Path) -> ArchiveOutcome {
+    ArchiveOutcome::Written {
+        archive: zip.to_path_buf(),
+        report: crate::archive::write::RepackReport {
+            members: 2,
+            bytes: 1,
+            snapshot: None,
+        },
+    }
+}
+
+/// Drain archive outcomes until `done`, for at most five seconds: a re-read
+/// that a landing starts itself runs on a worker.
+fn land_until(app: &mut App, done: impl Fn(&App) -> bool) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        settle_archive(app);
+        if done(app) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// X writes an archive back and closes before the write lands. The write
+/// still counts: the journal clears, so nothing reads as unwritten, and the
+/// archive is read again from clean staging, as after any write, so a member
+/// extracted before it never stands in for what is on disk now. Nothing is
+/// entered: Y's column never moves.
+#[test]
+#[ignore = "red: an outcome for a closed project is dropped, leaving the written changes pending"]
+fn a_write_that_lands_after_its_project_closed_still_counts() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        kick_mount(app, &zip);
+        settle_archive(app);
+        app.state.cur_mut().listing = crate::fs::listing::Listing::read(&t.x_home).unwrap();
+        let stale = app
+            .state
+            .mounts
+            .get(&zip)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        // A zip mount stages nothing until a member is read.
+        std::fs::create_dir_all(stale.parent().unwrap()).unwrap();
+        std::fs::write(&stale, "stale\n").unwrap();
+        app.state
+            .mounts
+            .get_mut(&zip)
+            .unwrap()
+            .journal
+            .delete("README.md");
+        assert_eq!(app.dirty_mounts(), std::slice::from_ref(&zip));
+        app.file_archive_outcome(written(&zip));
+        app.make_active(t.y);
+        app.remove_test_project(t.x);
+        assert!(
+            land_until(app, |app| app.state.mounts.get(&zip).is_some()
+                && !stale.exists()),
+            "the archive is never read again from clean staging"
+        );
+        assert!(
+            app.dirty_mounts().is_empty(),
+            "the written changes read as pending"
+        );
+        assert_eq!(app.state.cur().listing.dir, t.y_home, "Y's column moved");
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.starts_with("wrote pkg.zip")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// A failed write that lands after its project closed still says so: the
+/// user's changes are not on disk.
+#[test]
+#[ignore = "red: an outcome for a closed project is dropped, saying nothing"]
+fn a_failed_write_that_lands_after_its_project_closed_says_so() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        app.file_archive_outcome(ArchiveOutcome::WriteFailed {
+            archive: zip,
+            error: "disk full".into(),
+        });
+        app.make_active(t.y);
+        app.remove_test_project(t.x);
+        settle_archive(app);
+        assert!(
+            app.flash_text().is_some_and(|f| f.contains("NOT written")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// X starts reading an archive and closes before the read lands. The mount
+/// table is the process's, so the archive is recorded there, its staging
+/// with it for clean-up, but it is entered nowhere: Y's column never moves.
+#[test]
+#[ignore = "red: an outcome for a closed project is dropped, and its staging with it"]
+fn a_mount_that_lands_after_its_project_closed_is_recorded_not_entered() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        kick_mount(app, &zip);
+        app.make_active(t.y);
+        app.remove_test_project(t.x);
+        settle_archive(app);
+        assert!(
+            app.state.mounts.get(&zip).is_some(),
+            "the read was thrown away, and its staging with it"
+        );
+        assert_eq!(app.state.cur().listing.dir, t.y_home, "Y's column moved");
+    });
+}
+
+/// A member X extracted lands after X closed. The mount outlives X, so the
+/// extracted copy is recorded as spyc's own rather than read as an edit:
+/// nothing waits to be written, and the archive can still be moved or
+/// deleted. No pager opens over Y.
+#[test]
+#[ignore = "red: an outcome for a closed project is dropped, so the extracted copy reads as an edit"]
+fn a_member_extracted_after_its_project_closed_is_not_an_edit() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        kick_mount(app, &zip);
+        settle_archive(app);
+        app.state.cur_mut().listing = crate::fs::listing::Listing::read(&t.x_home).unwrap();
+        let real = app
+            .state
+            .mounts
+            .get(&zip)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, "# pkg\n").unwrap();
+        assert_eq!(
+            app.dirty_mounts(),
+            std::slice::from_ref(&zip),
+            "an extracted copy reads as an edit until it is recorded"
+        );
+        app.file_archive_outcome(ArchiveOutcome::Materialized {
+            real,
+            then: MaterializeThen::OpenPager(PagerDest::Overlay { scroll: None }),
+        });
+        app.make_active(t.y);
+        app.remove_test_project(t.x);
+        settle_archive(app);
+        assert!(
+            app.dirty_mounts().is_empty(),
+            "the extracted copy reads as an edit"
+        );
+        assert!(app.view.project().pager.is_none(), "a pager opened over Y");
+    });
+}
+
 /// A mount big enough to ask first, landing after the user moved to Y. The
 /// question is about X's archive, so it never opens over Y.
 #[test]

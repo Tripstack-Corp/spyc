@@ -558,6 +558,68 @@ fn driving_another_project_leaves_the_users_view_alone() {
     });
 }
 
+/// An agent whose project has closed reads nothing. Its project's context
+/// file is gone, and answering from wherever spyc's process cwd is would hand
+/// it another project's tree.
+#[test]
+#[ignore = "red: a bound connection whose context file is gone reads from the process cwd"]
+fn a_read_from_a_closed_projects_agent_answers_closed() {
+    with_projects(|p| {
+        let b_file = p.in_b(|app| app.view.project().context_path.clone());
+        let b_pane = p.b_pane.clone();
+        let reply = p.wire(move |c| {
+            c.initialize(Some(&b_pane));
+            // What closing `b` does to its file.
+            std::fs::remove_file(&b_file).unwrap();
+            c.tool("search_paths", json!({"query": "in_"}))
+        });
+        let text = reply.to_string();
+        assert!(text.contains("has closed"), "{text}");
+    });
+}
+
+/// A connection bound by its cwd, as a session codex's shared daemon runs is,
+/// belongs to no tab, so it outlives a project closing. It binds again from
+/// its cwd, as it would at `initialize`: to the project holding it, else the
+/// active one, never to nothing.
+#[test]
+#[ignore = "red: a connection whose bound project closed reads from the process cwd"]
+fn a_connection_bound_by_cwd_binds_again_when_its_project_closes() {
+    with_projects(|p| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut conn = Conn::open(p.app.view.project().context_path.clone(), tx);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let b_home = p.b_home.clone();
+        let b = p.b;
+        let app = &mut p.app;
+        let mut ctx = RunCtx::for_test();
+        let reply = std::thread::scope(|s| {
+            let client = s.spawn(move || {
+                conn.initialize_with(json!({"spyc/cwd": b_home}));
+                ready_tx.send(()).unwrap();
+                go_rx.recv().unwrap();
+                conn.tool("search_paths", json!({"query": "in_"}))
+            });
+            let mut closed = false;
+            while !client.is_finished() {
+                if let Ok(req) = rx.recv_timeout(Duration::from_millis(5)) {
+                    ctx.mcp_pending.push(req);
+                    app.drain_mcp_pending(&mut ctx);
+                }
+                if !closed && ready_rx.try_recv().is_ok() {
+                    app.remove_test_project(b);
+                    closed = true;
+                    go_tx.send(()).unwrap();
+                }
+            }
+            client.join().expect("the client finishes")
+        });
+        let text = reply.to_string();
+        assert!(text.contains("in_a.rs"), "{text}");
+    });
+}
+
 #[test]
 fn teardown_removes_every_projects_context_file() {
     with_projects(|p| {
