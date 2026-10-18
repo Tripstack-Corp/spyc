@@ -377,7 +377,7 @@ fn editing_a_member_opens_the_extracted_copy() {
                 continue;
             };
             let outcome = run_archive_op(op);
-            app.runtime.archive_results.lock().unwrap().push(outcome);
+            app.file_archive_outcome(outcome);
         }
         let (_, follow) = app.apply_archive_outcomes();
         spawned.extend(follow);

@@ -8,16 +8,30 @@ use crate::app::archive_ops::ArchiveOp;
 use crate::app::{App, Effect, Mode, Prompt, PromptKind};
 
 impl App {
-    /// Drop a mount and its staged bytes. Refuses while a column is inside it —
-    /// unmounting the ground you're standing on would strand the column.
+    /// Drop a mount and its staged bytes. Refuses while a column is inside it,
+    /// in any project — unmounting the ground a column stands on would strand
+    /// it.
     pub(in crate::app) fn unmount_archive(&mut self, archive: &Path) -> Vec<Effect> {
-        if self.state.column_dirs().iter().any(|d| {
-            self.state
-                .mounts
-                .resolve(d)
-                .is_some_and(|(m, _)| m.archive() == archive)
-        }) {
+        let standing: Vec<_> = self
+            .state
+            .every_column_dir()
+            .into_iter()
+            .filter(|(_, d)| {
+                self.state
+                    .mounts
+                    .resolve(d)
+                    .is_some_and(|(m, _)| m.archive() == archive)
+            })
+            .map(|(project, _)| project)
+            .collect();
+        if standing.contains(&self.state.active) {
             self.state.flash_error("archive: climb out of it first (h)");
+            return Vec::new();
+        }
+        if let Some(other) = standing.first().and_then(|id| self.state.project(*id)) {
+            let label = other.label();
+            self.state
+                .flash_error(format!("archive: a column in {label} is inside it"));
             return Vec::new();
         }
         // Dropping this one would delete the staged copy another mount is reading

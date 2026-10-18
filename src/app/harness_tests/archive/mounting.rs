@@ -225,7 +225,7 @@ fn opening_a_member_extracts_it_then_pages_it() {
                 continue;
             };
             let outcome = run_archive_op(op);
-            app.runtime.archive_results.lock().unwrap().push(outcome);
+            app.file_archive_outcome(outcome);
         }
         app.apply_archive_outcomes();
 
@@ -301,7 +301,7 @@ fn a_file_that_only_looks_like_an_archive_still_opens_as_a_file() {
                 matches!(outcome, ArchiveOutcome::NotAnArchive { .. }),
                 "{outcome:?}"
             );
-            app.runtime.archive_results.lock().unwrap().push(outcome);
+            app.file_archive_outcome(outcome);
         }
         app.apply_archive_outcomes();
 

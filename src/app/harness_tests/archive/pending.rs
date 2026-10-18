@@ -713,7 +713,7 @@ fn a_write_back_re_reads_without_a_clean_racing_its_staging_tree() {
                 continue;
             };
             let outcome = run_archive_op(op);
-            app.runtime.archive_results.lock().unwrap().push(outcome);
+            app.file_archive_outcome(outcome);
         }
         let (_, after_write) = app.apply_archive_outcomes();
 

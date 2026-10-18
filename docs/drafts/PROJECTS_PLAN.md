@@ -798,10 +798,8 @@ PR, except step 5's stages:
    own projects (`add_test_project`, `make_active`).
    - **5a. File-op results land in their project.** Landed; see below.
    - **5b. Archive, image and Lua results land in their project, and the
-     pending git view moves into `ProjectRuntime`.**
-     - An archive mount's table insert applies at once. Entering the mount
-       lands in its project. A mount that would then prompt, or re-run an
-       effect, is dropped with a flash, and its staged edits still record.
+     pending git view moves into `ProjectRuntime`**, in two PR pairs.
+     - **Archives** landed; see below.
      - A captured image is routed to the project holding its tab.
      - A viewed image is dropped, since the viewer is global modal UI.
      - A Lua request from a project the user has left is dropped with a flash.
@@ -864,6 +862,27 @@ PR, except step 5's stages:
    active pane, and a listing read whose project activation will re-list
    anyway. That read still settles the single in-flight refresh. A result for
    a closed project is dropped.
+
+   **Landed in 5b (archives).** `spawn_archive_op`, the archive worker's one
+   spawn site, tags each outcome the way 5a tags a file op. An outcome for
+   another open project runs there through `land_in`:
+   - **Entering a mount** moves that project's column. The mount table itself
+     is global, so the mount is always recorded.
+   - **A member opened in a pager** opens in that project's pager slot.
+   - **An archive op the outcome starts** is spawned in that project, so its
+     outcome comes back there too: the re-read after a write, a nested mount,
+     a staging clean.
+   - **A size question or an editor** would act on the view in front of the
+     user, so each is dropped and said so. The arms check `in_background`. An
+     effect held back for the mount is dropped the same way.
+   - **The project's in-flight flash** ends when its outcome lands.
+
+   The mount table is global, so the columns guarding it are too:
+   `every_column_dir` lists every open project's columns. Neither eviction
+   nor `:archive unmount` pulls a mount out from under any project's column.
+   5e has to decide what happens to a project's in-flight archive work when
+   the project closes. A `Written` outcome for a closed project is dropped
+   today, which leaves its mount's journal pending.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

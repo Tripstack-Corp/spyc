@@ -8,8 +8,8 @@ use crate::ui::pager::PagerView;
 
 use super::Effect;
 use crate::app::{
-    App, ForegroundExec, Message, PagerReturn, Wake, archive_ops, graveyard_ops, image_ops,
-    inventory_ops, kill_pg, mermaid_ops, worktree_ops,
+    App, ForegroundExec, Message, PagerReturn, Wake, graveyard_ops, image_ops, inventory_ops,
+    kill_pg, mermaid_ops, worktree_ops,
 };
 
 impl App {
@@ -273,17 +273,7 @@ impl App {
                 // Archive mount / materialize / staging cleanup — same detached
                 // shape as Graveyard. A streamed mount can run for seconds, so
                 // it also gets the shared cancel flag (`Esc` sets it).
-                Effect::Archive(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.archive_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    std::thread::spawn(move || {
-                        let outcome = archive_ops::run_archive_op(op);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Archive));
-                        }
-                    });
-                }
+                Effect::Archive(op) => self.spawn_archive_op(op),
                 // Render the mermaid diagram + open it externally on a detached
                 // worker (same shape as Graveyard); the outcome lands in
                 // `image_results` and `apply_image_outcomes` installs/flashes it.
