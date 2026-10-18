@@ -1744,6 +1744,53 @@ dir = "#aabbcc"
         );
     }
 
+    /// A scan pattern's uppercase label hands its filled `url` to the system
+    /// opener, so a project rc's template is kept only when it opens a web
+    /// page: one naming a local file (`./x.command`, `file://`) would launch
+    /// a program from the repo on a keypress. The pattern itself still labels
+    /// and yanks; `$HOME` keeps any template.
+    #[test]
+    #[ignore = "red: a project rc's scan pattern url is kept whatever it opens"]
+    fn a_project_scan_pattern_opens_only_web_pages() {
+        let tmp = tempdir().unwrap();
+        let rc = tmp.path().join(".spycrc.toml");
+        std::fs::write(
+            &rc,
+            "[[scan.patterns]]\nname = \"jira\"\nregex = \"JIRA-[0-9]+\"\n\
+             url = \"https://jira.example/browse/{}\"\n\n\
+             [[scan.patterns]]\nname = \"run\"\nregex = \"run-[a-z]+\"\nurl = \"./{}.command\"\n\n\
+             [[scan.patterns]]\nname = \"file\"\nregex = \"f-[a-z]+\"\nurl = \"file:///tmp/{}\"\n",
+        )
+        .unwrap();
+        let urls = |cfg: &Config| -> Vec<(String, Option<String>)> {
+            cfg.scan_patterns
+                .iter()
+                .map(|p| (p.name.clone(), p.url_template.clone()))
+                .collect()
+        };
+
+        let mut project = Config::default();
+        project.load_one(&rc, Trust::Project).unwrap();
+        assert_eq!(
+            urls(&project),
+            [
+                ("jira".into(), Some("https://jira.example/browse/{}".into())),
+                ("run".into(), None),
+                ("file".into(), None),
+            ]
+        );
+        assert!(
+            project.warnings.iter().any(|w| w.contains("\"run\"")),
+            "{:?}",
+            project.warnings
+        );
+
+        let mut home = Config::default();
+        home.load_one(&rc, Trust::Trusted).unwrap();
+        assert!(urls(&home).iter().all(|(_, url)| url.is_some()));
+        assert!(home.warnings.is_empty(), "{:?}", home.warnings);
+    }
+
     /// The control: `$HOME`'s clipboard command is in force.
     #[test]
     fn a_clipboard_command_in_home_is_honoured() {
