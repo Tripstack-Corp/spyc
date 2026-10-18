@@ -449,3 +449,61 @@ fn an_archive_ys_column_stands_in_is_never_unmounted_from_x() {
         );
     });
 }
+
+/// The mount table holds `MAX_MOUNTS` archives and evicts the least recently
+/// used. One Y's column stands in is never the one evicted, however many X
+/// opens after it.
+#[test]
+#[ignore = "red: eviction protects only the active project's columns"]
+fn an_archive_ys_column_stands_in_is_never_evicted_by_xs_mounts() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let ys = t.y_home.join("pkg.zip");
+        build_zip(&ys);
+        app.make_active(t.y);
+        kick_mount(app, &ys);
+        settle_archive(app);
+        assert_eq!(app.state.cur().listing.dir, ys, "Y's column is inside it");
+        app.make_active(t.x);
+        for i in 0..crate::archive::mount::MAX_MOUNTS {
+            let zip = t.x_home.join(format!("x{i}.zip"));
+            build_zip(&zip);
+            kick_mount(app, &zip);
+            settle_archive(app);
+        }
+        assert!(
+            app.state.mounts.get(&ys).is_some(),
+            "the archive Y's column stands in survives X's mounts"
+        );
+    });
+}
+
+/// A member extracted for editing in the pane, landing after the user moved
+/// to Y: no editor overlay opens, neither over Y nor unseen in X.
+#[test]
+#[ignore = "red: an extracted member's pane editor opens over whichever project is active"]
+fn a_member_edited_in_the_pane_from_x_opens_no_overlay() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = t.x;
+        app.file_archive_outcome(ArchiveOutcome::Materialized {
+            real: t.x_home.join("one.txt"),
+            then: MaterializeThen::Edit { in_pane: true },
+        });
+        app.make_active(t.y);
+        settle_archive(app);
+        assert!(
+            app.runtime.project().top_overlay.is_none(),
+            "no editor overlay opens over Y"
+        );
+        assert!(
+            app.as_project(x, |app| app.runtime.project().top_overlay.is_none()),
+            "none waits unseen in X"
+        );
+        assert!(
+            app.flash_text().is_some_and(|f| f.starts_with("xproj: ")),
+            "the flash names X: {:?}",
+            app.flash_text()
+        );
+    });
+}
