@@ -16,10 +16,10 @@ use super::{
 };
 use crate::pane::{Pane, PaneTabs};
 
-/// The per-project half of `Runtime` (#99 step 1,
-/// `docs/drafts/PROJECTS_PLAN.md` §1c): the bottom pane tabs and the two
-/// overlay-subprocess slots, which belong to one project's columns. Reached
-/// only through [`Runtime::project`] / [`Runtime::project_mut`].
+/// The per-project half of `Runtime` (#99, `docs/drafts/PROJECTS_PLAN.md`
+/// §1c): the bottom pane tabs and the two overlay-subprocess slots, which
+/// belong to one project's columns. The active project's is reached through
+/// [`Runtime::project`] / [`Runtime::project_mut`].
 #[derive(Default)]
 pub(super) struct ProjectRuntime {
     /// Bottom pane tabs (each owns a `PtyHost`).
@@ -92,8 +92,9 @@ pub(super) struct Runtime {
     pub(super) scope_waiters: Vec<PendingScopeWait>,
     /// Every open project's runtime, keyed by id — an id-addressed side
     /// table background threads also touch (unlike `AppState::projects`,
-    /// which is ordered for the switcher). Exactly one entry today (#99 step
-    /// 1). Reached only through [`Self::project`] / [`Self::project_mut`].
+    /// which is ordered for the switcher). The active one is reached through
+    /// [`Self::project`] / [`Self::project_mut`]; a tab's owner through
+    /// [`Self::project_of_pane`] / [`Self::tab_of_pane`].
     pub(super) projects: std::collections::HashMap<super::state::ProjectId, ProjectRuntime>,
     /// Which of `projects` the active-project accessors resolve to. Tracks
     /// `AppState::active`.

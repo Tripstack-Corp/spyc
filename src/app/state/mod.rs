@@ -411,8 +411,8 @@ pub struct AppState {
 
 impl AppState {
     /// The active project — the one drawn and driven by the keyboard. `active`
-    /// always names a live entry in `projects` (#99 step 1); exactly one
-    /// exists today, so this never actually scans past the first element.
+    /// always names a live entry in `projects` (#99); the scan is linear, as a
+    /// spyc holds a handful of projects.
     pub fn active_project(&self) -> &Project {
         self.projects
             .iter()

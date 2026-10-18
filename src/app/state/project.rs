@@ -1,11 +1,9 @@
 //! `Project`: a home directory and everything the user is doing under it —
-//! the file columns, the split, the pane layout and where the keyboard was.
-//! #99 step 1 (`docs/drafts/PROJECTS_PLAN.md` §0): introduced
-//! behaviour-identical, holding exactly what `AppState` held flat before —
-//! there is still exactly one project, created at launch exactly as today.
-//! `AppState::active_project()` / `active_project_mut()` are the only way
-//! anything reaches it; the existing column handles (`cur()`, `col(side)`,
-//! …) delegate through them, unchanged from every caller's perspective.
+//! the file columns, the split, the pane layout and where the keyboard was
+//! (#99, `docs/drafts/PROJECTS_PLAN.md` §0). The active project is reached
+//! through `AppState::active_project()` / `active_project_mut()`, which the
+//! column handles (`cur()`, `col(side)`, …) delegate through; another one
+//! through `AppState::project(id)` / `open_projects()`.
 
 use std::path::PathBuf;
 
