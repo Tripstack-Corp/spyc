@@ -312,7 +312,9 @@ fn a_reread_after_a_write_from_x_lands_in_xs_column() {
         build_zip(&zip);
         kick_mount(app, &zip);
         settle_archive(app);
-        app.state.chdir(&t.x_home).unwrap();
+        // Back out of the archive without `chdir`, which would move the
+        // process cwd into a temp dir this test deletes.
+        app.state.cur_mut().listing = crate::fs::listing::Listing::read(&t.x_home).unwrap();
         app.file_archive_outcome(ArchiveOutcome::Written {
             archive: zip.clone(),
             report: crate::archive::write::RepackReport {
