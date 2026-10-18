@@ -919,4 +919,38 @@ mod keyboard_enhancement_tests {
              bit from setup_terminal's one-time query: {resume_body:?}"
         );
     }
+
+    /// A terminal keeps one keyboard-flag stack per screen (the kitty spec;
+    /// ghostty's `Screen.kitty_keyboard`), and a child such as vim leaves on
+    /// the main screen. A push written before `EnterAlternateScreen` lands on
+    /// the main screen's stack: spyc runs without the flag, and once it quits
+    /// the login shell keeps it, so Ctrl+C and Ctrl+D stop working there.
+    #[test]
+    #[ignore = "red: resume_tui pushes the flag before re-entering the alternate screen"]
+    fn resume_pushes_the_flag_onto_the_alt_screen() {
+        let production = crate::guard_support::production_half(include_str!("terminal.rs"));
+        let body: String = production
+            .split_once("pub fn resume_tui(")
+            .expect("resume_tui exists")
+            .1
+            .split_once("\n}\n")
+            .expect("resume_tui ends")
+            .0
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let at = |needle: &str| {
+            body.find(needle)
+                .unwrap_or_else(|| panic!("resume_tui names {needle}: {body}"))
+        };
+        let alt = at("EnterAlternateScreen");
+        let gate = at("KEYBOARD_ENHANCEMENT_SUPPORTED");
+        let push = at("PushKeyboardEnhancementFlags");
+        assert!(
+            alt < gate && gate < push,
+            "resume_tui must re-enter the alternate screen, then push the flag \
+             if the terminal supports it: {body}"
+        );
+    }
 }

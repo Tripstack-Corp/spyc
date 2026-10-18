@@ -70,4 +70,22 @@ mod tests {
     fn leave_resets_to_the_full_screen_region() {
         assert_eq!(leave(), "\x1b[r");
     }
+
+    /// The scroll region is terminal-wide and survives a screen switch, so a
+    /// region reserved for the marker confines every program the subshell
+    /// runs: `less` freezes its top line and can't scroll back, and `clear`
+    /// pins a stale line above the region.
+    #[test]
+    #[ignore = "red: entering the subshell reserves the top row with DECSTBM"]
+    fn entering_the_subshell_sets_no_scroll_region() {
+        let seq = enter(80, 24);
+        let sets_region = seq.match_indices("\x1b[").any(|(at, csi)| {
+            let params = &seq[at + csi.len()..];
+            let end = params
+                .find(|c: char| !(c.is_ascii_digit() || c == ';'))
+                .unwrap_or(params.len());
+            params[end..].starts_with('r')
+        });
+        assert!(!sets_region, "{seq:?}");
+    }
 }

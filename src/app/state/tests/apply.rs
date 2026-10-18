@@ -186,6 +186,22 @@ fn apply_start_shell_returns_spawn() {
 }
 
 #[test]
+fn start_shell_hands_off_as_a_subshell() {
+    let mut s = test_state();
+    let result = s.apply(&Action::StartShell);
+    assert!(
+        matches!(
+            result,
+            ApplyResult::Post(ref e) if matches!(
+                e.as_slice(),
+                [Effect::ForegroundExec { subshell: true, pause_after: false, .. }]
+            )
+        ),
+        "`$` must hand off as the marked subshell, with no pause after it"
+    );
+}
+
+#[test]
 fn apply_prompt_actions_set_mode() {
     let mut s = test_state();
     s.apply(&Action::SearchPrompt);
