@@ -1722,7 +1722,6 @@ dir = "#aabbcc"
     /// warning that it may not name its own clipboard command or prompts, no
     /// binding twice, and no consent asked for its own startup tabs.
     #[test]
-    #[ignore = "red: the home rc is loaded a second time as a project rc"]
     fn the_home_rc_is_read_once_when_spyc_starts_in_home() {
         let tmp = tempdir().unwrap();
         let home = tmp.path().join(".spycrc.toml");

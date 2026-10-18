@@ -9,13 +9,23 @@ use super::{
 };
 
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
-/// attacker-controllable, so its executing keymap bindings are dropped;
+/// attacker-controllable, so its executing keymap bindings, `[prompts]` and
+/// `[clipboard] command` are dropped and its startup tabs await consent;
 /// `Trusted` (`$HOME/.spycrc.toml`, or explicit caller-supplied paths) is
 /// honoured in full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Trust {
     Trusted,
     Project,
+}
+
+/// Whether `a` and `b` name one file, through symlinks.
+fn same_file(a: &Path, b: &Path) -> bool {
+    a == b
+        || matches!(
+            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+            (Ok(x), Ok(y)) if x == y
+        )
 }
 
 impl Config {
@@ -26,10 +36,13 @@ impl Config {
     /// (`<cwd>/.spycrc.toml`) is **not** — spyc is routinely pointed at
     /// hostile content (cloned repos, extracted tarballs), so a project rc
     /// must not be able to bind a key to a shell command (`unix`) or an
-    /// arbitrary `jump`. Those are dropped from the project file, and its
-    /// startup tabs, which spawn at launch, are held in `pane.project_tabs`
-    /// until the user approves them. Cosmetic/behavioural settings
-    /// (`[colors]`, `[layout]`, …) and plain rebindings are still honoured.
+    /// arbitrary `jump`, put words in `[prompts]`, or name the
+    /// `[clipboard] command` a yank runs. Those are dropped from the project
+    /// file, and its startup tabs, which spawn at launch, are held in
+    /// `pane.project_tabs` until the user approves them. Cosmetic/behavioural
+    /// settings (`[colors]`, `[layout]`, …) and plain rebindings are still
+    /// honoured. Started in `$HOME`, the two are one file, the user's, read
+    /// once and trusted.
     pub fn load_default(cwd: &Path) -> anyhow::Result<Self> {
         let user = home_dir().map(|h| h.join(".spycrc.toml"));
         Self::load_layered(user.as_deref(), &cwd.join(".spycrc.toml"))
@@ -50,7 +63,9 @@ impl Config {
         if let Some(u) = user {
             cfg.load_one(u, Trust::Trusted)?;
         }
-        cfg.load_one(project, Trust::Project)?;
+        if !user.is_some_and(|u| same_file(u, project)) {
+            cfg.load_one(project, Trust::Project)?;
+        }
         Ok(cfg)
     }
 

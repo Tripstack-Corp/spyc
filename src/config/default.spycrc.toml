@@ -318,7 +318,8 @@
 # `command` (default unset): when set, spyc runs this exact command
 # (whitespace-split into argv, no shell features — wrap it in a script if you
 # need any) and pipes the yanked text to its stdin, bypassing `via`/OSC-52
-# entirely. `$SPYC_CLIPBOARD` overrides this if both are set.
+# entirely. `$SPYC_CLIPBOARD` overrides this if both are set. Only
+# `~/.spycrc.toml` may set it: a project file's is ignored with a warning.
 [clipboard]
 # via = "auto"
 # command = "wl-copy"
