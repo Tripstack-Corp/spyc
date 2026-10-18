@@ -270,6 +270,10 @@ impl App {
     fn apply_archive_outcome_elsewhere(&mut self, origin: ProjectId, outcome: ArchiveOutcome) {
         // The in-flight message announced this project's op, which is over.
         self.state.clear_progress_flash();
+        if !self.state.has_project(origin) {
+            self.apply_archive_outcome_orphaned(origin, outcome);
+            return;
+        }
         self.land_in(origin, |app| {
             let mut held_back = false;
             for effect in app.apply_one_archive_outcome(outcome) {
@@ -291,7 +295,12 @@ impl App {
     /// whose handler asked (`run_effects` runs in the user's project), or the
     /// one an outcome landed in (`apply_archive_outcome_elsewhere`).
     pub(super) fn spawn_archive_op(&self, op: ArchiveOp) {
-        let origin = self.state.active;
+        self.spawn_archive_op_from(self.state.active, op);
+    }
+
+    /// [`Self::spawn_archive_op`] for the project `origin`, which may have
+    /// closed: a re-read a closed project's write starts lands as its own.
+    fn spawn_archive_op_from(&self, origin: ProjectId, op: ArchiveOp) {
         let results = std::sync::Arc::clone(&self.runtime.archive_results);
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {
@@ -383,14 +392,73 @@ impl App {
             }
             ArchiveOutcome::Written { archive, report } => self.apply_written(archive, report),
             ArchiveOutcome::WriteFailed { archive, error } => {
-                self.state.flash_error(format!(
-                    "{} NOT written: {error} — changes are still pending",
-                    display_name(&archive)
-                ));
+                self.flash_write_failed(&archive, &error);
                 Vec::new()
             }
             ArchiveOutcome::Cleaned => Vec::new(),
         }
+    }
+
+    /// An outcome for a project that has closed. The mount table is the
+    /// process's, so what an op did to it lands as it would anywhere: a mount
+    /// is recorded, an extracted member is recorded as spyc's own, and a write
+    /// clears the journal and has the archive read again from clean staging,
+    /// that read tagged with the closed project so it lands here too. What
+    /// would act on a project (entering a mount, opening a pager or an editor,
+    /// asking a question) has none to act on and is dropped; a failed write
+    /// still says so.
+    fn apply_archive_outcome_orphaned(&mut self, origin: ProjectId, outcome: ArchiveOutcome) {
+        let effects = match outcome {
+            ArchiveOutcome::Mounted {
+                index,
+                capability,
+                warnings,
+                staging_root,
+                depth,
+                ..
+            } => self.record_mount(*index, capability, warnings, staging_root, depth),
+            ArchiveOutcome::Materialized { real, .. } => {
+                self.record_staged(&real);
+                Vec::new()
+            }
+            ArchiveOutcome::MaterializedMany { staged, .. } => {
+                for (_, real) in &staged {
+                    self.record_staged(real);
+                }
+                Vec::new()
+            }
+            ArchiveOutcome::Written { archive, report } => self.apply_written(archive, report),
+            ArchiveOutcome::WriteFailed { archive, error } => {
+                self.flash_write_failed(&archive, &error);
+                Vec::new()
+            }
+            _ => Vec::new(),
+        };
+        for effect in effects {
+            if let Effect::Archive(op) = effect {
+                self.spawn_archive_op_from(origin, op);
+            }
+        }
+    }
+
+    fn flash_written(&mut self, archive: &Path, report: &crate::archive::write::RepackReport) {
+        let snapshot = report
+            .snapshot
+            .as_ref()
+            .map_or_else(String::new, |_| " (original in the graveyard)".to_string());
+        self.state.flash_info(format!(
+            "wrote {} — {} member(s), {}{snapshot}",
+            display_name(archive),
+            report.members,
+            crate::fs::ops::format_size(report.bytes),
+        ));
+    }
+
+    fn flash_write_failed(&mut self, archive: &Path, error: &str) {
+        self.state.flash_error(format!(
+            "{} NOT written: {error} — changes are still pending",
+            display_name(archive)
+        ));
     }
 
     /// A mount landed: record it in the (global) mount table, then enter it,
@@ -406,29 +474,11 @@ impl App {
     ) -> Vec<Effect> {
         let archive = index.archive.clone();
         let notes = mount_notes(&capability, &warnings);
-        let protected = self.protected_archives();
-        let mut mount = ArchiveMount {
-            index,
-            journal: Journal::default(),
-            staged: StagedStats::new(),
-            capability,
-            warnings,
-            staging_root,
-            last_used: 0,
-            depth,
-            editing: Vec::new(),
-        };
-        // Whatever is on disk at mount time is what spyc just put there —
-        // a streamed mount wrote every member during the pass. Recording
-        // it is what stops the first dirty check from reading the whole
-        // archive as edited behind our back.
-        mount.staged = current_staged_stats(&mount);
-        let evicted = self.state.mounts.insert(mount, &protected);
+        let mut effects = self.record_mount(index, capability, warnings, staging_root, depth);
         // Enter it, then say what was odd about it — the flash outlives
         // the chdir, so the note is what the user is left reading. A
         // held-back effect names where to land instead, and re-running it
         // is what gets the cursor and the message it came with.
-        let mut effects = clean_effects(evicted);
         match then {
             Some(effect) => {
                 self.state.mounts.touch(&archive);
@@ -448,6 +498,36 @@ impl App {
         effects
     }
 
+    /// Record a landed mount in the (global) mount table, handing back the
+    /// clean-up of whatever it evicted.
+    fn record_mount(
+        &mut self,
+        index: crate::archive::index::ArchiveIndex,
+        capability: crate::archive::scan::Capability,
+        warnings: Vec<String>,
+        staging_root: PathBuf,
+        depth: usize,
+    ) -> Vec<Effect> {
+        let protected = self.protected_archives();
+        let mut mount = ArchiveMount {
+            index,
+            journal: Journal::default(),
+            staged: StagedStats::new(),
+            capability,
+            warnings,
+            staging_root,
+            last_used: 0,
+            depth,
+            editing: Vec::new(),
+        };
+        // Whatever is on disk at mount time is what spyc just put there —
+        // a streamed mount wrote every member during the pass. Recording
+        // it is what stops the first dirty check from reading the whole
+        // archive as edited behind our back.
+        mount.staged = current_staged_stats(&mount);
+        clean_effects(self.state.mounts.insert(mount, &protected))
+    }
+
     /// A write-back landed: the journal is clean, and the archive is re-read.
     fn apply_written(
         &mut self,
@@ -460,16 +540,7 @@ impl App {
             mount.journal.clear();
             mount.staged.clear();
         }
-        let snapshot = report
-            .snapshot
-            .as_ref()
-            .map_or_else(String::new, |_| " (original in the graveyard)".to_string());
-        self.state.flash_info(format!(
-            "wrote {} — {} member(s), {}{snapshot}",
-            display_name(&archive),
-            report.members,
-            crate::fs::ops::format_size(report.bytes),
-        ));
+        self.flash_written(&archive, &report);
         // Re-read it: a repack renumbers a zip's entries and moves a tar's
         // offsets, so every locator in the old index now points at the
         // wrong bytes. The mount has to be *dropped* for that to happen —

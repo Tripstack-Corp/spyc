@@ -375,7 +375,6 @@ fn land_until(app: &mut App, done: impl Fn(&App) -> bool) -> bool {
 /// extracted before it never stands in for what is on disk now. Nothing is
 /// entered: Y's column never moves.
 #[test]
-#[ignore = "red: an outcome for a closed project is dropped, leaving the written changes pending"]
 fn a_write_that_lands_after_its_project_closed_still_counts() {
     with_two(|t| {
         let app = &mut t.app;
@@ -426,7 +425,6 @@ fn a_write_that_lands_after_its_project_closed_still_counts() {
 /// A failed write that lands after its project closed still says so: the
 /// user's changes are not on disk.
 #[test]
-#[ignore = "red: an outcome for a closed project is dropped, saying nothing"]
 fn a_failed_write_that_lands_after_its_project_closed_says_so() {
     with_two(|t| {
         let app = &mut t.app;
@@ -450,7 +448,6 @@ fn a_failed_write_that_lands_after_its_project_closed_says_so() {
 /// table is the process's, so the archive is recorded there, its staging
 /// with it for clean-up, but it is entered nowhere: Y's column never moves.
 #[test]
-#[ignore = "red: an outcome for a closed project is dropped, and its staging with it"]
 fn a_mount_that_lands_after_its_project_closed_is_recorded_not_entered() {
     with_two(|t| {
         let app = &mut t.app;
@@ -473,7 +470,6 @@ fn a_mount_that_lands_after_its_project_closed_is_recorded_not_entered() {
 /// nothing waits to be written, and the archive can still be moved or
 /// deleted. No pager opens over Y.
 #[test]
-#[ignore = "red: an outcome for a closed project is dropped, so the extracted copy reads as an edit"]
 fn a_member_extracted_after_its_project_closed_is_not_an_edit() {
     with_two(|t| {
         let app = &mut t.app;

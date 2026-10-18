@@ -37,6 +37,7 @@ pub use commander::Commander;
 mod dispatch;
 mod git;
 mod git_cache;
+mod homes;
 pub use git_cache::{GitCache, GitState, GitStatusCache, GitWorkerRequest, GitWorkerResult};
 mod listing;
 mod navigation;

@@ -906,7 +906,12 @@ redraw, and only its active tab can be the focused one. Neither the watcher
 nor the git poll looks at a project out of view, so a switch
 (`App::switch_project`) re-reads (on a worker) and re-walks every column of
 the arriving project and reloads its preview, and writes the departing
-project's context file if it is behind. `get_spyc_context` adds `project` (its id,
+project's context file if it is behind. A project's home is its own: no two
+open projects share one (`AppState::home_taken`). Once a project closes, the
+archive work it started still lands on the process's mount table (a write's
+re-read included) and enters nowhere; an agent whose tab closed with it is
+told so rather than reading from the process cwd, and a connection bound by
+cwd binds again. `get_spyc_context` adds `project` (its id,
 label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,
