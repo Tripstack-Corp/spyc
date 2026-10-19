@@ -855,6 +855,7 @@ verbs above (`down`, `pick`,
 | `set_project_home_here` | set PROJECT_HOME to current dir |
 | `project_open` | open a directory as a project (`Space n`) |
 | `project_close` | close the project in view (`Space x`) |
+| `project_list` | list the open projects, to go to one (`Space j`) |
 | `project_last` | go to the project you were in last (`Space Space`) |
 | `project_next` | go to the next open project, wrapping (`Space ]`) |
 | `project_prev` | go to the previous open project, wrapping (`Space [`) |

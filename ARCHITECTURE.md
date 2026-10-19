@@ -911,7 +911,9 @@ project's context file if it is behind; `Space n` opens a project
 one (`App::close_project`: the user is moved out first, then `drop_project`
 shuts its tabs down off the loop thread, drops their scope claims and answers
 their parked waits, and removes its context file and its root from the
-sidecar), and the leader's other project keys move between them. A project's home is its own, and so
+sidecar), `Space j` lists them in a numbered picker
+(`App::open_project_switcher`), and the leader's other project keys move
+between them. A project's home is its own, and so
 is its start dir, the root an agent's cwd binds by: no two open projects
 share either (`AppState::home_taken`, `move_start_dir`). Once a project
 closes, the archive work it started still lands on the process's mount table

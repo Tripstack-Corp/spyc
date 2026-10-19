@@ -132,6 +132,9 @@ impl App {
         if let Some(r) = self.handle_pager_worktree_pick(key, viewport) {
             return r;
         }
+        if let Some(r) = self.handle_pager_project_pick(key, viewport) {
+            return r;
+        }
         if let Some(r) = self.handle_pager_history_editor(key, viewport) {
             return r;
         }
@@ -201,9 +204,12 @@ impl App {
     /// + reopen.
     pub fn clear_pager(&mut self) {
         self.remember_pager_position();
-        // Close whichever top pager the focused column owns: the right column's
-        // own `D` slot, else the shared (left / modal / no-split) slot.
-        if !self.state.pane_focused()
+        // Close the top pager that owns input, as `active_pager_slot` reads it:
+        // a modal one in the shared slot first, which covers every column; else
+        // the focused right column's own `D` slot; else the shared (left /
+        // no-split) slot.
+        if !self.modal_pager_open()
+            && !self.state.pane_focused()
             && self.focused_side() == state::Side::Right
             && self.view.project().pager_right.is_some()
         {
