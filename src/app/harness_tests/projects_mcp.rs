@@ -26,6 +26,9 @@ struct Projects {
     b_home: PathBuf,
     a_pane: String,
     b_pane: String,
+    /// How many `Bind`s the connections [`Projects::wire_from`] served asked
+    /// the loop for.
+    binds: usize,
 }
 
 fn with_projects(test: impl FnOnce(&mut Projects)) {
@@ -52,6 +55,7 @@ fn with_projects(test: impl FnOnce(&mut Projects)) {
             b_home,
             a_pane,
             b_pane,
+            binds: 0,
         });
     });
 }
@@ -76,10 +80,12 @@ impl Projects {
         let mut conn = Conn::open(default, tx);
         let mut ctx = RunCtx::for_test();
         let app = &mut self.app;
+        let binds = &mut self.binds;
         std::thread::scope(|s| {
             let client = s.spawn(move || client(&mut conn));
             while !client.is_finished() {
                 if let Ok(req) = rx.recv_timeout(Duration::from_millis(5)) {
+                    *binds += usize::from(matches!(req.command, McpCommand::Bind { .. }));
                     ctx.mcp_pending.push(req);
                     app.drain_mcp_pending(&mut ctx);
                 }
@@ -90,6 +96,7 @@ impl Projects {
             // reply, so it can still be queued once the client has finished,
             // when the client ran between a timed-out wait and the check.
             while let Ok(req) = rx.try_recv() {
+                *binds += usize::from(matches!(req.command, McpCommand::Bind { .. }));
                 ctx.mcp_pending.push(req);
                 app.drain_mcp_pending(&mut ctx);
             }
@@ -678,7 +685,6 @@ fn a_connection_bound_to_the_users_project_binds_again_when_it_closes() {
 /// it binds as an `initialize` naming nothing would, to the project the user
 /// is in, rather than reading whatever directory spyc's process cwd is.
 #[test]
-#[ignore = "red: a connection that has not bound reads its closed launch project's file"]
 fn a_connection_that_has_not_bound_follows_the_user_when_the_launch_project_closes() {
     with_projects(|p| {
         let (a, b) = (p.app.state.active, p.b);
@@ -688,6 +694,46 @@ fn a_connection_that_has_not_bound_follows_the_user_when_the_launch_project_clos
         let found = p.wire_from(default, |c| c.tool("search_paths", json!({"query": "in_"})));
         let text = found.to_string();
         assert!(text.contains("in_b.rs"), "{text}");
+    });
+}
+
+/// A hook's one-shot `report_status`, which never sends `initialize`, names
+/// its tab and reads no context file, so the launch project having closed
+/// doesn't make it bind first: it fires on every turn of every agent.
+#[test]
+fn a_hook_report_after_the_launch_project_closes_binds_nothing() {
+    with_projects(|p| {
+        let (a, b) = (p.app.state.active, p.b);
+        let default = p.app.view.project().context_path.clone();
+        p.app.make_active(b);
+        p.app.remove_test_project(a);
+        let pane = p.b_pane.clone();
+        let args = json!({"status": "working", "pane_id": pane});
+        p.wire_from(default, move |c| c.tool("report_status", args));
+        assert_eq!(p.binds, 0, "the report bound first");
+        assert_eq!(
+            Projects::reported(&p.app, &p.b_pane),
+            Some(AgentActivity::Working)
+        );
+    });
+}
+
+/// An agent's `initialize`, arriving once the launch project has closed,
+/// binds it to the pane it names, as it would with that project open: the
+/// connection isn't bound to the user's project on the way.
+#[test]
+fn an_agent_initializing_after_the_launch_project_closes_binds_its_pane() {
+    with_projects(|p| {
+        let (a, b) = (p.app.state.active, p.b);
+        let default = p.app.view.project().context_path.clone();
+        p.app.make_active(b);
+        p.app.remove_test_project(a);
+        let pane = p.b_pane.clone();
+        let context = p.wire_from(default, move |c| {
+            c.initialize(Some(&pane));
+            c.tool("get_spyc_context", json!({}))
+        });
+        assert_eq!(context["pane"]["id"], p.b_pane.as_str(), "{context}");
     });
 }
 

@@ -305,14 +305,25 @@ pub(super) fn dispatch_for(
     // spyc's process cwd is, which is another project's. One bound to no tab,
     // by its cwd or to the project the user was in, outlives the close and
     // binds again as it would at `initialize`, waiting on the loop as that
-    // does.
+    // does. One not bound yet reads the server's own file, the launch
+    // project's, and once that project has closed a call that reads it binds
+    // first, as an `initialize` naming nothing would. The calls that never
+    // bind read nothing: a hook's one-shot `report_status` names its tab, and
+    // a statusline tick reads only its own input.
     let gone = |caller: &Caller| caller.context.as_deref().is_some_and(|p| !p.exists());
-    if gone(caller)
+    let reads_context = match method {
+        "resources/read" => true,
+        "tools/call" => parsed["params"]["name"] != "report_status",
+        _ => false,
+    };
+    let default_gone = caller.context.is_none() && reads_context && !ctx_path.exists();
+    if (gone(caller) || default_gone)
         && caller.pane_id.is_none()
         && let Some(tx) = cmd_tx
     {
         let cwd = caller.cwd.clone();
-        bind_to(tx, None, cwd, caller, "re-bind");
+        let why = if default_gone { "bind" } else { "re-bind" };
+        bind_to(tx, None, cwd, caller, why);
     }
     let closed = gone(caller);
     let bound = caller.context.clone();

@@ -460,10 +460,6 @@ impl AppState {
 
     /// Close project `id`: it leaves `projects`, and its label is kept for
     /// whatever it left running.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "no key closes a project; tests do")
-    )]
     pub(crate) fn remove_project(&mut self, id: ProjectId) {
         if let Some(i) = self.projects.iter().position(|p| p.id == id) {
             let closed = self.projects.remove(i);
@@ -476,8 +472,9 @@ impl AppState {
         self.projects.iter()
     }
 
-    /// Open `project` beside the others, last in switcher order. Its home and
-    /// start dir are its caller's to have checked ([`Self::home_taken`]).
+    /// Open `project` beside the others, last in switcher order. That no open
+    /// project is anchored at its home or start dir is its caller's to have
+    /// checked (`App::open_project`).
     pub(crate) fn insert_project(&mut self, project: Project) {
         self.projects.push(project);
     }

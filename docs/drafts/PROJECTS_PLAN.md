@@ -1017,7 +1017,20 @@ PR, except step 5's stages:
      `switch_project`, never by `in_project`), `Space 1-9` to the Nth,
      `Space ]` / `Space [` through them, wrapping; with one project open they
      do nothing. The project keys are `Action::Project(ProjectAction)`, with
-     `Space p` / `Space P` moved in. Closing (`Space x`) is pair 2b.
+     `Space p` / `Space P` moved in.
+   - **Closing a project (pair 2b).** `Space x` closes the project in view
+     (`App::close_project`), asking first while a tab or editor in it still
+     runs (`PromptKind::CloseProject`), and refusing on the only one ("the last
+     project closes with :q") and from inside the editor the close would end. The user lands in `last_project`, else the next
+     project, else the one before; then `drop_project` shuts its tabs and
+     editors down off the loop thread, drops its tabs' scope claims, answers
+     their parked `wait_for_scope_clear`s, removes its context file, leaves all
+     three maps and rewrites the sidecar. A connection not bound yet, reading
+     the server's file, binds as one naming nothing would once that file's
+     project has closed, on a call that reads it (a hook's `report_status`
+     and a statusline tick don't). `Space n` now reads a path as `J` does (`$VAR`, and a
+     relative one against the column), compares a project's home canonical,
+     and says so on the project in view.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

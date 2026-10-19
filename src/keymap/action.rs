@@ -773,6 +773,8 @@ pub enum ProjectAction {
     SetHomeHere,
     /// `Space n` — open a directory as a project.
     Open,
+    /// `Space x` — close the project in view.
+    Close,
     /// `Space Space` — go to the project the user was in last.
     Last,
     /// `Space ]` — go to the next open project, wrapping.
@@ -789,6 +791,7 @@ impl ProjectAction {
             Self::JumpHome => "jump to PROJECT_HOME",
             Self::SetHomeHere => "set PROJECT_HOME to current dir",
             Self::Open => "open a directory as a project",
+            Self::Close => "close the project in view",
             Self::Last => "go to the last project",
             Self::Next => "go to the next project",
             Self::Prev => "go to the previous project",
@@ -801,6 +804,7 @@ impl ProjectAction {
             Self::JumpHome => "jump_project_home",
             Self::SetHomeHere => "set_project_home_here",
             Self::Open => "project_open",
+            Self::Close => "project_close",
             Self::Last => "project_last",
             Self::Next => "project_next",
             Self::Prev => "project_prev",
@@ -815,6 +819,7 @@ impl ProjectAction {
             "jump_project_home" => Self::JumpHome,
             "set_project_home_here" => Self::SetHomeHere,
             "project_open" => Self::Open,
+            "project_close" => Self::Close,
             "project_last" => Self::Last,
             "project_next" => Self::Next,
             "project_prev" => Self::Prev,

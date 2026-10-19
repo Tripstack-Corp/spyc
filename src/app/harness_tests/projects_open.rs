@@ -155,7 +155,6 @@ fn space_n_onto_an_open_projects_start_dir_goes_to_it() {
 /// A project homed through a symlink is the project at the directory the link
 /// names, so `Space n` there goes to it rather than opening a second.
 #[test]
-#[ignore = "red: Space n compares a stored home as it was given, not canonically"]
 fn space_n_onto_a_linked_home_goes_to_its_project() {
     with_three(|t| {
         let link = t.home.join("zlink");
@@ -175,7 +174,6 @@ fn space_n_onto_a_linked_home_goes_to_its_project() {
 /// A relative path is read against the column the user is in, as `J` and
 /// Tab completion read one, not against spyc's process cwd.
 #[test]
-#[ignore = "red: Space n reads a relative path against the process cwd"]
 fn a_relative_path_opens_against_the_column() {
     with_three(|t| {
         let app = &mut t.app;
@@ -195,7 +193,6 @@ fn a_relative_path_opens_against_the_column() {
 /// Enter on the prompt's pre-fill, the project in view's own directory, says
 /// so rather than doing nothing.
 #[test]
-#[ignore = "red: Space n onto the project in view does nothing, and says nothing"]
 fn space_n_onto_the_project_in_view_says_so() {
     with_three(|t| {
         let app = &mut t.app;

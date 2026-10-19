@@ -363,6 +363,12 @@ impl Runtime {
         self.projects.insert(id, ProjectRuntime::default());
     }
 
+    /// Project `id`'s runtime, taken out as the project closes: its tabs,
+    /// overlays and pager streams, for the close to shut down.
+    pub(super) fn remove_project(&mut self, id: super::state::ProjectId) -> Option<ProjectRuntime> {
+        self.projects.remove(&id)
+    }
+
     /// The active project's runtime (pane tabs, overlay slots). `active`
     /// always names a live entry (#99 step 1).
     pub(super) fn project(&self) -> &ProjectRuntime {

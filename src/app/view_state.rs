@@ -247,8 +247,9 @@ impl ProjectView {
 /// field; handlers reach it via `self.view.…`.
 #[allow(clippy::struct_excessive_bools)]
 pub struct ViewState {
-    /// Every open project's views, keyed by id. Exactly one entry today (#99
-    /// step 1). Reached only through [`Self::project`] / [`Self::project_mut`].
+    /// Every open project's views, keyed by id. The active one's are reached
+    /// through [`Self::project`] / [`Self::project_mut`], and every one's
+    /// context file through [`Self::context_paths`].
     pub(super) projects: std::collections::HashMap<super::state::ProjectId, ProjectView>,
     /// Which of `projects` the active-project accessors resolve to. Tracks
     /// `AppState::active`.
@@ -552,6 +553,11 @@ impl ViewState {
     /// Project `id`'s views, opened beside the others.
     pub(super) fn insert_project(&mut self, id: super::state::ProjectId, view: ProjectView) {
         self.projects.insert(id, view);
+    }
+
+    /// Project `id`'s views, taken out as the project closes.
+    pub(super) fn remove_project(&mut self, id: super::state::ProjectId) -> Option<ProjectView> {
+        self.projects.remove(&id)
     }
 
     /// The active project's views (pagers, row caches, context file).

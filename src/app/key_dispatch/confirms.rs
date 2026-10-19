@@ -1,5 +1,6 @@
-//! Modal confirm-key handlers (remove, graveyard purge-all, Claude
-//! crash-recover) + undo_last_remove. Split from key_dispatch.rs verbatim.
+//! The single-key confirm prompts' handlers (remove, graveyard purge-all,
+//! closing or restarting a tab, closing a project, the consents, …), the
+//! table that dispatches to them, and `undo_last_remove`.
 
 use std::path::PathBuf;
 
@@ -9,6 +10,48 @@ use crate::app::graveyard_ops::GraveyardOp;
 use crate::app::{App, Effect, Mode, Prompt, PromptKind};
 
 impl App {
+    /// The answer to a single-key confirm, when the open prompt is one: each
+    /// answers on its first key, so none reaches a line editor. `None` for
+    /// any other prompt. Every kind is named, so a new one is placed here.
+    pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let Mode::Prompting(prompt) = &self.state.mode else {
+            return None;
+        };
+        let answer: fn(&mut Self, KeyEvent) -> Vec<Effect> = match prompt.kind {
+            PromptKind::RemoveConfirm => Self::handle_remove_confirm_key,
+            PromptKind::GraveyardPurgeAllConfirm => Self::handle_graveyard_purge_all_confirm,
+            PromptKind::HookConsent { .. } => Self::handle_hook_consent_key,
+            PromptKind::SkillUpdate { .. } => Self::handle_skill_update_key,
+            PromptKind::ProjectTabsConsent { .. } => Self::handle_project_tabs_consent_key,
+            PromptKind::ClosePane => Self::handle_close_pane_confirm_key,
+            PromptKind::CloseProject(_) => Self::handle_close_project_confirm_key,
+            PromptKind::RestartPane => Self::handle_restart_pane_confirm_key,
+            PromptKind::ArchiveWriteConfirm { .. } => Self::handle_archive_write_confirm_key,
+            PromptKind::ArchiveMountConfirm { .. } => Self::handle_archive_mount_confirm_key,
+            PromptKind::LuaRunaway => Self::handle_lua_runaway_confirm_key,
+            PromptKind::PipeConfirm { .. } => Self::handle_pipe_confirm_key,
+            PromptKind::PatternPick
+            | PromptKind::ShellCmd
+            | PromptKind::Search { .. }
+            | PromptKind::Jump
+            | PromptKind::CopyTo
+            | PromptKind::MoveTo
+            | PromptKind::MakeDir
+            | PromptKind::NewFile
+            | PromptKind::SetEnv
+            | PromptKind::ShellCmdCaptured
+            | PromptKind::PaneNewTabCmd
+            | PromptKind::PaneNewTabCwd
+            | PromptKind::PaneRenameTab
+            | PromptKind::WorktreeNewBranch
+            | PromptKind::WorktreeDeleteConfirm
+            | PromptKind::Limit
+            | PromptKind::Command
+            | PromptKind::ProjectOpen => return None,
+        };
+        Some(answer(self, key))
+    }
+
     /// Single-key confirmation for `R`. `y` / `Y` triggers the delete;
     /// anything else — including Enter, Esc, or any other letter — cancels.
     /// The prompt closes in every case.
@@ -138,6 +181,23 @@ impl App {
             self.close_active_tab_now();
         } else {
             self.view.needs_full_repaint = true;
+        }
+        Vec::new()
+    }
+
+    /// `Space x`'s confirm: `y`/`Y` closes the project it asked about,
+    /// anything else keeps it.
+    pub(super) fn handle_close_project_confirm_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let prev = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        self.view.needs_full_repaint = true;
+        if let Mode::Prompting(Prompt {
+            kind: PromptKind::CloseProject(id),
+            ..
+        }) = prev
+            && matches!(key.code, KeyCode::Char('y' | 'Y'))
+            && self.state.has_project(id)
+        {
+            self.close_project_now(id);
         }
         Vec::new()
     }

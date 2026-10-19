@@ -12,70 +12,8 @@ use crate::app::{
 
 impl App {
     pub(super) fn handle_prompt_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        // Single-key confirm prompts: `y` / `Y` proceeds, anything else cancels.
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::RemoveConfirm)
-        ) {
-            return self.handle_remove_confirm_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::GraveyardPurgeAllConfirm)
-        ) {
-            return self.handle_graveyard_purge_all_confirm(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::HookConsent { .. })
-        ) {
-            return self.handle_hook_consent_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::SkillUpdate { .. })
-        ) {
-            return self.handle_skill_update_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::ProjectTabsConsent { .. })
-        ) {
-            return self.handle_project_tabs_consent_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::ClosePane)
-        ) {
-            return self.handle_close_pane_confirm_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::RestartPane)
-        ) {
-            return self.handle_restart_pane_confirm_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::ArchiveWriteConfirm { .. })
-        ) {
-            return self.handle_archive_write_confirm_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::ArchiveMountConfirm { .. })
-        ) {
-            return self.handle_archive_mount_confirm_key(key);
-        }
-        if matches!(
-            &self.state.mode,
-            Mode::Prompting(p) if matches!(p.kind, PromptKind::LuaRunaway)
-        ) {
-            return self.handle_lua_runaway_confirm_key(key);
-        }
-        if matches!(&self.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::PipeConfirm { .. }))
-        {
-            return self.handle_pipe_confirm_key(key);
+        if let Some(effects) = self.handle_confirm_key(key) {
+            return effects;
         }
         // Shell prompts (`!` / `;`) use the vi line editor + history.
         let has_editor = matches!(

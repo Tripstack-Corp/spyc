@@ -1222,6 +1222,7 @@ which-key popup lists the options:
 - **`Space p`** — jump to `PROJECT_HOME`.
 - **`Space P`** — set `PROJECT_HOME` to the current directory.
 - **`Space n`** — open a directory as a project, and go to it.
+- **`Space x`** — close the project in view.
 - **`Space Space`** — go to the project you were in last.
 - **`Space 1`..`Space 9`** — go to open project N.
 - **`Space ]` / `Space [`** — go to the next / previous project, wrapping.
@@ -1238,20 +1239,27 @@ jump) is gone in favour of `Space p`; `gw` (jump to the worktree root) stays.
 
 One spyc holds several projects, each with its own columns, pane tabs, config
 and `PROJECT_HOME`. **`Space n`** asks for a directory (pre-filled with the
-focused column's worktree root, `Tab` completes, `~` expands) and opens it as
-a project: its `.spycrc.toml` is read as a launch there would read it, and its
+focused column's worktree root; `Tab` completes, `~` and `$VAR` expand, and a
+relative path is read against the column) and opens it as a project: its `.spycrc.toml` is read as a launch there would read it, and its
 `[pane] tabs` start the same way, a repo's own list asking first. A directory
 an open project is anchored at is that project's, so `Space n` onto it goes
-there instead. **`Space Space`** goes back to the project you were in last,
+there instead, and says so when it is the one you're in. **`Space x`** closes
+the project in view and takes you to the one you were in last, else a
+neighbour. While a tab or an editor in it still runs it asks first, since
+closing ends them; its agents' scope claims go, and an agent waiting on one is
+answered. The only project open isn't closed this way (`:q` quits), and
+from inside an editor it says to quit the editor first, since closing would
+end it.
+**`Space Space`** goes back to the project you were in last,
 **`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
 through them in the order they were opened, wrapping. With one project open
 these do nothing at all.
 
 ## Project home & session name
 
-Each spyc run has a **`PROJECT_HOME`** (a sticky project root) and a
-**session name** (a spice-themed label like `SAFFRON_CUMIN`). Both are
-shown on the top bar and persist across `spyc -r`.
+Each project has a **`PROJECT_HOME`** (a sticky project root), and each
+spyc run a **session name** (a spice-themed label like `SAFFRON_CUMIN`).
+Both are shown on the top bar and persist across `spyc -r`.
 
 - **Auto-detect** — `PROJECT_HOME` is set to the launch directory
   automatically when that directory contains a `.git` entry. No
