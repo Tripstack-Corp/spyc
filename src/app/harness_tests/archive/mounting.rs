@@ -744,3 +744,91 @@ fn a_request_while_a_write_is_reread_joins_the_reread() {
         assert_eq!(app.state.cur().listing.dir, archive);
     });
 }
+
+// ── a clean-up takes only the tree it was handed ─────────────────────────────
+
+/// Read `archive` and land the read, handing back what the landing asked for
+/// (a clean-up of what it evicted) without running it.
+fn land_read(app: &mut App, archive: &Path) -> Vec<Effect> {
+    for effect in app.request_mount(archive, false) {
+        if let Effect::Archive(op) = effect {
+            app.file_archive_outcome(run_archive_op(op));
+        }
+    }
+    let (_, follow_on) = app.apply_archive_outcomes();
+    follow_on
+}
+
+fn cleans(effects: &[Effect]) -> bool {
+    effects
+        .iter()
+        .any(|e| matches!(e, Effect::Archive(ArchiveOp::Clean { .. })))
+}
+
+/// Unmounting hands the staging tree to a clean-up on its own thread, and
+/// entering the archive again at once reads into a tree at the same path. The
+/// clean-up takes only the tree it was handed: what the new read extracted
+/// survives it.
+#[test]
+#[ignore = "red: the clean-up after an unmount deletes what a read right after it extracts"]
+fn a_read_right_after_an_unmount_keeps_what_it_extracts() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir.clone());
+        assert!(land_read(&mut app, &archive).is_empty());
+        app.state.cur_mut().listing = crate::fs::listing::Listing::read(&dir).unwrap();
+        let clean = app.unmount_archive(&archive);
+        assert!(cleans(&clean), "{clean:?}");
+        assert!(land_read(&mut app, &archive).is_empty());
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        assert!(staged.exists(), "the new read extracted nothing");
+        settle(&mut app, clean);
+        assert!(staged.exists(), "the clean-up took the new read's files");
+    });
+}
+
+/// The same for the clean-up of a mount evicted to make room: reading the
+/// evicted archive again at once keeps what that read extracts.
+#[test]
+#[ignore = "red: the clean-up after an eviction deletes what a read right after it extracts"]
+fn a_read_right_after_an_eviction_keeps_what_it_extracts() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let first = dir.join("first.tar.gz");
+        build_tar_gz(&first);
+        let mut app = App::test_app(dir.clone());
+        assert!(land_read(&mut app, &first).is_empty());
+        let mut clean = Vec::new();
+        for i in 0..crate::archive::mount::MAX_MOUNTS {
+            let zip = dir.join(format!("z{i}.zip"));
+            build_zip(&zip);
+            clean.extend(land_read(&mut app, &zip));
+        }
+        assert!(
+            !app.state.mounts.contains(&first),
+            "the first archive was never evicted"
+        );
+        assert!(cleans(&clean), "{clean:?}");
+        let _ = land_read(&mut app, &first);
+        let staged = app
+            .state
+            .mounts
+            .get(&first)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        assert!(staged.exists(), "the new read extracted nothing");
+        settle(&mut app, clean);
+        assert!(staged.exists(), "the clean-up took the new read's files");
+    });
+}
