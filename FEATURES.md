@@ -1348,8 +1348,8 @@ unambiguous:
   in CONFIGURATION.md → "Action names"; one with a parameter takes it as
   `=value`, e.g. `map <F8> harpoon_jump =2`). `unmap KEY` makes a key do
   nothing, and a later `map` binds it again. A key is one key: a char, a
-  Ctrl-combo (`^P`) or a named key (`<F2>`); a multi-key chord binds from
-  `init.lua` with `spyc.map`. Beyond the
+  Ctrl-combo (`^P`) or a named key (`<F2>`), here and in `init.lua`'s
+  `spyc.map` alike. Beyond the
   built-in actions, a key can run a `unix` shell template
   (`map ^P unix ps aux`), a `jump`/`patternpick`, or a **`:` command**
   (`map A command graveyard`), or a **Lua script**
