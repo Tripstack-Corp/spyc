@@ -657,7 +657,6 @@ fn starts_a_write(effects: &[Effect]) -> bool {
 /// unmounting it is: the write re-reads the outer from an emptied tree,
 /// deleting the staged copy the inner one reads from.
 #[test]
-#[ignore = "red: the outer archive is written while the inner one is mounted"]
 fn writing_the_outer_archive_is_refused_while_the_inner_is_mounted() {
     on_the_inner_archive(|app, archive| {
         let fx = app.apply(&Action::EnterOrDisplay).unwrap();
@@ -681,7 +680,6 @@ fn writing_the_outer_archive_is_refused_while_the_inner_is_mounted() {
 /// refused: the write re-reads the outer from an emptied tree once it lands,
 /// deleting the staged copy the inner one would read from.
 #[test]
-#[ignore = "red: the inner archive is mounted while the outer one is being written"]
 fn entering_the_inner_archive_while_the_outer_is_written_is_refused() {
     on_the_inner_archive(|app, archive| {
         mark_outer_readme_for_removal(app, archive);

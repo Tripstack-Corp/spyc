@@ -1157,7 +1157,11 @@ joins that read instead and is served once it lands; a read that ends without
 a mount lets its joiners go. **A write in flight owns its archive**
 (`app/archive/writes.rs`): it lands by clearing the journal and re-reading
 from an emptied tree, so a second write, a delete, rename or put into that
-archive, a discard and an unmount are refused until it has landed. **A
+archive, a discard, an unmount and a mount of an archive inside it are refused
+until it has landed, and an archive with one mounted inside it is not written.
+An edit saved to an extracted copy can't be refused, so one saved after the
+write was planned is held aside from the re-read and put back, pending, once
+the archive is mounted again. **A
 clean-up takes only the tree it was handed**: it runs on its own thread, so
 the unmount or eviction that asks for it first moves the tree aside, and a
 read of the same archive starting at once gets a fresh tree at its path.

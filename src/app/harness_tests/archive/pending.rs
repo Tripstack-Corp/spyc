@@ -889,7 +889,6 @@ fn a_write_that_has_landed_lets_the_next_one_start() {
 /// so the edited copy is kept aside and put back, pending, once the archive
 /// has been read again.
 #[test]
-#[ignore = "red: an edit saved while the archive is written is lost when the write lands"]
 fn an_edit_saved_while_the_archive_is_written_is_kept_pending() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -939,7 +938,7 @@ fn an_edit_saved_while_the_archive_is_written_is_kept_pending() {
             Some(edited.to_string()),
             "the edit was lost"
         );
-        assert!(app.mount_is_dirty(&archive), "the edit isn't pending");
+        assert!(mount.is_dirty(), "the edit isn't pending");
         assert!(
             app.flash_text().is_some_and(|f| f.contains("README.md")),
             "{:?}",
@@ -990,6 +989,121 @@ fn an_edit_a_streamed_write_carried_is_not_pending_again() {
         assert!(
             !app.mount_is_dirty(&archive),
             "an edit the write carried is pending again"
+        );
+    });
+}
+
+/// A copy spyc extracts itself while the archive is written, a member read in
+/// the meantime, is not an edit: it isn't pending once the write has landed.
+#[test]
+fn a_member_read_while_the_archive_is_written_is_not_pending_after() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("src").join("main.rs")],
+                },
+            )],
+        );
+        let write = app.cmd_archive("write");
+        assert!(writes(&write), "{write:?}");
+        let fx = app.open_member(
+            &archive.join("README.md"),
+            crate::app::archive_ops::MaterializeThen::OpenPager(
+                crate::app::file_ops::PagerDest::Overlay { scroll: None },
+            ),
+        );
+        settle(&mut app, fx);
+        settle(&mut app, write);
+        assert!(app.state.mounts.get(&archive).is_some(), "read again");
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "a member spyc read came back as an edit"
+        );
+    });
+}
+
+/// An edit saved while a write runs comes back pending when the project that
+/// started the write closed before it landed: the mount table is the
+/// process's, and so is the re-read.
+#[test]
+fn an_edit_saved_while_a_closed_projects_write_ran_is_kept_pending() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let elsewhere = dir.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        let fx = app.open_member(
+            &archive.join("README.md"),
+            crate::app::archive_ops::MaterializeThen::OpenPager(
+                crate::app::file_ops::PagerDest::Overlay { scroll: None },
+            ),
+        );
+        settle(&mut app, fx);
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("src").join("main.rs")],
+                },
+            )],
+        );
+        let write = app.cmd_archive("write");
+        let edited = "# edited while the archive was written\n";
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        std::fs::write(&staged, edited).unwrap();
+        let x = app.state.active;
+        let y = app.add_test_project(&elsewhere);
+        app.make_active(y);
+        app.remove_test_project(x);
+        for effect in write {
+            if let Effect::Archive(op) = effect {
+                app.runtime
+                    .archive_results
+                    .lock()
+                    .unwrap()
+                    .push((x, run_archive_op(op)));
+            }
+        }
+        // The re-read the landing starts runs on a worker: done once the mount
+        // is of the written archive, which no longer holds `src/main.rs`.
+        let reread = |app: &App| {
+            app.state
+                .mounts
+                .get(&archive)
+                .is_some_and(|m| m.index.entries.iter().all(|e| e.inner != "src/main.rs"))
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !reread(&app) {
+            assert!(std::time::Instant::now() < deadline, "never read again");
+            app.apply_archive_outcomes();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let mount = app.state.mounts.get(&archive).unwrap();
+        assert!(mount.is_dirty(), "the edit isn't pending");
+        assert_eq!(
+            std::fs::read_to_string(mount.staging_root.join("README.md")).ok(),
+            Some(edited.to_string()),
+            "the edit was lost"
         );
     });
 }

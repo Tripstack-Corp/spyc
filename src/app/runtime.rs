@@ -229,7 +229,12 @@ pub(super) struct Runtime {
         std::collections::HashMap<std::path::PathBuf, Vec<super::archive::Joined>>,
     /// Archives being written (`App::start_write`): a write in flight owns its
     /// archive.
-    pub(super) archive_writes: std::collections::HashSet<std::path::PathBuf>,
+    pub(super) archive_writes:
+        std::collections::HashMap<std::path::PathBuf, crate::archive::journal::StagedStats>,
+    /// Edits saved to an archive's extracted copies while it was written,
+    /// held aside from its re-read until it is mounted again
+    /// (`App::restore_late_edits`).
+    pub(super) archive_held: std::collections::HashMap<std::path::PathBuf, super::archive::Held>,
     /// Landing slot for off-thread file operations, each tagged with the
     /// project that started it (`App::spawn_file_op`).
     pub(super) file_results:
@@ -335,7 +340,8 @@ impl Runtime {
             archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             archive_mount_then: None,
             archive_reads: std::collections::HashMap::new(),
-            archive_writes: std::collections::HashSet::new(),
+            archive_writes: std::collections::HashMap::new(),
+            archive_held: std::collections::HashMap::new(),
             file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),

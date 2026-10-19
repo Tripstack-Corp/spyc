@@ -34,25 +34,7 @@ impl App {
                 .flash_error(format!("archive: a column in {label} is inside it"));
             return Vec::new();
         }
-        // Dropping this one would delete the staged copy another mount is reading
-        // from, leaving that one pointing at nothing.
-        let staging = self
-            .state
-            .mounts
-            .get(archive)
-            .map(|m| m.staging_root.clone());
-        let child = staging.and_then(|staging| {
-            self.state
-                .mounts
-                .iter()
-                .find(|m| m.depth > 0 && m.archive() != archive && m.source().starts_with(&staging))
-                .map(|m| m.archive().to_path_buf())
-        });
-        if let Some(child) = child {
-            self.state.flash_error(format!(
-                "archive: unmount {} first — it lives inside this one",
-                display_name(&child)
-            ));
+        if self.refuse_mounted_inside(archive) {
             return Vec::new();
         }
         if let Some(staging) = self.state.mounts.remove(archive) {
@@ -63,6 +45,34 @@ impl App {
             self.state.flash_error("archive: not mounted");
             Vec::new()
         }
+    }
+
+    /// Whether an archive is mounted inside `archive`, saying which when one is:
+    /// it reads from a staged copy in `archive`'s tree, which unmounting
+    /// `archive`, or the re-read a write of it ends with, deletes.
+    fn refuse_mounted_inside(&mut self, archive: &Path) -> bool {
+        let Some(staging) = self
+            .state
+            .mounts
+            .get(archive)
+            .map(|m| m.staging_root.clone())
+        else {
+            return false;
+        };
+        let Some(child) = self
+            .state
+            .mounts
+            .iter()
+            .find(|m| m.depth > 0 && m.archive() != archive && m.source().starts_with(&staging))
+            .map(|m| m.archive().to_path_buf())
+        else {
+            return false;
+        };
+        self.state.flash_error(format!(
+            "archive: unmount {} first — it lives inside this one",
+            display_name(&child)
+        ));
+        true
     }
 
     /// Throw away an archive's pending changes: the journal *and* the staged copies
@@ -357,7 +367,7 @@ impl App {
     /// materialize time is what notices an edit made by an editor or an agent.
     fn write_effect(&mut self, archive: &Path) -> Option<Effect> {
         const MB: u64 = 1024 * 1024;
-        if self.refuse_while_written(archive) {
+        if self.refuse_while_written(archive) || self.refuse_mounted_inside(archive) {
             return None;
         }
         let snapshot_limit = self
@@ -377,7 +387,7 @@ impl App {
             } else if let Some(why) = mount.capability.reason() {
                 Some(Err(format!("archive is read-only: {why}")))
             } else {
-                Some(Ok(ArchiveOp::Write {
+                let op = ArchiveOp::Write {
                     steps: crate::archive::plan_repack(
                         &mount.index,
                         &mount.journal,
@@ -397,7 +407,8 @@ impl App {
                             .extract_budget_mb
                             .saturating_mul(MB),
                     },
-                }))
+                };
+                Some(Ok((op, now)))
             }
         };
         match prepared {
@@ -409,8 +420,8 @@ impl App {
                 self.state.flash_error(why);
                 None
             }
-            Some(Ok(op)) => {
-                self.start_write(archive);
+            Some(Ok((op, planned))) => {
+                self.start_write(archive, planned);
                 self.state
                     .flash_progress(format!("writing {}…", display_name(archive)));
                 Some(Effect::Archive(op))
