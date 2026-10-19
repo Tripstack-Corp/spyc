@@ -659,6 +659,56 @@ mod tests {
         assert_eq!(route_key(snap, key('g')), InputSink::Prompt);
     }
 
+    // A prompt opened over a full-screen editor or a `D` pager is drawn on the
+    // pane's tab bar (`displaced_prompt_row`), so it takes the keys: answering
+    // it must not type into the editor or move the pager.
+    #[test]
+    #[ignore = "red: the editor keeps the keys from a prompt open over it"]
+    fn prompt_wins_over_the_editor_overlay() {
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            focus: Focus::Overlay,
+            ..idle()
+        };
+        for c in ['y', 'n'] {
+            assert_eq!(route_key(snap, key(c)), InputSink::Prompt);
+        }
+        assert_eq!(
+            route_key(snap, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            InputSink::Prompt
+        );
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::Prompt);
+    }
+
+    #[test]
+    #[ignore = "red: a D pager keeps the keys from a prompt open over it"]
+    fn prompt_wins_over_a_top_pane_pager() {
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            focus: Focus::Pager(Mount::TopPane),
+            pager_mount: Some(Mount::TopPane),
+            ..idle()
+        };
+        for c in ['y', 'q', 'j'] {
+            assert_eq!(route_key(snap, key(c)), InputSink::Prompt);
+        }
+        assert_eq!(route_input(snap, InputKind::Paste), InputSink::Prompt);
+    }
+
+    // The modal pager is drawn over the prompt row, so a prompt raised behind
+    // it (a Lua script's "keep waiting?") waits there, and the pager keeps
+    // its keys until it closes.
+    #[test]
+    fn a_modal_pager_keeps_its_keys_over_a_prompt() {
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            focus: Focus::Pager(Mount::Overlay),
+            pager_mount: Some(Mount::Overlay),
+            ..idle()
+        };
+        assert_eq!(route_key(snap, key('q')), InputSink::PagerKey);
+    }
+
     // A `Mount::Overlay` pager eats keys REGARDLESS of pane focus — both a
     // normal key and a meta chord go to the pager even with `focus == Pane`.
     // The modal Overlay pager is routed via `pager_mount` (focus-independent),
