@@ -558,63 +558,102 @@ fn driving_another_project_leaves_the_users_view_alone() {
     });
 }
 
-/// An agent whose project has closed reads nothing. Its project's context
-/// file is gone, and answering from wherever spyc's process cwd is would hand
-/// it another project's tree.
+impl Projects {
+    /// Bind a connection by `meta`, run `close` in the loop once it is bound,
+    /// then have the agent search for `in_`. The server starts with the
+    /// context file `default`, which a connection bound to nothing reads.
+    fn search_across_a_close(
+        &mut self,
+        default: PathBuf,
+        meta: Value,
+        close: impl FnOnce(&mut App),
+    ) -> String {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut conn = Conn::open(default, tx);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let app = &mut self.app;
+        let mut ctx = RunCtx::for_test();
+        let mut close = Some(close);
+        let reply = std::thread::scope(|s| {
+            let client = s.spawn(move || {
+                conn.initialize_with(meta);
+                ready_tx.send(()).unwrap();
+                go_rx.recv().unwrap();
+                conn.tool("search_paths", json!({"query": "in_"}))
+            });
+            while !client.is_finished() {
+                if let Ok(req) = rx.recv_timeout(Duration::from_millis(5)) {
+                    ctx.mcp_pending.push(req);
+                    app.drain_mcp_pending(&mut ctx);
+                }
+                if ready_rx.try_recv().is_ok()
+                    && let Some(close) = close.take()
+                {
+                    close(app);
+                    go_tx.send(()).unwrap();
+                }
+            }
+            client.join().expect("the client finishes")
+        });
+        reply.to_string()
+    }
+}
+
+/// An agent whose project has closed reads nothing. Its tab went with the
+/// project, and answering from wherever spyc's process cwd is would hand it
+/// another project's tree.
 #[test]
 fn a_read_from_a_closed_projects_agent_answers_closed() {
     with_projects(|p| {
-        let b_file = p.in_b(|app| app.view.project().context_path.clone());
-        let b_pane = p.b_pane.clone();
-        let reply = p.wire(move |c| {
-            c.initialize(Some(&b_pane));
-            // What closing `b` does to its file.
-            std::fs::remove_file(&b_file).unwrap();
-            c.tool("search_paths", json!({"query": "in_"}))
-        });
-        let text = reply.to_string();
+        let b = p.b;
+        let default = p.app.view.project().context_path.clone();
+        let meta = json!({"spyc/paneId": p.b_pane});
+        let text = p.search_across_a_close(default, meta, |app| app.remove_test_project(b));
         assert!(text.contains("has closed"), "{text}");
+        assert!(!text.contains("in_a.rs"), "{text}");
     });
 }
 
 /// A connection bound by its cwd, as a session codex's shared daemon runs is,
 /// belongs to no tab, so it outlives a project closing. It binds again from
 /// its cwd, as it would at `initialize`: to the project holding it, else the
-/// active one, never to nothing.
+/// active one, never to nothing. The server's own file is a third project's,
+/// so reading that instead is told apart.
 #[test]
 fn a_connection_bound_by_cwd_binds_again_when_its_project_closes() {
     with_projects(|p| {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let mut conn = Conn::open(p.app.view.project().context_path.clone(), tx);
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
-        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
-        let b_home = p.b_home.clone();
+        let c_home = p.base.join("c");
+        std::fs::create_dir(&c_home).unwrap();
+        std::fs::write(c_home.join("in_c.rs"), "").unwrap();
+        let c = p.app.add_test_project(&c_home);
+        let default = p
+            .app
+            .as_project(c, |app| app.view.project().context_path.clone());
         let b = p.b;
-        let app = &mut p.app;
-        let mut ctx = RunCtx::for_test();
-        let reply = std::thread::scope(|s| {
-            let client = s.spawn(move || {
-                conn.initialize_with(json!({"spyc/cwd": b_home}));
-                ready_tx.send(()).unwrap();
-                go_rx.recv().unwrap();
-                conn.tool("search_paths", json!({"query": "in_"}))
-            });
-            let mut closed = false;
-            while !client.is_finished() {
-                if let Ok(req) = rx.recv_timeout(Duration::from_millis(5)) {
-                    ctx.mcp_pending.push(req);
-                    app.drain_mcp_pending(&mut ctx);
-                }
-                if !closed && ready_rx.try_recv().is_ok() {
-                    app.remove_test_project(b);
-                    closed = true;
-                    go_tx.send(()).unwrap();
-                }
-            }
-            client.join().expect("the client finishes")
-        });
-        let text = reply.to_string();
+        let meta = json!({"spyc/cwd": p.b_home});
+        let text = p.search_across_a_close(default, meta, |app| app.remove_test_project(b));
         assert!(text.contains("in_a.rs"), "{text}");
+        assert!(!text.contains("in_c.rs"), "{text}");
+    });
+}
+
+/// A connection that named a tab that isn't live, and no cwd, is bound to
+/// the project the user was in. It has no tab to lose with that project, so
+/// when the project closes it binds again the same way, to the project the
+/// user is in now.
+#[test]
+#[ignore = "red: a connection bound to the user's project is told it closed, forever"]
+fn a_connection_bound_to_the_users_project_binds_again_when_it_closes() {
+    with_projects(|p| {
+        let (a, b) = (p.app.state.active, p.b);
+        let default = p.app.view.project().context_path.clone();
+        let meta = json!({"spyc/paneId": "no-such-pane"});
+        let text = p.search_across_a_close(default, meta, move |app| {
+            app.make_active(b);
+            app.remove_test_project(a);
+        });
+        assert!(text.contains("in_b.rs"), "{text}");
     });
 }
 

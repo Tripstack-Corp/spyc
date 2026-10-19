@@ -163,3 +163,90 @@ fn rehoming_onto_a_free_directory_works() {
         assert_eq!(home(app), Some(sub));
     });
 }
+
+/// The project an MCP connection that names only `cwd` binds to.
+fn bound_by_cwd(app: &mut App, cwd: &std::path::Path) -> state::ProjectId {
+    let reply = app.execute_mcp_command(crate::mcp_cmd::McpCommand::Bind {
+        pane_id: None,
+        cwd: Some(cwd.to_path_buf()),
+    });
+    let crate::mcp_cmd::McpResponse::Ok { message } = reply else {
+        panic!("{reply:?}");
+    };
+    let bound: serde_json::Value = serde_json::from_str(&message).unwrap();
+    bound["project"].as_str().unwrap().parse().unwrap()
+}
+
+/// A start dir is the root an agent's cwd binds to its project by, so one
+/// project's is refused as another's, even for a project with a home: two
+/// projects there would bind an agent working in X's start dir to Y.
+#[test]
+#[ignore = "red: a project with a home moves its start dir onto another's"]
+fn moving_a_start_dir_onto_another_projects_start_dir_refuses() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = app.state.active;
+        app.make_active(t.y);
+        let _ = app
+            .state
+            .dispatch_command(&format!("startdir {}", t.x_home.display()));
+        assert_eq!(
+            app.state.active_project().start_dir,
+            t.y_home,
+            ":startdir took X's start dir"
+        );
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.contains("project xproj's start dir")),
+            "the refusal names X's start dir: {:?}",
+            app.flash_text()
+        );
+        assert_eq!(
+            bound_by_cwd(app, &t.x_home),
+            x,
+            "an agent in X's start dir bound to Y"
+        );
+    });
+}
+
+/// A project with no home is anchored at its start dir, and a refusal calls
+/// that directory what it is rather than the project's home.
+#[test]
+#[ignore = "red: the refusal calls a homeless project's start dir its home"]
+fn a_refusal_names_a_homeless_projects_start_dir_as_such() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let _ = app.state.dispatch_command("project clear");
+        app.make_active(t.y);
+        let _ = app
+            .state
+            .dispatch_command(&format!("project {}", t.x_home.display()));
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(flash.contains("project xproj's start dir"), "{flash}");
+        assert!(!flash.contains("'s home"), "{flash}");
+    });
+}
+
+/// `:project clear` falls back to the project's start dir, so a refusal
+/// because that is taken says so: the directory it names is not the home
+/// being cleared.
+#[test]
+#[ignore = "red: a refused :project clear never says it would fall back"]
+fn a_refused_clear_says_where_it_would_fall_back() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = app.state.active;
+        let _ = app
+            .state
+            .dispatch_command(&format!("project {}", t.x_home.join("sub").display()));
+        app.make_active(t.y);
+        let _ = app
+            .state
+            .dispatch_command(&format!("project {}", t.x_home.display()));
+        app.make_active(x);
+        let _ = app.state.dispatch_command("project clear");
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(flash.contains("fall back"), "{flash}");
+        assert!(flash.contains(&t.x_home.display().to_string()), "{flash}");
+    });
+}

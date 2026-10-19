@@ -507,6 +507,218 @@ fn a_member_extracted_after_its_project_closed_is_not_an_edit() {
     });
 }
 
+/// Run the one archive op among `effects` and hand back its outcome unfiled,
+/// to land later as the project that started it.
+fn run_unfiled(effects: Vec<Effect>) -> ArchiveOutcome {
+    let op = effects
+        .into_iter()
+        .find_map(|e| match e {
+            Effect::Archive(op) => Some(op),
+            _ => None,
+        })
+        .expect("the handler produced an archive op");
+    run_archive_op(op)
+}
+
+/// File `outcome` as project `origin`'s, open or closed.
+fn file_as(app: &App, origin: state::ProjectId, outcome: ArchiveOutcome) {
+    app.runtime
+        .archive_results
+        .lock()
+        .unwrap()
+        .push((origin, outcome));
+}
+
+/// X reads an archive while Y mounts the same one and records a change to
+/// it. X's read lands after the change, from X still open or closed. Y's
+/// mount is the live one: replacing it throws its journal away, and the
+/// change with it.
+fn a_read_from_x_never_replaces_ys_live_mount(close_x: bool) {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        let xs = run_unfiled(app.request_mount(&zip, false));
+        app.make_active(t.y);
+        kick_mount(app, &zip);
+        settle_archive(app);
+        app.state
+            .mounts
+            .get_mut(&zip)
+            .unwrap()
+            .journal
+            .delete("README.md");
+        assert_eq!(app.dirty_mounts(), std::slice::from_ref(&zip));
+        if close_x {
+            app.remove_test_project(t.x);
+        }
+        file_as(app, t.x, xs);
+        settle_archive(app);
+        assert_eq!(
+            app.dirty_mounts(),
+            std::slice::from_ref(&zip),
+            "Y's unwritten change was thrown away"
+        );
+    });
+}
+
+#[test]
+#[ignore = "red: a closed project's read replaces a live mount of the same archive"]
+fn a_closed_projects_read_never_replaces_a_live_mount() {
+    a_read_from_x_never_replaces_ys_live_mount(true);
+}
+
+#[test]
+#[ignore = "red: a read landing in X replaces Y's live mount of the same archive"]
+fn a_read_landing_in_x_never_replaces_ys_live_mount() {
+    a_read_from_x_never_replaces_ys_live_mount(false);
+}
+
+/// `:archive cancel` stops the read the user started in Y. A re-read that
+/// X's write starts, X open or closed, runs where the user can't see it and
+/// never takes the cancel from the read in front of them.
+fn archive_cancel_stops_ys_read_not_xs(close_x: bool) {
+    use std::sync::atomic::Ordering;
+    with_two(|t| {
+        let app = &mut t.app;
+        let (xzip, yzip) = (t.x_home.join("pkg.zip"), t.y_home.join("pkg.zip"));
+        build_zip(&xzip);
+        build_zip(&yzip);
+        app.make_active(t.y);
+        let ys = app.request_mount(&yzip, false);
+        let Some(Effect::Archive(crate::app::archive_ops::ArchiveOp::Mount { cancel, .. })) =
+            ys.first()
+        else {
+            panic!("expected Y's mount op: {ys:?}");
+        };
+        let ys_cancel = std::sync::Arc::clone(cancel);
+        if close_x {
+            app.remove_test_project(t.x);
+        }
+        file_as(app, t.x, written(&xzip));
+        app.apply_archive_outcomes();
+        app.cancel_archive_mount();
+        let stopped = ys_cancel.load(Ordering::Relaxed);
+        settle_archive(app);
+        assert!(stopped, "the cancel went to X's re-read, not Y's read");
+    });
+}
+
+#[test]
+#[ignore = "red: a closed project's re-read takes :archive cancel from the user's read"]
+fn archive_cancel_stops_the_users_read_not_a_closed_projects() {
+    archive_cancel_stops_ys_read_not_xs(true);
+}
+
+#[test]
+#[ignore = "red: X's re-read takes :archive cancel from the read in Y"]
+fn archive_cancel_stops_the_users_read_not_xs() {
+    archive_cancel_stops_ys_read_not_xs(false);
+}
+
+/// Y's "reading…" announces Y's read, still running when X's work lands, so
+/// X's landing leaves it, X open or closed. X's own in-flight message going
+/// when X's work lands is `an_archive_entered_from_x_lands_in_xs_column`.
+#[test]
+#[ignore = "red: X's landing clears the in-flight message of Y's read"]
+fn ys_reading_flash_outlives_xs_landings() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.y_home.join("pkg.zip");
+        build_zip(&zip);
+        app.make_active(t.y);
+        let _held = app.request_mount(&zip, false);
+        let reading = |app: &App| app.flash_text().is_some_and(|f| f.starts_with("reading"));
+        assert!(reading(app), "{:?}", app.flash_text());
+        file_as(app, t.x, ArchiveOutcome::Cleaned);
+        app.apply_archive_outcomes();
+        assert!(
+            reading(app),
+            "X's landing cleared it: {:?}",
+            app.flash_text()
+        );
+        app.remove_test_project(t.x);
+        file_as(app, t.x, ArchiveOutcome::Cleaned);
+        app.apply_archive_outcomes();
+        assert!(
+            reading(app),
+            "the closed project's landing cleared it: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// What a closed project's write says is named for it, as a landing from a
+/// project out of view is: the user is in Y, and Y wrote nothing.
+#[test]
+#[ignore = "red: a closed project's write lands unnamed"]
+fn a_closed_projects_write_is_named_for_it() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        app.make_active(t.y);
+        app.remove_test_project(t.x);
+        file_as(app, t.x, written(&zip));
+        settle_archive(app);
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.starts_with("xproj: wrote pkg.zip")),
+            "{:?}",
+            app.flash_text()
+        );
+        file_as(
+            app,
+            t.x,
+            ArchiveOutcome::WriteFailed {
+                archive: zip,
+                error: "disk full".into(),
+            },
+        );
+        settle_archive(app);
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.starts_with("xproj: pkg.zip NOT written")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// Work held back for a member a closed project extracted is dropped, and
+/// said so: the yank or copy-out the user asked for never happened.
+#[test]
+#[ignore = "red: work held back for a closed project's member is dropped silently"]
+fn work_held_back_for_a_closed_project_says_it_was_dropped() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let real = t.x_home.join("README.md");
+        std::fs::write(&real, "# pkg\n").unwrap();
+        app.make_active(t.y);
+        app.remove_test_project(t.x);
+        let yank = Effect::CopyToClipboard {
+            text: real.display().to_string(),
+            ok: crate::app::effect::ClipMsg::SinglePath,
+        };
+        file_as(
+            app,
+            t.x,
+            ArchiveOutcome::Materialized {
+                real,
+                then: MaterializeThen::Retry(Box::new(yank)),
+            },
+        );
+        let effects = settle_archive(app);
+        assert!(effects.is_empty(), "the yank ran in Y: {effects:?}");
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.starts_with("xproj:") && f.contains("dropped")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
 /// A mount big enough to ask first, landing after the user moved to Y. The
 /// question is about X's archive, so it never opens over Y.
 #[test]
