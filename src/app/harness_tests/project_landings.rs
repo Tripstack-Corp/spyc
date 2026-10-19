@@ -660,6 +660,85 @@ fn a_streamed_read_over_a_changed_mount_keeps_only_the_change() {
     });
 }
 
+fn starts_a_read(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| matches!(e, Effect::Archive(_)))
+}
+
+/// Y asks for an archive X is still reading. Y joins X's read rather than
+/// reading it again, and once it lands both columns are in the archive, X's
+/// in the background; or only Y's, when X closed first.
+fn y_joins_xs_read(close_x: bool) {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        let xs = app.request_mount(&zip, false);
+        app.make_active(t.y);
+        let ys = app.request_mount(&zip, false);
+        assert!(!starts_a_read(&ys), "Y read it again: {ys:?}");
+        if close_x {
+            app.remove_test_project(t.x);
+        }
+        file_as(app, t.x, run_unfiled(xs));
+        settle_archive(app);
+        assert_eq!(app.state.cur().listing.dir, zip, "Y's column is not in it");
+        if !close_x {
+            assert_eq!(
+                app.as_project(t.x, |app| app.state.cur().listing.dir.clone()),
+                zip,
+                "X's column is not in it"
+            );
+        }
+        assert!(
+            !app.flash_text().is_some_and(|f| f.starts_with("reading")),
+            "Y's in-flight message outlived the read: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+#[test]
+#[ignore = "red: Y reads an archive X is still reading a second time"]
+fn a_read_y_asks_for_while_xs_runs_joins_it() {
+    y_joins_xs_read(false);
+}
+
+#[test]
+#[ignore = "red: Y reads an archive a closed project is still reading a second time"]
+fn a_read_y_asks_for_while_a_closed_projects_runs_joins_it() {
+    y_joins_xs_read(true);
+}
+
+/// What Y holds back for an archive X is reading, a `navigate_to` into it,
+/// joins X's read and runs in Y once it lands.
+#[test]
+#[ignore = "red: work Y holds back for an archive X is reading starts a second read"]
+fn work_y_holds_back_for_xs_read_runs_when_it_lands() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        let xs = app.request_mount(&zip, false);
+        app.make_active(t.y);
+        let into = Effect::ChangeDir {
+            path: zip.join("src"),
+            focus: None,
+            on_ok: None,
+            err_prefix: "cd",
+        };
+        let ys = app.request_mount_then(&zip, false, Some(Box::new(into)));
+        assert!(!starts_a_read(&ys), "Y read it again: {ys:?}");
+        file_as(app, t.x, run_unfiled(xs));
+        let effects = settle_archive(app);
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::ChangeDir { path, .. } if *path == zip.join("src"))),
+            "Y's navigation never ran: {effects:?}"
+        );
+    });
+}
+
 /// `:archive cancel` stops the read the user started in Y. A re-read that
 /// X's write starts, X open or closed, runs where the user can't see it and
 /// never takes the cancel from the read in front of them.

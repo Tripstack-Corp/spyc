@@ -611,3 +611,140 @@ fn copying_a_directory_into_an_archive_is_refused_rather_than_flattened() {
         assert_eq!(member_names(&archive), before);
     });
 }
+
+// ── One read of an archive at a time ─────────────────────────────────────────
+
+fn starts_a_read(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| matches!(e, Effect::Archive(_)))
+}
+
+/// `Enter` on an archive whose read is still running, a second time or from
+/// the other column, starts no second read: it joins the one running, and the
+/// column is in the archive once that lands.
+#[test]
+#[ignore = "red: a second request for an archive being read starts a second read"]
+fn entering_an_archive_being_read_joins_the_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        let first = app.request_mount(&archive, false);
+        assert!(starts_a_read(&first), "{first:?}");
+        let second = app.request_mount(&archive, false);
+        assert!(!starts_a_read(&second), "a second read started: {second:?}");
+        settle(&mut app, first);
+        assert_eq!(app.state.cur().listing.dir, archive);
+        assert!(
+            !app.flash_text().is_some_and(|f| f.starts_with("reading")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// An archive inside another is read from its staged copy, and only once, the
+/// same way.
+#[test]
+#[ignore = "red: a second request for a nested archive being read starts a second read"]
+fn entering_a_nested_archive_being_read_joins_the_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let staged = dir.join("inner.zip");
+        build_zip(&staged);
+        let at = dir.join("outer.zip").join("inner.zip");
+        let mut app = App::test_app(dir);
+        let first = app.request_nested_mount(&at, &staged, None);
+        assert!(starts_a_read(&first), "{first:?}");
+        let second = app.request_nested_mount(&at, &staged, None);
+        assert!(!starts_a_read(&second), "a second read started: {second:?}");
+    });
+}
+
+/// A compressed tar is extracted as it is read, into a staging tree every
+/// read of it shares. A second read, landing after an edit the user saved to
+/// a member, would rewrite the member with the archive's bytes while the edit
+/// still reads as pending, and `:archive write` would pack the old bytes.
+#[test]
+#[ignore = "red: a second read of a compressed tar rewrites an edit saved in between"]
+fn an_edit_saved_while_a_compressed_tar_is_read_twice_survives() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        let first = app.request_mount(&archive, false);
+        let second = app.request_mount(&archive, false);
+        settle(&mut app, first);
+        assert_eq!(app.state.cur().listing.dir, archive);
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        std::fs::write(&staged, "# edited, and longer\n").unwrap();
+        app.scan_archive_edits();
+        settle(&mut app, second);
+        assert_eq!(
+            std::fs::read_to_string(&staged).unwrap(),
+            "# edited, and longer\n",
+            "a second read rewrote the edit"
+        );
+        assert_eq!(app.dirty_mounts(), std::slice::from_ref(&archive));
+    });
+}
+
+/// A read that ends without a mount, here because the bytes are no archive,
+/// is over: the next request for the file reads it again.
+#[test]
+fn a_read_that_ends_without_a_mount_lets_the_next_request_read() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("notes.zip");
+        std::fs::write(&archive, "not a zip\n").unwrap();
+        let mut app = App::test_app(dir);
+        let first = app.request_mount(&archive, false);
+        settle(&mut app, first);
+        assert!(!app.state.mounts.contains(&archive));
+        let again = app.request_mount(&archive, false);
+        assert!(starts_a_read(&again), "{again:?}");
+    });
+}
+
+/// The re-read after a write is a read like any other: a request for the
+/// archive while it runs joins it rather than reading it alongside.
+#[test]
+#[ignore = "red: a request while a write is re-read starts a second read"]
+fn a_request_while_a_write_is_reread_joins_the_reread() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir.clone());
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        // Back out without `chdir`, which would move the process cwd.
+        app.state.cur_mut().listing = crate::fs::listing::Listing::read(&dir).unwrap();
+        app.file_archive_outcome(ArchiveOutcome::Written {
+            archive: archive.clone(),
+            report: crate::archive::write::RepackReport {
+                members: 3,
+                bytes: 1,
+                snapshot: None,
+            },
+        });
+        let (_, reread) = app.apply_archive_outcomes();
+        assert!(starts_a_read(&reread), "{reread:?}");
+        let again = app.request_mount(&archive, false);
+        assert!(!starts_a_read(&again), "a second read started: {again:?}");
+        settle(&mut app, reread);
+        assert_eq!(app.state.cur().listing.dir, archive);
+    });
+}
