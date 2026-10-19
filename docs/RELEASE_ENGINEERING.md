@@ -433,8 +433,9 @@ are the source of truth — Actions *call them* so local and CI never drift.
   `.deb`s (`make deb`), regenerate the apt index (`apt-ftparchive`), sign the
   `Release` file with the signing key, and deploy the archive to GitHub Pages as
   a **workflow artifact** — served at `https://tripstack-corp.github.io/spyc`,
-  so users `apt install spyc` / `apt upgrade`. The job self-skips when the
-  signing key is absent.
+  so users `apt install spyc` / `apt upgrade`. The job fails when the signing
+  key is absent, rather than skipping: a skip is green, and the archive would
+  stay behind without anyone seeing it.
 - **No `gh-pages` branch, by design.** It used to hold the archive, and because
   `git clone` fetches every branch that made a clone of the SOURCE repo 255 MiB
   against 14 MiB of project — every `.deb` ever published, including 22 already
