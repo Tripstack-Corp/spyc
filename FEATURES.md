@@ -698,7 +698,9 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   file, copying a whole directory *in* (only files, since the archive would keep
   the name and lose what's under it), moving across the archive boundary in one
   step, `:grep`, `F` and shell commands are refused with a message rather than
-  half-working. The suffix shows `ro` when the archive can't be written back.
+  half-working, and so are `gP` and `gS`: a project's home and start directory
+  are real directories. The suffix shows `ro` when the archive can't be written
+  back.
 - **An agent can read a member too** — MCP `get_file_content` resolves a path
   inside a mount, reading the container in memory (or your not-yet-written edit,
   if there is one), so asking the agent in the pane about the file you're looking
@@ -1691,10 +1693,15 @@ Claude can query and control the workspace through these tools:
 - **`pick_files`** -- pick files matching glob patterns (additive)
 - **`clear_picks`** -- clear all picks
 - **`create_worktree(branch)`** -- create a git worktree off the
-  focused commander's repo (existing branch, else a new one off the
+  agent's project's repo (existing branch, else a new one off the
   default branch) in a sibling `<repo>.worktrees/<branch>/` dir;
-  returns `{branch, path}`. When the user is browsing outside any repo,
-  the calling agent's own pane decides the repo, then `PROJECT_HOME`.
+  returns `{branch, path}`. The repo is `PROJECT_HOME`'s (a project with
+  no home: its start directory's), else the calling agent's own pane's
+  for a project outside any repo — never the directory the user happens
+  to be browsing, which could be anything on their system.
+  `list_worktrees` lists the same repo, and a relative path given to the
+  other worktree tools resolves against `PROJECT_HOME` (a project with no
+  home: its start directory).
   Lets a skill spin up a worktree to work in a second column while the
   first stays on its branch.
 - **`remove_worktree(path)`** -- tear down a worktree by the path

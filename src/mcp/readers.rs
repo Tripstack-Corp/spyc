@@ -73,6 +73,17 @@ fn allowed_roots(ctx_path: &Path) -> Vec<PathBuf> {
         }
     }
 
+    // And every worktree of the project's repo, where `create_worktree` and
+    // `list_worktrees` act: PROJECT_HOME can be in another repo than `root`.
+    if let Some(home) = ctx["project_home"].as_str().filter(|s| !s.is_empty()) {
+        for wt in crate::git::worktree::list(Path::new(home))
+            .into_iter()
+            .flatten()
+        {
+            push(wt.path);
+        }
+    }
+
     // The focused column's chain. Included, but never the whole set: these
     // move with the user's cursor.
     for key in ["search_root", "project_home", "cwd"] {
@@ -403,7 +414,7 @@ pub(super) fn read_context_or_empty(ctx_path: &Path) -> String {
     })
 }
 
-/// JSON inventory of the focused column's worktrees, for the `list_worktrees`
+/// JSON inventory of the agent's project's worktrees, for the `list_worktrees`
 /// MCP tool: one object per worktree — branch, short HEAD, a dirty-file
 /// breakdown (`repo_status` counts), whether it's the worktree the user is
 /// currently in, `ahead`/`behind`/`merged` against the repo's integration
@@ -415,23 +426,33 @@ pub(super) fn read_context_or_empty(ctx_path: &Path) -> String {
 /// Returns `[]` outside a repo. (Column-`b` flags still need context the
 /// snapshot doesn't yet expose.)
 ///
-/// Anchored on `search_root` (the focused column's worktree root) rather than the
-/// raw `cwd`, matching every other read tool. The two agree whenever the cursor is
-/// in a repo; where they differ, `cwd` is the worse answer — inside an archive
-/// mount it is the container *file's* path, which discovers no repo, so listing
-/// the worktrees of the project came back as an empty set rather than as an error.
-pub(super) fn list_worktrees_json(ctx_path: &Path) -> String {
-    list_worktrees_json_at(&search_root(ctx_path))
+/// The repo is the project's ([`project_anchor`]), else the calling agent's
+/// own `agent_cwd` for a project outside any repo: never the directory the
+/// user is browsing, which could be anything on their system. `is_current`
+/// still marks the worktree the user's focused column is in (`search_root`).
+pub(super) fn list_worktrees_json(ctx_path: &Path, agent_cwd: Option<&Path>) -> String {
+    let project = project_anchor(ctx_path);
+    let worktrees = std::iter::once(project.as_path())
+        .chain(agent_cwd)
+        .find_map(crate::git::worktree::list);
+    worktrees_json(worktrees, &search_root(ctx_path))
 }
 
-/// Root-based core of [`list_worktrees_json`]: the same worktree inventory, but
-/// keyed off an explicit `cwd` (the focused column's worktree root) instead of
-/// re-reading it from a context file. The Lua worker holds the snapshot struct,
-/// not a ctx file, so it calls this directly; the MCP handler resolves `cwd`
-/// from the context file and delegates here.
+/// The worktree inventory of the repo `cwd` is in, marking the one `cwd` is
+/// in as current. The Lua worker holds the snapshot struct, not a ctx file, so
+/// it calls this directly with the focused column's worktree root.
 pub fn list_worktrees_json_at(cwd: &Path) -> String {
-    let cwd_canon = std::fs::canonicalize(cwd).ok();
-    let Some(worktrees) = crate::git::worktree::list(cwd) else {
+    worktrees_json(crate::git::worktree::list(cwd), cwd)
+}
+
+/// [`list_worktrees_json`]'s rows for `worktrees`, with the one `current` is in
+/// marked.
+fn worktrees_json(
+    worktrees: Option<Vec<crate::git::worktree::Worktree>>,
+    current: &Path,
+) -> String {
+    let cwd_canon = std::fs::canonicalize(current).ok();
+    let Some(worktrees) = worktrees else {
         return "[]".to_string();
     };
     // Resolve the integration base once, from the MAIN worktree — always first
@@ -479,17 +500,33 @@ pub fn list_worktrees_json_at(cwd: &Path) -> String {
 }
 
 /// Resolve a worktree path arg for the lease tools: absolute as-is, else
-/// relative to the context cwd (the focused column). The lease tools run on the
-/// socket thread — pure fs on the worktree's admin dir, no `App`.
+/// relative to the agent's project ([`project_anchor`]). The lease tools run on
+/// the socket thread — pure fs on the worktree's admin dir, no `App`.
 fn resolve_worktree_path(ctx_path: &Path, path_arg: &str) -> PathBuf {
     let raw = PathBuf::from(path_arg);
     if raw.is_absolute() {
         raw
     } else {
-        // `search_root`, not the raw cwd: inside an archive that cwd is the
-        // container file's path, and a worktree is never inside one.
-        search_root(ctx_path).join(raw)
+        project_anchor(ctx_path).join(raw)
     }
+}
+
+/// Where the context's project is anchored: its home, else the start dir
+/// (`root`) a project with no home is anchored at. The worktree tools act
+/// there, on the agent's project, never on the directory the user is
+/// browsing. A context file naming neither, which spyc doesn't write, falls
+/// back to `search_root`.
+fn project_anchor(ctx_path: &Path) -> PathBuf {
+    if let Ok(text) = std::fs::read_to_string(ctx_path)
+        && let Ok(v) = serde_json::from_str::<Value>(&text)
+    {
+        for key in ["project_home", "root"] {
+            if let Some(dir) = v[key].as_str().filter(|d| !d.is_empty()) {
+                return PathBuf::from(dir);
+            }
+        }
+    }
+    search_root(ctx_path)
 }
 
 /// `claim_worktree`: lock the worktree at `path_arg` with `reason` (git's
@@ -727,7 +764,8 @@ mod tests {
     /// While a column is inside an archive the context's `cwd` is the container
     /// *file's* path, which discovers no repo — so the worktree inventory came
     /// back as `[]`, reading as "this project has no worktrees" rather than as a
-    /// failure. `search_root` still names the repo, so it is what this anchors on.
+    /// failure. The inventory is the project's, so where the cursor rests,
+    /// container or not, doesn't move it.
     #[test]
     fn the_inventory_survives_a_cwd_inside_an_archive() {
         let tmp = tempfile::tempdir().unwrap();
@@ -745,6 +783,8 @@ mod tests {
         std::fs::write(
             &ctx,
             json!({
+                "root": repo.display().to_string(),
+                "project_home": repo.display().to_string(),
                 "cwd": inside.display().to_string(),
                 "search_root": repo.display().to_string(),
             })
@@ -757,7 +797,7 @@ mod tests {
             "[]",
             "the premise: nothing is discoverable from a path inside a container"
         );
-        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx, None)).unwrap();
         assert_eq!(
             v.as_array().map(Vec::len),
             Some(1),
@@ -800,12 +840,11 @@ mod tests {
     /// `list_worktrees` lists the agent's project's repo, never the repo of
     /// whatever directory the user is browsing.
     #[test]
-    #[ignore = "red: list_worktrees lists the browsed column's repo"]
     fn lists_the_projects_repo_not_the_browsed_columns() {
         let tmp = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(tmp.path()).unwrap();
         let (ctx, a) = home_in_a_browsing_b(&root);
-        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx, None)).unwrap();
         let mut paths: Vec<&str> = v
             .as_array()
             .expect("array")
@@ -817,10 +856,92 @@ mod tests {
         assert_eq!(paths, [a.to_str().unwrap(), feature.to_str().unwrap()]);
     }
 
+    /// A worktree of PROJECT_HOME's repo, which `create_worktree` hands back, is
+    /// a `root` the read tools accept, though the start dir is another repo.
+    #[test]
+    fn a_worktree_of_the_projects_repo_is_an_allowed_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (home, start) = (root.join("home"), root.join("start"));
+        one_commit_repo(&home);
+        one_commit_repo(&start);
+        let feature = crate::git::worktree::add(&home, "feature", None).unwrap();
+        let ctx = root.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({
+                "root": start.display().to_string(),
+                "project_home": home.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let args = json!({ "root": feature.display().to_string() });
+        assert_eq!(effective_root(&args, &ctx), Ok(feature));
+    }
+
+    /// PROJECT_HOME comes before the start dir (`root`) when both are repos.
+    #[test]
+    fn the_project_home_comes_before_the_start_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (home, start) = (root.join("home"), root.join("start"));
+        one_commit_repo(&home);
+        one_commit_repo(&start);
+        let ctx = root.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({
+                "root": start.display().to_string(),
+                "project_home": home.display().to_string(),
+                "search_root": start.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx, None)).unwrap();
+        let paths: Vec<&str> = v
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter_map(|e| e["path"].as_str())
+            .collect();
+        assert_eq!(paths, [home.to_str().unwrap()]);
+    }
+
+    /// A project outside any repo lists the calling agent's own repo, the one
+    /// its `initialize` named; with no agent cwd it lists nothing.
+    #[test]
+    fn a_project_outside_any_repo_lists_the_agents_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (outside, repo) = (root.join("outside"), root.join("repo"));
+        std::fs::create_dir(&outside).unwrap();
+        one_commit_repo(&repo);
+        let ctx = root.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({
+                "root": outside.display().to_string(),
+                "search_root": outside.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(list_worktrees_json(&ctx, None), "[]");
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx, Some(&repo))).unwrap();
+        let paths: Vec<&str> = v
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter_map(|e| e["path"].as_str())
+            .collect();
+        assert_eq!(paths, [repo.to_str().unwrap()]);
+    }
+
     /// A relative path given to `claim_worktree` resolves against PROJECT_HOME,
     /// not the browsed column.
     #[test]
-    #[ignore = "red: claim_worktree resolves against the browsed column"]
     fn claim_resolves_a_relative_path_against_project_home() {
         let tmp = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(tmp.path()).unwrap();
@@ -849,7 +970,7 @@ mod tests {
         )
         .unwrap();
 
-        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx, None)).unwrap();
         let arr = v.as_array().expect("array");
         assert_eq!(arr.len(), 2, "main + the linked worktree");
         let main = arr
@@ -890,7 +1011,7 @@ mod tests {
         )
         .unwrap();
 
-        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx, None)).unwrap();
         let arr = v.as_array().expect("array");
         let feat = arr
             .iter()
@@ -910,7 +1031,7 @@ mod tests {
             json!({ "cwd": tmp.path().display().to_string() }).to_string(),
         )
         .unwrap();
-        assert_eq!(list_worktrees_json(&ctx), "[]");
+        assert_eq!(list_worktrees_json(&ctx, None), "[]");
     }
 
     #[test]
@@ -931,7 +1052,7 @@ mod tests {
         .unwrap();
 
         let feat = |ctx: &Path| -> Value {
-            let v: Value = serde_json::from_str(&list_worktrees_json(ctx)).unwrap();
+            let v: Value = serde_json::from_str(&list_worktrees_json(ctx, None)).unwrap();
             v.as_array()
                 .unwrap()
                 .iter()
