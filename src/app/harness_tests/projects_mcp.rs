@@ -643,7 +643,6 @@ fn a_connection_bound_by_cwd_binds_again_when_its_project_closes() {
 /// when the project closes it binds again the same way, to the project the
 /// user is in now.
 #[test]
-#[ignore = "red: a connection bound to the user's project is told it closed, forever"]
 fn a_connection_bound_to_the_users_project_binds_again_when_it_closes() {
     with_projects(|p| {
         let (a, b) = (p.app.state.active, p.b);

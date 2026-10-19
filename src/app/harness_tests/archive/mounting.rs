@@ -474,7 +474,7 @@ fn the_reading_message_goes_once_the_archive_is_mounted() {
         let fx = app.request_mount(&archive, true);
         let flash = app.state.flash.as_ref().expect("the wait is announced");
         assert_eq!(flash.text, "reading pkg.zip…");
-        assert!(matches!(flash.kind, crate::app::FlashKind::Progress));
+        assert!(matches!(flash.kind, crate::app::FlashKind::Progress(_)));
 
         settle(&mut app, fx);
 
@@ -523,7 +523,7 @@ fn a_mount_with_something_to_report_still_reports_it() {
             flash.text
         );
         assert!(
-            !matches!(flash.kind, crate::app::FlashKind::Progress),
+            !matches!(flash.kind, crate::app::FlashKind::Progress(_)),
             "a note is not progress"
         );
     });

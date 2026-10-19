@@ -213,8 +213,9 @@ pub(super) struct Runtime {
         std::sync::Mutex<Vec<(super::state::ProjectId, archive_ops::ArchiveOutcome)>>,
     >,
     /// Cancel flag handed to the in-flight streamed mount, so a long tarball can
-    /// be abandoned with `:archive cancel`. Replaced per mount, so cancelling one
-    /// can never cancel the next.
+    /// be abandoned with `:archive cancel`. Replaced per mount the user starts,
+    /// so cancelling one can never cancel the next; a mount started in the
+    /// background keeps its own (`App::mount_cancel`).
     pub(super) archive_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// An effect parked across the mount-size prompt, with the archive it's
     /// waiting for: a `ChangeDir` into a not-yet-mounted archive whose size asked

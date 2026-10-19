@@ -85,8 +85,9 @@ pub(super) const CWD_META: &str = "spyc/cwd";
 
 /// Who is on the other end of one connection: the pane its `initialize`
 /// named, once the main loop has confirmed that tab is live, and the project
-/// it belongs to (#99). Bound once, for the connection's lifetime, and never
-/// taken from a tool call. An unbound caller (an older proxy, the status hook,
+/// it belongs to (#99). Bound at `initialize`, and bound again only once that
+/// project has closed, when it was bound to no tab; never taken from a tool
+/// call. An unbound caller (an older proxy, the status hook,
 /// the read-only fallback) behaves as every caller did before attribution
 /// existed.
 #[derive(Debug, Default)]
@@ -161,29 +162,44 @@ fn bind(tx: &std::sync::mpsc::Sender<McpRequest>, meta: &Value, caller: &mut Cal
     if pane_id.is_none() && cwd.is_none() {
         return;
     }
+    bind_to(tx, pane_id, cwd.map(PathBuf::from), caller, "initialize");
+}
+
+/// Ask the loop which pane and project `pane_id`, else `cwd`, else the
+/// project the user is in, binds `caller` to, and bind it there. `why` names
+/// the occasion in the log.
+fn bind_to(
+    tx: &std::sync::mpsc::Sender<McpRequest>,
+    pane_id: Option<&str>,
+    cwd: Option<PathBuf>,
+    caller: &mut Caller,
+    why: &str,
+) {
     let command = McpCommand::Bind {
         pane_id: pane_id.map(String::from),
-        cwd: cwd.map(PathBuf::from),
+        cwd: cwd.clone(),
     };
     let Some(bound) = ask(tx, command) else {
-        mcp_log("initialize: the loop didn't answer the bind; unattributed");
+        mcp_log(&format!("{why}: the loop didn't answer the bind"));
         return;
     };
     caller.project = bound["project"].as_str().and_then(|p| p.parse().ok());
     caller.context = bound["context_file"].as_str().map(PathBuf::from);
-    caller.cwd = cwd.map(PathBuf::from);
+    let by_cwd = cwd.is_some();
+    caller.cwd = cwd;
     let project = bound["project"].as_str().unwrap_or("none");
     match pane_id {
         Some(pane_id) if bound["pane"] == true => {
             mcp_log(&format!(
-                "initialize: connection bound to pane {pane_id}, project {project}"
+                "{why}: connection bound to pane {pane_id}, project {project}"
             ));
             caller.pane_id = Some(pane_id.to_string());
         }
         Some(pane_id) => mcp_log(&format!(
-            "initialize: no live pane {pane_id}; bound to project {project}"
+            "{why}: no live pane {pane_id}; bound to project {project}"
         )),
-        None => mcp_log(&format!("initialize: bound by cwd to project {project}")),
+        None if by_cwd => mcp_log(&format!("{why}: bound by cwd to project {project}")),
+        None => mcp_log(&format!("{why}: bound to the user's project {project}")),
     }
 }
 
@@ -284,17 +300,19 @@ pub(super) fn dispatch_for(
     let id = parsed["id"].clone();
     let method = parsed["method"].as_str().unwrap_or("");
     // A bound connection reads its own project's context file (#99), which a
-    // project that has closed took with it. A connection bound by cwd belongs
-    // to no tab, so it outlives the close and binds again, as it would at
-    // `initialize`. One bound to a pane lost its tab with the project, and
-    // reads nothing rather than whatever directory spyc's process cwd is,
-    // which is another project's.
+    // project that has closed took with it. One bound to a pane lost its tab
+    // with the project, and reads nothing rather than whatever directory
+    // spyc's process cwd is, which is another project's. One bound to no tab,
+    // by its cwd or to the project the user was in, outlives the close and
+    // binds again as it would at `initialize`, waiting on the loop as that
+    // does.
     let gone = |caller: &Caller| caller.context.as_deref().is_some_and(|p| !p.exists());
     if gone(caller)
         && caller.pane_id.is_none()
-        && let (Some(tx), Some(cwd)) = (cmd_tx, caller.cwd.clone())
+        && let Some(tx) = cmd_tx
     {
-        bind(tx, &json!({ CWD_META: cwd }), caller);
+        let cwd = caller.cwd.clone();
+        bind_to(tx, None, cwd, caller, "re-bind");
     }
     let closed = gone(caller);
     let bound = caller.context.clone();

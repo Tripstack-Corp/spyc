@@ -521,7 +521,7 @@ fn flash_progress_sets_message() {
     s.flash_progress("reading pkg.zip…");
     let flash = s.flash.as_ref().unwrap();
     assert_eq!(flash.text, "reading pkg.zip…");
-    assert!(matches!(flash.kind, FlashKind::Progress));
+    assert!(matches!(flash.kind, FlashKind::Progress(_)));
 }
 
 /// The clear is narrow on purpose: an in-flight message goes when its work

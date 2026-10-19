@@ -109,14 +109,23 @@ fn clearing_a_home_onto_another_projects_refuses() {
 }
 
 /// Moving a homeless project's start directory (`gS`, `:startdir`) moves its
-/// anchor, so onto another project's home it is refused.
+/// anchor, so onto another project's home it is refused. Y's home is not its
+/// start dir, so the rule that start dirs are unique plays no part.
 #[test]
 fn moving_a_homeless_projects_start_onto_another_home_refuses() {
     with_two(|t| {
         let app = &mut t.app;
+        let x = app.state.active;
+        let y_sub = t.y_home.join("sub");
+        std::fs::create_dir(&y_sub).unwrap();
+        app.make_active(t.y);
+        let _ = app
+            .state
+            .dispatch_command(&format!("project {}", y_sub.display()));
+        app.make_active(x);
         let _ = app.state.dispatch_command("project clear");
         let start = || t.x_home.clone();
-        app.state.cur_mut().listing = crate::fs::listing::Listing::read(&t.y_home).unwrap();
+        app.state.cur_mut().listing = crate::fs::listing::Listing::read(&y_sub).unwrap();
         app.handle_key(key('g')).unwrap();
         app.handle_key(key('S')).unwrap();
         assert_eq!(
@@ -126,7 +135,7 @@ fn moving_a_homeless_projects_start_onto_another_home_refuses() {
         );
         let _ = app
             .state
-            .dispatch_command(&format!("startdir {}", t.y_home.display()));
+            .dispatch_command(&format!("startdir {}", y_sub.display()));
         assert_eq!(
             app.state.active_project().start_dir,
             start(),
@@ -181,7 +190,6 @@ fn bound_by_cwd(app: &mut App, cwd: &std::path::Path) -> state::ProjectId {
 /// project's is refused as another's, even for a project with a home: two
 /// projects there would bind an agent working in X's start dir to Y.
 #[test]
-#[ignore = "red: a project with a home moves its start dir onto another's"]
 fn moving_a_start_dir_onto_another_projects_start_dir_refuses() {
     with_two(|t| {
         let app = &mut t.app;
@@ -212,7 +220,6 @@ fn moving_a_start_dir_onto_another_projects_start_dir_refuses() {
 /// A project with no home is anchored at its start dir, and a refusal calls
 /// that directory what it is rather than the project's home.
 #[test]
-#[ignore = "red: the refusal calls a homeless project's start dir its home"]
 fn a_refusal_names_a_homeless_projects_start_dir_as_such() {
     with_two(|t| {
         let app = &mut t.app;
@@ -231,7 +238,6 @@ fn a_refusal_names_a_homeless_projects_start_dir_as_such() {
 /// because that is taken says so: the directory it names is not the home
 /// being cleared.
 #[test]
-#[ignore = "red: a refused :project clear never says it would fall back"]
 fn a_refused_clear_says_where_it_would_fall_back() {
     with_two(|t| {
         let app = &mut t.app;
