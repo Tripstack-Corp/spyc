@@ -8,27 +8,63 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{App, Config, IgnoreMasks, Theme, UserKeymap};
+use super::state::ProjectId;
+use super::{App, Config, FlashKind, IgnoreMasks, Theme, UserKeymap};
 
 impl App {
-    /// Reload `.spycrc.toml` and rebuild the user keymap. Leaves the old
-    /// config in place on failure and flashes the error.
+    /// Reload every open project's config from its own rc and rebuild its
+    /// keymap, the project in view last, so its theme is the one in force;
+    /// then re-run `init.lua` once. A project whose rc fails keeps its old
+    /// config. A problem in another project's rc is the flash, named for it,
+    /// over the "reloaded" note of the one in view; one in the project in view
+    /// wins over both.
     pub fn reload_config(&mut self) {
-        // Reload the project rc from the **startup** cwd, not the directory
-        // the user has browsed into (`listing.dir`). Otherwise `^R` while
-        // sitting in a hostile directory would load that directory's
-        // `.spycrc.toml` — re-opening the very keypress-RCE vector that
-        // load_default's project-trust gating closes. (Executing project
-        // bindings are dropped regardless; pinning the dir keeps even the
-        // cosmetic settings load anchored to where spyc was launched.)
-        match Config::load_default(&self.state.active_project().start_dir) {
-            Ok(new_config) => {
-                self.adopt_config(new_config);
-                // The rebuilt keymap dropped the old synthetic `@map:` entries,
-                // so re-run init.lua to re-register them (silent when there's no
-                // init.lua — a configless `^R` shouldn't flash about Lua).
-                self.reload_init_lua(false);
+        let active = self.state.active;
+        let others: Vec<ProjectId> = self
+            .state
+            .open_projects()
+            .map(|p| p.id)
+            .filter(|id| *id != active)
+            .collect();
+        let mut problem = None;
+        for id in others {
+            let flash = self.in_project(id, |app| {
+                app.reload_project_config();
+                app.state.flash.take()
+            });
+            if let Some(mut flash) = flash.filter(|f| matches!(f.kind, FlashKind::Error))
+                && problem.is_none()
+            {
+                let label = self.state.label_of(id).unwrap_or_default();
+                flash.text = format!("{label}: {}", flash.text);
+                problem = Some(flash);
             }
+        }
+        self.reload_project_config();
+        let users_problem = self
+            .state
+            .flash
+            .as_ref()
+            .is_some_and(|f| matches!(f.kind, FlashKind::Error));
+        if let Some(problem) = problem.filter(|_| !users_problem) {
+            self.state.flash = Some(problem);
+        }
+        // The rebuilt keymaps dropped the synthetic `@map:` entries, so re-run
+        // `init.lua` to re-register them (silent when there's no `init.lua` —
+        // a configless `^R` shouldn't flash about Lua).
+        self.reload_init_lua(false);
+    }
+
+    /// Reload the active project's config. The project rc is read from its
+    /// **start dir**, not the directory the user has browsed into
+    /// (`listing.dir`): otherwise `^R` while sitting in a hostile directory
+    /// would load that directory's `.spycrc.toml`, re-opening the very
+    /// keypress-RCE vector that `load_default`'s project-trust gating closes.
+    /// (Executing project bindings are dropped regardless; pinning the dir
+    /// keeps even the cosmetic settings anchored to the project.)
+    fn reload_project_config(&mut self) {
+        match Config::load_default(&self.state.active_project().start_dir) {
+            Ok(new_config) => self.adopt_config(new_config),
             Err(e) => self.state.flash_error(format!("config error: {e:#}")),
         }
     }
@@ -38,7 +74,13 @@ impl App {
     pub(super) fn adopt_config(&mut self, new_config: Config) {
         self.state.active_project_mut().user_keymap =
             UserKeymap::from_bindings(new_config.bindings.clone());
-        self.view.theme = Theme::default().with_overrides(&new_config.colors);
+        // The theme is the project in view's; another project's colours take
+        // effect when the user switches to it (`switch_project`).
+        if !self.state.in_background {
+            let mono = self.view.theme.mono;
+            self.view.theme = Theme::default().with_overrides(&new_config.colors);
+            self.view.theme.mono = mono;
+        }
         // Reset to built-in mask defaults first, then apply config
         // overrides — so removing `[[ignore_masks]]` entries from
         // the rc file reverts the group to defaults on reload.
@@ -75,14 +117,19 @@ impl App {
     /// that `touch ~/.spycrc.toml` picks up immediately.
     pub fn candidate_config_paths(&self) -> Vec<PathBuf> {
         let mut out = Vec::new();
-        if let Some(home) = std::env::var_os("HOME") {
-            out.push(PathBuf::from(home).join(".spycrc.toml"));
+        if let Some(home) = crate::config::home_dir() {
+            out.push(home.join(".spycrc.toml"));
         }
-        // Anchor on the startup cwd, not the browsed `listing.dir`, so the
-        // project rc we watch (and reload on change) matches what
-        // `reload_config` actually loads — and browsing into a hostile
-        // directory never causes us to watch/react to its `.spycrc.toml`.
-        out.push(self.state.active_project().start_dir.join(".spycrc.toml"));
+        // Anchor on each open project's start dir, not a browsed
+        // `listing.dir`, so the project rcs we watch (and reload on change)
+        // match what `reload_config` actually loads — and browsing into a
+        // hostile directory never causes us to watch/react to its
+        // `.spycrc.toml`.
+        out.extend(
+            self.state
+                .open_projects()
+                .map(|p| p.start_dir.join(".spycrc.toml")),
+        );
         // The Lua entry point: a watch event on it routes through
         // `reload_config` (which re-runs init.lua), so editing init.lua takes
         // effect without `^R` / `:lua reload`. Watching its parent
@@ -94,15 +141,29 @@ impl App {
         out
     }
 
+    /// The parent dirs of [`Self::candidate_config_paths`], each once: what
+    /// the watch worker watches, since an editor that replaces a file on save
+    /// removes the inode a file watch would follow.
+    pub(super) fn config_parents(&self) -> Vec<PathBuf> {
+        let mut out: Vec<PathBuf> = Vec::new();
+        for parent in self
+            .candidate_config_paths()
+            .iter()
+            .filter_map(|p| p.parent())
+        {
+            if !out.iter().any(|o| o == parent) {
+                out.push(parent.to_path_buf());
+            }
+        }
+        out
+    }
+
     pub fn is_config_path(&self, path: &Path) -> bool {
         self.candidate_config_paths().iter().any(|c| c == path)
             || self
                 .state
-                .active_project()
-                .config
-                .sources
-                .iter()
-                .any(|c| c == path)
+                .open_projects()
+                .any(|p| p.config.sources.iter().any(|c| c == path))
     }
 
     /// True iff `path` is the listing directory or anything beneath it

@@ -67,15 +67,26 @@ pub enum WatchCommand {
         /// which already delivers events for files beneath it.
         preview: Option<PathBuf>,
     },
+    /// Watch exactly these config-file parent dirs, non-recursively: the
+    /// candidates of every open project (`App::config_parents`). Sent when
+    /// the set changes, as a start dir moves or a project opens or closes.
+    SyncConfigParents(Vec<PathBuf>),
 }
 
 impl App {
-    /// Re-point the worker when a column's listing dir or the open
-    /// vertical-split preview moved; the (un)watch syscalls run on the worker,
+    /// Re-point the worker when the open projects' config dirs changed, or a
+    /// column's listing dir or the open vertical-split preview moved; the (un)watch syscalls run on the worker,
     /// and `ctx` keeps the send-dedup keys. Names `a` and `b` by field rather
     /// than by focus: each column's tree and gitdir are watched under their own
     /// key whichever one has the keyboard.
     pub(super) fn sync_watch(&self, ctx: &mut RunCtx) {
+        let config = self.config_parents();
+        if config != ctx.watched_config
+            && let Some(tx) = ctx.watch_tx.as_ref()
+        {
+            let _ = tx.send(WatchCommand::SyncConfigParents(config.clone()));
+            ctx.watched_config = config;
+        }
         let preview = self
             .view
             .project()
@@ -148,23 +159,14 @@ pub fn spawn_watch_worker(
     // Config files are watched via their *parent* directories, not the files,
     // because editors that replace-on-save (vim, VS Code, nvim) remove the old
     // inode before creating the new one. Non-recursive; small set.
-    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-    for parent in config_parents {
-        if parent.is_dir() && seen.insert(parent.clone()) {
-            let _ = watcher.watch(&parent, RecursiveMode::NonRecursive);
-        }
-    }
+    let mut slots = Slots::default();
+    slots.sync_config(&mut watcher, config_parents);
 
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<WatchCommand>();
     std::thread::spawn(move || {
         // Owned by the worker: the dirs the watcher currently holds. The main
-        // loop tracks the last-requested listing dir separately, only to avoid
+        // loop tracks the last-requested targets separately, only to avoid
         // sending redundant commands.
-        let mut active_listing: Option<PathBuf> = None;
-        let mut active_git: Option<PathBuf> = None;
-        let mut active_listing_right: Option<PathBuf> = None;
-        let mut active_git_right: Option<PathBuf> = None;
-        let mut active_preview: Option<PathBuf> = None;
         while let Ok(cmd) = cmd_rx.recv() {
             match cmd {
                 WatchCommand::SyncListing {
@@ -173,25 +175,16 @@ pub fn spawn_watch_worker(
                     dir_right,
                     gitdir_right,
                     preview,
-                } => {
-                    sync_listing(
-                        &mut watcher,
-                        &mut active_listing,
-                        &mut active_git,
-                        &mut active_preview,
-                        &dir,
-                        gitdir.as_deref(),
-                        preview.as_deref(),
-                    );
-                    // Column `b`: same recursive-tree + non-recursive-gitdir
-                    // watches as the primary, so `b`'s working-tree edits and
-                    // index/HEAD changes fire events too. `None` dir → unwatch.
-                    sync_recursive(
-                        &mut watcher,
-                        &mut active_listing_right,
-                        dir_right.as_deref(),
-                    );
-                    sync_nonrecursive(&mut watcher, &mut active_git_right, gitdir_right.as_deref());
+                } => slots.sync_listing(
+                    &mut watcher,
+                    &dir,
+                    gitdir.as_deref(),
+                    dir_right.as_deref(),
+                    gitdir_right.as_deref(),
+                    preview.as_deref(),
+                ),
+                WatchCommand::SyncConfigParents(parents) => {
+                    slots.sync_config(&mut watcher, parents);
                 }
             }
         }
@@ -201,90 +194,207 @@ pub fn spawn_watch_worker(
     Some(cmd_tx)
 }
 
-/// Reconcile the recursive listing watch and the non-recursive gitdir watch
-/// to the requested topology. Runs on the watch worker, so the blocking
-/// recursive `inotify_add_watch` walk never stalls the event loop.
-fn sync_listing(
-    watcher: &mut notify::RecommendedWatcher,
-    active: &mut Option<PathBuf>,
-    active_git: &mut Option<PathBuf>,
-    active_preview: &mut Option<PathBuf>,
-    new_dir: &Path,
-    gitdir: Option<&Path>,
-    preview: Option<&Path>,
-) {
-    // Recursive: catches changes anywhere below the listing dir so git status
-    // markers update on the parent directory row when a file is added/modified
-    // in a subdirectory (e.g. touching `docs/foo.md` while sitting at the repo
-    // root). Events under `.git/` are filtered to specific files (`index`,
-    // `HEAD`) by `is_listing_path` to avoid `.git/objects` / pack / lockfile
-    // churn cascading into needless `git status` calls. On `Err` (e.g. Linux
-    // inotify watch-limit on a huge tree) the dir is left unwatched and the 1 Hz
-    // git poll carries marker refresh.
-    sync_recursive(watcher, active, Some(new_dir));
-    // Watch the repo's *resolved* gitdir non-recursively. For a normal repo
-    // that's `<root>/.git`; for a linked worktree it's
-    // `<main>/.git/worktrees/<name>/` (resolved from the `.git` *file*), which
-    // lives OUTSIDE the working tree — without watching it, a worktree's
-    // index/HEAD changes (stage, commit, checkout, branch switch) never fire
-    // the watcher and markers only refresh on the slower periodic poll. We
-    // can't watch the `index` *file* directly: git commits via atomic rename
-    // (write `index.lock`, rename to `index`), which replaces the inode — a
-    // file-level watch follows the *old* inode and goes deaf. A directory
-    // watch sees the rename land. NonRecursive bounds the noise even with huge
-    // `.git/objects` trees. `gitdir` is resolved + cached on chdir
-    // (`current_gitdir`).
-    sync_nonrecursive(watcher, active_git, gitdir);
-    // Watch the vertical-split preview's *parent* dir non-recursively (same
-    // replace-on-save rationale as the config + gitdir watches: a file-level
-    // watch follows the old inode through an editor's atomic rename and goes
-    // deaf).
-    let want_preview = preview_parent_to_watch(preview, new_dir);
-    sync_nonrecursive(watcher, active_preview, want_preview.as_deref());
+/// The two calls the worker makes on its watcher, so the bookkeeping in
+/// [`Slots`] can be tested against a stand-in.
+trait Watches {
+    /// Watch `dir`; whether it took.
+    fn watch(&mut self, dir: &Path, mode: RecursiveMode) -> bool;
+    fn unwatch(&mut self, dir: &Path);
 }
 
-/// Reconcile a single **recursive** watch slot to `want` (unwatching the old
-/// target first). On `watch()` error the slot is cleared (left unwatched; the
-/// poll carries refresh). Shared by the primary + second-commander listing
-/// trees.
-fn sync_recursive(
-    watcher: &mut notify::RecommendedWatcher,
-    active: &mut Option<PathBuf>,
-    want: Option<&Path>,
-) {
-    if active.as_deref() == want {
-        return;
+impl Watches for notify::RecommendedWatcher {
+    fn watch(&mut self, dir: &Path, mode: RecursiveMode) -> bool {
+        Watcher::watch(self, dir, mode).is_ok()
     }
-    if let Some(old) = active.take() {
-        let _ = watcher.unwatch(&old);
-    }
-    if let Some(dir) = want {
-        *active = watcher
-            .watch(dir, RecursiveMode::Recursive)
-            .is_ok()
-            .then(|| dir.to_path_buf());
+
+    fn unwatch(&mut self, dir: &Path) {
+        let _ = Watcher::unwatch(self, dir);
     }
 }
 
-/// Reconcile a single **non-recursive** watch slot to `want` (unwatching the
-/// old target first). Shared by the gitdir / preview-parent / second-commander
-/// gitdir watches.
-fn sync_nonrecursive(
-    watcher: &mut notify::RecommendedWatcher,
-    active: &mut Option<PathBuf>,
-    want: Option<&Path>,
-) {
-    if active.as_deref() == want {
-        return;
+/// What the watcher holds, slot by slot, and the config dirs it watches.
+/// `notify` keeps one watch per path, and on inotify unwatching a dir a
+/// recursive watch covers drops every watch beneath it, so a dir a slot
+/// covers is never watched or unwatched on its own, and what a slot lets go
+/// of is put back beneath it ([`Slots::restore_under`]).
+#[derive(Default)]
+struct Slots {
+    listing: Option<PathBuf>,
+    git: Option<PathBuf>,
+    listing_right: Option<PathBuf>,
+    git_right: Option<PathBuf>,
+    preview: Option<PathBuf>,
+    /// The config files' parent dirs.
+    config: Vec<PathBuf>,
+}
+
+impl Slots {
+    /// Reconcile every listing-side slot to the requested topology. Runs on
+    /// the watch worker, so the blocking recursive `inotify_add_watch` walk
+    /// never stalls the event loop.
+    fn sync_listing(
+        &mut self,
+        w: &mut impl Watches,
+        dir: &Path,
+        gitdir: Option<&Path>,
+        dir_right: Option<&Path>,
+        gitdir_right: Option<&Path>,
+        preview: Option<&Path>,
+    ) {
+        // Recursive: catches changes anywhere below the listing dir so git
+        // status markers update on the parent directory row when a file is
+        // added/modified in a subdirectory (e.g. touching `docs/foo.md` while
+        // sitting at the repo root). Events under `.git/` are filtered to
+        // specific files (`index`, `HEAD`) by `is_listing_path` to avoid
+        // `.git/objects` / pack / lockfile churn cascading into needless `git
+        // status` calls. On `Err` (e.g. Linux inotify watch-limit on a huge
+        // tree) the dir is left unwatched and the 1 Hz git poll carries marker
+        // refresh.
+        self.sync_slot(w, |s| &mut s.listing, Some(dir), RecursiveMode::Recursive);
+        // Watch the repo's *resolved* gitdir non-recursively. For a normal repo
+        // that's `<root>/.git`; for a linked worktree it's
+        // `<main>/.git/worktrees/<name>/` (resolved from the `.git` *file*),
+        // which lives OUTSIDE the working tree — without watching it, a
+        // worktree's index/HEAD changes (stage, commit, checkout, branch
+        // switch) never fire the watcher and markers only refresh on the slower
+        // periodic poll. We can't watch the `index` *file* directly: git
+        // commits via atomic rename (write `index.lock`, rename to `index`),
+        // which replaces the inode — a file-level watch follows the *old* inode
+        // and goes deaf. A directory watch sees the rename land. NonRecursive
+        // bounds the noise even with huge `.git/objects` trees. `gitdir` is
+        // resolved + cached on chdir (`current_gitdir`).
+        self.sync_slot(w, |s| &mut s.git, gitdir, RecursiveMode::NonRecursive);
+        // Watch the vertical-split preview's *parent* dir non-recursively (same
+        // replace-on-save rationale as the config + gitdir watches: a
+        // file-level watch follows the old inode through an editor's atomic
+        // rename and goes deaf).
+        let want_preview = preview_parent_to_watch(preview, dir);
+        self.sync_slot(
+            w,
+            |s| &mut s.preview,
+            want_preview.as_deref(),
+            RecursiveMode::NonRecursive,
+        );
+        // Column `b`: same recursive-tree + non-recursive-gitdir watches as the
+        // primary, so `b`'s working-tree edits and index/HEAD changes fire
+        // events too. `None` dir → unwatch.
+        self.sync_slot(
+            w,
+            |s| &mut s.listing_right,
+            dir_right,
+            RecursiveMode::Recursive,
+        );
+        self.sync_slot(
+            w,
+            |s| &mut s.git_right,
+            gitdir_right,
+            RecursiveMode::NonRecursive,
+        );
     }
-    if let Some(old) = active.take() {
-        let _ = watcher.unwatch(&old);
+
+    /// Reconcile one slot to `want` in `mode`, letting go of its old dir
+    /// first. On a `watch` error the slot is left empty (the poll carries
+    /// refresh).
+    fn sync_slot(
+        &mut self,
+        w: &mut impl Watches,
+        slot: fn(&mut Self) -> &mut Option<PathBuf>,
+        want: Option<&Path>,
+        mode: RecursiveMode,
+    ) {
+        if slot(self).as_deref() == want {
+            return;
+        }
+        if let Some(old) = slot(self).take()
+            && !self.covers(&old)
+        {
+            w.unwatch(&old);
+            self.restore_under(w, &old, mode);
+        }
+        if let Some(dir) = want
+            && w.watch(dir, mode)
+        {
+            *slot(self) = Some(dir.to_path_buf());
+        }
     }
-    if let Some(dir) = want
-        && watcher.watch(dir, RecursiveMode::NonRecursive).is_ok()
-    {
-        *active = Some(dir.to_path_buf());
+
+    /// Put back what still wants a watch after a slot let go of `dir`, held in
+    /// `mode`. On inotify, unwatching a dir watched recursively drops every
+    /// watch beneath it too, so each slot and config dir beneath it is
+    /// watched again; a non-recursive watch takes only its own dir, a config
+    /// dir there included. Each goes through [`rewatch`], so FSEvents, which
+    /// dropped nothing beneath, isn't handed a second copy of a path.
+    fn restore_under(&self, w: &mut impl Watches, dir: &Path, mode: RecursiveMode) {
+        let recursive = matches!(mode, RecursiveMode::Recursive);
+        if recursive {
+            for kept in self.recursive().filter(|r| r.starts_with(dir)) {
+                rewatch(w, kept, RecursiveMode::Recursive);
+            }
+            for kept in self.flat().filter(|f| f.starts_with(dir)) {
+                rewatch(w, kept, RecursiveMode::NonRecursive);
+            }
+        }
+        for kept in self.config.iter().filter(|c| {
+            (if recursive {
+                c.starts_with(dir)
+            } else {
+                *c == dir
+            }) && !self.covers(c)
+        }) {
+            rewatch(w, kept, RecursiveMode::NonRecursive);
+        }
     }
+
+    /// Watch exactly `parents` as config dirs. One no longer named is
+    /// unwatched, and a new one watched, unless a slot covers it either way.
+    fn sync_config(&mut self, w: &mut impl Watches, parents: Vec<PathBuf>) {
+        let mut wanted: Vec<PathBuf> = Vec::new();
+        for parent in parents {
+            if !wanted.contains(&parent) {
+                wanted.push(parent);
+            }
+        }
+        let old = std::mem::replace(&mut self.config, wanted);
+        for gone in old.iter().filter(|p| !self.config.contains(p)) {
+            if !self.covers(gone) {
+                w.unwatch(gone);
+            }
+        }
+        for new in self.config.iter().filter(|p| !old.contains(p)) {
+            if !self.covers(new) && new.is_dir() {
+                w.watch(new, RecursiveMode::NonRecursive);
+            }
+        }
+    }
+
+    /// The dirs the recursive slots hold.
+    fn recursive(&self) -> impl Iterator<Item = &Path> {
+        [&self.listing, &self.listing_right]
+            .into_iter()
+            .filter_map(Option::as_deref)
+    }
+
+    /// The dirs the non-recursive slots hold.
+    fn flat(&self) -> impl Iterator<Item = &Path> {
+        [&self.git, &self.git_right, &self.preview]
+            .into_iter()
+            .filter_map(Option::as_deref)
+    }
+
+    /// Whether a slot covers `dir`: holds it, or holds a dir above it
+    /// recursively. A covered dir is never watched or unwatched on its own:
+    /// a second watch on one path replaces the first's mode, and unwatching a
+    /// dir a recursive watch walked into cuts a hole in it.
+    fn covers(&self, dir: &Path) -> bool {
+        self.recursive().any(|r| dir.starts_with(r)) || self.flat().any(|f| f == dir)
+    }
+}
+
+/// Watch `dir` afresh: dropped first, so a backend that kept it (FSEvents,
+/// which appends a path on each `watch`) holds one copy, not two.
+fn rewatch(w: &mut impl Watches, dir: &Path, mode: RecursiveMode) {
+    w.unwatch(dir);
+    w.watch(dir, mode);
 }
 
 /// The parent dir to watch for a vertical-split `preview` file, or `None` when
@@ -303,11 +413,269 @@ fn preview_parent_to_watch(preview: Option<&Path>, new_dir: &Path) -> Option<Pat
 
 #[cfg(test)]
 mod tests {
-    use super::{is_readonly_access, preview_parent_to_watch};
-    use notify::EventKind;
+    use super::{Slots, Watches, is_readonly_access, preview_parent_to_watch};
     use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, MetadataKind, ModifyKind};
+    use notify::{EventKind, RecursiveMode};
+    use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
+    /// A watcher that keeps one watch per path, as `notify` does.
+    #[derive(Default)]
+    struct OnePerPath(HashMap<PathBuf, RecursiveMode>);
+
+    impl Watches for OnePerPath {
+        fn watch(&mut self, dir: &Path, mode: RecursiveMode) -> bool {
+            self.0.insert(dir.to_path_buf(), mode);
+            true
+        }
+
+        fn unwatch(&mut self, dir: &Path) {
+            self.0.remove(dir);
+        }
+    }
+
+    fn listing_at(slots: &mut Slots, w: &mut impl Watches, dir: &Path) {
+        slots.sync_listing(w, dir, None, None, None, None);
+    }
+
+    /// A watcher with inotify's semantics, as `notify` drives it: one watch
+    /// per path, a recursive watch standing for every dir beneath it, and
+    /// unwatching a dir watched recursively, or one a recursive watch walked
+    /// into, dropping every watch at or beneath it.
+    #[derive(Default)]
+    struct Inotify {
+        watches: HashMap<PathBuf, RecursiveMode>,
+        /// Dirs beneath a recursive watch that lost theirs.
+        holes: Vec<PathBuf>,
+    }
+
+    impl Inotify {
+        fn walked_into(&self, dir: &Path) -> bool {
+            self.watches
+                .iter()
+                .any(|(d, m)| *m == RecursiveMode::Recursive && dir.starts_with(d) && d != dir)
+        }
+
+        /// Whether an event in `dir` reaches the watcher.
+        fn hears(&self, dir: &Path) -> bool {
+            self.watches.contains_key(dir)
+                || (self
+                    .watches
+                    .iter()
+                    .any(|(d, m)| *m == RecursiveMode::Recursive && dir.starts_with(d))
+                    && !self.holes.iter().any(|h| dir.starts_with(h)))
+        }
+    }
+
+    impl Watches for Inotify {
+        fn watch(&mut self, dir: &Path, mode: RecursiveMode) -> bool {
+            self.holes.retain(|h| match mode {
+                RecursiveMode::Recursive => !h.starts_with(dir),
+                RecursiveMode::NonRecursive => h != dir,
+            });
+            self.watches.insert(dir.to_path_buf(), mode);
+            true
+        }
+
+        fn unwatch(&mut self, dir: &Path) {
+            let walked_into = self.walked_into(dir);
+            if walked_into || self.watches.get(dir) == Some(&RecursiveMode::Recursive) {
+                self.watches.retain(|d, _| !d.starts_with(dir));
+                if walked_into {
+                    self.holes.push(dir.to_path_buf());
+                }
+            } else {
+                self.watches.remove(dir);
+            }
+        }
+    }
+
+    /// A start dir dropped from the config dirs while a column's recursive
+    /// watch covers it (`h` up from it, then `gS` there) is left to that
+    /// watch: unwatching it would cut a hole in the column's tree.
+    #[test]
+    fn a_config_dir_a_listing_covers_is_never_unwatched_on_its_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (src, repo) = (tmp.path().to_path_buf(), tmp.path().join("repo"));
+        std::fs::create_dir(&repo).unwrap();
+        let (mut slots, mut w) = (Slots::default(), Inotify::default());
+        slots.sync_config(&mut w, vec![repo.clone()]);
+        listing_at(&mut slots, &mut w, &repo);
+        listing_at(&mut slots, &mut w, &src);
+        slots.sync_config(&mut w, vec![src.clone()]);
+        assert!(w.hears(&repo.join("deep")), "a hole in the column's tree");
+    }
+
+    /// Leaving a dir watched recursively (`~`) puts back every config watch
+    /// beneath it, not only one on the dir itself.
+    #[test]
+    fn leaving_a_dir_puts_back_the_config_watches_beneath_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let (lua, proj, elsewhere) = (
+            home.join("config"),
+            home.join("proj"),
+            tmp.path().join("elsewhere"),
+        );
+        for d in [&lua, &proj, &elsewhere] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let (mut slots, mut w) = (Slots::default(), Inotify::default());
+        slots.sync_config(&mut w, vec![home.clone(), lua.clone(), proj.clone()]);
+        listing_at(&mut slots, &mut w, &home);
+        listing_at(&mut slots, &mut w, &elsewhere);
+        for dir in [&home, &lua, &proj] {
+            assert!(w.hears(dir), "{} went unwatched", dir.display());
+        }
+    }
+
+    /// The listing leaving the repo root (`l` into `src`) unwatches it, which
+    /// on inotify takes the gitdir's watch beneath it: the gitdir is watched
+    /// again.
+    #[test]
+    fn a_gitdir_beneath_a_dir_the_listing_leaves_is_watched_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().to_path_buf();
+        let (git, src) = (repo.join(".git"), repo.join("src"));
+        for d in [&git, &src] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let (mut slots, mut w) = (Slots::default(), Inotify::default());
+        slots.sync_listing(&mut w, &repo, Some(&git), None, None, None);
+        slots.sync_listing(&mut w, &src, Some(&git), None, None, None);
+        assert!(w.hears(&git), "index and HEAD changes go unheard");
+    }
+
+    /// Column `a` leaving a dir column `b` stands beneath takes `b`'s
+    /// watches on inotify: `b`'s tree is watched again.
+    #[test]
+    fn a_column_beneath_a_dir_another_column_leaves_is_watched_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (outer, inner) = (tmp.path().to_path_buf(), tmp.path().join("inner"));
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::create_dir(&inner).unwrap();
+        let (mut slots, mut w) = (Slots::default(), Inotify::default());
+        slots.sync_listing(&mut w, &outer, None, Some(&inner), None, None);
+        slots.sync_listing(&mut w, elsewhere.path(), None, Some(&inner), None, None);
+        assert!(w.hears(&inner.join("deep")), "column b's tree went deaf");
+    }
+
+    /// A watcher with FSEvents' list semantics, as `notify` drives it: each
+    /// `watch` appends its path, and `unwatch` drops every copy. `calls`
+    /// logs every `watch`, kept or not.
+    #[derive(Default)]
+    struct FsEvents {
+        paths: Vec<(PathBuf, RecursiveMode)>,
+        calls: Vec<PathBuf>,
+    }
+
+    impl Watches for FsEvents {
+        fn watch(&mut self, dir: &Path, mode: RecursiveMode) -> bool {
+            self.paths.push((dir.to_path_buf(), mode));
+            self.calls.push(dir.to_path_buf());
+            true
+        }
+
+        fn unwatch(&mut self, dir: &Path) {
+            self.paths.retain(|(d, _)| d != dir);
+        }
+    }
+
+    /// Leaving and coming back to a dir over and over hands FSEvents one copy
+    /// of each path beneath it, however many times it was put back.
+    #[test]
+    fn putting_watches_back_hands_fsevents_no_second_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().to_path_buf();
+        let (git, src) = (repo.join(".git"), repo.join("src"));
+        for d in [&git, &src] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let (mut slots, mut w) = (Slots::default(), FsEvents::default());
+        for _ in 0..3 {
+            slots.sync_listing(&mut w, &repo, Some(&git), None, None, None);
+            slots.sync_listing(&mut w, &src, Some(&git), None, None, None);
+        }
+        let copies = w.paths.iter().filter(|(d, _)| *d == git).count();
+        assert_eq!(copies, 1, "{:?}", w.paths);
+    }
+
+    /// A non-recursive slot letting go of a dir (the preview's parent, above
+    /// the listing) takes no watch beneath it, so the listing isn't walked
+    /// again.
+    #[test]
+    fn a_flat_slot_letting_go_walks_no_listing_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (parent, listing) = (tmp.path().to_path_buf(), tmp.path().join("listing"));
+        std::fs::create_dir(&listing).unwrap();
+        let preview = parent.join("doc.md");
+        let (mut slots, mut w) = (Slots::default(), FsEvents::default());
+        slots.sync_listing(&mut w, &listing, None, None, None, Some(&preview));
+        slots.sync_listing(&mut w, &listing, None, None, None, None);
+        let walks = w.calls.iter().filter(|d| **d == listing).count();
+        assert_eq!(walks, 1, "the listing was walked again: {:?}", w.calls);
+    }
+
+    /// Column `b` in a dir inside column `a`'s tree: when `b` leaves, `a`'s
+    /// tree stays whole, since unwatching a dir a recursive watch walked into
+    /// cuts a hole in it.
+    #[test]
+    fn a_column_leaving_a_dir_inside_another_columns_tree_leaves_it_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (outer, inner) = (tmp.path().to_path_buf(), tmp.path().join("inner"));
+        let elsewhere = tempfile::tempdir().unwrap();
+        std::fs::create_dir(&inner).unwrap();
+        let (mut slots, mut w) = (Slots::default(), Inotify::default());
+        slots.sync_listing(&mut w, &outer, None, Some(&inner), None, None);
+        slots.sync_listing(&mut w, &outer, None, Some(elsewhere.path()), None, None);
+        assert!(w.hears(&inner.join("deep")), "column a's tree has a hole");
+    }
+
+    /// A project's start dir is a config dir, and a column stands in it at
+    /// first. Moving the column away unwatches the dir, which takes the config
+    /// watch with it, so the config watch is put back.
+    #[test]
+    fn a_config_dir_a_listing_leaves_is_watched_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (start, elsewhere) = (tmp.path().join("start"), tmp.path().join("elsewhere"));
+        for d in [&start, &elsewhere] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let (mut slots, mut w) = (Slots::default(), OnePerPath::default());
+        slots.sync_config(&mut w, vec![start.clone()]);
+        listing_at(&mut slots, &mut w, &start);
+        listing_at(&mut slots, &mut w, &elsewhere);
+        assert_eq!(w.0.get(&start), Some(&RecursiveMode::NonRecursive));
+        assert_eq!(w.0.get(&elsewhere), Some(&RecursiveMode::Recursive));
+    }
+
+    /// A config dir a column stands in keeps the column's recursive watch: a
+    /// non-recursive config watch over it would stop events from below.
+    #[test]
+    fn a_config_dir_a_listing_holds_keeps_its_recursive_watch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let start = tmp.path().to_path_buf();
+        let (mut slots, mut w) = (Slots::default(), OnePerPath::default());
+        listing_at(&mut slots, &mut w, &start);
+        slots.sync_config(&mut w, vec![start.clone()]);
+        assert_eq!(w.0.get(&start), Some(&RecursiveMode::Recursive));
+    }
+
+    /// A config dir no longer named is unwatched, unless a column stands in it.
+    #[test]
+    fn a_config_dir_no_longer_named_is_unwatched_unless_a_listing_holds_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (gone, held) = (tmp.path().join("gone"), tmp.path().join("held"));
+        for d in [&gone, &held] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let (mut slots, mut w) = (Slots::default(), OnePerPath::default());
+        slots.sync_config(&mut w, vec![gone.clone(), held.clone()]);
+        listing_at(&mut slots, &mut w, &held);
+        slots.sync_config(&mut w, Vec::new());
+        assert_eq!(w.0.get(&gone), None);
+        assert_eq!(w.0.get(&held), Some(&RecursiveMode::Recursive));
+    }
     #[test]
     fn readonly_access_events_are_dropped() {
         // The inotify `IN_OPEN` / `IN_CLOSE_NOWRITE` storm: pure reads.

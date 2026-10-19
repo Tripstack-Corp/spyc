@@ -254,8 +254,9 @@ mod guard_tests {
             r"\blet\s+(?:mut\s+)?(\w+)\s*=[^;]*?\b(\w+)\.active_project(?:_mut)?\(\)\s*;",
         )
         .expect("valid regex");
-        let bind_for = regex::Regex::new(r"\bfor\s+(\w+)\s+in\s+[^{]*?\b(\w+)\.open_projects\(\)")
-            .expect("valid regex");
+        let bind_for =
+            regex::Regex::new(r"\bfor\s+(\w+)\s+in\s+[^{]*?\b(\w+)\.open_projects(?:_mut)?\(\)")
+                .expect("valid regex");
         let fn_start = regex::Regex::new(
             r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:(?:const|async|unsafe)\s+)*fn\s+\w",
         )
@@ -325,6 +326,7 @@ mod guard_tests {
             "let r = self\n    .state\n    .active_project_mut()\n    .right\n    .as_mut();",
             "let p = self.state.active_project_mut();\np.left.cursor.clamp(n);",
             "for project in self.state.open_projects() {\n    seen.push(&project.left.listing.dir);\n}",
+            "for project in self.state.open_projects_mut() {\n    project.left.cursor.clamp(n);\n}",
         ];
         for src in forms {
             let receivers = column_field_receivers(src);

@@ -997,6 +997,16 @@ PR, except step 5's stages:
      A connection bound to no tab, by cwd (a session codex's shared daemon
      runs) or to the active project, outlives the close: it binds again as
      at `initialize`, to the project holding its cwd, else the active one.
+   - **Config and Lua for every project (pair 1b).** `reload_config`
+     reloads every open project from its own start dir's rc, the one in view
+     last, so its theme is in force (another's colours wait for the switch);
+     a problem in another project's rc is the flash, named for it. The
+     watcher's candidates name every project's rc (`config_parents`), and
+     `sync_watch` sends `WatchCommand::SyncConfigParents` when they change,
+     as a start dir moves; the worker puts back a config watch a column's
+     watch took with it. A `spyc.map` key binds in every open project's
+     keymap, and forgetting the registrations (`:lua reload`, `:lua off`)
+     strips them from every keymap, so a reload no longer doubles them.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
