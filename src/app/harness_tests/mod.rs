@@ -511,6 +511,7 @@ mod projects_close;
 mod projects_mcp;
 mod projects_open;
 mod projects_plumbing;
+mod projects_switcher;
 mod prompt_templates;
 mod second_commander;
 mod send_selection;
