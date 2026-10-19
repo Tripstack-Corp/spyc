@@ -626,7 +626,9 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   without decompressing the whole stream, so mounting one extracts as it reads.
   `[archive] extract_budget_mb` (default 512) is the ceiling; past it the mount
   is refused rather than filling the disk, and `:archive cancel` abandons one
-  that is taking too long.
+  that is taking too long. An archive is read once however often it is asked
+  for: `Enter` again, or from another column or project, while it is still
+  being read waits for that read rather than starting another.
 - **It says what's odd** — unsafe member paths (`../…`, or one claiming spyc's
   own `.spyc` staging directory), symlinks pointing out
   of the archive, duplicate or case-colliding names, encrypted members and a

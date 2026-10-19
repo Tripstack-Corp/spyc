@@ -622,7 +622,6 @@ fn starts_a_read(effects: &[Effect]) -> bool {
 /// the other column, starts no second read: it joins the one running, and the
 /// column is in the archive once that lands.
 #[test]
-#[ignore = "red: a second request for an archive being read starts a second read"]
 fn entering_an_archive_being_read_joins_the_read() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -647,7 +646,6 @@ fn entering_an_archive_being_read_joins_the_read() {
 /// An archive inside another is read from its staged copy, and only once, the
 /// same way.
 #[test]
-#[ignore = "red: a second request for a nested archive being read starts a second read"]
 fn entering_a_nested_archive_being_read_joins_the_read() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -668,7 +666,6 @@ fn entering_a_nested_archive_being_read_joins_the_read() {
 /// a member, would rewrite the member with the archive's bytes while the edit
 /// still reads as pending, and `:archive write` would pack the old bytes.
 #[test]
-#[ignore = "red: a second read of a compressed tar rewrites an edit saved in between"]
 fn an_edit_saved_while_a_compressed_tar_is_read_twice_survives() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -720,7 +717,6 @@ fn a_read_that_ends_without_a_mount_lets_the_next_request_read() {
 /// The re-read after a write is a read like any other: a request for the
 /// archive while it runs joins it rather than reading it alongside.
 #[test]
-#[ignore = "red: a request while a write is re-read starts a second read"]
 fn a_request_while_a_write_is_reread_joins_the_reread() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
