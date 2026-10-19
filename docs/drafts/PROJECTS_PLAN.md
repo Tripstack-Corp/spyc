@@ -1031,6 +1031,15 @@ PR, except step 5's stages:
      and a statusline tick don't). `Space n` now reads a path as `J` does (`$VAR`, and a
      relative one against the column), compares a project's home canonical,
      and says so on the project in view.
+   - **The switcher (pair 3a).** `Space j` lists the open projects in switcher
+     order, numbered, each with its home and tab count, the one in view
+     highlighted and marked `← current` (`App::open_project_switcher`,
+     `AppState::pending_projects`). `j`/`k` and Enter or `1`-`9` go to one
+     (`switch_to_pending_project`, which closes the switcher, the pager of the
+     project left, first), `/` searches, `q` closes it; from inside the editor
+     it refuses, since the editor keeps the keyboard over a pager opened on
+     it. It shares the worktree picker's keys (`numbered_picker_key`). The attention glyphs (step 6) and
+     recently-closed projects (step 8) are still to come.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

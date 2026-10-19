@@ -1225,6 +1225,7 @@ which-key popup lists the options:
 - **`Space P`** — set `PROJECT_HOME` to the current directory.
 - **`Space n`** — open a directory as a project, and go to it.
 - **`Space x`** — close the project in view.
+- **`Space j`** — list the open projects, to go to one.
 - **`Space Space`** — go to the project you were in last.
 - **`Space 1`..`Space 9`** — go to open project N.
 - **`Space ]` / `Space [`** — go to the next / previous project, wrapping.
@@ -1252,6 +1253,10 @@ closing ends them; its agents' scope claims go, and an agent waiting on one is
 answered. The only project open isn't closed this way (`:q` quits), and
 from inside an editor it says to quit the editor first, since closing would
 end it.
+**`Space j`** lists the open projects, numbered, each with how many tabs it
+has and its home, the one you're in highlighted: `j`/`k` and `Enter`, or
+`1`-`9`, go to one, `/` searches, and `q` closes it. From inside an editor it
+says to quit the editor first (`Space ]` / `Space [` still step through).
 **`Space Space`** goes back to the project you were in last,
 **`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
 through them in the order they were opened, wrapping. With one project open

@@ -541,6 +541,7 @@ impl App {
             }
             Action::Quit => self.request_quit(),
             Action::Project(crate::keymap::ProjectAction::Close) => self.close_project(),
+            Action::Project(crate::keymap::ProjectAction::List) => self.open_project_switcher(),
             Action::Project(p) => self.move_between_projects(*p),
 
             Action::GotoFile | Action::GotoFileLine => {

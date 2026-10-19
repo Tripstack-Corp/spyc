@@ -140,6 +140,63 @@ impl App {
         None
     }
 
+    /// The numbered pickers' keys (the worktree and project pickers): `j`/`k`
+    /// (or arrows) move the highlighted row, and `Enter` picks it, `1`-`9` the
+    /// row numbered, through `pick`. Other keys fall through, so `q`/`Esc`/
+    /// scroll still work via the motion handler.
+    fn numbered_picker_key(
+        &mut self,
+        key: KeyEvent,
+        viewport: u16,
+        pick: fn(&mut Self, usize),
+    ) -> Option<Vec<Effect>> {
+        let row = match key.code {
+            KeyCode::Char('j' | 'k') | KeyCode::Down | KeyCode::Up => {
+                let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+                if let Some(view) = active_pager_mut!(self) {
+                    view.picker_move(if down { 1 } else { -1 }, viewport);
+                }
+                return Some(Vec::new());
+            }
+            KeyCode::Enter => active_pager_mut!(self)
+                .and_then(|v| v.picker_cursor)
+                .unwrap_or(0),
+            KeyCode::Char(c @ '1'..='9') => (c as u8 - b'1') as usize,
+            _ => return None,
+        };
+        pick(self, row);
+        Some(Vec::new())
+    }
+
+    /// The project switcher (`Space j`): its keys are [`Self::numbered_picker_key`]'s,
+    /// picking with `switch_to_pending_project`.
+    pub(super) fn handle_pager_project_pick(
+        &mut self,
+        key: KeyEvent,
+        viewport: u16,
+    ) -> Option<Vec<Effect>> {
+        self.state.pending_projects.as_ref()?;
+        self.numbered_picker_key(key, viewport, Self::switch_to_pending_project)
+    }
+
+    /// Whether a picker owns the pager: the worktree, project or session
+    /// picker, or the history editor.
+    pub(super) const fn picker_is_open(&self) -> bool {
+        self.state.pending_worktrees.is_some()
+            || self.state.pending_projects.is_some()
+            || self.state.pending_sessions.is_some()
+            || self.view.pending_history_pick.is_some()
+    }
+
+    /// Forget every picker's rows, as closing the pager does.
+    pub(crate) fn clear_pending_pickers(&mut self) {
+        self.state.pending_worktrees = None;
+        self.state.pending_projects = None;
+        self.state.pending_sessions = None;
+        self.view.pending_history_pick = None;
+        self.view.pending_jump_history = None;
+    }
+
     /// Worktree picker: `j`/`k` (or arrows) move the highlighted row, `Enter`
     /// switches the **focused** column to it, and `1`-`9` quick-switch by number
     /// (focus `a` → switch `a`; focus `b` → switch `b`). `/` search syncs the
@@ -151,32 +208,7 @@ impl App {
         viewport: u16,
     ) -> Option<Vec<Effect>> {
         self.state.pending_worktrees.as_ref()?;
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(view) = active_pager_mut!(self) {
-                    view.picker_move(1, viewport);
-                }
-                Some(Vec::new())
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if let Some(view) = active_pager_mut!(self) {
-                    view.picker_move(-1, viewport);
-                }
-                Some(Vec::new())
-            }
-            KeyCode::Enter => {
-                let cursor = active_pager_mut!(self)
-                    .and_then(|v| v.picker_cursor)
-                    .unwrap_or(0);
-                self.switch_to_pending_worktree(cursor);
-                Some(Vec::new())
-            }
-            KeyCode::Char(c @ '1'..='9') => {
-                self.switch_to_pending_worktree((c as u8 - b'1') as usize);
-                Some(Vec::new())
-            }
-            _ => None,
-        }
+        self.numbered_picker_key(key, viewport, Self::switch_to_pending_worktree)
     }
 
     /// Switch the focused column to `pending_worktrees[idx]` and close the

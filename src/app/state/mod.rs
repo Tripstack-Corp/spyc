@@ -392,6 +392,8 @@ pub struct AppState {
     pub user_host: String,
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
+    /// The project switcher's rows (`Space j`), in the order they are numbered.
+    pub pending_projects: Option<Vec<ProjectId>>,
     pub pending_sessions: Option<Vec<crate::state::sessions::Manifest>>,
     /// `spyc -c` commands not yet run: they wait for startup to settle
     /// (`App::settle_startup_commands`).
@@ -914,6 +916,7 @@ impl AppState {
             user_host: "test@host".to_string(),
             pending_new_tab_cmd: None,
             pending_worktrees: None,
+            pending_projects: None,
             pending_sessions: None,
             startup_commands: Vec::new(),
             frecency: Frecency::default(),

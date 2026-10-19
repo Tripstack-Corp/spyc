@@ -127,10 +127,7 @@ impl App {
                     // on the ACTIVE pager (the focused column's slot), so closing
                     // `b`'s pager doesn't evict `a`'s — a hardcoded
                     // `view.pager.take()` here closed both columns at once.
-                    let is_picker = self.state.pending_worktrees.is_some()
-                        || self.state.pending_sessions.is_some()
-                        || self.view.pending_history_pick.is_some();
-                    let eligible = !is_picker
+                    let eligible = !self.picker_is_open()
                         && self
                             .active_pager_ref()
                             .is_some_and(|v| v.picker_cursor.is_none() && !v.streaming);
@@ -156,10 +153,7 @@ impl App {
                         self.clear_pager();
                     }
                 }
-                self.state.pending_worktrees = None;
-                self.state.pending_sessions = None;
-                self.view.pending_history_pick = None;
-                self.view.pending_jump_history = None;
+                self.clear_pending_pickers();
                 self.view.pager_pending_bracket = None;
                 self.view.needs_full_repaint = true;
             }

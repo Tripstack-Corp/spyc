@@ -243,6 +243,7 @@ impl App {
 
     /// W l — list worktrees in a pager; digit keys 1-9 select.
     pub fn worktree_list(&mut self) {
+        self.clear_pending_pickers();
         match crate::git::worktree::list(&self.state.cur().listing.dir) {
             Some(worktrees) => {
                 let cur_dir = self.state.cur().listing.dir.clone();

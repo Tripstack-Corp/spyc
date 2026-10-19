@@ -187,6 +187,7 @@ impl App {
             pending_new_tab_cmd: None,
             last_captured_cmd: None,
             pending_worktrees: None,
+            pending_projects: None,
             pending_sessions: None,
             startup_commands: Vec::new(),
             last_search: None,

@@ -1,8 +1,8 @@
 //! Opening a project, closing one, and moving between the open ones (#99):
-//! what the leader's project keys do — `Space n`, `Space x`, `Space Space`,
-//! `Space 1-9`, and `Space ]` / `Space [`.
+//! what the leader's project keys do — `Space n`, `Space x`, `Space j`,
+//! `Space Space`, `Space 1-9`, and `Space ]` / `Space [`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use super::view_state::ProjectView;
 use super::{App, Config, Mode, Pane, PaneTabs, Prompt, PromptKind, UserKeymap};
 use crate::keymap::ProjectAction;
 use crate::mcp_cmd::McpResponse;
+use crate::ui::pager;
 
 impl App {
     /// Go to another open project. With one project open these do nothing,
@@ -44,9 +45,79 @@ impl App {
             ProjectAction::JumpHome
             | ProjectAction::SetHomeHere
             | ProjectAction::Open
-            | ProjectAction::Close => None,
+            | ProjectAction::Close
+            | ProjectAction::List => None,
         };
         if let Some(id) = to {
+            self.switch_project(id);
+        }
+    }
+
+    /// `Space j`: list the open projects in switcher order, to go to one. Each
+    /// row is numbered, with how many tabs it has and its home; the one in
+    /// view is marked and highlighted. `j`/`k` and Enter, or `1`-`9`, pick
+    /// (`switch_to_pending_project`). Not from inside the editor, which keeps
+    /// the keyboard over a pager opened on top of it.
+    pub(super) fn open_project_switcher(&mut self) {
+        if matches!(self.state.active_project().focus, state::Focus::Overlay) {
+            self.state.flash_info(
+                "quit the editor first, or step through projects with Space ] / Space [",
+            );
+            return;
+        }
+        self.clear_pending_pickers();
+        let label_w = self
+            .state
+            .open_projects()
+            .map(|p| crate::ui::display_width(&p.label()))
+            .max()
+            .unwrap_or(0);
+        let tabs: HashMap<ProjectId, usize> = self
+            .runtime
+            .every_tab_set()
+            .map(|(id, tabs)| (id, tabs.tabs().len()))
+            .collect();
+        let active = self.state.active;
+        let (ids, lines): (Vec<ProjectId>, Vec<String>) = self
+            .state
+            .open_projects()
+            .enumerate()
+            .map(|(i, p)| {
+                let tabs = tabs.get(&p.id).copied().unwrap_or(0);
+                let row = project_row(i, p, label_w, tabs, p.id == active);
+                (p.id, row)
+            })
+            .unzip();
+        let start = ids.iter().position(|id| *id == active).unwrap_or(0);
+        self.state.pending_projects = Some(ids);
+        let mut view = pager::PagerView::new_plain(
+            "projects — j/k+Enter or 1-9 to go, / to search, q to close",
+            lines,
+        );
+        view.picker_cursor = Some(start);
+        view.no_history = true;
+        view.show_line_numbers = false;
+        view.wrap = false;
+        self.set_pager(view);
+    }
+
+    /// Go to the switcher's row `idx` and close the switcher, the pager of the
+    /// project being left. Past the end of the list nothing happens, and the
+    /// switcher stays open.
+    pub(super) fn switch_to_pending_project(&mut self, idx: usize) {
+        let Some(id) = self
+            .state
+            .pending_projects
+            .as_ref()
+            .and_then(|ids| ids.get(idx))
+            .copied()
+        else {
+            return;
+        };
+        self.clear_pager();
+        self.state.pending_projects = None;
+        self.view.needs_full_repaint = true;
+        if self.state.has_project(id) {
             self.switch_project(id);
         }
     }
@@ -267,4 +338,31 @@ impl App {
             .count();
         tabs + overlays
     }
+}
+
+/// One switcher row: `[n]  label  k tabs  ← current  home`, the marker on the
+/// project in view and the label padded to `label_w` columns, the widest of
+/// the list's. The home comes last, since it is the one column of no fixed
+/// width: a long one is cut at the pager's edge rather than pushing the marker
+/// off it. It is tilde-collapsed, as every displayed path is.
+fn project_row(
+    i: usize,
+    project: &state::Project,
+    label_w: usize,
+    tabs: usize,
+    current: bool,
+) -> String {
+    let label = project.label();
+    let pad = " ".repeat(label_w.saturating_sub(crate::ui::display_width(&label)));
+    let tabs = if tabs == 1 {
+        "1 tab".to_string()
+    } else {
+        format!("{tabs} tabs")
+    };
+    format!(
+        "  [{}]  {label}{pad}  {tabs:<8} {:<10} {}",
+        i + 1,
+        if current { "← current" } else { "" },
+        crate::paths::display_tilde(project.anchor()),
+    )
 }
