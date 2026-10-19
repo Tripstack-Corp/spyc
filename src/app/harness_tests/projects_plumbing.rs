@@ -256,3 +256,191 @@ fn a_refused_clear_says_where_it_would_fall_back() {
         assert!(flash.contains(&t.x_home.display().to_string()), "{flash}");
     });
 }
+
+// ── Config, for every project ────────────────────────────────────────────────
+
+fn write_rc(home: &std::path::Path, body: &str) {
+    std::fs::write(home.join(".spycrc.toml"), body).unwrap();
+}
+
+/// `^R`, or an edit to a project's rc, reloads every open project from its
+/// own rc, not only the one in view: Y's edit is in force once the user goes
+/// back to Y.
+#[test]
+#[ignore = "red: a reload reaches only the project in view"]
+fn a_reload_reaches_every_project_from_its_own_rc() {
+    with_two(|t| {
+        let app = &mut t.app;
+        write_rc(&t.y_home, "[layout]\nstatus_position = \"bottom\"\n");
+        app.reload_config();
+        assert_eq!(
+            app.as_project(t.y, |app| app
+                .state
+                .active_project()
+                .config
+                .layout
+                .status_position),
+            crate::config::StatusPosition::Bottom,
+            "Y's edit isn't in force in Y"
+        );
+    });
+}
+
+/// An error in another project's rc is the flash, named for that project,
+/// over the "reloaded" note of the project in view.
+#[test]
+#[ignore = "red: an error in another project's rc is never shown"]
+fn an_error_in_another_projects_rc_is_the_flash() {
+    with_two(|t| {
+        let app = &mut t.app;
+        write_rc(&t.y_home, "[layout\nstatus_position = \"top\"\n");
+        app.reload_config();
+        let flash = app.state.flash.clone();
+        assert!(
+            flash
+                .as_ref()
+                .is_some_and(|f| matches!(f.kind, crate::app::FlashKind::Error)
+                    && f.text.starts_with("yproj:")),
+            "{flash:?}"
+        );
+    });
+}
+
+/// Reloading another project's rc leaves the theme the user is looking at:
+/// that project's colours apply when the user switches to it.
+#[test]
+fn reloading_another_projects_rc_leaves_the_users_theme() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let before = format!("{:?}", app.view.theme);
+        write_rc(&t.y_home, "[colors]\ndir = \"#ff0000\"\n");
+        app.reload_config();
+        assert_eq!(format!("{:?}", app.view.theme), before, "Y's colours");
+    });
+}
+
+/// Every open project's rc is a config file: the watcher's candidates name
+/// it, and an event on it reloads.
+#[test]
+#[ignore = "red: only the project in view has its rc watched"]
+fn every_projects_rc_is_a_config_path() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let y_rc = t.y_home.join(".spycrc.toml");
+        assert!(
+            app.candidate_config_paths().contains(&y_rc),
+            "{:?}",
+            app.candidate_config_paths()
+        );
+        assert!(app.is_config_path(&y_rc));
+    });
+}
+
+/// Moving a project's start dir moves the rc it loads, so the watcher is told:
+/// the rc in the new start dir is watched, not the old one.
+#[test]
+#[ignore = "red: the watcher never hears of a start dir that moved"]
+fn moving_the_start_dir_tells_the_watcher() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut ctx = RunCtx::for_test();
+        ctx.watch_tx = Some(tx);
+        app.sync_watch(&mut ctx);
+        let _primed = rx.try_iter().count();
+        let _ = app
+            .state
+            .dispatch_command(&format!("startdir {}", t.x_home.join("sub").display()));
+        app.sync_watch(&mut ctx);
+        assert!(rx.try_iter().count() > 0, "the watcher was told nothing");
+    });
+}
+
+// ── Lua maps, in every project's keymap ──────────────────────────────────────
+
+/// Attach a real Lua worker whose wakes land on the returned channel.
+fn attach_lua(app: &mut App) -> std::sync::mpsc::Receiver<Message> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.runtime.pane_wake_tx = Some(tx.clone());
+    app.runtime.lua = Some(crate::lua::LuaWorker::spawn(move || {
+        let _ = tx.send(Message::Wake(Wake::Lua));
+    }));
+    rx
+}
+
+/// Load `body` as `<config>/init.lua` and land its registrations, through
+/// `run` (`reload_init_lua`, `:lua reload`).
+fn land_init_lua(
+    app: &mut App,
+    rx: &std::sync::mpsc::Receiver<Message>,
+    config: &std::path::Path,
+    run: impl FnOnce(&mut App),
+) {
+    std::fs::create_dir_all(config).unwrap();
+    crate::state::with_config_root(config, || run(app));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let (landed, _) = app.handle_lua_done();
+        if landed {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "init.lua never finished"
+        );
+        let _ = rx.recv_timeout(std::time::Duration::from_millis(50));
+    }
+}
+
+/// How many `spyc.map` bindings project `id`'s keymap holds.
+fn lua_maps_in(app: &mut App, id: state::ProjectId) -> usize {
+    app.as_project(id, |app| {
+        app.state
+            .active_project()
+            .user_keymap
+            .iter()
+            .filter(|b| matches!(&b.action, crate::keymap::BoundAction::Lua(n) if n.starts_with("@map:")))
+            .count()
+    })
+}
+
+const INIT_LUA_MAP: &str = "spyc.map(\"<F5>\", function() end)\n";
+
+/// A `spyc.map` key in `init.lua` binds in every open project's keymap, not
+/// only the one in view.
+#[test]
+#[ignore = "red: a spyc.map key binds only in the project in view"]
+fn an_init_lua_map_binds_in_every_open_project() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = app.state.active;
+        let config = t.x_home.parent().unwrap().join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("init.lua"), INIT_LUA_MAP).unwrap();
+        let rx = attach_lua(app);
+        land_init_lua(app, &rx, &config, |app| app.reload_init_lua(false));
+        assert_eq!(lua_maps_in(app, x), 1, "X's keymap");
+        assert_eq!(lua_maps_in(app, t.y), 1, "Y's keymap");
+    });
+}
+
+/// `:lua reload` replaces the `spyc.map` bindings rather than adding to them:
+/// each project's keymap holds one per map afterwards.
+#[test]
+#[ignore = "red: :lua reload leaves a second binding per spyc.map"]
+fn lua_reload_leaves_one_binding_per_map_in_each_project() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = app.state.active;
+        let config = t.x_home.parent().unwrap().join("config");
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(config.join("init.lua"), INIT_LUA_MAP).unwrap();
+        let rx = attach_lua(app);
+        land_init_lua(app, &rx, &config, |app| app.reload_init_lua(false));
+        land_init_lua(app, &rx, &config, |app| {
+            let _ = app.dispatch_command("lua reload");
+        });
+        assert_eq!(lua_maps_in(app, x), 1, "X's keymap");
+        assert_eq!(lua_maps_in(app, t.y), 1, "Y's keymap");
+    });
+}
