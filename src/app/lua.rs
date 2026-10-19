@@ -572,9 +572,17 @@ impl App {
         let elapsed = now_pre.saturating_duration_since(inflight.started_at);
         if lua_runaway_due(inflight.prompted, elapsed, LUA_RUNAWAY_SOFT) {
             // Only raise the modal in Normal mode — never stomp an open prompt
-            // (a confirm dialogue, the `:` line, …). Re-armed below so it
-            // re-fires once the user is back in Normal mode.
-            if matches!(self.state.mode, Mode::Normal) {
+            // (a confirm dialogue, the `:` line, …) — and not while the editor
+            // or a `D` pager has the keyboard: they hand an open prompt the
+            // keys, so the next key the user typed there would answer it, and
+            // any key but `y` aborts the script. Re-armed below so it re-fires
+            // once the user is back.
+            let typing_over = matches!(
+                self.state.active_project().focus,
+                super::state::Focus::Overlay
+                    | super::state::Focus::Pager(crate::ui::pager::Mount::TopPane)
+            );
+            if matches!(self.state.mode, Mode::Normal) && !typing_over {
                 let secs = elapsed.as_secs().max(1);
                 let name = inflight.name.clone();
                 self.runtime
@@ -589,8 +597,9 @@ impl App {
                 ctx.scheduler.disarm(Deadline::LuaRunaway);
                 return true;
             }
-            // A prompt is up: re-arm a short retry so the modal appears as soon
-            // as the user clears it (rather than waiting another full window).
+            // A prompt is up, or the editor or a `D` pager has the keyboard:
+            // re-arm a short retry so the modal appears as soon as the user is
+            // back (rather than waiting another full window).
             ctx.scheduler
                 .arm(Deadline::LuaRunaway, now_pre + LUA_RUNAWAY_SOFT);
             return false;
@@ -783,6 +792,45 @@ mod tests {
             // Modal up → the deadline is disarmed (re-armed on the user's
             // answer, not while the modal blocks).
             assert!(ctx.scheduler.next().is_none(), "deadline disarmed once up");
+        });
+    }
+
+    /// While the editor or a `D` pager has the keyboard the modal waits, since
+    /// either hands an open prompt the next key the user types there; it is
+    /// raised once the user is back in the file list.
+    #[test]
+    fn watchdog_waits_while_the_editor_or_a_d_pager_has_the_keyboard() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let now = Instant::now();
+            app.runtime.lua_inflight = Some(LuaInflight {
+                name: "slow".to_string(),
+                started_at: now.checked_sub(Duration::from_secs(3)).unwrap(),
+                prompted: false,
+            });
+            let mut ctx = RunCtx::for_test();
+            for focus in [
+                crate::app::state::Focus::Overlay,
+                crate::app::state::Focus::Pager(crate::ui::pager::Mount::TopPane),
+            ] {
+                app.state.active_project_mut().focus = focus;
+                assert!(!app.settle_lua_runaway(now, &mut ctx), "{focus:?}");
+                assert!(
+                    matches!(app.state.mode, Mode::Normal),
+                    "raised over {focus:?}"
+                );
+                assert!(
+                    ctx.scheduler.next().is_some(),
+                    "no retry armed over {focus:?}"
+                );
+            }
+            app.state.active_project_mut().focus = crate::app::state::Focus::FileList;
+            assert!(app.settle_lua_runaway(now, &mut ctx), "back in the list");
+            assert!(matches!(
+                &app.state.mode,
+                Mode::Prompting(p) if matches!(p.kind, PromptKind::LuaRunaway)
+            ));
         });
     }
 

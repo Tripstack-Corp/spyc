@@ -1402,7 +1402,6 @@ fn the_prompt_row_shows_over_a_full_screen_d_pager() {
 /// `^a x` from a `D` pager, on a tab that is still running, asks; the answer
 /// is the prompt's, not a pager key.
 #[test]
-#[ignore = "red: a D pager keeps the keys from a prompt open over it"]
 fn a_close_asked_from_a_d_pager_takes_its_answer() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -1434,10 +1433,9 @@ fn a_close_asked_from_a_d_pager_takes_its_answer() {
 }
 
 /// A prompt raised from the editor (`^a Space n`, a leader key the editor
-/// doesn't pause) takes the keys: Esc closes it rather than reaching the
-/// editor.
+/// doesn't pause) takes the keys: what is typed lands in the prompt, and `^C`
+/// closes it, rather than either reaching the editor.
 #[test]
-#[ignore = "red: the editor keeps the keys from a prompt open over it"]
 fn a_prompt_raised_from_the_editor_takes_the_keys() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -1455,11 +1453,46 @@ fn a_prompt_raised_from_the_editor_takes_the_keys() {
             "^a Space n asked nothing: {:?}",
             app.flash_text()
         );
-        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        app.handle_key(key('z')).unwrap();
+        assert!(
+            matches!(&app.state.mode, Mode::Prompting(p) if p.buffer.ends_with('z')),
+            "z went to the editor"
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
             .unwrap();
         assert!(
             matches!(app.state.mode, Mode::Normal),
-            "Esc went to the editor: the prompt is still up"
+            "^C went to the editor: the prompt is still up"
+        );
+    });
+}
+
+/// A consent raised while a modal pager is open draws as a pop-up over it, so
+/// it takes the keys: a key it doesn't answer to defers it and goes on to the
+/// pager, rather than the consent waiting, unanswerable, behind a pager it
+/// covers.
+#[test]
+fn a_consent_over_a_modal_pager_takes_the_keys() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        let pv = crate::ui::pager::PagerView::new_plain("t", vec!["a".to_string()]);
+        assert!(matches!(pv.mount, crate::ui::pager::Mount::Overlay));
+        app.set_pager(pv);
+        app.state.active_project_mut().focus =
+            state::Focus::Pager(crate::ui::pager::Mount::Overlay);
+        app.state.mode = Mode::Prompting(crate::app::Prompt::simple(
+            PromptKind::HookConsent {
+                agent: crate::state::sessions::AgentKind::Claude,
+            },
+            "set up claude? [Y/n] ",
+        ));
+        app.handle_key(key('x')).unwrap();
+        assert!(
+            matches!(app.state.mode, Mode::Normal),
+            "the pager took the key: the consent is still up"
         );
     });
 }

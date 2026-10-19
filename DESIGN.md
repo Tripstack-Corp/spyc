@@ -100,7 +100,10 @@ rather than create a new modal type.
   flash, an armed chord) it borrows the pane's tab bar, spyc's own
   chrome, as the status bar gives way for a zoomed pane; with no pane
   open, the surface's last row. The editor's text is never what gets
-  covered.
+  covered. A prompt shown there has the keyboard: its answer reaches the
+  prompt, never the editor or the pager under it. The full-frame modal pager
+  is the exception: a prompt raised under it waits until it closes, and only
+  a consent, drawn as a pop-up over it, takes the keys.
 - **Activity HUD** — tiny right-anchored debug overlay (`:activity`
   toggle). Reports dps, bytes/sec, poll period. Transparent by
   default — coloured text only, so what's beneath shows through the

@@ -179,6 +179,16 @@ pub enum PromptKind {
 }
 
 impl PromptKind {
+    /// True when this prompt draws as a centred pop-up over everything (the
+    /// consents), not on the prompt row: the ask reads as a modal, not a
+    /// status line lost beneath the pane.
+    pub const fn draws_as_popup(&self) -> bool {
+        matches!(
+            self,
+            Self::HookConsent { .. } | Self::ProjectTabsConsent { .. }
+        )
+    }
+
     /// True when pressing Tab in this prompt completes a filesystem path.
     ///
     /// The single allowlist for path completion: both the simple-prompt
