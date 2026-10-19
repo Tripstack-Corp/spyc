@@ -1399,6 +1399,71 @@ fn the_prompt_row_shows_over_a_full_screen_d_pager() {
     });
 }
 
+/// `^a x` from a `D` pager, on a tab that is still running, asks; the answer
+/// is the prompt's, not a pager key.
+#[test]
+#[ignore = "red: a D pager keeps the keys from a prompt open over it"]
+fn a_close_asked_from_a_d_pager_takes_its_answer() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab("cat");
+        let mut pv = crate::ui::pager::PagerView::new_plain("t", vec!["a".to_string()]);
+        pv.mount = crate::ui::pager::Mount::TopPane;
+        app.install_top_pager(pv);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+            .unwrap();
+        app.handle_key(key('x')).unwrap();
+        assert!(
+            matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::ClosePane)),
+            "^a x asked nothing"
+        );
+        app.handle_key(key('y')).unwrap();
+        assert!(
+            matches!(app.state.mode, Mode::Normal),
+            "the prompt is still up"
+        );
+        assert!(
+            app.runtime.project().pane_tabs.is_none(),
+            "y went to the pager: the tab is open"
+        );
+    });
+}
+
+/// A prompt raised from the editor (`^a Space n`, a leader key the editor
+/// doesn't pause) takes the keys: Esc closes it rather than reaching the
+/// editor.
+#[test]
+#[ignore = "red: the editor keeps the keys from a prompt open over it"]
+fn a_prompt_raised_from_the_editor_takes_the_keys() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        open_v_editor(&mut app, &dir);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+            .unwrap();
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(key('n')).unwrap();
+        assert!(
+            matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::ProjectOpen)),
+            "^a Space n asked nothing: {:?}",
+            app.flash_text()
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert!(
+            matches!(app.state.mode, Mode::Normal),
+            "Esc went to the editor: the prompt is still up"
+        );
+    });
+}
+
 /// With no pane open there is no tab bar, so the editor's last row carries it.
 #[test]
 fn with_no_pane_the_prompt_row_takes_the_editors_last_row() {
