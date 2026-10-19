@@ -141,6 +141,10 @@ pub enum PromptKind {
     /// anything else keeps it. Always targets the active tab (the modal prompt
     /// blocks tab switching), so it needs no index. An exited tab skips this.
     ClosePane,
+    /// `Space x` on a project a tab or editor of which still has a child
+    /// running: closing the project ends them. Single-key: `y`/`Y` closes the
+    /// project named, anything else keeps it.
+    CloseProject(state::ProjectId),
     /// Large file-pipe confirmation: only an unmodified `y`/`Y` queues it.
     PipeConfirm {
         payload: Vec<u8>,

@@ -280,15 +280,16 @@ its own list.
 
 ## Project home & session
 
-Each spyc run has a `PROJECT_HOME` (a sticky project root) and a
-session name (a spice-themed label like `SAFFRON_CUMIN`). Both appear
-on the top bar and persist across `spyc -r`.
+Each project has a `PROJECT_HOME` (a sticky project root), and each spyc
+run a session name (a spice-themed label like `SAFFRON_CUMIN`). Both
+appear on the top bar and persist across `spyc -r`.
 
 | Key | Action |
 |-----|--------|
 | `Space p` | Jump to `PROJECT_HOME` (leader; `^a Space p` from the pane) |
 | `gP` / `Space P` | Set `PROJECT_HOME` to current directory |
 | `Space n` | Open a directory as a project, and go to it |
+| `Space x` | Close the project in view (asks first while anything in it runs) |
 | `Space Space` | Go to the project you were in last |
 | `Space 1`..`Space 9` | Go to open project N |
 | `Space ]` / `Space [` | Go to the next / previous project, wrapping |
@@ -303,8 +304,8 @@ on the top bar and persist across `spyc -r`.
 
 The **leader** (`Space`, or `^a Space` from the agent pane) opens a
 global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
-`Space p` (project home), `Space n` / `Space Space` / `Space 1-9` /
-`Space ]` `Space [` (projects), `Space s` (session info), `Space ?` (help),
+`Space p` (project home), `Space n` / `Space x` / `Space Space` /
+`Space 1-9` / `Space ]` `Space [` (projects), `Space s` (session info), `Space ?` (help),
 `Space a` (about). Hold it to see the which-key popup. `W l` / `W n` /
 `W d` is a list-focus alias for the same worktree list / new / delete.
 

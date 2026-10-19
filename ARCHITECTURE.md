@@ -907,14 +907,19 @@ nor the git poll looks at a project out of view, so a switch
 (`App::switch_project`) re-reads (on a worker) and re-walks every column of
 the arriving project and reloads its preview, and writes the departing
 project's context file if it is behind; `Space n` opens a project
-(`App::open_project`), whose column the switch to it reads, and the leader's
-other project keys move between them. A project's home is its own, and so
+(`App::open_project`), whose column the switch to it reads, `Space x` closes
+one (`App::close_project`: the user is moved out first, then `drop_project`
+shuts its tabs down off the loop thread, drops their scope claims and answers
+their parked waits, and removes its context file and its root from the
+sidecar), and the leader's other project keys move between them. A project's home is its own, and so
 is its start dir, the root an agent's cwd binds by: no two open projects
 share either (`AppState::home_taken`, `move_start_dir`). Once a project
 closes, the archive work it started still lands on the process's mount table
 (a write's re-read included), named for it, and enters nowhere; an agent whose
 tab closed with it is told so rather than reading from the process cwd, and a
-connection bound to no tab binds again. A config reload (`^R`, or an edit an
+connection bound to no tab binds again, as does one not bound yet, on a call
+that reads a context file, once the launch project, whose file the server
+starts with, has closed. A config reload (`^R`, or an edit an
 open project's rc fires) reloads every open project from its own rc, the one
 in view last, and the watcher watches every project's rc; a `spyc.map` key
 binds in every project's keymap. `get_spyc_context` adds `project` (its id,

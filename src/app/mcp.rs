@@ -119,16 +119,25 @@ impl App {
                 .last_context
                 .as_ref()
                 .is_none_or(|c| c.root != ctx.root);
-            if moved && self.view.mcp_running {
-                let roots: Vec<&std::path::Path> = self
-                    .state
-                    .open_projects()
-                    .map(|p| p.start_dir.as_path())
-                    .collect();
-                crate::mcp::record_roots(&roots);
+            if moved {
+                self.record_open_roots();
             }
             self.view.project_mut().last_context = Some(ctx);
         }
+    }
+
+    /// Rewrite discovery's record of this spyc's roots, every open project's
+    /// start dir (#99), while the MCP server runs.
+    pub(super) fn record_open_roots(&self) {
+        if !self.view.mcp_running {
+            return;
+        }
+        let roots: Vec<&std::path::Path> = self
+            .state
+            .open_projects()
+            .map(|p| p.start_dir.as_path())
+            .collect();
+        crate::mcp::record_roots(&roots);
     }
 
     /// Resolve an MCP worktree-path argument and guard it: trim/require it,

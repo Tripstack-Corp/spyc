@@ -38,10 +38,6 @@ const FUNCTION: Rule = Rule {
         ("src/app/file_ops.rs::run_file_op", 162),
         ("src/app/key_dispatch/mod.rs::App::handle_key", 172),
         (
-            "src/app/key_dispatch/prompts.rs::App::handle_prompt_key",
-            160,
-        ),
-        (
             "src/app/key_dispatch/prompts.rs::App::handle_vi_prompt_key",
             144,
         ),

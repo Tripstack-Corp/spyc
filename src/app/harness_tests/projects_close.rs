@@ -9,6 +9,15 @@ use super::projects_open::{leader, open, with_three};
 use super::*;
 use crate::mcp_cmd::McpResponse;
 use crate::state::scope_registry::{ScopeClaim, ScopeIntent};
+use crossterm::event::KeyCode;
+
+/// `^a Space` then `c`: the leader from the pane, which a tab just opened has
+/// focused.
+fn leader_from_pane(app: &mut App, c: char) {
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+        .unwrap();
+    leader(app, c);
+}
 
 /// The pid of the live tab `pane`, in whichever project holds it.
 fn pid_of(app: &App, pane: &str) -> u32 {
@@ -44,13 +53,12 @@ fn claim(id: u64, owner: &str) -> ScopeClaim {
 /// `Space x` on a project with a tab whose child is still running asks
 /// first, naming the project and how many are running, and `n` keeps it.
 #[test]
-#[ignore = "red: Space x closes nothing"]
 fn space_x_with_a_running_tab_asks_and_n_keeps_the_project() {
     with_three(|t| {
         let (x, x_home) = (t.x, t.x_home.clone());
         let app = &mut t.app;
         app.open_tab_in_project(x, &x_home);
-        leader(app, 'x');
+        leader_from_pane(app, 'x');
         let Mode::Prompting(prompt) = &app.state.mode else {
             panic!("Space x asked nothing: {:?}", app.flash_text());
         };
@@ -71,7 +79,6 @@ fn space_x_with_a_running_tab_asks_and_n_keeps_the_project() {
 /// of every map; and the flash names it. `Space Space` never names a closed
 /// project.
 #[test]
-#[ignore = "red: Space x closes nothing"]
 fn y_closes_the_project_and_lands_in_the_last_one() {
     with_three(|t| {
         let app = &mut t.app;
@@ -82,7 +89,7 @@ fn y_closes_the_project_and_lands_in_the_last_one() {
         let context = app.view.project().context_path.clone();
         assert!(context.exists(), "zproj's context file");
 
-        leader(app, 'x');
+        leader_from_pane(app, 'x');
         app.handle_key(key('y')).unwrap();
 
         assert_eq!(
@@ -112,7 +119,6 @@ fn y_closes_the_project_and_lands_in_the_last_one() {
 /// With no last project to go back to, closing lands on a neighbour. A
 /// project with nothing running closes without asking.
 #[test]
-#[ignore = "red: Space x closes nothing"]
 fn with_no_last_project_closing_lands_on_a_neighbour() {
     with_three(|t| {
         let app = &mut t.app;
@@ -123,9 +129,78 @@ fn with_no_last_project_closing_lands_on_a_neighbour() {
     });
 }
 
+/// With no last project to go back to, closing a project lands on the next
+/// one, and closing the last in order on the one before it.
+#[test]
+fn with_no_last_project_closing_lands_on_the_next_else_the_one_before() {
+    with_three(|t| {
+        let app = &mut t.app;
+        open(app, &t.z_home);
+        let z = app.state.active;
+        leader(app, '2');
+        app.state.last_project = None;
+        leader(app, 'x');
+        assert!(!app.state.has_project(t.y));
+        assert_eq!(app.state.active, z, "not the next project");
+        app.state.last_project = None;
+        leader(app, 'x');
+        assert!(!app.state.has_project(z));
+        assert_eq!(app.state.active, t.x, "not the one before");
+    });
+}
+
+/// An editor open above the pane is running too: closing the project from
+/// the pane counts it, and it is shut down with the tabs.
+#[test]
+fn an_editor_counts_as_running_and_closes_with_the_project() {
+    with_three(|t| {
+        let (x, x_home) = (t.x, t.x_home.clone());
+        let app = &mut t.app;
+        app.open_tab_in_project(x, &x_home);
+        let wake = app.make_pane_wake();
+        let context = app.view.project().context_path.clone();
+        let editor = crate::pane::Pane::spawn("cat", 24, 80, &x_home, &context, wake)
+            .expect("the editor spawns");
+        let editor_pid = editor.process_id().expect("the editor has a pid");
+        app.runtime.project_mut().top_overlay = Some(editor);
+        leader_from_pane(app, 'x');
+        let Mode::Prompting(prompt) = &app.state.mode else {
+            panic!("Space x asked nothing: {:?}", app.flash_text());
+        };
+        assert!(prompt.prefix.contains("2 running"), "{}", prompt.prefix);
+        app.handle_key(key('y')).unwrap();
+        assert!(!app.state.has_project(x));
+        assert!(exits(editor_pid), "the editor is still running");
+    });
+}
+
+/// From inside the editor, `^a Space x` doesn't close the project the editor
+/// belongs to, as `^a` pane commands don't act there: closing would end it.
+#[test]
+fn space_x_from_the_editor_says_quit_it_first() {
+    with_three(|t| {
+        let (x, x_home) = (t.x, t.x_home.clone());
+        let app = &mut t.app;
+        let wake = app.make_pane_wake();
+        let context = app.view.project().context_path.clone();
+        let editor = crate::pane::Pane::spawn("cat", 24, 80, &x_home, &context, wake)
+            .expect("the editor spawns");
+        app.runtime.project_mut().top_overlay = Some(editor);
+        app.state.active_project_mut().focus = state::Focus::Overlay;
+        leader_from_pane(app, 'x');
+        assert!(matches!(app.state.mode, Mode::Normal), "it asked");
+        assert!(app.state.has_project(x));
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.contains("quit the editor first")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
 /// The only project open isn't closed from the leader: quitting is `:q`'s.
 #[test]
-#[ignore = "red: Space x on the only project says nothing"]
 fn space_x_on_the_only_project_says_q_closes_it() {
     let tmp = tempfile::tempdir().unwrap();
     let home = std::fs::canonicalize(tmp.path()).unwrap();
@@ -148,7 +223,6 @@ fn space_x_on_the_only_project_says_q_closes_it() {
 /// on `wait_for_scope_clear` is answered rather than left waiting. Another
 /// project's claims stay.
 #[test]
-#[ignore = "red: Space x closes nothing"]
 fn closing_drops_its_tabs_claims_and_answers_their_waits() {
     with_three(|t| {
         let (x, y, x_home, y_home) = (t.x, t.y, t.x_home.clone(), t.y_home.clone());
@@ -170,7 +244,7 @@ fn closing_drops_its_tabs_claims_and_answers_their_waits() {
             reply,
         });
 
-        leader(app, 'x');
+        leader_from_pane(app, 'x');
         app.handle_key(key('y')).unwrap();
 
         let owners: Vec<&str> = app
@@ -191,7 +265,6 @@ fn closing_drops_its_tabs_claims_and_answers_their_waits() {
 
 /// The sidecar discovery reads no longer lists a closed project's root.
 #[test]
-#[ignore = "red: Space x closes nothing"]
 fn closing_drops_its_root_from_discovery() {
     with_three(|t| {
         let app = &mut t.app;

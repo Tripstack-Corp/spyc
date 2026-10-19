@@ -222,7 +222,7 @@ tagged on `Action::tier()` and the namespace placement is guarded by
 build-checked contract, not just a convention.
 
 - **GLOBAL** (`Tier::Global`) — workspace ops that make sense from *any*
-  focus: worktree, project home, session. Home: the **leader** — `Space`
+  focus: worktree, project (open, close, move between, home), session. Home: the **leader** — `Space`
   in the file list. From the agent pane it's **`^a Space`**: a bare `Space`
   is literal text to the child, so it can't be intercepted there; the
   existing `^a` interception (`is_spyc_meta_when_pane_focused`) wakes spyc

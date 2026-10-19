@@ -161,19 +161,11 @@ impl App {
         id
     }
 
-    /// Close project `id` as far as the rest of the app can tell: it leaves
-    /// all three maps and its context file is removed. It must not be the
-    /// active project; tests switch away first, as closing does.
+    /// Close project `id` as `Space x` does once the user is out of it
+    /// (`drop_project`). It must not be the active project; tests switch away
+    /// first, as closing does.
     pub(crate) fn remove_test_project(&mut self, id: state::ProjectId) {
-        assert_ne!(
-            id, self.state.active,
-            "switch away before removing a project"
-        );
-        if let Some(view) = self.view.projects.remove(&id) {
-            crate::context::remove_context_file(&view.context_path);
-        }
-        self.runtime.projects.remove(&id);
-        self.state.remove_project(id);
+        self.drop_project(id);
     }
 
     /// Open a `cat` tab in project `id`, as that project's keyboard would, and
