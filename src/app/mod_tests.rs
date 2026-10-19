@@ -1425,6 +1425,15 @@ mod history_bucket_tests {
         );
     }
 
+    /// `Space n`'s directories are their own history, not `J`'s or the shell's.
+    #[test]
+    fn project_open_has_its_own_bucket() {
+        assert_eq!(
+            history_bucket_for(Some(&PromptKind::ProjectOpen)),
+            HistoryBucket::Project
+        );
+    }
+
     #[test]
     fn shell_and_path_prompts_fall_back_to_shell_bucket() {
         assert_eq!(

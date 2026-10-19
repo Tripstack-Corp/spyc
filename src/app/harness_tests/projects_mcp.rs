@@ -62,8 +62,18 @@ impl Projects {
     /// scope waits settled between requests. The server's own context file is
     /// `a`'s, the one it starts with.
     fn wire<T: Send>(&mut self, client: impl FnOnce(&mut Conn) -> T + Send) -> T {
+        let default = self.app.view.project().context_path.clone();
+        self.wire_from(default, client)
+    }
+
+    /// [`Self::wire`], with the server started on the context file `default`.
+    fn wire_from<T: Send>(
+        &mut self,
+        default: PathBuf,
+        client: impl FnOnce(&mut Conn) -> T + Send,
+    ) -> T {
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut conn = Conn::open(self.app.view.project().context_path.clone(), tx);
+        let mut conn = Conn::open(default, tx);
         let mut ctx = RunCtx::for_test();
         let app = &mut self.app;
         std::thread::scope(|s| {
@@ -659,6 +669,24 @@ fn a_connection_bound_to_the_users_project_binds_again_when_it_closes() {
             app.make_active(b);
             app.remove_test_project(a);
         });
+        assert!(text.contains("in_b.rs"), "{text}");
+    });
+}
+
+/// A connection that has not bound, one that sent no `initialize`, reads the
+/// server's own context file, the launch project's. Once that project closes
+/// it binds as an `initialize` naming nothing would, to the project the user
+/// is in, rather than reading whatever directory spyc's process cwd is.
+#[test]
+#[ignore = "red: a connection that has not bound reads its closed launch project's file"]
+fn a_connection_that_has_not_bound_follows_the_user_when_the_launch_project_closes() {
+    with_projects(|p| {
+        let (a, b) = (p.app.state.active, p.b);
+        let default = p.app.view.project().context_path.clone();
+        p.app.make_active(b);
+        p.app.remove_test_project(a);
+        let found = p.wire_from(default, |c| c.tool("search_paths", json!({"query": "in_"})));
+        let text = found.to_string();
         assert!(text.contains("in_b.rs"), "{text}");
     });
 }
