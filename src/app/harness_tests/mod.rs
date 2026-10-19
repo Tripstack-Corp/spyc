@@ -508,6 +508,7 @@ mod project_landings;
 mod project_switch;
 mod project_tabs;
 mod projects_mcp;
+mod projects_open;
 mod projects_plumbing;
 mod prompt_templates;
 mod second_commander;
