@@ -420,9 +420,12 @@ are the source of truth — Actions *call them* so local and CI never drift.
   version, its per-platform tarball URLs + SHA256s, and a `--HEAD` source build).
   On any publish (prereleases included — the tap tracks the current rc stream)
   this workflow recomputes the SHAs and pushes the formula bump. Auth is an
-  org-owned GitHub App (contents:write on the tap repo, no personal PAT):
-  `HOMEBREW_APP_ID` + `HOMEBREW_APP_KEY` in the `homebrew-tap` environment mint a
-  short-lived token via `actions/create-github-app-token`.
+  org-owned GitHub App (contents:write on the tap repo, no personal PAT): the
+  `homebrew-tap` environment's `HOMEBREW_APP_CLIENT_ID` variable (the App's
+  client ID, which is public) and `HOMEBREW_APP_KEY` secret mint a short-lived
+  token via `actions/create-github-app-token`. The job fails when either is
+  missing, rather than skipping: a skip is green, and the formula would stay
+  behind without anyone seeing it.
 
 ### `apt.yml` — signed apt repo publish (on release published) — **LIVE**
 - On any publish (prereleases included — apt tracks the rc stream): download the
@@ -464,8 +467,8 @@ are the source of truth — Actions *call them* so local and CI never drift.
 
 **Cross-cutting:** `concurrency` groups to cancel superseded runs (already wired
 in `ci.yml`); the `apt-publish` environment holds `APT_GPG_PRIVATE_KEY` +
-`APT_GPG_PASSPHRASE`, the `homebrew-tap` environment holds `HOMEBREW_APP_ID` +
-`HOMEBREW_APP_KEY` (org GitHub App). The apt push uses the built-in
+`APT_GPG_PASSPHRASE`, the `homebrew-tap` environment holds the
+`HOMEBREW_APP_CLIENT_ID` variable + `HOMEBREW_APP_KEY` secret (org GitHub App). The apt push uses the built-in
 `GITHUB_TOKEN` and cosign uses OIDC — no personal tokens stored.
 
 ### `cache-cleanup.yml` — reclaim a closed PR's caches — **IMPLEMENTED**
@@ -583,8 +586,9 @@ existing repo, not seeding a clean slate. Ordered to stand the whole thing up:
 5. Add/refresh community-health files (LICENSE, SECURITY.md Supported-Versions
    table, CONTRIBUTING, add CODE_OF_CONDUCT, issue/PR templates, CODEOWNERS).
 6. Repo About: description, homepage, topics; upload the social-preview card.
-7. Configure secrets (`GPG_KEY`/`GPG_PASSPHRASE` if GPG; `HOMEBREW_APP_ID` +
-   `HOMEBREW_APP_KEY` for the tap-bump App) + Actions permissions
+7. Configure secrets (`GPG_KEY`/`GPG_PASSPHRASE` if GPG; the tap-bump App's
+   `HOMEBREW_APP_KEY`, plus its client ID as the variable
+   `HOMEBREW_APP_CLIENT_ID`) + Actions permissions
    (`id-token: write` for attestations).
 8. Branch protection on `main` (+ `stable/*`, `releng/*` for Stage 2); required
    checks; squash-merge default.
