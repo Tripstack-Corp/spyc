@@ -108,12 +108,17 @@ impl App {
                 Some(*effect)
             }
             ArchiveSink::Record(changes) => {
-                self.record_pending(changes);
+                if !self.refuse_changes_while_written(&changes) {
+                    self.record_pending(changes);
+                }
                 None
             }
             // Bringing a file in needs its bytes somewhere before the repack can
             // read them, so the rewritten op runs *and* the change is recorded.
             ArchiveSink::RewriteAndRecord { effect, changes } => {
+                if self.refuse_changes_while_written(&changes) {
+                    return None;
+                }
                 if let Some(dir) = staging_target(&effect)
                     && let Err(e) = std::fs::create_dir_all(&dir)
                 {

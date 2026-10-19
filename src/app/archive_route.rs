@@ -72,6 +72,17 @@ pub enum PendingChange {
     },
 }
 
+impl PendingChange {
+    /// The archive the change is to.
+    pub fn archive(&self) -> &Path {
+        match self {
+            Self::Delete { archive, .. }
+            | Self::Rename { archive, .. }
+            | Self::Add { archive, .. } => archive,
+        }
+    }
+}
+
 /// Classify `effect` against the live mounts.
 ///
 /// `is_staged` answers "are this member's bytes already on disk?" and `is_dir`

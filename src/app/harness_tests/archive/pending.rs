@@ -789,7 +789,6 @@ fn writing(test: impl FnOnce(&mut App, &Path, Vec<Effect>)) {
 /// staging tree after the first has landed, taking an edit saved in between
 /// with it.
 #[test]
-#[ignore = "red: a second :archive write starts while the first runs"]
 fn a_second_write_while_one_runs_is_refused() {
     writing(|app, archive, write| {
         let second = app.cmd_archive("write");
@@ -808,7 +807,6 @@ fn a_second_write_while_one_runs_is_refused() {
 /// clearing the journal, so a change recorded after it started would vanish
 /// with no word.
 #[test]
-#[ignore = "red: a change recorded while the archive is written is lost when the write lands"]
 fn a_change_while_the_archive_is_written_is_refused() {
     writing(|app, archive, write| {
         settle(
@@ -827,7 +825,6 @@ fn a_change_while_the_archive_is_written_is_refused() {
 /// Discarding an archive's changes while they are written is refused: it would
 /// delete staged copies the write is reading.
 #[test]
-#[ignore = "red: :archive discard runs while the archive is written"]
 fn discarding_while_the_archive_is_written_is_refused() {
     writing(|app, archive, write| {
         let _ = app.cmd_archive("discard");
@@ -841,7 +838,6 @@ fn discarding_while_the_archive_is_written_is_refused() {
 /// anything: either answer to "write it first?" acts on an archive whose
 /// write has not landed.
 #[test]
-#[ignore = "red: :archive unmount asks to write or discard while the archive is written"]
 fn unmounting_while_the_archive_is_written_is_refused() {
     writing(|app, archive, write| {
         let _ = app.cmd_archive("unmount");
@@ -858,7 +854,6 @@ fn unmounting_while_the_archive_is_written_is_refused() {
 /// Putting a file into an archive while it is written is refused, as any
 /// change to it is.
 #[test]
-#[ignore = "red: a file put into an archive while it is written is lost when the write lands"]
 fn putting_a_file_into_the_archive_while_it_is_written_is_refused() {
     writing(|app, archive, write| {
         let staging = app.state.mounts.get(archive).unwrap().staging_root.clone();
