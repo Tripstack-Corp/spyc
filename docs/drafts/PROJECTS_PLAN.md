@@ -1007,6 +1007,17 @@ PR, except step 5's stages:
      watch took with it. A `spyc.map` key binds in every open project's
      keymap, and forgetting the registrations (`:lua reload`, `:lua off`)
      strips them from every keymap, so a reload no longer doubles them.
+   - **Opening and moving between projects (pair 2a).** `Space n` asks for a
+     directory and opens it (`App::open_project`): `create_project` reads its
+     rc, binds `init.lua`'s maps (`install_lua_maps`), builds column `a`
+     unread with its repo root and branch resolved, and the switch reads it on
+     the worker; then its context file is written and its startup tabs start.
+     A directory an open project is anchored at or started in is gone to
+     instead. `Space Space` goes to `AppState::last_project` (recorded by
+     `switch_project`, never by `in_project`), `Space 1-9` to the Nth,
+     `Space ]` / `Space [` through them, wrapping; with one project open they
+     do nothing. The project keys are `Action::Project(ProjectAction)`, with
+     `Space p` / `Space P` moved in. Closing (`Space x`) is pair 2b.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).

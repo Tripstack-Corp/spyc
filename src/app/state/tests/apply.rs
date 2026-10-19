@@ -385,7 +385,8 @@ fn apply_jump_prev_dir_emits_change_dir_when_set() {
 fn apply_jump_project_home_emits_change_dir_when_set() {
     let mut s = test_state();
     s.active_project_mut().home = Some(PathBuf::from("/tmp/proj"));
-    let ApplyResult::Post(fx) = s.apply(&Action::JumpProjectHome) else {
+    let ApplyResult::Post(fx) = s.apply(&Action::Project(crate::keymap::ProjectAction::JumpHome))
+    else {
         panic!("expected Post");
     };
     let cd = fx.change_dir().expect("one ChangeDir effect");
@@ -397,7 +398,7 @@ fn apply_jump_project_home_emits_change_dir_when_set() {
 fn apply_jump_project_home_unset_flashes_no_effect() {
     let mut s = test_state(); // project_home = None
     assert!(matches!(
-        s.apply(&Action::JumpProjectHome),
+        s.apply(&Action::Project(crate::keymap::ProjectAction::JumpHome)),
         ApplyResult::Handled
     ));
     assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Error));

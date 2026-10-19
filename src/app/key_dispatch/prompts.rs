@@ -219,6 +219,7 @@ impl App {
             HistoryBucket::PaneCwd => &mut self.state.pane_cwd_history,
             HistoryBucket::Jump => &mut self.state.jump_history,
             HistoryBucket::Command => &mut self.state.command_history,
+            HistoryBucket::Project => &mut self.state.project_history,
         }
     }
 

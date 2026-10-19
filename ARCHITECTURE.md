@@ -906,7 +906,9 @@ redraw, and only its active tab can be the focused one. Neither the watcher
 nor the git poll looks at a project out of view, so a switch
 (`App::switch_project`) re-reads (on a worker) and re-walks every column of
 the arriving project and reloads its preview, and writes the departing
-project's context file if it is behind. A project's home is its own, and so
+project's context file if it is behind; `Space n` opens a project
+(`App::open_project`), whose column the switch to it reads, and the leader's
+other project keys move between them. A project's home is its own, and so
 is its start dir, the root an agent's cwd binds by: no two open projects
 share either (`AppState::home_taken`, `move_start_dir`). Once a project
 closes, the archive work it started still lands on the process's mount table

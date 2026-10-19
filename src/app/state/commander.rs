@@ -89,13 +89,22 @@ impl Commander {
     /// is the focused commander (it builds rows through `cur()`). Used to open
     /// the second (right) column; mirrors the `left` init in `bootstrap`.
     pub fn for_dir(dir: &Path, config: &Config) -> anyhow::Result<Self> {
+        let mut commander = Self::unread_at(dir, config);
+        commander.listing = Listing::read(dir)?;
+        commander
+            .listing
+            .sort(commander.sort_order, commander.sort_reversed);
+        Ok(commander)
+    }
+
+    /// [`Self::for_dir`] with its listing not yet read: a column a worker
+    /// reads, as a project's columns are when the user switches to it.
+    pub fn unread_at(dir: &Path, config: &Config) -> Self {
         let sort_order = crate::fs::listing::SortMode::Name;
-        let mut listing = Listing::read(dir)?;
-        listing.sort(sort_order, false);
         let mut masks = IgnoreMasks::default();
         masks.apply_config(&config.ignore_masks);
-        Ok(Self {
-            listing,
+        Self {
+            listing: Listing::empty(dir.to_path_buf()),
             picks: Picks::new(),
             masks,
             temp_filter: None,
@@ -114,6 +123,6 @@ impl Commander {
             harpoon: None,
             harpoon_filter_set: std::collections::HashSet::new(),
             pending_ghosts: std::collections::HashSet::new(),
-        })
+        }
     }
 }

@@ -5,8 +5,8 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
-use crate::app::PromptKind;
 use crate::app::effect::matchers::EffectSliceExt;
+use crate::app::{FlashKind, PromptKind};
 use crate::fs::entry::EntryKind;
 use crate::fs::listing::SortMode;
 use crate::keymap::Action;

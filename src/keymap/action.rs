@@ -89,10 +89,9 @@ pub enum Action {
     JumpPrevDir,    // '' — jump back to directory before last chdir
     JumpStartDir,   // ` — jump to directory where spyc was launched
 
-    // Project home (sticky project root).
-    JumpProjectHome,  // Space p (leader) — jump to PROJECT_HOME (the overall project)
+    // Projects (#99): the project in view's home, and the open projects.
+    Project(ProjectAction),
     JumpWorktreeRoot, // gw — jump the focused column to ITS repo/worktree root
-    SetProjectHomeHere, // gP — set PROJECT_HOME to current directory
 
     // Start dir (target of backtick `).
     SetStartDirHere, // gS — set start_dir to current directory
@@ -264,8 +263,7 @@ impl Action {
             Self::WorktreeList
             | Self::WorktreeNew
             | Self::WorktreeDelete
-            | Self::JumpProjectHome
-            | Self::SetProjectHomeHere
+            | Self::Project(_)
             | Self::ShowMemory => Tier::Global,
             // Pane — the pty pane + vertical split (the `^a` prefix).
             Self::TogglePane
@@ -420,9 +418,8 @@ impl Action {
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",
             Self::JumpStartDir => "jump to starting directory",
-            Self::JumpProjectHome => "jump to PROJECT_HOME",
+            Self::Project(p) => p.describe(),
             Self::JumpWorktreeRoot => "jump the focused column to its worktree/repo root",
-            Self::SetProjectHomeHere => "set PROJECT_HOME to current dir",
             Self::SetStartDirHere => "set start dir to current dir (target of `)",
             Self::Date => "show date",
             Self::Version => "show version",
@@ -519,9 +516,8 @@ impl Action {
             Self::JumpPrevDir => "jump_prev_dir",
             Self::JumpStartDir => "jump_start_dir",
             // Project home / worktree root / start dir.
-            Self::JumpProjectHome => "jump_project_home",
+            Self::Project(p) => p.canonical_name(),
             Self::JumpWorktreeRoot => "jump_worktree_root",
-            Self::SetProjectHomeHere => "set_project_home_here",
             Self::SetStartDirHere => "set_start_dir_here",
             // Top-pane edit / display.
             Self::EditInPane => "edit_in_pane",
@@ -682,9 +678,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "jump_prev_dir" => Action::JumpPrevDir,
         "jump_start_dir" => Action::JumpStartDir,
         // Project home / worktree root / start dir.
-        "jump_project_home" => Action::JumpProjectHome,
         "jump_worktree_root" => Action::JumpWorktreeRoot,
-        "set_project_home_here" => Action::SetProjectHomeHere,
         "set_start_dir_here" => Action::SetStartDirHere,
         // Top-pane edit / display.
         "edit_in_pane" => Action::EditInPane,
@@ -763,15 +757,88 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "reopen_last_buffer" => Action::ReopenLastBuffer,
         "find_file" => Action::FindFile,
         "noop" => Action::Noop,
-        _ => return None,
+        _ => return ProjectAction::from_name(name).map(Action::Project),
+    })
+}
+
+/// What [`Action::Project`] does (#99): the project in view's home, and the
+/// open projects themselves. One variant of `Action` for all of them, so each
+/// naming table carries one arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, strum::EnumIter)]
+pub enum ProjectAction {
+    /// `Space p` — jump to PROJECT_HOME.
+    #[default]
+    JumpHome,
+    /// `gP` / `Space P` — set PROJECT_HOME to the current directory.
+    SetHomeHere,
+    /// `Space n` — open a directory as a project.
+    Open,
+    /// `Space Space` — go to the project the user was in last.
+    Last,
+    /// `Space ]` — go to the next open project, wrapping.
+    Next,
+    /// `Space [` — go to the previous open project, wrapping.
+    Prev,
+    /// `Space 1`..`Space 9` — go to open project N.
+    ByIndex(u8),
+}
+
+impl ProjectAction {
+    pub const fn describe(self) -> &'static str {
+        match self {
+            Self::JumpHome => "jump to PROJECT_HOME",
+            Self::SetHomeHere => "set PROJECT_HOME to current dir",
+            Self::Open => "open a directory as a project",
+            Self::Last => "go to the last project",
+            Self::Next => "go to the next project",
+            Self::Prev => "go to the previous project",
+            Self::ByIndex(_) => "go to project N",
+        }
+    }
+
+    pub const fn canonical_name(self) -> &'static str {
+        match self {
+            Self::JumpHome => "jump_project_home",
+            Self::SetHomeHere => "set_project_home_here",
+            Self::Open => "project_open",
+            Self::Last => "project_last",
+            Self::Next => "project_next",
+            Self::Prev => "project_prev",
+            Self::ByIndex(_) => "project_by_index",
+        }
+    }
+
+    /// The action `name` names, a parametric one in its default form
+    /// (`ByIndex(1)`).
+    fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "jump_project_home" => Self::JumpHome,
+            "set_project_home_here" => Self::SetHomeHere,
+            "project_open" => Self::Open,
+            "project_last" => Self::Last,
+            "project_next" => Self::Next,
+            "project_prev" => Self::Prev,
+            "project_by_index" => Self::ByIndex(1),
+            _ => return None,
+        })
+    }
+}
+
+/// Every action, a nested one ([`ProjectAction`]) by each of its variants:
+/// what the completeness guards iterate.
+#[cfg(test)]
+pub fn every_action() -> impl Iterator<Item = Action> {
+    use strum::IntoEnumIterator;
+    Action::iter().flat_map(|a| match a {
+        Action::Project(_) => ProjectAction::iter().map(Action::Project).collect(),
+        a => vec![a],
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, action_from_name};
+    use super::{Action, action_from_name, every_action};
     use std::collections::HashSet;
-    use strum::IntoEnumIterator;
 
     /// The mark actions carry a register letter with no meaningful context-free
     /// default, so [`action_from_name`] deliberately returns `None` for them
@@ -794,7 +861,7 @@ mod tests {
     /// `is_intentionally_excluded` (which documents the "why").
     #[test]
     fn action_names_round_trip() {
-        for variant in Action::iter() {
+        for variant in every_action() {
             let name = variant.canonical_name();
             if is_intentionally_excluded(&variant) {
                 assert!(
@@ -827,7 +894,7 @@ mod tests {
     #[test]
     fn canonical_names_are_unique() {
         let mut seen: HashSet<&'static str> = HashSet::new();
-        for variant in Action::iter() {
+        for variant in every_action() {
             let name = variant.canonical_name();
             assert!(
                 seen.insert(name),

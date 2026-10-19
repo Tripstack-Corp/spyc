@@ -288,6 +288,10 @@ on the top bar and persist across `spyc -r`.
 |-----|--------|
 | `Space p` | Jump to `PROJECT_HOME` (leader; `^a Space p` from the pane) |
 | `gP` / `Space P` | Set `PROJECT_HOME` to current directory |
+| `Space n` | Open a directory as a project, and go to it |
+| `Space Space` | Go to the project you were in last |
+| `Space 1`..`Space 9` | Go to open project N |
+| `Space ]` / `Space [` | Go to the next / previous project, wrapping |
 | `gS` | Set start dir (target of `` ` ``) to current directory |
 | `:project [.\|<path>\|clear]` | Manage `PROJECT_HOME` |
 | `:startdir [.\|<path>]` | Manage start dir |
@@ -299,7 +303,8 @@ on the top bar and persist across `spyc -r`.
 
 The **leader** (`Space`, or `^a Space` from the agent pane) opens a
 global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
-`Space p` (project home), `Space s` (session info), `Space ?` (help),
+`Space p` (project home), `Space n` / `Space Space` / `Space 1-9` /
+`Space ]` `Space [` (projects), `Space s` (session info), `Space ?` (help),
 `Space a` (about). Hold it to see the which-key popup. `W l` / `W n` /
 `W d` is a list-focus alias for the same worktree list / new / delete.
 

@@ -25,7 +25,7 @@ use crate::state::{Frecency, History, Inventory, Marks};
 #[cfg(test)]
 use crate::ui::list_view::GridDims;
 
-use super::{Effect, FlashKind, FlashMessage, Mode, RowData, View};
+use super::{Effect, FlashMessage, Mode, RowData, View};
 
 pub(super) mod agent_hud;
 mod pane_layout;
@@ -35,6 +35,7 @@ pub mod archive;
 mod commander;
 pub use commander::Commander;
 mod dispatch;
+mod flash;
 mod git;
 mod git_cache;
 mod homes;
@@ -355,6 +356,8 @@ pub struct AppState {
     /// independent of the shell-command and pane-prompt histories
     /// so they don't pollute each other.
     pub jump_history: History,
+    /// Persistent history for `Space n`'s "open project:" prompt.
+    pub project_history: History,
     /// Persistent history for `:` (vim-style command-line) prompts.
     /// Kept separate from shell-command history so `:make sync-all`
     /// (a typo for `!make sync-all`) doesn't surface back as a `:`
@@ -411,6 +414,10 @@ pub struct AppState {
     /// to the user's view stays with it: the process cwd, frecency and the
     /// harpoon menu.
     pub in_background: bool,
+    /// The project the user was in before the one in view: where `Space
+    /// Space` goes. Set by `App::switch_project`, never by `App::in_project`,
+    /// whose switches are an agent's, not the user's.
+    pub last_project: Option<ProjectId>,
     /// Whether the background git-status worker is wired. Set by `App::new`
     /// once the worker thread spawns; `false` in tests and during the
     /// AppState bootstrap before the worker exists. When `true`, a
@@ -467,6 +474,12 @@ impl AppState {
     /// Every open project, in switcher order.
     pub fn open_projects(&self) -> impl Iterator<Item = &Project> {
         self.projects.iter()
+    }
+
+    /// Open `project` beside the others, last in switcher order. Its home and
+    /// start dir are its caller's to have checked ([`Self::home_taken`]).
+    pub(crate) fn insert_project(&mut self, project: Project) {
+        self.projects.push(project);
     }
 
     /// [`Self::open_projects`], mutably.
@@ -745,70 +758,6 @@ impl AppState {
             .status_reported(pane_id);
     }
 
-    pub fn flash_info<S: Into<String>>(&mut self, text: S) {
-        self.flash = Some(FlashMessage {
-            text: text.into(),
-            kind: FlashKind::Info,
-        });
-    }
-
-    pub fn flash_error<S: Into<String>>(&mut self, text: S) {
-        self.flash = Some(FlashMessage {
-            text: text.into(),
-            kind: FlashKind::Error,
-        });
-    }
-
-    /// Announce work that is starting, to be replaced or cleared when it lands.
-    ///
-    /// A flash has no lifetime of its own — it shows until something else
-    /// replaces it — so an in-flight message left behind by a completion that had
-    /// nothing to say goes on claiming the work is still running.
-    pub fn flash_progress<S: Into<String>>(&mut self, text: S) {
-        self.flash = Some(FlashMessage {
-            text: text.into(),
-            kind: FlashKind::Progress(self.active),
-        });
-    }
-
-    /// Drop the active project's in-flight message now that its operation has
-    /// finished ([`Self::clear_progress_flash_of`]).
-    pub fn clear_progress_flash(&mut self) {
-        self.clear_progress_flash_of(self.active);
-    }
-
-    /// Drop the in-flight message project `id` raised, now that its operation
-    /// has finished.
-    ///
-    /// Only ever clears a [`FlashKind::Progress`] of `id`'s, so a real message
-    /// that landed in the meantime — a warning about the archive, an error —
-    /// survives, as does another project's announcement of work still running.
-    pub fn clear_progress_flash_of(&mut self, id: ProjectId) {
-        if self
-            .flash
-            .as_ref()
-            .is_some_and(|f| matches!(f.kind, FlashKind::Progress(owner) if owner == id))
-        {
-            self.flash = None;
-        }
-    }
-
-    /// Flash the outcome of a "save pane contents to file" action: the
-    /// saved file's basename on success, the error text on failure. Shared
-    /// by the two pane-scrollback save handlers (the `PaneScrollSave` action
-    /// and the `s` key in pane-scroll mode), which were byte-for-byte
-    /// identical. Errors stay `flash_info` (not `flash_error`) to preserve
-    /// the pre-existing presentation.
-    pub fn flash_saved_file(&mut self, result: std::io::Result<std::path::PathBuf>) {
-        match result {
-            Ok(path) => {
-                let name = path.file_name().unwrap_or_default().to_string_lossy();
-                self.flash_info(format!("saved: {name}"));
-            }
-            Err(e) => self.flash_info(format!("save error: {e:#}")),
-        }
-    }
-
     /// Human-readable session name for status bar / overlays; falls back to
     /// `"(unnamed)"` when no name is set (e.g. restored from an old session
     /// file that predates the name field).
@@ -963,6 +912,7 @@ impl AppState {
             closed_labels: std::collections::HashMap::new(),
             active,
             in_background: false,
+            last_project: None,
             git_worker_available: false,
             inventory: Inventory::new(),
             marks: Marks::default(),
@@ -978,6 +928,7 @@ impl AppState {
             pane_history: History::load_file("harness_ph"),
             pane_cwd_history: History::load_file("harness_pch"),
             jump_history: History::load_file("harness_jh"),
+            project_history: History::load_file("harness_prh"),
             command_history: History::load_file("harness_ch"),
             flash: None,
             should_quit: false,

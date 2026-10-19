@@ -540,6 +540,7 @@ impl App {
                 self.view.needs_full_repaint = true;
             }
             Action::Quit => self.request_quit(),
+            Action::Project(p) => self.move_between_projects(*p),
 
             Action::GotoFile | Action::GotoFileLine => {
                 // Emit a `ReadPaneText`/`GotoFile` effect (PR 5b): the executor

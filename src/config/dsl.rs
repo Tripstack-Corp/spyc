@@ -289,6 +289,9 @@ fn named_action(name: &str, tail: &str) -> Result<Action, String> {
         "jump_mark" => Action::JumpMark(mark_letter(name, param)?),
         "harpoon_jump" => Action::HarpoonJump(one_to_nine(name, param)?),
         "pane_tab_by_index" => Action::PaneTabByIndex(one_to_nine(name, param)?),
+        "project_by_index" => Action::Project(crate::keymap::ProjectAction::ByIndex(one_to_nine(
+            name, param,
+        )?)),
         "toggle_mask" => match param {
             Some("1") => Action::ToggleMask(1),
             Some("2") => Action::ToggleMask(2),
@@ -609,6 +612,10 @@ mod tests {
             Action::JumpMark(_) => ("=q", Action::JumpMark('q')),
             Action::HarpoonJump(_) => ("=3", Action::HarpoonJump(3)),
             Action::PaneTabByIndex(_) => ("=3", Action::PaneTabByIndex(3)),
+            Action::Project(crate::keymap::ProjectAction::ByIndex(_)) => (
+                "=3",
+                Action::Project(crate::keymap::ProjectAction::ByIndex(3)),
+            ),
             Action::ToggleMask(_) => ("=2", Action::ToggleMask(2)),
             Action::ChmodAdd(_) => ("=w", Action::ChmodAdd('w')),
             _ => return None,
@@ -620,8 +627,7 @@ mod tests {
     /// action fails here too.
     #[test]
     fn every_action_binds_by_its_canonical_name() {
-        use strum::IntoEnumIterator;
-        for variant in Action::iter() {
+        for variant in crate::keymap::action::every_action() {
             let name = variant.canonical_name();
             let (line, want) = match sample_parameter(&variant) {
                 Some((arg, want)) => (format!("map x {name} {arg}"), want),
@@ -727,7 +733,6 @@ mod tests {
     /// bind, so it lists every action and nothing else.
     #[test]
     fn the_action_name_table_lists_every_action() {
-        use strum::IntoEnumIterator;
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let doc = std::fs::read_to_string(root.join("CONFIGURATION.md")).expect("doc");
         let (_, section) = doc
@@ -740,8 +745,9 @@ mod tests {
             .filter_map(|l| row.captures(l))
             .map(|c| c.get(1).expect("name").as_str())
             .collect();
-        let names: std::collections::BTreeSet<&str> =
-            Action::iter().map(|a| a.canonical_name()).collect();
+        let names: std::collections::BTreeSet<&str> = crate::keymap::action::every_action()
+            .map(|a| a.canonical_name())
+            .collect();
         assert_eq!(listed, names);
     }
 

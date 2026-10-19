@@ -21,10 +21,6 @@ impl App {
     /// it is behind, since its agents read it while the loop writes only the
     /// active project's; its pager streams are its own (`ProjectRuntime`); and
     /// its tabs are drained and settled with every other project's.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "no key binding drives the switch; tests do")
-    )]
     pub(super) fn switch_project(&mut self, id: ProjectId) {
         if id == self.state.active {
             return;
@@ -33,6 +29,7 @@ impl App {
             self.state.has_project(id),
             "switch_project is handed an open project"
         );
+        self.state.last_project = Some(self.state.active);
         if std::mem::take(&mut self.view.project_mut().context_dirty) {
             self.write_context();
         }

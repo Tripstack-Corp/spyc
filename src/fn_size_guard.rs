@@ -66,7 +66,7 @@ const FUNCTION: Rule = Rule {
         ("src/keymap/action.rs::Action::canonical_name", 119),
         ("src/keymap/action.rs::Action::describe", 119),
         ("src/keymap/action.rs::action_from_name", 118),
-        ("src/keymap/resolver/mod.rs::Resolver::feed", 456),
+        ("src/keymap/resolver/mod.rs::Resolver::feed", 445),
         ("src/lua/api.rs::install", 170),
         ("src/mcp/protocol.rs::handle_tools_call", 384),
         (

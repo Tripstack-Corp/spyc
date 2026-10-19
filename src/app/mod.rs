@@ -162,6 +162,7 @@ mod preview_ops;
 mod proc;
 mod process_cwd;
 mod project_switch;
+mod projects;
 mod prompt;
 mod prompt_templates;
 mod quick_select;
@@ -298,6 +299,8 @@ enum HistoryBucket {
     Jump,
     /// `:` vim-style command line.
     Command,
+    /// `Space n`'s "open project:" directories.
+    Project,
 }
 
 const fn history_bucket_for(kind: Option<&PromptKind>) -> HistoryBucket {
@@ -306,6 +309,7 @@ const fn history_bucket_for(kind: Option<&PromptKind>) -> HistoryBucket {
         Some(PromptKind::PaneNewTabCwd) => HistoryBucket::PaneCwd,
         Some(PromptKind::Jump) => HistoryBucket::Jump,
         Some(PromptKind::Command) => HistoryBucket::Command,
+        Some(PromptKind::ProjectOpen) => HistoryBucket::Project,
         _ => HistoryBucket::Shell,
     }
 }

@@ -1221,6 +1221,10 @@ which-key popup lists the options:
   submenu as the `W` prefix, which still works in the list).
 - **`Space p`** — jump to `PROJECT_HOME`.
 - **`Space P`** — set `PROJECT_HOME` to the current directory.
+- **`Space n`** — open a directory as a project, and go to it.
+- **`Space Space`** — go to the project you were in last.
+- **`Space 1`..`Space 9`** — go to open project N.
+- **`Space ]` / `Space [`** — go to the next / previous project, wrapping.
 - **`Space s`** — session info.
 - **`Space ?`** — open this help.
 - **`Space a`** — open the about page.
@@ -1229,6 +1233,19 @@ This is the line between *global* commands (worktree, project — they make
 sense from any focus) and *frame* commands (git, picks, sort — they act on
 the file view and stay on the `g` / letter chords). `gh` (old project-home
 jump) is gone in favour of `Space p`; `gw` (jump to the worktree root) stays.
+
+## Projects
+
+One spyc holds several projects, each with its own columns, pane tabs, config
+and `PROJECT_HOME`. **`Space n`** asks for a directory (pre-filled with the
+focused column's worktree root, `Tab` completes, `~` expands) and opens it as
+a project: its `.spycrc.toml` is read as a launch there would read it, and its
+`[pane] tabs` start the same way, a repo's own list asking first. A directory
+an open project is anchored at is that project's, so `Space n` onto it goes
+there instead. **`Space Space`** goes back to the project you were in last,
+**`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
+through them in the order they were opened, wrapping. With one project open
+these do nothing at all.
 
 ## Project home & session name
 

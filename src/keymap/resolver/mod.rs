@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::action::Action;
+use super::action::{Action, ProjectAction};
 use super::user::{BoundAction, UserKeymap};
 
 /// State carried between keystrokes while we wait for a multi-key sequence
@@ -158,8 +158,13 @@ impl Resolver {
             // from pane focus.
             PendingSeq::Leader => vec![
                 Sub("w", "worktree"),
-                Act("p", A::JumpProjectHome),
-                Act("P", A::SetProjectHomeHere),
+                Act("p", A::Project(ProjectAction::JumpHome)),
+                Act("P", A::Project(ProjectAction::SetHomeHere)),
+                Act("n", A::Project(ProjectAction::Open)),
+                Act("Space", A::Project(ProjectAction::Last)),
+                Act("1-9", A::Project(ProjectAction::ByIndex(0))),
+                Act("]", A::Project(ProjectAction::Next)),
+                Act("[", A::Project(ProjectAction::Prev)),
                 Act("s", A::ShowMemory),
                 Act("?", A::Help),
                 Act("a", A::About),
@@ -174,7 +179,7 @@ impl Resolver {
                 Act("f", A::GotoFile),
                 Act("F", A::GotoFileLine),
                 Act("w", A::JumpWorktreeRoot),
-                Act("P", A::SetProjectHomeHere),
+                Act("P", A::Project(ProjectAction::SetHomeHere)),
                 Act("S", A::SetStartDirHere),
                 Act("p", A::ReopenLastBuffer),
                 Act("B", A::OpenTaskViewer),
@@ -240,6 +245,32 @@ impl Resolver {
             PendingSeq::D => vec![Act("d", A::RemovePrompt(None))],
             PendingSeq::Z => vec![Act("Z", A::Quit)],
         }
+    }
+
+    /// Mid-sequence: leader (`Space` / `^a Space`) — the global/workspace menu.
+    /// `w` opens the worktree submenu (reusing the `W`-prefix sub-handler so
+    /// `Space w l/n/d` == `W l/n/d`); the rest fire directly.
+    fn feed_leader(&mut self, ev: KeyEvent) -> ResolverOutcome {
+        if matches!(ev.code, KeyCode::Char('w' | 'W')) {
+            self.pending = PendingSeq::Worktree;
+            return ResolverOutcome::Pending;
+        }
+        let project = |p| ResolverOutcome::Action(Action::Project(p));
+        let out = match ev.code {
+            KeyCode::Char('p') => project(ProjectAction::JumpHome),
+            KeyCode::Char('P') => project(ProjectAction::SetHomeHere),
+            KeyCode::Char('n') => project(ProjectAction::Open),
+            KeyCode::Char(' ') => project(ProjectAction::Last),
+            KeyCode::Char(']') => project(ProjectAction::Next),
+            KeyCode::Char('[') => project(ProjectAction::Prev),
+            KeyCode::Char(d @ '1'..='9') => project(ProjectAction::ByIndex(d as u8 - b'0')),
+            KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::ShowMemory),
+            KeyCode::Char('?') => ResolverOutcome::Action(Action::Help),
+            KeyCode::Char('a') => ResolverOutcome::Action(Action::About),
+            _ => ResolverOutcome::Ignored,
+        };
+        self.reset();
+        out
     }
 
     /// Feed a key through the resolver, first consulting the user keymap
@@ -358,24 +389,8 @@ impl Resolver {
             return out;
         }
 
-        // Mid-sequence: leader (`Space` / `^a Space`) — the global/workspace
-        // menu. `w` opens the worktree submenu (reusing the `W`-prefix
-        // sub-handler so `Space w l/n/d` == `W l/n/d`); the rest fire directly.
         if self.pending == PendingSeq::Leader {
-            if matches!(ev.code, KeyCode::Char('w' | 'W')) {
-                self.pending = PendingSeq::Worktree;
-                return ResolverOutcome::Pending;
-            }
-            let out = match ev.code {
-                KeyCode::Char('p') => ResolverOutcome::Action(Action::JumpProjectHome),
-                KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
-                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::ShowMemory),
-                KeyCode::Char('?') => ResolverOutcome::Action(Action::Help),
-                KeyCode::Char('a') => ResolverOutcome::Action(Action::About),
-                _ => ResolverOutcome::Ignored,
-            };
-            self.reset();
-            return out;
+            return self.feed_leader(ev);
         }
 
         // Control-codes take priority and reset any pending state.
@@ -467,7 +482,9 @@ impl Resolver {
                 // leader/global menu), which removes the confusing `gh` vs `gw`
                 // pair. `gw` (jump to the worktree root) stays as frame nav.
                 KeyCode::Char('w') => ResolverOutcome::Action(Action::JumpWorktreeRoot),
-                KeyCode::Char('P') => ResolverOutcome::Action(Action::SetProjectHomeHere),
+                KeyCode::Char('P') => {
+                    ResolverOutcome::Action(Action::Project(ProjectAction::SetHomeHere))
+                }
                 KeyCode::Char('S') => ResolverOutcome::Action(Action::SetStartDirHere),
                 KeyCode::Char('B') => ResolverOutcome::Action(Action::OpenTaskViewer),
                 KeyCode::Char('p') => ResolverOutcome::Action(Action::ReopenLastBuffer),
