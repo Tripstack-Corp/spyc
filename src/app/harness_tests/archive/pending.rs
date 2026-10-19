@@ -746,3 +746,143 @@ fn a_write_back_re_reads_without_a_clean_racing_its_staging_tree() {
         );
     });
 }
+
+// ── a write in flight owns its archive ───────────────────────────────────────
+
+fn writes(effects: &[Effect]) -> bool {
+    effects
+        .iter()
+        .any(|e| matches!(e, Effect::Archive(ArchiveOp::Write { .. })))
+}
+
+fn being_written(app: &App) -> bool {
+    app.flash_text()
+        .is_some_and(|f| f.contains("being written"))
+}
+
+/// A zip mounted with the column inside and `README.md` marked for removal,
+/// and the write of that change started but not landed: its op is returned.
+fn writing(test: impl FnOnce(&mut App, &Path, Vec<Effect>)) {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("README.md")],
+                },
+            )],
+        );
+        let write = app.cmd_archive("write");
+        assert!(writes(&write), "{write:?}");
+        test(&mut app, &archive, write);
+    });
+}
+
+/// A second `:archive write` while the first runs is refused. Each write
+/// re-reads the archive once it lands, and the second re-read empties the
+/// staging tree after the first has landed, taking an edit saved in between
+/// with it.
+#[test]
+#[ignore = "red: a second :archive write starts while the first runs"]
+fn a_second_write_while_one_runs_is_refused() {
+    writing(|app, archive, write| {
+        let second = app.cmd_archive("write");
+        assert!(!writes(&second), "a second write started: {second:?}");
+        assert!(being_written(app), "{:?}", app.flash_text());
+        settle(app, write);
+        assert!(
+            !member_names(archive).contains(&"README.md".to_string()),
+            "the first write never landed: {:?}",
+            member_names(archive)
+        );
+    });
+}
+
+/// A change to an archive while it is written is refused: the write lands by
+/// clearing the journal, so a change recorded after it started would vanish
+/// with no word.
+#[test]
+#[ignore = "red: a change recorded while the archive is written is lost when the write lands"]
+fn a_change_while_the_archive_is_written_is_refused() {
+    writing(|app, archive, write| {
+        settle(
+            app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("src").join("main.rs")],
+                },
+            )],
+        );
+        assert!(being_written(app), "{:?}", app.flash_text());
+        settle(app, write);
+    });
+}
+
+/// Discarding an archive's changes while they are written is refused: it would
+/// delete staged copies the write is reading.
+#[test]
+#[ignore = "red: :archive discard runs while the archive is written"]
+fn discarding_while_the_archive_is_written_is_refused() {
+    writing(|app, archive, write| {
+        let _ = app.cmd_archive("discard");
+        assert!(being_written(app), "{:?}", app.flash_text());
+        assert!(app.mount_is_dirty(archive), "the changes were discarded");
+        settle(app, write);
+    });
+}
+
+/// Unmounting an archive while it is written is refused before it asks
+/// anything: either answer to "write it first?" acts on an archive whose
+/// write has not landed.
+#[test]
+#[ignore = "red: :archive unmount asks to write or discard while the archive is written"]
+fn unmounting_while_the_archive_is_written_is_refused() {
+    writing(|app, archive, write| {
+        let _ = app.cmd_archive("unmount");
+        assert!(
+            !matches!(app.state.mode, Mode::Prompting(_)),
+            "it asked to write or discard"
+        );
+        assert!(being_written(app), "{:?}", app.flash_text());
+        assert!(app.state.mounts.contains(archive));
+        settle(app, write);
+    });
+}
+
+/// Putting a file into an archive while it is written is refused, as any
+/// change to it is.
+#[test]
+#[ignore = "red: a file put into an archive while it is written is lost when the write lands"]
+fn putting_a_file_into_the_archive_while_it_is_written_is_refused() {
+    writing(|app, archive, write| {
+        let staging = app.state.mounts.get(archive).unwrap().staging_root.clone();
+        put_a_file_into(app, archive, &staging, "brought.txt", b"brought\n");
+        assert!(being_written(app), "{:?}", app.flash_text());
+        settle(app, write);
+    });
+}
+
+/// Once a write has landed the archive is free again: the next change and
+/// write go ahead.
+#[test]
+fn a_write_that_has_landed_lets_the_next_one_start() {
+    writing(|app, archive, write| {
+        settle(app, write);
+        settle(
+            app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("src").join("main.rs")],
+                },
+            )],
+        );
+        let next = app.cmd_archive("write");
+        assert!(writes(&next), "the next write was refused: {next:?}");
+    });
+}
