@@ -258,17 +258,11 @@ impl App {
         .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane))
     }
 
-    /// What the prompt row has to show, if anything. The consent prompts have
-    /// none: they draw as a centred pop-up, so the ask reads as a modal, not a
-    /// status line lost beneath the pane.
+    /// What the prompt row has to show, if anything. A prompt that draws as a
+    /// pop-up (`PromptKind::draws_as_popup`) has none there.
     fn prompt_row(&self) -> Option<PromptRow<'_>> {
         if let Mode::Prompting(p) = &self.state.mode {
-            return (!matches!(
-                p.kind,
-                crate::app::PromptKind::HookConsent { .. }
-                    | crate::app::PromptKind::ProjectTabsConsent { .. }
-            ))
-            .then_some(PromptRow::Prompt(p));
+            return (!p.kind.draws_as_popup()).then_some(PromptRow::Prompt(p));
         }
         if let Some(flash) = &self.state.flash {
             return Some(PromptRow::Flash(flash));

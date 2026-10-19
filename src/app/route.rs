@@ -101,6 +101,9 @@ pub(super) struct RouteSnapshot {
     pub modal: Option<Modal>,
     /// `state.mode` is `Mode::Prompting(_)`.
     pub is_prompting: bool,
+    /// The open prompt draws as a centred pop-up over everything (a consent,
+    /// `PromptKind::draws_as_popup`), not on the prompt row.
+    pub prompt_is_popup: bool,
     /// The authoritative focused region (`state.focus`, recomputed each loop
     /// top). Drives the overlay-pty arm (`Focus::Overlay`) and pane-focus
     /// (`Focus::Pane`); the `Pager`/`FileList` variants fall through to the
@@ -142,12 +145,18 @@ pub(super) struct RouteSnapshot {
 /// be a meta-chord that escapes to the resolver, but a paste is always
 /// content (`is_meta == false`) so it lands wherever a non-meta key would.
 ///
-/// One invariant cuts across the bottom-owned content arms: **an open
-/// prompt wins.** A prompt is the file-list area's active region, so every
-/// non-meta arm the bottom pane / scrollback / scroll-pager would otherwise
-/// own (2b, 3, 4, 5) carries `!snap.is_prompting` and falls through to the
-/// Prompt arm. Without it, a prompt opened while the pane is focused and
-/// closed or scrolling is shadowed and unanswerable.
+/// One invariant cuts across the content arms: **an open prompt wins.** A
+/// prompt is the file-list area's active region, so every non-meta arm the
+/// editor, a `D` pager, the bottom pane, its scrollback or the split's
+/// preview would otherwise own (1, 2, 2b, 3, 4, 5, 5b) falls through to the
+/// Prompt arm while one is open. Without it, a prompt opened from any of
+/// them (`^a x`, `^a c`, the leader's `^a Space n`, or one a script raises)
+/// is shadowed and unanswerable, and its answer is typed into whatever had
+/// the keyboard. Over the editor and a `D` pager the prompt row moves where
+/// it shows (`displaced_prompt_row`), and an exited editor's dismiss hold
+/// waits for the prompt to close. The modal pager is the one exception, as a
+/// full-frame modal: a prompt-row prompt raised under it waits until it
+/// closes, and only a consent, drawn as a pop-up over it, takes the keys.
 pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSink {
     // Modal layer — a single typed value (precedence decided by `active_modal`)
     // maps straight to its sink. Eats every input kind before the content layer.
@@ -155,11 +164,11 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         Some(Modal::ImageView) => return InputSink::ImageView,
         Some(Modal::FindPicker) => return InputSink::FindPicker,
         Some(Modal::Capture) => return InputSink::Capture,
-        Some(Modal::OverlayDismiss) => return InputSink::OverlayDismiss,
+        Some(Modal::OverlayDismiss) if !snap.is_prompting => return InputSink::OverlayDismiss,
         Some(Modal::QuickSelect) => return InputSink::QuickSelect,
         Some(Modal::Harpoon) => return InputSink::Harpoon,
         Some(Modal::ImageGallery) => return InputSink::ImageGallery,
-        None => {}
+        Some(Modal::OverlayDismiss) | None => {}
     }
 
     // Content layer.
@@ -175,24 +184,30 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     // 1. Top-overlay pty (V editor, ; command). `Focus::Overlay` already means
     //    the overlay is alive AND neither the pane nor a pager is focused (a
     //    `^a-j` into claude makes focus `Pane` instead, so the keystroke flows
-    //    to the bottom pane below). Meta chords still escape.
-    if matches!(snap.focus, Focus::Overlay) && !is_meta {
+    //    to the bottom pane below). Meta chords still escape, and an open
+    //    prompt takes the keys.
+    if matches!(snap.focus, Focus::Overlay) && !is_meta && !snap.is_prompting {
         return InputSink::OverlayPty;
     }
 
     // 2. Top-region pager (`view.pager`: Overlay or TopPane). Overlay is
     //    modal and always eats keys. A TopPane pager (`D`) coexists with the
     //    bottom: it yields non-meta keys to the bottom pane/scrollback when the
-    //    bottom is focused (`bottom_typing`), and meta chords always escape to
-    //    the resolver. `active_pager_mut!` resolves `PagerKey` to this pager
-    //    (the top is focused, or it's a modal Overlay).
+    //    bottom is focused (`bottom_typing`), meta chords always escape to the
+    //    resolver, and an open prompt takes the keys (`prompt_over`). Over the
+    //    modal Overlay only a consent's pop-up does: a prompt-row prompt waits
+    //    for it to close.
+    //    `active_pager_mut!` resolves `PagerKey` to this pager (the top is
+    //    focused, or it's a modal Overlay).
     // `pager_mount` is already the FOCUSED column's pager (a `D` in the other
     // column reads `None`), so a column-scoped pager only reaches here while its
     // column is focused — the other column's keys fall through to its list.
     if let Some(mount) = snap.pager_mount {
         let bottom_typing = matches!(mount, Mount::TopPane) && bottom_owns && !is_meta;
         let escape_meta = matches!(mount, Mount::TopPane) && is_meta;
-        if !(bottom_typing || escape_meta) {
+        let prompt_over =
+            snap.is_prompting && (matches!(mount, Mount::TopPane) || snap.prompt_is_popup);
+        if !(bottom_typing || escape_meta || prompt_over) {
             return InputSink::PagerKey;
         }
         // else fall through to the scrollback / bottom-pane / resolver arms.
@@ -266,6 +281,7 @@ impl App {
                 has_image_view: self.view.image_view.is_some(),
             }),
             is_prompting: matches!(self.state.mode, Mode::Prompting(_)),
+            prompt_is_popup: matches!(&self.state.mode, Mode::Prompting(p) if p.kind.draws_as_popup()),
             // The authoritative focus, recomputed at the loop top before this
             // read. Subsumes the old `has_top_overlay` + `pane_focused` reads.
             focus: self.state.active_project().focus,
@@ -299,6 +315,7 @@ mod tests {
         RouteSnapshot {
             modal: None,
             is_prompting: false,
+            prompt_is_popup: false,
             focus: Focus::FileList,
             pager_mount: None,
             has_scroll_pager: false,
@@ -659,11 +676,11 @@ mod tests {
         assert_eq!(route_key(snap, key('g')), InputSink::Prompt);
     }
 
-    // A prompt opened over a full-screen editor or a `D` pager is drawn on the
-    // pane's tab bar (`displaced_prompt_row`), so it takes the keys: answering
-    // it must not type into the editor or move the pager.
+    // A prompt opened over a full-screen editor or a `D` pager is drawn where
+    // the user sees it (the pane's tab bar, the row below a split's columns,
+    // or a consent's pop-up), so it takes the keys: answering it must not type
+    // into the editor or move the pager.
     #[test]
-    #[ignore = "red: the editor keeps the keys from a prompt open over it"]
     fn prompt_wins_over_the_editor_overlay() {
         let snap = RouteSnapshot {
             is_prompting: true,
@@ -681,7 +698,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red: a D pager keeps the keys from a prompt open over it"]
     fn prompt_wins_over_a_top_pane_pager() {
         let snap = RouteSnapshot {
             is_prompting: true,
@@ -695,9 +711,10 @@ mod tests {
         assert_eq!(route_input(snap, InputKind::Paste), InputSink::Prompt);
     }
 
-    // The modal pager is drawn over the prompt row, so a prompt raised behind
-    // it (a Lua script's "keep waiting?") waits there, and the pager keeps
-    // its keys until it closes.
+    // The modal pager is a full-frame modal, so a prompt-row prompt raised
+    // under it (a Lua script's "keep waiting?") waits until it closes, and the
+    // pager keeps its keys; from the editor, too. A consent draws as a pop-up
+    // over it, so that takes them.
     #[test]
     fn a_modal_pager_keeps_its_keys_over_a_prompt() {
         let snap = RouteSnapshot {
@@ -707,6 +724,47 @@ mod tests {
             ..idle()
         };
         assert_eq!(route_key(snap, key('q')), InputSink::PagerKey);
+        let from_the_editor = RouteSnapshot {
+            focus: Focus::Overlay,
+            ..snap
+        };
+        assert_eq!(route_key(from_the_editor, key('q')), InputSink::PagerKey);
+        let popup = RouteSnapshot {
+            prompt_is_popup: true,
+            ..snap
+        };
+        assert_eq!(route_key(popup, key('y')), InputSink::Prompt);
+    }
+
+    // A meta chord over a `D` pager with a prompt open reaches the prompt,
+    // which takes `^C` / `^a` as its own, not the resolver.
+    #[test]
+    fn a_meta_key_over_a_d_pager_reaches_an_open_prompt() {
+        let snap = RouteSnapshot {
+            is_prompting: true,
+            focus: Focus::Pager(Mount::TopPane),
+            pager_mount: Some(Mount::TopPane),
+            ..idle()
+        };
+        assert_eq!(route_key(snap, ctrl('a')), InputSink::Prompt);
+    }
+
+    // An exited editor's "press any key" hold waits while a prompt is open
+    // over it: the typed key is the prompt's, and the hold takes the next key
+    // once the prompt closes.
+    #[test]
+    fn an_exited_editors_dismiss_hold_yields_to_an_open_prompt() {
+        let hold = RouteSnapshot {
+            modal: Some(Modal::OverlayDismiss),
+            focus: Focus::Overlay,
+            ..idle()
+        };
+        assert_eq!(route_key(hold, key('z')), InputSink::OverlayDismiss);
+        let prompting = RouteSnapshot {
+            is_prompting: true,
+            ..hold
+        };
+        assert_eq!(route_key(prompting, key('z')), InputSink::Prompt);
     }
 
     // A `Mount::Overlay` pager eats keys REGARDLESS of pane focus — both a
@@ -919,7 +977,7 @@ mod tests {
             Focus::Pager(Mount::LowerPane),
         ];
         let plain = key('x'); // non-meta printable
-        // Sweep each modal × focus × pager mount × every combination of the 6
+        // Sweep each modal × focus × pager mount × every combination of the 7
         // remaining boolean bits (a flat bit-decode beats a deep `for` pyramid:
         // bit `i` of `bits` drives the i-th field). `resolver_pending` is held
         // false on purpose: with a chord pending, EVERY key (incl. `x`) is meta
@@ -929,10 +987,11 @@ mod tests {
         for &modal in &modals {
             for &focus in &focuses {
                 for &pager_mount in &mounts {
-                    for bits in 0..(1u32 << 6) {
+                    for bits in 0..(1u32 << 7) {
                         let snap = RouteSnapshot {
                             modal,
                             is_prompting: on(bits, 0),
+                            prompt_is_popup: on(bits, 6),
                             focus,
                             pager_mount,
                             has_scroll_pager: on(bits, 1),

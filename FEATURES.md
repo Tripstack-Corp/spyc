@@ -1431,7 +1431,9 @@ unambiguous:
   registered map/command counts. Scripts run on a dedicated worker thread
   so a runaway can't freeze the UI: if a script runs past ~1s an interactive
   **"lua '\<name\>' running Ns — keep waiting? [y/N]"** prompt pops — `N`/`Esc`
-  aborts it, `y` keeps waiting (re-prompting after another second) — backed by
+  aborts it, `y` keeps waiting (re-prompting after another second); it waits
+  while an editor or a `D` pager has the keyboard, so a key typed there can't
+  answer it — backed by
   an instruction-budget hook and a hard 30s ceiling, and `:lua off` /
   `--no-lua` disable the engine. `$HOME`-only (a project config can never run
   Lua, and init.lua loads only from `~/.config/spyc/`).
