@@ -1255,8 +1255,8 @@ from inside an editor it says to quit the editor first, since closing would
 end it.
 **`Space j`** lists the open projects, numbered, each with how many tabs it
 has and its home, the one you're in highlighted: `j`/`k` and `Enter`, or
-`1`-`9`, go to one, `/` searches, and `q` closes it. From inside an editor it
-says to quit the editor first (`Space ]` / `Space [` still step through).
+`1`-`9`, go to one, `/` searches, and `q` closes it. Opened from inside an
+editor, it has the keyboard until it closes, as help does.
 **`Space Space`** goes back to the project you were in last,
 **`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
 through them in the order they were opened, wrapping. With one project open

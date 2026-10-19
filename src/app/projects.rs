@@ -56,15 +56,8 @@ impl App {
     /// `Space j`: list the open projects in switcher order, to go to one. Each
     /// row is numbered, with how many tabs it has and its home; the one in
     /// view is marked and highlighted. `j`/`k` and Enter, or `1`-`9`, pick
-    /// (`switch_to_pending_project`). Not from inside the editor, which keeps
-    /// the keyboard over a pager opened on top of it.
+    /// (`switch_to_pending_project`).
     pub(super) fn open_project_switcher(&mut self) {
-        if matches!(self.state.active_project().focus, state::Focus::Overlay) {
-            self.state.flash_info(
-                "quit the editor first, or step through projects with Space ] / Space [",
-            );
-            return;
-        }
         self.clear_pending_pickers();
         let label_w = self
             .state

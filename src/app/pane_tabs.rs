@@ -807,9 +807,20 @@ impl App {
     /// `set_pane_focus` uses. Called at the loop top (and on surface close) so
     /// `state.focus` always reflects reality with **no per-open-site
     /// bookkeeping** — most pager opens (`:grep`, git-view, help, …) never touch
-    /// focus, and closes left a stale `Overlay`/`Pager` behind. Behaviour-
-    /// preserving while routing/render still read only `pane_focused()`: this
-    /// only refines the non-`Pane` discriminant, which `pane_focused()` ignores.
+    /// focus, and closes left a stale `Overlay`/`Pager` behind. The non-`Pane`
+    /// discriminant is what routes a key to the editor or to a modal pager
+    /// drawn over it.
+    pub(super) fn recompute_focus(&mut self) {
+        let want_pane = matches!(self.state.active_project().focus, state::Focus::Pane);
+        self.state.active_project_mut().focus = super::focus::decide_focus(
+            super::focus::FocusSnapshot {
+                has_top_overlay: self.focused_col_has_overlay(),
+                pager_mount: self.focused_top_pager_mount(),
+            },
+            want_pane,
+        );
+    }
+
     /// Does the FOCUSED vsplit column host a `V`/`D`/`;cmd` overlay PTY? Reads
     /// that column's own slot (`b` → `top_overlay_right`, else `top_overlay`), so
     /// an overlay open only in the OTHER column reads `false` — focus then
@@ -840,17 +851,6 @@ impl App {
             state::Side::Right => self.view.project().pager_right.as_ref().map(|v| v.mount),
             state::Side::Left => self.view.project().pager.as_ref().map(|v| v.mount),
         }
-    }
-
-    pub(super) fn recompute_focus(&mut self) {
-        let want_pane = matches!(self.state.active_project().focus, state::Focus::Pane);
-        self.state.active_project_mut().focus = super::focus::decide_focus(
-            super::focus::FocusSnapshot {
-                has_top_overlay: self.focused_col_has_overlay(),
-                pager_mount: self.focused_top_pager_mount(),
-            },
-            want_pane,
-        );
     }
 
     /// `:dump-scrollback` diagnostic. Runs the same drain +

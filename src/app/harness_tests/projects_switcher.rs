@@ -203,7 +203,6 @@ fn a_pick_closes_the_switcher_not_column_bs_pager() {
 /// From inside the editor the switcher opens over it and has the keyboard: a
 /// digit goes to that project, and the editor carries on in the project left.
 #[test]
-#[ignore = "red: Space j refuses from the editor"]
 fn space_j_from_the_editor_takes_the_keys() {
     with_three(|t| {
         let (x, x_home) = (t.x, t.x_home.clone());
@@ -223,39 +222,19 @@ fn space_j_from_the_editor_takes_the_keys() {
             app.flash_text()
         );
         // The loop top derives the focus again before it reads each key.
-        app.recompute_focus();
+        app.snapshot_pane_routing();
         app.handle_key(key('2')).unwrap();
         assert_eq!(app.state.active, t.y);
         assert!(
             app.as_project(x, |app| app.runtime.project().top_overlay.is_some()),
             "the editor quit"
         );
-    });
-}
-
-/// From inside the editor the switcher doesn't open: the editor keeps the
-/// keyboard over a pager opened on top of it, so the keys would go to the
-/// file.
-#[test]
-fn space_j_from_the_editor_says_quit_it_first() {
-    with_three(|t| {
-        let x_home = t.x_home.clone();
-        let app = &mut t.app;
-        let wake = app.make_pane_wake();
-        let context = app.view.project().context_path.clone();
-        let editor = crate::pane::Pane::spawn("cat", 24, 80, &x_home, &context, wake)
-            .expect("the editor spawns");
-        app.runtime.project_mut().top_overlay = Some(editor);
-        app.state.active_project_mut().focus = state::Focus::Overlay;
-        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
-            .unwrap();
-        leader(app, 'j');
-        assert!(rows(app).is_none(), "the switcher opened over the editor");
+        leader(app, ' ');
+        assert_eq!(app.state.active, x);
+        app.snapshot_pane_routing();
         assert!(
-            app.flash_text()
-                .is_some_and(|f| f.contains("quit the editor first")),
-            "{:?}",
-            app.flash_text()
+            matches!(app.state.active_project().focus, state::Focus::Overlay),
+            "back in x, the editor doesn't have the keys"
         );
     });
 }

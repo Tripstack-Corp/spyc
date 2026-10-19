@@ -1501,7 +1501,6 @@ fn a_consent_over_a_modal_pager_takes_the_keys() {
 /// keyboard: `q` closes it rather than reaching the file, and the editor has
 /// the keys back.
 #[test]
-#[ignore = "red: the editor keeps the keys under a modal pager"]
 fn help_opened_from_the_editor_takes_the_keys() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -1524,13 +1523,13 @@ fn help_opened_from_the_editor_takes_the_keys() {
             app.flash_text()
         );
         // The loop top derives the focus again before it reads each key.
-        app.recompute_focus();
+        app.snapshot_pane_routing();
         app.handle_key(key('q')).unwrap();
         assert!(
             app.view.project().pager.is_none(),
             "q went to the editor: help is still open"
         );
-        app.recompute_focus();
+        app.snapshot_pane_routing();
         assert!(
             app.runtime.project().top_overlay.is_some(),
             "the editor quit"
@@ -1538,6 +1537,47 @@ fn help_opened_from_the_editor_takes_the_keys() {
         assert!(
             matches!(app.state.active_project().focus, state::Focus::Overlay),
             "the editor doesn't have the keys back"
+        );
+    });
+}
+
+/// Help opened over the editor in `a` of a top-only split, then closed with
+/// `q`, leaves the editor pinned to `a`: unpinned, it would be drawn into the
+/// column focused next, under that column's list, and `a` would go blank.
+#[test]
+fn closing_help_opened_from_the_editor_keeps_it_in_its_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        app.open_second_commander_at(&dir);
+        app.state
+            .active_project_mut()
+            .vsplit
+            .as_mut()
+            .expect("the split is open")
+            .mode = state::VsplitMode::TopOnly;
+        app.apply(&Action::VsplitFocusLeft).unwrap();
+        let wake = app.make_pane_wake();
+        let overlay =
+            crate::pane::Pane::spawn("cat", 24, 40, &dir, &app.view.project().context_path, wake)
+                .expect("spawn overlay");
+        app.runtime.project_mut().top_overlay = Some(overlay);
+        app.view.project_mut().overlay_column = Some(state::Side::Left);
+        app.state.active_project_mut().focus = state::Focus::Overlay;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+            .unwrap();
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(key('?')).unwrap();
+        app.snapshot_pane_routing();
+        app.handle_key(key('q')).unwrap();
+        assert!(app.view.project().pager.is_none(), "help is still open");
+        assert_eq!(
+            app.view.project().overlay_column,
+            Some(state::Side::Left),
+            "the editor lost its column"
         );
     });
 }
@@ -1556,13 +1596,12 @@ fn open_help_over(app: &mut App) {
         "Help",
         vec!["help".to_string()],
     ));
-    app.recompute_focus();
+    app.snapshot_pane_routing();
 }
 
 /// The cursor shows where the keys go, so a modal pager hides the cursor of
 /// the editor or the pane it is drawn over, in either column.
 #[test]
-#[ignore = "red: the cursor under a modal pager still shows"]
 fn a_modal_pager_hides_the_cursor_of_what_it_covers() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

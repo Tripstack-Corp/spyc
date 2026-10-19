@@ -1036,9 +1036,10 @@ PR, except step 5's stages:
      highlighted and marked `← current` (`App::open_project_switcher`,
      `AppState::pending_projects`). `j`/`k` and Enter or `1`-`9` go to one
      (`switch_to_pending_project`, which closes the switcher, the pager of the
-     project left, first), `/` searches, `q` closes it; from inside the editor
-     it refuses, since the editor keeps the keyboard over a pager opened on
-     it. It shares the worktree picker's keys (`numbered_picker_key`). The attention glyphs (step 6) and
+     project left, first), `/` searches, `q` closes it; opened from inside
+     the editor it has the keyboard until it closes (`decide_focus`: a modal
+     pager beats the editor). It shares the worktree picker's keys
+     (`numbered_picker_key`). The attention glyphs (step 6) and
      recently-closed projects (step 8) are still to come.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.

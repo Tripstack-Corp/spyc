@@ -52,8 +52,8 @@ impl App {
         // loop-top seam and for the same reason: so the value `route_snapshot`
         // reads next is always current. Most pager opens never set focus and
         // closes leave it stale; this makes `state.focus` authoritative without
-        // bookkeeping at every open/close site. Behaviour-preserving today (only
-        // the non-`Pane` discriminant moves; `pane_focused()` is unchanged).
+        // bookkeeping at every open/close site. The non-`Pane` discriminant is
+        // what decides a key between the editor and a modal pager over it.
         self.recompute_focus();
     }
 

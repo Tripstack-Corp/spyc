@@ -146,7 +146,7 @@ impl App {
                         // slot uses `overlay_column`; closing `b`'s pager must
                         // NOT unpin a still-open pager in `a`.
                         if !matches!(slot, crate::app::pager_handler::PagerSlot::Right) {
-                            self.view.project_mut().overlay_column = None;
+                            self.unpin_overlay_column();
                         }
                         self.recompute_focus();
                     } else {
