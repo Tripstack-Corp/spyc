@@ -23,6 +23,8 @@ mod reads;
 mod screen;
 mod writes;
 
+pub(super) use writes::Held;
+
 pub(super) use reads::Joined;
 
 impl App {
@@ -101,6 +103,9 @@ impl App {
                 return vec![*effect];
             }
             self.enter_mount(at);
+            return Vec::new();
+        }
+        if self.refuse_inside_written(at) {
             return Vec::new();
         }
         if self.is_reading(source) {
@@ -456,7 +461,10 @@ impl App {
                 if then.is_some() {
                     self.flash_held_back_dropped();
                 }
-                self.record_mount(*index, capability, warnings, staging_root, depth)
+                let archive = index.archive.clone();
+                let effects = self.record_mount(*index, capability, warnings, staging_root, depth);
+                self.restore_late_edits(&archive);
+                effects
             }
             ArchiveOutcome::Materialized { real, then } => {
                 self.record_staged(&real);
@@ -548,6 +556,7 @@ impl App {
                 note.clone()
             });
         }
+        self.restore_late_edits(&archive);
         self.view.needs_full_repaint = true;
         effects
     }
@@ -803,18 +812,22 @@ fn clean_effects(roots: Vec<PathBuf>) -> Vec<Effect> {
 /// knows by the same pid prefix, and return where it went; `None` when there
 /// is no tree there to clean. A tree that can't be moved is cleaned in place.
 fn set_aside(root: PathBuf) -> Option<PathBuf> {
-    static SET_ASIDE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let mut name = root.file_name()?.to_os_string();
-    name.push(format!(
-        ".gone-{}",
-        SET_ASIDE.fetch_add(1, Ordering::Relaxed)
-    ));
-    let aside = root.with_file_name(name);
+    let aside = sibling_of(&root, "gone")?;
     match std::fs::rename(&root, &aside) {
         Ok(()) => Some(aside),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(_) => Some(root),
     }
+}
+
+/// A path beside the staging tree `root`, unique to this process, for what is
+/// moved out of it (`what`): its name keeps `root`'s, so the orphan sweep
+/// knows it by the same pid prefix.
+fn sibling_of(root: &Path, what: &str) -> Option<PathBuf> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut name = root.file_name()?.to_os_string();
+    name.push(format!(".{what}-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+    Some(root.with_file_name(name))
 }
 
 /// Where all staging trees live.
