@@ -146,7 +146,7 @@ pub fn tools() -> Value {
             },
             {
                 "name": "create_worktree",
-                "description": "Create a git worktree for the given branch (existing branch reused, else a NEW branch created off the repo's default/integration branch — pass `base` to override that start point). It lands in a sibling `<repo>.worktrees/<branch>/` dir, anchored on the MAIN repo even when called from inside a linked worktree. Returns {branch, path}. Pass `open:true` to also open it in column b and work there right away (otherwise navigate_to / open_worktree later). The repo is the focused column's; when the user is browsing outside any repo, your own pane's, then PROJECT_HOME's. Errors if none is in a repo or the branch is already checked out elsewhere.",
+                "description": "Create a git worktree for the given branch (existing branch reused, else a NEW branch created off the repo's default/integration branch — pass `base` to override that start point). It lands in a sibling `<repo>.worktrees/<branch>/` dir, anchored on the MAIN repo even when called from inside a linked worktree. Returns {branch, path}. Pass `open:true` to also open it in column b and work there right away (otherwise navigate_to / open_worktree later). The repo is your project's: PROJECT_HOME's (a project with no home: its start dir's), else your own pane's for a project outside any repo — never the directory the user happens to be browsing. Errors if none is in a repo or the branch is already checked out elsewhere.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -312,7 +312,7 @@ pub fn tools() -> Value {
             },
             {
                 "name": "list_worktrees",
-                "description": "List the git worktrees of the focused column's repo — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}, ahead, behind, merged, locked, lock_reason}. ahead/behind/merged are relative to the repo's integration base (null when unresolvable) — `merged:true` means removing that worktree/branch loses no unmerged commits. `locked:true` (with `lock_reason`) means another session has claimed it via claim_worktree and remove/clean will refuse. Consult it before remove_worktree (which tree is dirty, which is merged and safe to drop, which is claimed by someone else, which is the current one).",
+                "description": "List the git worktrees of your project's repo (PROJECT_HOME's, a project with no home: its start dir's, else your own cwd's, as for create_worktree — never the directory the user happens to be browsing) — the orient/inspect entry point for worktree cleanup. Returns a JSON array, one object per worktree: {path, branch, head, is_current, dirty:{staged,unstaged,untracked}, ahead, behind, merged, locked, lock_reason}. ahead/behind/merged are relative to the repo's integration base (null when unresolvable) — `merged:true` means removing that worktree/branch loses no unmerged commits. `locked:true` (with `lock_reason`) means another session has claimed it via claim_worktree and remove/clean will refuse. Consult it before remove_worktree (which tree is dirty, which is merged and safe to drop, which is claimed by someone else, which is the current one).",
                 "inputSchema": {
                     "type": "object",
                     "properties": {}
@@ -324,7 +324,7 @@ pub fn tools() -> Value {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "Path of the worktree to claim (as returned by create_worktree); relative paths resolve against the focused column's cwd." },
+                        "path": { "type": "string", "description": "Path of the worktree to claim (as returned by create_worktree); relative paths resolve against PROJECT_HOME (a project with no home: its start dir)." },
                         "reason": { "type": "string", "description": "Human-readable owner/reason recorded on the lease and shown to other sessions (e.g. 'agent A: refactoring auth'). Optional." }
                     },
                     "required": ["path"]
@@ -336,7 +336,7 @@ pub fn tools() -> Value {
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "Path of the worktree to release; relative paths resolve against the focused column's cwd." }
+                        "path": { "type": "string", "description": "Path of the worktree to release; relative paths resolve against PROJECT_HOME (a project with no home: its start dir)." }
                     },
                     "required": ["path"]
                 }

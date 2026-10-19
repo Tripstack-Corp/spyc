@@ -203,8 +203,8 @@ fn bind_to(
     }
 }
 
-/// `create_worktree`'s arguments, carrying the connection's own pane so the
-/// loop can find the agent's repo when the user is browsing outside one.
+/// `create_worktree`'s arguments, carrying the connection's own pane and cwd,
+/// where the loop finds the agent's repo for a project outside any repo.
 fn create_worktree_command(args: &Value, caller: &Caller) -> Result<McpCommand, &'static str> {
     let branch = args["branch"].as_str().unwrap_or("").to_string();
     if branch.trim().is_empty() {
@@ -218,6 +218,7 @@ fn create_worktree_command(args: &Value, caller: &Caller) -> Result<McpCommand, 
             .map(String::from),
         open: args["open"].as_bool().unwrap_or(false),
         pane_id: caller.pane_id.clone(),
+        cwd: caller.cwd.clone(),
     })
 }
 
@@ -603,8 +604,9 @@ fn handle_tools_call(
             }
         }
         "list_worktrees" => {
-            let ctx = ctx_path.to_path_buf();
-            match call_with_timeout(READ_TOOL_TIMEOUT, move || list_worktrees_json(&ctx)) {
+            let (ctx, agent_cwd) = (ctx_path.to_path_buf(), caller.cwd.clone());
+            let list = move || list_worktrees_json(&ctx, agent_cwd.as_deref());
+            match call_with_timeout(READ_TOOL_TIMEOUT, list) {
                 Ok(text) => send_tool_result(w, id, &text),
                 Err(msg) => send_tool_error(w, id, &format!("list_worktrees timed out: {msg}")),
             }

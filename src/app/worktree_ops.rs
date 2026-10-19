@@ -41,17 +41,18 @@ pub enum WorktreeJob {
     Create {
         anchors: Vec<std::path::PathBuf>,
         branch: String,
-        /// Start point for a NEW branch — the repo's default branch (POLA: not
-        /// the focused column's HEAD). `None` falls back to HEAD in `add`.
+        /// Start point for a NEW branch: the caller's, else (`None`) the default
+        /// branch of the repo it lands in, resolved on the worker (POLA: not the
+        /// focused column's HEAD), else HEAD in `add`.
         base: Option<String>,
         /// Also open the new worktree in column `b` (create→work in one call).
         open: bool,
     },
     /// `remove_worktree`: safe-by-default teardown of `target` — archive
     /// untracked + uncommitted content to the graveyard, force-remove, delete
-    /// the branch iff merged. `anchor` is a dir inside the repo (the focused
-    /// column's, as for `Create`), which is how a partially-removed `target`
-    /// with no `.git` left is still found.
+    /// the branch iff merged. `anchor` is a dir inside the repo (the project's,
+    /// as for `Create`), which is how a partially-removed `target` with no
+    /// `.git` left is still found.
     Remove {
         target: std::path::PathBuf,
         anchor: std::path::PathBuf,
@@ -123,7 +124,13 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
             base,
             open,
         } => {
-            match crate::git::worktree::add(create_anchor(&anchors), &branch, base.as_deref()) {
+            let anchor = create_anchor(&anchors);
+            let base = base.or_else(|| {
+                super::state::find_repo_root(anchor)
+                    .as_deref()
+                    .and_then(crate::git::branch::default_base)
+            });
+            match crate::git::worktree::add(anchor, &branch, base.as_deref()) {
                 Ok(path) => {
                     let json = serde_json::json!({
                         "branch": branch,
@@ -177,7 +184,7 @@ fn create_anchor(anchors: &[std::path::PathBuf]) -> &std::path::Path {
         .iter()
         .find(|dir| super::state::find_repo_root(dir).is_some())
         .or_else(|| anchors.first())
-        // Invariant: `create_anchors` always starts with the focused column's.
+        // Invariant: `create_anchors` always starts with the project's anchor.
         .expect("create_worktree has at least one anchor")
 }
 
@@ -239,6 +246,7 @@ impl App {
                 base,
                 open,
                 pane_id,
+                cwd,
             } => {
                 let branch = branch.trim();
                 if branch.is_empty() {
@@ -247,18 +255,9 @@ impl App {
                     })
                 } else {
                     Ok(WorktreeJob::Create {
-                        anchors: self.create_anchors(pane_id.as_deref()),
+                        anchors: self.create_anchors(pane_id.as_deref(), cwd.as_deref()),
                         branch: branch.to_string(),
-                        // Caller's explicit `base` override, else PROJECT_HOME's
-                        // default branch (POLA: not whatever the focused column
-                        // is on).
-                        base: base.clone().or_else(|| {
-                            self.state
-                                .active_project()
-                                .home
-                                .as_deref()
-                                .and_then(crate::git::branch::default_base)
-                        }),
+                        base: base.clone(),
                         open: *open,
                     })
                 }
@@ -266,14 +265,14 @@ impl App {
             McpCommand::RemoveWorktree { path } => match self.resolve_worktree_arg(path) {
                 Ok(target) => Ok(WorktreeJob::Remove {
                     target,
-                    anchor: self.state.worktree_anchor(),
+                    anchor: self.state.active_project().anchor().to_path_buf(),
                 }),
                 Err(message) => Err(McpResponse::Error { message }),
             },
             McpCommand::CleanWorktree { path } => match self.resolve_worktree_arg(path) {
                 Ok(target) => Ok(WorktreeJob::Clean {
                     target,
-                    anchor: self.state.worktree_anchor(),
+                    anchor: self.state.active_project().anchor().to_path_buf(),
                 }),
                 Err(message) => Err(McpResponse::Error { message }),
             },
@@ -281,22 +280,30 @@ impl App {
         })
     }
 
-    /// Where `create_worktree` looks for its repo, in order: the focused
-    /// column's dir, as `W n` uses ([`AppState::worktree_anchor`]); the calling
-    /// agent's own pane, so an agent in a repo isn't refused because the user is
-    /// browsing outside one; then `PROJECT_HOME`. The worker takes the first
-    /// that is inside a repo. Cached reads only: this runs on the loop.
+    /// Where `create_worktree` looks for its repo, in order: the calling
+    /// agent's project, at PROJECT_HOME else the start dir a project with no
+    /// home is anchored at ([`Project::anchor`]); then, for a project outside
+    /// any repo, the agent's own pane, then the cwd its proxy named at
+    /// `initialize`, the fallback `list_worktrees` takes too. Never the
+    /// directory the user is browsing, which could be anything on their system
+    /// (`W n`, the user's own key, is the one that uses it). The worker takes
+    /// the first that is inside a repo. Cached reads only: this runs on the
+    /// loop.
     ///
-    /// [`AppState::worktree_anchor`]: crate::app::state::AppState::worktree_anchor
-    fn create_anchors(&self, pane_id: Option<&str>) -> Vec<std::path::PathBuf> {
+    /// [`Project::anchor`]: crate::app::state::Project::anchor
+    fn create_anchors(
+        &self,
+        pane_id: Option<&str>,
+        cwd: Option<&std::path::Path>,
+    ) -> Vec<std::path::PathBuf> {
         let pane_cwd = pane_id.and_then(|id| {
             let tabs = self.runtime.project().pane_tabs.as_ref()?;
             let tab = tabs.tabs().iter().find(|t| t.info.id == id)?;
             Some(tab.live_cwd())
         });
-        std::iter::once(self.state.worktree_anchor())
+        std::iter::once(self.state.active_project().anchor().to_path_buf())
             .chain(pane_cwd)
-            .chain(self.state.active_project().home.clone())
+            .chain(cwd.map(std::path::Path::to_path_buf))
             .collect()
     }
 

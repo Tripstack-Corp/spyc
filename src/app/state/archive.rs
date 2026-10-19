@@ -44,6 +44,12 @@ pub const fn refusal(action: &Action) -> Option<&'static str> {
         // The finder walks real directories.
         A::FindFile => "archive: find is not available inside an archive",
 
+        // A project's home and start dir are real directories: the worktree
+        // tools and every new tab start there.
+        A::Project(crate::keymap::ProjectAction::SetHomeHere) | A::SetStartDirHere => {
+            "archive: a project's home and start dir can't be inside an archive"
+        }
+
         _ => return None,
     })
 }
@@ -71,6 +77,18 @@ mod tests {
             Action::Project(crate::keymap::ProjectAction::JumpHome),
         ] {
             assert_eq!(refusal(&action), None, "{action:?} should work in a mount");
+        }
+    }
+
+    /// A project's home and start dir are real directories, which the worktree
+    /// tools and new tabs start in; a container's path is not one.
+    #[test]
+    fn a_home_or_start_dir_inside_an_archive_is_refused() {
+        for action in [
+            Action::Project(crate::keymap::ProjectAction::SetHomeHere),
+            Action::SetStartDirHere,
+        ] {
+            assert!(refusal(&action).is_some(), "{action:?} must be refused");
         }
     }
 

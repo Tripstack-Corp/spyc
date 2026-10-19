@@ -105,9 +105,7 @@ impl App {
         let names_dir = |p: &Path| p == dir || std::fs::canonicalize(p).is_ok_and(|p| p == dir);
         self.state
             .open_projects()
-            .find(|p| {
-                names_dir(p.home.as_deref().unwrap_or(&p.start_dir)) || names_dir(&p.start_dir)
-            })
+            .find(|p| names_dir(p.anchor()) || names_dir(&p.start_dir))
             .map(|p| p.id)
     }
 

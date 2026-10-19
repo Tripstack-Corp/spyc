@@ -73,16 +73,18 @@ pub enum McpCommand {
     /// Clear all picks.
     ClearPicks,
     /// Create a git worktree for `branch` (existing branch, else a new one).
-    /// `base` overrides the start point for a NEW branch (`None` → PROJECT_HOME's
-    /// default branch, the POLA default). `open` also opens it in column `b`
-    /// (the create→work flow in one call). Replies with the new worktree's path.
-    /// `pane_id` is the calling agent's own tab, from its attributed
-    /// connection: where the repo is found when the focused column has none.
+    /// `base` overrides the start point for a NEW branch (`None` → the default
+    /// branch of the repo it lands in, the POLA default). `open` also opens it
+    /// in column `b` (the create→work flow in one call). Replies with the new
+    /// worktree's path. The repo is the agent's project's; `pane_id` (the
+    /// calling agent's own tab) and then `cwd` (the cwd its proxy named at
+    /// `initialize`) are where it is found for a project outside any repo.
     CreateWorktree {
         branch: String,
         base: Option<String>,
         open: bool,
         pane_id: Option<String>,
+        cwd: Option<std::path::PathBuf>,
     },
     /// Tear down a worktree by path (the path `CreateWorktree` returned).
     /// Refuses a dirty/locked worktree or one a column is currently in; the

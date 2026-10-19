@@ -737,6 +737,51 @@ fn an_agent_initializing_after_the_launch_project_closes_binds_its_pane() {
     });
 }
 
+/// A project outside any repo makes the agent's worktree in its own repo, the
+/// cwd its proxy named at `initialize`, where `list_worktrees` looks too.
+#[test]
+fn create_worktree_falls_back_to_the_agents_cwd() {
+    with_projects(|p| {
+        let agent = p.base.join("agent");
+        std::fs::create_dir(&agent).unwrap();
+        std::fs::write(agent.join("in_b.rs"), "").unwrap();
+        init_repo(&agent);
+        let meta = json!({"spyc/cwd": agent});
+        let created = p.wire(move |c| {
+            c.initialize_with(meta);
+            c.tool("create_worktree", json!({"branch": "agent-wt"}))
+        });
+        assert_eq!(
+            created["path"],
+            p.base.join("agent.worktrees/agent-wt").to_str().unwrap(),
+            "{created}"
+        );
+    });
+}
+
+/// A project outside any repo lists the worktrees of the agent's own repo,
+/// the cwd its proxy named at `initialize`, as `create_worktree` makes them
+/// there.
+#[test]
+fn list_worktrees_falls_back_to_the_agents_cwd() {
+    with_projects(|p| {
+        let agent = p.base.join("agent");
+        std::fs::create_dir(&agent).unwrap();
+        std::fs::write(agent.join("in_b.rs"), "").unwrap();
+        init_repo(&agent);
+        let meta = json!({"spyc/cwd": agent});
+        let listed = p.wire(move |c| {
+            c.initialize_with(meta);
+            c.tool("list_worktrees", json!({}))
+        });
+        let paths: Vec<&str> = listed
+            .as_array()
+            .map(|a| a.iter().filter_map(|e| e["path"].as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(paths, [agent.to_str().unwrap()], "{listed}");
+    });
+}
+
 #[test]
 fn teardown_removes_every_projects_context_file() {
     with_projects(|p| {

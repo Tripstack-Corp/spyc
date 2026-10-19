@@ -15,6 +15,11 @@ create_worktree(branch, base?, open?)  →  {branch, path}
   repo's default branch).
 - Lands in a sibling `<repo>.worktrees/<branch>/`, always anchored on the **main**
   repo even when called from inside a linked worktree.
+- The repo is your project's: `project_home`'s, else your own pane's for a
+  project outside any repo. Never the directory the user is browsing, which
+  could be anything on their system. `list_worktrees` lists the same repo, and
+  a relative path given to the other worktree tools resolves against
+  `project_home` (a project with no home: its start dir).
 - `open: true` also opens it in column b and focuses it, so you can work there
   immediately. Without it, the tree exists but the user's view doesn't move.
 - Errors if the branch is already checked out elsewhere.

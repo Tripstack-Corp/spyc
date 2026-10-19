@@ -140,12 +140,10 @@ impl App {
         crate::mcp::record_roots(&roots);
     }
 
-    /// Resolve an MCP worktree-path argument and guard it: trim/require it,
-    /// resolve a relative path against the focused column's dir (create_worktree
-    /// hands back an absolute path, but be lenient), then refuse if a column is
-    /// currently open inside it — removing/cleaning it would strand that column
-    /// on a deleted dir (mirrors git refusing to touch the current worktree).
-    /// `Err` is a ready-to-send reason. Shared by RemoveWorktree + CleanWorktree.
+    /// Resolve an MCP worktree-path argument: trim/require it, and resolve a
+    /// relative path against the agent's project (`Project::anchor`;
+    /// create_worktree hands back an absolute path, but be lenient). `Err` is a
+    /// ready-to-send reason. Shared by RemoveWorktree + CleanWorktree.
     pub(crate) fn resolve_worktree_arg(&self, path: &str) -> Result<std::path::PathBuf, String> {
         let path = path.trim();
         if path.is_empty() {
@@ -153,10 +151,7 @@ impl App {
         }
         let raw = std::path::PathBuf::from(path);
         let target = if raw.is_relative() {
-            // Not the raw column dir: inside an archive mount that is a path
-            // *within the container*, so a relative worktree path would resolve
-            // to somewhere that cannot exist.
-            self.state.worktree_anchor().join(&raw)
+            self.state.active_project().anchor().join(&raw)
         } else {
             raw
         };
@@ -179,7 +174,7 @@ impl App {
         }
         let raw = std::path::PathBuf::from(path);
         let target = if raw.is_relative() {
-            self.state.worktree_anchor().join(&raw)
+            self.state.active_project().anchor().join(&raw)
         } else {
             raw
         };

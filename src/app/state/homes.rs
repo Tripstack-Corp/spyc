@@ -22,7 +22,7 @@ impl AppState {
     /// at its `start_dir`.
     pub fn home_taken(&self, dir: &Path, except: ProjectId) -> Option<ProjectId> {
         self.open_projects()
-            .find(|p| p.id != except && p.home.as_deref().unwrap_or(&p.start_dir) == dir)
+            .find(|p| p.id != except && p.anchor() == dir)
             .map(|p| p.id)
     }
 

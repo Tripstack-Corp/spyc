@@ -79,6 +79,14 @@ impl Project {
     /// What the project is called: its home's last component, else its start
     /// directory's.
     pub fn label(&self) -> String {
-        crate::state::sessions::label_of(self.home.as_deref().unwrap_or(&self.start_dir))
+        crate::state::sessions::label_of(self.anchor())
+    }
+
+    /// Where the project is anchored: its home, else the start directory a
+    /// project with no home is anchored at. An agent's worktree tools act
+    /// here, on the agent's project, never on the directory the user happens
+    /// to be browsing.
+    pub fn anchor(&self) -> &std::path::Path {
+        self.home.as_deref().unwrap_or(&self.start_dir)
     }
 }
