@@ -573,15 +573,23 @@ impl App {
         if lua_runaway_due(inflight.prompted, elapsed, LUA_RUNAWAY_SOFT) {
             // Only raise the modal in Normal mode — never stomp an open prompt
             // (a confirm dialogue, the `:` line, …) — and not while the editor
-            // or a `D` pager has the keyboard: they hand an open prompt the
-            // keys, so the next key the user typed there would answer it, and
-            // any key but `y` aborts the script. Re-armed below so it re-fires
-            // once the user is back.
-            let typing_over = matches!(
-                self.state.active_project().focus,
+            // or a `D` pager has the keyboard, or the editor has it back once a
+            // modal pager over it closes: they hand an open prompt the keys, so
+            // the next key the user typed there would answer it, and any key
+            // but `y` aborts the script. Re-armed below so it re-fires once the
+            // user is back.
+            let typing_over = match self.state.active_project().focus {
                 super::state::Focus::Overlay
-                    | super::state::Focus::Pager(crate::ui::pager::Mount::TopPane)
-            );
+                | super::state::Focus::Pager(crate::ui::pager::Mount::TopPane) => true,
+                // What a modal pager covers has the keys back once it closes:
+                // the editor, or `b`'s own `D` pager.
+                super::state::Focus::Pager(crate::ui::pager::Mount::Overlay) => {
+                    self.focused_col_has_overlay()
+                        || (self.focused_side() == super::state::Side::Right
+                            && self.view.project().pager_right.is_some())
+                }
+                _ => false,
+            };
             if matches!(self.state.mode, Mode::Normal) && !typing_over {
                 let secs = elapsed.as_secs().max(1);
                 let name = inflight.name.clone();
@@ -831,6 +839,75 @@ mod tests {
                 &app.state.mode,
                 Mode::Prompting(p) if matches!(p.kind, PromptKind::LuaRunaway)
             ));
+        });
+    }
+
+    /// A modal pager opened over the editor has the keyboard only until it
+    /// closes, when the editor has it back, so the modal waits then too. Over
+    /// the file list it is raised, to wait behind the pager.
+    #[test]
+    fn watchdog_waits_while_a_modal_pager_covers_the_editor() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let now = Instant::now();
+            app.runtime.lua_inflight = Some(LuaInflight {
+                name: "slow".to_string(),
+                started_at: now.checked_sub(Duration::from_secs(3)).unwrap(),
+                prompted: false,
+            });
+            let mut ctx = RunCtx::for_test();
+            let wake = app.make_pane_wake();
+            let editor = crate::pane::Pane::spawn(
+                "cat",
+                24,
+                80,
+                tmp.path(),
+                &app.view.project().context_path,
+                wake,
+            )
+            .expect("the editor spawns");
+            app.runtime.project_mut().top_overlay = Some(editor);
+            app.set_pager(crate::ui::pager::PagerView::new_plain(
+                "Help",
+                vec!["help".to_string()],
+            ));
+            app.recompute_focus();
+            assert!(!app.settle_lua_runaway(now, &mut ctx), "over the editor");
+            assert!(matches!(app.state.mode, Mode::Normal));
+
+            app.runtime.project_mut().top_overlay = None;
+            app.recompute_focus();
+            assert!(app.settle_lua_runaway(now, &mut ctx), "over the file list");
+        });
+    }
+
+    /// Likewise for a modal pager over `b`'s own `D` pager, which has the
+    /// keyboard back once it closes.
+    #[test]
+    fn watchdog_waits_while_a_modal_pager_covers_bs_d_pager() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let now = Instant::now();
+            app.runtime.lua_inflight = Some(LuaInflight {
+                name: "slow".to_string(),
+                started_at: now.checked_sub(Duration::from_secs(3)).unwrap(),
+                prompted: false,
+            });
+            let mut ctx = RunCtx::for_test();
+            app.open_second_commander_at(tmp.path());
+            assert_eq!(app.focused_side(), crate::app::state::Side::Right);
+            let mut d = crate::ui::pager::PagerView::new_plain("d", vec!["d".to_string()]);
+            d.mount = crate::ui::pager::Mount::TopPane;
+            app.view.project_mut().pager_right = Some(d);
+            app.set_pager(crate::ui::pager::PagerView::new_plain(
+                "Help",
+                vec!["help".to_string()],
+            ));
+            app.recompute_focus();
+            assert!(!app.settle_lua_runaway(now, &mut ctx), "over b's pager");
+            assert!(matches!(app.state.mode, Mode::Normal));
         });
     }
 

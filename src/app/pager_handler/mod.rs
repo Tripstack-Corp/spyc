@@ -218,19 +218,22 @@ impl App {
             self.view.project_mut().pager_right = None;
         } else {
             self.view.project_mut().pager = None;
-            // Unpin the column only when nothing else is still anchored to it.
-            // A `V`/`;` top-overlay pty can still be open in that column (a
-            // modal `Overlay` pager like `?` help opened *over* the editor after
-            // `^a l` moved focus to `b`), and it needs the pin to keep rendering
-            // in place — clearing it would move the editor into the other column
-            // (blanking this one, artifacting that one).
-            if self.runtime.project().top_overlay.is_none() {
-                self.view.project_mut().overlay_column = None;
-            }
+            self.unpin_overlay_column();
         }
         // The top pager just closed — drop any stale `Pager(_)` focus this
         // frame (the loop top would catch it next tick regardless).
         self.recompute_focus();
+    }
+
+    /// Unpin the shared slot's column once its pager closes, unless a `V`/`;`
+    /// top-overlay pty is still open in it (a modal `Overlay` pager like `?`
+    /// help opened *over* the editor): it needs the pin to keep rendering in
+    /// place, and clearing it would move the editor into the other column
+    /// (blanking this one, artifacting that one).
+    fn unpin_overlay_column(&mut self) {
+        if self.runtime.project().top_overlay.is_none() {
+            self.view.project_mut().overlay_column = None;
+        }
     }
 
     /// Tear down a `^a-v` scrollback pager: snap the pty back to
@@ -540,7 +543,7 @@ impl App {
 
     /// A full-frame modal pager (grep / git-view / help / `;cmd` output) is open
     /// in the shared slot — it owns input regardless of which column is focused.
-    fn modal_pager_open(&self) -> bool {
+    pub(super) fn modal_pager_open(&self) -> bool {
         matches!(
             self.view.project().pager.as_ref().map(|v| v.mount),
             Some(crate::ui::pager::Mount::Overlay)

@@ -104,6 +104,10 @@ rather than create a new modal type.
   prompt, never the editor or the pager under it. The full-frame modal pager
   is the exception: a prompt raised under it waits until it closes, and only
   a consent, drawn as a pop-up over it, takes the keys.
+- **The surface drawn on top has the keyboard.** A modal pager (help, a
+  picker, session info) opened from inside the editor or the pane takes the
+  keys until it closes, and the cursor of what it covers is hidden meanwhile;
+  then the editor or pane has them back.
 - **Activity HUD** — tiny right-anchored debug overlay (`:activity`
   toggle). Reports dps, bytes/sec, poll period. Transparent by
   default — coloured text only, so what's beneath shows through the

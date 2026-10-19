@@ -164,7 +164,11 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         Some(Modal::ImageView) => return InputSink::ImageView,
         Some(Modal::FindPicker) => return InputSink::FindPicker,
         Some(Modal::Capture) => return InputSink::Capture,
-        Some(Modal::OverlayDismiss) if !snap.is_prompting => return InputSink::OverlayDismiss,
+        Some(Modal::OverlayDismiss)
+            if !snap.is_prompting && !matches!(snap.pager_mount, Some(Mount::Overlay)) =>
+        {
+            return InputSink::OverlayDismiss;
+        }
         Some(Modal::QuickSelect) => return InputSink::QuickSelect,
         Some(Modal::Harpoon) => return InputSink::Harpoon,
         Some(Modal::ImageGallery) => return InputSink::ImageGallery,
@@ -184,9 +188,14 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     // 1. Top-overlay pty (V editor, ; command). `Focus::Overlay` already means
     //    the overlay is alive AND neither the pane nor a pager is focused (a
     //    `^a-j` into claude makes focus `Pane` instead, so the keystroke flows
-    //    to the bottom pane below). Meta chords still escape, and an open
-    //    prompt takes the keys.
-    if matches!(snap.focus, Focus::Overlay) && !is_meta && !snap.is_prompting {
+    //    to the bottom pane below). Meta chords still escape, an open prompt
+    //    takes the keys, and so does a modal pager drawn over the editor, even
+    //    before the loop top has derived the focus again.
+    if matches!(snap.focus, Focus::Overlay)
+        && !matches!(snap.pager_mount, Some(Mount::Overlay))
+        && !is_meta
+        && !snap.is_prompting
+    {
         return InputSink::OverlayPty;
     }
 
@@ -765,6 +774,26 @@ mod tests {
             ..hold
         };
         assert_eq!(route_key(prompting, key('z')), InputSink::Prompt);
+    }
+
+    // A modal pager drawn over the editor has the keys, even while the focus
+    // still names the editor, and an exited command's "press any key" hold
+    // under it waits until it closes.
+    #[test]
+    fn a_modal_pager_over_the_editor_takes_the_keys() {
+        let over = RouteSnapshot {
+            focus: Focus::Overlay,
+            pager_mount: Some(Mount::Overlay),
+            ..idle()
+        };
+        assert_eq!(route_key(over, key('j')), InputSink::PagerKey);
+        assert_eq!(route_input(over, InputKind::Paste), InputSink::PagerKey);
+        let held = RouteSnapshot {
+            modal: Some(Modal::OverlayDismiss),
+            focus: Focus::Pager(Mount::Overlay),
+            ..over
+        };
+        assert_eq!(route_key(held, key('j')), InputSink::PagerKey);
     }
 
     // A `Mount::Overlay` pager eats keys REGARDLESS of pane focus — both a

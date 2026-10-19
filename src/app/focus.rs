@@ -24,7 +24,8 @@ pub(super) struct FocusSnapshot {
     pub has_top_overlay: bool,
     /// The focused column's top-region pager mount, if one is open there — or a
     /// full-frame modal (grep / git-view / help / `;cmd` output), which owns
-    /// focus regardless of column. `None` when the focused column has no pager.
+    /// focus regardless of column, and over the editor. `None` when the focused
+    /// column has no pager.
     pub pager_mount: Option<Mount>,
 }
 
@@ -32,14 +33,17 @@ pub(super) struct FocusSnapshot {
 /// no I/O.
 ///
 /// `want_pane` always selects [`Focus::Pane`]. Otherwise the "non-pane" side is
-/// the front-most surface: a top overlay, else the pager (tagged with its
-/// mount), else the file list. Branch order is a contract — every non-`Pane`
+/// the front-most surface: a full-frame modal pager, drawn over everything,
+/// else a top overlay, else the column's pager (tagged with its mount), else
+/// the file list. Branch order is a contract — every non-`Pane`
 /// arm yields `pane_focused() == false`. The `Overlay` / `Pager` discriminant
 /// is now read for real: `route::route_input` routes `Focus::Overlay` to the
 /// overlay pty, and the render label / DIM read the focused region from it.
 pub(super) const fn decide_focus(snap: FocusSnapshot, want_pane: bool) -> Focus {
     if want_pane {
         Focus::Pane
+    } else if matches!(snap.pager_mount, Some(Mount::Overlay)) {
+        Focus::Pager(Mount::Overlay)
     } else if snap.has_top_overlay {
         Focus::Overlay
     } else if let Some(mount) = snap.pager_mount {
@@ -73,8 +77,8 @@ mod tests {
     }
 
     #[test]
-    fn non_pane_prefers_overlay_then_pager_then_file_list() {
-        // Overlay wins even when a pager is also mounted.
+    fn non_pane_prefers_the_editor_then_its_pager_then_the_file_list() {
+        // The editor wins over a `D` pager in its column.
         assert_eq!(
             decide_focus(snap(true, Some(Mount::TopPane)), false),
             Focus::Overlay
@@ -92,7 +96,6 @@ mod tests {
     /// it has the keyboard while it is open, and the editor has it back once
     /// it closes. A `D` pager in the editor's column stays under the editor.
     #[test]
-    #[ignore = "red: the editor keeps focus under a modal pager"]
     fn a_modal_pager_takes_focus_from_the_editor() {
         assert_eq!(
             decide_focus(snap(true, Some(Mount::Overlay)), false),

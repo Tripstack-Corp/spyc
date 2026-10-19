@@ -192,7 +192,8 @@ impl App {
     /// (grid + cursor from one snapshot — no off-by-one tear during fast
     /// input). `suppress_cursor` hides the pty cursor even when the pane is
     /// focused — the overlay branch passes `overlay_awaiting_dismiss` so the
-    /// "[process exited — press any key]" frame shows no stray cursor.
+    /// "[process exited — press any key]" frame shows no stray cursor. A modal
+    /// pager drawn over the pane has the keys, so it hides the cursor too.
     fn render_bottom_region(
         &self,
         frame: &mut Frame,
@@ -231,7 +232,7 @@ impl App {
                     },
                     rect,
                 );
-                if focused && !suppress_cursor {
+                if focused && !suppress_cursor && !self.modal_pager_open() {
                     crate::app::util::place_pty_cursor_from_screen(frame, screen, rect);
                 }
             });
@@ -542,7 +543,7 @@ impl App {
                         },
                         rect,
                     );
-                    if right_focused {
+                    if right_focused && !self.modal_pager_open() {
                         crate::app::util::place_pty_cursor_from_screen(frame, screen, rect);
                     }
                 });
@@ -705,9 +706,12 @@ impl App {
         // the bottom pane, AND (in a vsplit) its own column is focused — so a
         // `V` in `a` dims when `^a l` moves focus to `b`. This is the LEFT /
         // single / no-split overlay slot; the right column's overlay is drawn
-        // (and focus-tracked) in `render_right_split`.
+        // (and focus-tracked) in `render_right_split`. A modal pager drawn over
+        // it has the keys, so the cursor isn't the editor's while it is open.
         let overlay_focused = self.column_focused(state::Side::Left);
-        let want_overlay_cursor = overlay_focused && !self.view.project().overlay_awaiting_dismiss;
+        let want_overlay_cursor = overlay_focused
+            && !self.view.project().overlay_awaiting_dismiss
+            && !self.modal_pager_open();
         overlay.with_screen(|screen| {
             frame.render_widget(
                 PaneWidget {
@@ -777,12 +781,11 @@ impl App {
             self.render_prompt_line(frame, rect);
         }
         // A centred `Overlay` pager (help / grep / git-view / version, …)
-        // opened while the editor is up must still draw. The user switched
-        // focus off the editor (e.g. `^a l` to `b`), so `?` landed an
-        // Overlay pager in `view.pager` that owns focus but has no draw
-        // site in this branch — paint it on top before returning (mirrors
-        // the TopPane branch's help tail below). Without this it's invisible
-        // yet still eats input.
+        // opened while the editor is up, from the editor or after `^a l` to
+        // `b`, owns focus (`decide_focus`) but has no draw site in this
+        // branch — paint it on top before returning (mirrors the TopPane
+        // branch's help tail below). Without this it's invisible yet still
+        // eats input.
         if let Some(view) = self.view.project().pager.as_ref()
             && matches!(view.mount, crate::ui::pager::Mount::Overlay)
         {
