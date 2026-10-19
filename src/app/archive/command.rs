@@ -172,7 +172,9 @@ impl App {
             },
             "discard" => match self.archive_to_act_on("discard") {
                 Ok(archive) => {
-                    self.discard_pending(&archive);
+                    if !self.refuse_while_written(&archive) {
+                        self.discard_pending(&archive);
+                    }
                     Vec::new()
                 }
                 Err(why) => {
@@ -189,6 +191,9 @@ impl App {
                 let dir = self.state.cur().listing.dir.clone();
                 if let Some((mount, _)) = self.state.mounts.resolve(&dir) {
                     let archive = mount.archive().to_path_buf();
+                    if self.refuse_while_written(&archive) {
+                        return Vec::new();
+                    }
                     // Unwritten changes would go with the mount, so ask before
                     // dropping them rather than after.
                     if self.mount_is_dirty(&archive)
@@ -352,6 +357,9 @@ impl App {
     /// materialize time is what notices an edit made by an editor or an agent.
     fn write_effect(&mut self, archive: &Path) -> Option<Effect> {
         const MB: u64 = 1024 * 1024;
+        if self.refuse_while_written(archive) {
+            return None;
+        }
         let snapshot_limit = self
             .state
             .active_project()
@@ -402,6 +410,7 @@ impl App {
                 None
             }
             Some(Ok(op)) => {
+                self.start_write(archive);
                 self.state
                     .flash_progress(format!("writing {}…", display_name(archive)));
                 Some(Effect::Archive(op))

@@ -651,7 +651,9 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   `[archive] snapshot_max_mb` are also copied into the graveyard first, so
   `:undo` can bring the old one back. `:archive discard` throws the pending
   changes away instead; unmounting a changed archive offers to write it first,
-  and quitting warns before dropping unwritten changes.
+  and quitting warns before dropping unwritten changes. While a write runs,
+  another write, a delete, rename or put into that archive, a discard and an
+  unmount are refused until it finishes.
 - **Changing an archive** — `R` marks a member for removal, `p` puts an
   inventory item in, `c` copies files in, `M` renames a member (an index edit, so
   no bytes move however large it is), and `e` / `V` edit a member by extracting it

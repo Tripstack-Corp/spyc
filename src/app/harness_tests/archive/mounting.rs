@@ -770,7 +770,6 @@ fn cleans(effects: &[Effect]) -> bool {
 /// clean-up takes only the tree it was handed: what the new read extracted
 /// survives it.
 #[test]
-#[ignore = "red: the clean-up after an unmount deletes what a read right after it extracts"]
 fn a_read_right_after_an_unmount_keeps_what_it_extracts() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -799,7 +798,6 @@ fn a_read_right_after_an_unmount_keeps_what_it_extracts() {
 /// The same for the clean-up of a mount evicted to make room: reading the
 /// evicted archive again at once keeps what that read extracts.
 #[test]
-#[ignore = "red: the clean-up after an eviction deletes what a read right after it extracts"]
 fn a_read_right_after_an_eviction_keeps_what_it_extracts() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

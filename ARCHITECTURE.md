@@ -1154,7 +1154,13 @@ land after the first and rewrite every member, an edit saved in between
 included, while the edit still read as pending. A request for an archive whose
 read is running, from any column or project, or while a write is re-read,
 joins that read instead and is served once it lands; a read that ends without
-a mount lets its joiners go.
+a mount lets its joiners go. **A write in flight owns its archive**
+(`app/archive/writes.rs`): it lands by clearing the journal and re-reading
+from an emptied tree, so a second write, a delete, rename or put into that
+archive, a discard and an unmount are refused until it has landed. **A
+clean-up takes only the tree it was handed**: it runs on its own thread, so
+the unmount or eviction that asks for it first moves the tree aside, and a
+read of the same archive starting at once gets a fresh tree at its path.
 
 **The write-back** (`write`) plans repack steps, writes a temp file beside the
 original, carries untouched members across without recompressing, **verifies by

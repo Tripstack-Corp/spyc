@@ -21,6 +21,7 @@ mod command;
 mod edits;
 mod reads;
 mod screen;
+mod writes;
 
 pub(super) use reads::Joined;
 
@@ -273,6 +274,7 @@ impl App {
         }
         let mut effects = Vec::new();
         for (origin, outcome) in landed {
+            self.finish_write(&outcome);
             let joined = self.finish_read(&outcome);
             let mounted = match &outcome {
                 ArchiveOutcome::Mounted { index, .. } => Some(index.archive.clone()),
@@ -782,13 +784,36 @@ pub(super) fn archive_ancestor_of(path: &Path) -> Option<(PathBuf, String)> {
     })
 }
 
+/// The clean-up of the staging trees `roots`. A clean-up runs on its own
+/// thread, and a read of the same archive starting before it runs reads into
+/// a tree at the same path, so each tree is first moved aside ([`set_aside`])
+/// and the clean-up deletes only what it was handed.
 fn clean_effects(roots: Vec<PathBuf>) -> Vec<Effect> {
+    let roots: Vec<PathBuf> = roots.into_iter().filter_map(set_aside).collect();
     if roots.is_empty() {
         Vec::new()
     } else {
         vec![Effect::Archive(ArchiveOp::Clean {
             staging_roots: roots,
         })]
+    }
+}
+
+/// Move the staging tree `root` out of its path, to a sibling the orphan sweep
+/// knows by the same pid prefix, and return where it went; `None` when there
+/// is no tree there to clean. A tree that can't be moved is cleaned in place.
+fn set_aside(root: PathBuf) -> Option<PathBuf> {
+    static SET_ASIDE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut name = root.file_name()?.to_os_string();
+    name.push(format!(
+        ".gone-{}",
+        SET_ASIDE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let aside = root.with_file_name(name);
+    match std::fs::rename(&root, &aside) {
+        Ok(()) => Some(aside),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some(root),
     }
 }
 
