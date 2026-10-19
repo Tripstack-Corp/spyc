@@ -1,0 +1,11 @@
+# actionlint's built-in input table for create-github-app-token@v3 predates
+# `client-id`: it rejects that input and still requires the deprecated
+# `app-id`. These two ignores cover exactly that, in the one workflow using the
+# action, so every other check on it (`private-key` required, unknown inputs)
+# still runs. They match nothing once a pinned actionlint (ci.yml) learns the
+# input, and can then go.
+paths:
+  .github/workflows/homebrew.yml:
+    ignore:
+      - 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'
+      - 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'

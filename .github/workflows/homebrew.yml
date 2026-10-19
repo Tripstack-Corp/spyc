@@ -8,9 +8,11 @@
 # rc stream (unlike apt.yml, which stays on stable X.Y.Z).
 #
 # Auth is an org-owned GitHub App (contents:write on the tap repo, no personal
-# PAT): HOMEBREW_APP_ID + HOMEBREW_APP_KEY in the `homebrew-tap` environment
-# mint a short-lived token per run. Self-skips when absent so it stays green
-# until configured (RELEASE_ENGINEERING.md §8).
+# PAT) that mints a short-lived token per run. The `homebrew-tap` environment
+# names it by client ID, which is public and so the variable
+# HOMEBREW_APP_CLIENT_ID; only its key is a secret, HOMEBREW_APP_KEY. Either one
+# missing fails the job: a skip would leave the formula behind on a green run
+# (RELEASE_ENGINEERING.md §8).
 name: homebrew
 
 on:
@@ -36,32 +38,27 @@ jobs:
     runs-on: ubuntu-latest
     environment: homebrew-tap
     env:
-      HOMEBREW_APP_ID: ${{ secrets.HOMEBREW_APP_ID }}
+      HOMEBREW_APP_CLIENT_ID: ${{ vars.HOMEBREW_APP_CLIENT_ID }}
       HOMEBREW_APP_KEY: ${{ secrets.HOMEBREW_APP_KEY }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Gate on App credentials (self-skip until configured)
-        id: guard
+      - name: Check the App credentials
         run: |
-          if [ -z "$HOMEBREW_APP_ID" ] || [ -z "$HOMEBREW_APP_KEY" ]; then
-            echo "::notice::homebrew App credentials not configured — skipping tap bump"
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$HOMEBREW_APP_CLIENT_ID" ] || [ -z "$HOMEBREW_APP_KEY" ]; then
+            echo "::error::the homebrew-tap environment needs the HOMEBREW_APP_CLIENT_ID variable and the HOMEBREW_APP_KEY secret; the tap was not bumped"
+            exit 1
           fi
 
       - name: Mint a tap token from the GitHub App
-        if: steps.guard.outputs.enabled == 'true'
         id: apptoken
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          client-id: ${{ vars.HOMEBREW_APP_CLIENT_ID }}
           private-key: ${{ secrets.HOMEBREW_APP_KEY }}
           owner: Tripstack-Corp
           repositories: homebrew-tap
 
       - name: Resolve tag + version
-        if: steps.guard.outputs.enabled == 'true'
         id: ver
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
@@ -69,13 +66,11 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Download release checksums
-        if: steps.guard.outputs.enabled == 'true'
         run: |
           gh release download "${{ steps.ver.outputs.tag }}" \
             --repo "${{ github.repository }}" --pattern 'SHA256SUMS'
 
       - name: Check out the tap
-        if: steps.guard.outputs.enabled == 'true'
         uses: actions/checkout@v7
         with:
           repository: Tripstack-Corp/homebrew-tap
@@ -83,7 +78,6 @@ jobs:
           path: tap
 
       - name: Rewrite Formula/spyc.rb
-        if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
@@ -123,7 +117,6 @@ jobs:
           echo "--- updated formula ---"; grep -E 'version "|sha256 "' "$f"
 
       - name: Commit + push to the tap
-        if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           cd tap
