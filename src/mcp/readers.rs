@@ -765,6 +765,70 @@ mod tests {
         );
     }
 
+    /// A repo with one commit at `dir`.
+    fn one_commit_repo(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        run_git(dir, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+        run_git(dir, &["add", "."]);
+        run_git(dir, &["commit", "-q", "-m", "c1"]);
+    }
+
+    /// A project homed in repo `a` (with a linked worktree) while the user
+    /// browses repo `b`, somewhere else on the system: the context file the
+    /// loop writes for it, and `a`.
+    fn home_in_a_browsing_b(root: &Path) -> (PathBuf, PathBuf) {
+        let (a, b) = (root.join("a"), root.join("elsewhere").join("b"));
+        one_commit_repo(&a);
+        one_commit_repo(&b);
+        crate::git::worktree::add(&a, "feature", None).unwrap();
+        let ctx = root.join("ctx.json");
+        std::fs::write(
+            &ctx,
+            json!({
+                "root": a.display().to_string(),
+                "project_home": a.display().to_string(),
+                "cwd": b.display().to_string(),
+                "search_root": b.display().to_string(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        (ctx, a)
+    }
+
+    /// `list_worktrees` lists the agent's project's repo, never the repo of
+    /// whatever directory the user is browsing.
+    #[test]
+    #[ignore = "red: list_worktrees lists the browsed column's repo"]
+    fn lists_the_projects_repo_not_the_browsed_columns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (ctx, a) = home_in_a_browsing_b(&root);
+        let v: Value = serde_json::from_str(&list_worktrees_json(&ctx)).unwrap();
+        let mut paths: Vec<&str> = v
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter_map(|e| e["path"].as_str())
+            .collect();
+        paths.sort_unstable();
+        let feature = root.join("a.worktrees").join("feature");
+        assert_eq!(paths, [a.to_str().unwrap(), feature.to_str().unwrap()]);
+    }
+
+    /// A relative path given to `claim_worktree` resolves against PROJECT_HOME,
+    /// not the browsed column.
+    #[test]
+    #[ignore = "red: claim_worktree resolves against the browsed column"]
+    fn claim_resolves_a_relative_path_against_project_home() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (ctx, _) = home_in_a_browsing_b(&root);
+        let claimed = claim_worktree_result(&ctx, "../a.worktrees/feature", "test");
+        assert!(claimed.is_ok(), "{claimed:?}");
+    }
+
     #[test]
     fn reports_inventory_dirty_and_current() {
         let tmp = tempfile::tempdir().unwrap();
