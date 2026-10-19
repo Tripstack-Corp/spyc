@@ -939,7 +939,32 @@ fn merge_color(dst: &mut Option<String>, src: Option<String>) {
 }
 
 pub fn home_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(home) = HOME_OVERRIDE.with(|h| h.borrow().clone()) {
+        return Some(home);
+    }
     std::env::var_os("HOME").map(PathBuf::from)
+}
+
+#[cfg(test)]
+thread_local! {
+    static HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only: run `body` with [`home_dir`] pinned to `root`, so a test never
+/// reads the developer's own `~/.spycrc.toml`. Unwound when `body` returns
+/// *or panics*. Mirrors `crate::state::with_config_root`.
+#[cfg(test)]
+pub fn with_home_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            HOME_OVERRIDE.with(|h| *h.borrow_mut() = None);
+        }
+    }
+    HOME_OVERRIDE.with(|h| *h.borrow_mut() = Some(root.to_path_buf()));
+    let _g = Guard;
+    body()
 }
 
 #[cfg(test)]

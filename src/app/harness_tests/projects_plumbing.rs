@@ -21,16 +21,20 @@ fn with_two(test: impl FnOnce(&mut Two)) {
     for d in [&state_dir, &x_home.join("sub"), &y_home] {
         std::fs::create_dir_all(d).unwrap();
     }
+    let home = base.join("home");
+    std::fs::create_dir_all(&home).unwrap();
     crate::state::with_state_root(&state_dir, || {
-        let mut app = App::test_app(x_home.clone());
-        let x = app.state.active;
-        app.ready_test_project(x, &x_home);
-        let y = app.add_test_project(&y_home);
-        test(&mut Two {
-            app,
-            y,
-            x_home,
-            y_home,
+        crate::config::with_home_root(&home, || {
+            let mut app = App::test_app(x_home.clone());
+            let x = app.state.active;
+            app.ready_test_project(x, &x_home);
+            let y = app.add_test_project(&y_home);
+            test(&mut Two {
+                app,
+                y,
+                x_home,
+                y_home,
+            });
         });
     });
 }
@@ -267,7 +271,6 @@ fn write_rc(home: &std::path::Path, body: &str) {
 /// own rc, not only the one in view: Y's edit is in force once the user goes
 /// back to Y.
 #[test]
-#[ignore = "red: a reload reaches only the project in view"]
 fn a_reload_reaches_every_project_from_its_own_rc() {
     with_two(|t| {
         let app = &mut t.app;
@@ -289,7 +292,6 @@ fn a_reload_reaches_every_project_from_its_own_rc() {
 /// An error in another project's rc is the flash, named for that project,
 /// over the "reloaded" note of the project in view.
 #[test]
-#[ignore = "red: an error in another project's rc is never shown"]
 fn an_error_in_another_projects_rc_is_the_flash() {
     with_two(|t| {
         let app = &mut t.app;
@@ -306,13 +308,35 @@ fn an_error_in_another_projects_rc_is_the_flash() {
     });
 }
 
+/// An error in the project in view's own rc wins over one in another's: it
+/// is the one the user is looking at.
+#[test]
+fn an_error_in_the_project_in_views_rc_wins() {
+    with_two(|t| {
+        let app = &mut t.app;
+        write_rc(&t.x_home, "[layout\n");
+        write_rc(&t.y_home, "[layout\n");
+        app.reload_config();
+        let flash = app.state.flash.clone();
+        assert!(
+            flash
+                .as_ref()
+                .is_some_and(|f| matches!(f.kind, crate::app::FlashKind::Error)
+                    && f.text.starts_with("config error")),
+            "{flash:?}"
+        );
+    });
+}
+
 /// Reloading another project's rc leaves the theme the user is looking at:
-/// that project's colours apply when the user switches to it.
+/// that project's colours apply when the user switches to it. Even when the
+/// project in view's own rc fails, so its reload puts no theme back.
 #[test]
 fn reloading_another_projects_rc_leaves_the_users_theme() {
     with_two(|t| {
         let app = &mut t.app;
         let before = format!("{:?}", app.view.theme);
+        write_rc(&t.x_home, "[layout\n");
         write_rc(&t.y_home, "[colors]\ndir = \"#ff0000\"\n");
         app.reload_config();
         assert_eq!(format!("{:?}", app.view.theme), before, "Y's colours");
@@ -322,7 +346,6 @@ fn reloading_another_projects_rc_leaves_the_users_theme() {
 /// Every open project's rc is a config file: the watcher's candidates name
 /// it, and an event on it reloads.
 #[test]
-#[ignore = "red: only the project in view has its rc watched"]
 fn every_projects_rc_is_a_config_path() {
     with_two(|t| {
         let app = &mut t.app;
@@ -333,13 +356,13 @@ fn every_projects_rc_is_a_config_path() {
             app.candidate_config_paths()
         );
         assert!(app.is_config_path(&y_rc));
+        assert!(app.config_parents().contains(&t.y_home));
     });
 }
 
 /// Moving a project's start dir moves the rc it loads, so the watcher is told:
 /// the rc in the new start dir is watched, not the old one.
 #[test]
-#[ignore = "red: the watcher never hears of a start dir that moved"]
 fn moving_the_start_dir_tells_the_watcher() {
     with_two(|t| {
         let app = &mut t.app;
@@ -352,7 +375,20 @@ fn moving_the_start_dir_tells_the_watcher() {
             .state
             .dispatch_command(&format!("startdir {}", t.x_home.join("sub").display()));
         app.sync_watch(&mut ctx);
-        assert!(rx.try_iter().count() > 0, "the watcher was told nothing");
+        let told: Vec<Vec<std::path::PathBuf>> = rx
+            .try_iter()
+            .filter_map(|c| match c {
+                crate::app::watch::WatchCommand::SyncConfigParents(parents) => Some(parents),
+                crate::app::watch::WatchCommand::SyncListing { .. } => None,
+            })
+            .collect();
+        let sub = t.x_home.join("sub");
+        assert!(
+            told.last().is_some_and(|p| p.contains(&sub)
+                && p.contains(&t.y_home)
+                && !p.contains(&t.x_home)),
+            "the watcher wasn't told to watch the new start dir and only it: {told:?}"
+        );
     });
 }
 
@@ -409,7 +445,6 @@ const INIT_LUA_MAP: &str = "spyc.map(\"<F5>\", function() end)\n";
 /// A `spyc.map` key in `init.lua` binds in every open project's keymap, not
 /// only the one in view.
 #[test]
-#[ignore = "red: a spyc.map key binds only in the project in view"]
 fn an_init_lua_map_binds_in_every_open_project() {
     with_two(|t| {
         let app = &mut t.app;
@@ -427,7 +462,6 @@ fn an_init_lua_map_binds_in_every_open_project() {
 /// `:lua reload` replaces the `spyc.map` bindings rather than adding to them:
 /// each project's keymap holds one per map afterwards.
 #[test]
-#[ignore = "red: :lua reload leaves a second binding per spyc.map"]
 fn lua_reload_leaves_one_binding_per_map_in_each_project() {
     with_two(|t| {
         let app = &mut t.app;
@@ -442,5 +476,33 @@ fn lua_reload_leaves_one_binding_per_map_in_each_project() {
         });
         assert_eq!(lua_maps_in(app, x), 1, "X's keymap");
         assert_eq!(lua_maps_in(app, t.y), 1, "Y's keymap");
+    });
+}
+
+/// A reload keeps the colours-off toggle, as a switch does: the rebuilt theme
+/// is the rc's colours, in the user's choice of whether to show them.
+#[test]
+fn a_reload_keeps_colours_off() {
+    with_two(|t| {
+        let app = &mut t.app;
+        app.view.theme.mono = true;
+        app.reload_config();
+        assert!(app.view.theme.mono, "the reload turned colours back on");
+    });
+}
+
+/// Serving a project inside another's serving leaves the outer one in the
+/// background still.
+#[test]
+fn a_nested_in_project_leaves_the_outer_one_in_the_background() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = app.state.active;
+        let still = app.in_project(t.y, |app| {
+            app.in_project(x, |_| ());
+            app.state.in_background
+        });
+        assert!(still);
+        assert!(!app.state.in_background);
     });
 }

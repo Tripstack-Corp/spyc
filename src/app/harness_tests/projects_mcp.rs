@@ -76,6 +76,13 @@ impl Projects {
                 app.apply_worktree_outcomes();
                 app.settle_scope_waiters(Instant::now(), &mut ctx);
             }
+            // A command nobody answers (`spyc/statusline`) is sent before its
+            // reply, so it can still be queued once the client has finished,
+            // when the client ran between a timed-out wait and the check.
+            while let Ok(req) = rx.try_recv() {
+                ctx.mcp_pending.push(req);
+                app.drain_mcp_pending(&mut ctx);
+            }
             client.join().expect("the client finishes")
         })
     }

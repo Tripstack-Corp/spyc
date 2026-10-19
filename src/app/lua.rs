@@ -337,13 +337,14 @@ impl App {
                 };
                 let idx = self.runtime.lua_registry.maps.len();
                 self.runtime.lua_registry.maps.push(fn_id);
-                self.state
-                    .active_project_mut()
-                    .user_keymap
-                    .push(UserBinding {
-                        chord,
+                // A key `init.lua` maps is the user's, so it binds in every
+                // open project, as `~/.spycrc.toml`'s bindings do.
+                for project in self.state.open_projects_mut() {
+                    project.user_keymap.push(UserBinding {
+                        chord: chord.clone(),
                         action: BoundAction::Lua(format!("{MAP_SENTINEL}{idx}")),
                     });
+                }
             }
             RegKind::Command(name) => {
                 self.runtime.lua_registry.commands.insert(name, fn_id);
@@ -484,9 +485,21 @@ impl App {
         );
     }
 
-    /// Re-run `init.lua` after a config reload (`^R` / `:lua reload`). The
-    /// loaded keymap already dropped the old synthetic `@map:` entries, so we
-    /// clear the registries and submit a `Reload` job; the next
+    /// Drop every `init.lua` registration: the registries, and the synthetic
+    /// `@map:` entries they put in every project's keymap, which would
+    /// otherwise point at callbacks that are gone, or pile up beside the ones
+    /// a reload registers.
+    fn forget_lua_registrations(&mut self) {
+        self.runtime.lua_registry.clear();
+        for project in self.state.open_projects_mut() {
+            project.user_keymap.retain(
+                |b| !matches!(&b.action, BoundAction::Lua(name) if name.starts_with(MAP_SENTINEL)),
+            );
+        }
+    }
+
+    /// Re-run `init.lua` after a config reload (`^R` / `:lua reload`): forget
+    /// the old registrations and submit a `Reload` job; the next
     /// [`App::handle_lua_done`] re-applies the fresh registrations (re-appending
     /// the synthetic keymap entries).
     ///
@@ -494,7 +507,7 @@ impl App {
     /// explicit `:lua reload`, but silent for the implicit `^R` config reload
     /// (a configless user shouldn't get a Lua flash every `^R`).
     pub(super) fn reload_init_lua(&mut self, verbose: bool) {
-        self.runtime.lua_registry.clear();
+        self.forget_lua_registrations();
         // Reset event bookkeeping too: reload re-registers the `spyc.on`
         // handlers, so the last-fired agent-status baselines start fresh (a
         // re-registered handler should see the current statuses as its first
@@ -636,7 +649,7 @@ pub(super) fn cmd_lua(app: &mut App, args: &str) -> Vec<Effect> {
             // The registries (now backed by dropped worker-side fns) go too,
             // along with the runaway-watchdog slot for the killed job.
             app.runtime.lua = None;
-            app.runtime.lua_registry.clear();
+            app.forget_lua_registrations();
             app.runtime.lua_inflight = None;
             app.runtime.lua_events = LuaEventState::default();
             app.state.flash_info("lua: disabled");

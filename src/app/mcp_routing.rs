@@ -33,9 +33,9 @@ impl App {
         );
         let flash = self.state.flash.take();
         self.set_active(id);
-        self.state.in_background = true;
+        let background = std::mem::replace(&mut self.state.in_background, true);
         let out = f(self);
-        self.state.in_background = false;
+        self.state.in_background = background;
         self.set_active(users);
         self.state.flash = flash;
         out
