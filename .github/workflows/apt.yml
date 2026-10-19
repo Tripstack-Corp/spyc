@@ -42,10 +42,11 @@
 #
 # The signing key lives in the `apt-publish` protected Environment (only this
 # job, on a `v*` tag or `main`, can read it); operator setup is in
-# RELEASE_ENGINEERING.md §8. The job self-skips when the key is absent, so it
-# stays green until then. Prereleases publish too — the deb version uses a
-# tilde (`2.0.0~rc.4`), which dpkg sorts BELOW the final `2.0.0`, so an rc never
-# blocks the stable upgrade (the Makefile's `DEB_VERSION` does the `-`→`~`).
+# RELEASE_ENGINEERING.md §8. A missing key fails the job: a skip would leave
+# the archive behind on a green run. Prereleases publish too — the deb version
+# uses a tilde (`2.0.0~rc.4`), which dpkg sorts BELOW the final `2.0.0`, so an
+# rc never blocks the stable upgrade (the Makefile's `DEB_VERSION` does the
+# `-`→`~`).
 name: apt
 
 on:
@@ -72,25 +73,19 @@ jobs:
     runs-on: ubuntu-latest
     # Scopes the signing-key secrets to this job (and to `v*` / `main` refs).
     environment: apt-publish
-    outputs:
-      enabled: ${{ steps.guard.outputs.enabled }}
     env:
       APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
       APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Gate on signing key (self-skip until configured)
-        id: guard
+      - name: Check the signing key
         run: |
           if [ -z "$APT_GPG_PRIVATE_KEY" ]; then
-            echo "::notice::apt signing key not configured — skipping publish"
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "::error::the apt-publish environment needs the APT_GPG_PRIVATE_KEY secret; the apt archive was not published"
+            exit 1
           fi
 
       - name: Resolve tag + version
-        if: steps.guard.outputs.enabled == 'true'
         id: ver
         run: |
           TAG="${{ github.event.release.tag_name || inputs.tag }}"
@@ -98,7 +93,6 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout spyc (for the Makefile + the prune policy)
-        if: steps.guard.outputs.enabled == 'true'
         # main, not the release tag: the .deb target just wraps the prebuilt
         # binary (release-agnostic), and older tags predate `make deb`.
         uses: actions/checkout@v7
@@ -106,11 +100,9 @@ jobs:
           ref: main
 
       - name: Install apt tooling
-        if: steps.guard.outputs.enabled == 'true'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dpkg-dev apt-utils gnupg
 
       - name: Decide which versions the archive holds
-        if: steps.guard.outputs.enabled == 'true'
         id: plan
         run: |
           set -euo pipefail
@@ -157,7 +149,6 @@ jobs:
           cat build-tags.txt
 
       - name: Build every deb the archive holds
-        if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           mkdir -p aptrepo
@@ -185,7 +176,6 @@ jobs:
           ls -la aptrepo
 
       - name: Import GPG signing key
-        if: steps.guard.outputs.enabled == 'true'
         id: gpg
         run: |
           echo "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
@@ -193,7 +183,6 @@ jobs:
           echo "keyid=$KEYID" >> "$GITHUB_OUTPUT"
 
       - name: Regenerate + sign the flat apt index
-        if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           cd aptrepo
@@ -224,7 +213,6 @@ jobs:
           cp ../docs/apt-README.md README.md
 
       - name: Sanity-check the archive before deploying it
-        if: steps.guard.outputs.enabled == 'true'
         run: |
           set -euo pipefail
           cd aptrepo
@@ -273,7 +261,6 @@ jobs:
           echo "archive OK: ${#debs[@]} deb(s), index verifies"
 
       - name: Upload the archive as the Pages artifact
-        if: steps.guard.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v5
         with:
           path: aptrepo
@@ -286,7 +273,6 @@ jobs:
   deploy:
     name: Deploy the apt repo to Pages
     needs: build
-    if: needs.build.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
