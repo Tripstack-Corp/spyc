@@ -576,13 +576,25 @@ impl App {
         lines.push(format!("marks    : {}", self.state.marks.entries.len()));
         lines.push(format!("rss      : {}", crate::sysinfo::format_rss()));
         lines.push(format!("time     : {}", crate::sysinfo::format_now()));
-        let deferred_tabs = &self.state.active_project().deferred_tabs;
-        if !deferred_tabs.is_empty() {
+        // Every project's, each named when several are open: a restore counts
+        // them all in its flash.
+        let several = self.state.open_projects().nth(1).is_some();
+        let mut unopened = self
+            .state
+            .open_projects()
+            .flat_map(|p| p.deferred_tabs.iter().map(move |d| (p, d)))
+            .peekable();
+        if unopened.peek().is_some() {
             lines.push(String::new());
             lines.push("unopened tabs (kept saved):".into());
-            for deferred in deferred_tabs {
+            for (project, deferred) in unopened {
+                let whose = if several {
+                    format!("{}: ", project.label())
+                } else {
+                    String::new()
+                };
                 lines.push(format!(
-                    "  saved tab {} ({}) — {}",
+                    "  {whose}saved tab {} ({}) — {}",
                     deferred.saved_index + 1,
                     deferred.tab.label,
                     deferred.reason

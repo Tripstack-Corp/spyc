@@ -3,7 +3,7 @@
 
 use super::pane_tabs::TabSlot;
 use super::state::restore::{DeferredTab, restored_active_index};
-use super::state::{Focus, Side, VSplit, VsplitMode};
+use super::state::{Focus, ProjectId, Side, VSplit, VsplitMode};
 use super::{
     App, Effect, RESTORE_BANNER_SETTLE, RESTORE_RESUME_ENTER_DELAY, RESTORE_RESUME_VERIFY_DELAY,
     RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
@@ -14,7 +14,7 @@ use crate::state::sessions::{Manifest, SavedProject, SavedTab};
 impl App {
     /// Restore's spawn: [`Self::open_pane_tab_in_home`], as the saved tab's
     /// agent hint, taking back its saved `pane_id` (see `TabInfo::id`) unless
-    /// it is empty or a live tab already holds it.
+    /// it is empty or a live tab in any project already holds it.
     pub(super) fn open_restored_pane_tab(
         &mut self,
         cmd: &str,
@@ -23,12 +23,8 @@ impl App {
         tab: &crate::state::sessions::SavedTab,
     ) -> bool {
         let pane_id = tab.pane_id.as_str();
-        let taken = self
-            .runtime
-            .project()
-            .pane_tabs
-            .as_ref()
-            .is_some_and(|tabs| tabs.tabs().iter().any(|t| t.info.id == pane_id));
+        // Any project's: an MCP call finds its tab by id across them all.
+        let taken = self.runtime.project_of_pane(pane_id).is_some();
         let reuse = (!pane_id.is_empty() && !taken).then_some(pane_id);
         self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, reuse, tab.agent_hint)
     }
@@ -122,32 +118,36 @@ impl App {
         self.open_restored_pane_tab(command, cwd, home, tab)
     }
 
-    /// Restore `manifest`'s active project into this spyc's active project.
+    /// Restore every project in `manifest`: the one the user was in into this
+    /// spyc's active project, and each of the others beside it, out of view,
+    /// in the order the file saved them.
     ///
     /// The restore adopts the file (its id and name, so later saves overwrite
-    /// it) only when this spyc carries everything in it: one project, and no
-    /// other spyc still writing it. Otherwise it is a copy and the file is left
-    /// as it was, so nothing the restore didn't open is lost. A copy of a
-    /// running session also leaves that spyc's agents alone: their
+    /// it) only when this spyc carries everything in it: every project opened,
+    /// and no other spyc still writing it. Otherwise it is a copy and the file
+    /// is left as it was, so nothing the restore didn't open is lost. A copy of
+    /// a running session also leaves that spyc's agents alone: their
     /// conversations, tab ids and scope claims stay with it, and the copy's
     /// agents start fresh.
     pub fn restore_session(&mut self, manifest: &Manifest) -> Vec<Effect> {
-        let Some(project) = manifest.active() else {
+        let Some(active) = manifest.active() else {
             self.state
                 .flash_error("session restore: the session has no projects");
             return Vec::new();
         };
-        let running = manifest.running();
-        let adopt = !running && manifest.projects.len() == 1;
-        let saved_tabs: Vec<SavedTab> = if running {
-            project.tabs.iter().map(fresh_tab).collect()
-        } else {
-            project.tabs.clone()
+        // The project the user was in comes back in view, else the first that
+        // can: one whose directories have all gone (a worktree removed after
+        // its merge) stays shut, and the rest still open.
+        let Some(project) = std::iter::once(active)
+            .chain(&manifest.projects)
+            .find(|p| has_a_place(p))
+        else {
+            self.state
+                .flash_error(format!("session dir gone: {}", active.anchor().display()));
+            return Vec::new();
         };
-        let plans: Vec<_> = saved_tabs
-            .iter()
-            .map(|tab| restore_plan(tab, project.anchor(), running))
-            .collect();
+        let running = manifest.running();
+        let (saved_tabs, plans) = restore_plans(project, running);
         // A wholly refused tab set leaves the current session intact. Mixed
         // sessions proceed, without ever spawning a refused command.
         if !plans.is_empty()
@@ -163,10 +163,39 @@ impl App {
             }
             return Vec::new();
         }
-        let Some(effects) = self.restore_column_a(project) else {
+        let Some(effects) = self.restore_column_a(project, true) else {
             return Vec::new();
         };
-        self.restore_session_settings(manifest, project, adopt);
+        self.restore_project(project, &saved_tabs, plans);
+        let others = self.restore_other_projects(manifest, project, running);
+        let adopt = !running && others.unopened.is_empty();
+        if adopt {
+            self.adopt_session(manifest);
+        }
+        // P2: restore the scope-coordination registry verbatim, once every
+        // project's tabs are back — independent of tab-restore success. A
+        // claim whose owning
+        // tab failed to respawn (or whose save predates `claim_owner`) just
+        // shows up "orphaned" on the registry / orchestration screen, still
+        // informative and releasable rather than silently lost. A running
+        // session's claims belong to its live agents, so a copy leaves them.
+        if !running {
+            self.state.scope_registry.clone_from(&manifest.scope_claims);
+        }
+        self.record_open_roots();
+        self.flash_restored(manifest, running, &others);
+        effects
+    }
+
+    /// Bring the active project back as `project` saved it: its settings, its
+    /// tabs, any it can't open kept saved, unopened, and its split.
+    fn restore_project(
+        &mut self,
+        project: &SavedProject,
+        saved_tabs: &[SavedTab],
+        plans: Vec<crate::agent::RestorePlan>,
+    ) {
+        self.restore_project_settings(project);
         if !saved_tabs.is_empty() {
             self.runtime.project_mut().pane_tabs = None;
             let mut restored = Vec::new();
@@ -184,25 +213,89 @@ impl App {
         if let Some(sv) = &project.vsplit {
             self.restore_vsplit(sv, project.pane_focused);
         }
-        // P2: restore the scope-coordination registry verbatim — independent
-        // of tab-restore success, like the vsplit above. A claim whose owning
-        // tab failed to respawn (or whose save predates `claim_owner`) just
-        // shows up "orphaned" on the registry / orchestration screen, still
-        // informative and releasable rather than silently lost. A running
-        // session's claims belong to its live agents, so a copy leaves them.
-        if !running {
-            self.state.scope_registry.clone_from(&manifest.scope_claims);
+    }
+
+    /// Open each project of `manifest` but `active`, the one restored into the
+    /// project in view, beside it and out of view, then put every project in
+    /// the order the file saved them.
+    fn restore_other_projects(
+        &mut self,
+        manifest: &Manifest,
+        active: &SavedProject,
+        running: bool,
+    ) -> OtherProjects {
+        let mut order = Vec::new();
+        let mut others = OtherProjects::default();
+        for saved in &manifest.projects {
+            if std::ptr::eq(saved, active) {
+                order.push(self.state.active);
+            } else if let Some((id, problem)) = self.restore_out_of_view(saved, running) {
+                order.push(id);
+                others
+                    .problems
+                    .extend(problem.map(|p| format!("{}: {p}", saved_label(saved))));
+            } else {
+                others.unopened.push(saved_label(saved));
+            }
         }
-        self.flash_restored(manifest, running, adopt);
-        effects
+        self.state.order_projects(&order);
+        others
+    }
+
+    /// Open `saved` as a project beside the one in view, its config read at
+    /// its start directory, else its anchor, else column `a`'s directory, with
+    /// its column `a`, tabs and split as it saved them, and its context file
+    /// written so its agents' tools answer for it. Returns its id and what
+    /// went wrong opening it, if anything. `None` when none of those
+    /// directories is left, or when an open project already has its home or
+    /// its start directory, which are one project's each.
+    fn restore_out_of_view(
+        &mut self,
+        saved: &SavedProject,
+        running: bool,
+    ) -> Option<(ProjectId, Option<String>)> {
+        let at = [saved.start_dir.as_path(), saved.anchor()]
+            .into_iter()
+            .chain(saved.left_cwd.as_deref())
+            .find(|dir| dir.is_dir())?;
+        let at = std::fs::canonicalize(at).ok()?;
+        if self
+            .state
+            .open_projects()
+            .any(|p| p.anchor() == saved.anchor() || p.start_dir == saved.start_dir)
+        {
+            return None;
+        }
+        let (id, config_problem) = self.create_project(&at);
+        let column_problem = self.in_project(id, |app| {
+            let landed = app.restore_column_a(saved, false).is_some();
+            app.reconcile_harpoon();
+            let (saved_tabs, plans) = restore_plans(saved, running);
+            app.restore_project(saved, &saved_tabs, plans);
+            app.write_context();
+            // `in_project` keeps the flash from the user, so its cause is read
+            // here.
+            (!landed).then(|| {
+                app.state.flash.as_ref().map_or_else(
+                    || "column a could not open".to_owned(),
+                    |flash| flash.text.clone(),
+                )
+            })
+        });
+        Some((id, config_problem.or(column_problem)))
     }
 
     /// Land column `a` where the project left it: its own directory, else the
-    /// project's anchor, which is all a version 1 file saved. The first that is
-    /// a directory, or a place inside an archive, wins, and the start
-    /// directory (the `` ` `` target) comes back with it. `None`, flashed, when
-    /// neither is left.
-    fn restore_column_a(&mut self, project: &SavedProject) -> Option<Vec<Effect>> {
+    /// project's anchor, which is all a version 1 file saved, else its start
+    /// directory ([`landings`]). The first that is a directory, or a place
+    /// inside an archive, wins, and the start directory (the `` ` `` target)
+    /// comes back with it. `None`, flashed, when none is left.
+    ///
+    /// Inside an archive, the project in view gets back the effect that mounts
+    /// it. `Effect::ChangeDir` acts on the project in view, so one restored out
+    /// of view lands beside the container instead, cursor on it: one `Enter`
+    /// from where it was.
+    fn restore_column_a(&mut self, project: &SavedProject, in_view: bool) -> Option<Vec<Effect>> {
         let anchor = project.anchor();
         let start_dir = if project.start_dir.is_dir() {
             project.start_dir.clone()
@@ -210,7 +303,7 @@ impl App {
             anchor.to_path_buf()
         };
         let mut failure = None;
-        for dir in project.left_cwd.as_deref().into_iter().chain([anchor]) {
+        for dir in landings(project) {
             if dir.is_dir() {
                 match self.state.chdir_side(Side::Left, dir) {
                     Ok(()) => {
@@ -219,18 +312,26 @@ impl App {
                     }
                     Err(e) => failure = Some(format!("session chdir: {e:#}")),
                 }
-            } else if super::archive::archive_ancestor_of(dir).is_some() {
+            } else if let Some((archive, _)) = super::archive::archive_ancestor_of(dir) {
                 // The user quit while browsing an archive. It isn't a directory
                 // and never was — the effect screen mounts it and lands the
                 // column back where they left off. The rest of the restore
                 // carries on meanwhile.
                 self.state.set_start_dir(&start_dir);
-                return Some(vec![Effect::ChangeDir {
-                    path: dir.to_path_buf(),
-                    focus: None,
-                    on_ok: None,
-                    err_prefix: "session chdir failed",
-                }]);
+                if in_view {
+                    return Some(vec![Effect::ChangeDir {
+                        path: dir.to_path_buf(),
+                        focus: None,
+                        on_ok: None,
+                        err_prefix: "session chdir failed",
+                    }]);
+                }
+                if let Some(parent) = archive.parent()
+                    && self.state.chdir_side(Side::Left, parent).is_ok()
+                {
+                    self.state.focus_on_path(&archive);
+                    return Some(Vec::new());
+                }
             }
         }
         self.state.flash_error(
@@ -325,24 +426,20 @@ impl App {
         }
     }
 
-    /// The session's identity, when the restore adopts it, and the restored
-    /// project's own settings apart from its tabs and split.
-    fn restore_session_settings(
-        &mut self,
-        manifest: &Manifest,
-        project: &SavedProject,
-        adopt: bool,
-    ) {
-        if adopt {
-            // Keep the startup-generated name when an older session file
-            // has no name field; otherwise take the saved one.
-            if !manifest.name.is_empty() {
-                self.state.session_name = Some(manifest.name.clone());
-            }
-            // Continue overwriting the restored session's own `<id>.json` on
-            // subsequent saves/autosaves (P3-2), rather than forking a new file.
-            self.state.session_id = Some(manifest.id);
+    /// Take `manifest`'s identity, when the restore adopts it.
+    fn adopt_session(&mut self, manifest: &Manifest) {
+        // Keep the startup-generated name when an older session file
+        // has no name field; otherwise take the saved one.
+        if !manifest.name.is_empty() {
+            self.state.session_name = Some(manifest.name.clone());
         }
+        // Continue overwriting the restored session's own `<id>.json` on
+        // subsequent saves/autosaves (P3-2), rather than forking a new file.
+        self.state.session_id = Some(manifest.id);
+    }
+
+    /// The restored project's own settings apart from its tabs and split.
+    fn restore_project_settings(&mut self, project: &SavedProject) {
         let restored = self.state.active_project_mut();
         restored.deferred_tabs.clear();
         restored.home = project.home.clone().filter(|p| p.is_dir());
@@ -352,35 +449,55 @@ impl App {
         }
     }
 
-    fn flash_restored(&mut self, manifest: &Manifest, running: bool, adopt: bool) {
+    /// What the restore came to, in one flash: whether it was a copy and why,
+    /// then any tabs kept unopened and anything that went wrong opening a
+    /// project, so none of them hides another.
+    fn flash_restored(&mut self, manifest: &Manifest, running: bool, others: &OtherProjects) {
         let name = if manifest.name.is_empty() {
             "(unnamed)"
         } else {
             manifest.name.as_str()
         };
-        let unopened = self.state.active_project().deferred_tabs.len();
-        if unopened > 0 {
-            self.state.flash_error(format!(
-                "session restored; {unopened} tab(s) unopened, kept saved — session info shows reasons"
-            ));
-        } else if running {
-            self.state.flash_info(format!(
+        let total = manifest.projects.len();
+        let headline = if running {
+            format!(
                 "restored a copy of {name}, running in pid {} — its agents start fresh here",
                 manifest.pid.unwrap_or_default()
-            ));
-        } else if !adopt {
-            self.state.flash_info(format!(
-                "restored one project of {name} as a copy — the session keeps all {}",
-                manifest.projects.len()
-            ));
+            )
+        } else if !others.unopened.is_empty() {
+            format!(
+                "restored {} of {total} projects of {name} as a copy, without {}: the session keeps them all",
+                total - others.unopened.len(),
+                others.unopened.join(", ")
+            )
+        } else if total > 1 {
+            format!("session restored: {total} projects")
         } else {
-            self.state.flash_info("session restored");
+            "session restored".to_owned()
+        };
+        let unopened: usize = self
+            .state
+            .open_projects()
+            .map(|p| p.deferred_tabs.len())
+            .sum();
+        let mut parts = vec![headline];
+        if unopened > 0 {
+            parts.push(format!(
+                "{unopened} tab(s) unopened, kept saved — session info shows reasons"
+            ));
+        }
+        parts.extend(others.problems.iter().cloned());
+        let text = parts.join("; ");
+        if parts.len() > 1 {
+            self.state.flash_error(text);
+        } else {
+            self.state.flash_info(text);
         }
     }
 
     /// Restore a saved vertical split: reopen the second commander at its saved
     /// cwd (PR G) or re-load the Stage-1 preview file, then apply the saved
-    /// shape. Split out of `restore_session` so it's unit-testable WITHOUT the
+    /// shape. Split out of `restore_project` so it's unit-testable WITHOUT the
     /// session-cwd `chdir` (which `set_current_dir`s and would race the parallel
     /// test runner) — `open_second_commander_at` / `load_right_preview` don't
     /// touch the process cwd.
@@ -476,6 +593,56 @@ impl App {
             }
         }
     }
+}
+
+/// What opening a manifest's other projects came to: the labels of those that
+/// didn't open, and each config problem of those that did.
+#[derive(Default)]
+struct OtherProjects {
+    unopened: Vec<String>,
+    problems: Vec<String>,
+}
+
+/// Where column `a` may land, in order: its own directory, the project's
+/// anchor, its start directory.
+fn landings(project: &SavedProject) -> impl Iterator<Item = &std::path::Path> {
+    project
+        .left_cwd
+        .as_deref()
+        .into_iter()
+        .chain([project.anchor(), project.start_dir.as_path()])
+}
+
+/// Whether column `a` has somewhere to land: one of its [`landings`] is a
+/// directory, or a place inside an archive.
+fn has_a_place(project: &SavedProject) -> bool {
+    landings(project).any(|dir| dir.is_dir() || super::archive::archive_ancestor_of(dir).is_some())
+}
+
+/// A saved project's name for the user: its label, else its anchor.
+fn saved_label(project: &SavedProject) -> String {
+    if project.label.is_empty() {
+        project.anchor().display().to_string()
+    } else {
+        project.label.clone()
+    }
+}
+
+/// `project`'s tabs as the restore opens them, each with how it comes back.
+fn restore_plans(
+    project: &SavedProject,
+    running: bool,
+) -> (Vec<SavedTab>, Vec<crate::agent::RestorePlan>) {
+    let saved_tabs: Vec<SavedTab> = if running {
+        project.tabs.iter().map(fresh_tab).collect()
+    } else {
+        project.tabs.clone()
+    };
+    let plans = saved_tabs
+        .iter()
+        .map(|tab| restore_plan(tab, project.anchor(), running))
+        .collect();
+    (saved_tabs, plans)
 }
 
 /// How `tab` comes back. A copy of a running session's tab starts its agent

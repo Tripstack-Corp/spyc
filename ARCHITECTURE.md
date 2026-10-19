@@ -1256,9 +1256,11 @@ leaves the current session and its identity intact. The records belong to the
 project they were restored into (`Project::deferred_tabs`), so a save with
 several projects open merges each project's own back into its own tabs.
 
-The same rule applies one level up, to whole projects. A restore opens one
-project, so it adopts the file only when that is all the file holds and no
-other live spyc is writing it. Otherwise the restore is a copy: this process
+The same rule applies one level up, to whole projects. A restore opens every
+project in the file, so it adopts the file only when every one of them opened
+and no other live spyc is writing it. A project whose directories have gone, or
+whose home or start directory another project already has, stays shut, and the
+restore is then a copy: this process
 keeps its own id and file, and the manifest stays as it was, so nothing a
 restore didn't open is ever overwritten. A copy of a running session also
 starts its agents fresh and takes none of that spyc's tab ids or scope claims,

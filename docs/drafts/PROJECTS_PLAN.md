@@ -549,7 +549,8 @@ restore path without it.
 - **A restore adopts the file only when it carries all of it:** one project,
   and no other live spyc writing it. Anything else restores the active project
   as a copy and leaves the file untouched, so a project the restore didn't open
-  is never overwritten. Step 5 widens this to "every project opened".
+  is never overwritten. Pair 3b of step 5 widened this to "every project
+  opened".
 - **A copy of a running session starts its agents fresh** (owner decision): a
   resume would put a second process in the conversations that spyc still has
   open, and `codex resume --last` would pick one even without an id. The copy
@@ -975,8 +976,10 @@ PR, except step 5's stages:
      directory (`clear_project_home`), and for a homeless project `gS` and
      `:startdir` (`move_start_dir`). A start dir is the root an agent's cwd
      binds by, so `move_start_dir` refuses another project's for any
-     project. Session restore sets a home unchecked; pair 3's restore of
-     every project checks it.
+     project. A restore of every project (pair 3b) opens a project out of
+     view only when no open project has its home or its start dir; the
+     project it restores into the one in view takes its home unchecked,
+     since nothing else is open yet.
    - **A closed project's archive work.** The mount table is the process's,
      so `apply_archive_outcome_orphaned` applies what an op did to it as it
      would anywhere, and drops what would act on a project. A mount is
@@ -1041,6 +1044,20 @@ PR, except step 5's stages:
      pager beats the editor). It shares the worktree picker's keys
      (`numbered_picker_key`). The attention glyphs (step 6) and
      recently-closed projects (step 8) are still to come.
+   - **`-r` restores every project (pair 3b).** The active project is
+     restored into the launch project as before; each other one is opened
+     out of view (`restore_out_of_view`: `create_project` at its start dir,
+     else its anchor, then column `a`, settings, tabs and split inside
+     `in_project`, and its context file written), and the projects are put
+     back in the order saved (`AppState::order_projects`). The file is
+     adopted when no other spyc runs it and every project opened; one whose
+     directories have gone, or whose home or start dir an open project has,
+     stays shut, and the rest restore as a copy whose flash names it. When
+     the project the user was in is the one that's gone, the first that can
+     come back is restored in view instead. `Effect::ChangeDir` acts on the project in view, so a
+     project out of view that was inside an archive lands beside it, cursor
+     on it, rather than mounting it. The flash and session info count every
+     project's unopened tabs.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
