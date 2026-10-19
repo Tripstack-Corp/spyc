@@ -758,8 +758,8 @@ One string per binding in a `keymap = [ ... ]` array. Forms:
 | `map <KEY> <action> =<value>` | an action with a parameter (`harpoon_jump =3`, `set_mark =a`) |
 | `unmap <KEY>` | the key does nothing; the same as `map <KEY> noop` |
 
-`<KEY>` is a single char (`f`), a Ctrl-combo (`^P`), or a named key (`<F2>`). The
-DSL binds single keys — for multi-key chords, use `init.lua`'s `spyc.map`.
+`<KEY>` is a single char (`f`), a Ctrl-combo (`^P`), or a named key (`<F2>`).
+Neither the DSL nor `init.lua`'s `spyc.map` binds a multi-key chord.
 Later lines win, so a `map` after an `unmap` of the same key binds it again.
 `unmap` of a chord prefix (`g`, `y`, `H`) silences the whole chord, but a
 binding for any other key leaves the chords that end in it alone:
@@ -945,8 +945,8 @@ and registers callbacks that fire later:
 ```lua
 -- ~/.config/spyc/init.lua
 
--- bind a key (multi-key chords work here, unlike the DSL)
-spyc.map("g z", function()
+-- bind a key: one key, as the DSL takes it (`z`, `^x`, `<F5>`)
+spyc.map("<F5>", function()
   spyc.navigate(spyc.context().project_home)
 end)
 
