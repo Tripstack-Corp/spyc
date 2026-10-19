@@ -881,3 +881,115 @@ fn a_write_that_has_landed_lets_the_next_one_start() {
         assert!(writes(&next), "the next write was refused: {next:?}");
     });
 }
+
+/// An edit saved to an extracted copy while the archive is written, by an
+/// editor left open or an agent, isn't in that write, and can't be refused:
+/// spyc never sees it coming. A zip's untouched members are carried across
+/// from the archive itself, and the write's re-read empties the staging tree,
+/// so the edited copy is kept aside and put back, pending, once the archive
+/// has been read again.
+#[test]
+#[ignore = "red: an edit saved while the archive is written is lost when the write lands"]
+fn an_edit_saved_while_the_archive_is_written_is_kept_pending() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        let readme = archive.join("README.md");
+        let fx = app.open_member(
+            &readme,
+            crate::app::archive_ops::MaterializeThen::OpenPager(
+                crate::app::file_ops::PagerDest::Overlay { scroll: None },
+            ),
+        );
+        settle(&mut app, fx);
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("src").join("main.rs")],
+                },
+            )],
+        );
+        let write = app.cmd_archive("write");
+        assert!(writes(&write), "{write:?}");
+        let edited = "# edited while the archive was written\n";
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        assert!(staged.exists(), "README.md was never extracted");
+        std::fs::write(&staged, edited).unwrap();
+        settle(&mut app, write);
+        assert!(
+            !member_names(&archive).contains(&"src/main.rs".to_string()),
+            "the write itself never landed: {:?}",
+            member_names(&archive)
+        );
+        let mount = app.state.mounts.get(&archive).expect("read again");
+        assert_eq!(
+            std::fs::read_to_string(mount.staging_root.join("README.md")).ok(),
+            Some(edited.to_string()),
+            "the edit was lost"
+        );
+        assert!(app.mount_is_dirty(&archive), "the edit isn't pending");
+        assert!(
+            app.flash_text().is_some_and(|f| f.contains("README.md")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// A compressed tar's untouched members are repacked from their staged
+/// copies, so an edit saved before the write read it is in the archive: it is
+/// written, and is not pending again once the archive has been read back.
+#[test]
+fn an_edit_a_streamed_write_carried_is_not_pending_again() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().to_path_buf();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("src").join("main.rs")],
+                },
+            )],
+        );
+        let write = app.cmd_archive("write");
+        assert!(writes(&write), "{write:?}");
+        let edited = "# edited before the write read it\n";
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        std::fs::write(&staged, edited).unwrap();
+        settle(&mut app, write);
+        let mount = app.state.mounts.get(&archive).expect("read again");
+        assert_eq!(
+            std::fs::read_to_string(mount.staging_root.join("README.md")).ok(),
+            Some(edited.to_string()),
+            "the write didn't carry the edit"
+        );
+        assert!(
+            !app.mount_is_dirty(&archive),
+            "an edit the write carried is pending again"
+        );
+    });
+}
