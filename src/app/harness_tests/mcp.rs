@@ -363,6 +363,115 @@ fn mcp_create_worktree_outside_every_repo_reports_the_columns_dir() {
     });
 }
 
+/// Two repos side by side: `a`, the project's home, and `b`, a repo the user
+/// has wandered into in column `a`, as they might browse anything on their
+/// system. Returns their parent.
+fn home_in_a_browsing_b(app_root: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let (a, b) = (app_root.join("a"), app_root.join("b"));
+    init_repo(&a);
+    init_repo(&b);
+    (a, b)
+}
+
+/// Point column `a` at `dir`, as browsing there does, without a `chdir`.
+fn browse(app: &mut App, dir: &std::path::Path) {
+    app.state.cur_mut().listing = crate::fs::listing::Listing::read(dir).expect("dir lists");
+    app.state.update_repo_root(state::Side::Left, dir);
+}
+
+/// The worktree tools act on the agent's project: `create_worktree` makes the
+/// worktree off PROJECT_HOME's repo, never the repo of whatever directory the
+/// user happens to be browsing.
+#[test]
+#[ignore = "red: create_worktree uses the browsed column's repo before PROJECT_HOME's"]
+fn mcp_create_worktree_anchors_on_project_home_not_the_browsed_column() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (a, b) = home_in_a_browsing_b(&root);
+        let mut app = App::test_app(a.clone());
+        app.state.active_project_mut().home = Some(a);
+        browse(&mut app, &b);
+        let path = created_at(create_worktree(&mut app, "home-wt", None));
+        assert_eq!(path, root.join("a.worktrees/home-wt"));
+        assert!(
+            !root.join("b.worktrees").exists(),
+            "a worktree landed in the browsed repo"
+        );
+    });
+}
+
+/// PROJECT_HOME's repo comes before the calling agent's own pane's: the pane
+/// is the fallback for a project outside any repo.
+#[test]
+#[ignore = "red: create_worktree uses the agent's pane before PROJECT_HOME"]
+fn mcp_create_worktree_prefers_project_home_over_the_calling_pane() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (a, b) = home_in_a_browsing_b(&root);
+        let outside = root.join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let mut app = App::test_app(outside);
+        app.state.active_project_mut().home = Some(a);
+        assert!(app.open_pane_tab_in("cat", &b));
+        let pane_id = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
+            .info
+            .id
+            .clone();
+        let path = created_at(create_worktree(&mut app, "pane-wt", Some(pane_id)));
+        assert_eq!(path, root.join("a.worktrees/pane-wt"));
+    });
+}
+
+/// A relative path given to `remove_worktree` resolves against PROJECT_HOME,
+/// and the removal finds its repo from there, not from the browsed column.
+#[test]
+#[ignore = "red: remove_worktree resolves against the browsed column"]
+fn mcp_remove_worktree_resolves_against_project_home() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (a, b) = home_in_a_browsing_b(&root);
+        let mut app = App::test_app(a.clone());
+        app.state.active_project_mut().home = Some(a.clone());
+        browse(&mut app, &b);
+        let job = app.plan_worktree_job(&crate::mcp_cmd::McpCommand::RemoveWorktree {
+            path: "gone".into(),
+        });
+        let Some(Ok(crate::app::worktree_ops::WorktreeJob::Remove { target, anchor })) = job else {
+            panic!("not a removal job");
+        };
+        assert_eq!(target, a.join("gone"));
+        assert_eq!(anchor, a);
+    });
+}
+
+/// A relative path given to `open_worktree` resolves against PROJECT_HOME.
+#[test]
+#[ignore = "red: open_worktree resolves against the browsed column"]
+fn mcp_open_worktree_resolves_a_relative_path_against_project_home() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let (a, b) = home_in_a_browsing_b(&root);
+        std::fs::create_dir(a.join("sub")).unwrap();
+        let mut app = App::test_app(a.clone());
+        app.state.active_project_mut().home = Some(a.clone());
+        browse(&mut app, &b);
+        let resp = app
+            .execute_mcp_command(crate::mcp_cmd::McpCommand::OpenWorktree { path: "sub".into() });
+        assert!(matches!(resp, McpResponse::Ok { .. }), "{resp:?}");
+        let opened = app
+            .state
+            .active_project()
+            .right
+            .as_ref()
+            .map(|b| b.listing.dir.clone());
+        assert_eq!(opened, Some(a.join("sub")));
+    });
+}
+
 /// MCP `remove_worktree` tears down a clean worktree — and when a column is open
 /// inside it, removal still proceeds and the column is snapped back to
 /// PROJECT_HOME (rather than refused and left stranded on a deleted dir).
