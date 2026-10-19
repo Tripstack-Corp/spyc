@@ -613,3 +613,92 @@ fn a_write_re_reads_the_archive_rather_than_trusting_the_old_index() {
         }
     });
 }
+
+/// `outer.zip` mounted, with the column on `bundle.zip`, the archive inside it.
+fn on_the_inner_archive(test: impl FnOnce(&mut App, &Path)) {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let _cwd = CwdGuard;
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("outer.zip");
+        build_nested_zip(&archive);
+        let mut app = App::test_app(dir);
+        mount_inline(&mut app, &archive, &tmp.path().join("staging"));
+        let idx = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.display.starts_with("bundle.zip"))
+            .unwrap();
+        app.state.cur_mut().cursor.index = idx;
+        test(&mut app, &archive);
+    });
+}
+
+fn mark_outer_readme_for_removal(app: &mut App, archive: &Path) {
+    settle(
+        app,
+        vec![Effect::Graveyard(
+            crate::app::graveyard_ops::GraveyardOp::Archive {
+                paths: vec![archive.join("README.md")],
+            },
+        )],
+    );
+}
+
+fn starts_a_write(effects: &[Effect]) -> bool {
+    effects
+        .iter()
+        .any(|e| matches!(e, Effect::Archive(ArchiveOp::Write { .. })))
+}
+
+/// Writing the outer archive while the inner one is mounted is refused, as
+/// unmounting it is: the write re-reads the outer from an emptied tree,
+/// deleting the staged copy the inner one reads from.
+#[test]
+#[ignore = "red: the outer archive is written while the inner one is mounted"]
+fn writing_the_outer_archive_is_refused_while_the_inner_is_mounted() {
+    on_the_inner_archive(|app, archive| {
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(app, fx);
+        assert!(app.state.mounts.get(&archive.join("bundle.zip")).is_some());
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(app, fx);
+        assert_eq!(app.state.cur().listing.dir, archive, "back in the outer");
+        mark_outer_readme_for_removal(app, archive);
+        let write = app.cmd_archive("write");
+        assert!(!starts_a_write(&write), "the outer was written: {write:?}");
+        assert!(
+            app.flash_text().is_some_and(|f| f.contains("bundle.zip")),
+            "it says which one is in the way: {:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// Mounting the inner archive while the outer one is being written is
+/// refused: the write re-reads the outer from an emptied tree once it lands,
+/// deleting the staged copy the inner one would read from.
+#[test]
+#[ignore = "red: the inner archive is mounted while the outer one is being written"]
+fn entering_the_inner_archive_while_the_outer_is_written_is_refused() {
+    on_the_inner_archive(|app, archive| {
+        mark_outer_readme_for_removal(app, archive);
+        let write = app.cmd_archive("write");
+        assert!(starts_a_write(&write), "{write:?}");
+        let fx = app.apply(&Action::EnterOrDisplay).unwrap();
+        settle(app, fx);
+        assert!(
+            app.state.mounts.get(&archive.join("bundle.zip")).is_none(),
+            "the inner archive was mounted"
+        );
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.contains("being written")),
+            "{:?}",
+            app.flash_text()
+        );
+        settle(app, write);
+    });
+}
