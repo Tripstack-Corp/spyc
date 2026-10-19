@@ -1497,6 +1497,107 @@ fn a_consent_over_a_modal_pager_takes_the_keys() {
     });
 }
 
+/// Help opened from the editor (`^a Space ?`) is drawn over it, so it has the
+/// keyboard: `q` closes it rather than reaching the file, and the editor has
+/// the keys back.
+#[test]
+#[ignore = "red: the editor keeps the keys under a modal pager"]
+fn help_opened_from_the_editor_takes_the_keys() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        open_v_editor(&mut app, &dir);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+            .unwrap();
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(key('?')).unwrap();
+        assert!(
+            app.view
+                .project()
+                .pager
+                .as_ref()
+                .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::Overlay)),
+            "^a Space ? opened no help: {:?}",
+            app.flash_text()
+        );
+        // The loop top derives the focus again before it reads each key.
+        app.recompute_focus();
+        app.handle_key(key('q')).unwrap();
+        assert!(
+            app.view.project().pager.is_none(),
+            "q went to the editor: help is still open"
+        );
+        app.recompute_focus();
+        assert!(
+            app.runtime.project().top_overlay.is_some(),
+            "the editor quit"
+        );
+        assert!(
+            matches!(app.state.active_project().focus, state::Focus::Overlay),
+            "the editor doesn't have the keys back"
+        );
+    });
+}
+
+/// Whether one rendered frame leaves the terminal's cursor showing.
+fn cursor_shows(app: &mut App) -> bool {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    terminal.backend().cursor_visible()
+}
+
+/// Help drawn over a surface whose cursor shows.
+fn open_help_over(app: &mut App) {
+    assert!(cursor_shows(app), "no cursor shows before help opens");
+    app.set_pager(crate::ui::pager::PagerView::new_plain(
+        "Help",
+        vec!["help".to_string()],
+    ));
+    app.recompute_focus();
+}
+
+/// The cursor shows where the keys go, so a modal pager hides the cursor of
+/// the editor or the pane it is drawn over, in either column.
+#[test]
+#[ignore = "red: the cursor under a modal pager still shows"]
+fn a_modal_pager_hides_the_cursor_of_what_it_covers() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+
+        let mut app = App::test_app(dir.clone());
+        open_v_editor(&mut app, &dir);
+        open_help_over(&mut app);
+        assert!(!cursor_shows(&mut app), "the editor's cursor shows");
+
+        let mut app = App::test_app(dir.clone());
+        app.open_pane_tab("cat");
+        assert!(app.state.pane_focused());
+        open_help_over(&mut app);
+        assert!(!cursor_shows(&mut app), "the pane's cursor shows");
+
+        let mut app = App::test_app(dir.clone());
+        app.open_second_commander_at(&dir);
+        assert_eq!(app.focused_side(), state::Side::Right);
+        let wake = app.make_pane_wake();
+        let overlay =
+            crate::pane::Pane::spawn("cat", 24, 40, &dir, &app.view.project().context_path, wake)
+                .expect("spawn overlay");
+        app.runtime.project_mut().top_overlay_right = Some(overlay);
+        app.recompute_focus();
+        assert!(matches!(
+            app.state.active_project().focus,
+            state::Focus::Overlay
+        ));
+        open_help_over(&mut app);
+        assert!(!cursor_shows(&mut app), "b's editor's cursor shows");
+    });
+}
+
 /// With no pane open there is no tab bar, so the editor's last row carries it.
 #[test]
 fn with_no_pane_the_prompt_row_takes_the_editors_last_row() {

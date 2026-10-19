@@ -88,6 +88,23 @@ mod tests {
         assert_eq!(decide_focus(snap(false, None), false), Focus::FileList);
     }
 
+    /// A modal pager (help, the pickers, `:grep`) is drawn over the editor, so
+    /// it has the keyboard while it is open, and the editor has it back once
+    /// it closes. A `D` pager in the editor's column stays under the editor.
+    #[test]
+    #[ignore = "red: the editor keeps focus under a modal pager"]
+    fn a_modal_pager_takes_focus_from_the_editor() {
+        assert_eq!(
+            decide_focus(snap(true, Some(Mount::Overlay)), false),
+            Focus::Pager(Mount::Overlay)
+        );
+        assert_eq!(decide_focus(snap(true, None), false), Focus::Overlay);
+        assert_eq!(
+            decide_focus(snap(true, Some(Mount::Overlay)), true),
+            Focus::Pane
+        );
+    }
+
     #[test]
     fn every_non_pane_decision_is_not_pane_focused() {
         for has_top_overlay in [false, true] {
