@@ -912,7 +912,10 @@ share either (`AppState::home_taken`, `move_start_dir`). Once a project
 closes, the archive work it started still lands on the process's mount table
 (a write's re-read included), named for it, and enters nowhere; an agent whose
 tab closed with it is told so rather than reading from the process cwd, and a
-connection bound to no tab binds again. `get_spyc_context` adds `project` (its id,
+connection bound to no tab binds again. A config reload (`^R`, or an edit an
+open project's rc fires) reloads every open project from its own rc, the one
+in view last, and the watcher watches every project's rc; a `spyc.map` key
+binds in every project's keymap. `get_spyc_context` adds `project` (its id,
 label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,

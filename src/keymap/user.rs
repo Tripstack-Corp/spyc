@@ -190,6 +190,11 @@ impl UserKeymap {
         Self { entries: bindings }
     }
 
+    /// Keep only the bindings `keep` accepts.
+    pub fn retain(&mut self, keep: impl FnMut(&UserBinding) -> bool) {
+        self.entries.retain(keep);
+    }
+
     /// Append a binding so it wins over earlier conflicts (`find` scans in
     /// reverse). Used to install `init.lua`'s `spyc.map` registrations as
     /// synthetic `@map:<idx>` entries on top of the loaded config.

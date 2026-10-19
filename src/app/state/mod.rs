@@ -469,6 +469,11 @@ impl AppState {
         self.projects.iter()
     }
 
+    /// [`Self::open_projects`], mutably.
+    pub fn open_projects_mut(&mut self) -> impl Iterator<Item = &mut Project> {
+        self.projects.iter_mut()
+    }
+
     /// Feed `key` to the resolver. `resolver` lives flat on `AppState` while
     /// `user_keymap` lives on the active project; `active_project()` borrows
     /// all of `self`, so it can't be called while `resolver` is already

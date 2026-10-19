@@ -102,6 +102,9 @@ pub struct RunCtx {
     /// topology is re-sent when this OR `watched_listing` changes, so opening /
     /// swapping / closing the preview re-points the preview-parent watch.
     pub(super) watched_preview: Option<PathBuf>,
+    /// The config-file parent dirs last sent to the worker
+    /// (`WatchCommand::SyncConfigParents`), re-sent when the set changes.
+    pub(super) watched_config: Vec<PathBuf>,
     pub(super) scheduler: Scheduler,
     /// Coalesce buffers: the recv arm pushes here; the pre-recv drains process them.
     pub(super) fs_pending: Vec<notify::Event>,
@@ -130,6 +133,7 @@ impl RunCtx {
             watched_listing: None,
             watched_listing_right: None,
             watched_preview: None,
+            watched_config: Vec::new(),
             scheduler: Scheduler::new(),
             fs_pending: Vec::new(),
             git_pending: Vec::new(),
@@ -161,12 +165,8 @@ impl App {
         // `watch_tx` drops at teardown. We pass it the config-file *parent*
         // dirs (editors replace-on-save, removing the file inode) and then
         // send an initial `SyncListing` to watch the listing dir recursively.
-        let config_parents: Vec<PathBuf> = self
-            .candidate_config_paths()
-            .into_iter()
-            .filter_map(|p| p.parent().map(std::path::Path::to_path_buf))
-            .collect();
-        let watch_tx = spawn_watch_worker(msg_tx, config_parents);
+        let config_parents = self.config_parents();
+        let watch_tx = spawn_watch_worker(msg_tx, config_parents.clone());
 
         // MVU Phase 3a: the git-status worker (spawned in `new()`) keeps
         // sending onto its own channel; this forwarder bridges its results
@@ -221,6 +221,7 @@ impl App {
             watched_listing: None,
             watched_listing_right: None,
             watched_preview: None,
+            watched_config: config_parents,
             // MVU Phase 2: advisory deadline scheduler — computes the
             // recv_timeout wait from armed timers; the loop still fires each
             // timer via its own predicate against the threaded `now`.
