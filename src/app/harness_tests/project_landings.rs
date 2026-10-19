@@ -529,137 +529,6 @@ fn file_as(app: &App, origin: state::ProjectId, outcome: ArchiveOutcome) {
         .push((origin, outcome));
 }
 
-/// X reads an archive while Y mounts the same one and records a change to
-/// it. X's read lands after the change, from X still open or closed. Y's
-/// mount is the live one: replacing it throws its journal away, and the
-/// change with it.
-fn a_read_from_x_never_replaces_ys_live_mount(close_x: bool) {
-    with_two(|t| {
-        let app = &mut t.app;
-        let zip = t.x_home.join("pkg.zip");
-        build_zip(&zip);
-        let xs = run_unfiled(app.request_mount(&zip, false));
-        app.make_active(t.y);
-        kick_mount(app, &zip);
-        settle_archive(app);
-        app.state
-            .mounts
-            .get_mut(&zip)
-            .unwrap()
-            .journal
-            .delete("README.md");
-        assert_eq!(app.dirty_mounts(), std::slice::from_ref(&zip));
-        if close_x {
-            app.remove_test_project(t.x);
-        }
-        file_as(app, t.x, xs);
-        settle_archive(app);
-        assert_eq!(
-            app.dirty_mounts(),
-            std::slice::from_ref(&zip),
-            "Y's unwritten change was thrown away"
-        );
-    });
-}
-
-#[test]
-fn a_closed_projects_read_never_replaces_a_live_mount() {
-    a_read_from_x_never_replaces_ys_live_mount(true);
-}
-
-#[test]
-fn a_read_landing_in_x_never_replaces_ys_live_mount() {
-    a_read_from_x_never_replaces_ys_live_mount(false);
-}
-
-fn build_zip_of(path: &Path, members: &[(&str, &str)]) {
-    use std::io::Write as _;
-    let mut w = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
-    let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
-    for (name, body) in members {
-        w.start_file(*name, opts).unwrap();
-        w.write_all(body.as_bytes()).unwrap();
-    }
-    w.finish().unwrap();
-}
-
-/// A compressed tar, whose mount is streamed: every member is extracted
-/// into the staging tree as the archive is read.
-fn build_tar_gz(path: &Path) {
-    let enc = flate2::write::GzEncoder::new(
-        std::fs::File::create(path).unwrap(),
-        flate2::Compression::default(),
-    );
-    let mut b = tar::Builder::new(enc);
-    for (name, body) in [("README.md", "# pkg\n"), ("src/main.rs", "fn main() {}\n")] {
-        let mut h = tar::Header::new_gnu();
-        h.set_size(body.len() as u64);
-        h.set_mode(0o644);
-        h.set_entry_type(tar::EntryType::Regular);
-        b.append_data(&mut h, name, body.as_bytes()).unwrap();
-    }
-    b.into_inner().unwrap().finish().unwrap();
-}
-
-/// A read landing over a mount with nothing unwritten replaces it. Two reads
-/// of one archive can race, and a re-read after a write must take the place
-/// of the read of the old bytes that landed second.
-#[test]
-fn a_read_landing_over_a_clean_mount_replaces_it() {
-    with_two(|t| {
-        let app = &mut t.app;
-        let zip = t.x_home.join("pkg.zip");
-        build_zip(&zip);
-        let old = run_unfiled(app.request_mount(&zip, false));
-        build_zip_of(&zip, &[("README.md", "# pkg\n"), ("NEW.md", "new\n")]);
-        let new = run_unfiled(app.request_mount(&zip, false));
-        file_as(app, t.x, old);
-        settle_archive(app);
-        file_as(app, t.y, new);
-        settle_archive(app);
-        let mount = app.state.mounts.get(&zip).unwrap();
-        assert!(
-            mount.member_at(&zip.join("NEW.md")).is_some(),
-            "the read of the old bytes is still mounted"
-        );
-    });
-}
-
-/// X's read of a compressed tar streams every member into the staging tree
-/// it shares with Y's mount of the same archive, after Y recorded a change.
-/// Y's mount is kept, with its change, and what X's stream rewrote is spyc's
-/// own copy, not edits for the next write to carry.
-#[test]
-fn a_streamed_read_over_a_changed_mount_keeps_only_the_change() {
-    with_two(|t| {
-        let app = &mut t.app;
-        let tgz = t.x_home.join("pkg.tar.gz");
-        build_tar_gz(&tgz);
-        let xs = app.request_mount(&tgz, false);
-        app.make_active(t.y);
-        kick_mount(app, &tgz);
-        settle_archive(app);
-        app.state
-            .mounts
-            .get_mut(&tgz)
-            .unwrap()
-            .journal
-            .delete("README.md");
-        let xs = run_unfiled(xs);
-        app.remove_test_project(t.x);
-        file_as(app, t.x, xs);
-        settle_archive(app);
-        let mount = app.state.mounts.get_mut(&tgz).unwrap();
-        assert!(mount.is_dirty(), "Y's unwritten change was thrown away");
-        mount.journal.clear();
-        assert!(
-            app.dirty_mounts().is_empty(),
-            "X's stream reads as edits: {:?}",
-            app.dirty_mounts()
-        );
-    });
-}
-
 fn starts_a_read(effects: &[Effect]) -> bool {
     effects.iter().any(|e| matches!(e, Effect::Archive(_)))
 }
@@ -698,13 +567,11 @@ fn y_joins_xs_read(close_x: bool) {
 }
 
 #[test]
-#[ignore = "red: Y reads an archive X is still reading a second time"]
 fn a_read_y_asks_for_while_xs_runs_joins_it() {
     y_joins_xs_read(false);
 }
 
 #[test]
-#[ignore = "red: Y reads an archive a closed project is still reading a second time"]
 fn a_read_y_asks_for_while_a_closed_projects_runs_joins_it() {
     y_joins_xs_read(true);
 }
@@ -712,7 +579,6 @@ fn a_read_y_asks_for_while_a_closed_projects_runs_joins_it() {
 /// What Y holds back for an archive X is reading, a `navigate_to` into it,
 /// joins X's read and runs in Y once it lands.
 #[test]
-#[ignore = "red: work Y holds back for an archive X is reading starts a second read"]
 fn work_y_holds_back_for_xs_read_runs_when_it_lands() {
     with_two(|t| {
         let app = &mut t.app;
@@ -735,6 +601,43 @@ fn work_y_holds_back_for_xs_read_runs_when_it_lands() {
                 .iter()
                 .any(|e| matches!(e, Effect::ChangeDir { path, .. } if *path == zip.join("src"))),
             "Y's navigation never ran: {effects:?}"
+        );
+    });
+}
+
+/// Work an agent in Y holds back for an archive X is reading joins X's read.
+/// Y is out of view when it lands, and the work would act on the view in front
+/// of the user, so it is dropped and said so, named for Y.
+#[test]
+fn work_held_back_out_of_view_for_a_read_is_dropped_and_said_so() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let zip = t.x_home.join("pkg.zip");
+        build_zip(&zip);
+        let xs = app.request_mount(&zip, false);
+        let into = Effect::ChangeDir {
+            path: zip.join("src"),
+            focus: None,
+            on_ok: None,
+            err_prefix: "cd",
+        };
+        let ys = app.in_project(t.y, |app| {
+            app.request_mount_then(&zip, false, Some(Box::new(into)))
+        });
+        assert!(!starts_a_read(&ys), "Y read it again: {ys:?}");
+        file_as(app, t.x, run_unfiled(xs));
+        let effects = settle_archive(app);
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::ChangeDir { .. })),
+            "Y's navigation ran in X: {effects:?}"
+        );
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.starts_with("yproj:") && f.contains("dropped")),
+            "{:?}",
+            app.flash_text()
         );
     });
 }

@@ -223,6 +223,10 @@ pub(super) struct Runtime {
     /// the in-flight half waits here — beside `archive_cancel`, the other piece of
     /// in-flight mount state.
     pub(super) archive_mount_then: Option<(std::path::PathBuf, Box<Effect>)>,
+    /// Archive reads in flight, by the path each reads, with the requests that
+    /// joined each (`App::join_read`): one read of an archive at a time.
+    pub(super) archive_reads:
+        std::collections::HashMap<std::path::PathBuf, Vec<super::archive::Joined>>,
     /// Landing slot for off-thread file operations, each tagged with the
     /// project that started it (`App::spawn_file_op`).
     pub(super) file_results:
@@ -327,6 +331,7 @@ impl Runtime {
             archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             archive_mount_then: None,
+            archive_reads: std::collections::HashMap::new(),
             file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),

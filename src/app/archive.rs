@@ -19,7 +19,10 @@ use super::{App, Effect, Mode, Prompt, PromptKind};
 
 mod command;
 mod edits;
+mod reads;
 mod screen;
+
+pub(super) use reads::Joined;
 
 impl App {
     /// Kick a mount for `path`. `confirmed` is set on the second pass, after the
@@ -52,12 +55,17 @@ impl App {
             self.enter_mount(path);
             return Vec::new();
         }
+        if self.is_reading(path) {
+            self.join_read(path, then);
+            return Vec::new();
+        }
         let Some(staging_root) = staging_root_for(path) else {
             self.state
                 .flash_error("archive: no state directory to stage into");
             return Vec::new();
         };
         let cancel = self.mount_cancel();
+        self.start_read(path);
         self.state
             .flash_progress(format!("reading {}…", display_name(path)));
         vec![Effect::Archive(ArchiveOp::Mount {
@@ -94,6 +102,10 @@ impl App {
             self.enter_mount(at);
             return Vec::new();
         }
+        if self.is_reading(source) {
+            self.join_read(source, then);
+            return Vec::new();
+        }
         let depth = self
             .state
             .mounts
@@ -115,6 +127,7 @@ impl App {
             return Vec::new();
         };
         let cancel = self.mount_cancel();
+        self.start_read(source);
         self.state
             .flash_progress(format!("reading {}…", display_name(at)));
         vec![Effect::Archive(ArchiveOp::Mount {
@@ -160,8 +173,10 @@ impl App {
             0
         };
         let cancel = self.mount_cancel();
+        let read = nested_source.unwrap_or_else(|| archive.to_path_buf());
+        self.start_read(&read);
         vec![Effect::Archive(ArchiveOp::Mount {
-            path: nested_source.unwrap_or_else(|| archive.to_path_buf()),
+            path: read,
             staging_root,
             limits: self.state.active_project().config.archive.limits(),
             max_entries: self.state.active_project().config.archive.max_entries,
@@ -258,10 +273,18 @@ impl App {
         }
         let mut effects = Vec::new();
         for (origin, outcome) in landed {
+            let joined = self.finish_read(&outcome);
+            let mounted = match &outcome {
+                ArchiveOutcome::Mounted { index, .. } => Some(index.archive.clone()),
+                _ => None,
+            };
             if origin == self.state.active {
                 effects.extend(self.apply_one_archive_outcome(outcome));
             } else {
                 self.apply_archive_outcome_elsewhere(origin, outcome);
+            }
+            if let Some(joined) = joined {
+                effects.extend(self.serve_joined(joined, mounted.as_deref()));
             }
         }
         (true, effects)
@@ -537,9 +560,6 @@ impl App {
         staging_root: PathBuf,
         depth: usize,
     ) -> Vec<Effect> {
-        if self.keep_live_mount(&index) {
-            return Vec::new();
-        }
         let protected = self.protected_archives();
         let mut mount = ArchiveMount {
             index,
@@ -558,32 +578,6 @@ impl App {
         // archive as edited behind our back.
         mount.staged = current_staged_stats(&mount);
         clean_effects(self.state.mounts.insert(mount, &protected))
-    }
-
-    /// Whether a read of `index`'s archive, landing while the archive is
-    /// mounted already (another project's read, or two reads raced), leaves
-    /// that mount in place. It does when the mount carries changes the user
-    /// hasn't written, which replacing it would throw away; otherwise the
-    /// landed read replaces it, as a re-read after a write must replace a read
-    /// of the old bytes. The two share a staging tree. A streamed read has
-    /// just rewritten every staged file there, so a staged difference is its
-    /// own rather than an edit: only the journal counts, and a mount kept
-    /// takes what is now on disk as spyc's.
-    fn keep_live_mount(&mut self, index: &crate::archive::index::ArchiveIndex) -> bool {
-        let Some(live) = self.state.mounts.get(&index.archive) else {
-            return false;
-        };
-        if index.format.is_seekable() {
-            return self.mount_is_dirty(&index.archive);
-        }
-        if !live.is_dirty() {
-            return false;
-        }
-        let rewritten = current_staged_stats(live);
-        if let Some(live) = self.state.mounts.get_mut(&index.archive) {
-            live.staged = rewritten;
-        }
-        true
     }
 
     /// A write-back landed: the journal is clean, and the archive is re-read.

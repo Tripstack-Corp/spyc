@@ -984,9 +984,9 @@ PR, except step 5's stages:
      spyc's own, so it never reads as an edit; a write clears the journal and
      has the archive read again from clean staging (`request_remount`), that
      read spawned for the closed project so it lands here too
-     (`spawn_archive_op_from`); a failed write says so. A mount never
-     replaces one holding changes the user hasn't written
-     (`keep_live_mount`), a re-read in the background never takes
+     (`spawn_archive_op_from`); a failed write says so. Two reads of one
+     archive never overlap, so a request from another project while one runs
+     joins it (`archive/reads.rs`); a re-read in the background never takes
      `:archive cancel` from the user's read (`mount_cancel`), and what it
      says is named for the closed project (`App::land_closed`,
      `AppState::closed_labels`). This answers what step 5's notes left open.

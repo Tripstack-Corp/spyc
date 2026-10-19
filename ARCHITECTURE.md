@@ -910,10 +910,9 @@ project's context file if it is behind. A project's home is its own, and so
 is its start dir, the root an agent's cwd binds by: no two open projects
 share either (`AppState::home_taken`, `move_start_dir`). Once a project
 closes, the archive work it started still lands on the process's mount table
-(a write's re-read included), named for it, and enters nowhere, nor replaces
-a mount holding changes the user hasn't written; an agent whose tab closed with it is told so
-rather than reading from the process cwd, and a connection bound to no tab
-binds again. `get_spyc_context` adds `project` (its id,
+(a write's re-read included), named for it, and enters nowhere; an agent whose
+tab closed with it is told so rather than reading from the process cwd, and a
+connection bound to no tab binds again. `get_spyc_context` adds `project` (its id,
 label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,
@@ -1148,6 +1147,14 @@ repack writes back comes from the index, never off disk.
 per entry. A compressed tar cannot be listed without decompressing it, so it
 extracts as it streams under `[archive] extract_budget_mb` — the budget counts
 bytes that *arrive*, not bytes a header declares.
+
+**One read of an archive at a time** (`app/archive/reads.rs`). Every read of an
+archive stages into the same tree, so a second read of a compressed tar would
+land after the first and rewrite every member, an edit saved in between
+included, while the edit still read as pending. A request for an archive whose
+read is running, from any column or project, or while a write is re-read,
+joins that read instead and is served once it lands; a read that ends without
+a mount lets its joiners go.
 
 **The write-back** (`write`) plans repack steps, writes a temp file beside the
 original, carries untouched members across without recompressing, **verifies by
