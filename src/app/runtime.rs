@@ -357,6 +357,12 @@ impl Runtime {
         }
     }
 
+    /// A runtime for project `id`, opened beside the others: no tabs, no
+    /// overlays, no pager streams yet.
+    pub(super) fn insert_project(&mut self, id: super::state::ProjectId) {
+        self.projects.insert(id, ProjectRuntime::default());
+    }
+
     /// The active project's runtime (pane tabs, overlay slots). `active`
     /// always names a live entry (#99 step 1).
     pub(super) fn project(&self) -> &ProjectRuntime {

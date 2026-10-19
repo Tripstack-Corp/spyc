@@ -106,6 +106,8 @@ pub enum PromptKind {
     Limit,
     /// `:` — vim-style command line.
     Command,
+    /// `Space n` — a directory to open as a project (#99).
+    ProjectOpen,
     /// The first time `agent` starts in spyc: wire it into its own user
     /// configuration (status hooks + MCP entry), once, for every project?
     /// `y`/`Y` → remember-allow + install; `n`/`N` → remember-deny. Any other
@@ -193,6 +195,7 @@ impl PromptKind {
                 | Self::MakeDir
                 | Self::NewFile
                 | Self::PaneNewTabCwd
+                | Self::ProjectOpen
                 | Self::ShellCmd
                 | Self::ShellCmdCaptured
                 | Self::Command
@@ -288,6 +291,10 @@ impl App {
                     };
                     self.open_pane_tab_in(&cmd, &cwd_path);
                 }
+                Vec::new()
+            }
+            PromptKind::ProjectOpen => {
+                self.open_project_typed(&prompt.buffer);
                 Vec::new()
             }
             PromptKind::PaneRenameTab => {

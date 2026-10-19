@@ -853,6 +853,11 @@ verbs above (`down`, `pick`,
 | `jump_project_home` | jump to PROJECT_HOME |
 | `jump_worktree_root` | jump the focused column to its worktree/repo root |
 | `set_project_home_here` | set PROJECT_HOME to current dir |
+| `project_open` | open a directory as a project (`Space n`) |
+| `project_last` | go to the project you were in last (`Space Space`) |
+| `project_next` | go to the next open project, wrapping (`Space ]`) |
+| `project_prev` | go to the previous open project, wrapping (`Space [`) |
+| `project_by_index =N` | go to open project `N` (1 to 9; `Space 1`..`Space 9`) |
 | `set_start_dir_here` | set the start dir (what `jump_start_dir` returns to) to the current dir |
 | `edit_in_pane` | open editor in top pane (bottom pane stays visible) |
 | `display_in_pane` | open `$PAGER` in the top pane (the bottom pane stays visible) |

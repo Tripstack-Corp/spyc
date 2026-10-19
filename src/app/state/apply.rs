@@ -401,17 +401,19 @@ impl AppState {
                     err_prefix: "jump to start failed",
                 }]);
             }
-            Action::JumpProjectHome => match self.active_project().home.clone() {
-                Some(dir) => {
-                    return ApplyResult::Post(vec![Effect::ChangeDir {
-                        path: dir,
-                        focus: None,
-                        on_ok: None,
-                        err_prefix: "jump to project home failed",
-                    }]);
+            Action::Project(crate::keymap::ProjectAction::JumpHome) => {
+                match self.active_project().home.clone() {
+                    Some(dir) => {
+                        return ApplyResult::Post(vec![Effect::ChangeDir {
+                            path: dir,
+                            focus: None,
+                            on_ok: None,
+                            err_prefix: "jump to project home failed",
+                        }]);
+                    }
+                    None => self.flash_error("PROJECT_HOME not set (gP to set, :project)"),
                 }
-                None => self.flash_error("PROJECT_HOME not set (gP to set, :project)"),
-            },
+            }
             // `g w` — jump the FOCUSED column to its OWN repo/worktree root
             // (per-column, from PR E's `current_repo_root`). `g h` jumps to the
             // overall PROJECT_HOME; this is the column-bound worktree home.
@@ -426,7 +428,10 @@ impl AppState {
                 }
                 None => self.flash_error("not in a git repository"),
             },
-            Action::SetProjectHomeHere => self.set_project_home(self.cur().listing.dir.clone()),
+            Action::Project(crate::keymap::ProjectAction::SetHomeHere) => {
+                self.set_project_home(self.cur().listing.dir.clone());
+            }
+            Action::Project(crate::keymap::ProjectAction::Open) => self.open_project_prompt(),
             Action::SetStartDirHere => self.move_start_dir(self.cur().listing.dir.clone()),
             Action::JumpPrevDir => match self.active_project().prev_dir.clone() {
                 Some(prev) => {

@@ -318,7 +318,7 @@ fn space_p_jumps_project_home() {
     feed(&mut r, key(' '));
     assert_eq!(
         feed(&mut r, key('p')),
-        ResolverOutcome::Action(Action::JumpProjectHome)
+        ResolverOutcome::Action(Action::Project(crate::keymap::ProjectAction::JumpHome))
     );
 }
 
@@ -353,7 +353,7 @@ fn ctrl_a_space_enters_leader_from_pane_prefix() {
     assert_eq!(feed(&mut r, key(' ')), ResolverOutcome::Pending);
     assert_eq!(
         feed(&mut r, key('p')),
-        ResolverOutcome::Action(Action::JumpProjectHome)
+        ResolverOutcome::Action(Action::Project(crate::keymap::ProjectAction::JumpHome))
     );
 }
 
@@ -476,6 +476,21 @@ fn chord_states() -> Vec<(String, Vec<crossterm::event::KeyEvent>)> {
 fn every_action_a_chord_binds_is_offered_in_its_hints() {
     use std::mem::{Discriminant, discriminant};
 
+    /// Which action `a` is, its payload aside: the variant, and for a nested
+    /// one the variant within it, so the project actions aren't all one.
+    fn kind(
+        a: &Action,
+    ) -> (
+        Discriminant<Action>,
+        Option<Discriminant<crate::keymap::ProjectAction>>,
+    ) {
+        let nested = match a {
+            Action::Project(p) => Some(discriminant(p)),
+            _ => None,
+        };
+        (discriminant(a), nested)
+    }
+
     let states = chord_states();
     // The tree, named — not a floor. `>= 8` against sixteen real states let the
     // walk lose half of them and still pass, which is the one failure a
@@ -514,11 +529,11 @@ fn every_action_a_chord_binds_is_offered_in_its_hints() {
         for ev in &entry {
             feed(&mut r, *ev);
         }
-        let hinted: Vec<Discriminant<Action>> = r
+        let hinted: Vec<_> = r
             .continuations()
             .into_iter()
             .filter_map(|e| match e {
-                ChordEntry::Act(_, a) => Some(discriminant(&a)),
+                ChordEntry::Act(_, a) => Some(kind(&a)),
                 ChordEntry::Sub(..) => None,
             })
             .collect();
@@ -529,7 +544,7 @@ fn every_action_a_chord_binds_is_offered_in_its_hints() {
                 feed(&mut r, *ev);
             }
             if let ResolverOutcome::Action(a) = feed(&mut r, cand)
-                && !hinted.contains(&discriminant(&a))
+                && !hinted.contains(&kind(&a))
             {
                 panic!(
                     "`{label}` + {cand:?} fires {a:?}, which the which-key popup never \

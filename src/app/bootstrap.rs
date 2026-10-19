@@ -167,6 +167,7 @@ impl App {
             closed_labels: std::collections::HashMap::new(),
             active,
             in_background: false,
+            last_project: None,
             git_worker_available: false,
             inventory: Inventory::load(),
             marks: Marks::load(),
@@ -194,6 +195,7 @@ impl App {
             pane_history: History::load_file("pane_history"),
             pane_cwd_history: History::load_file("pane_cwd_history"),
             jump_history: History::load_file("jump_history"),
+            project_history: History::load_file("project_history"),
             command_history: History::load_file("command_history"),
             flash: start_error.map(|text| FlashMessage {
                 text,
@@ -362,7 +364,7 @@ impl App {
 }
 
 /// spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
-fn initial_pane() -> state::PaneLayout {
+pub(super) fn initial_pane() -> state::PaneLayout {
     let claude_home = crate::agent::claude_metrics::home(
         std::env::var_os("CLAUDE_CONFIG_DIR"),
         std::env::var_os("HOME"),

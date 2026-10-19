@@ -68,7 +68,7 @@ mod tests {
             Action::JumpMark('a'),
             Action::HarpoonJump(1),
             Action::WorktreeList,
-            Action::JumpProjectHome,
+            Action::Project(crate::keymap::ProjectAction::JumpHome),
         ] {
             assert_eq!(refusal(&action), None, "{action:?} should work in a mount");
         }

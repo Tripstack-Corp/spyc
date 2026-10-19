@@ -549,9 +549,14 @@ impl ViewState {
         }
     }
 
+    /// Project `id`'s views, opened beside the others.
+    pub(super) fn insert_project(&mut self, id: super::state::ProjectId, view: ProjectView) {
+        self.projects.insert(id, view);
+    }
+
     /// The active project's views (pagers, row caches, context file).
-    /// `active` always names an entry: the one project is inserted at
-    /// construction and none is ever removed.
+    /// `active` always names an entry: the project being switched to, or
+    /// served, is open.
     pub(super) fn project(&self) -> &ProjectView {
         self.projects
             .get(&self.active)

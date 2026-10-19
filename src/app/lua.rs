@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::keymap::user::{BoundAction, UserBinding};
+use crate::keymap::user::{BoundAction, UserBinding, UserKeymap};
 use crate::lua::{LuaJob, LuaOutcome, LuaRequest, LuaWorker, RegKind, Registration};
 use crate::mcp_cmd::{McpCommand, McpResponse};
 
@@ -59,16 +59,26 @@ pub(super) const fn lua_runaway_due(prompted: bool, elapsed: Duration, soft: Dur
 /// `map KEY lua <name>` file binding (which names a script under `lua/`).
 const MAP_SENTINEL: &str = "@map:";
 
+/// The synthetic keymap entry for `spyc.map` registration `idx`.
+fn map_binding(idx: usize, chord: crate::keymap::user::KeyChord) -> UserBinding {
+    UserBinding {
+        chord,
+        action: BoundAction::Lua(format!("{MAP_SENTINEL}{idx}")),
+    }
+}
+
 /// The runtime registries `init.lua` populates via `spyc.map` / `spyc.command`
 /// / `spyc.on`. Each entry maps a trigger to the worker-side `fn_id` of the Lua
 /// callback to invoke. Held in `Runtime` (it tracks live worker state); rebuilt
 /// from scratch on every `init.lua` (re)load.
 #[derive(Default)]
 pub struct LuaRegistry {
-    /// `spyc.map` callbacks, indexed by position; the `@map:<idx>` keymap
-    /// sentinel addresses this. Each push also appends a synthetic keymap
-    /// binding, so the index and the binding stay in lockstep.
-    pub maps: Vec<u64>,
+    /// `spyc.map` callbacks with their keys, indexed by position; the
+    /// `@map:<idx>` keymap sentinel addresses this. Each push also appends a
+    /// synthetic binding to every open project's keymap, so the index and the
+    /// bindings stay in lockstep, and the key is kept for a project opened
+    /// later ([`App::install_lua_maps`]).
+    pub maps: Vec<(u64, crate::keymap::user::KeyChord)>,
     /// `spyc.command` callbacks, keyed by `:`-command name.
     pub commands: HashMap<String, u64>,
     /// `spyc.on` callbacks, keyed by event name — `App::fire_lua_event` looks
@@ -147,7 +157,7 @@ impl App {
         let Some(fn_id) = idx
             .parse::<usize>()
             .ok()
-            .and_then(|i| self.runtime.lua_registry.maps.get(i).copied())
+            .and_then(|i| self.runtime.lua_registry.maps.get(i).map(|(id, _)| *id))
         else {
             self.state.flash_error("lua: stale mapped binding");
             return Vec::new();
@@ -336,14 +346,11 @@ impl App {
                     }
                 };
                 let idx = self.runtime.lua_registry.maps.len();
-                self.runtime.lua_registry.maps.push(fn_id);
+                self.runtime.lua_registry.maps.push((fn_id, chord.clone()));
                 // A key `init.lua` maps is the user's, so it binds in every
                 // open project, as `~/.spycrc.toml`'s bindings do.
                 for project in self.state.open_projects_mut() {
-                    project.user_keymap.push(UserBinding {
-                        chord: chord.clone(),
-                        action: BoundAction::Lua(format!("{MAP_SENTINEL}{idx}")),
-                    });
+                    project.user_keymap.push(map_binding(idx, chord.clone()));
                 }
             }
             RegKind::Command(name) => {
@@ -483,6 +490,14 @@ impl App {
                 snapshot,
             },
         );
+    }
+
+    /// Bind every `spyc.map` key registered so far in `keymap`: a project's
+    /// opened after `init.lua` ran.
+    pub(super) fn install_lua_maps(&self, keymap: &mut UserKeymap) {
+        for (idx, (_, chord)) in self.runtime.lua_registry.maps.iter().enumerate() {
+            keymap.push(map_binding(idx, chord.clone()));
+        }
     }
 
     /// Drop every `init.lua` registration: the registries, and the synthetic

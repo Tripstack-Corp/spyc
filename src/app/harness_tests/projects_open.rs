@@ -94,7 +94,6 @@ fn land_relist(app: &mut App, done: impl Fn(&App) -> bool) -> bool {
 /// in view, its column listing the directory once the worker has read it, and
 /// with its context file written for its agents.
 #[test]
-#[ignore = "red: Space n opens nothing"]
 fn space_n_opens_a_directory_as_a_project() {
     with_three(|t| {
         let app = &mut t.app;
@@ -122,7 +121,6 @@ fn space_n_opens_a_directory_as_a_project() {
 /// `Space n` onto a directory that is already an open project's home goes to
 /// that project rather than opening a second one there.
 #[test]
-#[ignore = "red: Space n opens nothing"]
 fn space_n_onto_an_open_projects_home_goes_to_it() {
     with_three(|t| {
         let app = &mut t.app;
@@ -135,7 +133,6 @@ fn space_n_onto_an_open_projects_home_goes_to_it() {
 /// A project `Space n` opens starts the `[pane] tabs` of `~/.spycrc.toml`, as a
 /// launch there would.
 #[test]
-#[ignore = "red: Space n opens nothing"]
 fn space_n_starts_the_new_projects_startup_tabs() {
     with_three(|t| {
         std::fs::write(t.home.join(".spycrc.toml"), "[pane]\ntabs = [\"cat\"]\n").unwrap();
@@ -154,7 +151,6 @@ fn space_n_starts_the_new_projects_startup_tabs() {
 
 /// A repo's own `[pane] tabs` ask before they run, as at a launch.
 #[test]
-#[ignore = "red: Space n opens nothing"]
 fn a_repos_startup_tabs_ask_first() {
     with_three(|t| {
         std::fs::write(t.z_home.join(".spycrc.toml"), "[pane]\ntabs = [\"cat\"]\n").unwrap();
@@ -173,7 +169,6 @@ fn a_repos_startup_tabs_ask_first() {
 
 /// An `init.lua` `spyc.map` key binds in a project opened after the load.
 #[test]
-#[ignore = "red: Space n opens nothing"]
 fn a_lua_map_binds_in_a_project_opened_later() {
     with_three(|t| {
         let app = &mut t.app;
@@ -212,7 +207,6 @@ fn a_lua_map_binds_in_a_project_opened_later() {
 /// `Space 2` goes to the second project, and `Space Space` back to the one
 /// the user was in last.
 #[test]
-#[ignore = "red: Space 1-9 and Space Space go nowhere"]
 fn space_digit_and_space_space_move_between_projects() {
     with_three(|t| {
         let app = &mut t.app;
@@ -227,7 +221,6 @@ fn space_digit_and_space_space_move_between_projects() {
 
 /// A digit past the open projects says so, and goes nowhere.
 #[test]
-#[ignore = "red: Space 1-9 go nowhere"]
 fn space_digit_past_the_projects_says_so() {
     with_three(|t| {
         let app = &mut t.app;
@@ -243,7 +236,6 @@ fn space_digit_past_the_projects_says_so() {
 
 /// `Space ]` and `Space [` step through the projects in order, wrapping.
 #[test]
-#[ignore = "red: Space ] and Space [ go nowhere"]
 fn space_brackets_step_through_projects_and_wrap() {
     with_three(|t| {
         let app = &mut t.app;
@@ -298,4 +290,32 @@ fn the_leaders_other_keys_still_resolve() {
         name(resolver.feed(key('l'), &keymap)),
         Some("worktree_list")
     );
+}
+
+/// A repo opened as a project shows its branch, with its repo root resolved
+/// for the git walk that the switch to it runs.
+#[test]
+fn a_repo_opened_as_a_project_shows_its_branch() {
+    with_three(|t| {
+        let run_git = crate::git::test_support::run_git;
+        run_git(&t.z_home, &["init", "-q", "--initial-branch=trunk"]);
+        run_git(&t.z_home, &["add", "in_z.txt"]);
+        run_git(&t.z_home, &["commit", "-q", "-m", "z"]);
+        let app = &mut t.app;
+        open(app, &t.z_home);
+        assert!(
+            app.state
+                .cur()
+                .git
+                .info
+                .as_deref()
+                .is_some_and(|i| i.contains("trunk")),
+            "{:?}",
+            app.state.cur().git.info
+        );
+        assert_eq!(
+            app.state.cur().git_cache.current_repo_root.as_deref(),
+            Some(t.z_home.as_path())
+        );
+    });
 }

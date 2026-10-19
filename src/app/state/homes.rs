@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{AppState, Project, ProjectId};
+use crate::app::{Mode, Prompt, PromptKind};
 
 impl AppState {
     /// Project `id`'s label, taken from its home, else its start dir; for a
@@ -70,6 +71,18 @@ impl AppState {
         }
         self.flash_info(format!("start dir: {}", dir.display()));
         self.active_project_mut().start_dir = dir;
+    }
+
+    /// `Space n`: ask for a directory to open as a project, pre-filled with
+    /// the focused column's worktree root.
+    pub fn open_project_prompt(&mut self) {
+        let dir = self.tool_root(self.focused_side()).display().to_string();
+        let mut prompt = Prompt::shell(PromptKind::ProjectOpen, "open project: ");
+        prompt.buffer.clone_from(&dir);
+        if let Some(editor) = prompt.editor.as_mut() {
+            editor.set_content(&dir);
+        }
+        self.mode = Mode::Prompting(prompt);
     }
 
     /// The open project other than the active one whose start dir is `dir`.

@@ -405,6 +405,7 @@ impl AppState {
             | PromptKind::CopyTo
             | PromptKind::MoveTo
             | PromptKind::PaneNewTabCwd
+            | PromptKind::ProjectOpen
             | PromptKind::PaneRenameTab
             | PromptKind::Command
             | PromptKind::Jump
