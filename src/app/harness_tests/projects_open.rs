@@ -1,5 +1,7 @@
-//! #99 step 5e, pair 2a: opening a project, and moving between projects, from
+//! #99 step 5e, pair 2: opening a project, and moving between projects, from
 //! the leader (`Space n`, `Space Space`, `Space 1-9`, `Space ]` / `Space [`).
+//! Closing one (`Space x`) is `projects_close.rs`'s, which shares these
+//! fixtures.
 //!
 //! `x` is where the user starts, `y` is open beside it, and `zproj/` is a
 //! directory no project has yet. `$HOME` is a temp dir of its own, so no test
@@ -11,16 +13,17 @@ use std::time::{Duration, Instant};
 use super::*;
 use crossterm::event::KeyCode;
 
-struct Three {
-    app: App,
-    x: state::ProjectId,
-    y: state::ProjectId,
-    home: PathBuf,
-    y_home: PathBuf,
-    z_home: PathBuf,
+pub(super) struct Three {
+    pub(super) app: App,
+    pub(super) x: state::ProjectId,
+    pub(super) y: state::ProjectId,
+    pub(super) home: PathBuf,
+    pub(super) x_home: PathBuf,
+    pub(super) y_home: PathBuf,
+    pub(super) z_home: PathBuf,
 }
 
-fn with_three(test: impl FnOnce(&mut Three)) {
+pub(super) fn with_three(test: impl FnOnce(&mut Three)) {
     let tmp = tempfile::tempdir().unwrap();
     let base = std::fs::canonicalize(tmp.path()).unwrap();
     let [state_dir, home, x_home, y_home, z_home] =
@@ -40,6 +43,7 @@ fn with_three(test: impl FnOnce(&mut Three)) {
                 x,
                 y,
                 home: home.clone(),
+                x_home,
                 y_home,
                 z_home,
             });
@@ -47,13 +51,13 @@ fn with_three(test: impl FnOnce(&mut Three)) {
     });
 }
 
-fn leader(app: &mut App, c: char) {
+pub(super) fn leader(app: &mut App, c: char) {
     app.handle_key(key(' ')).unwrap();
     app.handle_key(key(c)).unwrap();
 }
 
 /// `Space n`, then `dir` in the prompt it opens, then Enter.
-fn open(app: &mut App, dir: &Path) {
+pub(super) fn open(app: &mut App, dir: &Path) {
     leader(app, 'n');
     let Mode::Prompting(prompt) = &mut app.state.mode else {
         panic!("Space n opened no prompt: {:?}", app.flash_text());
@@ -127,6 +131,104 @@ fn space_n_onto_an_open_projects_home_goes_to_it() {
         open(app, &t.y_home);
         assert_eq!(app.state.open_projects().count(), 2, "a second yproj");
         assert_eq!(app.state.active, t.y);
+    });
+}
+
+/// `Space n` onto a directory another open project started in goes to that
+/// project, though its home has moved: one directory is one project's.
+#[test]
+fn space_n_onto_an_open_projects_start_dir_goes_to_it() {
+    with_three(|t| {
+        let elsewhere = t.home.join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        let y = t.y;
+        t.app.as_project(y, |app| {
+            app.state.active_project_mut().home = Some(elsewhere);
+        });
+        let app = &mut t.app;
+        open(app, &t.y_home);
+        assert_eq!(app.state.open_projects().count(), 2, "a second yproj");
+        assert_eq!(app.state.active, t.y);
+    });
+}
+
+/// A project homed through a symlink is the project at the directory the link
+/// names, so `Space n` there goes to it rather than opening a second.
+#[test]
+#[ignore = "red: Space n compares a stored home as it was given, not canonically"]
+fn space_n_onto_a_linked_home_goes_to_its_project() {
+    with_three(|t| {
+        let link = t.home.join("zlink");
+        std::os::unix::fs::symlink(&t.z_home, &link).unwrap();
+        let z = t.app.add_test_project(&link);
+        let app = &mut t.app;
+        open(app, &t.z_home);
+        assert_eq!(
+            app.state.open_projects().count(),
+            3,
+            "a second project at zproj"
+        );
+        assert_eq!(app.state.active, z);
+    });
+}
+
+/// A relative path is read against the column the user is in, as `J` and
+/// Tab completion read one, not against spyc's process cwd.
+#[test]
+#[ignore = "red: Space n reads a relative path against the process cwd"]
+fn a_relative_path_opens_against_the_column() {
+    with_three(|t| {
+        let app = &mut t.app;
+        let parent = t.z_home.parent().expect("zproj has a parent");
+        app.state.cur_mut().listing =
+            crate::fs::listing::Listing::read(parent).expect("the parent lists");
+        open(app, Path::new("zproj"));
+        assert_eq!(
+            project_at(app, &t.z_home),
+            Some(app.state.active),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// Enter on the prompt's pre-fill, the project in view's own directory, says
+/// so rather than doing nothing.
+#[test]
+#[ignore = "red: Space n onto the project in view does nothing, and says nothing"]
+fn space_n_onto_the_project_in_view_says_so() {
+    with_three(|t| {
+        let app = &mut t.app;
+        leader(app, 'n');
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.state.active, t.x);
+        assert_eq!(app.state.open_projects().count(), 2);
+        assert!(
+            app.flash_text()
+                .is_some_and(|f| f.contains("already in project xproj")),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// The sidecar discovery reads lists the new project's root beside the
+/// others', so its agents' `spyc --mcp` proxies find this spyc.
+#[test]
+fn space_n_records_the_new_projects_root_for_discovery() {
+    with_three(|t| {
+        let app = &mut t.app;
+        app.view.mcp_running = true;
+        open(app, &t.z_home);
+        let state_dir = crate::state::state_root().expect("the test's state root");
+        let sidecar = crate::mcp::root_marker_path_in(&state_dir, std::process::id());
+        let recorded = std::fs::read_to_string(sidecar).unwrap_or_default();
+        let mut roots: Vec<&str> = recorded.lines().collect();
+        roots.sort_unstable();
+        let mut want = [&t.x_home, &t.y_home, &t.z_home].map(|p| p.to_str().unwrap());
+        want.sort_unstable();
+        assert_eq!(roots, want);
     });
 }
 
@@ -262,6 +364,17 @@ fn with_one_project_the_moves_do_nothing_and_say_nothing() {
             assert_eq!(app.state.active, only, "Space {c:?}");
             assert_eq!(app.flash_text(), None, "Space {c:?}");
         }
+    });
+}
+
+/// An agent's call, served inside its project, is not the user moving: where
+/// `Space Space` goes stays as it was.
+#[test]
+fn serving_another_project_leaves_the_last_project_alone() {
+    with_three(|t| {
+        let y = t.y;
+        t.app.as_project(y, |_| {});
+        assert_eq!(t.app.state.last_project, None);
     });
 }
 
