@@ -52,7 +52,7 @@ They share focus through a screen-style `^a` chord prefix. The pane is a real
 terminal emulator, [libghostty-vt](https://github.com/ghostty-org/ghostty) (the
 core of Ghostty), so an agent draws just as it would in your own terminal.
 
-Codex, Claude Code, and Antigravity tabs also have an optional [native session strip](CONFIGURATION.md#agent-hud--pane-agent_hud):
+Codex, Claude Code, and Antigravity tabs also have an optional [native session strip](docs/config/agent-hud.md#agent-hud--pane-agent_hud):
 `:agent hud compact` shows attention, identity, context and usage below the
 child; `full` adds operating mode and recent tools. It is off by default.
 
