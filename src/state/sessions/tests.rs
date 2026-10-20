@@ -19,11 +19,11 @@ fn slug_replaces_path_separators() {
 #[test]
 fn slug_rewrites_underscores_like_claude() {
     // Claude rewrites underscores to hyphens in its on-disk slug.
-    // `~/.claude/projects/-Users-x-src-tripstack-platform/`
-    // is what we must match for `tripstack_platform`.
+    // `~/.claude/projects/-Users-x-src-my-platform/`
+    // is what we must match for `my_platform`.
     assert_eq!(
-        project_slug(std::path::Path::new("/Users/x/src/tripstack_platform")),
-        "-Users-x-src-tripstack-platform"
+        project_slug(std::path::Path::new("/Users/x/src/my_platform")),
+        "-Users-x-src-my-platform"
     );
     assert_eq!(
         project_slug(std::path::Path::new("/Users/x/src/system_setup")),

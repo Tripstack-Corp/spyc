@@ -48,8 +48,8 @@ const STREAM_BATCH: usize = 256;
 /// from `root`. Pass 2 looks for *nested* git repos under `root`
 /// that pass 1 skipped because the outer repo's `.gitignore`
 /// excluded them (the common "sibling clones living inside a
-/// parent dir" layout, e.g. `tripstack_platform/.gitignore`
-/// excluding `book-org/` even though `book-org/` is a separate
+/// parent dir" layout, e.g. `platform/.gitignore`
+/// excluding `services/` even though `services/` is a separate
 /// checkout the user wants to find files in). Each found subrepo
 /// is then walked with its own gitignore context. Without pass 2,
 /// `F` in such a parent dir misses everything outside the outer

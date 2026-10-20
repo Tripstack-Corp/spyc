@@ -45,8 +45,8 @@ codex) or shell can act on it. Today it anchors each path on
 relative to the project root, everything else stays absolute.
 
 That breaks when the agent's working directory isn't the project root.
-Observed: spyc pasted `book-org/client-api-20-contract/docs`, the agent
-ran `cd book-org/... && …` from `~/src/tripstack_platform`, and got
+Observed: spyc pasted `services/billing-api/docs`, the agent
+ran `cd services/... && …` from `~/src/platform`, and got
 `no such file or directory` — because the relative path was anchored on
 spyc's project root, not the agent's actual cwd.
 
