@@ -160,7 +160,8 @@ impl App {
             .active_project_mut()
             .pane
             .agent_hud
-            .set_target(target);
+            .set_target(target)
+            .or_else(|| self.collector_lag());
         if change.is_some() {
             ctx.draw.mark(3);
         }
@@ -208,6 +209,26 @@ impl App {
                 ConsumerChange::Start(binding) => Some(binding),
                 ConsumerChange::Stop => None,
             })]
+        })
+    }
+
+    /// The process runs one collector and each project keeps its own
+    /// binding, so after a switch the project in view can hold a binding the
+    /// collector isn't following, its target unchanged since it was last in
+    /// view: start one on it, or stop the one following a project out of view.
+    ///
+    /// The collector started may reuse a binding whose earlier collector was
+    /// cancelled. That is safe because results reach the Model only through
+    /// the collector in `runtime.agent_hud`, each with its own channel, so a
+    /// dropped one's never land. Each return re-runs the bounded startup
+    /// lookup off the loop thread, as a tab switch does.
+    fn collector_lag(&self) -> Option<ConsumerChange> {
+        let bound = self.state.active_project().pane.agent_hud.binding.as_ref();
+        let followed = self.runtime.agent_hud.as_ref().map(|c| &c.binding);
+        (bound != followed).then(|| {
+            bound
+                .cloned()
+                .map_or(ConsumerChange::Stop, ConsumerChange::Start)
         })
     }
 
