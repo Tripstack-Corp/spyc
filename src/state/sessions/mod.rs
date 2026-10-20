@@ -411,7 +411,7 @@ pub fn pick_closest_unclaimed_session<T: SessionCandidate>(
 /// `/Users/x/src/spyc` → `-Users-x-src-spyc`.
 ///
 /// Claude rewrites *any* non-alphanumeric/hyphen character to `-`,
-/// not just `/`. So `tripstack_platform` becomes `tripstack-platform`
+/// not just `/`. So `my_platform` becomes `my-platform`
 /// in the on-disk path. We mirror that exactly — anything else
 /// produces a slug that doesn't match Claude's directory and the
 /// resume resolver returns None, leaving a session unresumable.
