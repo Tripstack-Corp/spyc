@@ -398,7 +398,13 @@ mod tests {
 
     /// Markdown nobody copies a config line from: history, which may show
     /// syntax spyc has since dropped, and test data.
-    const NOT_COPIED_FROM: &[&str] = &["CHANGELOG.md", "docs/archive/", "tests/fixtures/", "fuzz/"];
+    const NOT_COPIED_FROM: &[&str] = &[
+        "CHANGELOG.md",
+        "docs/changelog/",
+        "docs/archive/",
+        "tests/fixtures/",
+        "fuzz/",
+    ];
 
     /// Where spyc ships DSL lines a user may copy: the `--print-config`
     /// template and every other markdown doc. Walked, not listed, so a doc

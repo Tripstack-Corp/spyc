@@ -280,8 +280,8 @@ release-debug: ## Optimized build with debug symbols (for `sample`, `lldb`, `per
 	@ls -lh $(TARGET_DIR)/release-debug/$(BINARY)
 
 # --- Changelog & release tagging (git-cliff) ---------------------------------
-# CHANGELOG.md is git-cliff-generated from v1.57.0 onward (older entries are
-# frozen hand-written history). `make changelog` PREVIEWS the pending section.
+# CHANGELOG.md is git-cliff-generated (releases before 2.0.0 are frozen in
+# docs/changelog/1.x.md). `make changelog` PREVIEWS the pending section.
 #
 # Releasing is TWO steps because `main` only takes PRs — a single
 # bump-commit-and-tag target would put the tag on a release-branch commit that
