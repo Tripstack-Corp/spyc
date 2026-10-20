@@ -9,13 +9,12 @@ default, it runs `claude` (the Claude Code CLI). This is the core of
 spyc's workflow: browse files above, talk to Claude below.
 
 The pane is a terminal in its own right, not a pass-through to the host. A
-program that redraws inside a synchronized update (DEC mode 2026) is shown only
-once the update is finished, so brew's download list doesn't flicker. A program
-that asks before choosing what to emit gets answers about the pane rather than
-the host: device attributes, mode reports, cursor position, and an XTVERSION
-naming `spyc`. That is how claude learns it can use synchronized output in any
-host terminal. The pane answers nothing it can't back: no kitty keyboard
-protocol, no image protocols, no OSC 52 clipboard.
+program that redraws in one go is shown once the redraw is finished, and a
+program that asks what the terminal supports gets answers about the pane, not
+the host, so claude's and brew's redraws don't flicker even in a host terminal
+that can't do this itself. The pane doesn't offer the kitty keyboard protocol,
+image protocols or OSC 52 clipboard writes. How it answers:
+[ARCHITECTURE.md → "Answering the child's queries"](../../ARCHITECTURE.md#answering-the-childs-queries).
 
 - **^\\ / F10** toggle the pane open/closed
 - **F9** open pane with `claude --resume`
@@ -33,16 +32,12 @@ protocol, no image protocols, no OSC 52 clipboard.
   so this is the tmux-style "send-prefix" escape hatch
 - **^a P** pipe file contents of the selection to the pane
 - **^a i** pipe inventory file contents to the pane
-- **^z** suspend/resume the pane's child — an agent (claude/codex/…) or any
-  other command (`htop`, `vim`, a long build). spyc sends `SIGSTOP` to the
-  pane's process group itself and shows 💤 on the divider; press `^z` again to
-  `SIGCONT` it back. (It manages the stop rather than forwarding the key: a
-  full-screen program runs its tty with signal generation off, so a forwarded
-  `^z` is a byte it discards — and Claude, which does catch `^z`, had a handler
-  that on macOS looked like an exit and got the pane killed. `SIGSTOP` is
-  uncatchable, so it just freezes.) The one exception is a **shell** pane —
-  `zsh`, `bash`, `sh` — whose `^z` is forwarded so its own job control keeps
-  backgrounding the foreground job
+- **^z** suspend/resume the pane's program — an agent (claude/codex/…) or any
+  other command (`htop`, `vim`, a long build) — with 💤 on the divider while
+  it's stopped. spyc stops it itself rather than passing the key on, because a
+  full-screen program ignores a forwarded `^z`. The one exception is a
+  **shell** tab (`zsh`, `bash`, `sh`): its `^z` goes to the shell, so job
+  control still backgrounds the foreground job
 - **^a + / ^a -** grow or shrink the pane
 - **^a z** zoom the **active** region (toggle fullscreen). Pane focused →
   the pane fills the screen (list collapses to 0 rows, `[ZOOM]` on the
@@ -53,122 +48,63 @@ protocol, no image protocols, no OSC 52 clipboard.
   new pane reveals the split. Focus stays where it is, `^a j` / `^a k` are
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
-- **Agent-activity dots** — each **agent** pane tab shows a live activity dot
-  in the divider, from these layered sources:
-  - **Output timing** (no hooks, no screen-scraping): a **spicy heat-pulse `●`**
-    — an orange → spark colour *breath*, eased in 16 small
-    steps over 1.6 s (10 Hz), a stepped warm ramp on a 256-colour terminal — while
-    output is flowing, fading to a quiet `·` once the agent goes silent. The
-    pulse animates only while something is working, so a fully-idle pane set
-    still renders at 0 fps.
-  - **Semantic self-report** via the `report_status` MCP tool: a cooperative
-    agent (Claude, codex, …) tells spyc when it's `working` (holds the pulse
-    through a silent thinking pause — no false "idle"), `blocked` (a steady
-    **hot-red square `■`** — the "which agent needs me" signal), `done` (a
-    calm teal square `■`), or `waiting` (a steady blue hollow circle `○`: the
-    turn is over, but background work the agent started will wake it). Shape
-    carries meaning: a **circle `●`** is live / animated (working), a **square
-    `■`** is a *settled* state that is your turn (blocked or done), and a
-    **hollow `○`** is not working this moment but not your turn either — so you
-    can tell "needs me / finished" from "busy" and "waiting on CI" at a glance.
-    Claude Code's turn-end hook lists the background work still running, so its
-    `waiting` needs no report; other agents report it, with a note saying what
-    they wait on, which `:why-status` shows. A `waiting` an agent reports
-    before its turn has ended shows once the turn ends; until then the dot
-    stays working. Entering `waiting` pings nothing.
-    For Codex and Claude, live reports survive output and footer redraws until
-    a newer report or TTL expiry; quiet tool waits do not erase `working`.
-    Agy yields non-blocked reports to fresh output for uncovered approvals.
-    Codex's complete command, file-edit, MCP-tool and network approval forms
-    temporarily override a non-blocked report while retaining it for recovery. **`blocked` is latched**: it stays a steady red
-    square — no TTL, no output or animation revives it — until you actually
-    answer the pane by pressing **Enter** in it (or the agent files a newer
-    report). Identified Codex questions instead wait for their matching tool
-    completion; Enter alone does not clear them. Non-agent tabs (a plain shell)
-    get no dot.
-  - **Auto-reporting (claude + codex; agy partial)** — so it works without the
-    agent choosing to call the tool, spyc installs lifecycle hooks (prompt-submit
-    → working, needs-permission/approval → blocked, turn-end → done) that run
-    `spyc --report-status`. They go into each agent's own user configuration,
-    once, for every project: **claude**'s `settings.json` (reloaded live),
-    **codex**'s `$CODEX_HOME/hooks.json` (read at startup, so a codex already
-    running picks them up on its next launch). Codex's metadata-bearing `PermissionRequest` is observational: it fires
-    before automatic or human review, so it cannot establish a human wait.
-    Known command, file-edit, MCP-tool and network forms require their default
-    choices and complete footer at the viewport bottom; diagnostics identify
-    this `scrape-fallback`. Missing required text and other forms produce no guess. Codex's `Interrupt` hook
-    reports `idle` after cancellation. Complete default async-question editors
-    and collapsed question summaries also show `blocked` while the tab needs an
-    answer, even if Codex keeps working. Clearing the native view retires that
-    fallback and resumes the latest live report; clipped/customized views are
-    not guessed. Its `request_user_input` hooks report
-    `blocked` on start and recover `working` only for the same pending
-    pane/session/turn/call; other waits stay blocked. Project trust and `/hooks`
-    review are separate from spyc's consent; spyc never auto-approves hooks. **agy** (Antigravity)
-    gets a `spyc-status` set in `~/.gemini/config/hooks.json` and is **partial** — it
-    covers `working`, `done`, and `blocked` for agy's own `ask_question` tool
-    (a `PreToolUse` hook sees that one exactly when it's called). The *other*
-    way agy waits on you — its tool-permission prompt — fires no event in any
-    agy version, so that half of the red square is read off the pane instead.
-    `done` needs **agy ≥ 1.1.10**, which is where `Stop` hooks became reachable
-    at all; on an older agy that half falls back to output timing. Full
-    mechanics: [`docs/AGENT_ORCHESTRATION.md`](../AGENT_ORCHESTRATION.md).
-    **It asks first**, once per agent: the first `claude`/`codex`/`agy` launch
-    pops a `[Y/n]` ("show this agent's live status and give it spyc's tools?"),
-    and the answer covers every project — it never asks again for that agent.
-    `y` adds the hooks and the agent's `spyc` MCP entry to its own configuration;
-    nothing is written into your projects, and nothing is removed at exit. The
-    write keeps your own settings and key order. Only `y` or `n` answers it;
-    **any other key defers** — the popup closes, nothing is saved, and the next
-    launch asks again. It has to work that way because the popup appears once
-    the pane already has focus, so the first words of a message to the agent
-    would otherwise be swallowed until one of them contained a `y`, which would
-    then answer it. **`:hooks`** lists each agent's answer, and
-    **`:hooks on|off|ask <agent>`** changes it later (the active tab's agent when
-    none is named): `on` installs, `off` takes spyc's part back out, `ask` forgets
-    the answer. If a claude live reload doesn't take, **`:hooks on!`** also
-    restarts the active claude pane and resumes the conversation so the hooks
-    load from launch. spyc writes nothing into a project; copies a version
-    before 2.2 wrote there can be deleted by hand (`INSTALL.md`).
-  - **Scrape fallback** (for a state an agent's hooks can't report) — spyc
-    reads the **visible screen** for verified approval prompts. Agy exposes no
-    approval event. Codex's permission event precedes both automatic and human
-    review, so only a complete default command, file-edit, MCP-tool or network
-    form establishes its user wait. That dialogue temporarily overrides a non-blocked report;
-    semantic question/agent blocks retain precedence. Codex scans within 250 ms
-    of the first pending repaint, so continuous redraws cannot hide a wait;
-    other agents wait for quiet output. Codex requires several prompt phrases
-    and the exact modal footer at the viewport bottom, accepting native word
-    wrapping and excluding old dialogues above the normal composer.
-    Prompt-settling input clears the detected wait.
+- **Agent-activity dots** — each **agent** tab shows a live dot in the
+  divider:
+  - a pulsing **`●`** (an orange-to-spark breath) while it's working;
+  - a steady hot-red **`■`** when it's **blocked** on you, and a calm teal
+    **`■`** when it's **done**: a square is a settled state, and your turn;
+  - a blue hollow **`○`** when it's **waiting** on background work it started
+    (a CI run, a build) that will wake it. `:why-status` shows what it said it
+    waits on, and entering `waiting` pings nothing;
+  - a quiet **`·`** when it's idle. A plain shell tab gets no dot.
 
-  **`:why-status`** opens the active tab's diagnosis in the pager, like
-  `:why-git`: its state and source (self-reported / scrape-fallback /
-  output-timing) and seconds since last output first, then the tab's
-  `:activity dump` report, with each hook setup fact on its own line. A
-  tab that isn't an agent says it has no dot. **`:activity dump`** retains each pane's last received report even
-  after expiry, distinguishes hook-file presence from startup/restart facts,
-  and never treats a self-report or bound MCP connection as proof of hook
-  execution or trust.
-  Each pane also retains up to eight reported hook-event summaries (event,
-  tool and available turn/call ids), without arguments, prompts or responses.
-  These are claimed metadata, not verified execution; an older reporter may
-  omit them. `--status-trace` logs the same sanitized metadata rather than raw
-  hook input. Metadata does not infer that a permission/question was answered.
-  **`:why-git`** opens a saveable pager dumping each column's git-marker refresh
-  state — repo root / resolved gitdir, the cached poll key vs the live on-disk
-  one (`index`'s mtime plus the latest of `HEAD`, its branch ref, and the shared
-  `config`, so you can see whether the next 1 Hz poll SHORT-CIRCUITS or
-  re-walks), that config's own mtime, and the displayed marker count. The tool
-  for "why is this column showing stale git markers" — capture it the moment
-  markers look wrong.
+  The pulse animates only while something is working, so an idle spyc draws
+  nothing. **`blocked` stays red** until you answer the pane by pressing
+  **Enter** in it, or the agent reports again; a Codex question stays red until
+  that question is answered.
+
+  Where the state comes from, best first: the agent's own reports, through
+  spyc's `report_status` tool and the status hooks spyc installs (claude and
+  codex fully; agy partly, and its `done` needs agy ≥ 1.1.10); for a wait an
+  agent can't report, such as agy's tool-permission prompt or a Codex approval
+  dialogue, a verified prompt read off the screen; and failing both, output
+  timing. The mechanics, per agent:
+  [`docs/AGENT_ORCHESTRATION.md`](../AGENT_ORCHESTRATION.md).
+
+  **It asks first**, once per agent: the first `claude`/`codex`/`agy` launch
+  pops a `[Y/n]` ("show this agent's live status and give it spyc's tools?"),
+  and the answer covers every project. `y` adds the hooks and the agent's
+  `spyc` MCP entry to its own configuration, keeping your settings and key
+  order; nothing is written into your projects, and nothing is removed at
+  exit. Only `y` or `n` answers it; **any other key defers** and the next
+  launch asks again, because the popup appears with the pane already focused
+  and would otherwise swallow the start of what you typed to the agent. Codex
+  reads its hooks at startup, so a codex already running picks them up on its
+  next launch, and its own project trust and `/hooks` review still apply:
+  spyc never approves hooks for you. **`:hooks`** lists each agent's answer,
+  and **`:hooks on|off|ask <agent>`** changes it (the active tab's agent when
+  none is named): `on` installs, `off` takes spyc's part back out, `ask`
+  forgets the answer. If a claude live reload doesn't take, **`:hooks on!`**
+  also restarts the active claude pane and resumes the conversation. Copies a
+  version before 2.2 wrote into a project can be deleted by hand
+  (`INSTALL.md`).
+
+  **`:why-status`** opens the active tab's diagnosis in the pager: its state,
+  where that came from (self-reported, scrape-fallback or output-timing), the
+  seconds since its last output, and its hook setup. **`:activity dump`** has
+  the same for every pane, with the last report each one received and its
+  recent hook events. It keeps an event's name, tool and ids, never its
+  arguments, prompts or responses, and treats them as what the agent claimed,
+  not proof that a hook ran; `--status-trace` logs the same. **`:why-git`**
+  dumps each column's git-marker refresh state: capture it the moment markers
+  look stale.
 - **Agent notifications** (`[notify]` config) — the "which agent needs me" ping,
   fired the instant a pane transitions (0 delay, not a timer):
   - **Desktop notification** naming the tab (e.g. *"codex needs you — tab 2 is
     blocked"*) on `Blocked` and `Done`. **On by default.** `desktop_via` picks
     how it's delivered — default **`"auto"`**: an **OSC-9 terminal escape over
     SSH** (so it pops on your *client* terminal, where your eyes are) and the OS
-    notifier (`notify-rust`) locally. Force it with `"system"` (OS notifier — the
+    notifier locally. Force it with `"system"` (OS notifier — the
     machine spyc runs on), `"osc9"` (terminal escape — needs iTerm2/kitty/WezTerm/
     …), or `"both"`. Set `desktop = false` to silence, or `desktop_done = false`
     to be pinged only when an agent is *blocked* (not on every finished turn).
@@ -202,15 +138,14 @@ protocol, no image protocols, no OSC 52 clipboard.
   (splits just the list; the pane stays full-width below both columns). Width and
   focused column carry across. The shape a split *opens* in is
   **`[layout] vsplit_mode`** — `"full_height"` by default, `"top_only"` for the
-  old half-height open. The `^a |` / `^a f` aliases exist because the **pane**
-  intercepts only `^a`-family keys, so `^s` alone would leave the split
-  unreachable while you're typing to an agent. `^a a` / `^a h` focus the left pane
+  old half-height open. The `^a |` / `^a f` aliases reach the split from the
+  **pane**, which passes every key but the `^a` family to its program. `^a a` / `^a h` focus the left pane
   (a), `^a b` / `^a l` the right (b); `^a + / ^a -` resize the split width when
   a column is focused. Opinionated: exactly two file panes, labelled a/b
   (numbers stay for PTY tabs). The preview **live-reloads**: edit the file
   (in spyc's editor, an agent pane, or any external editor) and the rendered
-  markdown updates on save — the re-render runs off-thread, preserving your
-  scroll position, and re-wraps when you resize the column.
+  markdown updates on save without losing your scroll position, and re-wraps
+  when you resize the column.
 - **^s n** open a **second full file-commander** in the right column
   (`b`) — a complete browser, not just a preview: its own cwd, listing,
   picks, filter, sort, git markers, and harpoon. It opens *top-only*
@@ -227,11 +162,8 @@ protocol, no image protocols, no OSC 52 clipboard.
   own pinned harpoon list). **g w** jumps the focused column to its
   worktree / repo root; `PROJECT_HOME` (jumped by `Space p`) stays the
   overall anchor. Git markers in each column refresh on filesystem
-  events independently. (The second-commander chord is `^s`, not `^z`:
-  `^z` to a shell in the bottom pane is SIGTSTP — it'd background a
-  running job. `^s` is at worst terminal flow-control XOFF, which spyc's
-  raw mode clears; over a flow-control-sensitive SSH/serial link it may
-  still be intercepted.)
+  events independently. Over a flow-control-sensitive SSH or serial link,
+  `^s` (XOFF) may be caught before spyc sees it.
 - **W l** opens a **worktree picker** — `j`/`k` (or arrows) move the
   highlighted row, `Enter` switches the *focused* column to it, `/`
   searches (the cursor lands on the match), and `1`-`9` quick-switch by
@@ -246,7 +178,7 @@ protocol, no image protocols, no OSC 52 clipboard.
   open it in `b`, work, and tear it down — while `a` stays on the main
   branch.
 - **^a v** enter scrollback view — browse up to 10K lines of pane
-  history in the **in-app pager** (v1.5). Line numbers are on by
+  history in the **in-app pager**. Line numbers are on by
   default here (a gutter the live pane never shows, so it reads at a
   glance as scrolled-back rather than live; `l` toggles). All pager
   keys work: `/` search with `n` / `N`, `:N` jump, `V` visual line,
@@ -258,12 +190,10 @@ protocol, no image protocols, no OSC 52 clipboard.
   snaps back to live — and so does scrolling *down past the end*, so a
   flick out the bottom returns you to the agent rather than parking you
   at `[EOF]`.
-  - The fundamental limit is that full-screen TUIs do *virtual
-    scrolling* inside a fixed grid — old content lives in app
-    memory, not the terminal — so even a parallel terminal parser
-    can't recover it. `^a v` on a *non-agent* alt-screen app
-    (vim, htop, lazygit) is therefore a dead end: it flashes a
-    hint pointing at the app's own history viewer.
+  - A full-screen program that isn't an agent (vim, htop, lazygit)
+    keeps its history in its own memory, not the terminal's, so
+    `^a v` can't show it: it flashes a hint pointing at the
+    program's own history view.
   - **Agent transcripts.** Agents that keep an on-disk JSONL
     transcript — Claude Code, codex
     (`~/.codex/sessions/.../rollout-*.jsonl`), and Antigravity
@@ -272,18 +202,15 @@ protocol, no image protocols, no OSC 52 clipboard.
     replies, and tool calls rendered in the pager, titled
     `(transcript)` rather than `(history)`.
 
-    Codex reads current structured message/command/MCP records and legacy
-    events, including custom-tool calls. Repeated records with matching
-    identities are shown once per session; instruction injections and reasoning
-    records are excluded.
+    A codex transcript shows its messages, commands and tool calls, each
+    once; its injected instructions and reasoning are left out.
 
     Tool calls are
     labelled with their salient argument — `⚙ Bash(Find foo call
     sites)`, `⚙ Edit(src/lib.rs)` — and each result shows a dim
     one-line output preview with a `(+N lines)` count. The
-    transcript is
-    resolved and read **off-thread** (no UI stall on a big
-    session), and **`r`** reloads it — the agent keeps appending
+    transcript loads in the background, so a big session doesn't
+    stall spyc, and **`r`** reloads it — the agent keeps appending
     while you read. If no transcript exists yet (brand-new
     session), spyc flashes a hint.
   - **The transcript wins whenever the terminal has nothing.** An
@@ -324,21 +251,18 @@ protocol, no image protocols, no OSC 52 clipboard.
   output (including scrollback) so paths in large diffs are still found.
   A path wrapped onto the next row — by the terminal, or by the agent's
   own line wrapping — is put back together. In a claude pane the scan
-  stops at its input box, so the status line under it (which names
-  `CLAUDE.md`) can't outrank what claude printed. A relative path resolves
+  stops at its input box, so the status line under it can't outrank what
+  claude printed. A relative path resolves
   against the pane's cwd, then its worktree root (a `cargo` run from `src/`
   prints paths relative to the root), then the focused column's directory
   and its worktree root, then PROJECT_HOME; the newest line that resolves
   under any of them wins. `J`'s default and `^a u`'s uppercase open use the
   same order.
 
-Codex tabs capture their launch `CODEX_HOME` (default: `$HOME/.codex`) after
-shell rc loading, including runtime `:setenv` overrides. Explicit per-pane
-homes are reapplied after rc loading. That home stays attached to the pane
-through restart, session save/restore and fork. Transcript lookup uses its exact
-session id in that home; missing data keeps the pane live with a diagnostic.
-Discovery scopes claims by home and waits for an explicit id when simultaneous
-launches or unnamed resumes have ambiguous ownership.
+A codex tab keeps the `CODEX_HOME` it launched with (default `$HOME/.codex`,
+after your shell rc and any `:setenv`) through restart, save and restore, and
+fork, and finds its transcript there; how spyc tells two codex launches apart is
+in [`docs/HARNESS.md`](../HARNESS.md).
 
 ### Multi-tab
 
@@ -351,9 +275,9 @@ Multiple tabs, each running an independent pty:
 - **^a 1..9** switch to tab N
 - **^a P** pipe selected file contents to the pane. Content over 8 MiB asks
   for confirmation of its size (`y`/`Y` sends, other keys cancel). A confirmed
-  large pipe needs an empty input queue and stays together as one bracketed
-  paste; later input is refused until that batch finishes writing. Ordinary pastes
-  over 8 MiB are refused with a size-limit error.
+  one is refused while other input is still queued for the pane; otherwise it
+  goes as one paste, and the pane takes no other input until it's written. An
+  ordinary paste over 8 MiB is refused.
 - **^a p / ^a [** prev tab
 - **^a n / ^a ]** next tab
 - **^a ^a** jump to the last-active tab (screen/tmux "last window")
@@ -362,8 +286,8 @@ Multiple tabs, each running an independent pty:
   working directory, **in place**, so the tab keeps its number (and its `^a r`
   rename). Confirms first (`y`/`N`) when the child is still running, for the
   same reason `^a x` does; an already-exited tab restarts silently. The new
-  child is a new process, so its `SPYC_PANE_ID`, agent conversation, and
-  scrollback all start fresh
+  child is a new process, so its agent conversation and scrollback start
+  fresh
 - **^a F** fork the active tab — its conversation carries on in a new tab as a
   branch, and the original stays where it was. claude branches with
   `--resume <id> --fork-session` and codex with `codex fork <id>`: a new
@@ -371,9 +295,8 @@ Multiple tabs, each running an independent pty:
   screen and `^a v` reads back. Each needs a conversation on disk first, so a
   tab that hasn't had a prompt has nothing to fork yet. agy and zot can resume
   a conversation but not branch it, so `^a F` says so rather than opening one
-  conversation in two tabs. Codex preserves launch options and quoting even
-  after an old `resume`/`fork` selector; ambiguous commands are refused rather
-  than launching with different settings. A tab running anything else forks
+  conversation in two tabs. A codex command spyc can't rewrite exactly is
+  refused rather than forked with different settings. A tab running anything else forks
   into a copy of its command, opened at the tab's current directory. `docs/HARNESS.md` §4
   has the per-agent detail
 - Activity indicator (**+**) on background tabs that have new output
@@ -387,7 +310,7 @@ Multiple tabs, each running an independent pty:
   pop-up (`y` run, `n` never, `Esc` not now). The approval binds to the
   exact commands and cwds, so an edited list asks again. `:startup-tabs`
   shows the answer, and `:startup-tabs forget` clears it. Reference:
-  `CONFIGURATION.md` → "Startup tabs"
+  [Startup tabs](../../CONFIGURATION.md#startup-tabs--pane-tabs)
 - When the tabs overflow the divider, labels crop so every tab stays visible
   and clickable
 - **Default command** for `^a c` resolves in this order:
@@ -417,8 +340,8 @@ match is overlaid with a 1- or 2-letter label.
   - **URL** → hand to the system handler (`open` on macOS,
     `xdg-open` on Linux)
   - **Path** → cursor-jump in spyc (chdir to parent + place cursor)
-  - **Git SHA** → open the commit in the in-house gix-backed
-    `show` view (same pager as `gd`; `|` toggles layout)
+  - **Git SHA** → open the commit in the `show` view (the same
+    pager as `gd`; `|` toggles the layout)
   - **Custom pattern** with a `url = "..."` template → fill `{}`
     with the match, then `open`/`xdg-open`
   - Other kinds (IPv4, custom without template) → fall back to
