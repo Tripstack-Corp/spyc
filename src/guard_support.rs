@@ -84,6 +84,38 @@ pub fn production_half(src: &str) -> String {
     out.join("\n")
 }
 
+/// Every markdown file under `root`, as sorted repo-relative paths with `/`
+/// separators. Build output and VCS metadata are skipped; each guard drops
+/// whatever its own policy exempts.
+pub fn markdown_files(root: &std::path::Path) -> Vec<String> {
+    const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache"];
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if p.is_dir() {
+                if !SKIP_DIRS.contains(&name) {
+                    walk(&p, out);
+                }
+            } else if p.extension().is_some_and(|x| x == "md") {
+                out.push(p);
+            }
+        }
+    }
+    let mut found = Vec::new();
+    walk(root, &mut found);
+    let mut out: Vec<String> = found
+        .iter()
+        .filter_map(|p| p.strip_prefix(root).ok())
+        .map(|p| p.display().to_string().replace('\\', "/"))
+        .collect();
+    out.sort();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::production_half;

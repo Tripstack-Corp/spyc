@@ -184,6 +184,12 @@ project status, update **all** of:
 
 This is a hard requirement, not a nice-to-have. Stale docs are bugs.
 
+Moving or splitting a doc? `every_relative_markdown_link_resolves`
+(`src/link_guard.rs`) fails on any relative link or `#anchor` left
+pointing at nothing. A prose reference such as
+`ARCHITECTURE.md → "MCP server"` isn't a link, so search for those by
+hand.
+
 ## Versioning
 
 We use [SemVer](https://semver.org/). The version lives in

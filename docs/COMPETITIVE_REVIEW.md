@@ -375,7 +375,7 @@ Roadmap pointers cite `ROADMAP.md` by file only (line numbers go stale fast).
 
 | Capability                             | Yazi    | spyc                                   |
 |----------------------------------------|---------|----------------------------------------|
-| Lua scripting / plugins                | Yes — plugins + package manager (BETA) | **Lua scripting shipped** (`map KEY lua`, `init.lua` platform, `spyc.on` events, full-`Action` `spyc.action`; off-thread worker, `src/lua/`, v1.84–1.89). No plugin *package manager* (deliberate). |
+| Lua scripting / plugins                | Yes — plugins + package manager (BETA) | **Lua scripting shipped** (`map KEY lua <name>`, `init.lua` platform, `spyc.on` events, full-`Action` `spyc.action`; off-thread worker, `src/lua/`, v1.84–1.89). No plugin *package manager* (deliberate). |
 | Theme system / "Flavors"               | Yes (BETA) | Themes in `.spycrc.toml` + nerd-font/mono toggle; no installable-theme package system |
 | Custom previewers / fetchers           | Yes (Lua) | Not exposed (spyc's Lua drives nav/actions/reads, not previewers) |
 | Keymap customization                   | Yes (`keymap.toml`) | Yes (`.spycrc.toml`)         |
