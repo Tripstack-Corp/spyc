@@ -95,9 +95,7 @@ image protocols or OSC 52 clipboard writes. How it answers:
   the same for every pane, with the last report each one received and its
   recent hook events. It keeps an event's name, tool and ids, never its
   arguments, prompts or responses, and treats them as what the agent claimed,
-  not proof that a hook ran; `--status-trace` logs the same. **`:why-git`**
-  dumps each column's git-marker refresh state: capture it the moment markers
-  look stale.
+  not proof that a hook ran; `--status-trace` logs the same.
 - **Agent notifications** (`[notify]` config) — the "which agent needs me" ping,
   fired the instant a pane transitions (0 delay, not a timer):
   - **Desktop notification** naming the tab (e.g. *"codex needs you — tab 2 is
@@ -128,55 +126,6 @@ image protocols or OSC 52 clipboard writes. How it answers:
   - **`:notify test`** fires every channel on demand (bell + visual + both desktop
     mechanisms), bypassing the config gating — to verify your setup without waiting
     for a real agent transition.
-- **^s |** (alias **^a |**) vertical (left/right) split of the file area. Opens
-  (50/50) with a **preview of the file under the cursor** (markdown rendered) in
-  the right column. Press it again **on a different file** to swap the preview to
-  that file, keeping the layout; **on the same file** it closes. A directory
-  isn't previewable (it warns).
-- **^s f** (alias **^a f**) flips the open split's **height**: *full-height* (divider runs the
-  whole frame height; the pane is confined under the left column) ⇄ *top-only*
-  (splits just the list; the pane stays full-width below both columns). Width and
-  focused column carry across. The shape a split *opens* in is
-  **`[layout] vsplit_mode`** — `"full_height"` by default, `"top_only"` for the
-  old half-height open. The `^a |` / `^a f` aliases reach the split from the
-  **pane**, which passes every key but the `^a` family to its program. `^a a` / `^a h` focus the left pane
-  (a), `^a b` / `^a l` the right (b); `^a + / ^a -` resize the split width when
-  a column is focused. Opinionated: exactly two file panes, labelled a/b
-  (numbers stay for PTY tabs). The preview **live-reloads**: edit the file
-  (in spyc's editor, an agent pane, or any external editor) and the rendered
-  markdown updates on save without losing your scroll position, and re-wraps
-  when you resize the column.
-- **^s n** open a **second full file-commander** in the right column
-  (`b`) — a complete browser, not just a preview: its own cwd, listing,
-  picks, filter, sort, git markers, and harpoon. It opens *top-only*
-  whatever `vsplit_mode` says (the pane stays full-width below two peer
-  browsers); `^s f` makes it full-height. **^s x** closes it.
-  (`^d` does *not* close it — it quits, so `^d^d` with `b` open lets the
-  session save + `-r` restore the split.)
-  `^a a`/`^a h` focus the left commander (a), `^a b`/`^a l` the right
-  (b). Everything follows the focused column: navigation, `V`/`D`
-  overlays, file ops (`O`/`+`/`W`), `!`/`;`/`$` shell cwd, the MCP
-  context, and the per-column tools — **grep `F`**, **find**, **MCP
-  search**, and **harpoon** all scope to the focused column's *worktree
-  root* (so `b` in a separate worktree searches its own tree, with its
-  own pinned harpoon list). **g w** jumps the focused column to its
-  worktree / repo root; `PROJECT_HOME` (jumped by `Space p`) stays the
-  overall anchor. Git markers in each column refresh on filesystem
-  events independently. Over a flow-control-sensitive SSH or serial link,
-  `^s` (XOFF) may be caught before spyc sees it.
-- **W l** opens a **worktree picker** — `j`/`k` (or arrows) move the
-  highlighted row, `Enter` switches the *focused* column to it, `/`
-  searches (the cursor lands on the match), and `1`-`9` quick-switch by
-  number (focus `b` first to put a worktree there). Rows list the main
-  worktree first (git's ordering), each showing the branch checked out
-  in it; the main one is marked **`(main worktree)`** and the one the
-  focused column is in `← current`. The marker is what tells you which
-  row is your git home when a feature branch is checked out there
-  directly — the branch column can't. With the MCP tools
-  (`create_worktree` / `open_worktree` /
-  `remove_worktree` / `clean_worktree`) an agent can spin up a worktree,
-  open it in `b`, work, and tear it down — while `a` stays on the main
-  branch.
 - **^a v** enter scrollback view — browse up to 10K lines of pane
   history in the **in-app pager**. Line numbers are on by
   default here (a gutter the live pane never shows, so it reads at a
@@ -358,7 +307,7 @@ Custom patterns in `.spycrc.toml`:
 [[scan.patterns]]
 name = "jira"
 regex = '[A-Z]+-\\d+'
-url = "https://tripstack.atlassian.net/browse/{}"   # optional
+url = "https://example.atlassian.net/browse/{}"   # optional
 ```
 
 Without `url`, uppercase falls back to yank+hint. Bad regexes are
