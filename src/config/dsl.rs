@@ -396,8 +396,26 @@ mod tests {
         assert!(parse("map z lua").is_err());
     }
 
-    /// Where spyc ships DSL lines a user may copy.
-    const EXAMPLE_SOURCES: &[&str] = &[
+    /// Markdown nobody copies a config line from: history, which may show
+    /// syntax spyc has since dropped, and test data.
+    const NOT_COPIED_FROM: &[&str] = &["CHANGELOG.md", "docs/archive/", "tests/fixtures/", "fuzz/"];
+
+    /// Where spyc ships DSL lines a user may copy: the `--print-config`
+    /// template and every other markdown doc. Walked, not listed, so a doc
+    /// split into new files stays covered.
+    fn example_sources() -> Vec<String> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        std::iter::once("src/config/default.spycrc.toml".to_string())
+            .chain(
+                crate::guard_support::markdown_files(root)
+                    .into_iter()
+                    .filter(|f| !NOT_COPIED_FROM.iter().any(|skip| f.starts_with(skip))),
+            )
+            .collect()
+    }
+
+    /// Sources that must each still turn up an example.
+    const EXAMPLE_FLOOR: &[&str] = &[
         "src/config/default.spycrc.toml",
         "CONFIGURATION.md",
         "FEATURES.md",
@@ -439,8 +457,8 @@ mod tests {
             ),
         ];
         let mut out = Vec::new();
-        for &file in EXAMPLE_SOURCES {
-            let text = std::fs::read_to_string(root.join(file)).expect(file);
+        for file in example_sources() {
+            let text = std::fs::read_to_string(root.join(&file)).expect("readable source");
             for (n, line) in text.lines().enumerate() {
                 for (shape, re) in &shapes {
                     for cap in re.captures_iter(line) {
@@ -477,9 +495,16 @@ mod tests {
     #[test]
     fn every_shipped_keymap_example_parses() {
         let examples = shipped_examples();
+        let sources = example_sources();
+        assert!(
+            sources.len() > 20,
+            "found only {} sources — the walk is broken",
+            sources.len()
+        );
         // A reader that stops matching checks nothing and passes, so each
-        // source and each shape must still turn something up.
-        for file in EXAMPLE_SOURCES {
+        // floor source and each shape must still turn something up.
+        for file in EXAMPLE_FLOOR {
+            assert!(sources.iter().any(|s| s == file), "{file} is not walked");
             assert!(
                 examples
                     .iter()
