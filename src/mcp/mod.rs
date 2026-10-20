@@ -122,6 +122,7 @@ pub fn socket_path() -> Option<PathBuf> {
 }
 
 mod config;
+mod framing;
 mod hooks;
 mod protocol;
 /// Root-based readers (git/fs/file) shared with the Lua engine's live-read API
@@ -426,7 +427,7 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     // silently dropped — which is why hook-driven reports never moved the dot,
     // while MCP-tool calls (routed through the framing proxy) did. Frame it the
     // same way via `send_message` (which also flushes).
-    if protocol::send_message(&mut stream, &req).is_err() {
+    if framing::send_message(&mut stream, &req).is_err() {
         trace_log("report-status: write FAILED");
         return;
     }

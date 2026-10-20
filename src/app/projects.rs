@@ -1,6 +1,7 @@
 //! Opening a project, closing one, and moving between the open ones (#99):
 //! what the leader's project keys do — `Space n`, `Space x`, `Space j`,
-//! `Space Space`, `Space 1-9`, and `Space ]` / `Space [`.
+//! `Space Space`, `Space 1-9`, and `Space ]` / `Space [` — and how the dumps
+//! that cover every project head and name them.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -52,6 +53,38 @@ impl App {
         };
         if let Some(id) = to {
             self.switch_project(id);
+        }
+    }
+
+    /// Each open project in switcher order, headed for a dump that covers them
+    /// all (`project web`, the one in view marked), with its tabs if it has
+    /// any. A dump draws the headings only while several are open.
+    pub(super) fn tabs_by_project(&self) -> Vec<(String, Option<&PaneTabs>)> {
+        let tabs: HashMap<ProjectId, &PaneTabs> = self.runtime.every_tab_set().collect();
+        self.state
+            .open_projects()
+            .map(|p| {
+                let mark = if p.id == self.state.active {
+                    " (in view)"
+                } else {
+                    ""
+                };
+                (
+                    format!("project {}{mark}", p.label()),
+                    tabs.get(&p.id).copied(),
+                )
+            })
+            .collect()
+    }
+
+    /// ` in web` for a dump line about something in project `id`, while
+    /// several projects are open, and ` in web (closed)` once it has closed;
+    /// nothing with one open.
+    pub(super) fn in_project_note(&self, id: ProjectId) -> String {
+        match self.state.label_of(id) {
+            Some(label) if !self.state.has_project(id) => format!(" in {label} (closed)"),
+            Some(label) if self.state.open_projects().nth(1).is_some() => format!(" in {label}"),
+            _ => String::new(),
         }
     }
 

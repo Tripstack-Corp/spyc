@@ -1,5 +1,7 @@
 //! Agent activity source and hook-readiness diagnostics: `:why-status` (the
-//! active tab) and `:activity dump` (every tab) print one shared per-tab report.
+//! active tab) and `:activity dump` (every tab, in every project, each under
+//! its project's heading while several are open) print one shared per-tab
+//! report.
 
 use std::time::Instant;
 
@@ -141,21 +143,39 @@ pub(super) fn activity_dump_lines(app: &App) -> Vec<String> {
             (Some(id), None) => format!("pane {id} (tab closed)"),
             (None, None) => "unattributed (an older proxy, or no live tab had its id)".into(),
         };
+        // A tab's project is its connection's; one without a tab has the
+        // project the server bound it to.
+        let project = c
+            .pane_id
+            .as_deref()
+            .and_then(|id| app.runtime.project_of_pane(id))
+            .or(c.project);
+        let named = project.map_or_else(String::new, |id| app.in_project_note(id));
         out.push(format!(
-            "  #{conn}  {who}  since {}  calls:{}",
+            "  #{conn}  {who}{named}  since {}  calls:{}",
             c.since, c.calls
         ));
     }
     out.push(String::new());
 
-    let Some(tabs) = app.runtime.project().pane_tabs.as_ref() else {
-        out.push("(no panes open)".to_string());
-        return out;
-    };
-    let active = tabs.active_index();
-    for (i, e) in tabs.tabs().iter().enumerate() {
-        out.extend(tab_report(i, e, i == active, now));
-        out.push(String::new());
+    let projects = app.tabs_by_project();
+    let several = projects.len() > 1;
+    for (heading, tabs) in projects {
+        if several {
+            out.push(heading);
+        }
+        let Some(tabs) = tabs else {
+            out.push("(no panes open)".to_string());
+            if several {
+                out.push(String::new());
+            }
+            continue;
+        };
+        let active = tabs.active_index();
+        for (i, e) in tabs.tabs().iter().enumerate() {
+            out.extend(tab_report(i, e, i == active, now));
+            out.push(String::new());
+        }
     }
     out
 }

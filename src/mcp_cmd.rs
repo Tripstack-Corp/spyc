@@ -198,6 +198,13 @@ pub enum McpCommand {
     /// status hook's one-shot `report_status` calls never initialize, so they
     /// never appear here. The reply is ignored.
     ConnectionInitialized { conn: u64, pane_id: Option<String> },
+    /// An initialized connection is bound to `project` (#99): after its
+    /// `ConnectionInitialized`, and again whenever it binds later, as when its
+    /// project closes. The reply is ignored.
+    ConnectionBound {
+        conn: u64,
+        project: crate::project_id::ProjectId,
+    },
     /// An initialized connection closed. The reply is ignored.
     ConnectionClosed { conn: u64 },
     /// The socket server received a message it couldn't frame/parse and dropped
@@ -217,6 +224,7 @@ impl McpCommand {
             Self::Statusline { .. }
                 | Self::Disconnected { .. }
                 | Self::ConnectionInitialized { .. }
+                | Self::ConnectionBound { .. }
                 | Self::ConnectionClosed { .. }
                 | Self::ToolCalled { .. }
         )

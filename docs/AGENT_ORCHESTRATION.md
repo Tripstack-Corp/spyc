@@ -138,7 +138,10 @@ next launch) and goes to the agent, rather than being eaten by a dialogue the
 user was not typing at.
 
 **Debug:** **`:why-status`** opens a pager with the active tab's state + source,
-then its full derivation; **`:activity dump`** opens one with every pane's. A
+then its full derivation; **`:activity dump`** opens one with every pane's, in
+every open project. While several are open, each project's tabs are under its
+heading (`project web`, the one in view marked `(in view)`), and each MCP
+connection names the project it acts on, `(closed)` once that has closed. A
 live report's note shows in both, so a `waiting` tab says what it waits on.
 
 The dump retains the last received semantic report after expiry or dismissal;
@@ -400,8 +403,11 @@ rebasing. Non-overlapping merges proceed in parallel untouched.
 ### Inspecting it
 
 - **`:agent registry`** — pager dump of every claim + how many agents are parked
-  in a wait.
-- **`:agent list`** — each agent tab with its activity dot + the scope it owns.
+  in a wait. While several projects are open, each claim names the project of
+  the tab that owns it.
+- **`:agent list`** — each agent tab with its activity dot + the scope it owns,
+  in every open project, under each project's heading while several are open
+  (`(no agents)` under one running only shells).
 
 ---
 

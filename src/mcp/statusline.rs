@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::protocol::{send_message, send_result};
+use super::framing::{send_message, send_result};
 use crate::agent::claude_statusline::{self, Statusline};
 use crate::mcp_cmd::{McpCommand, McpRequest};
 
@@ -137,7 +137,7 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
-            let body = super::super::protocol::read_lsp_message(&mut reader).unwrap();
+            let body = super::super::framing::read_lsp_message(&mut reader).unwrap();
             let mut writer = stream;
             // The forwarder stops waiting at its timeout, and a loaded runner
             // can get here later than that: the reply is not what's under test.

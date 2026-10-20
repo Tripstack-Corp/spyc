@@ -519,8 +519,9 @@ pub(super) fn cmd_agent(app: &mut App, args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
-/// Build the `:agent registry` dump — every P2 scope claim + the parked-waiter
-/// count. Pure read of the Model registry + Runtime waiters.
+/// Build the `:agent registry` dump — every P2 scope claim, with its owner
+/// tab's project while several are open, + the parked-waiter count. Pure read
+/// of the Model registry + Runtime waiters.
 fn agent_registry_lines(app: &App) -> Vec<String> {
     let now = crate::sysinfo::epoch_secs();
     let mut out = vec![format!(
@@ -534,9 +535,17 @@ fn agent_registry_lines(app: &App) -> Vec<String> {
     }
     for c in &app.state.scope_registry {
         let age = now.saturating_sub(c.claimed_at_secs);
+        let named = app
+            .runtime
+            .every_tab_set()
+            .find_map(|(id, tabs)| {
+                let owns = tabs.tabs().iter().any(|t| t.info.claim_owner == c.owner);
+                owns.then_some(id)
+            })
+            .map_or_else(String::new, |id| app.in_project_note(id));
         out.push(String::new());
         out.push(format!(
-            "[{}] {} — {}  (claimed {age}s ago)",
+            "[{}] {}{named} — {}  (claimed {age}s ago)",
             c.id,
             c.owner_label,
             c.intent.as_str(),
@@ -557,19 +566,41 @@ fn agent_registry_lines(app: &App) -> Vec<String> {
     out
 }
 
-/// Build the `:agent list` dump — each agent tab with its activity dot + the
+/// Build the `:agent list` dump — each agent tab, in every project (under each
+/// project's heading while several are open), with its activity dot + the
 /// scope claims it owns. Pure read of the pane tabs + registry.
 fn agent_list_lines(app: &App) -> Vec<String> {
-    use crate::state::sessions::AgentKind;
     let mut out = vec![format!(
         "spyc {} — agents @ {}",
         crate::VERSION,
         crate::sysinfo::format_now(),
     )];
-    let Some(tabs) = app.runtime.project().pane_tabs.as_ref() else {
-        out.push("(no panes open)".to_string());
-        return out;
-    };
+    let projects = app.tabs_by_project();
+    let several = projects.len() > 1;
+    for (heading, tabs) in projects {
+        if several {
+            out.push(String::new());
+            out.push(heading);
+        }
+        match tabs {
+            Some(tabs) => {
+                let agents = agent_lines(app, tabs);
+                if several && agents.is_empty() {
+                    out.push("(no agents)".to_string());
+                }
+                out.extend(agents);
+            }
+            None => out.push("(no panes open)".to_string()),
+        }
+    }
+    out
+}
+
+/// `:agent list`'s lines for one project's tabs: each agent, its dot and the
+/// scope it claims.
+fn agent_lines(app: &App, tabs: &crate::pane::PaneTabs) -> Vec<String> {
+    use crate::state::sessions::AgentKind;
+    let mut out = Vec::new();
     let active = tabs.active_index();
     for (i, e) in tabs.tabs().iter().enumerate() {
         let info = &e.info;

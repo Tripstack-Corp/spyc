@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 
 use crate::mcp_cmd::McpCommand;
 
-use super::protocol::{dispatch, read_lsp_message, send_message};
+use super::framing::{read_lsp_message, send_message};
+use super::protocol::dispatch;
 use super::server::{collect_project_pids_in, discover_live_socket, handle_socket_connection};
 use super::*;
 

@@ -445,6 +445,7 @@ impl App {
             McpCommand::Statusline { .. }
             | McpCommand::Disconnected { .. }
             | McpCommand::ConnectionInitialized { .. }
+            | McpCommand::ConnectionBound { .. }
             | McpCommand::ConnectionClosed { .. }
             | McpCommand::ToolCalled { .. } => McpResponse::Ok {
                 message: "ok".into(),
@@ -501,10 +502,19 @@ impl App {
                     conn,
                     super::activity::McpConnection {
                         pane_id,
+                        project: None,
                         since: crate::sysinfo::format_now(),
                         calls: 0,
                     },
                 );
+                McpResponse::Ok {
+                    message: "ok".into(),
+                }
+            }
+            McpCommand::ConnectionBound { conn, project } => {
+                if let Some(c) = self.view.activity.mcp_connections.get_mut(&conn) {
+                    c.project = Some(project);
+                }
                 McpResponse::Ok {
                     message: "ok".into(),
                 }
