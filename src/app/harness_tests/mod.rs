@@ -507,6 +507,7 @@ mod per_column;
 mod project_landings;
 mod project_switch;
 mod project_tabs;
+mod projects_attention;
 mod projects_close;
 mod projects_mcp;
 mod projects_open;

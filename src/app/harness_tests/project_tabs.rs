@@ -313,7 +313,7 @@ use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
 
 /// Give project `id` a tab that reads as `command`, in `dir`. Returns its pane
 /// id.
-fn agent_tab_in(
+pub(super) fn agent_tab_in(
     app: &mut App,
     id: state::ProjectId,
     dir: &std::path::Path,
@@ -915,7 +915,7 @@ fn space_bang(app: &mut App) {
 }
 
 /// Project `id`'s tab `index` reports `status` at `at`, and the walk sees it.
-fn report_at(
+pub(super) fn report_at(
     app: &mut App,
     id: state::ProjectId,
     index: usize,
