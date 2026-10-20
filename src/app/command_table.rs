@@ -174,6 +174,62 @@ pub fn completion_command_names() -> impl Iterator<Item = &'static str> {
 
 #[cfg(test)]
 mod tests {
+    /// Whether `text` names the `:` command `name` itself, not a longer one
+    /// that starts with it (`:task` is not `:task-to-pane`).
+    fn names_command(text: &str, name: &str) -> bool {
+        let needle = format!(":{name}");
+        text.match_indices(&needle).any(|(i, _)| {
+            !text[i + needle.len()..]
+                .starts_with(|c: char| c.is_alphanumeric() || c == '-' || c == '_')
+        })
+    }
+
+    /// A `:` command usually has no default key, so a user finds it in the docs
+    /// or not at all: each one is named, as `:name`, on a user-facing page.
+    #[test]
+    fn every_command_is_documented_for_users() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let pages: Vec<String> = crate::guard_support::markdown_files(root)
+            .into_iter()
+            .filter(|f| {
+                matches!(
+                    f.as_str(),
+                    "FEATURES.md" | "CONFIGURATION.md" | "docs/KEYBINDINGS.md"
+                ) || f.starts_with("docs/features/")
+                    || f.starts_with("docs/config/")
+            })
+            .collect();
+        assert!(
+            pages.len() >= 10,
+            "found only {pages:?}; the walk is broken"
+        );
+        let text: String = pages
+            .iter()
+            .map(|f| std::fs::read_to_string(root.join(f)).expect("readable page"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let missing: Vec<&str> = super::COMMAND_TABLE
+            .iter()
+            .map(|c| c.name)
+            .filter(|name| !names_command(&text, name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "`:` commands no user page names: {missing:?}. Say what each does on its \
+             docs/features/ or docs/config/ page (or FEATURES.md, CONFIGURATION.md, \
+             docs/KEYBINDINGS.md), written as `:name`."
+        );
+    }
+
+    #[test]
+    fn a_command_is_not_named_by_a_longer_one() {
+        assert!(names_command("run `:task 3`", "task"));
+        assert!(names_command("**:task**", "task"));
+        assert!(!names_command("run `:task-to-pane`", "task"));
+        assert!(!names_command("`:quit`", "q"));
+        assert!(names_command("`:q` / `:quit`", "q"));
+    }
+
     #[test]
     fn command_table_is_sorted_and_unique() {
         let names: Vec<&str> = super::COMMAND_TABLE.iter().map(|c| c.name).collect();

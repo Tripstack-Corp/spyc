@@ -204,6 +204,12 @@ project status, update **all** of:
 
 This is a hard requirement, not a nice-to-have. Stale docs are bugs.
 
+A user page (`docs/features/`, `docs/config/`) says what a user sees and
+does. How it works belongs in the module's `//!` doc or `ARCHITECTURE.md`,
+where the people changing it look. A new page gets a summary and a link in
+its hub (`FEATURES.md` or `CONFIGURATION.md`), every `:` command is named on
+a user page, and both hubs have a size cap; guards check all three.
+
 Moving or splitting a doc? `every_relative_markdown_link_resolves`
 (`src/link_guard.rs`) fails on any relative link or `#anchor` left
 pointing at nothing. A prose reference such as

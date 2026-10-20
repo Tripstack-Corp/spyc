@@ -223,6 +223,53 @@ fn check(docs: &BTreeMap<String, String>, exists: impl Fn(&str) -> bool) -> Repo
     r
 }
 
+/// Each directory of pages and the hub that must link every one of them: a page
+/// nobody links to is found only by someone already looking for it.
+const HUBS: &[(&str, &str)] = &[
+    ("docs/config/", "CONFIGURATION.md"),
+    ("docs/features/", "FEATURES.md"),
+];
+
+/// The repo-relative files `text`, the doc at `from`, links to.
+fn linked_files(from: &str, text: &str) -> HashSet<String> {
+    let scheme = Regex::new(r"^[A-Za-z][A-Za-z0-9+.-]*:").expect("regex");
+    link_targets(text)
+        .into_iter()
+        .filter(|(_, t)| !scheme.is_match(t))
+        .filter_map(|(_, t)| {
+            let path = t.split('#').next().unwrap_or_default();
+            (!path.is_empty()).then(|| resolve(from, &percent_decode(path)))?
+        })
+        .collect()
+}
+
+#[test]
+fn every_feature_and_config_page_is_linked_from_its_hub() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let docs = crate::guard_support::markdown_files(root);
+    let mut orphans = Vec::new();
+    for &(dir, hub) in HUBS {
+        let text = std::fs::read_to_string(root.join(hub)).expect("read the hub");
+        let linked = linked_files(hub, &text);
+        let pages: Vec<&String> = docs.iter().filter(|f| f.starts_with(dir)).collect();
+        assert!(
+            !pages.is_empty(),
+            "no pages under {dir}; the walk is broken"
+        );
+        orphans.extend(
+            pages
+                .into_iter()
+                .filter(|page| !linked.contains(*page))
+                .map(|page| format!("{page}: not linked from {hub}")),
+        );
+    }
+    assert!(
+        orphans.is_empty(),
+        "{}\nGive each page a summary and a link in its hub.",
+        orphans.join("\n")
+    );
+}
+
 #[test]
 fn every_relative_markdown_link_resolves() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -343,6 +390,17 @@ fn urls_are_not_checked_and_history_is_not_scanned() {
     assert_eq!(r.files, 1);
     assert_eq!(r.broken.len(), 1, "{:#?}", r.broken);
     assert!(r.broken[0].contains("`docs/archive/old.md#gone` names no heading"));
+}
+
+#[test]
+fn a_hub_links_a_page_however_the_link_is_written() {
+    let linked = linked_files(
+        "FEATURES.md",
+        "[a](docs/features/a.md) [b](./docs/features/b.md#top) <img src=\"docs/c.png\"> [w](https://x.dev/d.md)\n",
+    );
+    assert!(linked.contains("docs/features/a.md") && linked.contains("docs/features/b.md"));
+    assert!(linked.contains("docs/c.png"));
+    assert_eq!(linked.len(), 3, "{linked:?}");
 }
 
 #[test]
