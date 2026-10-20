@@ -4,8 +4,7 @@ Part of spyc's [feature reference](../../FEATURES.md). How a hosted agent works 
 
 ## MCP server (Claude + Codex integration)
 
-spyc runs a background MCP server on a PID-scoped Unix domain socket
-(`~/.local/state/spyc/mcp-<PID>.sock`). Saying yes to an agent's first-launch
+spyc runs a background MCP server for the agents it hosts. Saying yes to an agent's first-launch
 `[Y/n]` adds a `spyc` entry to that agent's own MCP configuration, once, so it
 discovers spyc in every project — no `--mcp-config` flag needed:
 
@@ -14,20 +13,13 @@ discovers spyc in every project — no `--mcp-config` flag needed:
 - **codex**: `[mcp_servers.spyc]` in `$CODEX_HOME/config.toml`.
 - **agy**: `~/.gemini/config/mcp_config.json`.
 
-Each registration re-execs `spyc --mcp` as a stdio proxy, which
-connects to the socket named by the agent pane's own env
-(`SPYC_MCP_SOCK`), so an agent always reaches the spyc that launched
-it. Shell tabs carry the same env, so an agent typed into a shell
-reaches spyc and names its tab too. The tab then
-follows the agent in its foreground: it gets that agent's activity dot
-while it runs, drops its status and session when it exits, reads as a
-shell while it is stopped with `^Z`, and is saved as the shell it was
-launched as. An agent that outlived its spyc (a Claude Code background session
-across `spyc -r`) reaches the restarted one instead: the restored tab
-keeps its pane id, and the proxy and the status hook find the live spyc
-rooted above the agent. The entry names no socket itself; codex's lists
-`env_vars = ["SPYC_MCP_SOCK", "SPYC_PANE_ID"]`, because codex hands
-an MCP server only the variables it is told to.
+An agent always reaches the spyc that launched it, and so does one you start
+by typing its name into a shell tab. That tab then follows the agent: it shows
+the agent's activity dot while it runs, drops its status and session when it
+exits, reads as a shell while it is stopped with `^Z`, and is saved as the shell
+it was launched as. An agent that outlived its spyc (a Claude Code background
+session across `spyc -r`) reaches the restarted one instead. How the entry finds
+the right spyc: [ARCHITECTURE.md → "MCP server"](../../ARCHITECTURE.md#mcp-server).
 
 **`spyc --install-agents`** does the same from the command line, without
 waiting for a launch: claude's `settings.json` (in `$CLAUDE_CONFIG_DIR`, else
@@ -41,23 +33,18 @@ tracks them. An organization's `managed-mcp.json` keeps control of claude's MCP
 servers, and spyc installs only the hooks there. Files are edited in place:
 a symlinked `settings.json` stays a link, a file that won't parse is left
 alone with the reason printed, and an MCP server named `spyc` that runs
-something else is never replaced. codex gets its hooks in `$CODEX_HOME/hooks.json`
-(else `~/.codex/hooks.json`) and its MCP entry spliced into `config.toml` beside
-it, comments and layout intact. codex asks you to approve new hooks once, in
-`/hooks`, and from then on they apply in every project, trusted or not.
+something else is never replaced. codex's `config.toml` keeps its comments and
+layout. codex asks you to approve new hooks once, in `/hooks`, and from then on
+they apply in every project, trusted or not.
 
 spyc starts codex panes with **`--no-daemon`**, so codex runs the session
-itself rather than on its shared background server. That server spawns every
-session's hooks and MCP servers with the environment of whichever codex
-started it, so they couldn't reach the spyc, or name the tab, that launched a
-pane. **`[pane] codex_daemon = true`** lets codex panes join it anyway, at the
-cost of their activity dots and MCP attribution. A codex typed into a shell
-tab joins it unless started with `codex --no-daemon`; its tab shows codex
-with an output-timing dot, and `:why-status` says how to get hook status.
-Hooks and MCP proxies the shared server runs notice it and ignore the pane id
-they inherited, so they never light, or answer for, another tab. A proxy there
-also ignores the inherited socket, which can belong to another spyc, and
-connects to the spyc rooted at its session's directory. See
+itself rather than on its shared background server, whose hooks and tools
+can't tell which spyc or tab a session belongs to.
+**`[pane] codex_daemon = true`** lets codex panes join it anyway, at the cost of
+their activity dots and MCP attribution. A codex typed into a shell tab joins
+it unless started with `codex --no-daemon`; its tab shows codex with an
+output-timing dot, and `:why-status` says how to get hook status. A session on
+the shared server never lights, or answers for, another tab. See
 [`docs/HARNESS.md`](../HARNESS.md) → "codex's shared daemon".
 
 **`[pane] codex_mcp = false`** (`.spycrc.toml`) stops spyc from registering
@@ -93,17 +80,14 @@ Claude can query and control the workspace through these tools:
 - **`report_status(status, [pane], [ttl_ms], [note])`** -- self-report activity
   for your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) /
   `done` / `waiting` (turn over, background work will wake you; `note` says on
-  what) / `idle`. Overrides spyc's output-timing guess; targets the caller's own
-  tab by default (the focused tab for a connection that named none). Non-blocked
-  reports default to five minutes (`waiting`: an hour) and larger `ttl_ms` values
-  are clamped to that maximum; blocked reports stay latched until settled or
-  replaced. A `waiting` report outlasts the hook `done` that ends its own turn,
-  and Enter in the pane retires it.
-  Accepted Escape/`Ctrl-C` retires a working report; Enter, arrows and pasted
-  control bytes preserve it. Closed panes cannot retain or receive activity reports.
+  what) / `idle`. Overrides spyc's output-timing guess and targets the caller's
+  own tab by default. A report lapses after a while unless renewed, except
+  `blocked`, which stays until the user answers or a newer report replaces it.
+  How reports, hooks and interrupts combine:
+  [`docs/AGENT_ORCHESTRATION.md`](../AGENT_ORCHESTRATION.md).
 - **`register_scope(paths, intent, [pr], [note])`** / **`list_scopes`** /
   **`release_scope(id)`** / **`wait_for_scope_clear(paths, [timeout_ms])`** --
-  merge-coordination registry (P2). Declare the files/globs you're touching and
+  merge-coordination registry. Declare the files/globs you're touching and
   whether you're `editing` or `merging`; other agents `list_scopes` to see
   overlaps, or **`wait_for_scope_clear`** to *block* until no other `merging`
   claim overlaps theirs (bounded by a timeout — default 5m, cap 10m), so
@@ -133,13 +117,11 @@ Claude can query and control the workspace through these tools:
   only if it's merged into the integration base. A worktree claimed with
   `claim_worktree` is refused; a column sitting inside is moved to
   PROJECT_HOME rather than refused.
-  - **The removal can't strand a half-worktree.** The tree is renamed aside
-    before it's deleted, so a process still writing into `target/` can only
-    leave orphaned bytes, which the reply names.
-  - **A worktree an earlier spyc left half-removed is finished, not
-    refused.** That's one with its `.git` gone but its admin dir and branch
-    still there, and calling `remove_worktree` on it again completes the
-    job.
+  - **The removal can't strand a half-worktree.** A process still writing
+    into the tree (a build into `target/`) can only leave orphaned bytes, and
+    the reply names them.
+  - **A worktree an earlier removal left half-done is finished, not
+    refused**: calling `remove_worktree` on it again completes the job.
 - **`clean_worktree(path)`** -- an alias of `remove_worktree`, kept for the
   tool name.
 - **`open_worktree(path)`** -- open the second spyc column (column `b`)
@@ -163,11 +145,11 @@ ancestor of the dead path) with a `directory not found, …` flash, so
 a pane is never stranded.
 
 **Search tools (gitignore-aware, scoped to the focused commander's worktree root — its repo root, else PROJECT_HOME, else cwd):**
-- **`search_paths(query, [limit])`** -- fuzzy filename search
-  (same `ignore` walker + nucleo ranking as the `F` picker).
+- **`search_paths(query, [limit])`** -- fuzzy filename search,
+  gitignore-aware and ranked like the `F` picker.
   Returns repo-relative paths, fzf-style ranked.
-- **`search_content(pattern, [limit])`** -- regex content search
-  via the embedded ripgrep matcher (same as `:grep`). Returns
+- **`search_content(pattern, [limit])`** -- regex content search,
+  with the same matcher as `:grep`. Returns
   `{path, line, col, text}` objects.
 - **`search_picks(pattern, [limit])`** -- *spyc-shaped*: content
   search restricted to the user's currently-picked files. Picks
@@ -178,7 +160,7 @@ a pane is never stranded.
   files surviving across sessions). Lets Claude grep accumulated
   "interesting files" without re-establishing context.
 
-**Git tools (in-process gix, scoped like search; no `git` subprocess):**
+**Git tools (read in-process, scoped like search):**
 - **`git_status`** -- working-tree status as structured JSON,
   `{path, staged, unstaged, untracked}` per changed path.
 - **`git_log([limit])`** -- recent commits newest-first,
@@ -200,9 +182,8 @@ focused column — pass the path returned by `create_worktree` /
 `list_worktrees`. Without it the tools follow the focused column (so
 an agent editing in a sibling worktree should pass `root`).
 
-Write actions execute on the main thread via a command channel.
-Flash messages (`[mcp] navigated to src/`) inform the user when
-Claude changes the workspace. The `gf`/`gF` keys complete the loop:
+Flash messages (`[mcp] navigated to src/`) tell the user when an
+agent changes the workspace. The `gf`/`gF` keys complete the loop:
 jump from Claude's output back to the file list.
 
 ## Installable agent skill
@@ -217,10 +198,8 @@ spyc --install-skill
 Writes an embedded usage guide into each agent's **personal** skills directory,
 so it applies in every project without touching any repo.
 
-All three hosts converged on the same format — `<skills-dir>/<name>/SKILL.md`
-with YAML frontmatter plus optional `references/` sub-files — so one embedded
-copy serves them **verbatim**; only the directory differs. Adding another host is
-one `Host` variant and its directory.
+All three agents read the same skill format, so the one copy spyc carries is
+installed to each unchanged; only the directory differs.
 
 Contents:
 
@@ -231,12 +210,11 @@ Contents:
 | `references/search.md` | which of the four search corpora to use, and `root` scoping |
 | `references/git.md` | the three `git_diff` scopes, and when to shell out anyway |
 
-This is the depth *underneath* the MCP handshake: `initialize`'s shared
-`SERVER_INSTRUCTIONS` stays within an 800-byte budget because clients may repeat
-it across tool descriptions. It retains tool preference, pane/root scoping,
-worktree and file-scope claims, safe cleanup and status reporting. Argument
-details live in each tool's description; full workflows live in the skill,
-which is loaded on demand.
+The skill is the depth under spyc's MCP server. The instructions the server
+gives every agent are kept short, since an agent may repeat them alongside each
+tool: which tools to prefer, how to target your own worktree, claims, safe
+cleanup and status reporting. Each tool's description has its arguments; the
+skill has the full workflows, and an agent loads it when it needs them.
 
 **Staying current.** spyc offers a single `[Y/n]` update on startup when its
 embedded copy differs from what's installed — one prompt covering every host,
@@ -244,11 +222,9 @@ naming the ones that are behind, and refreshing only those (accepting never
 silently adopts a host you never installed to). If hosts disagree about whether
 edits are at stake, the cautious warning wins. It only ever offers for an
 **already-installed** skill — install it explicitly once, and you're never
-nagged about a feature you didn't opt into. Declining is remembered against the
-skill's *content fingerprint* rather than spyc's version, so it re-asks when the
-skill genuinely changes rather than on every version bump (and, since `main`
-carries a static `N.M.0-CURRENT` for a whole cycle, a version-keyed decline
-would have silenced it for months).
+nagged about a feature you didn't opt into. A decline is remembered against the
+skill's content, so spyc asks again when the skill itself changes, not on every
+version bump.
 
 **Your edits are safe.** A `.spyc-skill.json` manifest records what spyc wrote,
 which is what lets it tell "spyc's copy moved on" from "you edited this." An
@@ -280,8 +256,8 @@ wrapper forwards them, each with when it resets: local clock time (`↻3:40pm`,
 `↻Thu 9am`), or the time left with `[pane] agent_hud_resets = "countdown"`. `:agent hud off` stops collection; `:agent hud dump` (or
 `info`), or a double-click on the strip, opens saveable source and freshness
 diagnostics with every tool's tally. A drag across the strip copies its text.
-The strip uses the shared pane geometry, preserves six child rows and needs no
-idle polling. See [configuration and source semantics](../config/agent-hud.md#agent-hud--pane-agent_hud)
+The strip always leaves the agent at least six rows, and costs nothing while
+the agent is idle. See [configuration and source semantics](../config/agent-hud.md#agent-hud--pane-agent_hud)
 for the home-only preference and size fallbacks.
 
 ## Agent image gallery — what you actually pasted
@@ -331,11 +307,8 @@ restarts when a conversation is cleared or resumed, so the same label can
 name two different pictures. Images the agent received without a label
 appear too.
 
-Claude and Codex are supported. Codex's gallery reads current turn items and
-legacy user-message/API records from the pane's pinned session and effective
-home. Forks include each parent's attachments only through the branch point.
-Repeated representations of one attachment appear once; separate submissions
-remain separate. Local image files and inline image data can be opened; an inline
-copy keeps an attachment available when Codex's temporary file has disappeared.
-Missing files, malformed data and opaque remote/file references report an error
-when opened. Other agents report that their transcript format is unsupported.
+Claude and Codex are supported; other agents say their transcript format isn't.
+A forked Codex session lists its parent's images up to the fork. An image sent
+twice appears twice, and one attachment recorded more than one way appears once.
+A Codex image sent inline still opens after its temporary file is gone; one that
+can't be read reports why when you open it.

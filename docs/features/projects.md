@@ -25,10 +25,9 @@ which-key popup lists the options:
 - **`Space ?`** — open this help.
 - **`Space a`** — open the about page.
 
-This is the line between *global* commands (worktree, project — they make
-sense from any focus) and *frame* commands (git, picks, sort — they act on
-the file view and stay on the `g` / letter chords). `gh` (old project-home
-jump) is gone in favour of `Space p`; `gw` (jump to the worktree root) stays.
+The leader holds the workspace commands, the ones that make sense from
+anywhere; commands that act on the file view (git, picks, sort) stay on the
+`g` and letter keys, and `gw` still jumps to the worktree root.
 
 ## Projects
 
@@ -85,17 +84,11 @@ Both are shown on the top bar and persist across `spyc -r`.
 
 ## Session management
 
-When restoring a saved session, an unsupported Codex tab is left unopened while
-supported tabs resume. Its command and conversation metadata stay saved through
-autosave and quit. Session info (`Space s`, or `^a Space s` from a pane) lists the
-unopened tabs and reasons. If every saved tab is refused, the current session
-stays intact.
-
 spyc auto-saves your workspace on quit and can restore it on startup.
 
 - **Crash-sufficient autosave** — beyond the quit-time save, spyc
   re-saves the session ~2s after any change (new tab, `cd`, split
-  resize, …) to a stable per-session file written atomically, so a hard
+  resize, …), so a hard
   kill (`SIGKILL`, crash, laptop sleep) loses at most that couple of
   seconds rather than everything since launch. It only writes when
   something actually changed, so an idle spyc does no disk work.
@@ -121,6 +114,11 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   keeps every project. If that was the project you were in, you land in
   the first that opened. A project out of view that was inside an archive
   comes back beside it, cursor on it, one `Enter` from where it was.
+- **Tabs that can't come back** — an unsupported Codex tab is left unopened
+  while the other tabs resume, and its command and conversation stay saved
+  for next time. Session info (`Space s`, or `^a Space s` from a pane) lists
+  the unopened tabs and why. If every saved tab is refused, the current
+  session stays as it was.
 - **Running sessions** — a session another spyc is still writing is
   marked `running` in the picker. Restoring it makes a copy with its own
   file and name, whose agents start fresh rather than resuming the
@@ -132,21 +130,15 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   keeps its place by when it was last saved, not when it was created.
 - **Agent session resume** — for tabs running `claude`, `codex`,
   `agy`, or `zot`, quitting spyc and launching with `spyc -r`
-  will restore. Claude tabs spawn a fresh `claude` and type
-  `/resume <id>` once it's settled (the CLI flag has a regression),
-  then verify the submit landed — re-sending Enter while the command
-  is still visibly unsubmitted, since Claude's async startup can eat
-  a lone `\r`. A tab saved before its conversation's first message
-  restores as a fresh `claude`, since there is nothing to resume yet.
-  Codex tabs spawn `codex resume <UUID>` directly — the UUID being the
-  rollout spyc pinned to that tab while it ran, so a tab still working at
-  quit resumes exactly rather than guessing. When no UUID was ever pinned,
-  codex falls back to `codex resume --last`, which uses codex's native
-  cwd-filtered picker. Agy tabs spawn `agy --conversation <id>`, the
-  conversation its status hook reported or the one the tab was launched
-  on. A tab with none, or one agy never wrote, restores as a fresh `agy`
-  rather than `--continue`, which would resume whichever conversation in
-  the workspace was newest, possibly another tab's. `zot` tabs
-  restore with `zot --continue` (zot's resume-most-recent-for-cwd);
-  specific-session resume and transcript scrollback are a follow-up
-  pending its on-disk session-file format.
+  will restore. A claude tab resumes its own conversation (spyc types
+  `/resume <id>` into a fresh `claude`); one saved before its first
+  message restores as a fresh `claude`, since there is nothing to resume
+  yet. A codex tab resumes its own session (`codex resume <id>`) even if
+  it was still working at quit, or, when spyc never learned which session
+  it was, falls back to `codex resume --last`, codex's own picker for the
+  directory. An agy tab resumes its conversation (`agy --conversation
+  <id>`); one with none restores as a fresh `agy`, since agy's
+  `--continue` would take whichever conversation was newest, possibly
+  another tab's. A `zot` tab restores with `zot --continue`, zot's most
+  recent session for the directory. How each agent is resumed:
+  [`docs/HARNESS.md`](../HARNESS.md).
