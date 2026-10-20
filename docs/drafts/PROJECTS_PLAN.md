@@ -1090,6 +1090,15 @@ PR, except step 5's stages:
      `^z`-suspended tab counts for nothing. The title counts the tabs blocked
      in the other projects, and each `Space j` row carries its project's
      glyph. With one project open nothing changes.
+   - **Grouped (pair 6d).** `:activity dump` and `:agent list` cover every
+     project's tabs, each project under a `project <label>` heading in
+     switcher order while several are open. Each MCP connection in the dump
+     names the project it acts on: its tab's, else the one the server bound
+     it to (`McpCommand::ConnectionBound`, at `initialize` and again on a
+     re-bind), "(closed)" once that has closed: named rather than listed
+     under a heading, as §6 had it. `:agent registry` names the project of
+     each claim's owner tab. The HUD's `conn:N` stays a total, and
+     `:why-status` stays the active tab's.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
 8. **Recently-closed projects in the switcher.**
 

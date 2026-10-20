@@ -98,6 +98,8 @@ pub struct ActivityMonitor {
 pub struct McpConnection {
     /// The tab it is bound to (its `SPYC_PANE_ID`), `None` when unattributed.
     pub pane_id: Option<String>,
+    /// The project it acts on, once the server has said.
+    pub project: Option<crate::app::state::ProjectId>,
     /// When it initialized, as [`crate::sysinfo::format_now`] prints it.
     pub since: String,
     pub calls: u64,

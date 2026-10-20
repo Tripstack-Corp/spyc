@@ -326,6 +326,62 @@ fn the_loop_hears_a_connection_start_and_end() {
     assert_eq!(ended, Some(id));
 }
 
+/// The loop hears which project a connection acts on: at its `initialize`,
+/// and again when that project closes and it binds to another.
+#[test]
+fn the_loop_hears_each_project_a_connection_binds_to() {
+    const OTHER: &str = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5a6c";
+    let tmp = tempfile::tempdir().unwrap();
+    let user = user_browsing_y(&tmp);
+    let first = tmp.path().join("first.json");
+    std::fs::copy(&user, &first).unwrap();
+    let (tx, rx) = mpsc::channel::<McpRequest>();
+    let (seen_tx, seen) = mpsc::channel();
+    let files = (first.clone(), user.clone());
+    std::thread::spawn(move || {
+        let mut binds = 0;
+        for McpRequest { command, reply, .. } in rx {
+            let message = match &command {
+                McpCommand::Bind { .. } => {
+                    binds += 1;
+                    let (project, file) = if binds == 1 {
+                        (PROJECT, &files.0)
+                    } else {
+                        (OTHER, &files.1)
+                    };
+                    json!({"pane": false, "project": project, "context_file": file}).to_string()
+                }
+                _ => "ok".into(),
+            };
+            let _ = seen_tx.send(command);
+            let _ = reply.send(McpResponse::Ok { message });
+        }
+    });
+    let mut conn = Conn::open(user, tx);
+    conn.initialize_with(json!({CWD_META: "/w/b"}));
+    std::fs::remove_file(&first).unwrap();
+    conn.tool("git_status", json!({}));
+    drop(conn);
+    let mut bound = Vec::new();
+    let mut initialized = false;
+    loop {
+        match seen
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the close")
+        {
+            McpCommand::ConnectionInitialized { .. } => initialized = true,
+            McpCommand::ConnectionBound { project, .. } => {
+                // The loop keeps a project only on a connection it has heard of.
+                assert!(initialized, "a project before its connection");
+                bound.push(project.to_string());
+            }
+            McpCommand::ConnectionClosed { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(bound, [PROJECT, OTHER]);
+}
+
 /// An older proxy's connection is reported too, as unattributed.
 #[test]
 fn an_unattributed_connection_is_reported_without_a_pane() {

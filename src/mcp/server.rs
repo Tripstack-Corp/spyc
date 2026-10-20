@@ -12,9 +12,8 @@ use serde_json::{Value, json};
 
 use crate::mcp_cmd::{McpCommand, McpRequest};
 
-use super::protocol::{
-    CWD_META, Caller, PANE_ID_META, dispatch, dispatch_for, read_lsp_message, send_message,
-};
+use super::framing::{read_lsp_message, send_message};
+use super::protocol::{CWD_META, Caller, PANE_ID_META, dispatch, dispatch_for};
 use super::{
     PROXY_IO_TIMEOUT, log_bodies, mcp_log, root_marker_path_in, socket_path, socket_path_for,
     state_dir,

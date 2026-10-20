@@ -78,7 +78,9 @@ shows its project's glyph too, as it was when the list opened. The terminal
 title counts the tabs blocked in the other projects, for when you're in
 another window: `🌶️: spyc (■2) · SAFFRON_CUMIN`. A `^z`-suspended agent counts
 for nothing in any of these, as its tab shows 💤. With one project open, the
-bar, the title and `Space j` read as they always have.
+bar, the title and `Space j` read as they always have. The coordination dumps
+(`:activity dump`, `:agent list`, `:agent registry`) cover every open project
+too, each project's agents under its name.
 
 ## Project home & session name
 

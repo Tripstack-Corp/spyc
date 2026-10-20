@@ -11,7 +11,8 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::protocol::{PANE_ID_META, read_lsp_message, send_message};
+use super::framing::{read_lsp_message, send_message};
+use super::protocol::PANE_ID_META;
 use super::server::handle_socket_connection;
 use crate::mcp_cmd::McpRequest;
 
