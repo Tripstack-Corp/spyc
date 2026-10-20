@@ -518,3 +518,30 @@ mod pages_artifact_guards {
         );
     }
 }
+
+#[cfg(test)]
+mod changelog_guards {
+    use std::path::Path;
+
+    fn read(file: &str) -> String {
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(file)).expect(file)
+    }
+
+    /// `git cliff --prepend` replaces CHANGELOG.md's header only where it is
+    /// cliff.toml's exactly; anywhere else the release writes a second one.
+    #[test]
+    fn the_changelog_starts_with_the_header_git_cliff_replaces() {
+        let cliff: toml::Table = toml::from_str(&read("cliff.toml")).expect("cliff.toml parses");
+        let header = cliff["changelog"]["header"]
+            .as_str()
+            .expect("a [changelog] header");
+        assert!(
+            header.len() > 20,
+            "header too short to mean anything: {header:?}"
+        );
+        assert!(
+            read("CHANGELOG.md").starts_with(header),
+            "CHANGELOG.md must open with cliff.toml's header, character for character"
+        );
+    }
+}

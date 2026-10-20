@@ -1,20 +1,22 @@
 # git-cliff configuration — generates CHANGELOG.md sections from the
 # conventional-commit history (the `feat:` / `fix:` / `refactor:` / `docs:`
 # messages the repo already uses). Cut a release with `make release-tag`, which
-# *prepends* the new version's section and leaves prior entries untouched —
-# versions <= 1.56.0 are frozen hand-written history; git-cliff owns >= 1.57.0.
+# *prepends* the new version's section and leaves prior entries untouched.
+# Releases before 2.0.0 are frozen in docs/changelog/1.x.md.
 # This is a release-time / local tool — NOT part of `make check` or CI.
 
 [changelog]
+# `--prepend` drops CHANGELOG.md's header only where it matches this one exactly,
+# so an edit here is made there too, or the next release writes it twice.
+# Guarded by `the_changelog_starts_with_the_header_git_cliff_replaces`.
 header = """
 # Changelog
 
-All notable changes to spyc. Entries from v1.57.0 onward are generated from the \
-conventional-commit history by [git-cliff](https://git-cliff.org) (config in \
-`cliff.toml`); regenerate the pending section with `make changelog` and cut a \
-release with `make release-prep` then `make release-tag` (see \
-`docs/RELEASE_ENGINEERING.md`). Entries at v1.56.0 and earlier are \
-the original hand-written log, kept verbatim.
+All notable changes to spyc, generated from the conventional-commit history by \
+[git-cliff](https://git-cliff.org) (config in `cliff.toml`); regenerate the \
+pending section with `make changelog` and cut a release with `make release-prep` \
+then `make release-tag` (see `docs/RELEASE_ENGINEERING.md`). Releases before \
+2.0.0 are in [`docs/changelog/1.x.md`](docs/changelog/1.x.md).
 
 """
 # Tera template. Groups carry a hidden `<!-- N -->` sort key so they render in a

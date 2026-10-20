@@ -256,9 +256,8 @@ mod tests {
 
     /// Exempt by file name, each for a reason that outranks house spelling.
     const SKIP_FILES: &[&str] = &[
-        // Generated from commit subjects by git-cliff, and frozen verbatim
-        // history before v1.57.0 — editing it here would be undone and would
-        // rewrite quoted history.
+        // Generated from commit subjects by git-cliff — editing it here would
+        // be undone.
         "CHANGELOG.md",
         // A vendored canonical document (Contributor Covenant). Its worth is
         // in being recognizably the standard text, so it is the
@@ -273,6 +272,8 @@ mod tests {
         // documents archived from here on are already Canadian, having been
         // written under the rule.
         "docs/archive/",
+        // Releases before 2.0.0, frozen as CHANGELOG.md left them.
+        "docs/changelog/",
     ];
 
     const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache"];
