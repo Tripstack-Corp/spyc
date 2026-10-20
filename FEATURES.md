@@ -1496,7 +1496,17 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   doesn't take a picker slot; a restored session is still updated.
 - **`spyc --resume`** (or `-r`) — opens a session picker showing
   the session name (primary column), a human-readable timestamp
-  ("just now", "2 hours ago", "3 days ago"), and the cwd.
+  ("just now", "2 hours ago", "3 days ago"), and the cwd, or each
+  project with its tab count when the session had several open.
+- **Every project comes back** — restoring a session opens every project
+  it had open, each with its own tabs, columns and split, in the order
+  they were opened, and puts you in the one you were in. A project whose
+  directory has gone (a worktree removed after its merge, say), or whose
+  home another project of the session already has, stays shut: the rest
+  open as a copy, with their own file, and the session they came from
+  keeps every project. If that was the project you were in, you land in
+  the first that opened. A project out of view that was inside an archive
+  comes back beside it, cursor on it, one `Enter` from where it was.
 - **Running sessions** — a session another spyc is still writing is
   marked `running` in the picker. Restoring it makes a copy with its own
   file and name, whose agents start fresh rather than resuming the

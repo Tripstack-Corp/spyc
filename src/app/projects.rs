@@ -181,7 +181,7 @@ impl App {
     /// - column `a` at `dir`, unread, since the switch to it reads it on a
     ///   worker, with its repo root, harpoon and branch resolved now, so the
     ///   switch's git walk has a root to walk.
-    fn create_project(&mut self, dir: &Path) -> (ProjectId, Option<String>) {
+    pub(super) fn create_project(&mut self, dir: &Path) -> (ProjectId, Option<String>) {
         let (config, problem) = match Config::load_default(dir) {
             Ok(config) => (config, None),
             Err(e) => (Config::default(), Some(format!("config error: {e:#}"))),

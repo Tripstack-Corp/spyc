@@ -481,6 +481,17 @@ impl AppState {
         self.projects.push(project);
     }
 
+    /// Put the open projects in switcher order as `order` lists them. A project
+    /// it doesn't name keeps its place, after those it does.
+    pub(crate) fn order_projects(&mut self, order: &[ProjectId]) {
+        self.projects.sort_by_key(|p| {
+            order
+                .iter()
+                .position(|id| *id == p.id)
+                .unwrap_or(order.len())
+        });
+    }
+
     /// [`Self::open_projects`], mutably.
     pub fn open_projects_mut(&mut self) -> impl Iterator<Item = &mut Project> {
         self.projects.iter_mut()
