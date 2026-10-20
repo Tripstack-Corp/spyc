@@ -667,6 +667,51 @@ fn a_restored_projects_config_error_is_named() {
     });
 }
 
+/// #99 step 7a: a project out of view whose home a file under `projects/`
+/// names is configured by that file as it opens, named for it, though its
+/// start directory is below its home.
+#[test]
+#[ignore = "red: #99 7a, per-project config files"]
+fn a_restored_project_out_of_view_is_configured_by_its_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    in_temp_home(tmp.path(), |state_root| {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let (other, config) = (base.join("other"), base.join("config"));
+        let sub = other.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::create_dir_all(config.join("projects")).unwrap();
+        std::fs::write(
+            config.join("projects").join("work.toml"),
+            format!("home = {:?}\n", other.display().to_string()),
+        )
+        .unwrap();
+        let mut theirs = project(P1, &other, &sub, Vec::new());
+        theirs["start_dir"] = json!(sub);
+        write_v1_decoy(state_root);
+        write_manifest(
+            state_root,
+            504,
+            &manifest(
+                504,
+                "FILED",
+                1_700_000_100,
+                P2,
+                vec![
+                    theirs,
+                    project(P2, &crate_root(), &crate_root(), vec![tab("mine", &other)]),
+                ],
+            ),
+        );
+        crate::state::with_config_root(&config, || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            picker_lines(&mut app);
+            press(&mut app, KeyCode::Char('1'));
+            let theirs = homed_at(&app, &other);
+            assert_eq!(app.state.label_of(theirs).as_deref(), Some("work"));
+        });
+    });
+}
+
 /// When the project the user was in has gone (its worktree removed after its
 /// merge, say), the first project that can comes back in view and the rest
 /// beside it, as a copy that names the one that didn't open.
