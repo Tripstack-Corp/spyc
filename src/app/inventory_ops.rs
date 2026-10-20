@@ -1,3 +1,6 @@
+//! Inventory operations that touch the disk (yank into the cache, remove,
+//! clear, put back out), run on a detached worker the way `file_ops` runs.
+
 use std::path::PathBuf;
 
 use super::App;

@@ -1,4 +1,4 @@
-//! Guard: how long a `.rs` file may get.
+//! Guard: how long a `.rs` file may get, and how large AGENTS.md may get.
 //!
 //! Two limits. A file's non-test code stays under [`PRODUCTION`]'s, because
 //! that is the code a reader, a reviewer and an agent's context have to hold
@@ -268,4 +268,23 @@ fn pins_are_sorted_with_one_entry_per_file() {
             rule.list
         );
     }
+}
+
+/// AGENTS.md is in context on every agent turn in this repo, so every byte of it
+/// is paid on each one. Unguarded, it went from 34 KB to 76 KB in ten weeks
+/// after a trim.
+const AGENTS_MD_BYTES: usize = 26_000;
+
+#[test]
+fn agents_md_stays_slim() {
+    let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("AGENTS.md"))
+        .expect("read AGENTS.md")
+        .len();
+    assert!(bytes > 4_000, "AGENTS.md is {bytes} bytes: the wrong file?");
+    assert!(
+        bytes <= AGENTS_MD_BYTES,
+        "AGENTS.md is {bytes} bytes, over its {AGENTS_MD_BYTES}-byte cap. Move a feature's \
+         detail to FEATURES.md, a module's to its `//!` doc, a procedure to \
+         CONTRIBUTING.md; don't raise the cap."
+    );
 }
