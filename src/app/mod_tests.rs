@@ -455,7 +455,7 @@ mod guard_tests {
             missing.is_empty(),
             "src/app/ feature modules missing from the AGENTS.md module index: {missing:?}. \
              Add a bullet for each, naming the module in BOLD backticks — **`name.rs`**, \
-             the form every index bullet uses (AGENTS.md → \"Keep docs in sync\"). A \
+             the form every index entry uses (AGENTS.md → \"Architecture\"). A \
              passing mention in prose deliberately does not count, and a module absent \
              from the map is the worktree_clean.rs gap the June-2026 review caught."
         );

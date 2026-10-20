@@ -1,3 +1,8 @@
+//! File operations that touch the disk, run on a detached worker: copy, move
+//! and per-file rename, piping file contents to a pane, restoring from git, the
+//! `:longlist` / `:filetype` reports, opening a special file into a pager, and
+//! re-reading listings. A result lands on its Runtime slot and wakes the loop.
+
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
