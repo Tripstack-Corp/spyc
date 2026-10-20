@@ -34,17 +34,16 @@ Part of spyc's [feature reference](../../FEATURES.md). The file list and what ac
   newest path the active pane printed — the one `gf` would find — dimmed
   in the prompt: `Enter` goes there (a file opens its directory with the
   cursor on it), `→`/`End` loads it for editing, and typing replaces it.
-  The paths are checked on a worker thread, so the prompt opens at once
-  even when one of them sits on a mount that's stopped answering.
-  Codex live navigation excludes verified input chrome; see
-  [output navigation](../HARNESS.md#output-navigation) for the boundary and fallback.
+  The prompt opens at once even when a suggestion sits on a mount that's
+  stopped answering. In a codex pane the agent's own input box isn't read
+  as output; see [output navigation](../HARNESS.md#output-navigation).
 - **F** project-wide fuzzy filename finder. Walks the focused
   commander's worktree root (its repo root, else `PROJECT_HOME`,
-  else the current dir) honouring `.gitignore`, ranks
-  candidates against typed input via nucleo-matcher (basename hits
-  outrank parent-dir hits, fzf-style). Up/Down move selection,
-  Enter chdirs to the matched file's parent and places the cursor
-  on it; Esc cancels. No persistent index — walks lazily on open.
+  else the current dir) honouring `.gitignore`, and ranks what
+  you type fzf-style, a basename hit above a parent-directory hit.
+  Up/Down move selection, Enter chdirs to the matched file's parent
+  and places the cursor on it; Esc cancels. There's no index to
+  build: it walks the tree when you open it.
 - Multi-column layout that adapts to terminal width
 - Colour-coded entries: directories, executables, symlinks, files
 - **Git status markers** — two-character left-gutter pair whose *positions*
@@ -96,9 +95,9 @@ Two levels of selection for flexible file management.
   OSC-52 terminal escape over SSH instead; `[clipboard] command` /
   `$SPYC_CLIPBOARD` overrides the backend entirely with a
   user-supplied command — see CONFIGURATION.md. Every verb that yanks
-  text shares this one delivery path — `yf`, `yP`, `yp`, `ya`, a mouse
-  drag, `^a u` Quick Select and the image overlay's `Y` — so the SSH
-  and override behaviour is the same whichever one you reach for.
+  text — `yf`, `yP`, `yp`, `ya`, a mouse drag, `^a u` Quick Select and
+  the image overlay's `Y` — goes the same way, so the SSH and override
+  behaviour is the same whichever one you reach for.
 
 - **Y** remove cursor file from inventory
 - **p** put all inventory files to the current directory
@@ -127,9 +126,8 @@ become `%` in shell expansion.
 - **L** long listing -- aligned table, name first (symlinks as
   `name -> target`), then mode, size, mtime, owner, group, links, octal,
   bytes, blocks, inode, atime/ctime/birth. The row is wider than a
-  terminal, so it wraps: leading with the name means the wrap sheds the
-  forensic columns rather than the one that identifies the row. Pager
-  height fits the wrapped content. (Also reachable as `:longlist`.)
+  terminal, so it wraps, and with the name first a wrap only pushes the
+  rarely needed columns down. Pager height fits the wrapped content. (Also reachable as `:longlist`.)
 - **:filetype** run `file(1)` on the selection
 - **:chmod** chmod +x
 
@@ -140,15 +138,13 @@ become `%` in shell expansion.
 ## Graveyard — soft-delete recovery
 
 Files removed with **R** (and items expelled from inventory) go to
-a **graveyard** at `$XDG_STATE_HOME/spyc/graveyard/`. Each entry is
-a `<uuid>.json` (metadata) + `<uuid>.tar.zst` (compressed payload)
-pair. tar's `HeaderMode::Complete` captures mode bits (executable
-flag, etc.), mtime, and best-effort UID/GID; restore preserves all
-of them. xattrs / ACLs / macOS resource forks are NOT preserved
-(out of scope for v1).
+a **graveyard** at `$XDG_STATE_HOME/spyc/graveyard/`, compressed, with
+their permissions (the executable bit included), modification time and,
+where it can, owner, all of which a restore puts back. Extended
+attributes, ACLs and macOS resource forks are not kept.
 
-- **`:graveyard`** — open the graveyard view (newest entries first). No default
-  key since the keymap slim; bind one with `map <KEY> command graveyard`
+- **`:graveyard`** — open the graveyard view (newest entries first). It
+  has no default key; bind one with `map <KEY> command graveyard`
 - **`:undo`** — restore the most-recent entry to its original path
 - Inside the graveyard view:
   - **`p`** — restore the cursor entry to the current dir (cwd)
@@ -178,9 +174,8 @@ Vi-style named bookmarks for fast navigation:
 ## Harpoon — pinned working set
 
 Inspired by ThePrimeagen's neovim plugin: a small, hand-curated,
-**per-project** ordered list of file (or directory) pointers for
-muscle-memory navigation. Up to 9 slots. Persisted on disk per
-`PROJECT_HOME`, auto-saved on every mutation.
+**per-worktree** ordered list of file (or directory) pointers for
+muscle-memory navigation. Up to 9 slots, saved on every change.
 
 - **Ha** harpoon the cursor file/dir (append; idempotent; capped at 9)
 - **Hx** un-harpoon the cursor file/dir
@@ -200,18 +195,12 @@ muscle-memory navigation. Up to 9 slots. Persisted on disk per
   `src/foo/bar/hello.c` is harpooned and you're viewing `src/`,
   `foo/` shows up so you can drill in.
 
-Persistence: `$XDG_STATE_HOME/spyc/harpoon/<basename>.<hash>.toml`
-(one file per **worktree**, keyed by an absolute-path hash so two
-worktrees with the same basename can't collide). The key is the
-focused column's worktree root (else `PROJECT_HOME`), so a second
-column in a different worktree keeps its own bookmarks — harpoon
-stores absolute paths, so a shared list would jump you into the
-wrong worktree's copy. Outside a repo with no `PROJECT_HOME`, the
-H-prefix bindings flash a hint and bail.
-
-Note: `H` was previously an alias for "jump to `$HOME`"; it's now
-the harpoon chord prefix. The `~` key and the Home key still jump
-to `$HOME`, and `Space p` jumps to `PROJECT_HOME`.
+Each worktree keeps its own list, under
+`$XDG_STATE_HOME/spyc/harpoon/`: the focused column's worktree root
+picks it (else `PROJECT_HOME`), so a second column in another worktree
+has its own slots and never jumps you into the wrong worktree's copy of
+a file. Outside a repo with no `PROJECT_HOME`, the `H` keys flash a hint
+and do nothing.
 
 ## Ignore masks & filtering
 
@@ -229,9 +218,9 @@ non-matching files — same matcher as `/`, so `^`/`$` anchor it
 picked files. `=git` (or `=g`)
 shows only files appearing in `git status` — modified, staged,
 untracked, deleted, renamed, conflicted — plus parent directories
-that contain such files (so you can navigate into changed subtrees).
-The filter stays live as the 1Hz git poll updates `git_files`.
-`=h` shows only the project's harpoon entries plus their ancestor
-directories (see "Harpoon" below). `=` with an empty pattern clears
+that contain such files (so you can navigate into changed subtrees),
+and follows git as files change.
+`=h` shows only the harpoon entries plus their ancestor
+directories (see "Harpoon" above). `=` with an empty pattern clears
 the filter. The active filter is shown in the status bar. Cleared
 automatically when changing directories.
