@@ -560,3 +560,197 @@ fn a_codex_session_claimed_in_one_project_is_not_given_to_another() {
         );
     });
 }
+
+// ── #99 step 6a: attention across projects ─────────────────────────────────
+
+/// Change project `id`'s tab `index`.
+fn edit_tab(app: &mut App, id: state::ProjectId, index: usize, f: impl FnOnce(&mut TabInfo)) {
+    app.as_project(id, |app| {
+        let tabs = app.runtime.project_mut().pane_tabs.as_mut().expect("a tab");
+        f(&mut tabs.tabs_mut()[index].info);
+    });
+}
+
+/// Make project `id`'s tab `index` its active one.
+fn activate(app: &mut App, id: state::ProjectId, index: usize) {
+    app.as_project(id, |app| {
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .expect("a tab")
+            .switch_to(index);
+    });
+}
+
+/// The cell after `[n]` in the tab bar of the project in view: its dot, `+`,
+/// or blank.
+fn tab_glyph(app: &mut App, n: usize) -> Option<char> {
+    let (w, h) = (100, 30);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+    let buf = terminal.backend().buffer();
+    let marker = format!("[{n}]");
+    (0..h).find_map(|y| {
+        let row: String = (0..w)
+            .map(|x| buf.cell((x, y)).map_or(" ", |c| c.symbol()))
+            .collect();
+        row.find(&marker)
+            .and_then(|at| row[at + marker.len()..].chars().next())
+    })
+}
+
+/// A done on a tab the user isn't looking at stays marked after its report
+/// decays: its dot stays a teal `■` until the tab is in view, then reads idle.
+#[test]
+#[ignore = "red: a done decays to idle unseen"]
+fn a_done_on_a_tab_out_of_view_stays_marked_until_seen() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, x, &x_home, "claude");
+        activate(app, x, 0);
+        let now = Instant::now();
+        edit_tab(app, x, 1, |info| {
+            info.reported = Some(report(AgentActivity::Done, now));
+        });
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        let later = now + Duration::from_secs(301);
+        app.settle_agent_activity(later, &mut RunCtx::for_test());
+        assert_eq!(tab_glyph(app, 2), Some('■'), "the done decayed unseen");
+
+        activate(app, x, 1);
+        app.settle_agent_activity(later, &mut RunCtx::for_test());
+        activate(app, x, 0);
+        assert_eq!(tab_glyph(app, 2), Some('·'), "seen, it reads idle");
+    });
+}
+
+/// The control: a done on the tab in view is seen as it lands, so once its
+/// report decays it reads idle wherever the user goes next.
+#[test]
+fn a_done_on_the_tab_in_view_is_seen() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, x, &x_home, "claude");
+        activate(app, x, 0);
+        let now = Instant::now();
+        edit_tab(app, x, 0, |info| {
+            info.reported = Some(report(AgentActivity::Done, now));
+        });
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        let later = now + Duration::from_secs(301);
+        app.settle_agent_activity(later, &mut RunCtx::for_test());
+        activate(app, x, 1);
+        assert_eq!(tab_glyph(app, 1), Some('·'));
+    });
+}
+
+/// With the list zoomed over the pane, the tab is out of view: a done there
+/// is unseen, and still marked once the user unzooms and moves on.
+#[test]
+#[ignore = "red: a done decays to idle unseen"]
+fn a_done_behind_a_zoomed_list_is_unseen() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, x, &x_home, "claude");
+        activate(app, x, 0);
+        app.state.active_project_mut().pane.zoom = state::ZoomTarget::TopList;
+        let now = Instant::now();
+        edit_tab(app, x, 0, |info| {
+            info.reported = Some(report(AgentActivity::Done, now));
+        });
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        let later = now + Duration::from_secs(301);
+        app.settle_agent_activity(later, &mut RunCtx::for_test());
+        app.state.active_project_mut().pane.zoom = state::ZoomTarget::None;
+        activate(app, x, 1);
+        assert_eq!(tab_glyph(app, 1), Some('■'), "the done decayed unseen");
+    });
+}
+
+/// The notification text from an agent's blocked edge, as one line.
+fn notification_line(effects: &[Effect]) -> Option<String> {
+    effects.iter().find_map(|effect| match effect {
+        Effect::Notify { system, osc9, .. } => system
+            .as_ref()
+            .map(|(summary, body)| format!("{summary} — {body}"))
+            .or_else(|| osc9.clone()),
+        _ => None,
+    })
+}
+
+/// With several projects open, a notification names its project: a tab
+/// number alone doesn't say which project's tab.
+#[test]
+#[ignore = "red: the notification names no project"]
+fn a_notification_names_its_project_when_several_are_open() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Blocked, now));
+        });
+        app.make_active(t.y);
+        let (_, effects) = app.settle_agent_activity(now, &mut RunCtx::for_test());
+        let line = notification_line(&effects).expect("a notification");
+        assert_eq!(line, "claude in xproj needs you — xproj: tab 1 is blocked");
+    });
+}
+
+/// The control: with one project open, the notification reads as before.
+#[test]
+fn with_one_project_the_notification_reads_as_before() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        app.remove_test_project(t.y);
+        agent_tab_in(app, x, &x_home, "claude");
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Blocked, now));
+        });
+        let (_, effects) = app.settle_agent_activity(now, &mut RunCtx::for_test());
+        let line = notification_line(&effects).expect("a notification");
+        assert_eq!(line, "claude needs you — tab 1 is blocked");
+    });
+}
+
+/// Output in another project's active tab marks it: no one is looking at
+/// any of that project's tabs.
+#[test]
+#[ignore = "red: another project's active tab gets no +"]
+fn output_in_another_projects_active_tab_marks_it() {
+    with_two(|t| {
+        let (app, x) = (&mut t.app, t.x);
+        app.open_tab_in_project(x, &t.x_home);
+        app.make_active(t.y);
+        type_into(app, x, b"hello\n");
+        assert!(
+            drain_until(app, |app| first_tab(app, x, |tab| tab.info.has_activity)),
+            "X's tab printed unseen, and it isn't marked"
+        );
+    });
+}
+
+/// A blocked agent in another project rings the bell, and the flash beside it
+/// says where: the border pulse alone says only "look".
+#[test]
+#[ignore = "red: the bell names no project"]
+fn the_bell_for_another_project_names_it() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        notify_in(app, x, |notify| notify.visual = true);
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Blocked, now));
+        });
+        app.make_active(t.y);
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        assert!(app.view.visual_bell.is_some(), "the bell rang");
+        assert_eq!(app.flash_text(), Some("xproj: tab 1 is blocked"));
+    });
+}
