@@ -288,3 +288,23 @@ fn agents_md_stays_slim() {
          CONTRIBUTING.md; don't raise the cap."
     );
 }
+
+/// FEATURES.md and CONFIGURATION.md are overviews that link out to their pages;
+/// one that takes its pages' detail back stops being an overview, as FEATURES.md
+/// had at 109 KB.
+const HUB_BYTES: &[(&str, usize)] = &[("CONFIGURATION.md", 26_000), ("FEATURES.md", 14_000)];
+
+#[test]
+fn hub_pages_stay_overviews() {
+    for &(hub, cap) in HUB_BYTES {
+        let bytes = std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(hub))
+            .unwrap_or_else(|e| panic!("read {hub}: {e}"))
+            .len();
+        assert!(bytes > 2_000, "{hub} is {bytes} bytes: the wrong file?");
+        assert!(
+            bytes <= cap,
+            "{hub} is {bytes} bytes, over its {cap}-byte cap. Put the detail on its \
+             docs/features/ or docs/config/ page and keep a summary here; don't raise the cap."
+        );
+    }
+}

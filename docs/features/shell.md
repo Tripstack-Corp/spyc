@@ -152,7 +152,7 @@ end).
   so `gf`/`gF` jump from a hit to the file in-place. Capped at 5000
   matches; refine the pattern if you hit it. Power users: `! rg foo`
   still works for ripgrep's full flag surface.
-- **`:q`** — quit
+- **`:q`** / **`:quit`** — quit
 
 The `:` prompt shares history with other shell prompts, so Up/Down
 cycles through previous commands.
