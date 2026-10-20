@@ -1,3 +1,6 @@
+//! One directory entry: its name, its kind (directory, executable, file,
+//! symlink) and metadata, and the suffix a row shows for that kind.
+
 use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;

@@ -1,3 +1,7 @@
+//! The lifecycle metadata a status hook reports, bounded and sanitized for
+//! diagnostics: event names, tools and ids, never hook arguments or response
+//! content. A pane keeps its last [`HISTORY_LIMIT`] events.
+
 mod input;
 
 pub use input::read_payload;

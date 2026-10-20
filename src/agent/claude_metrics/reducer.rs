@@ -1,3 +1,8 @@
+//! Folds a Claude Code transcript's events into the HUD's [`Snapshot`]: usage
+//! counted once per message however many content blocks repeat it, the context's
+//! size forgotten at a compaction while lifetime totals keep, tool counts by
+//! name, and the plan from `TodoWrite` or `TaskCreate`/`TaskUpdate`.
+
 use std::collections::{BTreeMap, VecDeque};
 
 use jiff::Timestamp;

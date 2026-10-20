@@ -1,3 +1,7 @@
+//! Turns keystrokes into actions: the default keymap, counts and multi-key chords
+//! (`gg`, the `^a` prefix, marks, the leader), and the continuations the chord
+//! hint lists. A user binding wins on a key's first press, never mid-chord.
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::action::{Action, ProjectAction};

@@ -1,3 +1,5 @@
+//! The cursor in a listing: the selected row and the top row the viewport shows.
+
 /// Cursor position within a listing: the selected index and the viewport's top row.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Cursor {

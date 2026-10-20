@@ -1,3 +1,7 @@
+//! Draws the status bar's powerline segments (pepper, `PROJECT_HOME`, session,
+//! path, git, agent and the column's state), cutting the path in the middle
+//! when the row is too short.
+
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
