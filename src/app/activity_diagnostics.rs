@@ -168,12 +168,16 @@ fn tab_report(i: usize, e: &TabEntry, is_active: bool, now: Instant) -> Vec<Stri
     let marker = if is_active { '*' } else { ' ' };
     let mut out = vec![
         format!(
-            "{marker}[{}] \"{}\"  dot={}  agent={}  suspended={}",
+            "{marker}[{}] \"{}\"  dot={}  agent={}  suspended={}  unseen_done={}",
             i + 1,
             info.label,
             info.activity.name(),
             is_agent(info),
             info.suspended,
+            info.unseen_done.map_or_else(
+                || "no".to_string(),
+                |at| format!("{}s ago, its dot stays teal", at.elapsed().as_secs())
+            ),
         ),
         format!("    command: {}", info.command),
         format!("    cwd: {}", info.cwd.display()),

@@ -1060,6 +1060,18 @@ PR, except step 5's stages:
      project's unopened tabs.
 6. **Attention.** The roll-up, the projects segment and its degradation ladder,
    the title, notification text, `Space !` and `^a !`.
+   - **Seen and named (pair 6a).** A tab is in view when it is the active tab
+     of the project in view and its pane is drawn (`App::in_view_tab`: not
+     hidden, not zoomed onto the list or the right column, not under a
+     full-frame pager). A done that lands out of view is unseen
+     (`TabInfo::unseen_done`, the first done's time) until the tab is in view,
+     outliving the report's decay (owner decisions, 2026-10-20), and its dot
+     stays teal meanwhile. A blocked agent's wait is timed from when it began
+     (`TabInfo::blocked_since`). The activity walk sets both and clears the
+     in-view tab's unseen done and `+`. A background project's active tab now
+     gets its `+`. Notifications name the project while several are open, and
+     a bell rung from another project flashes "web: tab 2 is blocked". The
+     roll-up moves to 6c, its first consumer.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
 8. **Recently-closed projects in the switcher.**
 
