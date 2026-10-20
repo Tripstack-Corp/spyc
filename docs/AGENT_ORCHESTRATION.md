@@ -52,7 +52,7 @@ that a turn stopped or finished.
 | heat-pulse `●` (pepper→ember) | **working** — output flowing or a `working` report |
 | quiet `·` | **idle** |
 | steady **red** square `■` | **blocked** — waiting on you ("needs me") |
-| calm **teal** square `■` | **done** — finished a turn |
+| calm **teal** square `■` | **done** — finished a turn; one that landed while its tab was out of view stays teal until the tab is in view |
 | steady **blue** hollow circle `○` | **waiting** — turn over, but background work the agent started will wake it |
 | `💤` | `^z`-suspended |
 
@@ -309,17 +309,26 @@ rather than reporting the output-timing fallback as if it were the answer.
 ## 2. Notifications — the ping when an agent needs you
 
 On a tab's transition to **blocked** or **done**, spyc fires a desktop
-notification naming the tab — so you can alt-tab away and get pulled back to the
-*right* pane. Configured under `[notify]` (see
+notification naming the tab, and its project when several are open — so you can
+alt-tab away and get pulled back to the *right* pane. Configured under `[notify]` (see
 [`CONFIGURATION.md`](../CONFIGURATION.md)):
 
 - **Desktop ping** — on by default, on both blocked/done. Over SSH it routes as
   an OSC-9 terminal escape (reaches your *client* terminal); locally it uses the
   OS notifier.
 - **Visual bell** (a spice-heat border pulse) — on by default; **terminal bell**
-  — off by default.
+  — off by default. Rung for another project, it flashes where.
+
 - `suppress_focused_tab` mutes the tab you're already watching (off by default —
   spyc-focused ≠ eyes-on-terminal).
+
+**Seen and unseen (#99).** A tab is in view when it is the active tab of the
+project in view and its pane is drawn: not hidden, not zoomed away, not under a
+full-frame pager or image. A done that lands on a tab out of view is *unseen*
+(`TabInfo::unseen_done`, kept from the first done) until the tab comes into
+view, even after the done report decays to idle or the agent exits, and its dot
+stays teal meanwhile (`:activity dump` shows `unseen_done=`). A blocked agent's
+wait is timed from when it began (`TabInfo::blocked_since`). Neither is saved.
 
 ---
 
