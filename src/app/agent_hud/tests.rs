@@ -304,10 +304,9 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
 
 /// The strip follows the project in view. Each project keeps its own binding
 /// and the process runs one collector, so coming back to a project whose
-/// binding is unchanged must still put the collector back on it, or the strip
-/// shows the other project's agent, or nothing new at all.
+/// binding is unchanged must still put the collector back on it, or its strip
+/// shows nothing new.
 #[test]
-#[ignore = "red: the collector keeps following the project left"]
 fn agent_hud_follows_the_project_switched_to() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -320,11 +319,13 @@ fn agent_hud_follows_the_project_switched_to() {
         app.cmd_agent_hud("compact");
         wait_metrics(&mut app, &mut ctx, 11);
         let x = app.state.active;
-        let y_dir = tmp.path().join("y");
-        std::fs::create_dir_all(&y_dir).unwrap();
-        let y = app.add_test_project(&y_dir);
+        // Every project's column stays in the process's own cwd: the loop
+        // moves the cwd to the column in view, and a temp dir there would be
+        // gone under the tests running beside this one.
+        let here = std::env::current_dir().unwrap();
+        let y = app.add_test_project(&here);
         app.as_project(y, |app| {
-            let tab = entry(app, &y_dir, &b, "cat");
+            let tab = entry(app, tmp.path(), &b, "cat");
             app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(tab));
             app.state.active_project_mut().pane.pane_height_pct = 50;
             app.state.active_project_mut().config.mouse.capture = false;
@@ -343,6 +344,30 @@ fn agent_hud_follows_the_project_switched_to() {
         );
         append_usage(&path_a, 55, "2026-10-13T12:00:01Z");
         wait_metrics(&mut app, &mut ctx, 55);
+    });
+}
+
+/// A switch to a project with no strip stops collection: nothing in view
+/// reads what the other project's agent writes.
+#[test]
+fn agent_hud_collection_stops_on_a_project_with_no_strip() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("home");
+        rollout(&home, 11);
+        let mut app = fixture(tmp.path(), &home);
+        let mut ctx = RunCtx::for_test();
+        app.cmd_agent_hud("compact");
+        wait_metrics(&mut app, &mut ctx, 11);
+        // The project's column stays in the process's own cwd, as above.
+        let bare = app.add_test_project(&std::env::current_dir().unwrap());
+        app.switch_project(bare);
+        tick(&mut app, &mut ctx);
+        assert!(
+            app.runtime.agent_hud.is_none(),
+            "collection outlives the project left"
+        );
     });
 }
 
