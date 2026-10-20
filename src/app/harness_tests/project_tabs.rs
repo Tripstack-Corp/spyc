@@ -905,3 +905,161 @@ fn the_bell_for_another_project_names_it() {
         assert_eq!(app.flash_text(), Some("xproj: tab 1 is blocked"));
     });
 }
+
+// ── #99 step 6b: `Space !` and `^a !`, to the agent that needs you ─────────
+
+/// `Space !` from the file list.
+fn space_bang(app: &mut App) {
+    app.handle_key(key(' ')).unwrap();
+    app.handle_key(key('!')).unwrap();
+}
+
+/// Project `id`'s tab `index` reports `status` at `at`, and the walk sees it.
+fn report_at(
+    app: &mut App,
+    id: state::ProjectId,
+    index: usize,
+    status: AgentActivity,
+    at: Instant,
+) {
+    edit_tab(app, id, index, |info| {
+        info.reported = Some(report(status, at));
+    });
+    app.settle_agent_activity(at, &mut RunCtx::for_test());
+}
+
+/// The active tab of the project in view, and whether the pane has the keys.
+fn where_now(app: &App) -> (state::ProjectId, usize, bool) {
+    let tab = app
+        .runtime
+        .project()
+        .pane_tabs
+        .as_ref()
+        .map_or(0, crate::pane::PaneTabs::active_index);
+    (app.state.active, tab, app.state.pane_focused())
+}
+
+/// `Space !` goes to the agent that needs you, in any project: its project,
+/// its tab, and the pane focused on it.
+#[test]
+#[ignore = "red: Space ! does nothing"]
+fn space_bang_goes_to_a_blocked_agent_in_another_project() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, x, &x_home, "claude");
+        activate(app, x, 0);
+        app.make_active(t.y);
+        report_at(app, x, 1, AgentActivity::Blocked, Instant::now());
+        space_bang(app);
+        assert_eq!(where_now(app), (x, 1, true));
+    });
+}
+
+/// The longest-blocked agent comes first, and `Space !` again goes on to the
+/// next, so pressing it walks through every agent waiting on you.
+#[test]
+#[ignore = "red: Space ! does nothing"]
+fn space_bang_again_goes_to_the_next_agent() {
+    with_two(|t| {
+        let (app, x, y, x_home, y_home) =
+            (&mut t.app, t.x, t.y, t.x_home.clone(), t.y_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, y, &y_home, "claude");
+        let now = Instant::now();
+        report_at(app, y, 0, AgentActivity::Blocked, now);
+        report_at(
+            app,
+            x,
+            0,
+            AgentActivity::Blocked,
+            now + Duration::from_secs(5),
+        );
+        space_bang(app);
+        assert_eq!(where_now(app), (y, 0, true), "y has waited longer");
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+            .unwrap();
+        app.handle_key(key('!')).unwrap();
+        assert_eq!(where_now(app), (x, 0, true), "then x");
+    });
+}
+
+/// With nothing blocked, a done the user hasn't seen is next.
+#[test]
+#[ignore = "red: Space ! does nothing"]
+fn space_bang_goes_to_an_unseen_done() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        app.make_active(t.y);
+        report_at(app, x, 0, AgentActivity::Done, Instant::now());
+        space_bang(app);
+        assert_eq!(where_now(app), (x, 0, true));
+    });
+}
+
+/// With nothing waiting, it says so and goes nowhere.
+#[test]
+#[ignore = "red: Space ! does nothing"]
+fn space_bang_with_nothing_waiting_says_so() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        app.make_active(t.y);
+        report_at(app, x, 0, AgentActivity::Working, Instant::now());
+        space_bang(app);
+        assert_eq!(app.state.active, t.y);
+        assert_eq!(app.flash_text(), Some("nothing needs you"));
+    });
+}
+
+/// `^a !` reaches it from inside an agent's pane, in two keys.
+#[test]
+#[ignore = "red: ^a ! does nothing"]
+fn ctrl_a_bang_works_from_the_pane() {
+    with_two(|t| {
+        let (app, x, y, x_home, y_home) =
+            (&mut t.app, t.x, t.y, t.x_home.clone(), t.y_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, y, &y_home, "claude");
+        app.make_active(y);
+        app.state.active_project_mut().focus = state::Focus::Pane;
+        report_at(app, x, 0, AgentActivity::Blocked, Instant::now());
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+            .unwrap();
+        app.handle_key(key('!')).unwrap();
+        assert_eq!(where_now(app), (x, 0, true));
+    });
+}
+
+/// With one project open it still goes to the tab, and brings a hidden or
+/// zoomed-away pane back into view.
+#[test]
+#[ignore = "red: Space ! does nothing"]
+fn space_bang_in_one_project_shows_the_pane() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        app.remove_test_project(t.y);
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, x, &x_home, "claude");
+        activate(app, x, 0);
+        report_at(app, x, 1, AgentActivity::Blocked, Instant::now());
+        for hide in [
+            |app: &mut App| app.state.active_project_mut().pane.pane_hidden = true,
+            |app: &mut App| app.state.active_project_mut().pane.zoom = state::ZoomTarget::TopList,
+        ] {
+            activate(app, x, 0);
+            app.state.active_project_mut().focus = state::Focus::FileList;
+            hide(app);
+            space_bang(app);
+            assert_eq!(where_now(app), (x, 1, true));
+            let pane = &app.state.active_project().pane;
+            assert!(
+                !pane.pane_hidden && pane.zoom != state::ZoomTarget::TopList,
+                "the pane is still out of view"
+            );
+            app.state.active_project_mut().pane.pane_hidden = false;
+            app.state.active_project_mut().pane.zoom = state::ZoomTarget::None;
+        }
+    });
+}
