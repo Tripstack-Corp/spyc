@@ -509,6 +509,7 @@ mod project_switch;
 mod project_tabs;
 mod projects_attention;
 mod projects_close;
+mod projects_dumps;
 mod projects_mcp;
 mod projects_open;
 mod projects_plumbing;
