@@ -1,3 +1,7 @@
+//! Folds an agy transcript's events, in file order, into the HUD's [`Snapshot`]:
+//! usage, mode, compactions and tool calls, each result paired with its call and
+//! a result that arrives first held until its call does.
+
 use std::collections::{BTreeMap, VecDeque};
 
 use jiff::Timestamp;

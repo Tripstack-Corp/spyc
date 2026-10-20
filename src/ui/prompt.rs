@@ -1,3 +1,6 @@
+//! Draws the prompt line: its prefix, the buffer and the vi-mode cursor, with a
+//! long line wrapped.
+
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},

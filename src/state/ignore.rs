@@ -1,3 +1,6 @@
+//! The ignore masks: groups of glob patterns (dotfiles and build artifacts by
+//! default) that a listing hides while their mask is on.
+
 use glob::Pattern;
 
 /// A single ignore mask: a list of glob patterns plus an on/off switch.

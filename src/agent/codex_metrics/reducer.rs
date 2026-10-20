@@ -1,3 +1,7 @@
+//! Folds a Codex rollout's metric events into the HUD's [`Snapshot`]: the latest
+//! cumulative token snapshot, which replaces older ones rather than adding to
+//! them, the current turn, and its tool calls.
+
 use std::collections::BTreeMap;
 
 use jiff::Timestamp;

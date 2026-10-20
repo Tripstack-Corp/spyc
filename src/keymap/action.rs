@@ -1,3 +1,7 @@
+//! [`Action`], the vocabulary of everything a key can do, with each action's
+//! tier, its description, and the snake_case name a `.spycrc.toml` `map` or
+//! `spyc.action` names it by.
+
 /// The full vocabulary of things spyc can do in response to input.
 ///
 /// Keep this enum stable and spy-parity-friendly: each variant should map to

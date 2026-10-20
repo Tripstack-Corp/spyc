@@ -2,29 +2,9 @@
 //!
 //! AGENTS.md's module index gives each module one line because the module's own
 //! doc carries the rest, so a module without one has only that line to explain
-//! it. The modules without one when this guard landed are listed in
-//! [`UNDOCUMENTED`], and the list only shrinks.
+//! it.
 
 use std::path::Path;
-
-/// Modules with no `//!` doc when this guard landed. Writing one means deleting
-/// its entry; adding one defeats the guard.
-const UNDOCUMENTED: &[&str] = &[
-    "src/agent/agy_metrics/reducer.rs",
-    "src/agent/claude_metrics/reducer.rs",
-    "src/agent/codex_metrics/reducer.rs",
-    "src/agent/status_hook.rs",
-    "src/fs/entry.rs",
-    "src/fs/listing.rs",
-    "src/keymap/action.rs",
-    "src/keymap/resolver/mod.rs",
-    "src/mcp/hooks/codex.rs",
-    "src/state/cursor.rs",
-    "src/state/ignore.rs",
-    "src/state/picks.rs",
-    "src/ui/prompt.rs",
-    "src/ui/status.rs",
-];
 
 /// Whether `src` opens with a module doc, past any inner attributes.
 fn has_module_doc(src: &str) -> bool {
@@ -47,25 +27,14 @@ fn every_module_opens_with_a_module_doc() {
         "found {} modules; the walk is looking in the wrong place",
         modules.len()
     );
-    let mut problems = Vec::new();
-    for (rel, src) in &modules {
-        match (has_module_doc(src), UNDOCUMENTED.contains(&rel.as_str())) {
-            (false, false) => problems.push(format!(
-                "{rel}: no `//!` module doc. Say what the module is for, in a line or two."
-            )),
-            (true, true) => problems.push(format!(
-                "{rel}: has a module doc now. Delete its UNDOCUMENTED entry."
-            )),
-            _ => {}
-        }
-    }
-    for listed in UNDOCUMENTED {
-        if !modules.iter().any(|(rel, _)| rel == listed) {
-            problems.push(format!(
-                "{listed}: listed in UNDOCUMENTED but not found. Delete it."
-            ));
-        }
-    }
+    let mut problems: Vec<String> = modules
+        .iter()
+        .filter(|(_, src)| !has_module_doc(src))
+        .map(|(rel, _)| {
+            format!("{rel}: no `//!` module doc. Say what the module is for, in a line or two.")
+        })
+        .collect();
+    problems.sort();
     assert!(
         problems.is_empty(),
         "module docs (src/module_doc_guard.rs):\n{}",
@@ -83,12 +52,4 @@ fn a_module_doc_is_the_first_thing_past_inner_attributes() {
     assert!(!has_module_doc("// A plain comment.\n//! Too late.\n"));
     assert!(!has_module_doc("use std::fs;\n"));
     assert!(!has_module_doc(""));
-}
-
-#[test]
-fn undocumented_is_sorted_with_one_entry_per_file() {
-    assert!(
-        UNDOCUMENTED.windows(2).all(|pair| pair[0] < pair[1]),
-        "keep UNDOCUMENTED sorted, one entry per file"
-    );
 }

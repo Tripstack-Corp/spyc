@@ -1,3 +1,6 @@
+//! Picks, the per-directory multi-select, kept by path so a re-read listing
+//! doesn't lose them.
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 

@@ -1,3 +1,6 @@
+//! Reading a directory into a sorted [`Listing`], capped at [`MAX_ENTRIES`], and
+//! telling a macOS privacy denial apart from an ordinary permission error.
+
 use std::fmt;
 use std::path::{Path, PathBuf};
 
