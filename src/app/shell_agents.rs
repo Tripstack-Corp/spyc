@@ -57,6 +57,7 @@ fn forget_agent(info: &mut TabInfo) {
     info.scrape_pending_at = None;
     info.activity = crate::pane::AgentActivity::Unknown;
     info.notified = crate::pane::AgentActivity::Unknown;
+    info.unseen_done = None;
     info.live_session_id = None;
     info.claude_statusline = None;
     info.codex_session_id = None;
@@ -275,7 +276,7 @@ pub(super) const fn transition(
 
 #[cfg(test)]
 mod tests {
-    use super::{Change, Seen, identify, transition};
+    use super::{Change, Seen, forget_agent, identify, transition};
     use crate::pane::RunningAgent;
     use crate::proc_group::Member;
     use crate::state::sessions::AgentKind;
@@ -287,6 +288,17 @@ mod tests {
             argv: argv.iter().map(|a| (*a).to_string()).collect(),
             started_epoch_secs: started,
         }
+    }
+
+    /// An agent that leaves a shell tab leaves no unseen done on it: the tab
+    /// is a shell again and has no dot to show one, and its `+` says the rest.
+    #[test]
+    fn a_departed_agent_leaves_no_unseen_done() {
+        use crate::pane::tabs::TabInfo;
+        let mut info = TabInfo::new("zsh", "/tmp");
+        info.unseen_done = Some(std::time::Instant::now());
+        forget_agent(&mut info);
+        assert_eq!(info.unseen_done, None);
     }
 
     /// An agent that leaves a shell tab takes its turn with it: a wait it held
