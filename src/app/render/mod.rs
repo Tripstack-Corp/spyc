@@ -1052,6 +1052,11 @@ mod purity_guard {
         ("render/agent_hud.rs", include_str!("agent_hud.rs")),
         ("render/layout.rs", include_str!("layout.rs")),
         ("ui/agent_hud.rs", include_str!("../../ui/agent_hud.rs")),
+        ("ui/status.rs", include_str!("../../ui/status.rs")),
+        (
+            "ui/project_chips.rs",
+            include_str!("../../ui/project_chips.rs"),
+        ),
         (
             "ui/agent_hud/claude.rs",
             include_str!("../../ui/agent_hud/claude.rs"),

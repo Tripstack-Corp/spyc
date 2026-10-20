@@ -1,17 +1,23 @@
-//! `Space !` / `^a !`: going to the agent that needs you, in any project (#99).
+//! Which agents need the user, in every project (#99): `Space !` / `^a !`
+//! going to one, and each project's roll-up for the status bar, the title and
+//! `Space j`.
 //!
 //! [`pick`] orders every agent waiting on the user: blocked ones first, the
 //! longest-waiting first, then dones not yet seen. It goes on from the agent
 //! the user is at, so pressing again walks through them all, even as a done
 //! just visited stops counting. [`App::go_to_attention`] goes there: the
 //! project, the tab, and the keyboard in its pane, which is brought into view
-//! first.
+//! first. [`rollup`] is a project's most urgent agent, its chip's glyph.
 
+use std::collections::HashMap;
 use std::time::Instant;
+
+use ratatui::style::Color;
 
 use super::App;
 use super::state::{self, ProjectId};
-use crate::pane::AgentActivity;
+use crate::pane::{AgentActivity, TabInfo};
+use crate::ui::project_chips::{ProjectAttention, ProjectChip, ProjectChips};
 
 /// An agent waiting on the user: where it is, and since when.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,7 +60,70 @@ pub(super) fn pick(waiting: &[Waiting], after: Option<WaitKey>) -> Option<Waitin
         .map(|w| **w)
 }
 
+/// What one project's agents most need from the user, from each tab and
+/// whether it is in view: blocked, then a done not yet seen, then at work,
+/// then waiting on work of its own. `None` while every agent is idle or its
+/// done is seen, and for a project running none. A `^z`-suspended tab counts
+/// for nothing, as its dot shows 💤 in place of its state.
+pub(super) fn rollup<'a>(
+    tabs: impl IntoIterator<Item = (&'a TabInfo, bool)>,
+) -> Option<ProjectAttention> {
+    tabs.into_iter()
+        .filter(|(info, _)| !info.suspended)
+        .filter_map(|(info, seen)| match info.shown_activity(seen) {
+            AgentActivity::Blocked => Some(ProjectAttention::Blocked),
+            AgentActivity::Done if !seen && info.unseen_done.is_some() => {
+                Some(ProjectAttention::UnseenDone)
+            }
+            AgentActivity::Working => Some(ProjectAttention::Working),
+            AgentActivity::Waiting => Some(ProjectAttention::Waiting),
+            AgentActivity::Done | AgentActivity::Idle | AgentActivity::Unknown => None,
+        })
+        .max()
+}
+
 impl App {
+    /// Every open project's chip for the status bar, in switcher order, while
+    /// several are open. With one, the bar reads as it always has.
+    pub(super) fn project_chips(&self, pulse: Color) -> Option<ProjectChips> {
+        let attention = self.project_attention();
+        let chips: Vec<ProjectChip> = self
+            .state
+            .open_projects()
+            .map(|p| ProjectChip {
+                label: p.label(),
+                attention: attention.get(&p.id).copied(),
+                active: p.id == self.state.active,
+            })
+            .collect();
+        (chips.len() > 1).then_some(ProjectChips { chips, pulse })
+    }
+
+    /// Each open project's [`rollup`], the tab in view counted as seen.
+    /// Projects with nothing to say are left out.
+    pub(super) fn project_attention(&self) -> HashMap<ProjectId, ProjectAttention> {
+        let in_view = self.in_view_tab();
+        self.runtime
+            .every_tab_set()
+            .filter_map(|(id, tabs)| {
+                let seen = |i| id == self.state.active && in_view == Some(i);
+                let tabs = tabs.tabs().iter().enumerate();
+                Some((id, rollup(tabs.map(|(i, e)| (&e.info, seen(i))))?))
+            })
+            .collect()
+    }
+
+    /// How many tabs are blocked in the projects out of view, `^z`-suspended
+    /// ones aside: the title's count, for a user looking at another window.
+    pub(super) fn blocked_elsewhere(&self) -> usize {
+        self.runtime
+            .every_tab_set()
+            .filter(|(id, _)| *id != self.state.active)
+            .flat_map(|(_, tabs)| tabs.tabs())
+            .filter(|e| e.info.activity == AgentActivity::Blocked && !e.info.suspended)
+            .count()
+    }
+
     /// `Space !`: go to the agent that needs you ([`pick`]), switching project
     /// and tab and giving its pane the keyboard, or say that none does.
     pub(super) fn go_to_attention(&mut self) {
@@ -148,8 +217,64 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{Waiting, pick};
+    use super::{Waiting, pick, rollup};
+    use crate::pane::{AgentActivity, TabInfo};
+    use crate::ui::project_chips::ProjectAttention;
     use std::time::{Duration, Instant};
+
+    fn tab(activity: AgentActivity, unseen: bool) -> TabInfo {
+        let mut info = TabInfo::new("claude", "/tmp");
+        info.activity = activity;
+        info.unseen_done = unseen.then(Instant::now);
+        info
+    }
+
+    /// The most urgent tab speaks for its project: blocked, then a done not
+    /// yet seen, then work, then a wait on its own work.
+    #[test]
+    fn a_project_shows_its_most_urgent_agent() {
+        use AgentActivity::{Blocked, Done, Idle, Waiting, Working};
+        let of = |tabs: &[TabInfo]| rollup(tabs.iter().map(|t| (t, false)));
+        let all = [
+            tab(Waiting, false),
+            tab(Working, false),
+            tab(Idle, true),
+            tab(Blocked, false),
+        ];
+        assert_eq!(of(&all), Some(ProjectAttention::Blocked));
+        assert_eq!(of(&all[..3]), Some(ProjectAttention::UnseenDone));
+        assert_eq!(of(&all[..2]), Some(ProjectAttention::Working));
+        assert_eq!(of(&all[..1]), Some(ProjectAttention::Waiting));
+        assert_eq!(of(&[tab(Idle, false), tab(Done, false)]), None);
+    }
+
+    /// A done counts only while unseen: not on the tab in view, nor once
+    /// seen, and an agent back at work shows its work.
+    #[test]
+    fn a_seen_done_or_one_back_at_work_says_nothing_new() {
+        use AgentActivity::{Done, Idle, Unknown, Working};
+        let one = |t: TabInfo, seen| rollup([(&t, seen)]);
+        assert_eq!(
+            one(tab(Done, true), false),
+            Some(ProjectAttention::UnseenDone)
+        );
+        assert_eq!(one(tab(Idle, true), true), None);
+        assert_eq!(one(tab(Done, true), true), None);
+        assert_eq!(
+            one(tab(Working, true), false),
+            Some(ProjectAttention::Working)
+        );
+        assert_eq!(one(tab(Unknown, false), false), None, "a shell tab");
+    }
+
+    /// A suspended agent's dot is 💤, so it says nothing for its project,
+    /// whatever its state underneath.
+    #[test]
+    fn a_suspended_agent_says_nothing() {
+        let mut blocked = tab(AgentActivity::Blocked, false);
+        blocked.suspended = true;
+        assert_eq!(rollup([(&blocked, false)]), None);
+    }
 
     fn at(project: usize, tab: usize, blocked: bool, since: Option<Instant>) -> Waiting {
         Waiting {

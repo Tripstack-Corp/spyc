@@ -400,7 +400,6 @@ impl App {
         phase_offset: u64,
     ) -> Option<ratatui::text::Span<'static>> {
         use crate::pane::AgentActivity;
-        use ratatui::style::Color;
         use ratatui::style::{Modifier, Style};
         use ratatui::text::Span;
         match activity {
@@ -421,7 +420,7 @@ impl App {
             AgentActivity::Blocked => Some(Span::styled(
                 "\u{25a0}", // ■
                 Style::default()
-                    .fg(Color::Rgb(0xF7, 0x76, 0x8E)) // hot red (matches bg-task err)
+                    .fg(crate::ui::project_chips::BLOCKED_RED)
                     .add_modifier(Modifier::BOLD),
             )),
             // Done = finished a turn, waiting for the next prompt: a calm teal
@@ -450,7 +449,7 @@ impl App {
     /// A 256-colour terminal gets the same colours quantized by the frame's
     /// downgrade, a stepped warm ramp; a mono theme drops to the single accent
     /// (no pulse). PURE.
-    const fn spicy_pulse_color(&self, frame: u64) -> ratatui::style::Color {
+    pub(in crate::app) const fn spicy_pulse_color(&self, frame: u64) -> ratatui::style::Color {
         if self.view.theme.mono {
             return self.view.theme.prompt_prefix;
         }
@@ -803,6 +802,33 @@ mod tests {
     /// shared frame but different phase seeds land on different heat colours, so
     /// the dots don't breathe in lockstep. Also pins the overflow contract — a
     /// full-range seed must `wrapping_add` onto the frame, not panic.
+    /// A project's chip shows its agent's dot: the same glyph in the same
+    /// style for each state the chip shows, in colour and in mono.
+    #[test]
+    fn a_projects_glyph_is_its_agents_dot() {
+        use crate::ui::project_chips::{ProjectAttention, glyph};
+        let mut app = App::test_app(PathBuf::from("/tmp/proj"));
+        app.view.agent_anim_frame = 1;
+        for mono in [false, true] {
+            app.view.theme.mono = mono;
+            let pulse = app.spicy_pulse_color(app.view.agent_anim_frame);
+            for (dot, chip) in [
+                (AgentActivity::Blocked, ProjectAttention::Blocked),
+                (AgentActivity::Done, ProjectAttention::UnseenDone),
+                (AgentActivity::Working, ProjectAttention::Working),
+                (AgentActivity::Waiting, ProjectAttention::Waiting),
+            ] {
+                let dot = app.agent_activity_span(dot, 0).expect("an agent's dot");
+                let chip = glyph(chip, pulse, &app.view.theme);
+                assert_eq!(
+                    (dot.content, dot.style),
+                    (chip.content, chip.style),
+                    "mono={mono}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn working_pulse_phase_offset_desyncs_tabs() {
         let mut app = App::test_app(PathBuf::from("/tmp/proj"));

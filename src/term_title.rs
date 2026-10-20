@@ -2,7 +2,10 @@
 //!
 //! Title is `🌶️: <project> · <session>` (session omitted when there's
 //! no `SESSION_NAME`). `<project>` is the basename of `PROJECT_HOME`
-//! when set, otherwise the basename of the current cwd.
+//! when set, otherwise the basename of the current cwd. While several
+//! projects are open it is the label of the one in view, followed by a
+//! count of the tabs blocked in the others when there are any:
+//! `🌶️: spyc (■2) · SAFFRON_CUMIN`.
 //!
 //! When `$TMUX` is set, every emitted sequence is wrapped in tmux's
 //! DCS passthrough so it reaches the outer terminal (e.g. iTerm2).
@@ -79,15 +82,26 @@ fn sanitize_title(title: &str) -> String {
 
 /// Compose the title from project + session info.
 pub fn compose(project_home: Option<&Path>, session_name: Option<&str>, cwd: &Path) -> String {
-    let logo = "\u{1f336}\u{fe0f}";
     let project = project_home
         .and_then(|p| p.file_name())
         .or_else(|| cwd.file_name())
         .and_then(|s| s.to_str())
         .unwrap_or("spyc");
+    titled(project, 0, session_name)
+}
+
+/// The title naming `project`, with `blocked_elsewhere` tabs blocked in the
+/// other open projects (none shows no count).
+pub fn titled(project: &str, blocked_elsewhere: usize, session_name: Option<&str>) -> String {
+    let logo = "\u{1f336}\u{fe0f}";
+    let blocked = if blocked_elsewhere == 0 {
+        String::new()
+    } else {
+        format!(" (\u{25a0}{blocked_elsewhere})")
+    };
     match session_name {
-        Some(s) if !s.is_empty() => format!("{logo}: {project} \u{b7} {s}"),
-        _ => format!("{logo}: {project}"),
+        Some(s) if !s.is_empty() => format!("{logo}: {project}{blocked} \u{b7} {s}"),
+        _ => format!("{logo}: {project}{blocked}"),
     }
 }
 
@@ -124,6 +138,15 @@ mod tests {
         let p = PathBuf::from("/x/proj");
         let s = compose(Some(&p), Some(""), &p);
         assert_eq!(s, "\u{1f336}\u{fe0f}: proj");
+    }
+
+    #[test]
+    fn titled_counts_the_blocked_elsewhere() {
+        assert_eq!(
+            titled("web", 2, Some("SAGE")),
+            "\u{1f336}\u{fe0f}: web (\u{25a0}2) \u{b7} SAGE"
+        );
+        assert_eq!(titled("web", 0, None), "\u{1f336}\u{fe0f}: web");
     }
 
     #[test]

@@ -784,11 +784,17 @@ impl App {
     /// and the foreground-exec after-work resets it to `None` to force a
     /// re-emit. Returns `None` when the title is unchanged.
     pub(super) fn term_title_effect(&mut self) -> Option<Effect> {
-        let title = crate::term_title::compose(
-            self.state.active_project().home.as_deref(),
-            self.state.session_name.as_deref(),
-            &self.state.cur().listing.dir,
-        );
+        let session = self.state.session_name.as_deref();
+        let title = if self.state.open_projects().nth(1).is_some() {
+            let label = self.state.active_project().label();
+            crate::term_title::titled(&label, self.blocked_elsewhere(), session)
+        } else {
+            crate::term_title::compose(
+                self.state.active_project().home.as_deref(),
+                session,
+                &self.state.cur().listing.dir,
+            )
+        };
         if self.view.last_term_title.as_deref() == Some(&title) {
             return None;
         }

@@ -386,9 +386,11 @@ impl App {
             .as_deref()
             .map(path_basename_display);
         let agent_info = self.active_agent_status();
+        let chips = self.project_chips(self.spicy_pulse_color(self.view.agent_anim_frame));
         let line = StatusBar {
             project_home: project_label.as_deref(),
             session_name: self.state.session_name.as_deref(),
+            projects: chips.as_ref(),
             path: &path,
             suffix: &suffix.full,
             suffix_short: suffix.short.as_deref(),

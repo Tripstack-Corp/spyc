@@ -1,6 +1,7 @@
 //! Draws the status bar's powerline segments (pepper, `PROJECT_HOME`, session,
 //! path, git, agent and the column's state), cutting the path in the middle
-//! when the row is too short.
+//! when the row is too short. While several projects are open, their chips
+//! (`ui::project_chips`) take the place of `PROJECT_HOME` and the session.
 
 use ratatui::{
     layout::Rect,
@@ -8,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
+use crate::ui::project_chips::{self, ProjectChips};
 use crate::ui::theme::Theme;
 
 pub struct StatusBar<'a> {
@@ -15,6 +17,9 @@ pub struct StatusBar<'a> {
     pub project_home: Option<&'a str>,
     /// Session display name (e.g. `SAFFRON_CUMIN`). Hidden when `None`.
     pub session_name: Option<&'a str>,
+    /// Every open project's chip while several are open, drawn in a third of
+    /// the bar in place of `project_home` and `session_name`. `None` with one.
+    pub projects: Option<&'a ProjectChips>,
     pub path: &'a str,
     /// Optional trailing state, e.g. `[picks:2 hidden:3]`.
     pub suffix: &'a str,
@@ -46,6 +51,24 @@ fn push_segment(spans: &mut Vec<Span>, text: &str, fg: Color, bg: Color, next_bg
         text.to_string(),
         Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
     ));
+    spans.push(Span::styled(PL_SEP, Style::default().fg(bg).bg(next_bg)));
+}
+
+/// [`push_segment`] for a segment of styled spans: each drawn on `bg`, in `fg`
+/// unless it has a colour of its own.
+fn push_spans(
+    spans: &mut Vec<Span<'static>>,
+    segment: Vec<Span<'static>>,
+    fg: Color,
+    bg: Color,
+    next_bg: Color,
+) {
+    let base = Style::default().fg(fg).bg(bg);
+    spans.extend(
+        segment
+            .into_iter()
+            .map(|s| Span::styled(s.content, base.patch(s.style))),
+    );
     spans.push(Span::styled(PL_SEP, Style::default().fg(bg).bg(next_bg)));
 }
 
@@ -118,13 +141,18 @@ impl StatusBar<'_> {
 
         let emoji_w = 4; // space + 🌶️ (2 cols) + space
 
-        let project_text = self.project_home.map(|p| format!(" {p} "));
-        let session_text = self.session_name.map(|n| format!(" {n} "));
+        let project_spans = self.project_spans(avail);
+        let session_text = self
+            .session_name
+            .filter(|_| self.projects.is_none())
+            .map(|n| format!(" {n} "));
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} "));
         let agent_text = self.agent_info.map(|a| format!(" \u{f120} {a} ")); // 󰰠 terminal-shell-like glyph
 
         let width_of = |t: &Option<String>| t.as_deref().map_or(0, |s| dw(s) + 1);
-        let project_w = width_of(&project_text);
+        let project_w = project_spans
+            .as_ref()
+            .map_or(0, |s| project_chips::width(s) + 1);
         let session_w = width_of(&session_text);
         let git_w = width_of(&git_text);
         let agent_w = width_of(&agent_text);
@@ -158,13 +186,9 @@ impl StatusBar<'_> {
         let mut spans: Vec<Span> = Vec::new();
         self.push_logo(&mut spans, term_bg);
 
-        if let Some(ref text) = project_text {
-            let next_bg = if session_text.is_some() {
-                sess_bg
-            } else {
-                path_bg
-            };
-            push_segment(&mut spans, text, proj_fg, proj_bg, next_bg);
+        if let Some(project) = project_spans {
+            let next_bg = session_text.as_ref().map_or(path_bg, |_| sess_bg);
+            push_spans(&mut spans, project, proj_fg, proj_bg, next_bg);
         }
         if let Some(ref text) = session_text {
             push_segment(&mut spans, text, sess_fg, sess_bg, path_bg);
@@ -211,20 +235,51 @@ impl StatusBar<'_> {
         Line::from(spans)
     }
 
+    /// The project segment, padded, before the bar's colours: `PROJECT_HOME`'s
+    /// basename with one project open, else the chips, in a third of the bar
+    /// with the padding and the separator.
+    fn project_spans(&self, avail: usize) -> Option<Vec<Span<'static>>> {
+        let Some(chips) = self.projects else {
+            return self.project_home.map(|p| {
+                vec![Span::styled(
+                    format!(" {p} "),
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]
+            });
+        };
+        let mut spans = vec![Span::raw(" ")];
+        // The logo, the padding and the separator.
+        let most = avail.saturating_sub(4 + 3);
+        spans.extend(chips.spans(chip_room(avail), most, self.theme));
+        spans.push(Span::raw(" "));
+        Some(spans)
+    }
+
     /// Fallback plain rendering for mono mode.
     fn plain_line(&self, area: Rect) -> Line<'static> {
         let avail = area.width as usize;
 
-        let parts: Vec<&str> = [self.project_home, self.session_name]
-            .into_iter()
-            .flatten()
-            .collect();
-        let prefix = if parts.is_empty() {
-            String::new()
+        let mut spans = if let Some(chips) = self.projects {
+            let most = avail.saturating_sub(2);
+            let mut spans = chips.spans(chip_room(avail), most, self.theme);
+            spans.push(Span::raw(": "));
+            spans
         } else {
-            format!("{}: ", parts.join(" "))
+            let parts: Vec<&str> = [self.project_home, self.session_name]
+                .into_iter()
+                .flatten()
+                .collect();
+            let prefix = if parts.is_empty() {
+                String::new()
+            } else {
+                format!("{}: ", parts.join(" "))
+            };
+            vec![Span::styled(
+                prefix,
+                Style::default().add_modifier(Modifier::BOLD),
+            )]
         };
-        let pre_w = dw(&prefix);
+        let pre_w = project_chips::width(&spans);
         let cost = |s: &str| if s.is_empty() { 0 } else { 2 + dw(s) };
         let suffix = self.fitting_suffix(avail.saturating_sub(pre_w), cost, dw(self.path));
         let suffix_w = cost(suffix);
@@ -237,10 +292,7 @@ impl StatusBar<'_> {
             (truncate_middle(self.path, budget), String::new())
         };
 
-        let mut spans = vec![
-            Span::styled(prefix, Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(path_disp),
-        ];
+        spans.push(Span::raw(path_disp));
         if !suffix_disp.is_empty() {
             spans.push(Span::raw("  "));
             spans.push(Span::styled(
@@ -250,6 +302,13 @@ impl StatusBar<'_> {
         }
         Line::from(spans)
     }
+}
+
+/// The chips' room in an `avail`-wide bar: a third of it, less the powerline
+/// segment's padding and separator. Mono takes the same, so both narrow at the
+/// same widths.
+const fn chip_room(avail: usize) -> usize {
+    (avail / 3).saturating_sub(3)
 }
 
 /// Elide the middle of `s` to fit `max` display columns, keeping a third of the
@@ -369,6 +428,7 @@ mod tests {
                 let bar = StatusBar {
                     project_home,
                     session_name,
+                    projects: None,
                     path,
                     suffix,
                     suffix_short: None,
@@ -397,6 +457,7 @@ mod tests {
         let bar = StatusBar {
             project_home: Some("spyc"),
             session_name: None,
+            projects: None,
             path,
             suffix: "[picks:3 hidden:12 sort:mtime]",
             suffix_short: Some("[p:3 h:12 s:t]"),
@@ -440,6 +501,7 @@ mod tests {
         let bar = StatusBar {
             project_home: Some("spyc"),
             session_name: None,
+            projects: None,
             path: PATH,
             suffix: "[picks:3 hidden:12 sort:mtime]",
             suffix_short: None,
@@ -533,6 +595,111 @@ mod tests {
             96,
         );
         insta::assert_snapshot!(out);
+    }
+
+    /// The chips take the project and session segments' place, on the
+    /// project segment's background, each glyph keeping its own colour.
+    #[test]
+    fn the_chips_take_the_project_and_session_place() {
+        use crate::ui::project_chips::{BLOCKED_RED, ProjectAttention, ProjectChip};
+        let theme = Theme::default();
+        let chips = ProjectChips {
+            chips: vec![
+                ProjectChip {
+                    label: "web".into(),
+                    attention: Some(ProjectAttention::Blocked),
+                    active: false,
+                },
+                ProjectChip {
+                    label: "spyc".into(),
+                    attention: None,
+                    active: true,
+                },
+            ],
+            pulse: Color::Red,
+        };
+        let bar = StatusBar {
+            project_home: Some("spyc"),
+            session_name: Some("SAFFRON_CUMIN"),
+            projects: Some(&chips),
+            path: PATH,
+            suffix: "",
+            suffix_short: None,
+            git_info: None,
+            agent_info: None,
+            theme: &theme,
+            plain_logo: true,
+        };
+        let line = bar.build_line(Rect::new(0, 0, 120, 1));
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains(" web ■ · spyc "), "{text}");
+        assert!(!text.contains("SAFFRON_CUMIN"), "{text}");
+        let glyph = line
+            .spans
+            .iter()
+            .find(|s| s.content == "■")
+            .expect("a glyph");
+        let label = line
+            .spans
+            .iter()
+            .find(|s| s.content == "spyc")
+            .expect("a label");
+        assert_eq!(glyph.style.fg, Some(BLOCKED_RED));
+        assert_eq!(glyph.style.bg, label.style.bg);
+        assert!(glyph.style.bg.is_some());
+    }
+
+    /// However narrow the bar, the narrowest step's `■` and the segment's end
+    /// (the separator, or mono's `: `) are on it: the label is cut first.
+    #[test]
+    fn the_narrowest_chips_fit_the_bar() {
+        use crate::ui::project_chips::{ProjectAttention, ProjectChip};
+        let chips = ProjectChips {
+            chips: vec![
+                ProjectChip {
+                    label: "a-long-project-name".into(),
+                    attention: None,
+                    active: true,
+                },
+                ProjectChip {
+                    label: "x".into(),
+                    attention: Some(ProjectAttention::Blocked),
+                    active: false,
+                },
+            ],
+            pulse: Color::Red,
+        };
+        for mono in [false, true] {
+            let theme = Theme {
+                mono,
+                ..Theme::default()
+            };
+            let end = if mono { ": " } else { PL_SEP };
+            for w in 12..40u16 {
+                let bar = StatusBar {
+                    project_home: None,
+                    session_name: None,
+                    projects: Some(&chips),
+                    path: PATH,
+                    suffix: "",
+                    suffix_short: None,
+                    git_info: None,
+                    agent_info: None,
+                    theme: &theme,
+                    plain_logo: true,
+                };
+                let line = bar.build_line(Rect::new(0, 0, w, 1));
+                let mut col = 0;
+                let mut block = false;
+                let ends = line.spans.iter().find_map(|s| {
+                    block |= s.content == "■";
+                    col += dw(&s.content);
+                    (block && s.content == end).then_some(col)
+                });
+                let ends = ends.expect("the block and the segment's end");
+                assert!(ends <= usize::from(w), "mono={mono} w={w}: {line:?}");
+            }
+        }
     }
 
     #[test]

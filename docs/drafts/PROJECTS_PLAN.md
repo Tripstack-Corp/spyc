@@ -1072,6 +1072,24 @@ PR, except step 5's stages:
      gets its `+`. Notifications name the project while several are open, and
      a bell rung from another project flashes "web: tab 2 is blocked". The
      roll-up moves to 6c, its first consumer.
+   - **Going there (pair 6b).** `Space !`, and `^a !` from the pane
+     (`Tier::Meta`), goes to the agent waiting on the user longest, blocked
+     before an unseen done, in switcher then tab order on a tie, and on from
+     the one the user is at when pressed again (`attention::pick`). It
+     switches project and tab and brings the pane into view: shown, not
+     zoomed away, no modal pager over it. With nothing waiting it says
+     "nothing needs you".
+   - **Shown (pair 6c).** `attention::rollup` is a project's most urgent
+     agent (`ui::project_chips::ProjectAttention`): blocked, an unseen done,
+     working, then waiting, which draws `○` and never pulses. While several
+     projects are open the bar's projects segment draws a chip each in place
+     of the home and session segments, in a third of the bar, narrowing as §5
+     says; in the collapsed step `2/4` is the active project's place among
+     the open ones, and the last step cuts the label before the `■`. The
+     glyphs are the tab dots' own, styles included, in mono too. A
+     `^z`-suspended tab counts for nothing. The title counts the tabs blocked
+     in the other projects, and each `Space j` row carries its project's
+     glyph. With one project open nothing changes.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
 8. **Recently-closed projects in the switcher.**
 

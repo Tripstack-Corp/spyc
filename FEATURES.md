@@ -101,6 +101,8 @@ The status bar uses powerline-style segments in this order:
 - Pepper emoji (logo)
 - `PROJECT_HOME` basename (hidden when unset)
 - Session name in all caps (hidden when empty)
+- While several projects are open, a chip for each in place of those two,
+  with its agents' most urgent glyph ([Projects and sessions](docs/features/projects.md))
 - Current path (intelligently truncated)
 - Git branch with dirty flag (`main*`)
 - The active tab's agent

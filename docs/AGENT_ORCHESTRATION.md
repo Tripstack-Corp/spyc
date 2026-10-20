@@ -330,6 +330,14 @@ view, even after the done report decays to idle or the agent exits, and its dot
 stays teal meanwhile (`:activity dump` shows `unseen_done=`). A blocked agent's
 wait is timed from when it began (`TabInfo::blocked_since`). Neither is saved.
 
+**Each project's roll-up (#99).** While several projects are open, each
+project's chip in the status bar and its `Space j` row show its most urgent
+agent in the tab dots' glyphs: blocked (red `■`), then a done not yet seen
+(teal `■`), then working (`●`), then waiting on its own work (`○`, which never
+pulses). A project whose agents are idle, or whose done is seen, shows none,
+and a `^z`-suspended agent counts for nothing. The terminal title counts the
+tabs blocked in the projects out of view: `🌶️: spyc (■2) · SAFFRON_CUMIN`.
+
 ---
 
 ## 3. Session persistence & resume
