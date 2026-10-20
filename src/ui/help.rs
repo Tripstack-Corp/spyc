@@ -50,6 +50,10 @@ const SECTIONS: &[Section] = &[
             ("Space Space", "go to the project you were in last"),
             ("Space 1-9", "go to open project N"),
             ("Space ] [", "next / previous project, wrapping"),
+            (
+                "Space !",
+                "go to the agent that needs you (^a ! from the pane)",
+            ),
             ("Space s", "session info"),
             ("Space ?", "this help"),
             ("Space a", "about spyc (:about)"),
@@ -344,6 +348,7 @@ const SECTIONS: &[Section] = &[
                 "^a ↓",
                 "send a literal ^a to the pane (e.g. so Claude receives it)",
             ),
+            ("^a !", "go to the agent that needs you, in any project"),
             ("^a P", "pipe file contents of selection to pane"),
             ("^a i", "pipe inventory file contents to pane"),
             (

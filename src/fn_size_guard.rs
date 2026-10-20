@@ -30,7 +30,7 @@ const FUNCTION: Rule = Rule {
     slack: 10,
     advice: "Extract a cohesive helper",
     pins: &[
-        ("src/app/actions.rs::App::apply_inner", 360),
+        ("src/app/actions.rs::App::apply_inner", 331),
         ("src/app/archive_route.rs::classify", 142),
         ("src/app/bootstrap.rs::App::new", 211),
         ("src/app/effect/executor.rs::App::run_effects", 182),
@@ -62,7 +62,7 @@ const FUNCTION: Rule = Rule {
         ("src/keymap/action.rs::Action::canonical_name", 119),
         ("src/keymap/action.rs::Action::describe", 119),
         ("src/keymap/action.rs::action_from_name", 118),
-        ("src/keymap/resolver/mod.rs::Resolver::feed", 445),
+        ("src/keymap/resolver/mod.rs::Resolver::feed", 409),
         ("src/lua/api.rs::install", 170),
         ("src/mcp/protocol.rs::handle_tools_call", 384),
         (

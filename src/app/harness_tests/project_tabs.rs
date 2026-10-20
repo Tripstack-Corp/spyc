@@ -942,7 +942,6 @@ fn where_now(app: &App) -> (state::ProjectId, usize, bool) {
 /// `Space !` goes to the agent that needs you, in any project: its project,
 /// its tab, and the pane focused on it.
 #[test]
-#[ignore = "red: Space ! does nothing"]
 fn space_bang_goes_to_a_blocked_agent_in_another_project() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -959,13 +958,15 @@ fn space_bang_goes_to_a_blocked_agent_in_another_project() {
 /// The longest-blocked agent comes first, and `Space !` again goes on to the
 /// next, so pressing it walks through every agent waiting on you.
 #[test]
-#[ignore = "red: Space ! does nothing"]
 fn space_bang_again_goes_to_the_next_agent() {
     with_two(|t| {
         let (app, x, y, x_home, y_home) =
             (&mut t.app, t.x, t.y, t.x_home.clone(), t.y_home.clone());
         agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, x, &x_home, "cat");
         agent_tab_in(app, y, &y_home, "claude");
+        // The user is on x's other tab, so the first press starts from the top.
+        activate(app, x, 1);
         let now = Instant::now();
         report_at(app, y, 0, AgentActivity::Blocked, now);
         report_at(
@@ -986,7 +987,6 @@ fn space_bang_again_goes_to_the_next_agent() {
 
 /// With nothing blocked, a done the user hasn't seen is next.
 #[test]
-#[ignore = "red: Space ! does nothing"]
 fn space_bang_goes_to_an_unseen_done() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -1000,7 +1000,6 @@ fn space_bang_goes_to_an_unseen_done() {
 
 /// With nothing waiting, it says so and goes nowhere.
 #[test]
-#[ignore = "red: Space ! does nothing"]
 fn space_bang_with_nothing_waiting_says_so() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -1015,7 +1014,6 @@ fn space_bang_with_nothing_waiting_says_so() {
 
 /// `^a !` reaches it from inside an agent's pane, in two keys.
 #[test]
-#[ignore = "red: ^a ! does nothing"]
 fn ctrl_a_bang_works_from_the_pane() {
     with_two(|t| {
         let (app, x, y, x_home, y_home) =
@@ -1035,7 +1033,6 @@ fn ctrl_a_bang_works_from_the_pane() {
 /// With one project open it still goes to the tab, and brings a hidden or
 /// zoomed-away pane back into view.
 #[test]
-#[ignore = "red: Space ! does nothing"]
 fn space_bang_in_one_project_shows_the_pane() {
     with_two(|t| {
         let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
@@ -1047,6 +1044,9 @@ fn space_bang_in_one_project_shows_the_pane() {
         for hide in [
             |app: &mut App| app.state.active_project_mut().pane.pane_hidden = true,
             |app: &mut App| app.state.active_project_mut().pane.zoom = state::ZoomTarget::TopList,
+            |app: &mut App| {
+                app.state.active_project_mut().pane.zoom = state::ZoomTarget::RightColumn;
+            },
         ] {
             activate(app, x, 0);
             app.state.active_project_mut().focus = state::Focus::FileList;
@@ -1055,11 +1055,101 @@ fn space_bang_in_one_project_shows_the_pane() {
             assert_eq!(where_now(app), (x, 1, true));
             let pane = &app.state.active_project().pane;
             assert!(
-                !pane.pane_hidden && pane.zoom != state::ZoomTarget::TopList,
+                !pane.pane_hidden
+                    && matches!(
+                        pane.zoom,
+                        state::ZoomTarget::None | state::ZoomTarget::BottomPane
+                    ),
                 "the pane is still out of view"
             );
             app.state.active_project_mut().pane.pane_hidden = false;
             app.state.active_project_mut().pane.zoom = state::ZoomTarget::None;
         }
+    });
+}
+
+/// A modal pager left open in the project it goes to would cover the agent:
+/// it closes, as `q` would close it, so a picker it was doesn't stay armed
+/// for the next pager to open.
+#[test]
+fn space_bang_closes_a_pager_over_the_agent() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        app.as_project(x, App::open_project_switcher);
+        assert!(app.state.pending_projects.is_some(), "the switcher is open");
+        app.make_active(t.y);
+        report_at(app, x, 0, AgentActivity::Blocked, Instant::now());
+        space_bang(app);
+        assert_eq!(app.state.active, x);
+        assert_eq!(app.in_view_tab(), Some(0), "the pager still covers it");
+        assert!(
+            app.state.pending_projects.is_none(),
+            "the picker is still armed"
+        );
+    });
+}
+
+/// Pressing again walks through every agent waiting: a blocked one before an
+/// older unseen done, and on from a done just seen, which no longer waits,
+/// to the next rather than back to the top.
+#[test]
+fn space_bang_walks_on_past_a_done_just_seen() {
+    with_two(|t| {
+        let (app, x, y, x_home, y_home) =
+            (&mut t.app, t.x, t.y, t.x_home.clone(), t.y_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        agent_tab_in(app, x, &x_home, "cat");
+        agent_tab_in(app, y, &y_home, "claude");
+        agent_tab_in(app, y, &y_home, "claude");
+        activate(app, x, 1);
+        let t0 = Instant::now();
+        let at = |secs| t0 + Duration::from_secs(secs);
+        report_at(app, y, 0, AgentActivity::Done, at(0));
+        report_at(app, y, 1, AgentActivity::Done, at(1));
+        report_at(app, x, 0, AgentActivity::Blocked, at(2));
+        let bang = |app: &mut App| {
+            app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+                .unwrap();
+            app.handle_key(key('!')).unwrap();
+            app.settle_agent_activity(at(3), &mut RunCtx::for_test());
+            where_now(app)
+        };
+        assert_eq!(bang(app), (x, 0, true), "blocked before an older done");
+        assert_eq!(bang(app), (y, 0, true), "the older done next");
+        assert_eq!(
+            first_tab(app, y, |tab| tab.info.unseen_done),
+            None,
+            "the done is seen"
+        );
+        assert_eq!(
+            bang(app),
+            (y, 1, true),
+            "on to the next done, not back to x"
+        );
+        assert_eq!(bang(app), (x, 0, true), "and round to the top");
+    });
+}
+
+/// A done the user hasn't seen, on an agent that has gone back to work, isn't
+/// waiting on them: its dot says working.
+#[test]
+fn an_agent_back_at_work_is_not_waiting() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        app.make_active(t.y);
+        let now = Instant::now();
+        report_at(app, x, 0, AgentActivity::Done, now);
+        report_at(
+            app,
+            x,
+            0,
+            AgentActivity::Working,
+            now + Duration::from_secs(1),
+        );
+        space_bang(app);
+        assert_eq!(app.state.active, t.y);
+        assert_eq!(app.flash_text(), Some("nothing needs you"));
     });
 }

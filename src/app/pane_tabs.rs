@@ -99,6 +99,21 @@ impl App {
             .map_or_else(String::new, |t| t.active_info().label.clone())
     }
 
+    /// Go to another tab, `pick` moving the active one, and give it the
+    /// keyboard: switching tabs means "I want to interact with this tab".
+    /// From a fullscreen list (`TopList` zoom) it fullscreens the chosen tab
+    /// instead (`fullscreen_tab_if_list_zoomed`), as `^a c` does.
+    pub(super) fn go_to_tab(&mut self, pick: impl FnOnce(&mut PaneTabs)) {
+        self.stash_scrollback_pager_to_active_tab();
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
+            pick(tabs);
+            self.state.active_project_mut().focus = state::Focus::Pane;
+        }
+        self.fullscreen_tab_if_list_zoomed();
+        self.restore_active_tab_scrollback_pager();
+        self.view.needs_full_repaint = true;
+    }
+
     /// `^a-\` / F10 — toggle the bottom pane. Three states:
     ///   1. No tabs yet (`pane_tabs.is_none()`): spawn the default
     ///      command.

@@ -295,6 +295,9 @@ pub struct ViewState {
     /// Active harpoon menu overlay (interactive: reorder, delete, jump).
     // Module-private (type `HarpoonMenu` is module-private).
     pub(super) harpoon_menu: Option<HarpoonMenu>,
+    /// The agent `Space !` last went to, by pane id, and its place in the
+    /// order: where the next press goes on from while the user is still there.
+    pub(super) attention_last: Option<(String, super::attention::WaitKey)>,
     /// The which-key chord-hint popup, once the hint delay has elapsed while a
     /// chord is still armed. `None` when no popup is showing (set in
     /// `settle_chord_hint`, cleared the moment the chord resolves/cancels).
@@ -498,6 +501,7 @@ impl ViewState {
             needs_full_repaint: false,
             last_term_title: None,
             harpoon_menu: None,
+            attention_last: None,
             chord_hint: None,
             chord_hint_due: None,
             quick_select: None,
