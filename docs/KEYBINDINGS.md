@@ -13,7 +13,7 @@ bound too, and on by default — see [Mouse](#mouse).
 
 | Key | Action |
 |-----|--------|
-| `h` `j` `k` `l` | Move (counts work: `5j`, `10k`) |
+| `h` `j` `k` `l` / `←` `↓` `↑` `→` | Move (counts work: `5j`, `10k`) |
 | `0`-`9` `<motion>` | Count prefix (e.g. `5j`, `10k`, `5G`) |
 | `gg` / `G` | Top / bottom |
 | `^B` / `PageUp` | Previous page |
@@ -26,7 +26,9 @@ bound too, and on by default — see [Mouse](#mouse).
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
 | `u` / `-` | Climb to parent |
 | `/` | Search current listing (incremental; glob-aware, `^`/`$` anchors) |
+| `n` / `N` | Next / previous match of the last search |
 | `~` / `Home` | Jump to home (`H` is the harpoon prefix) |
+| `gw` | Jump the focused column to its worktree / repo root |
 | `J` | Jump to any path; with nothing typed, `Enter` takes the newest path the pane printed |
 | `F` | Project-wide fuzzy filename finder (gitignore-aware) |
 | `:grep <pat>` | Project-wide content search (embedded ripgrep matcher) |
@@ -300,7 +302,11 @@ appear on the top bar and persist across `spyc -r`.
 | `:name <NEW>` | Rename the active session |
 | `:whoami` | Show `user@host` in the status line |
 | `Space s` / `I` | Session info (pid, rss, counts) |
-| `Space ?` | This help overlay (same as `?`) |
+| `?` / `F1` / `Space ?` | This help overlay |
+| `Space a` / `:about` | The about page |
+| `Space w l` / `Space w n` / `Space w d` | Worktree list / new / delete (`W l` / `W n` / `W d` in the file list) |
+| `Q` / `^d` / `ZZ` / `:q` | Quit, saving the session (asks first while a tab or task is still running) |
+| `q` | Doesn't quit: flashes a hint instead, keeping the key for macro recording |
 | `gV` / `:version` | Show the spyc version |
 
 The **leader** (`Space`, or `^a Space` from the agent pane) opens a

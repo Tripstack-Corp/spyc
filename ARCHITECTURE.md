@@ -1217,7 +1217,10 @@ detail back.
 **What's checked.** Links and their anchors resolve
 (`every_relative_markdown_link_resolves`), each page is linked from its hub
 (`every_feature_and_config_page_is_linked_from_its_hub`), every `:` command is
-named on a user page (`every_command_is_documented_for_users`), every module
+named on a user page (`every_command_is_documented_for_users`), every default
+key binding is in `docs/KEYBINDINGS.md` and the `?` overlay
+(`every_default_binding_is_in_the_keymap_reference`,
+`every_default_binding_is_in_the_help_overlay`), every module
 opens with a `//!` doc (`every_module_opens_with_a_module_doc`), every keymap
 example parses (`every_shipped_keymap_example_parses`), and `AGENTS.md` and the
 two hubs stay under their caps (`agents_md_stays_slim`,

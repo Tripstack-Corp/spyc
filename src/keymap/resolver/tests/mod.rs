@@ -7,6 +7,7 @@ use super::*;
 
 mod bindings;
 mod counts;
+mod documented;
 mod keys;
 mod panes;
 mod prefixes;
