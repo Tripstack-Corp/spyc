@@ -615,7 +615,7 @@ mod guard_tests {
             dangling.is_empty(),
             "SPYC-TRAP anchor(s) with no matching `<!-- SPYC-TRAP: <slug> -->` \
              section in ARCHITECTURE.md: {dangling:?}. Add the rationale section \
-             (keyed by the slug) in the same commit. See AGENTS.md → trap anchors."
+             (keyed by the slug) in the same commit. See AGENTS.md → \"Load-bearing trap anchors\"."
         );
 
         // Reverse: every store marker has at least one code referrer.
@@ -630,7 +630,7 @@ mod guard_tests {
             orphans.is_empty(),
             "orphan SPYC-TRAP section(s) in ARCHITECTURE.md (no `SPYC-TRAP(<slug>)` \
              referrer in src/): {orphans:?}. The code site went away — drop the \
-             section, or restore the anchor. See AGENTS.md → trap anchors."
+             section, or restore the anchor. See AGENTS.md → \"Load-bearing trap anchors\"."
         );
     }
 

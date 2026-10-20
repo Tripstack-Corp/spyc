@@ -88,8 +88,14 @@ pub fn production_half(src: &str) -> String {
 /// separators. Build output and VCS metadata are skipped; each guard drops
 /// whatever its own policy exempts.
 pub fn markdown_files(root: &std::path::Path) -> Vec<String> {
+    repo_files(root, &["md"])
+}
+
+/// Every file under `root` with one of `extensions`, as [`markdown_files`]
+/// lists markdown.
+pub fn repo_files(root: &std::path::Path, extensions: &[&str]) -> Vec<String> {
     const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache"];
-    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    fn walk(dir: &std::path::Path, extensions: &[&str], out: &mut Vec<std::path::PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -98,15 +104,19 @@ pub fn markdown_files(root: &std::path::Path) -> Vec<String> {
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if p.is_dir() {
                 if !SKIP_DIRS.contains(&name) {
-                    walk(&p, out);
+                    walk(&p, extensions, out);
                 }
-            } else if p.extension().is_some_and(|x| x == "md") {
+            } else if p
+                .extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|x| extensions.contains(&x))
+            {
                 out.push(p);
             }
         }
     }
     let mut found = Vec::new();
-    walk(root, &mut found);
+    walk(root, extensions, &mut found);
     let mut out: Vec<String> = found
         .iter()
         .filter_map(|p| p.strip_prefix(root).ok())

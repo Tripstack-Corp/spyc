@@ -389,7 +389,7 @@
 #   map <KEY> prompt <name>         — type the [prompts] template <name> into the pane
 #   map <KEY> patternpick =<glob>   — pick files matching a glob
 #   map <KEY> jump =<path>          — jump to a directory
-#   map <KEY> <action>              — any built-in action by name (docs/config/keymap.md → Action names)
+#   map <KEY> <action>              — any built-in action by name (docs/config/keymap.md → "Action names")
 #   map <KEY> <action> =<value>     — one with a parameter, e.g. harpoon_jump =3
 #   unmap <KEY>                     — the key does nothing (a later map rebinds it)
 #
