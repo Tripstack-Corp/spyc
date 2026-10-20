@@ -20,6 +20,7 @@ pub mod line_select;
 pub mod list_view;
 pub mod markdown;
 pub mod pager;
+pub mod project_chips;
 pub mod prompt;
 pub mod scrollback;
 pub mod status;

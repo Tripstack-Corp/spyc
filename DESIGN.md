@@ -46,7 +46,14 @@ These are the names. Use them in code and when writing.
   (`SAFFRON_CUMIN` style) · path · git branch + dirty flag · agent ·
   suffix (`[picks:3 hidden:14]`). When the terminal is narrow, the
   suffix switches to its short forms (`[p:3 h:14]`) before the path
-  is cut, and then the path is shortened in the middle.
+  is cut, and then the path is shortened in the middle. While several
+  projects are open, the **projects** segment takes the place of
+  `PROJECT_HOME` and the session name: a chip per project, its label
+  (bold for the one in view, dim for the others) and the tab dots'
+  glyph for its most urgent agent (`spyc ■ · web ● · api`). It gets
+  a third of the bar and narrows in steps (`spyc ■ · web ● +2`, then
+  `spyc 2/4 ■`, then `spyc ■`), none of which drops a block in another
+  project: the last cuts the label before it loses that `■`.
 - **List** — the file area. Vi-navigated. Each row: cursor bar,
   pick check, take check, name, git marker, size/age (depending on
   mode). The "central widget" — most operations resolve against the

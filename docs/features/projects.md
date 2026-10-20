@@ -62,11 +62,30 @@ and puts the keyboard in that agent's pane, showing the pane if it was hidden
 or zoomed away. Press it again for the next one; with nothing waiting, it says
 "nothing needs you". It works with one project open too, across its tabs.
 
+**The status bar shows every open project** while there are several: a chip
+for each, in the order they were opened, the one you're in bold and the others
+dim, each with the glyph of what its agents most need, as their tab dots show
+it: a red `■` when one is blocked on you, a teal `■` for a done you haven't
+seen, `●` while one works and `○` while one waits on its own background work,
+and nothing while they're idle (`spyc ■ · web ● · api`). The chips take the
+session name's place, which stays in the terminal title and `Space s`, and
+get a third of the bar. In a narrow terminal the quiet projects go first,
+counted as `+N` (`spyc ■ · web ● +2`); then the others collapse to where you
+are among them and their most urgent glyph (`spyc 2/4 ■`, project 2 of 4);
+then the project you're in stands alone, with a red `■` while another is
+blocked, which is never dropped: the label is cut first. Each `Space j` row
+shows its project's glyph too, as it was when the list opened. The terminal
+title counts the tabs blocked in the other projects, for when you're in
+another window: `🌶️: spyc (■2) · SAFFRON_CUMIN`. A `^z`-suspended agent counts
+for nothing in any of these, as its tab shows 💤. With one project open, the
+bar, the title and `Space j` read as they always have.
+
 ## Project home & session name
 
 Each project has a **`PROJECT_HOME`** (a sticky project root), and each
 spyc run a **session name** (a spice-themed label like `SAFFRON_CUMIN`).
-Both are shown on the top bar and persist across `spyc -r`.
+Both are shown on the top bar (while several projects are open, their chips
+take the place of both) and persist across `spyc -r`.
 
 - **Auto-detect** — `PROJECT_HOME` is set to the launch directory
   automatically when that directory contains a `.git` entry. No

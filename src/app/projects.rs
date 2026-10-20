@@ -13,7 +13,8 @@ use super::view_state::ProjectView;
 use super::{App, Config, Mode, Pane, PaneTabs, Prompt, PromptKind, UserKeymap};
 use crate::keymap::ProjectAction;
 use crate::mcp_cmd::McpResponse;
-use crate::ui::pager;
+use crate::ui::{pager, project_chips};
+use ratatui::text::{Line, Span};
 
 impl App {
     /// Go to another open project. With one project open these do nothing,
@@ -55,8 +56,9 @@ impl App {
     }
 
     /// `Space j`: list the open projects in switcher order, to go to one. Each
-    /// row is numbered, with how many tabs it has and its home; the one in
-    /// view is marked and highlighted. `j`/`k` and Enter, or `1`-`9`, pick
+    /// row is numbered, with its agents' glyph as its chip in the status bar
+    /// has it, how many tabs it has and its home; the one in view is marked
+    /// and highlighted. `j`/`k` and Enter, or `1`-`9`, pick
     /// (`switch_to_pending_project`).
     pub(super) fn open_project_switcher(&mut self) {
         self.clear_pending_pickers();
@@ -72,19 +74,28 @@ impl App {
             .map(|(id, tabs)| (id, tabs.tabs().len()))
             .collect();
         let active = self.state.active;
-        let (ids, lines): (Vec<ProjectId>, Vec<String>) = self
+        let attention = self.project_attention();
+        let pulse = self.spicy_pulse_color(self.view.agent_anim_frame);
+        let several = self.state.open_projects().nth(1).is_some();
+        let (ids, lines): (Vec<ProjectId>, Vec<Line<'static>>) = self
             .state
             .open_projects()
             .enumerate()
             .map(|(i, p)| {
                 let tabs = tabs.get(&p.id).copied().unwrap_or(0);
-                let row = project_row(i, p, label_w, tabs, p.id == active);
+                let glyph = several.then(|| {
+                    attention.get(&p.id).map_or_else(
+                        || Span::raw(" "),
+                        |a| project_chips::glyph(*a, pulse, &self.view.theme),
+                    )
+                });
+                let row = project_row(i, p, label_w, tabs, p.id == active, glyph);
                 (p.id, row)
             })
             .unzip();
         let start = ids.iter().position(|id| *id == active).unwrap_or(0);
         self.state.pending_projects = Some(ids);
-        let mut view = pager::PagerView::new_plain(
+        let mut view = pager::PagerView::new_styled(
             "projects — j/k+Enter or 1-9 to go, / to search, q to close",
             lines,
         );
@@ -334,18 +345,21 @@ impl App {
     }
 }
 
-/// One switcher row: `[n]  label  k tabs  ← current  home`, the marker on the
-/// project in view and the label padded to `label_w` columns, the widest of
-/// the list's. The home comes last, since it is the one column of no fixed
-/// width: a long one is cut at the pager's edge rather than pushing the marker
-/// off it. It is tilde-collapsed, as every displayed path is.
+/// One switcher row: `[n] ■ label  k tabs  ← current  home`, with `glyph` (a
+/// blank for a project with nothing to say) while several projects are open,
+/// and none with one, the marker on the project in view and the label padded
+/// to `label_w` columns, the widest of the list's. The home comes last,
+/// since it is the one column of no fixed width: a long one is cut at the
+/// pager's edge rather than pushing the marker off it. It is tilde-collapsed,
+/// as every displayed path is.
 fn project_row(
     i: usize,
     project: &state::Project,
     label_w: usize,
     tabs: usize,
     current: bool,
-) -> String {
+    glyph: Option<Span<'static>>,
+) -> Line<'static> {
     let label = project.label();
     let pad = " ".repeat(label_w.saturating_sub(crate::ui::display_width(&label)));
     let tabs = if tabs == 1 {
@@ -353,10 +367,12 @@ fn project_row(
     } else {
         format!("{tabs} tabs")
     };
-    format!(
-        "  [{}]  {label}{pad}  {tabs:<8} {:<10} {}",
-        i + 1,
+    let mut spans = vec![Span::raw(format!("  [{}] ", i + 1))];
+    spans.extend(glyph);
+    spans.push(Span::raw(format!(
+        " {label}{pad}  {tabs:<8} {:<10} {}",
         if current { "← current" } else { "" },
         crate::paths::display_tilde(project.anchor()),
-    )
+    )));
+    Line::from(spans)
 }

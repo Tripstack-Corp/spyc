@@ -161,7 +161,6 @@ fn with_one_project_the_bar_and_title_read_as_before() {
 /// seen, hollow `○` waiting, and none for a project with nothing to say. The
 /// one in view is bold and the others dim; mono reads the same, uncoloured.
 #[test]
-#[ignore = "red: #99 6c, the projects segment"]
 fn several_projects_show_in_the_bar_each_with_its_glyph() {
     with_four(|t| {
         t.reports(0, AgentActivity::Blocked);
@@ -195,16 +194,63 @@ fn several_projects_show_in_the_bar_each_with_its_glyph() {
 /// The session name leaves the bar while several projects are open, giving
 /// the chips its room; the title still names it.
 #[test]
-#[ignore = "red: #99 6c, the projects segment"]
 fn the_session_name_leaves_the_bar_while_several_are_open() {
     with_four(|t| {
         for mono in [false, true] {
             t.app.view.theme.mono = mono;
             let text = bar(&mut t.app, 160);
             assert!(!text.contains(SESSION), "mono={mono}: {text}");
-            assert!(text.contains("yproj"), "mono={mono}: {text}");
+            assert!(text.contains("xproj · yproj"), "mono={mono}: {text}");
         }
         assert!(title(&mut t.app).ends_with(SESSION));
+    });
+}
+
+/// A done on the tab in view is seen as it lands, so the project in view's
+/// chip has nothing to say; one on its other tab is unseen, and teal.
+#[test]
+fn a_done_in_view_is_seen_and_one_out_of_view_is_not() {
+    with_four(|t| {
+        t.agent(1);
+        t.agent(1);
+        let y = t.ids[1];
+        t.app.as_project(y, |app| {
+            let tabs = app.runtime.project_mut().pane_tabs.as_mut();
+            tabs.expect("two tabs").switch_to(0);
+        });
+        let now = Instant::now();
+        report_at(&mut t.app, y, 0, AgentActivity::Done, now);
+        let buf = draw(&mut t.app, 160);
+        assert_eq!(
+            after(&buf, 0, "yproj").map(|c| c.symbol().to_string()),
+            Some("\u{b7}".into()),
+            "{}",
+            row(&buf, 0)
+        );
+        report_at(&mut t.app, y, 1, AgentActivity::Done, now);
+        let buf = draw(&mut t.app, 160);
+        let theme = crate::ui::theme::Theme::default();
+        let glyph = after(&buf, 0, "yproj").map(|c| (c.symbol().to_string(), c.fg));
+        assert_eq!(glyph, Some(("■".into(), theme.take)), "{}", row(&buf, 0));
+    });
+}
+
+/// A done that landed out of view is seen as soon as its tab is: the chip of
+/// the project switched to has nothing to say from the first frame, before
+/// the next walk clears it.
+#[test]
+fn an_unseen_done_is_seen_from_the_first_frame_in_view() {
+    with_four(|t| {
+        t.reports(0, AgentActivity::Done);
+        let glyph = |app: &mut App| {
+            let buf = draw(app, 160);
+            let at = after(&buf, 0, "xproj").map(|c| c.symbol().to_string());
+            (at, row(&buf, 0))
+        };
+        assert_eq!(glyph(&mut t.app).0, Some("■".into()), "unseen from y");
+        t.app.make_active(t.ids[0]);
+        let (at, text) = glyph(&mut t.app);
+        assert_eq!(at, Some("\u{b7}".into()), "seen in view: {text}");
     });
 }
 
@@ -219,7 +265,6 @@ fn narrowing(t: &mut Four) {
 /// The chips get a third of the bar. Where they all don't fit, the projects
 /// with nothing to say go first, counted as `+N`.
 #[test]
-#[ignore = "red: #99 6c, the projects segment"]
 fn a_narrow_bar_drops_the_quiet_projects_first() {
     with_four(|t| {
         narrowing(t);
@@ -234,7 +279,6 @@ fn a_narrow_bar_drops_the_quiet_projects_first() {
 /// Narrower, the others collapse to where the user is among them and their
 /// most urgent glyph: project 2 of 4, and something elsewhere is blocked.
 #[test]
-#[ignore = "red: #99 6c, the projects segment"]
 fn a_narrower_bar_collapses_the_others() {
     with_four(|t| {
         narrowing(t);
@@ -251,7 +295,6 @@ fn a_narrower_bar_collapses_the_others() {
 /// another project is blocked: that is what the chips are for, so it is never
 /// dropped, however narrow the bar.
 #[test]
-#[ignore = "red: #99 6c, the projects segment"]
 fn the_narrowest_bar_still_shows_a_project_is_blocked() {
     with_four(|t| {
         narrowing(t);
@@ -270,7 +313,6 @@ fn the_narrowest_bar_still_shows_a_project_is_blocked() {
 /// looking at another window: `x`'s two, not `y`'s own, which its tab bar
 /// shows.
 #[test]
-#[ignore = "red: #99 6c, the title's blocked count"]
 fn the_title_counts_blocked_tabs_in_the_other_projects() {
     with_four(|t| {
         assert_eq!(
@@ -292,7 +334,6 @@ fn the_title_counts_blocked_tabs_in_the_other_projects() {
 /// `Space j` gives each project's row its glyph, after its number, in its
 /// colour.
 #[test]
-#[ignore = "red: #99 6c, the switcher's glyphs"]
 fn the_switcher_shows_each_projects_glyph() {
     with_four(|t| {
         t.reports(0, AgentActivity::Blocked);
@@ -313,5 +354,47 @@ fn the_switcher_shows_each_projects_glyph() {
             "{}",
             row(&buf, y_row)
         );
+    });
+}
+
+/// With one project open, its `Space j` row reads as it always has: no glyph
+/// column, whatever its agents are doing.
+#[test]
+fn with_one_project_the_switcher_row_reads_as_before() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = std::fs::canonicalize(tmp.path()).unwrap();
+    let (state_dir, home) = (base.join("state"), base.join("xproj"));
+    for d in [&state_dir, &home] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    crate::state::with_state_root(&state_dir, || {
+        let mut app = App::test_app(home.clone());
+        let x = app.state.active;
+        app.ready_test_project(x, &home);
+        agent_tab_in(&mut app, x, &home, "claude");
+        agent_tab_in(&mut app, x, &home, "claude");
+        report_at(&mut app, x, 1, AgentActivity::Blocked, Instant::now());
+        leader(&mut app, 'j');
+        let buf = draw(&mut app, 120);
+        let y = row_with(&buf, &["[1]", "xproj"]).expect("x's row");
+        assert!(row(&buf, y).contains("  [1]  xproj  "), "{}", row(&buf, y));
+    });
+}
+
+/// A `^z`-suspended agent's tab shows 💤, so it counts for nothing, though it
+/// was blocked: no glyph on its project's chip and no count in the title.
+#[test]
+fn a_suspended_agent_is_not_counted() {
+    with_four(|t| {
+        t.reports(0, AgentActivity::Blocked);
+        t.app.as_project(t.ids[0], |app| {
+            let tabs = app.runtime.project_mut().pane_tabs.as_mut();
+            tabs.expect("a tab").tabs_mut()[0].info.suspended = true;
+        });
+        let title = title(&mut t.app);
+        assert!(!title.contains('\u{25a0}'), "{title}");
+        let buf = draw(&mut t.app, 160);
+        let glyph = after(&buf, 0, "xproj").map(|c| c.symbol().to_string());
+        assert_eq!(glyph, Some("\u{b7}".into()), "{}", row(&buf, 0));
     });
 }
