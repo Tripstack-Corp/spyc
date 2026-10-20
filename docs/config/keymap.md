@@ -116,6 +116,7 @@ verbs above (`down`, `pick`,
 | `project_open` | open a directory as a project (`Space n`) |
 | `project_close` | close the project in view (`Space x`) |
 | `project_list` | list the open projects, to go to one (`Space j`) |
+| `project_attention` | go to the agent that needs you, in any project (`Space !`, `^a !`) |
 | `project_last` | go to the project you were in last (`Space Space`) |
 | `project_next` | go to the next open project, wrapping (`Space ]`) |
 | `project_prev` | go to the previous open project, wrapping (`Space [`) |

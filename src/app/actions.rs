@@ -398,40 +398,10 @@ impl App {
             Action::PaneNewTab => self.start_new_tab_prompt(),
             Action::PaneCloseTab => self.close_active_tab(),
             Action::PaneTabByIndex(n) => {
-                // Switching tabs implies "I want to interact with this other
-                // tab" — pull focus into the pane. From a fullscreen list
-                // (`TopList` zoom), it instead fullscreens the chosen tab (see
-                // `fullscreen_tab_if_list_zoomed`), navigating between
-                // fullscreen views. Matches `^a c` (new tab).
-                self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
-                    tabs.switch_to((*n as usize).saturating_sub(1));
-                    self.state.active_project_mut().focus = state::Focus::Pane;
-                }
-                self.fullscreen_tab_if_list_zoomed();
-                self.restore_active_tab_scrollback_pager();
-                self.view.needs_full_repaint = true;
+                self.go_to_tab(|tabs| tabs.switch_to((*n as usize).saturating_sub(1)));
             }
-            Action::PaneNextTab => {
-                self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
-                    tabs.next();
-                    self.state.active_project_mut().focus = state::Focus::Pane;
-                }
-                self.fullscreen_tab_if_list_zoomed();
-                self.restore_active_tab_scrollback_pager();
-                self.view.needs_full_repaint = true;
-            }
-            Action::PanePrevTab => {
-                self.stash_scrollback_pager_to_active_tab();
-                if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
-                    tabs.prev();
-                    self.state.active_project_mut().focus = state::Focus::Pane;
-                }
-                self.fullscreen_tab_if_list_zoomed();
-                self.restore_active_tab_scrollback_pager();
-                self.view.needs_full_repaint = true;
-            }
+            Action::PaneNextTab => self.go_to_tab(PaneTabs::next),
+            Action::PanePrevTab => self.go_to_tab(PaneTabs::prev),
             Action::PaneLastTab => {
                 self.stash_scrollback_pager_to_active_tab();
                 let jumped = self
@@ -542,6 +512,7 @@ impl App {
             Action::Quit => self.request_quit(),
             Action::Project(crate::keymap::ProjectAction::Close) => self.close_project(),
             Action::Project(crate::keymap::ProjectAction::List) => self.open_project_switcher(),
+            Action::Project(crate::keymap::ProjectAction::Attention) => self.go_to_attention(),
             Action::Project(p) => self.move_between_projects(*p),
 
             Action::GotoFile | Action::GotoFileLine => {

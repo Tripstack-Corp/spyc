@@ -171,6 +171,7 @@ impl Resolver {
                 Act("1-9", A::Project(ProjectAction::ByIndex(0))),
                 Act("]", A::Project(ProjectAction::Next)),
                 Act("[", A::Project(ProjectAction::Prev)),
+                Act("!", A::Project(ProjectAction::Attention)),
                 Act("s", A::ShowMemory),
                 Act("?", A::Help),
                 Act("a", A::About),
@@ -218,6 +219,7 @@ impl Resolver {
                 Act("u", A::QuickSelectOpen),
                 Act("g", A::OpenImageGallery),
                 Act("\\ C", A::TogglePane),
+                Act("!", A::Project(ProjectAction::Attention)),
                 Sub("Space", "global menu"),
             ],
             PendingSeq::CtrlS => vec![
@@ -271,10 +273,80 @@ impl Resolver {
             KeyCode::Char(' ') => project(ProjectAction::Last),
             KeyCode::Char(']') => project(ProjectAction::Next),
             KeyCode::Char('[') => project(ProjectAction::Prev),
+            KeyCode::Char('!') => project(ProjectAction::Attention),
             KeyCode::Char(d @ '1'..='9') => project(ProjectAction::ByIndex(d as u8 - b'0')),
             KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::ShowMemory),
             KeyCode::Char('?') => ResolverOutcome::Action(Action::Help),
             KeyCode::Char('a') => ResolverOutcome::Action(Action::About),
+            _ => ResolverOutcome::Ignored,
+        };
+        self.reset();
+        out
+    }
+
+    /// Mid-sequence: the `^a` (`^w`) pane prefix, waiting for its command.
+    /// Combines screen(1)-style (`^a n` next, `^a p` prev, `^a c` new, `^a k`
+    /// kill) with vim-style (`j`/`k` focus, `+`/`-` resize). Matches on the
+    /// key *code* whatever the Ctrl modifier: holding Ctrl through the second
+    /// key (`^a ^n`) is the natural way to fire the chord fast, and screen
+    /// treats it the same as `^a n`.
+    const fn feed_pane_prefix(&mut self, ev: KeyEvent) -> ResolverOutcome {
+        // `^a Space` → the global leader menu. This is the pane-focus path
+        // into it: bare Space can't be intercepted while typing in the pane
+        // (it's literal text), so `^a` wakes spyc and Space enters the menu.
+        if matches!(ev.code, KeyCode::Char(' ')) {
+            self.pending = PendingSeq::Leader;
+            return ResolverOutcome::Pending;
+        }
+        let out = match ev.code {
+            // Vertical focus — j/J down (to pane), k up (to list/spyc row).
+            // `a`/`A` used to alias `j` here; reclaimed below for the
+            // a/b file-pane axis (numbers = PTY tabs, letters = file panes).
+            KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
+            KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
+            // Horizontal file-pane focus (vertical split): a/h → left (a),
+            // b/l → right (b). `^a |` / `^a f` alias `^s |` / `^s f`: while
+            // the pane owns the keyboard only `^a`/`^w`/`^\` are intercepted
+            // (`is_spyc_meta_when_pane_focused`), so without these two the
+            // split couldn't be opened or reshaped from the pane at all.
+            // `^s` still hosts the whole family for a focused file column.
+            KeyCode::Char('a' | 'A' | 'h') => ResolverOutcome::Action(Action::VsplitFocusLeft),
+            KeyCode::Char('b' | 'B' | 'l') => ResolverOutcome::Action(Action::VsplitFocusRight),
+            KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitToggle),
+            KeyCode::Char('f') => ResolverOutcome::Action(Action::VsplitToggleHeight),
+            KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::ToggleDim),
+            // Tab navigation (screen-style + vim bracket style).
+            KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
+            KeyCode::Char('p' | '[') => ResolverOutcome::Action(Action::PanePrevTab),
+            KeyCode::Char('c') => ResolverOutcome::Action(Action::PaneNewTab),
+            KeyCode::Char('K' | 'x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
+            KeyCode::Char(c @ '1'..='9') => {
+                ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
+            }
+            KeyCode::Char('r') => ResolverOutcome::Action(Action::PaneRenameTab),
+            KeyCode::Char('R') => ResolverOutcome::Action(Action::PaneRestartTab),
+            KeyCode::Char('F') => ResolverOutcome::Action(Action::PaneForkTab),
+            // Pane toggle / resize / scroll.
+            KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
+            KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
+            KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
+            KeyCode::Char('z' | 'Z') => ResolverOutcome::Action(Action::TogglePaneZoom),
+            KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
+            // Send / pipe content to pane.
+            KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
+            KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
+            KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
+            KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
+            KeyCode::Char('g' | 'G') => ResolverOutcome::Action(Action::OpenImageGallery),
+            // `^a ↓` — send a literal Ctrl-A to the pane (tmux send-prefix):
+            // the prefix is otherwise unreachable by the child, but Claude
+            // binds ^a (e.g. expand notes), so this is the escape hatch.
+            KeyCode::Down => ResolverOutcome::Action(Action::PaneSendPrefix),
+            // The one project key reached from inside an agent: two keys, not
+            // `^a Space !`'s three.
+            KeyCode::Char('!') => {
+                ResolverOutcome::Action(Action::Project(ProjectAction::Attention))
+            }
             _ => ResolverOutcome::Ignored,
         };
         self.reset();
@@ -310,73 +382,13 @@ impl Resolver {
         }
 
         // Mid-sequence: Ctrl-A / Ctrl-W prefix waiting for a pane command.
-        // Combines screen(1)-style (^a n=next, ^a p=prev, ^a c=new, ^a k=kill)
-        // with vim-style (j/k focus, +/- resize).
-        //
-        // Runs BEFORE the generic Ctrl block below and matches on the key
-        // *code* regardless of the Ctrl modifier. Holding Ctrl through the
-        // second key (`^a ^n`, `^a ^p`, …) is the natural way to fire the
-        // chord fast, and screen treats it the same as `^a n`. With the old
-        // order, the Ctrl block ate `^a ^n` / `^a ^p` as an unknown control
-        // code and reset the chord — the "rapid `^a-n` eats the command"
-        // regression. (`^a ^a` is already intercepted just above as
-        // PaneLastTab, so it never reaches the `'a' | 'A'` focus arm here.)
+        // Runs BEFORE the generic Ctrl block below, which would otherwise eat
+        // a held-Ctrl second key (`^a ^n`) as an unknown control code and
+        // reset the chord — the "rapid `^a-n` eats the command" regression.
+        // (`^a ^a` is already intercepted just above as PaneLastTab, so it
+        // never reaches the `'a' | 'A'` focus arm there.)
         if self.pending == PendingSeq::W {
-            // `^a Space` → the global leader menu. This is the pane-focus path
-            // into it: bare Space can't be intercepted while typing in the pane
-            // (it's literal text), so `^a` wakes spyc and Space enters the menu.
-            if matches!(ev.code, KeyCode::Char(' ')) {
-                self.pending = PendingSeq::Leader;
-                return ResolverOutcome::Pending;
-            }
-            let out = match ev.code {
-                // Vertical focus — j/J down (to pane), k up (to list/spyc row).
-                // `a`/`A` used to alias `j` here; reclaimed below for the
-                // a/b file-pane axis (numbers = PTY tabs, letters = file panes).
-                KeyCode::Char('j' | 'J') => ResolverOutcome::Action(Action::PaneFocusDown),
-                KeyCode::Char('k') => ResolverOutcome::Action(Action::PaneFocusUp),
-                // Horizontal file-pane focus (vertical split): a/h → left (a),
-                // b/l → right (b). `^a |` / `^a f` alias `^s |` / `^s f`: while
-                // the pane owns the keyboard only `^a`/`^w`/`^\` are intercepted
-                // (`is_spyc_meta_when_pane_focused`), so without these two the
-                // split couldn't be opened or reshaped from the pane at all.
-                // `^s` still hosts the whole family for a focused file column.
-                KeyCode::Char('a' | 'A' | 'h') => ResolverOutcome::Action(Action::VsplitFocusLeft),
-                KeyCode::Char('b' | 'B' | 'l') => ResolverOutcome::Action(Action::VsplitFocusRight),
-                KeyCode::Char('|') => ResolverOutcome::Action(Action::VsplitToggle),
-                KeyCode::Char('f') => ResolverOutcome::Action(Action::VsplitToggleHeight),
-                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::ToggleDim),
-                // Tab navigation (screen-style + vim bracket style).
-                KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
-                KeyCode::Char('p' | '[') => ResolverOutcome::Action(Action::PanePrevTab),
-                KeyCode::Char('c') => ResolverOutcome::Action(Action::PaneNewTab),
-                KeyCode::Char('K' | 'x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
-                KeyCode::Char(c @ '1'..='9') => {
-                    ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
-                }
-                KeyCode::Char('r') => ResolverOutcome::Action(Action::PaneRenameTab),
-                KeyCode::Char('R') => ResolverOutcome::Action(Action::PaneRestartTab),
-                KeyCode::Char('F') => ResolverOutcome::Action(Action::PaneForkTab),
-                // Pane toggle / resize / scroll.
-                KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
-                KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
-                KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
-                KeyCode::Char('z' | 'Z') => ResolverOutcome::Action(Action::TogglePaneZoom),
-                KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
-                // Send / pipe content to pane.
-                KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
-                KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),
-                KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
-                KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
-                KeyCode::Char('g' | 'G') => ResolverOutcome::Action(Action::OpenImageGallery),
-                // `^a ↓` — send a literal Ctrl-A to the pane (tmux send-prefix):
-                // the prefix is otherwise unreachable by the child, but Claude
-                // binds ^a (e.g. expand notes), so this is the escape hatch.
-                KeyCode::Down => ResolverOutcome::Action(Action::PaneSendPrefix),
-                _ => ResolverOutcome::Ignored,
-            };
-            self.reset();
-            return out;
+            return self.feed_pane_prefix(ev);
         }
 
         // Mid-sequence: `^s` (vertical-split) prefix waiting for a sub-command —

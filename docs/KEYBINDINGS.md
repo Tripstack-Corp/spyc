@@ -146,6 +146,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
 | `^a ↓` | Send a literal `^a` to the pane (e.g. so Claude receives it) |
+| `^a !` | Go to the agent that needs you, in any project (as `Space !`) |
 | `^a g` | Image-gallery popup: what the agent received + what you've pasted but not sent (`j`/`k` move, `Enter` view, `q` close) |
 | `gf` | Jump to file path in pane output |
 | `gF` | Jump to file + open at referenced line |
@@ -296,6 +297,7 @@ appear on the top bar and persist across `spyc -r`.
 | `Space Space` | Go to the project you were in last |
 | `Space 1`..`Space 9` | Go to open project N |
 | `Space ]` / `Space [` | Go to the next / previous project, wrapping |
+| `Space !` / `^a !` | Go to the agent that needs you, in any project: the longest-blocked first, then a done you haven't seen; again for the next one |
 | `gS` | Set start dir (target of `` ` ``) to current directory |
 | `:project [.\|<path>\|clear]` | Manage `PROJECT_HOME` |
 | `:startdir [.\|<path>]` | Manage start dir |
@@ -312,7 +314,8 @@ appear on the top bar and persist across `spyc -r`.
 The **leader** (`Space`, or `^a Space` from the agent pane) opens a
 global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
 `Space p` (project home), `Space n` / `Space x` / `Space j` /
-`Space Space` / `Space 1-9` / `Space ]` `Space [` (projects), `Space s` (session info), `Space ?` (help),
+`Space Space` / `Space 1-9` / `Space ]` `Space [` (projects), `Space !` (the agent that needs you),
+`Space s` (session info), `Space ?` (help),
 `Space a` (about). Hold it to see the which-key popup. `W l` / `W n` /
 `W d` is a list-focus alias for the same worktree list / new / delete.
 

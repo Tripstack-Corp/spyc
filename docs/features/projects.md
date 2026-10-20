@@ -21,6 +21,8 @@ which-key popup lists the options:
 - **`Space Space`** — go to the project you were in last.
 - **`Space 1`..`Space 9`** — go to open project N.
 - **`Space ]` / `Space [`** — go to the next / previous project, wrapping.
+- **`Space !`** — go to the agent that needs you, in any project (`^a !` from
+  the pane, two keys).
 - **`Space s`** — session info.
 - **`Space ?`** — open this help.
 - **`Space a`** — open the about page.
@@ -52,6 +54,13 @@ editor, it has the keyboard until it closes, as help does.
 **`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
 through them in the order they were opened, wrapping. With one project open
 these do nothing at all.
+
+**`Space !`**, or **`^a !`** from inside an agent's pane, goes to the agent
+that needs you, in whichever project it is: the one blocked on you longest,
+then one that finished while you weren't looking. It switches project and tab
+and puts the keyboard in that agent's pane, showing the pane if it was hidden
+or zoomed away. Press it again for the next one; with nothing waiting, it says
+"nothing needs you". It works with one project open too, across its tabs.
 
 ## Project home & session name
 

@@ -267,7 +267,17 @@ impl Action {
             Self::WorktreeList
             | Self::WorktreeNew
             | Self::WorktreeDelete
-            | Self::Project(_)
+            | Self::Project(
+                ProjectAction::JumpHome
+                | ProjectAction::SetHomeHere
+                | ProjectAction::Open
+                | ProjectAction::Close
+                | ProjectAction::List
+                | ProjectAction::Last
+                | ProjectAction::Next
+                | ProjectAction::Prev
+                | ProjectAction::ByIndex(_),
+            )
             | Self::ShowMemory => Tier::Global,
             // Pane — the pty pane + vertical split (the `^a` prefix).
             Self::TogglePane
@@ -312,7 +322,10 @@ impl Action {
             | Self::ToggleActivity
             | Self::Quit
             | Self::MacroRecordReserved
-            | Self::Noop => Tier::Meta,
+            | Self::Noop
+            // A project action, but the one a user reaches for from inside an
+            // agent's pane, so it binds on `^a` as well as the leader.
+            | Self::Project(ProjectAction::Attention) => Tier::Meta,
             // Frame — everything else (nav, picks, files, git, sort, marks,
             // harpoon, filter, search, inventory, …).
             _ => Tier::Frame,
@@ -781,6 +794,8 @@ pub enum ProjectAction {
     Close,
     /// `Space j` — list the open projects, to go to one.
     List,
+    /// `Space !` / `^a !` — go to the agent that needs you, in any project.
+    Attention,
     /// `Space Space` — go to the project the user was in last.
     Last,
     /// `Space ]` — go to the next open project, wrapping.
@@ -799,6 +814,7 @@ impl ProjectAction {
             Self::Open => "open a directory as a project",
             Self::Close => "close the project in view",
             Self::List => "list the open projects",
+            Self::Attention => "go to the agent that needs you",
             Self::Last => "go to the last project",
             Self::Next => "go to the next project",
             Self::Prev => "go to the previous project",
@@ -813,6 +829,7 @@ impl ProjectAction {
             Self::Open => "project_open",
             Self::Close => "project_close",
             Self::List => "project_list",
+            Self::Attention => "project_attention",
             Self::Last => "project_last",
             Self::Next => "project_next",
             Self::Prev => "project_prev",
@@ -829,6 +846,7 @@ impl ProjectAction {
             "project_open" => Self::Open,
             "project_close" => Self::Close,
             "project_list" => Self::List,
+            "project_attention" => Self::Attention,
             "project_last" => Self::Last,
             "project_next" => Self::Next,
             "project_prev" => Self::Prev,

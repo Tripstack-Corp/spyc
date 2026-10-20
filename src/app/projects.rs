@@ -46,7 +46,8 @@ impl App {
             | ProjectAction::SetHomeHere
             | ProjectAction::Open
             | ProjectAction::Close
-            | ProjectAction::List => None,
+            | ProjectAction::List
+            | ProjectAction::Attention => None,
         };
         if let Some(id) = to {
             self.switch_project(id);

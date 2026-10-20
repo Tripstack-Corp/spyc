@@ -243,7 +243,8 @@ build-checked contract, not just a convention.
   `f` flip the height, `n`/`x` the second commander — because the split is
   a family of related shapes rather than one key; `^a |` stays as an alias
   for the open/close, the one member with long-standing muscle memory.
-- `Tier::Meta` (help, version, redraw) is allowed in any namespace.
+- `Tier::Meta` (help, version, redraw, and `Space !` / `^a !`, the one project
+  key reached from inside an agent's pane) is allowed in any namespace.
 
 Vi where it fits, screen/tmux where it doesn't: movement / marks / prompt
 editing → vi; pane prefix + tabs → screen (`^a`); worktree (`W` family,
