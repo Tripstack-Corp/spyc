@@ -382,6 +382,302 @@ fn a_two_project_manifest_restores_its_active_project_as_a_copy() {
     });
 }
 
+/// Each open project's home, in switcher order.
+fn homes(app: &App) -> Vec<Option<PathBuf>> {
+    app.state.open_projects().map(|p| p.home.clone()).collect()
+}
+
+/// The open project homed at `home`.
+fn homed_at(app: &App, home: &Path) -> crate::project_id::ProjectId {
+    app.state
+        .open_projects()
+        .find(|p| p.home.as_deref() == Some(home))
+        .map_or_else(
+            || panic!("no project homed at {}: {:?}", home.display(), homes(app)),
+            |p| p.id,
+        )
+}
+
+/// Project `id`'s tabs, by label.
+fn tab_labels(app: &mut App, id: crate::project_id::ProjectId) -> Vec<String> {
+    app.as_project(id, |app| {
+        app.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or_else(Vec::new, |tabs| {
+                tabs.tabs().iter().map(|t| t.info.label.clone()).collect()
+            })
+    })
+}
+
+/// `-r` opens every project in the manifest, each with its own tabs and
+/// column `a`, in the order it saved them, and lands in the one the user was
+/// in. A project out of view gets its context file, so its agents' tools
+/// answer for it.
+#[test]
+#[ignore = "red: -r restores only the active project"]
+fn a_two_project_manifest_restores_every_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let other = std::fs::canonicalize(tmp.path()).unwrap().join("other");
+        let other_left = other.join("src");
+        std::fs::create_dir_all(&other_left).unwrap();
+        write_v1_decoy(&state_root);
+        write_manifest(
+            &state_root,
+            504,
+            &manifest(
+                504,
+                "TWO_PROJECTS",
+                1_700_000_100,
+                P2,
+                vec![
+                    project(P1, &other, &other_left, vec![tab("theirs", &other)]),
+                    project(P2, &crate_root(), &crate_root(), vec![tab("mine", &other)]),
+                ],
+            ),
+        );
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        let lines = picker_lines(&mut app);
+        listed(&lines, "TWO_PROJECTS");
+        press(&mut app, KeyCode::Char('1'));
+
+        assert_eq!(
+            homes(&app),
+            [Some(other.clone()), Some(crate_root())],
+            "both projects, in the order they were saved"
+        );
+        assert_eq!(app.state.active_project().home, Some(crate_root()));
+        assert_eq!(app.state.cur().listing.dir, crate_root());
+        let mine = app.state.active;
+        assert_eq!(tab_labels(&mut app, mine), ["mine"]);
+        let theirs = homed_at(&app, &other);
+        assert_eq!(tab_labels(&mut app, theirs), ["theirs"]);
+        assert_eq!(
+            app.as_project(theirs, |app| app.state.cur().listing.dir.clone()),
+            other_left,
+            "its column a is back where it was"
+        );
+        assert!(
+            app.as_project(theirs, |app| app.view.project().context_path.exists()),
+            "its agents have a context file to read"
+        );
+        assert_eq!(app.flash_text(), Some("session restored: 2 projects"));
+    });
+}
+
+/// With every project opened, the restore adopts the file: later saves
+/// overwrite it with every project, not just the one in view.
+#[test]
+#[ignore = "red: -r restores only the active project"]
+fn restoring_every_project_adopts_the_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let other = std::fs::canonicalize(tmp.path()).unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        write_v1_decoy(&state_root);
+        write_manifest(
+            &state_root,
+            504,
+            &manifest(
+                504,
+                "TWO_PROJECTS",
+                1_700_000_100,
+                P2,
+                vec![
+                    project(P1, &other, &other, vec![tab("theirs", &other)]),
+                    project(P2, &crate_root(), &crate_root(), vec![tab("mine", &other)]),
+                ],
+            ),
+        );
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.state.session_id = Some(9001);
+        app.state.session_name = Some("OWN_NAME".into());
+        picker_lines(&mut app);
+        press(&mut app, KeyCode::Char('1'));
+
+        assert_eq!(app.state.session_id, Some(504), "the file's id");
+        assert_eq!(app.state.session_name.as_deref(), Some("TWO_PROJECTS"));
+        app.save_session();
+        let file = read_manifest(&state_root, 504);
+        let labels: Vec<_> = file["projects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["tabs"][0]["label"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(labels, ["theirs", "mine"], "every project, in order");
+        assert!(
+            !state_root.join("sessions/9001.json").exists(),
+            "no second file"
+        );
+    });
+}
+
+/// A project whose directory has gone can't open. The rest do, as a copy: the
+/// file keeps the one that didn't, and the flash names it.
+#[test]
+#[ignore = "red: -r restores only the active project"]
+fn a_manifest_with_a_gone_project_restores_the_rest_as_a_copy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let (other, vanished) = (base.join("other"), base.join("vanished"));
+        std::fs::create_dir_all(&other).unwrap();
+        write_v1_decoy(&state_root);
+        write_manifest(
+            &state_root,
+            504,
+            &manifest(
+                504,
+                "THREE_PROJECTS",
+                1_700_000_100,
+                P2,
+                vec![
+                    project(P1, &other, &other, vec![tab("theirs", &other)]),
+                    project(P2, &crate_root(), &crate_root(), vec![tab("mine", &other)]),
+                    project(P3, &vanished, &vanished, vec![tab("lost", &other)]),
+                ],
+            ),
+        );
+        let source = std::fs::read(state_root.join("sessions/504.json")).unwrap();
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.state.session_id = Some(9001);
+        picker_lines(&mut app);
+        press(&mut app, KeyCode::Char('1'));
+
+        assert_eq!(homes(&app), [Some(other), Some(crate_root())]);
+        assert_eq!(app.state.session_id, Some(9001), "a copy keeps its own id");
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(
+            flash.contains("as a copy") && flash.contains("vanished"),
+            "{flash}"
+        );
+        app.save_session();
+        assert_eq!(
+            std::fs::read(state_root.join("sessions/504.json")).unwrap(),
+            source,
+            "the manifest is left as it was"
+        );
+        let own = read_manifest(&state_root, 9001);
+        assert_eq!(own["projects"].as_array().map(Vec::len), Some(2));
+    });
+}
+
+/// A project out of view whose column `a` was inside an archive comes back
+/// beside it, cursor on it, and the project in view doesn't move.
+#[test]
+#[ignore = "red: -r restores only the active project"]
+fn a_project_out_of_view_inside_an_archive_comes_back_beside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let other = std::fs::canonicalize(tmp.path()).unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let archive = other.join("bundle.zip");
+        std::fs::write(&archive, b"a container").unwrap();
+        write_v1_decoy(&state_root);
+        write_manifest(
+            &state_root,
+            504,
+            &manifest(
+                504,
+                "IN_A_ZIP",
+                1_700_000_100,
+                P2,
+                vec![
+                    project(P1, &other, &archive.join("inner"), Vec::new()),
+                    project(P2, &crate_root(), &crate_root(), vec![tab("mine", &other)]),
+                ],
+            ),
+        );
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        picker_lines(&mut app);
+        let effects =
+            app.handle_pager_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()));
+        assert!(
+            !effects
+                .iter()
+                .any(|fx| matches!(fx, crate::app::Effect::ChangeDir { .. })),
+            "nothing moves the project in view: {effects:?}"
+        );
+        assert_eq!(app.state.cur().listing.dir, crate_root());
+        let theirs = homed_at(&app, &other);
+        let (dir, cursor) = app.as_project(theirs, |app| {
+            let col = app.state.cur();
+            (
+                col.listing.dir.clone(),
+                col.rows.get(col.cursor.index).map(|r| r.path.clone()),
+            )
+        });
+        assert_eq!(dir, other);
+        assert_eq!(cursor, Some(archive));
+    });
+}
+
+/// A project out of view whose tabs couldn't all open keeps them saved, and
+/// the flash and session info count them with the rest.
+#[test]
+#[ignore = "red: -r restores only the active project"]
+fn a_project_out_of_views_unopened_tabs_are_counted() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let other = std::fs::canonicalize(tmp.path()).unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let refused = json!({
+            "command": "codex --future-option", "label": "refused", "cwd": other,
+            "agent_kind": "codex", "agent_session_id": UUID,
+            "codex_home": other.join("codex-home")
+        });
+        write_v1_decoy(&state_root);
+        write_manifest(
+            &state_root,
+            504,
+            &manifest(
+                504,
+                "PARTIAL",
+                1_700_000_100,
+                P2,
+                vec![
+                    project(P1, &other, &other, vec![refused]),
+                    project(P2, &crate_root(), &crate_root(), vec![tab("mine", &other)]),
+                ],
+            ),
+        );
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        picker_lines(&mut app);
+        press(&mut app, KeyCode::Char('1'));
+
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(flash.contains("1 tab(s) unopened"), "{flash}");
+        let theirs = homed_at(&app, &other);
+        assert_eq!(
+            app.as_project(theirs, |app| app.state.active_project().deferred_tabs.len()),
+            1
+        );
+        app.show_session_info();
+        let info: Vec<String> = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .expect("session info")
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            info.iter().any(|l| l.contains("refused")),
+            "session info lists it: {info:#?}"
+        );
+    });
+}
+
 /// With several projects in a manifest, its row lists them, each with its tab
 /// count, in place of one directory.
 #[test]
