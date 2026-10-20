@@ -144,7 +144,7 @@ pub fn map_to_listing(entries: &[StatusEntry], prefix: &str) -> HashMap<String, 
             untracked: entry.untracked,
         };
         // Only file rows in THIS directory get a basename entry. Otherwise a
-        // deep entry like `content-acquisition/AGENTS.md` would write
+        // deep entry like `services/AGENTS.md` would write
         // `AGENTS.md → Modified` and dirty the unrelated root-level
         // `AGENTS.md` row.
         if in_this_dir && !name.is_empty() {

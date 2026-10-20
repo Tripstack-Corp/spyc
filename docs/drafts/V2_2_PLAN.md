@@ -309,8 +309,8 @@ from it. `send_selection_to_pane` (`src/app/clipboard.rs`) makes each selected
 path relative to `project_home` and leaves everything else absolute. When the
 pane's agent is working in a worktree rather than at the project root, the
 relative path resolves against the wrong directory. The plan records spyc
-pasting `book-org/client-api-20-contract/docs`, the agent running
-`cd book-org/…` from `~/src/tripstack_platform`, and getting
+pasting `services/billing-api/docs`, the agent running
+`cd services/…` from `~/src/platform`, and getting
 `no such file or directory`.
 
 It sits in the bug set for the same reason #327 does: it breaks in the workflow

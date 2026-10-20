@@ -99,14 +99,14 @@ mod map_tests {
     #[test]
     fn deep_modification_does_not_dirty_same_basename_at_root() {
         // Regression: a root listing of `git status` showing
-        // `content-acquisition/AGENTS.md` modified must NOT mark a
+        // `services/AGENTS.md` modified must NOT mark a
         // separate root-level `AGENTS.md` as modified.
-        let porcelain = " M content-acquisition/AGENTS.md\n";
+        let porcelain = " M services/AGENTS.md\n";
         let map = parse(porcelain, "");
         // The deep file's basename is NOT a root entry.
         assert!(!map.contains_key("AGENTS.md"));
         // The parent dir IS marked dirty (unstaged-Modified).
-        let dir_status = map.get("content-acquisition/").unwrap();
+        let dir_status = map.get("services/").unwrap();
         assert_eq!(dir_status.unstaged, Some(GitChange::Modified));
         assert!(dir_status.staged.is_none());
         assert!(!dir_status.untracked);
