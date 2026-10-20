@@ -3,8 +3,10 @@
 //! its headings or anchors.
 //!
 //! Moving or splitting a doc strands the links into it, and nothing else in
-//! the gate reads a link. A prose cross-reference (`ARCHITECTURE.md → "MCP
-//! server"`) is not a link and is not checked.
+//! the gate reads a link. A prose reference to a section, in a doc or in code,
+//! is checked the same way: `ARCHITECTURE.md → "MCP server"` names a heading (or
+//! a bold rule) in that file, and `RELEASE_ENGINEERING.md §13.8` a numbered
+//! section and, after the dot, an item in it.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -223,6 +225,119 @@ fn check(docs: &BTreeMap<String, String>, exists: impl Fn(&str) -> bool) -> Repo
     r
 }
 
+/// Where a reference may point: a heading by name, or a numbered section and
+/// optionally a numbered item in it.
+#[derive(Debug, PartialEq, Eq)]
+enum Section {
+    Named(String),
+    Numbered(String, Option<String>),
+}
+
+impl std::fmt::Display for Section {
+    /// The reference as it is written: `"Name"`, or `§N` / `§N.M`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Named(name) => write!(f, "\"{name}\""),
+            Self::Numbered(num, None) => write!(f, "§{num}"),
+            Self::Numbered(num, Some(item)) => write!(f, "§{num}.{item}"),
+        }
+    }
+}
+
+/// The section references on `line`: `FILE.md → "Name"` (the quotes may be
+/// escaped, as in a Rust string) and `FILE.md §N` / `§N.M`.
+fn section_refs(line: &str) -> Vec<(String, Section)> {
+    static NAMED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"`?([A-Za-z0-9_./-]+\.md)`?\s*→\s*\\?["“]([^"”\\]+)\\?["”]"#).expect("regex")
+    });
+    static NUMBERED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"`?([A-Za-z0-9_./-]+\.md)`?\s*(?:→\s*)?§\s*(\d+)(?:\.(\d+))?").expect("regex")
+    });
+    let named = NAMED
+        .captures_iter(line)
+        .map(|c| (c[1].to_string(), Section::Named(c[2].to_string())));
+    let numbered = NUMBERED.captures_iter(line).map(|c| {
+        let item = c.get(3).map(|m| m.as_str().to_string());
+        (c[1].to_string(), Section::Numbered(c[2].to_string(), item))
+    });
+    named.chain(numbered).collect()
+}
+
+/// A heading or rule name as a reference spells it: no code or bold marks,
+/// spaces collapsed, no trailing punctuation, lowercase.
+fn normalize(s: &str) -> String {
+    let plain: String = s.chars().filter(|c| !matches!(c, '`' | '*')).collect();
+    plain
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_end_matches(['.', ':', ',', ';'])
+        .to_lowercase()
+}
+
+/// `text`'s headings, each with its level, and its bold leads (`**Rule.**`
+/// opening a line or a bullet, level 0): what a section reference may name.
+fn section_names(text: &str) -> Vec<(usize, usize, String)> {
+    static HEADING: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^ {0,3}(#{1,6})\s+(.*?)\s*$").expect("regex"));
+    static LEAD: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^\s*(?:[-*]\s+)?\*\*(.+?)\*\*").expect("regex"));
+    let mut out = Vec::new();
+    for (n, line) in prose_lines(text) {
+        if let Some(c) = HEADING.captures(line) {
+            out.push((n, c[1].len(), normalize(&c[2])));
+        } else if let Some(c) = LEAD.captures(line) {
+            out.push((n, 0, normalize(&c[1])));
+        }
+    }
+    out
+}
+
+/// Whether `text` has the section `want` names.
+fn has_section(text: &str, want: &Section) -> bool {
+    let names = section_names(text);
+    match want {
+        Section::Named(name) => {
+            let name = normalize(name);
+            names.iter().any(|(.., n)| n.starts_with(&name))
+        }
+        Section::Numbered(num, item) => {
+            let Some(&(line, level, _)) = names.iter().find(|(_, level, n)| {
+                *level > 0
+                    && (n.starts_with(&format!("{num}.")) || n.starts_with(&format!("{num} ")))
+            }) else {
+                return false;
+            };
+            let Some(item) = item else { return true };
+            let end = names
+                .iter()
+                .find(|(l, lv, _)| *l > line && *lv > 0 && *lv <= level)
+                .map_or(usize::MAX, |&(l, ..)| l);
+            prose_lines(text)
+                .into_iter()
+                .filter(|(n, _)| *n > line && *n < end)
+                .any(|(_, l)| l.trim_start().starts_with(&format!("{item}. ")))
+        }
+    }
+}
+
+/// The doc a reference written in `from` names: as a repo path, relative to
+/// `from`, or by a file name only one live doc has.
+fn resolve_doc(from: &str, name: &str, docs: &BTreeMap<String, String>) -> Option<String> {
+    if docs.contains_key(name) {
+        return Some(name.to_string());
+    }
+    if let Some(rel) = resolve(from, name).filter(|r| docs.contains_key(r)) {
+        return Some(rel);
+    }
+    let base = name.rsplit('/').next().unwrap_or(name);
+    let mut hits = docs.keys().filter(|p| {
+        p.rsplit('/').next() == Some(base) && !NOT_SCANNED.iter().any(|s| p.starts_with(s))
+    });
+    let first = hits.next()?;
+    hits.next().is_none().then(|| first.clone())
+}
+
 /// Each directory of pages and the hub that must link every one of them: a page
 /// nobody links to is found only by someone already looking for it.
 const HUBS: &[(&str, &str)] = &[
@@ -241,6 +356,116 @@ fn linked_files(from: &str, text: &str) -> HashSet<String> {
             (!path.is_empty()).then(|| resolve(from, &percent_decode(path)))?
         })
         .collect()
+}
+
+/// Not read for section references: history, test data, and this file's own
+/// fixtures, which name sections that don't exist on purpose.
+const REFS_NOT_SCANNED: &[&str] = &[
+    "CHANGELOG.md",
+    "docs/archive/",
+    "docs/changelog/",
+    "fuzz/",
+    "src/link_guard.rs",
+    "tests/fixtures/",
+];
+
+#[test]
+fn every_section_reference_resolves() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let read = |f: &String| {
+        std::fs::read_to_string(root.join(f))
+            .ok()
+            .map(|t| (f.clone(), t))
+    };
+    let docs: BTreeMap<String, String> = crate::guard_support::markdown_files(root)
+        .iter()
+        .filter_map(read)
+        .collect();
+    let sources = crate::guard_support::repo_files(root, &["md", "rs", "toml", "yml", "sh"]);
+    let mut checked = 0;
+    let mut broken = Vec::new();
+    for (from, text) in sources
+        .iter()
+        .filter(|f| !REFS_NOT_SCANNED.iter().any(|s| f.starts_with(s)))
+        .filter_map(read)
+    {
+        let markdown = Path::new(&from)
+            .extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("md"));
+        let lines: Vec<(usize, &str)> = if markdown {
+            prose_lines(&text)
+        } else {
+            text.lines().enumerate().map(|(i, l)| (i + 1, l)).collect()
+        };
+        for (n, line) in lines {
+            for (doc, section) in section_refs(line) {
+                checked += 1;
+                match resolve_doc(&from, &doc, &docs) {
+                    None => broken.push(format!("{from}:{n}: `{doc}` names no doc")),
+                    Some(target) if !has_section(&docs[&target], &section) => {
+                        broken.push(format!("{from}:{n}: `{doc}` has no section {section}"));
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+    }
+    assert!(
+        checked > 40,
+        "checked only {checked} references; the reader is broken"
+    );
+    assert!(
+        broken.is_empty(),
+        "{} section reference(s) name nothing — a moved or renamed section takes its \
+         references with it:\n{}",
+        broken.len(),
+        broken.join("\n")
+    );
+}
+
+#[test]
+fn a_section_reference_names_a_heading_a_rule_or_a_numbered_item() {
+    let doc = "# Guide\n## Mouse routing\n- **Never pipe the gate.** Run it bare.\n## 8. CI\n1. lint\n2. test\n## 9. Release\n3. tag\n";
+    let named = |n: &str| Section::Named(n.to_string());
+    let num = |n: &str, i: Option<&str>| Section::Numbered(n.to_string(), i.map(str::to_string));
+    assert!(has_section(doc, &named("Mouse routing")));
+    assert!(has_section(doc, &named("mouse ROUTING.")));
+    assert!(has_section(doc, &named("Never pipe the gate")));
+    assert!(!has_section(doc, &named("Keyboard routing")));
+    assert!(has_section(doc, &num("8", None)) && has_section(doc, &num("8", Some("2"))));
+    assert!(
+        !has_section(doc, &num("8", Some("3"))),
+        "item 3 is in section 9"
+    );
+    assert!(!has_section(doc, &num("10", None)));
+}
+
+#[test]
+fn section_references_are_read_in_every_written_form() {
+    assert_eq!(
+        section_refs(r#"see `ARCHITECTURE.md` → "Mouse routing", and RELEASE.md §13.8"#),
+        [
+            (
+                "ARCHITECTURE.md".to_string(),
+                Section::Named("Mouse routing".to_string())
+            ),
+            (
+                "RELEASE.md".to_string(),
+                Section::Numbered("13".to_string(), Some("8".to_string()))
+            ),
+        ]
+    );
+    assert_eq!(
+        section_refs(r#""see AGENTS.md → \"Architecture\".""#),
+        [(
+            "AGENTS.md".to_string(),
+            Section::Named("Architecture".to_string())
+        )]
+    );
+    assert!(
+        section_refs("AGENTS.md → Conventions").is_empty(),
+        "an unquoted name isn't read"
+    );
 }
 
 #[test]

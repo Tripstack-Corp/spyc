@@ -212,9 +212,9 @@ a user page, and both hubs have a size cap; guards check all three.
 
 Moving or splitting a doc? `every_relative_markdown_link_resolves`
 (`src/link_guard.rs`) fails on any relative link or `#anchor` left
-pointing at nothing. A prose reference such as
-`ARCHITECTURE.md → "MCP server"` isn't a link, so search for those by
-hand.
+pointing at nothing, and `every_section_reference_resolves` does the same
+for a prose reference to a section (`ARCHITECTURE.md → "MCP server"`,
+`RELEASE_ENGINEERING.md §8`), as long as the section's name is in quotes.
 
 ## Versioning
 

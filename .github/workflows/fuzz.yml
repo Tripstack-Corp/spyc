@@ -5,7 +5,7 @@
 # The targets cover spyc's untrusted-input surface, which is larger than it
 # looks: the pager renders arbitrary files, the pty pane parses ANSI from
 # arbitrary child processes, and markdown/highlighting run over both. See
-# SECURITY.md → threat model.
+# SECURITY.md → "Threat model".
 #
 # Corpora persist between runs via the cache, so each week resumes from the
 # inputs previous weeks discovered rather than starting cold.

@@ -1221,9 +1221,10 @@ named on a user page (`every_command_is_documented_for_users`), every module
 opens with a `//!` doc (`every_module_opens_with_a_module_doc`), every keymap
 example parses (`every_shipped_keymap_example_parses`), and `AGENTS.md` and the
 two hubs stay under their caps (`agents_md_stays_slim`,
-`hub_pages_stay_overviews`). A prose reference such as
-`ARCHITECTURE.md → "Mouse routing"` is not a link and is not checked, so search
-for them when a doc moves.
+`hub_pages_stay_overviews`). A prose reference to a section,
+`ARCHITECTURE.md → "Mouse routing"` or `RELEASE_ENGINEERING.md §13.8`, must name
+a heading, a bold rule or a numbered item that exists
+(`every_section_reference_resolves`), so write a section's name in quotes.
 
 ### Load-bearing trap anchors
 

@@ -20,7 +20,7 @@
 //! - a pinned file is back under the limit, or gone, so its entry is deleted.
 //!
 //! Raising a pin defeats the guard. Extract a cohesive child module instead: a
-//! verbatim, behaviour-identical relocation (AGENTS.md → Conventions).
+//! verbatim, behaviour-identical relocation (AGENTS.md → "Conventions").
 
 use std::path::Path;
 
