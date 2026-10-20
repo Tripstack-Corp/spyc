@@ -8,7 +8,7 @@ A vi-keyboard-driven terminal file manager in Rust, on ratatui/crossterm, in the
 |---|---|
 | design decisions, `SPYC-TRAP` rationales | [`ARCHITECTURE.md`](ARCHITECTURE.md) |
 | UI language, the binding taxonomy | [`DESIGN.md`](DESIGN.md) |
-| what spyc does, every key | [`FEATURES.md`](FEATURES.md), [`docs/KEYBINDINGS.md`](docs/KEYBINDINGS.md) |
+| what spyc does (an overview, then `docs/features/`), every key | [`FEATURES.md`](FEATURES.md), [`docs/KEYBINDINGS.md`](docs/KEYBINDINGS.md) |
 | `.spycrc.toml`, notifications, keymap DSL, Lua | [`CONFIGURATION.md`](CONFIGURATION.md) |
 | activity dots, notifications, the scope registry | [`docs/AGENT_ORCHESTRATION.md`](docs/AGENT_ORCHESTRATION.md) |
 | per-agent quirks: screen modes, scrollback, resume | [`docs/HARNESS.md`](docs/HARNESS.md) |
@@ -104,7 +104,7 @@ The rules, one each. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the longer forms a
 - **Test the requirement, not the implementation**, and **a test is evidence only once you've watched it fail**: break what it covers, see it report, put it back. A finding naming N sites is closed when N are fixed, and a differential comparison normalizes both sides through one function. Assert intent through the matchers in `effect.rs`.
 - **Repaint:** event-driven dirty frames with `needs_draw` reason codes, `needs_full_repaint` for teardown transitions, DEC 2026 around every frame, rows cached via `list_generation`; 0 draws per second at idle.
 - **Pane I/O:** keys via `input::encode_key(ev, app_cursor)`, raw bytes via `pane.send_bytes()`, paste bracketed. Panes `exec` their command; `^z` suspends a non-shell tab with `SIGSTOP` (never `SIGTSTP`), and a shell tab forwards it. The invocation policy is `shell::pane_invocation` (SPYC-TRAP `pane-shell-rc-double-source`).
-- **Keep docs in sync** in the same commit: `FEATURES.md`, `docs/KEYBINDINGS.md`, `src/ui/help.rs`, `CONFIGURATION.md`, `README.md`, `INSTALL.md` as a change touches them; `ARCHITECTURE.md` on an architectural decision, `DESIGN.md` on a UI-language one, `ROADMAP.md` for strategy only (work items are GitHub Issues). **AGENTS.md takes a new module's index line or a new rule, never a feature's detail.** Relative links are checked (`every_relative_markdown_link_resolves`).
+- **Keep docs in sync** in the same commit: the `docs/features/` page (and `FEATURES.md`'s summary when an area changes), `docs/KEYBINDINGS.md`, `src/ui/help.rs`, `CONFIGURATION.md`, `README.md`, `INSTALL.md` as a change touches them; `ARCHITECTURE.md` on an architectural decision, `DESIGN.md` on a UI-language one, `ROADMAP.md` for strategy only (work items are GitHub Issues). **AGENTS.md takes a new module's index line or a new rule, never a feature's detail.** Relative links are checked (`every_relative_markdown_link_resolves`).
 
 ### Commits, merges, CHANGELOG
 

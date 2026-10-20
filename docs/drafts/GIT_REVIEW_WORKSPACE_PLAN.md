@@ -98,7 +98,7 @@ Useful implementation anchors:
 - [`src/ui/diff_render/mod.rs`](../../src/ui/diff_render/mod.rs): reusable pure
   diff rendering. Its current output is styled lines, not a semantic selection
   map.
-- [`FEATURES.md`](../../FEATURES.md#git-views--diff--show--blame): the existing
+- [`docs/features/pager.md`](../features/pager.md#git-views--diff--show--blame): the existing
   user-facing Git behaviours that must remain compatible.
 
 ## Scope and release boundary

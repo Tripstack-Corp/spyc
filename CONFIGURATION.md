@@ -772,7 +772,9 @@ binding for any other key leaves the chords that end in it alone:
 > from tmux's own prefix (and `set -s escape-time 0` for snappy input).
 
 Several low-frequency features ship as `:` commands **without** a default key so
-the keymap stays uncluttered — bind the ones you use:
+the keymap stays uncluttered (the graveyard, the activity monitor, `:longlist`,
+`:filetype`, `:chmod`), and `--print-config` lists them as commented `command`
+lines to enable. Bind the ones you use:
 
 ```toml
 keymap = [
@@ -972,7 +974,11 @@ end)
 ```
 
 Events: `startup`, `dir_changed` (`{cwd}`), `project_changed` (`{project_home}`),
-`agent_status` (`{pane, state}`).
+`agent_status` (`{pane, state}`). Each fires on a transition, and a change a handler
+makes itself (a `dir_changed` handler that navigates) doesn't fire it again, so hooks
+can't loop; high-frequency events (cursor moves, pane output) aren't exposed.
+Tab-completion lists the `:` commands `init.lua` registered, and `:lua status`
+reports how many maps and commands it registered.
 
 ### The `spyc.*` API
 
@@ -980,11 +986,16 @@ Events: `startup`, `dir_changed` (`{cwd}`), `project_changed` (`{project_home}`)
 - **Live reads** (synchronous, gitignore-aware, scoped to the search root):
   `spyc.worktrees()`, `spyc.git_status()`, `spyc.git_log{ limit = N }`,
   `spyc.read(path)`, `spyc.search_paths(query)`,
-  `spyc.search_content(regex)` → rows of `{ file, line, text }`.
+  `spyc.search_content(regex)` → rows of `{ file, line, text }`. They run on the
+  Lua worker through spyc's MCP readers, with no round trip to the main loop. A
+  failure (a bad path, not a repo, an invalid regex) raises a Lua error; nothing
+  found is an empty table.
 - **Drive the view:** `spyc.navigate(path)`, `spyc.pick(...)`,
   `spyc.clear_picks()`, `spyc.filter(...)`, `spyc.report_status(state)`.
 - **Invoke behaviours:** `spyc.action("<snake_case_name>")` (any built-in action,
-  e.g. `git_blame`), `spyc.cmd("<:command>")`.
+  e.g. `git_blame`), with an optional count (`spyc.action("down", 3)`), and
+  `spyc.cmd("<:command>")`. `set_mark` and `jump_mark` need a mark letter, so
+  reach them through `spyc.cmd`.
 - **Talk to the user:** `spyc.notify(msg)`, `spyc.warn(msg)`.
 
 ### Safety
@@ -992,8 +1003,11 @@ Events: `startup`, `dir_changed` (`{cwd}`), `project_changed` (`{project_home}`)
 Scripts run on a **dedicated worker thread** with an instruction-budget kill
 switch and a hard 30-second ceiling; a script running longer than ~1s raises an
 interactive `keep waiting? [y/N]` prompt (the loop stays responsive because the
-interpreter is off the main thread). Disable Lua entirely with `:lua off` or the
-`--no-lua` launch flag. Full charter: `docs/archive/LUA_SCRIPTING_PLAN.md`.
+interpreter is off the main thread). The prompt waits while an editor or a `D`
+pager has the keyboard, so a key typed there can't answer it. Lua is `$HOME`-only:
+a project config can never run it, and `init.lua` loads only from
+`~/.config/spyc/`. Disable Lua entirely with `:lua off` or the `--no-lua` launch
+flag. Full charter: `docs/archive/LUA_SCRIPTING_PLAN.md`.
 
 ---
 
