@@ -193,7 +193,8 @@ use `terminal.clear()` per frame.
 When your change affects user-visible behaviour, keybindings, or
 project status, update **all** of:
 
-- `FEATURES.md` — what the app does
+- `docs/features/` — what the app does, one page per area; `FEATURES.md` is
+  their overview, so touch its summary when an area changes
 - `ROADMAP.md` — strategy/direction only; file or close a **GitHub Issue** for per-item work
 - `AGENTS.md` — only a new module's index line or a new rule; a feature's detail
   goes in `FEATURES.md`, and `agents_md_stays_slim` caps the file
