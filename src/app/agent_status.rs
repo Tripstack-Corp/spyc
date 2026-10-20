@@ -19,7 +19,7 @@ use super::{
     VisualBell, Wake,
 };
 use crate::config::{DesktopVia, NotifyConfig};
-use crate::pane::{AgentActivity, ReportedStatus};
+use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
 
 /// How long after a tab's last pane output it still counts as `Working`. Long
 /// enough to bridge the sub-second gaps between streamed token chunks; short
@@ -159,8 +159,7 @@ fn notification_for_transition(
     cfg: &NotifyConfig,
     tab_focused: bool,
     is_ssh: bool,
-    label: &str,
-    tab_number: usize,
+    who: &Subject,
 ) -> NotifyPlan {
     // A fresh edge into a notify-worthy state; `is_done` distinguishes the
     // routine finished-turn edge (per-channel opt-in) from `Blocked` (fires all).
@@ -184,7 +183,7 @@ fn notification_for_transition(
         (false, false)
     };
     let (system, osc9) = if want_system || want_osc9 {
-        let (summary, body) = notification_text(label, tab_number, new);
+        let (summary, body) = notification_text(who, new);
         // OSC-9 takes one line; fold the two parts into it.
         let osc9 = want_osc9.then(|| format!("{summary} — {body}"));
         let system = want_system.then_some((summary, body));
@@ -200,21 +199,66 @@ fn notification_for_transition(
     }
 }
 
+/// Who a notification is about: the tab's label and its number in its
+/// project, and the project, named only while several are open.
+struct Subject<'a> {
+    label: &'a str,
+    tab_number: usize,
+    project: Option<&'a str>,
+}
+
 /// Compose the `(summary, body)` for a transition notification: a glanceable
-/// "which agent + what" summary plus the tab locator in the body. Only
-/// `Blocked` / `Done` reach here (see [`notification_for_transition`]); the
-/// fallback arm is a sane non-panicking default.
-fn notification_text(label: &str, tab_number: usize, new: AgentActivity) -> (String, String) {
+/// "which agent + what" summary plus the tab locator in the body, each naming
+/// the project when [`Subject::project`] does. Only `Blocked` / `Done` reach
+/// here (see [`notification_for_transition`]); the fallback arm is a sane
+/// non-panicking default.
+fn notification_text(who: &Subject, new: AgentActivity) -> (String, String) {
+    let (label, tab) = (who.label, who.tab_number);
+    let (agent, place) = who.project.map_or_else(
+        || (label.to_owned(), format!("tab {tab}")),
+        |project| {
+            (
+                format!("{label} in {project}"),
+                format!("{project}: tab {tab}"),
+            )
+        },
+    );
     match new {
-        AgentActivity::Blocked => (
-            format!("{label} needs you"),
-            format!("tab {tab_number} is blocked"),
-        ),
-        AgentActivity::Done => (
-            format!("{label} finished"),
-            format!("tab {tab_number} — done"),
-        ),
-        _ => (label.to_string(), format!("tab {tab_number}")),
+        AgentActivity::Blocked => (format!("{agent} needs you"), format!("{place} is blocked")),
+        AgentActivity::Done => (format!("{agent} finished"), format!("{place} — done")),
+        _ => (agent, place),
+    }
+}
+
+/// One project's part of the activity walk: its `[notify]`, how its
+/// notifications name it, and what the user sees of it.
+struct ProjectNotify {
+    id: super::state::ProjectId,
+    cfg: NotifyConfig,
+    /// Its label, while several projects are open: a tab number alone doesn't
+    /// say which project's tab.
+    named: Option<String>,
+    /// Its place in switcher order, which orders the bell's flash.
+    order: usize,
+    /// It is the project in view.
+    in_view: bool,
+    /// The tab the user sees in it ([`App::in_view_tab`]).
+    tab_in_view: Option<usize>,
+}
+
+/// A bell rung from a project out of view, and the flash that says where.
+struct BellNote {
+    blocked: bool,
+    order: usize,
+    tab_number: usize,
+    text: String,
+}
+
+impl BellNote {
+    /// Blocked over done, then switcher order, then tab order: the walk's map
+    /// order isn't the user's.
+    fn outranks(&self, other: &Self) -> bool {
+        (self.blocked, other.order, other.tab_number) > (other.blocked, self.order, self.tab_number)
     }
 }
 
@@ -254,17 +298,46 @@ struct ActivityScan<'a> {
     any_working: bool,
     status_transitions: Vec<(String, AgentActivity)>,
     live_ids: HashSet<String>,
+    bell_note: Option<BellNote>,
 }
 
 impl ActivityScan<'_> {
-    /// Settle one tab, `index` its place in its project (0-based). `focused`:
+    /// When a tab's `Blocked` began, and a `Done` that lands while the tab is
+    /// out of view, kept until it is in view. In view, the tab's unseen done
+    /// and its `+` are seen.
+    fn settle_attention(&mut self, info: &mut TabInfo, new: AgentActivity, in_view: bool) {
+        if new == AgentActivity::Blocked {
+            info.blocked_since.get_or_insert(self.now);
+        } else {
+            info.blocked_since = None;
+        }
+        if in_view {
+            let seen = info.unseen_done.take().is_some();
+            self.changed |= seen | std::mem::take(&mut info.has_activity);
+        } else if new == AgentActivity::Done && info.notified != AgentActivity::Done {
+            info.unseen_done.get_or_insert(self.now);
+        }
+    }
+
+    /// Keep the most urgent bell rung from a project out of view.
+    fn note_bell(&mut self, note: BellNote) {
+        if self
+            .bell_note
+            .as_ref()
+            .is_none_or(|best| note.outranks(best))
+        {
+            self.bell_note = Some(note);
+        }
+    }
+
+    /// Settle one tab, `index` its place in `project` (0-based). `focused`:
     /// the user is looking at it, so a transition doesn't ping them.
     fn settle_tab(
         &mut self,
         entry: &mut crate::pane::TabEntry,
         index: usize,
         focused: bool,
-        notify_cfg: &NotifyConfig,
+        project: &ProjectNotify,
     ) {
         let kind = entry.info.agent().kind();
         let closed = entry.pane.is_closed();
@@ -326,22 +399,35 @@ impl ActivityScan<'_> {
         if new == AgentActivity::Working {
             self.any_working = true;
         }
+        self.settle_attention(&mut entry.info, new, project.tab_in_view == Some(index));
         // P3-1 notification edge: compare `new` against `notified` (this
         // settle owns it), NOT `activity` — the MCP `report_status` handler
         // pre-sets `activity` for an instant dot, which would otherwise erase
         // the Idle→Blocked edge before we see it (→ no ping). Decide against
         // the old `notified`, then advance it.
         if new != entry.info.notified {
+            let who = Subject {
+                label: &entry.info.label,
+                tab_number: index + 1,
+                project: project.named.as_deref(),
+            };
             let plan = notification_for_transition(
                 entry.info.notified,
                 new,
-                notify_cfg,
+                &project.cfg,
                 focused,
                 self.is_ssh,
-                &entry.info.label,
-                index + 1,
+                &who,
             );
             if !plan.is_silent() {
+                if plan.visual && !project.in_view && who.project.is_some() {
+                    self.note_bell(BellNote {
+                        blocked: new == AgentActivity::Blocked,
+                        order: project.order,
+                        tab_number: who.tab_number,
+                        text: notification_text(&who, new).1,
+                    });
+                }
                 if plan.system.is_some() || plan.osc9.is_some() || plan.bell {
                     self.effects.push(Effect::Notify {
                         system: plan.system,
@@ -719,11 +805,7 @@ impl App {
         // (5 bools, cheap).
         let in_view = self.state.active;
         let pane_focused = self.state.pane_focused();
-        let notify: Vec<(super::state::ProjectId, NotifyConfig)> = self
-            .state
-            .open_projects()
-            .map(|project| (project.id, project.config.notify.clone()))
-            .collect();
+        let notify = self.project_notify();
         let open: HashSet<String> = self
             .runtime
             .every_tab_set()
@@ -746,15 +828,16 @@ impl App {
             any_working: false,
             status_transitions: Vec::new(),
             live_ids: HashSet::new(),
+            bell_note: None,
         };
         for (id, tabs) in self.runtime.every_tab_set_mut() {
-            let Some((_, notify_cfg)) = notify.iter().find(|(project, _)| *project == id) else {
+            let Some(project) = notify.iter().find(|project| project.id == id) else {
                 continue;
             };
             let active_idx = tabs.active_index();
             for (i, entry) in tabs.tabs_mut().iter_mut().enumerate() {
                 let focused = id == in_view && i == active_idx && pane_focused;
-                scan.settle_tab(entry, i, focused, notify_cfg);
+                scan.settle_tab(entry, i, focused, project);
             }
         }
         let ActivityScan {
@@ -765,6 +848,7 @@ impl App {
             any_working,
             status_transitions,
             live_ids,
+            bell_note,
             ..
         } = scan;
 
@@ -811,8 +895,54 @@ impl App {
             ctx.scheduler
                 .arm(Deadline::VisualBell, now + VISUAL_BELL_FRAME);
             changed = true;
+            // The pulse says "look"; from another project, the flash says where,
+            // unless an error is showing, which matters more.
+            let error_showing = self
+                .state
+                .flash
+                .as_ref()
+                .is_some_and(|flash| matches!(flash.kind, super::FlashKind::Error));
+            if let Some(note) = bell_note.filter(|_| !error_showing) {
+                self.state.flash_info(note.text);
+            }
         }
         (changed, effects)
+    }
+
+    /// Each open project's part of the activity walk, in switcher order.
+    fn project_notify(&self) -> Vec<ProjectNotify> {
+        let in_view = self.state.active;
+        let tab_in_view = self.in_view_tab();
+        let several = self.state.open_projects().nth(1).is_some();
+        self.state
+            .open_projects()
+            .enumerate()
+            .map(|(order, project)| ProjectNotify {
+                id: project.id,
+                cfg: project.config.notify.clone(),
+                named: several.then(|| project.label()),
+                order,
+                in_view: project.id == in_view,
+                tab_in_view: tab_in_view.filter(|_| project.id == in_view),
+            })
+            .collect()
+    }
+
+    /// The tab the user sees: the active tab of the project in view, while its
+    /// pane is drawn. A hidden pane, a zoom onto the list or the right column,
+    /// a modal pager or a full-screen image over the whole frame leaves none;
+    /// the editor, a `D` pager, `^a v` and a split all keep the pane drawn.
+    pub(super) fn in_view_tab(&self) -> Option<usize> {
+        let pane = &self.state.active_project().pane;
+        let drawn = !pane.pane_hidden
+            && matches!(
+                pane.zoom,
+                super::state::ZoomTarget::None | super::state::ZoomTarget::BottomPane
+            )
+            && !self.modal_pager_open()
+            && self.view.image_view.is_none();
+        let tabs = self.runtime.project().pane_tabs.as_ref()?;
+        drawn.then(|| tabs.active_index())
     }
 
     /// Advance / decay the P3-1 visual-bell border pulse (a `&mut` settle point,
@@ -848,6 +978,15 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    /// A tab of an agent labelled `label`, its project unnamed (one open).
+    fn who(label: &str, tab_number: usize) -> super::Subject<'_> {
+        super::Subject {
+            label,
+            tab_number,
+            project: None,
+        }
+    }
+
     use super::{AgentKind, AgentStatusCache, App};
     use std::path::{Path, PathBuf};
 
@@ -1243,7 +1382,8 @@ mod tests {
         let cfg = NotifyConfig::default(); // desktop(auto) + desktop_done + visual on; bell off.
 
         // Idle → Blocked on a background tab, local → system "needs me" ping.
-        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 2);
+        let p =
+            super::notification_for_transition(Idle, Blocked, &cfg, false, false, &who("codex", 2));
         let (summary, body) = p.system.clone().expect("blocked pings the OS notifier");
         assert!(summary.contains("codex"), "summary names the agent");
         assert!(body.contains('2'), "body carries the tab locator");
@@ -1255,8 +1395,67 @@ mod tests {
         );
 
         // Working → Done also pings (desktop_done on by default).
-        let p = super::notification_for_transition(Working, Done, &cfg, false, false, "claude", 1);
+        let p = super::notification_for_transition(
+            Working,
+            Done,
+            &cfg,
+            false,
+            false,
+            &who("claude", 1),
+        );
         assert!(p.system.is_some());
+    }
+
+    /// The bell's flash goes to the most urgent: blocked over done, then the
+    /// earlier project in switcher order, then the lower tab.
+    #[test]
+    fn the_bell_note_for_the_most_urgent_wins() {
+        let note = |blocked, order, tab_number| super::BellNote {
+            blocked,
+            order,
+            tab_number,
+            text: String::new(),
+        };
+        assert!(
+            note(true, 3, 5).outranks(&note(false, 0, 1)),
+            "blocked first"
+        );
+        assert!(
+            note(false, 0, 9).outranks(&note(false, 2, 1)),
+            "earlier project"
+        );
+        assert!(note(true, 1, 1).outranks(&note(true, 1, 2)), "lower tab");
+        assert!(
+            !note(true, 1, 2).outranks(&note(true, 1, 2)),
+            "not over itself"
+        );
+    }
+
+    /// With a project named, both halves say which project's tab it is; with
+    /// none, they read as before.
+    #[test]
+    fn notification_text_names_the_project_when_given() {
+        use crate::pane::AgentActivity::{Blocked, Done};
+        let named = super::Subject {
+            label: "claude",
+            tab_number: 2,
+            project: Some("web"),
+        };
+        assert_eq!(
+            super::notification_text(&named, Blocked),
+            (
+                "claude in web needs you".into(),
+                "web: tab 2 is blocked".into()
+            )
+        );
+        assert_eq!(
+            super::notification_text(&named, Done),
+            ("claude in web finished".into(), "web: tab 2 — done".into())
+        );
+        assert_eq!(
+            super::notification_text(&who("claude", 2), Done),
+            ("claude finished".into(), "tab 2 — done".into())
+        );
     }
 
     // The OSC-9 fallback: `auto` routes to OSC-9 (not the OS notifier) over SSH,
@@ -1295,7 +1494,8 @@ mod tests {
         use crate::pane::AgentActivity::{Blocked, Idle};
         let cfg = NotifyConfig::default(); // desktop_via = auto
         // is_ssh = true → the desktop ping goes out as OSC-9, not the OS notifier.
-        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, true, "codex", 2);
+        let p =
+            super::notification_for_transition(Idle, Blocked, &cfg, false, true, &who("codex", 2));
         assert!(p.system.is_none(), "no OS notifier over SSH under auto");
         let msg = p.osc9.expect("OSC-9 fires over SSH");
         assert!(
@@ -1313,7 +1513,7 @@ mod tests {
         // another app while the agent works), so "needs me" must reach them.
         let cfg = NotifyConfig::default();
         assert!(
-            !super::notification_for_transition(Idle, Blocked, &cfg, true, false, "codex", 2)
+            !super::notification_for_transition(Idle, Blocked, &cfg, true, false, &who("codex", 2))
                 .is_silent(),
             "focused tab notifies by default"
         );
@@ -1323,7 +1523,7 @@ mod tests {
             ..NotifyConfig::default()
         };
         assert!(
-            super::notification_for_transition(Idle, Blocked, &cfg, true, false, "codex", 2)
+            super::notification_for_transition(Idle, Blocked, &cfg, true, false, &who("codex", 2))
                 .is_silent(),
             "suppress_focused_tab = true stays silent for the watched tab"
         );
@@ -1339,12 +1539,12 @@ mod tests {
         };
         // Done with desktop_done off → silent…
         assert!(
-            super::notification_for_transition(Working, Done, &cfg, false, false, "codex", 3)
+            super::notification_for_transition(Working, Done, &cfg, false, false, &who("codex", 3))
                 .is_silent()
         );
         // …but Blocked still fires.
         assert!(
-            super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 3)
+            super::notification_for_transition(Idle, Blocked, &cfg, false, false, &who("codex", 3))
                 .system
                 .is_some()
         );
@@ -1357,19 +1557,20 @@ mod tests {
         let cfg = NotifyConfig::default();
         // No edge (Blocked → Blocked, Done → Done) → silent: one ping per turn.
         assert!(
-            super::notification_for_transition(Blocked, Blocked, &cfg, false, false, "x", 1)
+            super::notification_for_transition(Blocked, Blocked, &cfg, false, false, &who("x", 1))
                 .is_silent()
         );
         assert!(
-            super::notification_for_transition(Done, Done, &cfg, false, false, "x", 1).is_silent()
+            super::notification_for_transition(Done, Done, &cfg, false, false, &who("x", 1))
+                .is_silent()
         );
         // Non-worthy transitions (resume / go quiet) never ping.
         assert!(
-            super::notification_for_transition(Idle, Working, &cfg, false, false, "x", 1)
+            super::notification_for_transition(Idle, Working, &cfg, false, false, &who("x", 1))
                 .is_silent()
         );
         assert!(
-            super::notification_for_transition(Working, Idle, &cfg, false, false, "x", 1)
+            super::notification_for_transition(Working, Idle, &cfg, false, false, &who("x", 1))
                 .is_silent()
         );
     }
@@ -1383,7 +1584,8 @@ mod tests {
             bell: true,
             ..NotifyConfig::default()
         };
-        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 1);
+        let p =
+            super::notification_for_transition(Idle, Blocked, &cfg, false, false, &who("codex", 1));
         assert!(
             p.system.is_none() && p.osc9.is_none(),
             "no desktop notif when desktop is off"
@@ -1406,12 +1608,14 @@ mod tests {
         };
 
         // Blocked ("needs me") fires the interrupting channels.
-        let p = super::notification_for_transition(Idle, Blocked, &cfg, false, false, "codex", 1);
+        let p =
+            super::notification_for_transition(Idle, Blocked, &cfg, false, false, &who("codex", 1));
         assert!(p.bell, "bell rings on Blocked");
         assert!(p.visual, "flash fires on Blocked");
 
         // Done (every finished turn) stays quiet on bell + flash; desktop still pings.
-        let p = super::notification_for_transition(Working, Done, &cfg, false, false, "codex", 1);
+        let p =
+            super::notification_for_transition(Working, Done, &cfg, false, false, &who("codex", 1));
         assert!(!p.bell, "no per-turn bell on Done");
         assert!(!p.visual, "no per-turn flash on Done");
         assert!(
@@ -1432,7 +1636,8 @@ mod tests {
             visual_done: true,
             ..NotifyConfig::default()
         };
-        let p = super::notification_for_transition(Working, Done, &cfg, false, false, "codex", 1);
+        let p =
+            super::notification_for_transition(Working, Done, &cfg, false, false, &who("codex", 1));
         assert!(p.bell, "bell_done rings the bell on Done");
         assert!(p.visual, "visual_done flashes on Done");
     }

@@ -199,6 +199,15 @@ pub struct TabInfo {
     /// sees it (→ no notification). `settle_agent_activity` owns this field, so
     /// the pre-set can't hide the transition. Starts `Unknown`.
     pub notified: AgentActivity,
+    /// When a `Done` landed on this tab while it was out of view, kept until
+    /// the user brings the tab into view (`App::in_view_tab`). It outlives the
+    /// done report's decay to idle, so the tab's dot stays a teal `■`. Never
+    /// saved: an unseen done is about this run.
+    pub unseen_done: Option<std::time::Instant>,
+    /// When the tab's current `Blocked` began, `None` whenever it isn't
+    /// blocked: the oldest blocked agent is the one waiting longest. Never
+    /// saved.
+    pub blocked_since: Option<std::time::Instant>,
     /// True while this pane is `^z`-suspended: spyc sent `SIGSTOP` to its
     /// process group (the child is stopped, not exited) and the divider shows
     /// 💤 instead of the activity dot. Set/cleared by the `^z` toggle
@@ -324,6 +333,17 @@ pub struct TabInfo {
 }
 
 impl TabInfo {
+    /// The activity its dot shows: a done the user hasn't seen keeps its teal
+    /// `■` after the report decays to idle, until the tab is `seen` (in view,
+    /// `App::in_view_tab`).
+    pub fn shown_activity(&self, seen: bool) -> AgentActivity {
+        if self.unseen_done.is_some() && !seen && self.activity == AgentActivity::Idle {
+            AgentActivity::Done
+        } else {
+            self.activity
+        }
+    }
+
     /// The agent this tab runs now: the one detected in a shell tab's
     /// foreground, else the one its launch command names. Every question about
     /// an existing tab's agent (its dot, reports, resume, transcript, paste and
@@ -387,6 +407,8 @@ impl TabInfo {
             last_output_at: None,
             activity: AgentActivity::Unknown,
             notified: AgentActivity::Unknown,
+            unseen_done: None,
+            blocked_since: None,
             suspended: false,
             reported: None,
             last_reported: None,

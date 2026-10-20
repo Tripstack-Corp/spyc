@@ -286,10 +286,12 @@ impl App {
         use ratatui::style::Style;
         use ratatui::text::Span;
         let tab_layout = super::super::mouse::tab_hit::tab_layout(tabs, is_scrolling, bar_width);
+        let in_view = self.in_view_tab();
         let mut used = 0usize;
         let mut active_shown = false;
         for (i, entry) in tabs.tabs().iter().enumerate() {
             let is_active = i == tabs.active_index();
+            let seen = in_view == Some(i);
             let sep = "─";
             // FIXED-WIDTH indicator so the divider never reflows as statuses
             // change: every tab is `[N]` + exactly one status cell + label.
@@ -314,13 +316,16 @@ impl App {
                     Style::default().fg(self.view.theme.status_suffix),
                 ))
             } else if is_agent {
-                self.agent_activity_span(entry.info.activity, entry.info.anim_phase_offset)
+                self.agent_activity_span(
+                    entry.info.shown_activity(seen),
+                    entry.info.anim_phase_offset,
+                )
             } else {
                 None
             };
             let shell_cell = if is_agent || suspended {
                 "" // the dot span fills the cell instead
-            } else if entry.info.has_activity {
+            } else if entry.info.has_activity && !seen {
                 "+"
             } else {
                 " " // reserved blank — keeps the width fixed

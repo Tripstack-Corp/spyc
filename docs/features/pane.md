@@ -52,7 +52,9 @@ image protocols or OSC 52 clipboard writes. How it answers:
   divider:
   - a pulsing **`●`** (an orange-to-spark breath) while it's working;
   - a steady hot-red **`■`** when it's **blocked** on you, and a calm teal
-    **`■`** when it's **done**: a square is a settled state, and your turn;
+    **`■`** when it's **done**: a square is a settled state, and your turn. A
+    done that landed while you weren't looking at its tab stays teal until
+    you are, even after its report times out;
   - a blue hollow **`○`** when it's **waiting** on background work it started
     (a CI run, a build) that will wake it. `:why-status` shows what it said it
     waits on, and entering `waiting` pings nothing;
@@ -99,7 +101,8 @@ image protocols or OSC 52 clipboard writes. How it answers:
 - **Agent notifications** (`[notify]` config) — the "which agent needs me" ping,
   fired the instant a pane transitions (0 delay, not a timer):
   - **Desktop notification** naming the tab (e.g. *"codex needs you — tab 2 is
-    blocked"*) on `Blocked` and `Done`. **On by default.** `desktop_via` picks
+    blocked"*) on `Blocked` and `Done`, and its project when several are open
+    (*"codex in web needs you — web: tab 2 is blocked"*). **On by default.** `desktop_via` picks
     how it's delivered — default **`"auto"`**: an **OSC-9 terminal escape over
     SSH** (so it pops on your *client* terminal, where your eyes are) and the OS
     notifier locally. Force it with `"system"` (OS notifier — the
@@ -111,6 +114,8 @@ image protocols or OSC 52 clipboard writes. How it answers:
   - **Visual bell** (`visual = false` to opt out; **on by default**) — a brief
     spice-heat **border pulse** (spyc's pepper→ember→orange→spark gradient)
     sweeping around the whole frame; the branded, non-reflowing attention flash.
+    When it rings for another project, a flash says where (*"web: tab 2 is
+    blocked"*).
   - **Blocked-only by default for the intrusive channels.** `Blocked` ("needs
     me") fires every enabled channel; the routine `Done` (once per *finished
     turn*) fires only channels that opt in. The quiet desktop ping does
