@@ -101,14 +101,14 @@ in Codex's queued-question view can be copied even when Codex cannot select it.
 Hold Ctrl on the press; releasing Ctrl mid-drag does not hand it back to the child.
 spyc holds the visible grid while you drag, then copies from it on release and
 resumes the live view. The child continues running throughout. See
-[the selection caveats](../CONFIGURATION.md#selecting-text) for Ctrl+click behaviour.
+[the selection caveats](config/mouse.md#selecting-text) for Ctrl+click behaviour.
 A key, paste, wheel gesture, tab switch or layout change cancels the held drag.
 Turning mouse capture off also cancels it. Shift+drag remains the host terminal's
 selection gesture.
 
 The host terminal must forward Ctrl+left events. iTerm2 requires its pointer
 preference for reporting Ctrl+click to applications; Terminal.app uses the gesture
-for a shortcut menu. See [the selection caveats](../CONFIGURATION.md#selecting-text)
+for a shortcut menu. See [the selection caveats](config/mouse.md#selecting-text)
 for the preference and the host-selection fallback.
 
 ---
@@ -549,7 +549,7 @@ CLI execution or fresh onboarding acceptance.
 
 Enable `:agent hud compact`, then `full`; `off` is the default. The strip follows
 the active live Codex tab and leaves its native composer within the resized
-child. [Configuration and source semantics](../CONFIGURATION.md#agent-hud--pane-agent_hud)
+child. [Configuration and source semantics](config/agent-hud.md#agent-hud--pane-agent_hud)
 explain unknown values, freshness and the home-only preference.
 
 For a local acceptance round:

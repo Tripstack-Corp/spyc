@@ -760,15 +760,15 @@ mod tests {
         );
     }
 
-    /// `CONFIGURATION.md`'s action-name table is where a user finds a name to
-    /// bind, so it lists every action and nothing else.
+    /// The action-name table in `docs/config/keymap.md` is where a user finds a
+    /// name to bind, so it lists every action and nothing else.
     #[test]
     fn the_action_name_table_lists_every_action() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        let doc = std::fs::read_to_string(root.join("CONFIGURATION.md")).expect("doc");
+        let doc = std::fs::read_to_string(root.join("docs/config/keymap.md")).expect("doc");
         let (_, section) = doc
-            .split_once("\n### Action names\n")
-            .expect("an `### Action names` section");
+            .split_once("\n## Action names\n")
+            .expect("an `## Action names` section");
         let section = section.split("\n#").next().unwrap_or(section);
         let row = regex::Regex::new(r"^\| `([a-z_]+)[^`]*` \|").expect("regex");
         let listed: std::collections::BTreeSet<&str> = section

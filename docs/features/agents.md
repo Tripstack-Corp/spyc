@@ -281,7 +281,7 @@ wrapper forwards them, each with when it resets: local clock time (`↻3:40pm`,
 `info`), or a double-click on the strip, opens saveable source and freshness
 diagnostics with every tool's tally. A drag across the strip copies its text.
 The strip uses the shared pane geometry, preserves six child rows and needs no
-idle polling. See [configuration and source semantics](../../CONFIGURATION.md#agent-hud--pane-agent_hud)
+idle polling. See [configuration and source semantics](../config/agent-hud.md#agent-hud--pane-agent_hud)
 for the home-only preference and size fallbacks.
 
 ## Agent image gallery — what you actually pasted

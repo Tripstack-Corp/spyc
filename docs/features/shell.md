@@ -100,7 +100,7 @@ end).
   a mouse-aware child keeps reaching the child. A released highlight appears only
   while the live grid still matches the copied text; new output or input clears it.
   Ctrl+click behaviour and host-terminal forwarding preferences are documented
-  in [the selection caveats](../../CONFIGURATION.md#selecting-text).
+  in [the selection caveats](../config/mouse.md#selecting-text).
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file

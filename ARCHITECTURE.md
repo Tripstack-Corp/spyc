@@ -1073,7 +1073,7 @@ list rows), each a `begin` + `extend` + `finish` triple. The press *claims* the
 drag; an unclaimed press leaves child-forwarding untouched, which is why an
 ordinary drag inside a mouse-aware child still reaches the child. Ctrl+left press
 claims the pane for spyc even when the child requested mouse reporting.
-[Selection caveats](CONFIGURATION.md#selecting-text) define Ctrl+click behaviour.
+[Selection caveats](docs/config/mouse.md#selecting-text) define Ctrl+click behaviour.
 
 Pane selection owns a bounded `pane::snapshot::ScreenSnapshot` captured under the
 parser lock at press. The draw and clipboard extraction use that same immutable
