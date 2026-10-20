@@ -302,6 +302,50 @@ fn agent_hud_real_loop_rebinds_same_cwd_homes_and_stops_without_a_consumer() {
     });
 }
 
+/// The strip follows the project in view. Each project keeps its own binding
+/// and the process runs one collector, so coming back to a project whose
+/// binding is unchanged must still put the collector back on it, or the strip
+/// shows the other project's agent, or nothing new at all.
+#[test]
+#[ignore = "red: the collector keeps following the project left"]
+fn agent_hud_follows_the_project_switched_to() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let (a, b) = (tmp.path().join("home-a"), tmp.path().join("home-b"));
+        let path_a = rollout(&a, 11);
+        rollout(&b, 99);
+        let mut app = fixture(tmp.path(), &a);
+        let mut ctx = RunCtx::for_test();
+        app.cmd_agent_hud("compact");
+        wait_metrics(&mut app, &mut ctx, 11);
+        let x = app.state.active;
+        let y_dir = tmp.path().join("y");
+        std::fs::create_dir_all(&y_dir).unwrap();
+        let y = app.add_test_project(&y_dir);
+        app.as_project(y, |app| {
+            let tab = entry(app, &y_dir, &b, "cat");
+            app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(tab));
+            app.state.active_project_mut().pane.pane_height_pct = 50;
+            app.state.active_project_mut().config.mouse.capture = false;
+            app.cmd_agent_hud("compact");
+        });
+
+        app.switch_project(y);
+        wait_metrics(&mut app, &mut ctx, 99);
+        app.switch_project(x);
+        tick(&mut app, &mut ctx);
+        let followed = app.runtime.agent_hud.as_ref().map(|c| c.binding.clone());
+        assert_eq!(
+            followed,
+            app.state.active_project().pane.agent_hud.binding,
+            "the collector follows the project left"
+        );
+        append_usage(&path_a, 55, "2026-10-13T12:00:01Z");
+        wait_metrics(&mut app, &mut ctx, 55);
+    });
+}
+
 #[test]
 fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
     let tmp = tempfile::tempdir().unwrap();
