@@ -411,6 +411,9 @@ mod fn_size_guard;
 mod link_guard;
 
 #[cfg(test)]
+mod module_doc_guard;
+
+#[cfg(test)]
 mod size_guard;
 
 #[cfg(test)]

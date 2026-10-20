@@ -7,8 +7,8 @@ Part of spyc's [feature reference](../../FEATURES.md). The built-in pager, its b
 A built-in pager for viewing files and command output without leaving
 spyc.
 
-- **Syntax highlighting** via syntect — source files are highlighted
-  with language-aware colouring (hundreds of languages supported)
+- **Syntax highlighting** — source files are highlighted with
+  language-aware colouring (hundreds of languages supported)
 - ANSI colour preservation — captured command output looks exactly right
 - **Streaming output** — `!` commands show output live with an
   hourglass timer, stderr merged so build progress appears in real-time
@@ -39,23 +39,21 @@ spyc.
   `^b` / `g` / `G` / `Home` / `End` extend it (auto-scrolling), the
   status footer shows `L{lo}-L{hi}` and the line count, `y` yanks the
   inclusive range to the clipboard and exits, `Esc` / `V` cancel.
-  (Decoupling the anchor from the top of the viewport lets a
-  selection begin on a precise line.)
 - **^v** enter **visual block (columnar) mode** — vi's rectangle.
   `j` / `k` extend rows, `h` / `l` extend columns; `y` yanks the
-  rectangle (each row contributes `chars[lo_col..=hi_col]`, rows
-  shorter than the range simply contribute fewer chars). `^v`
+  rectangle (each row gives the characters in the column range, a
+  shorter row fewer of them). `^v`
   toggles back off; `V` while in block drops down to line mode
   (vim parity). Footer reads
   `-- VISUAL BLOCK --  L{lo}-L{hi} C{lo}-C{hi}  ({rows}×{cols})`
 - **x** toggle hex-dump view for binary files
 - **Markdown viewer** — `.md`/`.markdown` files open in rendered
   mode by default: headings styled, lists with bullets, fenced
-  code blocks syntect-highlighted by language, blockquotes with a
+  code blocks highlighted by language, blockquotes with a
   left rule, links shown with the destination URL, inline
   bold/italic/strikethrough preserved. Press `m` to toggle to the
-  raw source view (with full syntect highlighting of the
-  markdown source itself); press `m` again to flip back. Yank
+  raw source view (itself highlighted as markdown); press `m`
+  again to flip back. Yank
   and save always emit the source.
   Also rendered: **GFM alerts** (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`,
   `[!WARNING]`, `[!CAUTION]`) as coloured labels; **YAML front matter** as its
@@ -84,8 +82,8 @@ flash instead of silently closing. Scroll positions are preserved.
 
 ## Git views — diff / show / blame
 
-In-house, gix-backed git pager views (v1.56) — built in-process (no
-`git` subprocess), syntax-highlighted, with intra-line change
+Git views built into spyc rather than run through `git`:
+syntax-highlighted, with intra-line change
 highlighting on modified lines — every changed region is marked, so an
 unchanged token between two changed ones is never swept in. `[diff]
 intraline` picks the granularity: `"char"` (default) marks just the
@@ -106,5 +104,5 @@ characters that differ, `"word"` marks the whole changed token the way
 - All pager keys work: `/` search, `:N` jump, visual yank, `gf`/`gF`
   path jumps, buffer history
 
-Quick Select's uppercase **Git SHA** label opens the same in-house
-`show` view for that commit (see "Quick Select" below).
+Quick Select's uppercase **Git SHA** label opens the same `show` view
+for that commit (see [Quick Select](pane.md#quick-select--labelled-overlay-picker)).

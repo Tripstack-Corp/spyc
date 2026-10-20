@@ -12,9 +12,9 @@ Three modes of running commands, each for a different use case:
   the current selection, relative to the column's directory where the
   command runs, so `./%` runs the selected script; anything outside
   stays absolute, and a name starting with `-` gets a `./`. `^C`
-  interrupts; `^\` hard-kills; `^Z` sends the task to the background
-  (reader thread keeps draining output into a buffer; resume with `:fg`
-  -- see Background tasks).
+  interrupts; `^\` hard-kills; `^Z` sends the task to the background,
+  where it keeps capturing its output (resume with `:fg` -- see
+  Background tasks).
 - **!!** — repeat the last captured command.
 - **!?** — history editor popup. Opens instantly (no Enter needed).
   Also reachable mid-prompt: after `Esc` puts the line editor in
@@ -43,16 +43,16 @@ Three modes of running commands, each for a different use case:
   [[ -n $SPYC_SUBSHELL ]] && PS1="[spyc] $PS1"         # bash
   ```
 
-  No screen row is reserved for the marker: a scroll region is shared by
-  every program the subshell runs, so `less`, `man` and `clear` would draw
-  inside it. A spyc launched with `SPYC_SUBSHELL` already set flashes a
-  warning instead of letting you get lost two subshells deep (#686).
+  spyc doesn't keep a screen row for a marker, because every program the
+  subshell runs (`less`, `man`, `clear`) would then draw inside what's left.
+  A spyc launched with `SPYC_SUBSHELL` already set flashes a warning instead
+  of letting you get lost two subshells deep.
 
-All three modes invoke `$SHELL -i -c <cmd>` (interactive flag where
-the shell supports it: zsh, bash, fish, ksh) so aliases, functions,
-and rc-file PATH entries from `.zshrc` / `.bashrc` work the same way
-they do in a regular terminal tab. POSIX `sh` / `dash` get plain
-`-c` since they don't read rc files in interactive mode anyway.
+All three modes run the command in your `$SHELL` as an interactive
+shell would, so aliases, functions, and rc-file PATH entries from
+`.zshrc` / `.bashrc` work the same way they do in a regular terminal
+tab (zsh, bash, fish and ksh; a POSIX `sh` or `dash` reads no rc file
+that way, so it just runs the command).
 
 The shell prompt uses a vi-mode line editor with persistent history
 (shared across sessions), so you get `h/l/w/b/0/$` motion, `x/D/C`
@@ -62,7 +62,7 @@ and `i/a/I/A` mode switching — all within the one-line prompt.
 mode. Ctrl+J inserts a newline in the pane (for Claude CLI
 multi-line input).
 
-Pane command prompts (`^W n`) have their own dedicated history,
+Pane command prompts (`^a c`) have their own dedicated history,
 separate from shell commands — so Up/Down shows `claude`, `zsh`,
 `bash` instead of mixed shell commands. The follow-up "pane cwd:"
 prompt keeps a *separate* history again, so Up/Down there recalls
@@ -83,8 +83,8 @@ end).
 - **`:bprev`** / **`:bnext`** — navigate pager buffer history (also `[b`/`]b` in pager)
 - **`:mouse on|off|auto`** — real mouse reporting: the wheel scrolls whatever is under
   the pointer, left-click focuses that region (and clicks through to a mouse-aware
-  agent), middle-click pastes (read off-thread and bounded, so a wedged
-  `xclip`/pasteboard reports itself instead of freezing spyc), right-click opens
+  agent), middle-click pastes (a clipboard tool that hangs reports itself
+  instead of freezing spyc), right-click opens
   the leader menu. **Costs native click-drag text
   selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
   `:mouse off` gives it back immediately, no restart, and survives a config
@@ -95,18 +95,17 @@ end).
   copies it. **Ctrl+drag selects through spyc in any live pane**, including Codex's
   queued questions and other surfaces whose child cannot select text. Hold Ctrl
   when pressing; spyc owns the whole gesture even if you release Ctrl first.
-  The pane's visible grid stays fixed while dragging, with the child running behind
-  it. Release copies those held bytes and resumes live output. An ordinary drag in
-  a mouse-aware child keeps reaching the child. A released highlight appears only
-  while the live grid still matches the copied text; new output or input clears it.
+  The pane holds still while you drag, with its program running behind it, and
+  catches up when you release and the text is copied. An ordinary drag in a
+  mouse-aware child keeps reaching the child. The highlight stays only while the
+  pane still shows what you copied; new output or input clears it.
   Ctrl+click behaviour and host-terminal forwarding preferences are documented
   in [the selection caveats](../config/mouse.md#selecting-text).
   **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays up
   after the copy. Distinct from picks: a drag never changes what the next file
   operation acts on.
-  **Click a pane tab to switch to it** — the tab bar looked clickable and wasn't,
-  so the one part of that row meaning "go here" behaved like static text.
+  **Click a pane tab to switch to it.**
   **Drag across any chrome row to select part of it** — the status line, the
   divider/tab line, the prompt row (a flash, the `:` command line, an armed
   chord) and the activity HUD. Release copies exactly those columns, so you can
@@ -124,10 +123,8 @@ end).
   content only — never the line-number gutter, the whitespace/line-break markers,
   or the border. In a Markdown view `m` chooses what you get: rendered prose, or
   the raw source. A click that doesn't move stays a click.
-  Over an agent pane the wheel does whatever that agent can actually receive:
-  **claude** requests mouse reporting, so the event is forwarded and claude
-  scrolls itself; **agy** ignores mouse reports but scrolls on Shift+Arrow, so
-  spyc sends those instead; **codex** discards mouse events and its main chat view
+  Over an agent pane the wheel scrolls in whatever way that agent can:
+  **claude** and **agy** scroll their own output; **codex**'s main chat view
   doesn't scroll, so the wheel drives its `^T` transcript overlay instead — opening
   it after a few consecutive ticks UP (`[mouse] pane_scroll_view`, configurable to
   stay closed or to use spyc's own `^a v` history instead), then scrolling by line,
@@ -147,15 +144,15 @@ end).
 - **`:fg`** / **`:fg N`** — resume a backgrounded task (see Background tasks)
 - **`:pause`** / **`:pause N`** — pause a backgrounded task (`SIGSTOP`)
 - **`:resume`** / **`:resume N`** — resume a paused task (`SIGCONT`)
-- **`:grep <pattern>`** — project-wide content search via embedded
-  ripgrep matcher (`grep-regex` + `grep-searcher`). Walks the
+- **`:grep <pattern>`** — project-wide content search with ripgrep's
+  matcher, built in. Walks the
   focused commander's worktree root (its repo root, else
   `PROJECT_HOME`, else current dir) honouring `.gitignore`, smart-case
   by default. Results stream into a pager as `path:line:col: text`,
   so `gf`/`gF` jump from a hit to the file in-place. Capped at 5000
   matches; refine the pattern if you hit it. Power users: `! rg foo`
   still works for ripgrep's full flag surface.
-- **`:q`** — quit
+- **`:q`** / **`:quit`** — quit
 
 The `:` prompt shares history with other shell prompts, so Up/Down
 cycles through previous commands.
@@ -171,8 +168,8 @@ Long-running captured commands (`!cargo test`, `!find ...`) don't have
 to lock you out of spyc.
 
 - **^Z** while a `!` capture pager is open sends the task to the
-  background. The reader thread keeps draining output into a per-task
-  buffer (head-truncated at 1 MB). Tasks render in the pane divider,
+  background, where spyc keeps capturing its output (the latest 1 MB of
+  it). Tasks render in the pane divider,
   right-aligned, in a distinct colour family from pane tabs:
   `[N+]` running with new output (teal), `[N●]` running quiescent
   (blue), `[N✓]` exited cleanly (green), `[N✗]` non-zero / killed
@@ -201,25 +198,20 @@ to lock you out of spyc.
 - A task that completes while in the background fires a flash:
   `task #N: cmd — exit 0 (43s)`.
 - **`:task-to-pane`** / **`:task-to-pane N`** promotes a
-  backgrounded task to a new pane tab. The pty keeps running
-  through the transition; spyc resizes it to the bottom-pane
-  geometry, replays the captured buffer through a fresh terminal
-  parser so the tab opens with the same content the task viewer
-  was showing, and SIGCONT's the child if it was paused. Useful
+  backgrounded task to a new pane tab. The process keeps running
+  through the move, the tab opens showing what the task viewer
+  showed, and a paused task resumes. Useful
   when an `!` task you started turns out to need persistent
   attention (a long-running `npm run dev`, a `cargo watch`, a
   `tail -F`) — promote it next to claude instead of shuttling
-  through `:fg` / `^z`. Already-exited tasks aren't promoted
-  (a dead pty would just immediately tear down the tab); use
-  `:fg` for the static-output view in that case. The promoted
-  tab inherits the task's TERM (`dumb`, set when the `!` capture
-  spawned), so plain shells and SGR-colour output work fine but
-  alt-screen TUIs won't suddenly start working in the new tab.
+  through `:fg` / `^z`. A task that has exited can't be
+  promoted; `:fg` shows its output instead. The tab keeps the
+  task's `TERM=dumb`, so plain shells and colour output work but a
+  full-screen program still won't.
 - **`:pane-to-task`** is the symmetric inverse — moves the active
   pane tab into the background-task list without killing the
-  child. Same `PtyHost` migrates between containers; same child
-  PID round-trips. The new task buffer starts empty (vim's `^z`
-  parity — visual context isn't recovered through the demote
-  boundary). Bring it back via `:fg` or `:task-to-pane`.
+  child, which carries on as the same process. The task's buffer
+  starts empty, as after vim's `^z`: what was on screen isn't
+  carried over. Bring it back via `:fg` or `:task-to-pane`.
 - The quit confirmation (`Q`/`^D`) counts backgrounded running tasks
   alongside pane-tab processes.
