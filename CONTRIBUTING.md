@@ -208,7 +208,9 @@ A user page (`docs/features/`, `docs/config/`) says what a user sees and
 does. How it works belongs in the module's `//!` doc or `ARCHITECTURE.md`,
 where the people changing it look. A new page gets a summary and a link in
 its hub (`FEATURES.md` or `CONFIGURATION.md`), every `:` command is named on
-a user page, and both hubs have a size cap; guards check all three.
+a user page, every default key binding is in `docs/KEYBINDINGS.md` and the
+`?` overlay (`src/ui/help.rs`), and both hubs have a size cap; guards check
+all four.
 
 Moving or splitting a doc? `every_relative_markdown_link_resolves`
 (`src/link_guard.rs`) fails on any relative link or `#anchor` left

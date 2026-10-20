@@ -183,7 +183,7 @@ const SECTIONS: &[Section] = &[
         ],
     },
     Section {
-        title: "Harpoon (per-project pinned files, max 9)",
+        title: "Harpoon (per-worktree pinned files, max 9)",
         rows: &[
             ("Ha", "append cursor file/dir to harpoon"),
             ("Hx", "remove cursor file/dir from harpoon"),
@@ -485,7 +485,11 @@ const SECTIONS: &[Section] = &[
             ),
             ("^L", "redraw"),
             ("^R", "reload config (auto-reloads on save)"),
-            ("Q  ^D  :q  ZZ", "quit (q reserved for future macros)"),
+            ("Q  ^D  :q  ZZ", "quit"),
+            (
+                "q",
+                "doesn't quit: flashes a hint (kept for macro recording)",
+            ),
             ("Esc (×2)", "cancel prompt (Esc→Normal→Esc→cancel)"),
         ],
     },
@@ -504,6 +508,15 @@ const SECTIONS: &[Section] = &[
 /// consistent even when every visible key is short (default bindings
 /// only). Widens automatically when any row — user binding or built-in —
 /// needs more room.
+/// Every row's key column with its section's title, for the guard that every
+/// default binding is in this overlay (`keymap::resolver::tests::documented`).
+#[cfg(test)]
+pub fn key_column() -> impl Iterator<Item = (&'static str, &'static str)> {
+    SECTIONS
+        .iter()
+        .flat_map(|s| s.rows.iter().map(|(keys, _)| (s.title, *keys)))
+}
+
 const MIN_KEY_W: usize = 24;
 
 /// Build help content formatted to fit within `col_w` per column.
