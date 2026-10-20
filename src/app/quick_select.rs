@@ -126,7 +126,7 @@ impl App {
     }
 
     /// Route a picked match to the right action, given user
-    /// intent. See action matrix in `FEATURES.md` ("Quick Select").
+    /// intent. See the action matrix in `docs/features/pane.md` ("Quick Select").
     fn dispatch_quick_select(&mut self, m: &crate::pane::quick_select::Match, open_intent: bool) {
         let kind_label = m.kind.label().to_string();
         // The kind × intent decision is the pure `quick_select_action`; this
