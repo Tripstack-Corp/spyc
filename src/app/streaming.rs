@@ -389,8 +389,10 @@ impl App {
                     if !entry.info.agent().detection_rules().is_empty() {
                         entry.info.scrape_dirty = true;
                     }
-                    if i == active_idx {
-                        pane_had_output |= project == in_view;
+                    // Every tab but the one the user drives gets its `+`: no
+                    // one sees a project out of view, its active tab included.
+                    if i == active_idx && project == in_view {
+                        pane_had_output = true;
                     } else {
                         entry.info.has_activity = true;
                         if project == in_view {

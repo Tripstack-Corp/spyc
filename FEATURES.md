@@ -48,7 +48,7 @@ do from here?", modelled on Neovim's which-key.
 
 ## Browsing files
 
-`Enter` descends into a directory, opens a text file in the pager, or shows an image; the `=` limit filter narrows the listing. Picks are a per-directory multi-select, and the inventory a persistent cache of files to put down elsewhere. `c`, `M` and `R` copy, move and remove, and a removed file goes to the graveyard, from which the `:graveyard` viewer restores it. Marks (`m{a-z}`), harpoon's nine pinned slots (`H`) and the ignore masks (`a`, `o`) round it out.
+`Enter` descends into a directory, opens a text file in the pager, or shows an image; the `=` limit filter narrows the listing. Picks are a per-directory multi-select, and the inventory a persistent cache of files to put down elsewhere. `c`, `M` and `R` copy, move and remove, and a removed file goes to the graveyard, from which the `:graveyard` viewer restores it. `^s |` previews a file in a second column and `^s n` opens a second file list there, and `W l` moves either column to another worktree. Marks (`m{a-z}`), harpoon's nine pinned slots (`H`) and the ignore masks (`a`, `o`) round it out.
 
 Full reference: [Browsing files](docs/features/browsing.md).
 
@@ -63,6 +63,12 @@ Full reference: [The agent pane](docs/features/pane.md).
 Every agent spyc launches reaches spyc's MCP server: tools to read the user's view, drive the file list, search, read git in-process, manage worktrees and report the agent's status. `spyc --install-skill` installs a guide that teaches an agent those tools. `:agent hud` shows a strip of the agent's own session facts below its pane, and `^a g` lists the images an agent actually received.
 
 Full reference: [Agents and MCP](docs/features/agents.md).
+
+## Mouse
+
+Mouse reporting is on by default: the wheel scrolls whatever is under the pointer, a click focuses it, middle-click pastes and right-click opens the leader menu. A drag selects and copies text in a pane, the pager or any chrome row, or file names in the list, and a double-click takes a whole chrome line. `:mouse off` gives the terminal its own selection back.
+
+Full reference: [Mouse](docs/features/mouse.md).
 
 ## The pager and git views
 
