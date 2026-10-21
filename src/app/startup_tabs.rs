@@ -237,7 +237,7 @@ impl App {
         }
         let launch_dir = self.state.active_project().start_dir.clone();
         let mut opened = 0usize;
-        let mut cwd_fallbacks = 0usize;
+        let mut bad_cwds = Vec::new();
         for tab in tabs {
             let cwd = match &tab.cwd {
                 Some(p) => {
@@ -254,7 +254,7 @@ impl App {
                     if expanded.is_dir() {
                         expanded
                     } else {
-                        cwd_fallbacks += 1;
+                        bad_cwds.push(crate::paths::display_tilde(&expanded));
                         self.state.default_pane_cwd()
                     }
                 }
@@ -289,14 +289,21 @@ impl App {
             "{lead}opened {opened}/{} startup tab(s) — ^a 1..9 to jump",
             tabs.len()
         );
-        if cwd_fallbacks > 0 || opened < tabs.len() {
-            self.state.flash_error(format!(
-                "{summary} ({cwd_fallbacks} cwd not a directory, used default; \
-                 {} failed to spawn)",
-                tabs.len() - opened
+        let mut problems = Vec::new();
+        if !bad_cwds.is_empty() {
+            problems.push(format!(
+                "not a directory, opened in the default cwd: {}",
+                bad_cwds.join(", ")
             ));
-        } else {
+        }
+        if opened < tabs.len() {
+            problems.push(format!("{} failed to spawn", tabs.len() - opened));
+        }
+        if problems.is_empty() {
             self.state.flash_info(summary);
+        } else {
+            self.state
+                .flash_error(format!("{summary} ({})", problems.join("; ")));
         }
     }
 }
@@ -366,7 +373,6 @@ mod app_tests {
     /// A startup tab whose cwd isn't a directory opens in the default one, and
     /// the flash names the directory, the half the user can act on.
     #[test]
-    #[ignore = "red: #483, the flash counts the bad cwds without naming them"]
     fn a_startup_tab_whose_cwd_is_gone_is_named() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
