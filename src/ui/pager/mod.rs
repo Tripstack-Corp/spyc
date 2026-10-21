@@ -38,6 +38,16 @@ enum Search {
     },
 }
 
+/// Which picker a pager is ([`PagerView::picker`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerKind {
+    Worktrees,
+    Projects,
+    Sessions,
+    History,
+    JumpHistory,
+}
+
 /// Where to render the pager. v1.5 introduces this so the same
 /// `PagerView` can be a centred popup, embedded into the top-pane
 /// slot (replacing the file list — like `;less` does today via the
@@ -238,6 +248,10 @@ pub struct PagerView {
     /// instead of scrolling, and Enter selects. The value is the 0-based
     /// line index of the highlighted row.
     pub picker_cursor: Option<usize>,
+    /// Which picker this pager is, if it is one. A picker's keys act only
+    /// while its own pager is the one in view, never on a pager opened over
+    /// it: the help, an older buffer, a worker's late pager.
+    pub picker: Option<PickerKind>,
     /// When set, render a vi cursor on the picker line at this column offset.
     /// Used by the history editor to show the editing cursor inline.
     pub picker_edit_cursor: Option<(usize, crate::ui::line_edit::Mode)>,

@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, Effect};
 use crate::ui::line_edit::{EditResult, Mode as LineMode};
+use crate::ui::pager::PickerKind;
 
 /// What a key does in the history editor before the line editor sees it.
 /// Ctrl+D deletes in either mode; the rest of the vi motions only apply in
@@ -55,13 +56,14 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
+        let in_view = self.picker_in_view(PickerKind::JumpHistory);
         let view = active_pager_mut!(self)?;
         // Jump-history popup: j/k navigate, Enter chdirs, x deletes,
         // q/Esc closes. Per-popup j/k handling because the pager
         // dispatch doesn't have a generic picker-move arm; each
         // popup type wires its own (matches how the session picker
         // and history editor do it).
-        if self.view.pending_jump_history.is_some() {
+        if in_view && self.view.pending_jump_history.is_some() {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);
@@ -176,20 +178,24 @@ impl App {
         viewport: u16,
     ) -> Option<Vec<Effect>> {
         self.state.pending_projects.as_ref()?;
+        self.picker_in_view(PickerKind::Projects).then_some(())?;
         self.numbered_picker_key(key, viewport, Self::switch_to_pending_project)
     }
 
-    /// Whether a picker owns the pager: the worktree, project or session
-    /// picker, or the history editor.
-    pub(super) const fn picker_is_open(&self) -> bool {
-        self.state.pending_worktrees.is_some()
-            || self.state.pending_projects.is_some()
-            || self.state.pending_sessions.is_some()
-            || self.view.pending_history_pick.is_some()
+    /// Whether the pager in view is the picker `kind`: a picker's keys act
+    /// only on its own pager, so one opened over it (the help, an older
+    /// buffer, a worker's late pager) keeps its own keys.
+    pub(crate) fn picker_in_view(&self, kind: PickerKind) -> bool {
+        self.active_pager_ref()
+            .is_some_and(|view| view.picker == Some(kind))
     }
 
-    /// Forget every picker's rows, as closing the pager does.
+    /// Forget every picker's rows, as closing the pager does, and every
+    /// picker's pager kept in the buffer history: its rows are gone, and a
+    /// picker opened since has rows of its own, which `]b` back to an old one
+    /// would hand its keys.
     pub(crate) fn clear_pending_pickers(&mut self) {
+        self.view.project_mut().pager_history.drop_pickers();
         self.state.pending_worktrees = None;
         self.state.pending_projects = None;
         self.state.pending_sessions = None;
@@ -208,6 +214,7 @@ impl App {
         viewport: u16,
     ) -> Option<Vec<Effect>> {
         self.state.pending_worktrees.as_ref()?;
+        self.picker_in_view(PickerKind::Worktrees).then_some(())?;
         self.numbered_picker_key(key, viewport, Self::switch_to_pending_worktree)
     }
 
@@ -248,6 +255,7 @@ impl App {
         viewport: u16,
     ) -> Option<Vec<Effect>> {
         active_pager_mut!(self)?;
+        self.picker_in_view(PickerKind::History).then_some(())?;
         let normal = self.view.pending_history_pick.as_ref()?.mode == LineMode::Normal;
         let g_armed = self.view.history_pending_g;
         let action = history_key(key, normal, g_armed);
@@ -402,9 +410,10 @@ impl App {
         key: KeyEvent,
         viewport: u16,
     ) -> Option<Vec<Effect>> {
+        let in_view = self.picker_in_view(PickerKind::Sessions);
         let view = active_pager_mut!(self)?;
         // Session picker: j/k navigate, Enter/1-9 select, n new.
-        if self.state.pending_sessions.is_some() {
+        if in_view && self.state.pending_sessions.is_some() {
             match key.code {
                 KeyCode::Char('j') | KeyCode::Down => {
                     view.picker_move(1, viewport);

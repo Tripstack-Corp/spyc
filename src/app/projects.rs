@@ -117,6 +117,7 @@ impl App {
         self.state.pending_projects = Some(rows);
         let mut view = pager::PagerView::new_styled(SWITCHER_TITLE, lines);
         view.picker_cursor = Some(start);
+        view.picker = Some(pager::PickerKind::Projects);
         view.no_history = true;
         view.show_line_numbers = false;
         view.wrap = false;
@@ -126,12 +127,19 @@ impl App {
 
     /// Add `closed` to the open switcher, after the projects already listed,
     /// and draw every row again, padded to the widest label of them all. The
-    /// switcher is the pager with its title, so rows read for one another
-    /// pager has since covered land nowhere. Returns whether the switcher
-    /// changed.
+    /// switcher is the pager in view, or the one stashed under the help, which
+    /// `q` brings back; rows read for a switcher any other pager has covered
+    /// land nowhere ([`Self::picker_in_view`]). Returns whether the pager in
+    /// view changed.
     pub(super) fn show_closed_rows(&mut self, closed: Vec<ClosedProject>) -> bool {
-        let pager = self.view.project().pager.as_ref();
-        if pager.is_none_or(|view| view.title != SWITCHER_TITLE) {
+        let in_view = self.picker_in_view(pager::PickerKind::Projects);
+        let under_help = self
+            .view
+            .project()
+            .pager_help_stash
+            .as_ref()
+            .is_some_and(|view| view.picker == Some(pager::PickerKind::Projects));
+        if !in_view && !under_help {
             return false;
         }
         let Some(mut rows) = self.state.pending_projects.take() else {
@@ -140,11 +148,17 @@ impl App {
         rows.extend(closed.into_iter().map(|c| SwitcherRow::Closed(Box::new(c))));
         let lines = self.switcher_lines(&rows);
         self.state.pending_projects = Some(rows);
-        if let Some(view) = self.view.project_mut().pager.as_mut() {
+        let project = self.view.project_mut();
+        let switcher = if in_view {
+            project.pager.as_mut()
+        } else {
+            project.pager_help_stash.as_mut()
+        };
+        if let Some(view) = switcher {
             view.lines = lines;
             REOPEN_TITLE.clone_into(&mut view.title);
         }
-        true
+        in_view
     }
 
     /// The switcher's lines for `rows` ([`project_row`]). An open project has
