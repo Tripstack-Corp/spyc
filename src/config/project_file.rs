@@ -1,5 +1,5 @@
 //! A project's own config file under `$XDG_CONFIG_HOME/spyc/projects/` (#99,
-//! `docs/drafts/PROJECTS_PLAN.md` §1f): which file configures a project,
+//! `docs/archive/PROJECTS_PLAN.md` §1f): which file configures a project,
 //! matched by the `home` it names, never by its file name, which is the
 //! project's label.
 //!

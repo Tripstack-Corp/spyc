@@ -16,7 +16,7 @@ use super::{
 };
 use crate::pane::{Pane, PaneTabs};
 
-/// The per-project half of `Runtime` (#99, `docs/drafts/PROJECTS_PLAN.md`
+/// The per-project half of `Runtime` (#99, `docs/archive/PROJECTS_PLAN.md`
 /// §1c): the bottom pane tabs, the two overlay-subprocess slots, a git view
 /// still being built and the pager streams, which belong to one project's
 /// columns and pagers. The active project's is reached through

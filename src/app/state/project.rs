@@ -1,6 +1,6 @@
 //! `Project`: a home directory and everything the user is doing under it —
 //! the file columns, the split, the pane layout and where the keyboard was
-//! (#99, `docs/drafts/PROJECTS_PLAN.md` §0). The active project is reached
+//! (#99, `docs/archive/PROJECTS_PLAN.md` §0). The active project is reached
 //! through `AppState::active_project()` / `active_project_mut()`, which the
 //! column handles (`cur()`, `col(side)`, …) delegate through; another one
 //! through `AppState::project(id)` / `open_projects()`.
@@ -16,7 +16,7 @@ pub use crate::project_id::ProjectId;
 
 /// A home directory and everything the user is doing under it: the file
 /// columns, the split's shape, the pane layout, and where the keyboard was.
-/// See `docs/drafts/PROJECTS_PLAN.md` §0 and §1a.
+/// See `docs/archive/PROJECTS_PLAN.md` §0 and §1a.
 pub struct Project {
     pub id: ProjectId,
     /// Today's `project_home`. Stays `Option`, not required: `:project

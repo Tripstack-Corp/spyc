@@ -113,7 +113,7 @@ foundations work continues throughout.
 
 2.2 lands the prerequisites Projects needs and closes the bugs a daily driver
 hits weekly. Every item is one or the other. Scope and sequencing:
-[`docs/drafts/V2_2_PLAN.md`](docs/drafts/V2_2_PLAN.md). **2.2 tags once the
+[`docs/archive/V2_2_PLAN.md`](docs/archive/V2_2_PLAN.md). **2.2 tags once the
 whole list is done, and not before.** For `PROJECTS_PLAN.md`, done means
 authored: its approval gates 2.3, not the tag (decisions log, 2026-10-02).
 Everything else already merged to `main` ships with it (decisions log,
@@ -193,7 +193,7 @@ Everything else already merged to `main` ships with it (decisions log,
   `[layout] status_flags = "full"` keeps the old bar.
 
 - **[#492](https://github.com/Tripstack-Corp/spyc/issues/492): the Projects
-  design, [`docs/drafts/PROJECTS_PLAN.md`](docs/drafts/PROJECTS_PLAN.md)**
+  design, [`docs/archive/PROJECTS_PLAN.md`](docs/archive/PROJECTS_PLAN.md)**
   (#520, #535), approved on 2026-10-12 (decisions log). It answers the 2.2
   plan's seven questions, so 2.3's code can start.
 
@@ -237,17 +237,21 @@ discovers, mirrors or forwards to) and CounterTop. They may be revisited later.
 The daemonized *monolith* is a different thing: it returns in 3.0, and it is not
 a peer. It is one process with nothing mirrored, and its client is a renderer
 rather than an instance. See "The 3.0 horizon" below.
-[`docs/drafts/PROJECTS_PLAN.md`](docs/drafts/PROJECTS_PLAN.md), a 2.2
+[`docs/archive/PROJECTS_PLAN.md`](docs/archive/PROJECTS_PLAN.md), a 2.2
 deliverable approved on 2026-10-12, is the design. Tracked as
-[#99](https://github.com/Tripstack-Corp/spyc/issues/99).
+[#99](https://github.com/Tripstack-Corp/spyc/issues/99), closed on 2026-10-21
+with all eight steps landed. 2.3 ships on Projects alone; UX 2.0 is 2.4
+(decisions log, 2026-10-21).
 
-**Also in 2.3, after Projects:** the
-[UX 2.0 plan](docs/drafts/UX_2_0_PLAN.md) gives every object spyc draws (a
+## The 2.4 horizon: UX 2.0
+
+The [UX 2.0 plan](docs/drafts/UX_2_0_PLAN.md) gives every object spyc draws (a
 file row, a pane, a tab, a divider, a status segment, the pager) a menu of the
 actions that apply to it, opened with `.` or a right-click, and each entry
 shows the key that does the same thing. A Makefile's menu is its targets. Its
 slices start once Projects has landed (owner decision, 2026-10-11), and the
-plan absorbs `CLICKABLE_MENUS_PLAN.md`. Draft for review.
+plan absorbs `CLICKABLE_MENUS_PLAN.md`. Draft for review: its open questions
+come before its first slice.
 
 **Candidate addition, not committed to 2.3:** the
 [Git review workspace proposal](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md)
@@ -307,14 +311,15 @@ icebox — is tracked in **[GitHub Issues](https://github.com/Tripstack-Corp/spy
 labelled by `area:*` / `type:*` and organized on the **[roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1)**. Signposts:
 
 - **`2.2` milestone** — the scoped 2.2 work (see "Road to 2.2" above).
-- **`2.3` milestone** — Projects, then UX 2.0 (see "The 2.3 horizon" above).
+- **`2.3` milestone** — Projects, complete (see "The 2.3 horizon: Projects" above).
+- **2.4** — UX 2.0 (see "The 2.4 horizon: UX 2.0" above).
 - **`icebox`** — speculative / nice-to-have ideas.
 - **`needs-design`** — items with a design doc in `docs/drafts/` or needing a spike.
 - **`needs-repro`** — reported, not yet reproducible; evidence wanted before design.
 - **`good first issue`** — small, self-contained entry points.
 
-This file is the *strategy* layer — thesis, current state, the 2.2, 2.3 and
-3.0 arcs, non-goals, and the decisions log. The per-item backlog lives in Issues;
+This file is the *strategy* layer — thesis, current state, the 2.2, 2.3, 2.4
+and 3.0 arcs, non-goals, and the decisions log. The per-item backlog lives in Issues;
 detailed designs for not-yet-started work are in `docs/drafts/*_PLAN.md`;
 shipped or parked designs are archived under `docs/archive/`.
 
@@ -438,7 +443,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   Stage 2 already runs a second full `Commander` in-process.
   Agent-status dots and notifications are already per-process. And #40
   landed as the prep refactor. Depends on the pane-identity transport
-  (2.2) for project attribution; `docs/drafts/PROJECTS_PLAN.md`, a 2.2
+  (2.2) for project attribution; `docs/archive/PROJECTS_PLAN.md`, a 2.2
   deliverable, is where it gets argued.
 - **The 3.0 horizon opens on durable sessions, via the daemonized
   monolith** (2026-09-04). A headless spyc owns the PTYs, agent children and
@@ -742,12 +747,18 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   An agent spyc didn't launch now gets no tools, because the entry starts in
   every session of that agent; a codex session on the shared daemon keeps
   discovery by its directory, since spyc can't tell whether it launched it.
+- **2.3 ships on Projects alone, and UX 2.0 moves to 2.4** (2026-10-21).
+  Projects (#99) is complete: one process holding several projects, attention
+  across them, per-project config files, and recovery that restores every
+  project or reopens one closed lately. It is the largest change since 2.0, and
+  daily users soaking it in a release candidate is worth more than another
+  design on top of it before the tag.
 
 ## Doc map
 
 | Doc | Role |
 |---|---|
-| `ROADMAP.md` | This file — strategy, the 2.2, 2.3 and 3.0 arcs, non-goals, decisions log. |
+| `ROADMAP.md` | This file — strategy, the 2.2, 2.3, 2.4 and 3.0 arcs, non-goals, decisions log. |
 | [GitHub Issues](https://github.com/Tripstack-Corp/spyc/issues) + [roadmap board](https://github.com/orgs/Tripstack-Corp/projects/1) | The live backlog — features, fixes, ideas; labeled + milestoned. |
 | `docs/archive/BACKLOG_DRAFT_NOTES.md` | Archived raw intake backlog — open items migrated to Issues (2026-07); kept as history. |
 | `CHANGELOG.md` | Shipped history (git-cliff, conventional commits). |
@@ -760,10 +771,9 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/RELEASE_ENGINEERING.md` | The launch operating manual — release streams, CI, signing, Homebrew, org setup. |
 | `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
-| `docs/drafts/V2_2_PLAN.md` | The 2.2 scope, sequencing and exit criteria — the plan behind "Road to 2.2". |
 | `docs/drafts/CODEX_SUPPORT_PLAN.md` | Draft Codex parity remediation and opt-in session HUD: reproduced RC regressions, hook/image/navigation gaps, telemetry contracts, sequencing and validation. HUD scope is proposed and unscheduled, not an added RC gate. |
-| `docs/drafts/PROJECTS_PLAN.md` | The 2.3 Projects design, approved 2026-10-12 ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99's code starts from it. |
-| [`docs/drafts/UX_2_0_PLAN.md`](docs/drafts/UX_2_0_PLAN.md) | The 2.3 UX design, draft for review, sequenced after Projects: one object model and hit-test, a menu per object projected from `Action` with each entry's key shown, Makefile targets run in the live pager, and fading key hints. Absorbs `CLICKABLE_MENUS_PLAN.md` as its slices 1–2. |
+| `docs/archive/PROJECTS_PLAN.md` | Archived — the 2.3 Projects design, approved 2026-10-12 ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99 built all eight of its steps, and closed on 2026-10-21. |
+| [`docs/drafts/UX_2_0_PLAN.md`](docs/drafts/UX_2_0_PLAN.md) | The 2.4 UX design, draft for review, sequenced after Projects: one object model and hit-test, a menu per object projected from `Action` with each entry's key shown, Makefile targets run in the live pager, and fading key hints. Absorbs `CLICKABLE_MENUS_PLAN.md` as its slices 1–2. |
 | [`docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md`](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md) | Draft candidate for 2.3, unscheduled: connected Git review, project/worktree context, comparison semantics, MCP reads, delivery slices, and references. Git write operations are a separate assessment. |
 | `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |
 | `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
@@ -776,7 +786,8 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/archive/ARCHIVE_BROWSING_PLAN.md` | Archived design — navigate into zip/tarballs with full editing; shipped v2.1.0, [#149](https://github.com/Tripstack-Corp/spyc/issues/149) closed. |
 | `docs/archive/native_scroll_plan.md` · `docs/archive/mouse_selection_plan.md` | Archived designs — the mouse suite, shipped v2.1.0. Neither was amended as it was built; the banners name what diverged. |
 | `docs/archive/pasted-image-preview-plan.md` | Archived design — paste capture, image preview, the `^a g` gallery; shipped v2.1.0. |
-| `docs/archive/2.1-release-notes.md` | Archived — the human-facing 2.1 notes. |
+| `docs/archive/2.1-release-notes.md` · `docs/archive/2.2-release-notes.md` | Archived — the human-facing 2.1 and 2.2 notes. |
+| `docs/archive/V2_2_PLAN.md` | Archived — the 2.2 scope, sequencing and exit criteria, the plan behind "Road to 2.2"; 2.2 shipped as v2.2.0. |
 | `docs/archive/TESTING_STRATEGY.md` | Testing strategy & guidelines (coverage, anti-"test theater", proptest/cargo-fuzz, AI-testing rules). Campaign complete — 8 clusters, June 2026; kept as the how-we-test reference. |
 | `docs/archive/V1_60_PLAN.md` | Archived design — CounterTop multi-instance hub. Parked as an architecture; the multi-project goal it targeted is reopened for 2.3 on the monolith route (see the decisions log). |
 | `docs/archive/V1_70_PLAN.md` | Archived design — Mise en Place typed addressability + crate split. Speculative; MCP already covers the basics. |

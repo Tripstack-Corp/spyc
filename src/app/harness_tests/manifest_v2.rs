@@ -1,4 +1,4 @@
-//! The recovery manifest, version 2 (#99 step 4, `docs/drafts/PROJECTS_PLAN.md`
+//! The recovery manifest, version 2 (#99 step 4, `docs/archive/PROJECTS_PLAN.md`
 //! §3): one file holding every project, column `a`'s directory, and the pid of
 //! the spyc writing it.
 //!

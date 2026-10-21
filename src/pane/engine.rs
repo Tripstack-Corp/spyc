@@ -1,7 +1,7 @@
 //! The terminal-engine seam: what spyc needs from a VT state machine, and
 //! nothing about which one it is.
 //!
-//! Introduced by the engine series (`docs/drafts/V2_2_PLAN.md` §8) to swap
+//! Introduced by the engine series (`docs/archive/V2_2_PLAN.md` §8) to swap
 //! vt100 for libghostty-vt as one impl rather than a change of six files.
 //! libghostty-vt (`engine_ghostty`) is the one engine behind it.
 //!

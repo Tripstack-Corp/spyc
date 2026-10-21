@@ -20,7 +20,7 @@ Moving it would file it as done:
 
 - **`pane-identity-transport-proposal.md`** (C7) — a design proposal
   recommending pane id in the MCP `initialize` handshake. Accepted for 2.2
-  (`docs/drafts/V2_2_PLAN.md`), not yet built. `pane_id` exists today only as
+  (`docs/archive/V2_2_PLAN.md`), not yet built. `pane_id` exists today only as
   an optional *tool argument* on `report_status` / `register_scope` /
   `release_scope` — which is the option the proposal explicitly rejects,
   because attribution then fails silently whenever an agent forgets to send it.

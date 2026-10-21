@@ -1,6 +1,6 @@
 //! Gate criteria for the scrollback budget, with the SHIPPED configuration.
 //!
-//! Two assertions, per `V2_2_PLAN.md` §8:
+//! Two assertions, per `docs/archive/V2_2_PLAN.md` §8:
 //!   1. realistic content retains **≥ budget minus one page** — the safety
 //!      valve never binds on content a user could legitimately produce;
 //!   2. a pathological stream demonstrably **does** bind it, page-granular

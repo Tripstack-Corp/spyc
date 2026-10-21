@@ -1,5 +1,5 @@
 //! The recovery manifest: one file per spyc process, holding every project it
-//! has open (#99, `docs/drafts/PROJECTS_PLAN.md` §3). This is version 2. A file
+//! has open (#99, `docs/archive/PROJECTS_PLAN.md` §3). This is version 2. A file
 //! with no `version` is a version 1 session, which reads as a manifest with one
 //! project.
 
@@ -58,7 +58,7 @@ pub struct Manifest {
 }
 
 /// A project a spyc closed, as it was when it closed, kept so the switcher can
-/// reopen it with its tabs (`docs/drafts/PROJECTS_PLAN.md` §3).
+/// reopen it with its tabs (`docs/archive/PROJECTS_PLAN.md` §3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClosedProject {
     /// When it closed, in seconds since the epoch.

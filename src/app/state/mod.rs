@@ -403,7 +403,7 @@ pub struct AppState {
     pub frecency: Frecency,
     /// Every open project, in switcher order; looked up by `active` via
     /// [`Self::active_project`] / [`Self::active_project_mut`]
-    /// (`docs/drafts/PROJECTS_PLAN.md`, #99). Action handlers reach the active
+    /// (`docs/archive/PROJECTS_PLAN.md`, #99). Action handlers reach the active
     /// project's **focused** column via [`Self::cur`] / [`Self::cur_mut`];
     /// render draws `left`/`right` explicitly off [`Self::active_project`].
     pub projects: Vec<Project>,

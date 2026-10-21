@@ -11,7 +11,7 @@
 
 **Status (2026-08-19): split.** **Option A is in 2.2** —
 [#9](https://github.com/Tripstack-Corp/spyc/issues/9), scoped in
-[`V2_2_PLAN.md`](V2_2_PLAN.md) §6. Everything else in this document stays
+[`V2_2_PLAN.md`](../archive/V2_2_PLAN.md) §6. Everything else in this document stays
 exploration under [#59](https://github.com/Tripstack-Corp/spyc/issues/59): the
 terse-token expansion, the hooks, and the four-channel topology problem are a
 design question, and Option A is not. This document already made that call in

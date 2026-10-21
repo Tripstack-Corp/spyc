@@ -1,5 +1,5 @@
 //! Which closed projects the switcher (`Space j`) lists after the open ones
-//! (#99, `docs/drafts/PROJECTS_PLAN.md` §3): this spyc's own, and every
+//! (#99, `docs/archive/PROJECTS_PLAN.md` §3): this spyc's own, and every
 //! project a spyc that has quit had open or had closed, newest first and one
 //! per anchor. The saved sessions are read, and their spycs and directories
 //! looked at, on a worker, so the switcher opens at once with the open

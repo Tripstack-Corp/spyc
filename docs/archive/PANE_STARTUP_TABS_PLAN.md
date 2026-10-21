@@ -14,7 +14,7 @@
 analysis (Caleb Howard, 2026-05-15).
 
 **Target release:** 2.2 ([#58](https://github.com/Tripstack-Corp/spyc/issues/58);
-scope and sequencing in [`V2_2_PLAN.md`](../drafts/V2_2_PLAN.md)). It stopped being
+scope and sequencing in [`V2_2_PLAN.md`](V2_2_PLAN.md)). It stopped being
 opportunistic: a declarative tab set is the config half of a 2.3 project
 definition.
 

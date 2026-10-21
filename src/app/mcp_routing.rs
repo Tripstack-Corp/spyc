@@ -1,4 +1,4 @@
-//! Which project an MCP call acts on (#99, `docs/drafts/PROJECTS_PLAN.md` §2).
+//! Which project an MCP call acts on (#99, `docs/archive/PROJECTS_PLAN.md` §2).
 //!
 //! A connection is bound to a project at its `initialize`: the project of the
 //! tab its proxy named, else the one whose root holds its cwd, else the active
