@@ -168,6 +168,23 @@ impl App {
         self.drop_project(id);
     }
 
+    /// Wait, at most five seconds, for `done`: the switcher's closed rows are
+    /// read off the loop thread.
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        reason = "callers hold the app mutably, as landing a worker's rows needs"
+    )]
+    pub(crate) fn land_closed_rows(&mut self, done: impl Fn(&Self) -> bool) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !done(self) {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        true
+    }
+
     /// Open a `cat` tab in project `id`, as that project's keyboard would, and
     /// return the tab's pane id.
     pub(crate) fn open_tab_in_project(

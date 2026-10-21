@@ -514,6 +514,7 @@ mod projects_dumps;
 mod projects_mcp;
 mod projects_open;
 mod projects_plumbing;
+mod projects_reopen;
 mod projects_switcher;
 mod prompt_templates;
 mod second_commander;
