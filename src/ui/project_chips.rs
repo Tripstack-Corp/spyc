@@ -290,6 +290,61 @@ mod tests {
         assert_eq!((span.content.as_ref(), span.style.fg), ("○", None));
     }
 
+    /// The segment is as wide whatever the agents are doing, at every step it
+    /// narrows through and with each project in view, so what follows it on
+    /// the bar never moves as they work, block and finish.
+    #[test]
+    #[ignore = "red: the projects segment widens and narrows with its agents"]
+    fn the_segment_holds_its_width_whatever_the_agents_do() {
+        let theme = Theme::default();
+        let states = [
+            None,
+            Some(Waiting),
+            Some(Working),
+            Some(UnseenDone),
+            Some(Blocked),
+        ];
+        let labels = ["web", "spyc", "a-long-project", "api"];
+        for (room, most) in [(100, 100), (40, 100), (20, 100), (12, 100), (0, 9)] {
+            for active in 0..labels.len() {
+                let mut widths = std::collections::BTreeSet::new();
+                for shift in 0..states.len() {
+                    let list: Vec<_> = labels
+                        .iter()
+                        .enumerate()
+                        .map(|(k, label)| (*label, states[(shift + k) % states.len()], k == active))
+                        .collect();
+                    widths.insert(width(&chips(&list).spans(room, most, &theme)));
+                }
+                let label = labels[active];
+                assert_eq!(
+                    widths.len(),
+                    1,
+                    "room={room} most={most} in {label}: {widths:?}"
+                );
+            }
+        }
+    }
+
+    /// Projects are parted by a chevron, powerline's own between the parts of
+    /// one segment, or by a bar in mono, where the bar draws no powerline
+    /// glyphs.
+    #[test]
+    #[ignore = "red: the chips are parted by a dot"]
+    fn the_chips_are_parted_by_a_chevron() {
+        let c = chips(&[("web", Some(Blocked), false), ("spyc", None, true)]);
+        let theme = Theme::default();
+        assert_eq!(
+            text(&c.spans(100, 100, &theme)),
+            "web \u{25a0} \u{e0b1} spyc  "
+        );
+        let mono = Theme {
+            mono: true,
+            ..Theme::default()
+        };
+        assert_eq!(text(&c.spans(100, 100, &mono)), "web \u{25a0} | spyc  ");
+    }
+
     /// The order the segment ranks by: the user's turn above the agent's.
     #[test]
     fn blocked_outranks_an_unseen_done_outranks_work() {
