@@ -437,3 +437,52 @@ fn a_move_onto_a_home_no_file_names_reads_nothing() {
         });
     });
 }
+
+// ── #99 step 7b: `:project config` ───────────────────────────────────────────
+
+/// The control: `./config` still reaches a directory named `config`, as any
+/// relative path does.
+#[test]
+fn project_dot_slash_config_re_homes_onto_a_config_directory() {
+    with_three(|t| {
+        let config_dir = t.x_home.join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        t.app.state.dispatch_command("project ./config");
+        let home = t.app.state.active_project().home.clone();
+        assert_eq!(home.as_deref(), Some(&*config_dir));
+    });
+}
+
+/// `:project config` is the project's own config file, no longer a directory
+/// named `config`: the project's home stays where it was.
+#[test]
+#[ignore = "red: #99 7b, `:project config`"]
+fn project_config_does_not_re_home_onto_a_config_directory() {
+    with_three(|t| {
+        std::fs::create_dir_all(t.x_home.join("config")).unwrap();
+        t.app.state.dispatch_command("project config");
+        let home = t.app.state.active_project().home.clone();
+        assert_eq!(home.as_deref(), Some(&*t.x_home));
+    });
+}
+
+/// With no directory named `config`, `:project config` is no error: it hands
+/// the loop the work of opening the file.
+#[test]
+#[ignore = "red: #99 7b, `:project config`"]
+fn project_config_hands_the_loop_the_file_to_open() {
+    with_three(|t| {
+        let result = t.app.state.dispatch_command("project config");
+        let errored = t
+            .app
+            .state
+            .flash
+            .as_ref()
+            .is_some_and(|f| matches!(f.kind, FlashKind::Error));
+        assert!(!errored, "{:?}", t.app.flash_text());
+        assert!(
+            matches!(&result, state::CommandResult::Post(fx) if !fx.is_empty()),
+            "{result:?}"
+        );
+    });
+}
