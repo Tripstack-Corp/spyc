@@ -35,7 +35,7 @@ bound too, and on by default — see [Mouse](#mouse).
 
 ## File operations
 
-`%` expands to the current selection in any prompt (e.g. `M` then `%.bak`).
+`%` expands to the current selection in any prompt (e.g. `M` then `%.bak`), and `%%` is a literal `%`.
 
 | Key | Action |
 |-----|--------|
@@ -221,7 +221,7 @@ rectangular selection.
 | `$` | Drop into `$SHELL` |
 | `:` | Command line (`:cd`, `:sort`, `:limit`, `:grep`, `:fg`, `:task`, `:q`) |
 
-`%` in any command expands to the current selection, relative to the directory the command runs in (`./%` runs the selected script); anything outside it stays absolute.
+`%` in any command expands to the current selection, relative to the directory the command runs in (`./%` runs the selected script); anything outside it stays absolute. `%%` is a literal `%`: `!printf '%%s\n' %` prints each selected name.
 
 While a `!` capture is running in the pager:
 
