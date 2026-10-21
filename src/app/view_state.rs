@@ -119,7 +119,7 @@ pub struct VisualBell {
 }
 
 /// The per-project half of `ViewState` (#99 step 1,
-/// `docs/drafts/PROJECTS_PLAN.md` §1d): the pagers open over one project's
+/// `docs/archive/PROJECTS_PLAN.md` §1d): the pagers open over one project's
 /// columns and panes, their history, each column's row cache, the bookkeeping
 /// of `ProjectRuntime`'s overlay slots, and the project's MCP context file.
 /// Reached only through [`ViewState::project`] / [`ViewState::project_mut`].

@@ -1,5 +1,5 @@
 //! Switching the project the user sees and drives (#99,
-//! `docs/drafts/PROJECTS_PLAN.md` §5).
+//! `docs/archive/PROJECTS_PLAN.md` §5).
 
 use super::App;
 use super::file_ops::FileOp;

@@ -487,7 +487,7 @@ database or remote publishing mechanism.
 ## Projects and recovery
 
 This feature should attach to the project-owned state introduced by
-[`PROJECTS_PLAN.md`](PROJECTS_PLAN.md), especially its identity, background
+[`PROJECTS_PLAN.md`](../archive/PROJECTS_PLAN.md), especially its identity, background
 result routing, MCP attribution, and recovery format. Land those foundations
 before integrating review state. Query/model work can be prepared separately
 without installing a second global context mechanism.
@@ -755,7 +755,7 @@ checked on 2026-10-06; spyc design choices in this document remain proposals.
 
 Internal design references:
 
-- [`PROJECTS_PLAN.md`](PROJECTS_PLAN.md): project identity, result routing,
+- [`PROJECTS_PLAN.md`](../archive/PROJECTS_PLAN.md): project identity, result routing,
   pane attribution, recovery, and release sequencing.
 - [`ROADMAP.md`](../../ROADMAP.md): the shared-working-set thesis and release
   priorities.

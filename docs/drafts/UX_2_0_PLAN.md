@@ -1,4 +1,4 @@
-# UX 2.0 — the object under the pointer (2.3 design)
+# UX 2.0 — the object under the pointer (2.4 design)
 
 **TL;DR for reviewers.** Every object spyc draws — a file row, a directory, a
 pane, a tab label, a split divider, a status segment, the blank space below the
@@ -11,7 +11,8 @@ where the terminal passes it, with ⇧ or ⌘ held on iTerm2 — and `.` opens i
 everywhere. Right-click on blank space still opens the leader.
 
 **Dependency.** This plan executes after `PROJECTS_PLAN.md` has landed
-(owner decision, 2026-10-11). Project menus are in scope (§3f); the `file:line`
+(owner decision, 2026-10-11), and ships in 2.4, after 2.3 ships on Projects
+alone (owner decision, 2026-10-21). Project menus are in scope (§3f); the `file:line`
 anchors below are against pre-Projects `main` and are re-verified in slice 0.
 
 What approving this doc agrees to:
@@ -284,7 +285,7 @@ shows them, as the popup does today.
 
 ### 3f. Status segments and projects
 
-The bar's `projects` segment (`PROJECTS_PLAN.md` §5) is the one place every
+The bar's `projects` segment (`docs/archive/PROJECTS_PLAN.md` §5) is the one place every
 open project is drawn, so it is where project menus live. `status.rs` exports
 its segment spans, and within the `projects` segment, one span per label, the
 way `tab_hit.rs` does for tabs.
@@ -416,11 +417,11 @@ the pager's title shows what ran.
 
 **Keyboard route.** `Space m` opens the make submenu for the focused column's
 directory (the cursor's Makefile when on one): `Tier::Global`, workspace
-operation, same tier argument `PROJECTS_PLAN.md` §4 makes. `:make [target]`
+operation, same tier argument `docs/archive/PROJECTS_PLAN.md` §4 makes. `:make [target]`
 runs one directly. Both land in the leader's hint list for the completeness
 guard. `m` is free on the leader and is the mnemonic.
 
-**Follow-up, not 2.3.** `Justfile` — spyc ships one. `just --dump --dump-format json`
+**Follow-up, not 2.4.** `Justfile` — spyc ships one. `just --dump --dump-format json`
 is the parse, if it evaluates nothing; whether top-level backtick assignments
 run under `--dump` has to be checked before it is used. `package.json`
 scripts and `Cargo.toml` are read-only JSON/TOML and cheap once the
@@ -448,7 +449,7 @@ be learned over time. Three mechanisms, one of them new.
    `.spycrc.toml` binding names, so a renamed key keeps its count), stored in
    `<state>/learned.json` through `fs::write_atomic` like `frecency.json`.
    Global, not per project: muscle memory is the user's, the argument
-   `PROJECTS_PLAN.md` §1a makes for the histories. Only key-fired dispatches
+   `docs/archive/PROJECTS_PLAN.md` §1a makes for the histories. Only key-fired dispatches
    count; a menu-fired one never does, or clicking three times would silence
    the hint it was meant to earn. `:hints reset` clears the file; `:hints`
    lists what has faded. The which-key popup is untouched by fade: it is the
@@ -581,7 +582,7 @@ a worse gap than a status bar you cannot click.
 - **A Makefile that parses to nothing** (every target behind `$(…)` or `%`)
   yields an empty submenu. The row then says `make: no explicit targets`
   rather than hiding, so the user learns why.
-- **The leader gets dense in 2.3.** Nine Projects keys plus `m`. The popup
+- **The leader got dense in 2.3.** Nine Projects keys plus `m`. The popup
   wraps; the guard checks completeness; nothing else to do unless it reads
   badly in use.
 - **The `PagerAction` lift is the widest diff in the plan.** `modes.rs` is a

@@ -5,7 +5,7 @@
 //! snapshot API, and if 3.0 attach and 2.3 recovery will use that, re-running
 //! only the formatter measurement grades the wrong mechanism.
 //!
-//! Four criteria, per `V2_2_PLAN.md` §8:
+//! Four criteria, per `docs/archive/V2_2_PLAN.md` §8:
 //!   1. fidelity — encode, decode, row-by-row diff, over the SAME corpus the
 //!      formatter grading uses so the two are comparable
 //!   2. encoded size on that corpus

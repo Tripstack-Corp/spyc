@@ -1,5 +1,5 @@
 //! The projects closed lately, which the switcher (`Space j`) lists after the
-//! open ones and reopens (#99, `docs/drafts/PROJECTS_PLAN.md` §3): what a
+//! open ones and reopens (#99, `docs/archive/PROJECTS_PLAN.md` §3): what a
 //! close keeps, newest first and one per anchor, and the rows the switcher
 //! numbers.
 

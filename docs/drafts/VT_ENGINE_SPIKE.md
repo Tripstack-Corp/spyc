@@ -854,7 +854,7 @@ pin. `snapshot_grade`, `sbprobe` and `membudget` replace them.
 measured at ghostty `f4c68d65`, chosen for ABI compatibility with the published
 `libghostty-vt` bindings — and at that commit `max_scrollback` is inert. That
 commit cannot ship. This addendum re-states every figure the adoption rests on
-at the pin that can, and it is the Stage-5 gate of `V2_2_PLAN.md` §8.
+at the pin that can, and it is the Stage-5 gate of `docs/archive/V2_2_PLAN.md` §8.
 
 **Pin:** `1f5bb5769fbb5e717546073d33d3985604a315b2`, 2026-09-04.
 **Through:** `crates/spyc-vt-sys` — the same bindings, the same vendored
