@@ -16,6 +16,10 @@ const P1: &str = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5a6b";
 const P2: &str = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5a6c";
 const P3: &str = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5a6d";
 const UUID: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";
+const UUID2: &str = "019e8b21-9e7c-7553-a118-d1cdada725fe";
+const UUID3: &str = "019e8b21-9e7c-7553-a118-d1cdada725ff";
+const UUID4: &str = "019e8b21-9e7c-7553-a118-d1cdada72600";
+const UUID5: &str = "019e8b21-9e7c-7553-a118-d1cdada72601";
 
 fn crate_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -1048,5 +1052,280 @@ fn unopened_tabs_stay_with_their_project() {
         };
         assert_eq!(labels(0), ["refused", "kept"]);
         assert_eq!(labels(1), ["cat"]);
+    });
+}
+
+/// `LEFT_BEHIND`, a session no spyc runs, and `HOLDER`, an older one whose
+/// spyc is `pid`, started at `started`. `LEFT_BEHIND` has a codex tab of each
+/// kind below, each its own fake in a directory named for its label:
+/// - `in_view`, on `UUID`, in the project in view (at the crate root), with
+///   the tab id and claim owner `HOLDER`'s tab on that conversation has;
+/// - `idless`, with no saved conversation, saved in a directory that has
+///   gone, so it spawns at the project's anchor;
+/// - `unheld`, on `UUID4`, in `dir`, a conversation `HOLDER` isn't in;
+/// - `out_of_view`, on `UUID2`, in the project out of view (at `other`);
+/// - `unopened`, on `UUID5`, at `other`, a conversation `HOLDER` keeps only
+///   as a tab it couldn't open.
+///
+/// `HOLDER` has tabs on `UUID` and `UUID2`, a codex of its own at that anchor,
+/// and the unopened record. `LEFT_BEHIND` saved a scope claim for `in_view`'s
+/// owner and one for `unheld`'s.
+fn write_left_behind_and_holder(state_root: &Path, dir: &Path, pid: u32, started: u64) {
+    let other = dir.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let codex = |sub: &str, sid: Option<&str>, cwd: &Path| {
+        json!({
+            "command": fake_agent(&dir.join(sub), "codex"), "label": sub, "cwd": cwd,
+            "agent_kind": "codex", "agent_session_id": sid,
+            "codex_home": dir.join("codex-home")
+        })
+    };
+    let mut theirs = codex("theirs", Some(UUID), &other);
+    theirs["pane_id"] = json!("their-pane");
+    theirs["claim_owner"] = json!("their-owner");
+    let mut kept = codex("theirs", Some(UUID5), &other);
+    kept["unopened"] = json!(true);
+    let mut holder = manifest(
+        801,
+        "HOLDER",
+        1_700_000_100,
+        P1,
+        vec![project(
+            P1,
+            &other,
+            &other,
+            vec![
+                theirs,
+                codex("theirs", Some(UUID2), &other),
+                codex("theirs", Some(UUID3), &crate_root()),
+                kept,
+            ],
+        )],
+    );
+    holder["pid"] = json!(pid);
+    holder["process_started"] = json!(started);
+    write_manifest(state_root, 801, &holder);
+    let mut in_view = codex("in_view", Some(UUID), dir);
+    in_view["pane_id"] = json!("their-pane");
+    in_view["claim_owner"] = json!("their-owner");
+    let mut unheld = codex("unheld", Some(UUID4), dir);
+    unheld["claim_owner"] = json!("my-owner");
+    let mut left = manifest(
+        802,
+        "LEFT_BEHIND",
+        1_700_000_200,
+        P1,
+        vec![
+            project(
+                P1,
+                &crate_root(),
+                &crate_root(),
+                vec![in_view, codex("idless", None, &dir.join("gone")), unheld],
+            ),
+            project(
+                P2,
+                &other,
+                &other,
+                vec![
+                    codex("out_of_view", Some(UUID2), &other),
+                    codex("unopened", Some(UUID5), &other),
+                ],
+            ),
+        ],
+    );
+    let claim = |id: u64, owner: &str| {
+        json!({
+            "id": id, "owner": owner, "owner_label": "agent", "paths": ["src/*.rs"],
+            "intent": "merging", "pr": null, "note": null, "claimed_at_secs": 1
+        })
+    };
+    left["scope_claims"] = json!([claim(7, "their-owner"), claim(8, "my-owner")]);
+    write_manifest(state_root, 802, &left);
+}
+
+/// The owners of the scope claims the restore brought back.
+fn claim_owners(app: &App) -> Vec<String> {
+    app.state
+        .scope_registry
+        .iter()
+        .map(|claim| claim.owner.clone())
+        .collect()
+}
+
+/// Restore `LEFT_BEHIND`, the newest session, from the picker.
+fn restore_left_behind(app: &mut App) {
+    let lines = picker_lines(app);
+    assert!(lines[1].contains("LEFT_BEHIND"), "newest first: {lines:#?}");
+    press(app, KeyCode::Char('1'));
+}
+
+/// A conversation another running spyc holds isn't resumed a second time,
+/// whatever file saved it: restoring a session no spyc runs starts that tab's
+/// agent fresh, in the project in view and out of it, without the tab id and
+/// scope claims of the holder's tab, and the flash says why. A session
+/// restored as a copy leaves its file's pid behind, so restoring that file
+/// again would otherwise put two spycs in one conversation. A codex with no
+/// saved conversation would resume the newest in its directory
+/// (`resume --last`), so it starts fresh where another spyc runs a codex.
+/// Conversations the holder isn't running still resume: one it has never
+/// had, and one it only keeps saved as a tab it couldn't open.
+#[test]
+#[ignore = "red: a restore resumes a conversation another running spyc holds"]
+fn a_conversation_another_running_spyc_holds_starts_fresh() {
+    let tmp = tempfile::tempdir().unwrap();
+    in_temp_home(tmp.path(), |state_root| {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let live = std::os::unix::process::parent_id();
+        write_left_behind_and_holder(state_root, &dir, live, started_at(live));
+        let mut app = App::test_app(dir.clone());
+        restore_left_behind(&mut app);
+
+        for sub in ["in_view", "idless", "out_of_view"] {
+            let argv = agent_argv(&dir.join(sub), "codex");
+            assert!(
+                !argv.iter().any(|arg| arg == "resume"),
+                "{sub}: the agent starts fresh: {argv:?}"
+            );
+        }
+        for (sub, sid) in [("unheld", UUID4), ("unopened", UUID5)] {
+            let argv = agent_argv(&dir.join(sub), "codex");
+            assert!(
+                argv.windows(2).any(|w| w[0] == "resume" && w[1] == sid),
+                "{sub}: the agent resumes: {argv:?}"
+            );
+        }
+        let tabs = app.runtime.project().pane_tabs.as_ref().expect("the tabs");
+        let in_view = tabs
+            .tabs()
+            .iter()
+            .find(|tab| tab.info.label == "in_view")
+            .expect("the in_view tab");
+        assert_ne!(in_view.info.id, "their-pane");
+        assert_ne!(in_view.info.claim_owner, "their-owner");
+        assert_eq!(claim_owners(&app), ["my-owner"], "no claim of theirs");
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(
+            flash.contains("3 tab(s) start fresh: another spyc has their conversations"),
+            "{flash}"
+        );
+    });
+}
+
+/// The control: once the spyc that held them has gone, the same conversations
+/// resume, the id-less codex its newest, every scope claim comes back, and
+/// the flash says nothing of starting fresh.
+#[test]
+fn a_conversation_held_by_a_spyc_that_has_gone_resumes() {
+    let tmp = tempfile::tempdir().unwrap();
+    in_temp_home(tmp.path(), |state_root| {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let live = std::os::unix::process::parent_id();
+        write_left_behind_and_holder(state_root, &dir, dead_pid(), started_at(live));
+        let mut app = App::test_app(dir.clone());
+        restore_left_behind(&mut app);
+
+        for (sub, selector) in [
+            ("in_view", UUID),
+            ("idless", "--last"),
+            ("unheld", UUID4),
+            ("out_of_view", UUID2),
+            ("unopened", UUID5),
+        ] {
+            let argv = agent_argv(&dir.join(sub), "codex");
+            assert!(
+                argv.windows(2)
+                    .any(|w| w[0] == "resume" && w[1] == selector),
+                "{sub}: the agent resumes: {argv:?}"
+            );
+        }
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(!flash.contains("start fresh"), "{flash}");
+        assert_eq!(claim_owners(&app), ["their-owner", "my-owner"]);
+    });
+}
+
+/// A tab a restore starts fresh is still refused when the restore can't
+/// rebuild it safely: a copy of a running session doesn't relaunch a codex
+/// saved with its initial prompt, which would send the prompt again. It stays
+/// saved, unopened, as it does when it would resume, its conversation still
+/// named for when it can be reopened.
+#[test]
+#[ignore = "red: a fresh tab skips the restore's refusal and replays its prompt"]
+fn a_fresh_tab_that_would_replay_its_prompt_stays_unopened() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let codex = fake_agent(&dir, "codex").display().to_string();
+        let live = std::os::unix::process::parent_id();
+        let prompted = json!({
+            "command": format!("{codex} 'do the thing'"), "label": "prompted", "cwd": dir,
+            "agent_kind": "codex", "agent_session_id": UUID,
+            "codex_home": dir.join("codex-home")
+        });
+        let mut saved = manifest(
+            803,
+            "PROMPTED",
+            1_700_000_100,
+            P1,
+            vec![project(
+                P1,
+                &crate_root(),
+                &crate_root(),
+                vec![prompted, tab("kept", &dir)],
+            )],
+        );
+        saved["pid"] = json!(live);
+        saved["process_started"] = json!(started_at(live));
+        write_v1_decoy(&state_root);
+        write_manifest(&state_root, 803, &saved);
+        let mut app = App::test_app(dir);
+        picker_lines(&mut app);
+        press(&mut app, KeyCode::Char('1'));
+
+        let deferred = &app.state.active_project().deferred_tabs;
+        let labels: Vec<&str> = deferred.iter().map(|d| d.tab.label.as_str()).collect();
+        assert_eq!(labels, ["prompted"], "{:?}", app.flash_text());
+        assert_eq!(deferred[0].tab.agent_session_id.as_deref(), Some(UUID));
+        assert_eq!(tab_count(&app), 1, "only the plain tab opens");
+    });
+}
+
+/// A tab that starts fresh starts without the resume its command saved: a
+/// copy of a running session doesn't relaunch an older save's
+/// `codex resume --last`, which would resume that spyc's newest conversation.
+#[test]
+#[ignore = "red: a fresh tab relaunches the resume its command saved"]
+fn a_fresh_tab_drops_the_resume_its_command_saved() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let codex = fake_agent(&dir, "codex").display().to_string();
+        let live = std::os::unix::process::parent_id();
+        let resuming = json!({
+            "command": format!("{codex} resume --last"), "label": "resuming", "cwd": dir,
+            "agent_kind": "codex", "codex_home": dir.join("codex-home")
+        });
+        let mut saved = manifest(
+            804,
+            "SAVED_RESUME",
+            1_700_000_100,
+            P1,
+            vec![project(P1, &crate_root(), &crate_root(), vec![resuming])],
+        );
+        saved["pid"] = json!(live);
+        saved["process_started"] = json!(started_at(live));
+        write_v1_decoy(&state_root);
+        write_manifest(&state_root, 804, &saved);
+        let mut app = App::test_app(dir.clone());
+        picker_lines(&mut app);
+        press(&mut app, KeyCode::Char('1'));
+
+        let argv = agent_argv(&dir, "codex");
+        assert!(
+            !argv.iter().any(|arg| arg == "resume"),
+            "the agent starts fresh: {argv:?}"
+        );
     });
 }
