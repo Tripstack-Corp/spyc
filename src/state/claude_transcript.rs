@@ -286,6 +286,66 @@ mod tests {
             .collect()
     }
 
+    /// A user prompt line, as Claude Code writes one.
+    fn prompt(text: &str) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"parentUuid": null, "type": "user", "message": {"role": "user", "content": text}})
+        )
+    }
+
+    /// Claude Code also logs records the view never renders (`api-request`,
+    /// `api-request-blob`, …), and they can be most of a session's bytes: two
+    /// thirds of one real 19.5 MB session.
+    fn logged_request(bytes: usize) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({"type": "api-request", "sessionId": "s", "body": "x".repeat(bytes)})
+        )
+    }
+
+    #[test]
+    #[ignore = "red: ^a v shows only the last 4 MB of the file, unrendered records included"]
+    fn the_first_prompt_shows_however_much_the_session_logged_beside_it() {
+        let mut jsonl = prompt("the first prompt");
+        for _ in 0..600 {
+            jsonl.push_str(&logged_request(10_000));
+        }
+        jsonl.push_str(&prompt("the last prompt"));
+        assert!(
+            jsonl.len() > 5 * 1024 * 1024,
+            "the logged records outweigh the cap"
+        );
+        let flat = render_to_flat(&jsonl);
+        assert!(flat.iter().any(|l| l.contains("the last prompt")));
+        assert!(
+            flat.iter().any(|l| l.contains("the first prompt")),
+            "the session's first prompt is missing: the view kept only the file's tail"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: ^a v keeps every line of a transcript, however long"]
+    fn a_long_conversation_keeps_its_newest_lines_within_a_scrollback() {
+        let jsonl: String = (0..15_000)
+            .map(|i| prompt(&format!("prompt {i}")))
+            .collect();
+        let flat = render_to_flat(&jsonl);
+        assert!(
+            flat.len() <= 10_000,
+            "{} lines: more than a terminal scrollback holds",
+            flat.len()
+        );
+        assert!(
+            flat.iter().any(|l| l.contains("prompt 14999")),
+            "the newest prompt is kept"
+        );
+        assert!(
+            !flat.iter().any(|l| l.contains("prompt 0")),
+            "the oldest prompts go first"
+        );
+    }
+
     #[test]
     fn renders_user_string_and_assistant_blocks() {
         let flat = render_to_flat(concat!(
