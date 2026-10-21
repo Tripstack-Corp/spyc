@@ -965,6 +965,7 @@ mod tests {
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,
+            unopened: false,
         })
         .expect("SavedTab serializes");
         assert!(

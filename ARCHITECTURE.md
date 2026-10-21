@@ -1295,6 +1295,41 @@ which still belong to its live agents. "Running" means the recorded pid is
 alive with the recorded start time: a crashed spyc's pid soon belongs to
 another process, and a pid alone would mark its manifest running forever.
 
+<!-- SPYC-TRAP: restore-skips-held-conversations -->
+### A restore never resumes into a conversation another spyc runs
+
+A copy leaves its file's pid behind, so the file reads as not running while the
+copy runs its conversations, and restoring it again would resume them a second
+time: two processes in one conversation, which splits it without a word.
+`restore_session` therefore reads every manifest whose spyc is running
+(`Held::by_running`), and `restore_plans` starts fresh any tab whose plan would
+resume into something one of them holds, in whichever file the tab was saved:
+
+- its saved conversation: by uuid anywhere, or by claude's name for it within
+  the directory the name is claude's in, since a name is unique only there;
+- with no conversation saved, its agent's newest in the directory it spawns
+  in, where a running spyc has that agent with the same codex home: codex's
+  `resume --last` and zot's `--continue` pick that one.
+
+The check reads the plan the agent rebuilds (`reconstruct_saved_tab`), not the
+id alone, so a tab its plan wouldn't resume (a non-claude wrapper, a claude
+with nothing written yet) isn't counted. A tab its plan refuses stays refused,
+its record whole, even when it would start fresh: a copy of a running session
+once relaunched a codex's saved command verbatim, initial prompt included, so
+a copy now keeps unopened whatever a restore of the file would. A fresh start
+drops any resume an older save kept in the command (`fresh_command`). A held
+tab leaves its tab id and scope claims with the holder, as a running copy's
+tabs do. A record its spyc couldn't open is saved `unopened` and holds nothing.
+
+A holder's tab names its conversation once spyc has pinned it: codex's and
+agy's to the id in their resume command, claude's to the id it typed, a new
+codex's once its rollout is matched. Until then, and for zot, which saves no
+id, the holder is known only by its directory, which holds only a tab saved
+with no conversation. An agent started inside a shell tab is saved as the
+shell and holds nothing. A file is only as fresh as its last autosave, a
+couple of seconds behind, so two restores at the same moment can still miss
+each other.
+
 
 <!-- SPYC-TRAP: session-prune-by-last-save -->
 ### Session pruning ranks by last save, not by id

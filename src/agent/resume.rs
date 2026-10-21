@@ -7,6 +7,23 @@
 //! that call them, rather than in `crate::app` (MVU Stage 4: the agent layer
 //! shouldn't reach back up into `app` for its own behaviour).
 
+/// Whether `tab`'s command is a wrapper around its agent (#610): its
+/// `[[pane.tab]] agent` hint names an agent the command itself isn't.
+fn is_wrapper(tab: &crate::state::sessions::SavedTab) -> bool {
+    tab.agent_hint
+        .is_some_and(|kind| super::detect(&tab.command).kind() != kind)
+}
+
+/// `tab`'s command as a restore that starts it fresh spawns it: without any
+/// resume an older save kept in it. A wrapper's is relaunched as written.
+pub fn fresh_command(tab: &crate::state::sessions::SavedTab) -> String {
+    if is_wrapper(tab) {
+        tab.command.clone()
+    } else {
+        super::profile_for(tab.effective_kind()).command_without_resume(&tab.command)
+    }
+}
+
 /// Modern saves with an unresolved Codex home cannot adopt a new launch home.
 /// Legacy saves retain their inherited-home compatibility.
 pub fn reconstruct_saved_tab(
@@ -16,10 +33,7 @@ pub fn reconstruct_saved_tab(
     // A wrapper's command is relaunched as written (#610): only claude, which
     // resumes by typing `/resume` rather than by a flag, gets its conversation
     // back; the others start fresh.
-    if tab
-        .agent_hint
-        .is_some_and(|kind| super::detect(&tab.command).kind() != kind)
-    {
+    if is_wrapper(tab) {
         let resume = if tab.effective_kind() == crate::state::sessions::AgentKind::Claude {
             super::profile_for(crate::state::sessions::AgentKind::Claude)
                 .reconstruct_restore(&tab.command, tab.agent_session_id.as_deref(), cwd)

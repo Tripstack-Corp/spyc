@@ -328,6 +328,7 @@ impl App {
                             claim_owner: t.info.claim_owner.clone(),
                             pane_id: t.info.id.clone(),
                             agent_hint: t.info.agent_hint,
+                            unopened: false,
                         }
                     })
                     .collect()
@@ -1086,6 +1087,7 @@ mod tests {
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
+                    unopened: false,
                 });
             crate::state::sessions::save_session(&saved).expect("seed the restore point");
 
@@ -1553,6 +1555,7 @@ mod tests {
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,
+            unopened: false,
         };
         let one = Manifest::one_project(1, 0, "ONE", "/w/spyc", vec![tab("vim"), tab("zsh")]);
         let row = super::picker_row(0, &one, false, false);

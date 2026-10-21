@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 mod manifest;
 pub use manifest::{
-    MANIFEST_VERSION, Manifest, SavedProject, label_of, parse_manifest, project_list_label,
+    Held, MANIFEST_VERSION, Manifest, SavedProject, label_of, parse_manifest, project_list_label,
 };
 
 const MAX_SESSIONS: usize = 20;
@@ -21,7 +21,7 @@ const MAX_SESSIONS: usize = 20;
 /// Drives session-save and resume-on-restore behaviour — claude uses
 /// a UUID-or-name token plus `/resume` over stdin (CLI flag is
 /// regression-prone), codex uses `codex resume <UUID>` directly.
-#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentKind {
     Claude,
@@ -106,6 +106,10 @@ pub struct SavedTab {
     /// wrapper, which restore relaunches as written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_hint: Option<AgentKind>,
+    /// A record a restore couldn't open, kept saved for a later one to try: no
+    /// agent runs it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unopened: bool,
 }
 
 // Serde's skip callback receives a reference to the field.

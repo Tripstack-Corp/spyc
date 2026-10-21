@@ -36,7 +36,13 @@ pub fn merge_saved_tabs(
         if has_live && index <= active {
             active += 1;
         }
-        live.insert(index, tab.tab.clone());
+        live.insert(
+            index,
+            SavedTab {
+                unopened: true,
+                ..tab.tab.clone()
+            },
+        );
     }
     (live, active)
 }
@@ -70,6 +76,23 @@ mod tests {
     fn tab(label: &str) -> SavedTab {
         serde_json::from_value(serde_json::json!({"command": label, "label": label, "cwd": "/tmp"}))
             .expect("fixture")
+    }
+
+    /// A record put back is marked unopened: no agent runs it, so it holds no
+    /// conversation against another spyc's restore.
+    #[test]
+    fn records_put_back_are_marked_unopened() {
+        let deferred = vec![DeferredTab {
+            saved_index: 0,
+            tab: tab("kept"),
+            reason: "refused".into(),
+        }];
+        let (tabs, _) = merge_saved_tabs(vec![tab("live")], 0, &deferred);
+        let marked: Vec<(&str, bool)> = tabs
+            .iter()
+            .map(|tab| (tab.label.as_str(), tab.unopened))
+            .collect();
+        assert_eq!(marked, [("kept", true), ("live", false)]);
     }
 
     #[test]
