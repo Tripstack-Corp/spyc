@@ -21,11 +21,11 @@ const UUID3: &str = "019e8b21-9e7c-7553-a118-d1cdada725ff";
 const UUID4: &str = "019e8b21-9e7c-7553-a118-d1cdada72600";
 const UUID5: &str = "019e8b21-9e7c-7553-a118-d1cdada72601";
 
-fn crate_root() -> PathBuf {
+pub(super) fn crate_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn write_manifest(state_root: &Path, id: u64, manifest: &Value) {
+pub(super) fn write_manifest(state_root: &Path, id: u64, manifest: &Value) {
     let dir = state_root.join("sessions");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -35,7 +35,7 @@ fn write_manifest(state_root: &Path, id: u64, manifest: &Value) {
     .unwrap();
 }
 
-fn read_manifest(state_root: &Path, id: u64) -> Value {
+pub(super) fn read_manifest(state_root: &Path, id: u64) -> Value {
     let path = state_root.join("sessions").join(format!("{id}.json"));
     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap()
 }
@@ -55,12 +55,12 @@ fn write_v1_decoy(state_root: &Path) {
     );
 }
 
-fn tab(label: &str, cwd: &Path) -> Value {
+pub(super) fn tab(label: &str, cwd: &Path) -> Value {
     json!({ "command": "cat", "label": label, "cwd": cwd })
 }
 
 /// One project, with column `a` at `left_cwd`.
-fn project(id: &str, home: &Path, left_cwd: &Path, tabs: Vec<Value>) -> Value {
+pub(super) fn project(id: &str, home: &Path, left_cwd: &Path, tabs: Vec<Value>) -> Value {
     json!({
         "id": id, "home": home, "label": home.file_name().unwrap().to_string_lossy(),
         "start_dir": home, "left_cwd": left_cwd,
@@ -68,7 +68,13 @@ fn project(id: &str, home: &Path, left_cwd: &Path, tabs: Vec<Value>) -> Value {
     })
 }
 
-fn manifest(id: u64, name: &str, epoch_secs: u64, active: &str, projects: Vec<Value>) -> Value {
+pub(super) fn manifest(
+    id: u64,
+    name: &str,
+    epoch_secs: u64,
+    active: &str,
+    projects: Vec<Value>,
+) -> Value {
     json!({
         "version": 2, "id": id, "name": name, "saved_at": "", "epoch_secs": epoch_secs,
         "active_project": active, "projects": projects
@@ -122,7 +128,7 @@ fn the_only_session_file(state_root: &Path) -> Option<Value> {
 }
 
 /// When `pid` started, in seconds since the epoch.
-fn started_at(pid: u32) -> u64 {
+pub(super) fn started_at(pid: u32) -> u64 {
     use sysinfo_crate::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let mut sys = System::new();
     let pid = Pid::from_u32(pid);
@@ -368,7 +374,7 @@ fn tab_labels(app: &mut App, id: crate::project_id::ProjectId) -> Vec<String> {
 
 /// Run `body` with spyc's state under `tmp/state` and a home of `tmp/home`
 /// holding no rc, so a project the restore opens reads no real config.
-fn in_temp_home(tmp: &Path, body: impl FnOnce(&Path)) {
+pub(super) fn in_temp_home(tmp: &Path, body: impl FnOnce(&Path)) {
     let (state_root, home) = (tmp.join("state"), tmp.join("home"));
     std::fs::create_dir_all(&home).unwrap();
     crate::config::with_home_root(&home, || {

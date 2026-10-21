@@ -13,7 +13,7 @@ use crossterm::event::KeyCode;
 
 /// `^a Space` then `c`: the leader from the pane, which a tab just opened has
 /// focused.
-fn leader_from_pane(app: &mut App, c: char) {
+pub(super) fn leader_from_pane(app: &mut App, c: char) {
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
         .unwrap();
     leader(app, c);
