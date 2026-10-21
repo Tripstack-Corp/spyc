@@ -262,28 +262,20 @@ impl App {
         others
     }
 
-    /// Open `saved` as a project beside the one in view, its config read at
-    /// its start directory, else its anchor, else column `a`'s directory, with
-    /// its column `a`, tabs and split as it saved them, and its context file
-    /// written so its agents' tools answer for it. `None` when none of those
-    /// directories is left, or when an open project already has its home or
-    /// its start directory, which are one project's each.
-    fn restore_out_of_view(
+    /// Open `saved` as a project beside the one in view, its config read where
+    /// it [`opens_at`], with its column `a`, tabs and split as it saved them,
+    /// and its context file written so its agents' tools answer for it.
+    /// `None` when none of those directories is left, or when an open project
+    /// already has its home or its start directory, which are one project's
+    /// each (`App::project_at_saved`).
+    pub(super) fn restore_out_of_view(
         &mut self,
         saved: &SavedProject,
         running: bool,
         held: &Held,
     ) -> Option<OutOfView> {
-        let at = [saved.start_dir.as_path(), saved.anchor()]
-            .into_iter()
-            .chain(saved.left_cwd.as_deref())
-            .find(|dir| dir.is_dir())?;
-        let at = std::fs::canonicalize(at).ok()?;
-        if self
-            .state
-            .open_projects()
-            .any(|p| p.anchor() == saved.anchor() || p.start_dir == saved.start_dir)
-        {
+        let at = std::fs::canonicalize(opens_at(saved)?).ok()?;
+        if self.project_at_saved(saved).is_some() {
             return None;
         }
         let (id, config_problem) = self.create_project(&at, saved.anchor());
@@ -460,6 +452,8 @@ impl App {
         // Continue overwriting the restored session's own `<id>.json` on
         // subsequent saves/autosaves (P3-2), rather than forking a new file.
         self.state.session_id = Some(manifest.id);
+        // The file's closed projects are this spyc's to reopen and save now.
+        self.state.adopt_closed(&manifest.closed_projects);
     }
 
     /// The restored project's own settings apart from its tabs and split.
@@ -638,10 +632,10 @@ struct RestoreOutcome {
 
 /// A project [`App::restore_out_of_view`] opened: its id, what went wrong
 /// opening it, if anything, and its [`TabPlans::held`].
-struct OutOfView {
-    id: ProjectId,
-    problem: Option<String>,
-    held: Vec<String>,
+pub(super) struct OutOfView {
+    pub(super) id: ProjectId,
+    pub(super) problem: Option<String>,
+    pub(super) held: Vec<String>,
 }
 
 /// A project's tabs as the restore opens them, each with how it comes back.
@@ -670,8 +664,17 @@ fn has_a_place(project: &SavedProject) -> bool {
     landings(project).any(|dir| dir.is_dir() || super::archive::archive_ancestor_of(dir).is_some())
 }
 
+/// The directory a project opened out of view opens at: its start directory,
+/// else its anchor, else column `a`'s, the first still a directory.
+pub(super) fn opens_at(project: &SavedProject) -> Option<&std::path::Path> {
+    [project.start_dir.as_path(), project.anchor()]
+        .into_iter()
+        .chain(project.left_cwd.as_deref())
+        .find(|dir| dir.is_dir())
+}
+
 /// A saved project's name for the user: its label, else its anchor.
-fn saved_label(project: &SavedProject) -> String {
+pub(super) fn saved_label(project: &SavedProject) -> String {
     if project.label.is_empty() {
         project.anchor().display().to_string()
     } else {

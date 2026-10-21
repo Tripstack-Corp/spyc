@@ -293,7 +293,7 @@ appear on the top bar and persist across `spyc -r`.
 | `gP` / `Space P` | Set `PROJECT_HOME` to current directory |
 | `Space n` | Open a directory as a project, and go to it |
 | `Space x` | Close the project in view (asks first while anything in it runs) |
-| `Space j` | List the open projects, to go to one (`j`/`k` + Enter, or `1`-`9`) |
+| `Space j` | List the open projects, to go to one, and those closed lately, to reopen one (`j`/`k` + Enter, or `1`-`9`) |
 | `Space Space` | Go to the project you were in last |
 | `Space 1`..`Space 9` | Go to open project N |
 | `Space ]` / `Space [` | Go to the next / previous project, wrapping |

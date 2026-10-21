@@ -1,21 +1,28 @@
-//! Opening a project, closing one, and moving between the open ones (#99):
-//! what the leader's project keys do — `Space n`, `Space x`, `Space j`,
-//! `Space Space`, `Space 1-9`, and `Space ]` / `Space [` — and how the dumps
-//! that cover every project head and name them.
+//! Opening a project, closing one, reopening one closed lately, and moving
+//! between the open ones (#99): what the leader's project keys do — `Space
+//! n`, `Space x`, `Space j`, `Space Space`, `Space 1-9`, and `Space ]` /
+//! `Space [` — and how the dumps that cover every project head and name them.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context as _;
 
-use super::state::{self, ProjectId};
+use super::state::{self, ProjectId, SwitcherRow};
 use super::view_state::ProjectView;
 use super::{App, Config, Mode, Pane, PaneTabs, Prompt, PromptKind, UserKeymap};
 use crate::keymap::ProjectAction;
 use crate::mcp_cmd::McpResponse;
+use crate::state::sessions::{ClosedProject, Held, SavedProject};
 use crate::ui::{pager, project_chips};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
+
+/// The switcher's title, and once closed projects are listed under the open
+/// ones, [`REOPEN_TITLE`].
+const SWITCHER_TITLE: &str = "projects — j/k+Enter or 1-9 to go, / to search, q to close";
+const REOPEN_TITLE: &str = "projects — j/k+Enter or 1-9 to go or reopen, / to search, q to close";
 
 impl App {
     /// Go to another open project. With one project open these do nothing,
@@ -88,73 +95,224 @@ impl App {
         }
     }
 
-    /// `Space j`: list the open projects in switcher order, to go to one. Each
-    /// row is numbered, with its agents' glyph as its chip in the status bar
-    /// has it, how many tabs it has and its home; the one in view is marked
-    /// and highlighted. `j`/`k` and Enter, or `1`-`9`, pick
-    /// (`switch_to_pending_project`).
+    /// `Space j`: list the open projects in switcher order, to go to one, and
+    /// under them the projects closed lately, to reopen one. The closed rows
+    /// are read on a worker and follow the open ones once they land
+    /// (`spawn_closed_rows`), so the switcher opens at once and its numbers
+    /// and highlight don't move. The one in view is highlighted. `j`/`k` and
+    /// Enter, or `1`-`9`, pick (`switch_to_pending_project`).
     pub(super) fn open_project_switcher(&mut self) {
         self.clear_pending_pickers();
-        let label_w = self
+        let rows: Vec<SwitcherRow> = self
             .state
             .open_projects()
-            .map(|p| crate::ui::display_width(&p.label()))
-            .max()
-            .unwrap_or(0);
-        let tabs: HashMap<ProjectId, usize> = self
-            .runtime
-            .every_tab_set()
-            .map(|(id, tabs)| (id, tabs.tabs().len()))
+            .map(|p| SwitcherRow::Open(p.id))
             .collect();
         let active = self.state.active;
-        let attention = self.project_attention();
-        let pulse = self.spicy_pulse_color(self.view.agent_anim_frame);
-        let several = self.state.open_projects().nth(1).is_some();
-        let (ids, lines): (Vec<ProjectId>, Vec<Line<'static>>) = self
-            .state
-            .open_projects()
-            .enumerate()
-            .map(|(i, p)| {
-                let tabs = tabs.get(&p.id).copied().unwrap_or(0);
-                let glyph = several.then(|| {
-                    project_chips::cell(attention.get(&p.id).copied(), pulse, &self.view.theme)
-                });
-                let row = project_row(i, p, label_w, tabs, p.id == active, glyph);
-                (p.id, row)
-            })
-            .unzip();
-        let start = ids.iter().position(|id| *id == active).unwrap_or(0);
-        self.state.pending_projects = Some(ids);
-        let mut view = pager::PagerView::new_styled(
-            "projects — j/k+Enter or 1-9 to go, / to search, q to close",
-            lines,
-        );
+        let start = rows
+            .iter()
+            .position(|row| matches!(row, SwitcherRow::Open(id) if *id == active))
+            .unwrap_or(0);
+        let lines = self.switcher_lines(&rows);
+        self.state.pending_projects = Some(rows);
+        let mut view = pager::PagerView::new_styled(SWITCHER_TITLE, lines);
         view.picker_cursor = Some(start);
         view.no_history = true;
         view.show_line_numbers = false;
         view.wrap = false;
         self.set_pager(view);
+        self.spawn_closed_rows();
     }
 
-    /// Go to the switcher's row `idx` and close the switcher, the pager of the
-    /// project being left. Past the end of the list nothing happens, and the
-    /// switcher stays open.
+    /// Add `closed` to the open switcher, after the projects already listed,
+    /// and draw every row again, padded to the widest label of them all. The
+    /// switcher is the pager with its title, so rows read for one another
+    /// pager has since covered land nowhere. Returns whether the switcher
+    /// changed.
+    pub(super) fn show_closed_rows(&mut self, closed: Vec<ClosedProject>) -> bool {
+        let pager = self.view.project().pager.as_ref();
+        if pager.is_none_or(|view| view.title != SWITCHER_TITLE) {
+            return false;
+        }
+        let Some(mut rows) = self.state.pending_projects.take() else {
+            return false;
+        };
+        rows.extend(closed.into_iter().map(|c| SwitcherRow::Closed(Box::new(c))));
+        let lines = self.switcher_lines(&rows);
+        self.state.pending_projects = Some(rows);
+        if let Some(view) = self.view.project_mut().pager.as_mut() {
+            view.lines = lines;
+            REOPEN_TITLE.clone_into(&mut view.title);
+        }
+        true
+    }
+
+    /// The switcher's lines for `rows` ([`project_row`]). An open project has
+    /// its agents' glyph as its chip in the status bar has it, how many tabs
+    /// it has and its home, the one in view marked; a closed one is dimmed,
+    /// with the tabs it saved and how long ago it closed.
+    fn switcher_lines(&self, rows: &[SwitcherRow]) -> Vec<Line<'static>> {
+        let tabs: HashMap<ProjectId, usize> = self
+            .runtime
+            .every_tab_set()
+            .map(|(id, tabs)| (id, tabs.tabs().len()))
+            .collect();
+        let attention = self.project_attention();
+        let pulse = self.spicy_pulse_color(self.view.agent_anim_frame);
+        let several = self.state.open_projects().nth(1).is_some();
+        let now = crate::sysinfo::epoch_secs();
+        let texts: Vec<RowText> = rows
+            .iter()
+            .map(|row| match row {
+                SwitcherRow::Open(id) => {
+                    self.state
+                        .project(*id)
+                        .map_or_else(RowText::default, |p| RowText {
+                            label: p.label(),
+                            home: p.anchor().to_path_buf(),
+                            tabs: tabs.get(id).copied().unwrap_or(0),
+                            marker: if *id == self.state.active {
+                                "← current"
+                            } else {
+                                ""
+                            }
+                            .to_owned(),
+                            glyph: several.then(|| {
+                                project_chips::cell(
+                                    attention.get(id).copied(),
+                                    pulse,
+                                    &self.view.theme,
+                                )
+                            }),
+                            dim: false,
+                        })
+                }
+                SwitcherRow::Closed(closed) => RowText {
+                    label: super::session_restore::saved_label(&closed.project),
+                    home: closed.project.anchor().to_path_buf(),
+                    tabs: closed.project.tabs.len(),
+                    marker: super::recently_closed::closed_ago(closed.closed_secs, now),
+                    glyph: several.then(|| Span::raw(" ")),
+                    dim: true,
+                },
+            })
+            .collect();
+        let label_w = texts
+            .iter()
+            .map(|text| crate::ui::display_width(&text.label))
+            .max()
+            .unwrap_or(0);
+        texts
+            .into_iter()
+            .enumerate()
+            .map(|(i, text)| project_row(i, text, label_w))
+            .collect()
+    }
+
+    /// Go to the switcher's row `idx`, or reopen the closed project it lists,
+    /// and close the switcher, the pager of the project being left. Past the
+    /// end of the list nothing happens, and the switcher stays open.
     pub(super) fn switch_to_pending_project(&mut self, idx: usize) {
-        let Some(id) = self
+        let Some(row) = self
             .state
             .pending_projects
             .as_ref()
-            .and_then(|ids| ids.get(idx))
-            .copied()
+            .and_then(|rows| rows.get(idx))
+            .cloned()
         else {
             return;
         };
         self.clear_pager();
         self.state.pending_projects = None;
         self.view.needs_full_repaint = true;
-        if self.state.has_project(id) {
-            self.switch_project(id);
+        match row {
+            SwitcherRow::Open(id) if self.state.has_project(id) => self.switch_project(id),
+            SwitcherRow::Open(_) => {}
+            SwitcherRow::Closed(closed) => self.reopen_project(&closed.project),
         }
+    }
+
+    /// Reopen `saved`, a project closed lately, beside the open ones and go to
+    /// it, as `-r` opens a project out of view: its column `a`, its tabs and
+    /// its split as it saved them, and its context file written. A tab that
+    /// would resume into a conversation an agent is in starts fresh
+    /// ([`Self::held_conversations`]). A project open again meanwhile is gone
+    /// to instead, and one with no directory left stays closed; the flash
+    /// says which.
+    fn reopen_project(&mut self, saved: &SavedProject) {
+        let label = super::session_restore::saved_label(saved);
+        if let Some(id) = self.project_at_saved(saved) {
+            self.state.forget_closed(saved.anchor());
+            self.switch_project(id);
+            self.state.flash_info(format!("project {label} is open"));
+            return;
+        }
+        if super::session_restore::opens_at(saved).is_none() {
+            self.state.flash_error(format!(
+                "project {label} not reopened: its directories are gone"
+            ));
+            return;
+        }
+        let held = self.held_conversations();
+        let Some(opened) = self.restore_out_of_view(saved, false, &held) else {
+            self.state
+                .flash_error(format!("project {label} could not be reopened"));
+            return;
+        };
+        self.switch_project(opened.id);
+        self.record_open_roots();
+        self.state.forget_closed(saved.anchor());
+        let mut parts = vec![format!(
+            "reopened project {label} ({})",
+            tab_count(
+                self.runtime
+                    .project()
+                    .pane_tabs
+                    .as_ref()
+                    .map_or(0, |t| t.tabs().len())
+            )
+        )];
+        if !opened.held.is_empty() {
+            parts.push(format!(
+                "{} tab(s) start fresh: another agent is in their conversations",
+                opened.held.len()
+            ));
+        }
+        let unopened = self.state.active_project().deferred_tabs.len();
+        if unopened > 0 {
+            parts.push(format!(
+                "{unopened} tab(s) unopened, kept saved — session info shows reasons"
+            ));
+        }
+        parts.extend(opened.problem);
+        let text = parts.join("; ");
+        if parts.len() > 1 {
+            self.state.flash_error(text);
+        } else {
+            self.state.flash_info(text);
+        }
+    }
+
+    /// What a reopened project's tabs mustn't resume into: the conversations
+    /// every other running spyc's agents are in (`Held::by_running`), and
+    /// those this spyc's own live tabs are in, each by the conversation it is
+    /// pinned to and, for an agent that resumes its newest, by its directory.
+    fn held_conversations(&self) -> Held {
+        let mut held = Held::by_running(&crate::state::sessions::load_manifests());
+        let live = self
+            .runtime
+            .every_tab_set()
+            .flat_map(|(_, tabs)| tabs.tabs())
+            .filter(|tab| !tab.pane.is_closed() && tab.pane.exit_status().is_none());
+        for tab in live {
+            held.add_running(
+                tab.info.agent().kind(),
+                tab.info.pinned_session_id(),
+                &tab.info.cwd,
+                tab.info.codex_home.as_deref(),
+            );
+        }
+        held
     }
 
     /// `Space n`'s prompt submitted: open `typed` as a project, read as `J`
@@ -194,6 +352,9 @@ impl App {
             return;
         }
         let (id, problem) = self.create_project(dir, dir);
+        self.state
+            .closed_projects
+            .retain(|closed| !names_dir(closed.project.anchor(), dir));
         self.switch_project(id);
         self.write_context();
         let label = self.state.label_of(id).unwrap_or_default();
@@ -205,14 +366,31 @@ impl App {
     }
 
     /// The open project anchored at, or started in, `dir`, a canonical
-    /// directory. A project's own home and start dir are compared canonical
-    /// too, since either can name `dir` through a symlink.
+    /// directory ([`names_dir`]).
     fn project_at(&self, dir: &Path) -> Option<ProjectId> {
-        let names_dir = |p: &Path| p == dir || std::fs::canonicalize(p).is_ok_and(|p| p == dir);
         self.state
             .open_projects()
-            .find(|p| names_dir(p.anchor()) || names_dir(&p.start_dir))
+            .find(|p| names_dir(p.anchor(), dir) || names_dir(&p.start_dir, dir))
             .map(|p| p.id)
+    }
+
+    /// The open project `saved` can't open beside: the one anchored where it
+    /// is, or started where it started, compared canonical ([`opened_in`]).
+    pub(super) fn project_at_saved(&self, saved: &SavedProject) -> Option<ProjectId> {
+        let (anchor, start) = saved_dirs(saved);
+        self.state
+            .open_projects()
+            .find(|p| names_dir(p.anchor(), &anchor) || names_dir(&p.start_dir, &start))
+            .map(|p| p.id)
+    }
+
+    /// Every open project's anchor and start dir, for [`opened_in`] off the
+    /// loop thread.
+    pub(super) fn open_dirs(&self) -> Vec<(PathBuf, PathBuf)> {
+        self.state
+            .open_projects()
+            .map(|p| (p.anchor().to_path_buf(), p.start_dir.clone()))
+            .collect()
     }
 
     /// A new project homed and started at `dir`, out of view, and what was
@@ -313,12 +491,15 @@ impl App {
     /// - its context file is removed, and discovery's record of the roots
     ///   rewritten without it;
     /// - it leaves all three maps, its label kept for the work it left
-    ///   running, and `Space Space` no longer goes to it.
+    ///   running, and `Space Space` no longer goes to it;
+    /// - it is kept as a save writes it, taken before its tabs shut down, for
+    ///   `Space j` to reopen ([`Self::closed_snapshot`]).
     pub(super) fn drop_project(&mut self, id: ProjectId) {
         assert_ne!(
             id, self.state.active,
             "a project is dropped once the user is out of it"
         );
+        let snapshot = self.closed_snapshot(id);
         let mut owners = HashSet::new();
         if let Some(mut project) = self.runtime.remove_project(id) {
             if let Some(tabs) = project.pane_tabs.as_mut() {
@@ -351,6 +532,7 @@ impl App {
         if self.state.last_project == Some(id) {
             self.state.last_project = None;
         }
+        self.state.remember_closed(snapshot);
         self.record_open_roots();
     }
 
@@ -386,34 +568,74 @@ impl App {
     }
 }
 
-/// One switcher row: `[n] ■ label  k tabs  ← current  home`, with `glyph` (a
-/// blank for a project with nothing to say) while several projects are open,
-/// and none with one, the marker on the project in view and the label padded
-/// to `label_w` columns, the widest of the list's. The home comes last,
-/// since it is the one column of no fixed width: a long one is cut at the
-/// pager's edge rather than pushing the marker off it. It is tilde-collapsed,
-/// as every displayed path is.
-fn project_row(
-    i: usize,
-    project: &state::Project,
-    label_w: usize,
+/// Whether `path`, an open project's home or start dir, names `dir`, a
+/// canonical directory: either can name it through a symlink.
+fn names_dir(path: &Path, dir: &Path) -> bool {
+    path == dir || std::fs::canonicalize(path).is_ok_and(|path| path == dir)
+}
+
+/// `saved`'s anchor and start dir, each canonical where it still resolves.
+fn saved_dirs(saved: &SavedProject) -> (PathBuf, PathBuf) {
+    let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    (canonical(saved.anchor()), canonical(&saved.start_dir))
+}
+
+/// Whether one of `open`, the open projects' anchors and start dirs
+/// ([`App::open_dirs`]), has `saved` open: one anchored where it is, or
+/// started where it started. A home is one project's, and a start dir is one
+/// project's (`AppState::home_taken`, `move_start_dir`); `saved` anchored at
+/// another's start dir, which `:project` allows, still opens.
+pub(super) fn opened_in(open: &[(PathBuf, PathBuf)], saved: &SavedProject) -> bool {
+    let (anchor, start) = saved_dirs(saved);
+    open.iter().any(|(open_anchor, open_start)| {
+        names_dir(open_anchor, &anchor) || names_dir(open_start, &start)
+    })
+}
+
+/// What one switcher row shows besides its number.
+#[derive(Default)]
+struct RowText {
+    label: String,
+    home: PathBuf,
     tabs: usize,
-    current: bool,
+    /// `← current` on the project in view, how long ago a closed one closed.
+    marker: String,
+    /// The project's agents' glyph (a blank for one with nothing to say)
+    /// while several projects are open, and none with one.
     glyph: Option<Span<'static>>,
-) -> Line<'static> {
-    let label = project.label();
-    let pad = " ".repeat(label_w.saturating_sub(crate::ui::display_width(&label)));
-    let tabs = if tabs == 1 {
-        "1 tab".to_string()
+    /// A closed project's row is dimmed.
+    dim: bool,
+}
+
+/// One switcher row: `[n] ■ label  k tabs  ← current  home`, the label
+/// padded to `label_w` columns, the widest of the list's. The home comes
+/// last, since it is the one column of no fixed width: a long one is cut at
+/// the pager's edge rather than pushing the marker off it. It is
+/// tilde-collapsed, as every displayed path is.
+fn project_row(i: usize, text: RowText, label_w: usize) -> Line<'static> {
+    let pad = " ".repeat(label_w.saturating_sub(crate::ui::display_width(&text.label)));
+    let mut spans = vec![Span::raw(format!("  [{}] ", i + 1))];
+    spans.extend(text.glyph);
+    spans.push(Span::raw(format!(
+        " {}{pad}  {:<8} {:<11} {}",
+        text.label,
+        tab_count(text.tabs),
+        text.marker,
+        crate::paths::display_tilde(&text.home),
+    )));
+    if text.dim {
+        for span in &mut spans {
+            span.style = span.style.add_modifier(Modifier::DIM);
+        }
+    }
+    Line::from(spans)
+}
+
+/// `1 tab`, `3 tabs`.
+fn tab_count(tabs: usize) -> String {
+    if tabs == 1 {
+        "1 tab".to_owned()
     } else {
         format!("{tabs} tabs")
-    };
-    let mut spans = vec![Span::raw(format!("  [{}] ", i + 1))];
-    spans.extend(glyph);
-    spans.push(Span::raw(format!(
-        " {label}{pad}  {tabs:<8} {:<10} {}",
-        if current { "← current" } else { "" },
-        crate::paths::display_tilde(project.anchor()),
-    )));
-    Line::from(spans)
+    }
 }

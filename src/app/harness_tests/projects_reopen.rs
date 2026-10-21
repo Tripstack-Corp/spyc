@@ -9,7 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use super::manifest_v2::{
-    crate_root, in_temp_home, manifest, project, read_manifest, started_at, tab, write_manifest,
+    crate_root, dead_pid, in_temp_home, manifest, project, read_manifest, started_at, tab,
+    write_manifest,
 };
 use super::projects_close::leader_from_pane;
 use super::projects_open::{Three, leader, open, with_three};
@@ -24,6 +25,14 @@ const P4: &str = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5b04";
 const P5: &str = "0192f0e4-7c3a-7b2e-9a51-3c1d2e4f5b05";
 const UUID: &str = "019e8b21-9e7c-7553-a118-d1cdada72701";
 const UUID2: &str = "019e8b21-9e7c-7553-a118-d1cdada72702";
+const UUID3: &str = "019e8b21-9e7c-7553-a118-d1cdada72703";
+
+/// `manifest` as written by a spyc that has quit: a pid no process holds.
+fn quit(mut manifest: Value) -> Value {
+    manifest["pid"] = json!(dead_pid());
+    manifest["process_started"] = json!(1_700_000_000);
+    manifest
+}
 
 /// Where `with_three` keeps spyc's state.
 fn state_root(t: &Three) -> PathBuf {
@@ -113,7 +122,6 @@ fn commands(app: &App) -> Vec<String> {
 /// its tab running its command again, and its context file written for its
 /// agents.
 #[test]
-#[ignore = "red: #99 8b, the switcher lists no closed project"]
 fn a_closed_project_is_listed_and_its_number_reopens_it() {
     with_three(|t| {
         let (y, y_home) = (t.y, t.y_home.clone());
@@ -176,17 +184,41 @@ fn a_closed_project_is_listed_and_its_number_reopens_it() {
     });
 }
 
+/// A reopened project is no longer kept as closed: the next save has it open,
+/// and not closed too.
+#[test]
+fn a_reopened_project_is_no_longer_kept_as_closed() {
+    with_three(|t| {
+        let state_root = state_root(t);
+        let (x, x_home) = (t.x, t.x_home.clone());
+        let app = &mut t.app;
+        app.state.session_id = Some(500);
+        tab_to_save(app, x, &x_home);
+        leader(app, '2');
+        leader(app, 'x');
+        leader(app, 'j');
+        assert!(closed_row(app, "yproj").is_some(), "{:#?}", rows(app));
+        app.handle_key(key('2')).unwrap();
+        let saved = saved(app, &state_root);
+        assert!(closed_homes(&saved).is_empty(), "{saved:#}");
+        assert_eq!(saved["projects"].as_array().map(Vec::len), Some(2));
+    });
+}
+
 /// A project a spyc that has quit had open is listed as closed when that spyc
 /// last saved, and Enter on it opens it here with its tabs.
 #[test]
-#[ignore = "red: #99 8b, the switcher lists no earlier spyc's project"]
 fn a_project_an_earlier_spyc_had_open_is_listed_and_reopens() {
     with_three(|t| {
         let (state_root, z_home) = (state_root(t), t.z_home.clone());
         let then = crate::sysinfo::epoch_secs() - 2 * 3600;
         let tabs = vec![tab("cat", &z_home)];
         let projects = vec![project(P1, &z_home, &z_home, tabs)];
-        write_manifest(&state_root, 7, &manifest(7, "EARLIER", then, P1, projects));
+        write_manifest(
+            &state_root,
+            7,
+            &quit(manifest(7, "EARLIER", then, P1, projects)),
+        );
         let app = &mut t.app;
         leader(app, 'j');
         let row =
@@ -217,7 +249,6 @@ fn a_project_an_earlier_spyc_had_open_is_listed_and_reopens() {
 /// open here, nor one whose directories have all gone, nor one in this spyc's
 /// own file, whose state is newer.
 #[test]
-#[ignore = "red: #99 8b, the switcher lists no earlier spyc's project"]
 fn only_a_project_that_can_be_reopened_is_listed() {
     with_three(|t| {
         let state_root = state_root(t);
@@ -238,7 +269,7 @@ fn only_a_project_that_can_be_reopened_is_listed() {
             ],
         );
         earlier["closed_projects"] = closed(P4, &t_home);
-        write_manifest(&state_root, 7, &earlier);
+        write_manifest(&state_root, 7, &quit(earlier));
         let live = std::os::unix::process::parent_id();
         let z_home = t.z_home.clone();
         let mut running = manifest(
@@ -259,7 +290,7 @@ fn only_a_project_that_can_be_reopened_is_listed() {
             P1,
             vec![project(P1, &v_home, &v_home, vec![])],
         );
-        write_manifest(&state_root, 9, &mine);
+        write_manifest(&state_root, 9, &quit(mine));
         let app = &mut t.app;
         app.state.session_id = Some(9);
 
@@ -273,7 +304,6 @@ fn only_a_project_that_can_be_reopened_is_listed() {
 /// A closed project is saved with the session, apart from the open ones, with
 /// when it closed.
 #[test]
-#[ignore = "red: #99 8b, a closed project isn't saved"]
 fn a_closed_project_is_saved_with_the_session() {
     with_three(|t| {
         let state_root = state_root(t);
@@ -303,7 +333,6 @@ fn a_closed_project_is_saved_with_the_session() {
 /// A restore that adopts a file takes its closed projects too: the next save
 /// over it keeps them, and the switcher lists them.
 #[test]
-#[ignore = "red: #99 8b, an adopted session's closed projects are dropped"]
 fn an_adopted_sessions_closed_projects_are_kept() {
     let tmp = tempfile::tempdir().unwrap();
     in_temp_home(tmp.path(), |state_root| {
@@ -335,7 +364,6 @@ fn an_adopted_sessions_closed_projects_are_kept() {
 /// `Space n` onto a closed project's home opens it afresh and forgets the
 /// closed one, and a project closed twice is kept once, as it closed last.
 #[test]
-#[ignore = "red: #99 8b, a closed project isn't saved"]
 fn a_project_closed_twice_is_kept_once() {
     with_three(|t| {
         let state_root = state_root(t);
@@ -370,7 +398,6 @@ fn a_project_closed_twice_is_kept_once() {
 /// A closed project whose directories have gone since the switcher listed it
 /// isn't reopened, and the flash says why.
 #[test]
-#[ignore = "red: #99 8b, the switcher lists no closed project"]
 fn a_closed_project_gone_since_it_was_listed_says_so() {
     with_three(|t| {
         let (x, y_home) = (t.x, t.y_home.clone());
@@ -393,7 +420,6 @@ fn a_closed_project_gone_since_it_was_listed_says_so() {
 /// would put two agents in it: that tab's agent starts fresh, the flash says
 /// so, and the others resume.
 #[test]
-#[ignore = "red: #99 8b, the switcher lists no earlier spyc's project"]
 fn a_reopened_tab_whose_conversation_a_tab_here_is_in_starts_fresh() {
     with_three(|t| {
         let (state_root, x, x_home) = (state_root(t), t.x, t.x_home.clone());
@@ -409,7 +435,11 @@ fn a_reopened_tab_whose_conversation_a_tab_here_is_in_starts_fresh() {
         let tabs = vec![codex("held", UUID), codex("free", UUID2)];
         let then = crate::sysinfo::epoch_secs() - 600;
         let projects = vec![project(P1, &w_home, &w_home, tabs)];
-        write_manifest(&state_root, 7, &manifest(7, "EARLIER", then, P1, projects));
+        write_manifest(
+            &state_root,
+            7,
+            &quit(manifest(7, "EARLIER", then, P1, projects)),
+        );
         let mine = fake_agent(&base.join("mine"), "codex");
         let app = &mut t.app;
         app.as_project(x, |app| {
@@ -435,6 +465,100 @@ fn a_reopened_tab_whose_conversation_a_tab_here_is_in_starts_fresh() {
             free.windows(2).any(|w| w[0] == "resume" && w[1] == UUID2),
             "{free:?}"
         );
+        let flash = app.flash_text().unwrap_or_default();
+        assert!(flash.contains("1 tab(s) start fresh"), "{flash}");
+    });
+}
+
+/// Reopening never resumes a conversation another running spyc's agent is
+/// in, either: that tab's agent starts fresh, and the others resume.
+#[test]
+fn a_reopened_tab_whose_conversation_another_spyc_is_in_starts_fresh() {
+    with_three(|t| {
+        let state_root = state_root(t);
+        let base = t.home.parent().expect("the fixture's base").to_path_buf();
+        let [w_home, r_home] = ["wproj", "rproj"].map(|name| sibling(t, name, true));
+        let codex = |sub: &str, sid: &str, cwd: &Path| {
+            json!({
+                "command": fake_agent(&base.join(sub), "codex"), "label": sub, "cwd": cwd,
+                "agent_kind": "codex", "agent_session_id": sid,
+                "codex_home": base.join("codex-home")
+            })
+        };
+        let then = crate::sysinfo::epoch_secs() - 600;
+        let tabs = vec![
+            codex("theirs", UUID3, &w_home),
+            codex("free", UUID2, &w_home),
+        ];
+        let projects = vec![project(P1, &w_home, &w_home, tabs)];
+        write_manifest(
+            &state_root,
+            7,
+            &quit(manifest(7, "EARLIER", then, P1, projects)),
+        );
+        let live = std::os::unix::process::parent_id();
+        let tabs = vec![codex("holder", UUID3, &r_home)];
+        let mut running = manifest(
+            8,
+            "RUNNING",
+            then,
+            P2,
+            vec![project(P2, &r_home, &r_home, tabs)],
+        );
+        running["pid"] = json!(live);
+        running["process_started"] = json!(started_at(live));
+        write_manifest(&state_root, 8, &running);
+        let app = &mut t.app;
+
+        leader(app, 'j');
+        assert!(closed_row(app, "wproj").is_some(), "{:#?}", rows(app));
+        app.handle_key(key('3')).unwrap();
+        let theirs = agent_argv(&base.join("theirs"), "codex");
+        assert!(!theirs.iter().any(|arg| arg == "resume"), "{theirs:?}");
+        let free = agent_argv(&base.join("free"), "codex");
+        assert!(
+            free.windows(2).any(|w| w[0] == "resume" && w[1] == UUID2),
+            "{free:?}"
+        );
+        let flash = app.flash_text().unwrap_or_default();
+        assert!(flash.contains("1 tab(s) start fresh"), "{flash}");
+    });
+}
+
+/// A reopened codex tab that never learned its conversation would resume the
+/// newest in its directory (`resume --last`), so it starts fresh where a
+/// codex tab here runs in that directory under the same home.
+#[test]
+fn a_reopened_idless_codex_where_a_codex_here_runs_starts_fresh() {
+    with_three(|t| {
+        let (state_root, x) = (state_root(t), t.x);
+        let base = t.home.parent().expect("the fixture's base").to_path_buf();
+        let w_home = sibling(t, "wproj", true);
+        let codex_home = base.join("codex-home");
+        let idless = json!({
+            "command": fake_agent(&base.join("idless"), "codex"), "label": "idless",
+            "cwd": w_home, "agent_kind": "codex", "codex_home": codex_home
+        });
+        let then = crate::sysinfo::epoch_secs() - 600;
+        let projects = vec![project(P1, &w_home, &w_home, vec![idless])];
+        write_manifest(
+            &state_root,
+            7,
+            &quit(manifest(7, "EARLIER", then, P1, projects)),
+        );
+        let mine = fake_agent(&base.join("mine"), "codex");
+        let app = &mut t.app;
+        app.as_project(x, |app| {
+            assert!(app.open_pane_tab_in(&mine.display().to_string(), &w_home));
+            let tabs = app.runtime.project_mut().pane_tabs.as_mut().expect("a tab");
+            tabs.tabs_mut().last_mut().expect("a tab").info.codex_home = Some(codex_home.clone());
+        });
+
+        leader_from_pane(app, 'j');
+        assert!(closed_row(app, "wproj").is_some(), "{:#?}", rows(app));
+        app.handle_key(key('3')).unwrap();
+        let argv = agent_argv(&base.join("idless"), "codex");
+        assert!(!argv.iter().any(|arg| arg == "resume"), "{argv:?}");
         let flash = app.flash_text().unwrap_or_default();
         assert!(flash.contains("1 tab(s) start fresh"), "{flash}");
     });

@@ -1054,8 +1054,8 @@ PR, except step 5's stages:
      project left, first), `/` searches, `q` closes it; opened from inside
      the editor it has the keyboard until it closes (`decide_focus`: a modal
      pager beats the editor). It shares the worktree picker's keys
-     (`numbered_picker_key`). The attention glyphs (step 6) and
-     recently-closed projects (step 8) are still to come.
+     (`numbered_picker_key`). The attention glyphs came in step 6, and the
+     recently-closed projects in step 8.
    - **`-r` restores every project (pair 3b).** The active project is
      restored into the launch project as before; each other one is opened
      out of view (`restore_out_of_view`: `create_project` at its start dir,
@@ -1135,6 +1135,28 @@ PR, except step 5's stages:
      a directory named `config`. Under test `shell::with_editor` keeps the
      developer's editor from starting.
 8. **Recently-closed projects in the switcher.**
+   - **Held conversations (pair 8a).** A restore never resumes a
+     conversation another running spyc's agent is in (`Held::by_running`:
+     each running manifest's opened tabs by uuid, by claude's name in its
+     directory, and, for an agent that resumes its newest, by directory and
+     codex home). Such a tab starts fresh (`restore_plans`), keeping a
+     refusal it has, and its scope claims stay with the holder.
+   - **Reopened (pair 8b).** `drop_project` keeps the closing project as a
+     save writes it (`closed_snapshot`, its conversations resolved before
+     its tabs shut down) in `AppState::closed_projects`: newest first, one
+     per anchor, five at most (`RECENTLY_CLOSED`), saved in the manifest's
+     `closed_projects` and taken on with an adopted file. They don't make a
+     quit save a file. `Space j` opens with the open projects and asks a
+     worker for the closed rows (`spawn_closed_rows`, `Wake::ClosedRows`):
+     this spyc's, each project a spyc that has quit had open, at its last
+     save, and each it had closed (`recently_closed`), the newest of each
+     anchor, then without a running spyc's projects, those open here and
+     those with no directory left. They follow the open rows, dimmed and
+     numbered on, with `closed 5m` in the marker column. Picking one reopens
+     it as `-r` opens a project out of view (`App::reopen_project` over
+     `restore_out_of_view`), its tabs held against every running spyc's
+     agents and this spyc's own live tabs. `Space n` onto a closed
+     project's anchor forgets it.
 
 Steps 1 and 2 are invisible and land first. Steps 3-6 are the release.
 

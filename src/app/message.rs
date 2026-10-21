@@ -189,6 +189,10 @@ pub enum Wake {
     /// Payloadless, same shape as `ClipboardPasteDone`; `apply_jump_defaults`
     /// drains the slot in the pre-recv scan.
     JumpDefault,
+    /// The switcher's closed rows (`spawn_closed_rows`) were read and pushed
+    /// onto `runtime.closed_rows_results`. Payloadless, same shape as
+    /// `JumpDefault`; `apply_closed_rows` drains the slot in the pre-recv scan.
+    ClosedRows,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
     Inventory,
     /// An off-thread MCP worktree op (create/remove/clean) finished and pushed

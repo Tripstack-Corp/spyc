@@ -253,6 +253,13 @@ pub(super) struct Runtime {
         std::sync::Arc<std::sync::Mutex<Vec<super::jump_default::JumpDefaultAnswer>>>,
     /// The newest `J` default request; an answer to any other is stale.
     pub(super) jump_default_seq: u64,
+    /// Landing slot for the switcher's closed rows (`spawn_closed_rows`).
+    /// Drained by `apply_closed_rows`, which keeps only the rows for
+    /// `closed_rows_seq`, the switcher opened last.
+    pub(super) closed_rows_results:
+        std::sync::Arc<std::sync::Mutex<Vec<super::recently_closed::ClosedRows>>>,
+    /// The switcher opened last; rows read for any other are stale.
+    pub(super) closed_rows_seq: u64,
     /// Landing slot for off-thread clipboard *writes*. One entry per dispatched
     /// write: `None` succeeded, `Some(msg)` is what to flash.
     ///
@@ -346,6 +353,8 @@ impl Runtime {
             clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             jump_default_seq: 0,
+            closed_rows_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            closed_rows_seq: 0,
             clipboard_copy_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
             listing_refresh_inflight: false,
             listing_refresh_dirty: false,

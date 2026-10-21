@@ -46,7 +46,7 @@ const SECTIONS: &[Section] = &[
             ("Space P", "set PROJECT_HOME to current directory"),
             ("Space n", "open a directory as a project"),
             ("Space x", "close the project in view"),
-            ("Space j", "list the open projects"),
+            ("Space j", "list the projects, and reopen a closed one"),
             ("Space Space", "go to the project you were in last"),
             ("Space 1-9", "go to open project N"),
             ("Space ] [", "next / previous project, wrapping"),
