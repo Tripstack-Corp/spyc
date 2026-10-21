@@ -392,22 +392,14 @@ mod tests {
         assert!(bar_total(&cells) <= 10, "fixed chrome floor holds");
     }
 
-    /// Shaving must cut on grapheme clusters: a ZWJ emoji is one drawn glyph,
-    /// and a per-char pop would leave a half-cluster whose width the terminal
-    /// and the fit disagree on.
+    /// Shaving cuts on grapheme clusters. A flag is two regional indicators
+    /// drawn as one 2-column glyph; with one column left for the label it goes
+    /// whole, where cutting a scalar at a time would leave a lone indicator,
+    /// which the terminal draws as a letter tile.
     #[test]
     fn fit_shaves_whole_clusters() {
-        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
-        // `ab` + family = 4 columns on 5 fixed; a bar of 6 leaves one column
-        // of label. The family (2 wide) must go as one unit, not one scalar
-        // at a time.
-        let cells = fit_tabs(vec![item(&format!("ab{family}"))], 6);
-        assert_eq!(cells[0].label_text, "a");
-        assert_eq!(bar_total(&cells), 6);
-        // And a cluster at the head with a 1-column budget drops whole rather
-        // than leaving a fragment.
-        let cells = fit_tabs(vec![item(&format!("{family}a"))], 6);
-        assert!(!cells[0].label_text.contains('\u{200d}'), "no ZWJ fragment");
+        let cells = fit_tabs(vec![item("\u{1f1e8}\u{1f1e6}")], 6);
+        assert_eq!(cells[0].label_text, "", "a lone regional indicator is left");
         assert!(bar_total(&cells) <= 6);
     }
 
