@@ -143,7 +143,7 @@ pub(super) fn started_at(pid: u32) -> u64 {
 }
 
 /// A pid no process holds: a child's, once it has been reaped.
-fn dead_pid() -> u32 {
+pub(super) fn dead_pid() -> u32 {
     let mut child = std::process::Command::new("true").spawn().unwrap();
     let pid = child.id();
     child.wait().unwrap();
@@ -885,6 +885,48 @@ fn a_second_project_at_the_same_home_stays_shut() {
 
         assert_eq!(homes(&app), [Some(crate_root())]);
         assert_eq!(app.state.session_id, Some(9001), "a copy keeps its own id");
+    });
+}
+
+/// A project homed at another's start dir, which `:project` allows, is a
+/// project of its own: a home is one project's, and a start dir is one
+/// project's, but one's home may be another's start dir. The restore opens
+/// both and adopts the file.
+#[test]
+fn a_project_homed_at_anothers_start_dir_restores_beside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    in_temp_home(tmp.path(), |state_root| {
+        let other = std::fs::canonicalize(tmp.path()).unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let sub = crate_root().join("src");
+        let mut started_in_sub = project(P1, &crate_root(), &crate_root(), vec![]);
+        started_in_sub["start_dir"] = json!(sub);
+        let mut homed_at_sub = project(P2, &sub, &other, vec![]);
+        homed_at_sub["start_dir"] = json!(other);
+        write_v1_decoy(state_root);
+        write_manifest(
+            state_root,
+            505,
+            &manifest(
+                505,
+                "CROSSED",
+                1_700_000_100,
+                P1,
+                vec![started_in_sub, homed_at_sub],
+            ),
+        );
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.state.session_id = Some(9001);
+        picker_lines(&mut app);
+        press(&mut app, KeyCode::Char('1'));
+
+        assert_eq!(
+            homes(&app),
+            [Some(crate_root()), Some(sub)],
+            "{:?}",
+            app.flash_text()
+        );
+        assert_eq!(app.state.session_id, Some(505), "the file is adopted");
     });
 }
 

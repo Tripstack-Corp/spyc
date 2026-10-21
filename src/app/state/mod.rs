@@ -32,6 +32,8 @@ mod pane_layout;
 pub use pane_layout::PaneLayout;
 mod apply;
 pub mod archive;
+mod closed;
+pub use closed::{RECENTLY_CLOSED, SwitcherRow, newest_per_anchor};
 mod commander;
 pub use commander::Commander;
 mod dispatch;
@@ -393,7 +395,7 @@ pub struct AppState {
     pub pending_new_tab_cmd: Option<String>,
     pub pending_worktrees: Option<Vec<PathBuf>>,
     /// The project switcher's rows (`Space j`), in the order they are numbered.
-    pub pending_projects: Option<Vec<ProjectId>>,
+    pub pending_projects: Option<Vec<SwitcherRow>>,
     pub pending_sessions: Option<Vec<crate::state::sessions::Manifest>>,
     /// `spyc -c` commands not yet run: they wait for startup to settle
     /// (`App::settle_startup_commands`).
@@ -408,6 +410,9 @@ pub struct AppState {
     /// The labels of projects closed this session, so work one left running
     /// still lands named for it ([`Self::label_of`]).
     pub closed_labels: std::collections::HashMap<ProjectId, String>,
+    /// The projects closed lately, newest first, one per anchor, as each was
+    /// when it closed: what the switcher reopens, saved with the session.
+    pub closed_projects: Vec<crate::state::sessions::ClosedProject>,
     /// Which of `projects` is drawn and driven by the keyboard — or, while
     /// [`Self::in_background`] is set, the project an agent's MCP call acts on.
     pub active: ProjectId,
@@ -897,6 +902,7 @@ impl AppState {
             mounts: Mounts::default(),
             projects: vec![project],
             closed_labels: std::collections::HashMap::new(),
+            closed_projects: Vec::new(),
             active,
             in_background: false,
             last_project: None,

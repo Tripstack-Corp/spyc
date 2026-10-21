@@ -51,6 +51,19 @@ pub struct Manifest {
     /// owning tab via `SavedTab::claim_owner`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scope_claims: Vec<ScopeClaim>,
+    /// The projects this spyc closed lately, newest first, one per anchor, for
+    /// the switcher to reopen. A 2.3 build before them ignores the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub closed_projects: Vec<ClosedProject>,
+}
+
+/// A project a spyc closed, as it was when it closed, kept so the switcher can
+/// reopen it with its tabs (`docs/drafts/PROJECTS_PLAN.md` §3).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClosedProject {
+    /// When it closed, in seconds since the epoch.
+    pub closed_secs: u64,
+    pub project: SavedProject,
 }
 
 /// One project: where its columns were, its split, its pane and its tabs.
@@ -137,6 +150,7 @@ impl Manifest {
             active_project: Some(project.id),
             projects: vec![project],
             scope_claims: v1.scope_claims,
+            closed_projects: Vec::new(),
         }
     }
 }
@@ -177,6 +191,7 @@ impl Manifest {
             active_project: Some(project.id),
             projects: vec![project],
             scope_claims: Vec::new(),
+            closed_projects: Vec::new(),
         }
     }
 
@@ -224,24 +239,42 @@ impl Held {
         held
     }
 
-    /// Record `tab`'s agent as running. A tab running no agent is in nothing.
+    /// Record `tab`'s agent as running.
     fn add(&mut self, tab: &SavedTab) {
-        let kind = tab.effective_kind();
+        let ids = [&tab.agent_session_id, &tab.agent_session_name]
+            .into_iter()
+            .flatten()
+            .map(String::as_str);
+        self.add_running(
+            tab.effective_kind(),
+            ids,
+            &tab.cwd,
+            tab.codex_home.as_deref(),
+        );
+    }
+
+    /// Record an agent of `kind` as running in `cwd` under `codex_home`, in
+    /// the conversations `ids` names, each by its uuid or by a name. A tab
+    /// running no agent is in nothing.
+    pub fn add_running<'a>(
+        &mut self,
+        kind: AgentKind,
+        ids: impl IntoIterator<Item = &'a str>,
+        cwd: &Path,
+        codex_home: Option<&Path>,
+    ) {
         if kind == AgentKind::Other {
             return;
         }
-        for id in [&tab.agent_session_id, &tab.agent_session_name]
-            .into_iter()
-            .flatten()
-        {
+        for id in ids {
             if super::is_uuid(id) {
-                self.ids.insert((kind, id.clone()));
+                self.ids.insert((kind, id.to_owned()));
             } else {
-                self.names.insert((kind, tab.cwd.clone(), id.clone()));
+                self.names.insert((kind, cwd.to_path_buf(), id.to_owned()));
             }
         }
         self.dirs
-            .insert((kind, tab.cwd.clone(), tab.codex_home.clone()));
+            .insert((kind, cwd.to_path_buf(), codex_home.map(Path::to_path_buf)));
     }
 
     /// Whether resuming `tab` in `cwd` puts it in something held: the

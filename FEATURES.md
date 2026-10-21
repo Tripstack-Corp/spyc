@@ -90,7 +90,7 @@ Full reference: [Archives](docs/features/archives.md).
 
 ## Projects and sessions
 
-Workspace commands sit behind the leader: `Space` in the file list, `^a Space` from the pane. One spyc holds several projects (`Space n` opens one, `Space x` closes it, `Space j` lists them), each with its own columns, tabs and `PROJECT_HOME`. A session is saved as you go and on quit, and `spyc -r` restores every project's tabs and agent conversations.
+Workspace commands sit behind the leader: `Space` in the file list, `^a Space` from the pane. One spyc holds several projects (`Space n` opens one, `Space x` closes it, `Space j` lists them and reopens one closed lately), each with its own columns, tabs and `PROJECT_HOME`. A session is saved as you go and on quit, and `spyc -r` restores every project's tabs and agent conversations.
 
 Full reference: [Projects and sessions](docs/features/projects.md).
 

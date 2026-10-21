@@ -562,6 +562,7 @@ mod tests {
             Message::Wake(Wake::ClipboardCopy),
             Message::Wake(Wake::Wiring),
             Message::Wake(Wake::JumpDefault),
+            Message::Wake(Wake::ClosedRows),
         ];
         for done in wakes {
             let (_tx, rx) = mpsc::channel::<Message>();

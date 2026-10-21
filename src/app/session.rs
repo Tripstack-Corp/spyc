@@ -13,7 +13,9 @@
 //! `pane_tabs.rs`.
 
 use crate::pane::PaneTabs;
-use crate::state::sessions::{AgentKind, Manifest, SavedProject, SavedTab, SavedVsplit};
+use crate::state::sessions::{
+    AgentKind, ClosedProject, Manifest, SavedProject, SavedTab, SavedVsplit,
+};
 use crate::ui::line_edit::LineEditor;
 use crate::ui::pager::{self, PagerView};
 
@@ -223,6 +225,26 @@ impl App {
             active_project: Some(users),
             projects,
             scope_claims: self.state.scope_registry.clone(),
+            closed_projects: self.state.closed_projects.clone(),
+        }
+    }
+
+    /// Project `id` as closing it keeps it, saved as [`Self::build_manifest`]
+    /// saves a project, its tabs' conversations resolved before they shut
+    /// down. The other open projects' tabs claim theirs first, as a save
+    /// matches them, so none of its tabs keeps a conversation an open tab is
+    /// in: a save never gives one conversation to two tabs.
+    pub(super) fn closed_snapshot(&mut self, id: ProjectId) -> ClosedProject {
+        let mut claims = ConversationClaims::new();
+        for other in self.open_project_ids() {
+            if other != id {
+                self.in_project(other, |app| app.saved_tabs(&mut claims));
+            }
+        }
+        let project = self.in_project(id, |app| app.saved_project(&mut claims));
+        ClosedProject {
+            closed_secs: crate::sysinfo::epoch_secs(),
+            project,
         }
     }
 
@@ -437,6 +459,11 @@ impl App {
         // P2: a scope-registry mutation (register/release) is session-relevant
         // — it's exactly what must survive a crash mid-merge-train.
         self.state.scope_registry.hash(&mut h);
+        for closed in &self.state.closed_projects {
+            closed.project.anchor().hash(&mut h);
+            closed.closed_secs.hash(&mut h);
+            closed.project.tabs.len().hash(&mut h);
+        }
         h.finish()
     }
 
@@ -500,10 +527,14 @@ impl App {
     /// persist. Only armed while dirty ⇒ a clean/idle session wakes nothing
     /// (0 dps). Never needs a redraw.
     pub(crate) fn settle_autosave(&mut self, now: Instant, ctx: &mut RunCtx) {
-        // Nothing worth restoring (bare launch: no tabs, no split, no scope
-        // claims) ⇒ never write an empty session; stay disarmed.
-        let dirty = self.has_restorable_state()
-            && Some(self.session_fingerprint()) != self.runtime.autosave_last_saved_fp;
+        // A bare launch (no tabs, split or scope claims) never writes an empty
+        // session, which would take a picker slot. Once this spyc has saved
+        // its file, every change is saved, as quitting would save it, so the
+        // file never lists tabs or projects closed since.
+        let worth_saving =
+            self.has_restorable_state() || self.runtime.autosave_last_saved_fp.is_some();
+        let dirty =
+            worth_saving && Some(self.session_fingerprint()) != self.runtime.autosave_last_saved_fp;
         match autosave_action(dirty, self.runtime.autosave_due, now) {
             AutosaveAction::Idle => {
                 self.runtime.autosave_due = None;
@@ -1360,6 +1391,60 @@ mod tests {
         });
     }
 
+    /// A closing project's snapshot never takes a conversation an open
+    /// project's tab is only matched to, not pinned to, as a save matches it:
+    /// both tabs run claude in one directory, and the open one is in it.
+    #[test]
+    fn a_closing_projects_snapshot_leaves_another_tabs_matched_conversation() {
+        with_claude_home(|project, claude| {
+            claude_transcript(claude, project, MINE, SPAWN + 30);
+            let mut app = App::test_app(project.to_path_buf());
+            claude_tab(&mut app, project, None);
+            let other = project.parent().expect("the temp root").join("other");
+            std::fs::create_dir_all(&other).expect("other");
+            let b = app.add_test_project(&other);
+            app.as_project(b, |app| claude_tab(app, project, None));
+            assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
+            let closed = app.closed_snapshot(b);
+            assert_ne!(
+                closed.project.tabs[0].agent_session_id.as_deref(),
+                Some(MINE)
+            );
+        });
+    }
+
+    /// Once this spyc has saved its file, closing the last tab saves too, so
+    /// the file never lists a tab or project closed since; a bare launch with
+    /// nothing to restore still writes nothing.
+    #[test]
+    fn once_saved_a_change_with_nothing_left_to_restore_is_saved() {
+        with_claude_home(|project, _| {
+            let mut app = App::test_app(project.to_path_buf());
+            app.state.session_id = Some(77);
+            let mut ctx = crate::app::RunCtx::for_test();
+            let now = std::time::Instant::now();
+            app.settle_autosave(now, &mut ctx);
+            app.settle_autosave(now + Duration::from_secs(3), &mut ctx);
+            assert!(
+                !crate::state::sessions::session_exists(77),
+                "a bare launch saved"
+            );
+            app.open_pane_tab("cat");
+            app.settle_autosave(now + Duration::from_secs(4), &mut ctx);
+            app.settle_autosave(now + Duration::from_secs(7), &mut ctx);
+            let tabs = |app: &App| {
+                let file = crate::state::sessions::load_manifests();
+                assert_eq!(file.len(), 1, "{:?}", app.flash_text());
+                file[0].projects[0].tabs.len()
+            };
+            assert_eq!(tabs(&app), 1);
+            app.runtime.project_mut().pane_tabs = None;
+            app.settle_autosave(now + Duration::from_secs(8), &mut ctx);
+            app.settle_autosave(now + Duration::from_secs(11), &mut ctx);
+            assert_eq!(tabs(&app), 0, "the closed tab is still saved");
+        });
+    }
+
     /// Spawn-time matching still picks the tab's own conversation over an
     /// older one in the same cwd once both are written.
     #[test]
@@ -1501,6 +1586,50 @@ mod tests {
             app.open_pane_tab_in("cat", &a);
             let b_id = app.add_test_project(&b);
             body(&mut app, b_id, &b);
+        });
+    }
+
+    /// A closing project's snapshot never takes a conversation a tab of
+    /// another open project is pinned to, as a save never gives one
+    /// conversation to two tabs.
+    #[test]
+    fn a_closing_projects_snapshot_leaves_another_projects_conversation() {
+        const UUID: &str = "0198c2f4-1a2b-7c3d-8e4f-5a6b7c8d9e0f";
+        two_projects(|app, b_id, b| {
+            app.open_tab_in_project(b_id, b);
+            let pin = |app: &mut App| {
+                let tabs = app.runtime.project_mut().pane_tabs.as_mut().expect("a tab");
+                let info = &mut tabs.tabs_mut()[0].info;
+                info.command = "codex".to_string();
+                info.codex_session_id = Some(UUID.to_string());
+            };
+            pin(app);
+            app.as_project(b_id, pin);
+            let closed = app.closed_snapshot(b_id);
+            assert_eq!(closed.project.tabs.len(), 1);
+            assert_ne!(
+                closed.project.tabs[0].agent_session_id.as_deref(),
+                Some(UUID)
+            );
+        });
+    }
+
+    /// The closed projects are saved, so a change to them alone moves the
+    /// autosave fingerprint.
+    #[test]
+    fn a_closed_project_moves_the_autosave_fingerprint() {
+        two_projects(|app, _, b| {
+            let before = app.session_fingerprint();
+            let closed: crate::state::sessions::ClosedProject =
+                serde_json::from_value(serde_json::json!({
+                    "closed_secs": 1, "project": {
+                        "id": crate::app::state::ProjectId::new(), "home": b,
+                        "start_dir": b, "pane_height_pct": 30
+                    }
+                }))
+                .expect("a closed project");
+            app.state.remember_closed(closed);
+            assert_ne!(app.session_fingerprint(), before);
         });
     }
 

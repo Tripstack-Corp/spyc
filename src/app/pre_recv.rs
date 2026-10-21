@@ -108,6 +108,10 @@ impl App {
         if self.apply_jump_defaults() {
             ctx.draw.mark(3);
         }
+        // The switcher's closed rows landed (woke via `Wake::ClosedRows`).
+        if self.apply_closed_rows() {
+            ctx.draw.mark(3);
+        }
 
         // Drain finished Lua runs (woke via `Message::Wake(Wake::Lua)`): apply the
         // requests the script produced, running any effects they translate to.

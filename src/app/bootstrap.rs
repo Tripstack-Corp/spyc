@@ -162,6 +162,7 @@ impl App {
         let app_state = state::AppState {
             projects: vec![project],
             closed_labels: std::collections::HashMap::new(),
+            closed_projects: Vec::new(),
             active,
             in_background: false,
             last_project: None,

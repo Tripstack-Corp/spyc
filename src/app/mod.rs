@@ -167,6 +167,7 @@ mod projects;
 mod prompt;
 mod prompt_templates;
 mod quick_select;
+mod recently_closed;
 mod render;
 mod route;
 mod run;

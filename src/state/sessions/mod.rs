@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 mod manifest;
 pub use manifest::{
-    Held, MANIFEST_VERSION, Manifest, SavedProject, label_of, parse_manifest, project_list_label,
+    ClosedProject, Held, MANIFEST_VERSION, Manifest, SavedProject, label_of, parse_manifest,
+    project_list_label,
 };
 
 const MAX_SESSIONS: usize = 20;
@@ -214,7 +215,9 @@ pub fn with_claude_dir<R>(dir: &std::path::Path, body: impl FnOnce() -> R) -> R 
     body()
 }
 
-fn sessions_dir() -> Option<PathBuf> {
+/// Where the saved sessions are. A worker reading them is handed this, since a
+/// test's state root is its own thread's.
+pub fn sessions_dir() -> Option<PathBuf> {
     crate::state::state_root().map(|r| r.join("sessions"))
 }
 
@@ -244,10 +247,12 @@ pub fn session_exists(id: u64) -> bool {
 
 /// Every saved session this build can read, newest first.
 pub fn load_manifests() -> Vec<Manifest> {
-    let Some(dir) = sessions_dir() else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    sessions_dir().map_or_else(Vec::new, |dir| load_manifests_in(&dir))
+}
+
+/// [`load_manifests`] from `dir`, a [`sessions_dir`].
+pub fn load_manifests_in(dir: &std::path::Path) -> Vec<Manifest> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut sessions: Vec<Manifest> = entries

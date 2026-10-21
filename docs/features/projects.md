@@ -17,7 +17,8 @@ which-key popup lists the options:
 - **`Space P`** — set `PROJECT_HOME` to the current directory.
 - **`Space n`** — open a directory as a project, and go to it.
 - **`Space x`** — close the project in view.
-- **`Space j`** — list the open projects, to go to one.
+- **`Space j`** — list the open projects, to go to one, and those closed
+  lately, to reopen one.
 - **`Space Space`** — go to the project you were in last.
 - **`Space 1`..`Space 9`** — go to open project N.
 - **`Space ]` / `Space [`** — go to the next / previous project, wrapping.
@@ -47,13 +48,27 @@ there instead, and says so when it is the one you're in. **`Space x`** closes
 the project in view and takes you to the one you were in last, else a
 neighbour. While a tab or an editor in it still runs it asks first, since
 closing ends them; its agents' scope claims go, and an agent waiting on one is
-answered. The only project open isn't closed this way (`:q` quits), and
+answered. The project is kept as it was, tabs and all, for `Space j` to
+reopen. The only project open isn't closed this way (`:q` quits), and
 from inside an editor it says to quit the editor first, since closing would
 end it.
 **`Space j`** lists the open projects, numbered, each with how many tabs it
-has and its home, the one you're in highlighted: `j`/`k` and `Enter`, or
-`1`-`9`, go to one, `/` searches, and `q` closes it. Opened from inside an
-editor, it has the keyboard until it closes, as help does.
+has and its home, the one you're in highlighted. Under them, dimmed and
+numbered on, come up to five projects closed lately, newest first: those you
+closed here, and those a spyc that has since quit had open or had closed,
+each with the tabs it saved and how long ago it closed (`closed 5m`, `closed
+3h`, `closed 2d`). A project open here or in another running spyc isn't
+among them, nor one whose directories have all gone. A session saved by
+spyc 2.2 can't say whether that spyc has quit, so its projects come back
+through `spyc -r` instead. `j`/`k` and `Enter`, or
+`1`-`9`, go to an open project or reopen a closed one: it comes back beside
+the others with its columns, tabs and split as they were, as `spyc -r` brings
+a project back, and you go to it. A tab that would resume a conversation an
+agent is in, in another spyc or in one of your tabs here, starts fresh
+instead, and the message says how many did. Reopening doesn't start the
+project's `[pane] tabs`; `Space n` opens it afresh instead, and it is no
+longer listed as closed. `/` searches, and `q` closes the list. Opened from
+inside an editor, it has the keyboard until it closes, as help does.
 **`Space Space`** goes back to the project you were in last,
 **`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
 through them in the order they were opened, wrapping. With one project open
@@ -82,11 +97,12 @@ labels are cut to one length, in the middle, so every project keeps its chip
 are among them and the others' most urgent glyph (`spyc 2/4 ■`, project 2 of
 4); then the project you're in stands alone, with a red `■` while another is
 blocked, which is never dropped: the label is cut first. Each `Space j` row
-shows its project's glyph too, as it was when the list opened. The terminal
+shows its project's glyph too, as it was when the list was drawn. The terminal
 title counts the tabs blocked in the other projects, for when you're in
 another window: `🌶️: spyc (■2) · SAFFRON_CUMIN`. A `^z`-suspended agent counts
 for nothing in any of these, as its tab shows 💤. With one project open, the
-bar, the title and `Space j` read as they always have. The coordination dumps
+bar and the title read as they always have, and `Space j` lists that project
+with any closed lately under it. The coordination dumps
 (`:activity dump`, `:agent list`, `:agent registry`) cover every open project
 too, each project's agents under its name.
 
@@ -142,6 +158,10 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   Sessions saved by an older spyc still restore. A quit with
   nothing to restore (no tabs, split or scope claims) saves nothing, so it
   doesn't take a picker slot; a restored session is still updated.
+- **Closed projects** — the projects you closed lately are saved with the
+  session too, so `Space j` can reopen one after `-r`, and a restore that
+  takes the session on keeps them. They don't count as something to
+  restore: a quit with only closed projects to save saves nothing new.
 - **`spyc --resume`** (or `-r`) — opens a session picker showing
   the session name (primary column), a human-readable timestamp
   ("just now", "2 hours ago", "3 days ago"), and the cwd, or each
