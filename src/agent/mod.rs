@@ -1305,6 +1305,19 @@ mod tests {
         .unwrap()
     }
 
+    /// A fresh start drops any resume an older save kept in the command, and
+    /// relaunches a wrapper (#610) as written.
+    #[test]
+    fn a_fresh_command_drops_a_saved_resume_but_not_a_wrappers() {
+        let fresh = |command, kind, hint| resume::fresh_command(&saved(command, kind, hint, None));
+        assert_eq!(fresh("codex resume --last", "codex", None), "codex");
+        assert_eq!(fresh("claude --continue", "claude", None), "claude");
+        assert_eq!(
+            fresh("my-codex --continue", "codex", Some("codex")),
+            "my-codex --continue"
+        );
+    }
+
     /// A wrapper (#610) restores exactly as written: nothing appended. Claude
     /// still resumes its conversation, which it does by typing, not by a flag.
     #[test]
@@ -1522,6 +1535,7 @@ mod tests {
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,
+            unopened: false,
         };
         // `effective_kind` upgrades the legacy Other → Claude.
         assert_eq!(tab.effective_kind(), AgentKind::Claude);
@@ -1553,6 +1567,7 @@ mod tests {
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,
+            unopened: false,
         };
         assert_eq!(tab.effective_kind(), AgentKind::Other);
         let plan = profile_for(tab.effective_kind()).reconstruct_restore(

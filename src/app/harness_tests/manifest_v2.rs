@@ -1010,6 +1010,11 @@ fn restoring_a_running_manifest_makes_a_copy_whose_agents_start_fresh() {
             !argv.iter().any(|arg| arg == "resume" || arg == UUID),
             "the agent starts fresh: {argv:?}"
         );
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(
+            !flash.contains("tab(s) start fresh"),
+            "the copy says it once: {flash}"
+        );
     });
 }
 
@@ -1170,7 +1175,6 @@ fn restore_left_behind(app: &mut App) {
 /// Conversations the holder isn't running still resume: one it has never
 /// had, and one it only keeps saved as a tab it couldn't open.
 #[test]
-#[ignore = "red: a restore resumes a conversation another running spyc holds"]
 fn a_conversation_another_running_spyc_holds_starts_fresh() {
     let tmp = tempfile::tempdir().unwrap();
     in_temp_home(tmp.path(), |state_root| {
@@ -1250,7 +1254,6 @@ fn a_conversation_held_by_a_spyc_that_has_gone_resumes() {
 /// saved, unopened, as it does when it would resume, its conversation still
 /// named for when it can be reopened.
 #[test]
-#[ignore = "red: a fresh tab skips the restore's refusal and replays its prompt"]
 fn a_fresh_tab_that_would_replay_its_prompt_stays_unopened() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -1295,7 +1298,6 @@ fn a_fresh_tab_that_would_replay_its_prompt_stays_unopened() {
 /// copy of a running session doesn't relaunch an older save's
 /// `codex resume --last`, which would resume that spyc's newest conversation.
 #[test]
-#[ignore = "red: a fresh tab relaunches the resume its command saved"]
 fn a_fresh_tab_drops_the_resume_its_command_saved() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");

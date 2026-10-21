@@ -161,6 +161,22 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   file and name, whose agents start fresh rather than resuming the
   conversations that spyc still has open, and which leaves that spyc's
   scope claims alone.
+- **Conversations another spyc is in** — whichever session you restore,
+  a tab that would resume a conversation another running spyc's agent is
+  in starts its agent fresh instead, leaving that spyc its scope claims,
+  and the restore's message counts those tabs. So restoring a session
+  twice, once as a copy and then again, doesn't put two spycs in one
+  conversation. A codex tab that never learned its conversation, and a
+  zot tab, resume the newest one in their directory, so each starts fresh
+  where another spyc runs that agent there. The other spyc's save is a
+  couple of seconds behind it, and names an agent's conversation only once
+  spyc has matched it, so a restore at the very moment it starts can miss
+  it; an agent started inside a shell tab isn't seen at all.
+- **Tabs that can't be rebuilt safely** — a tab the restore would refuse,
+  such as a codex started with a prompt, stays unopened even when it would
+  start fresh, so its prompt is never sent twice. A copy of a running
+  session keeps those tabs unopened too, as restoring the session itself
+  would.
 - **j/k navigation** — browse sessions with highlighted cursor row.
   Enter to restore, n for a new session, 1-9 for direct selection.
 - Capped at the 20 most recently saved sessions. A session you restore

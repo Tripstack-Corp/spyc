@@ -3,11 +3,12 @@
 //! with no `version` is a version 1 session, which reads as a manifest with one
 //! project.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{SavedTab, SavedVsplit};
+use super::{AgentKind, SavedTab, SavedVsplit};
 use crate::config::AgentHudMode;
 use crate::project_id::ProjectId;
 use crate::state::scope_registry::ScopeClaim;
@@ -191,6 +192,82 @@ impl Manifest {
     }
 }
 
+/// What other spycs' agents are in, which a restore must not resume into: a
+/// second process in a conversation splits it.
+#[derive(Debug, Default)]
+pub struct Held {
+    /// Each conversation saved by its uuid, with its agent.
+    ids: HashSet<(AgentKind, String)>,
+    /// Each conversation saved by a name, claude's, with its agent and the
+    /// directory the name is claude's in: a name is unique only within it.
+    names: HashSet<(AgentKind, PathBuf, String)>,
+    /// Each directory an agent runs in, with its agent and codex home: a
+    /// resume with no conversation to name picks that agent's newest there.
+    dirs: HashSet<(AgentKind, PathBuf, Option<PathBuf>)>,
+}
+
+impl Held {
+    /// What the tabs of every running spyc in `manifests` are in. A manifest
+    /// no spyc runs holds nothing, and this spyc's own file isn't another's
+    /// ([`Manifest::running`]). A record a spyc couldn't open runs nothing.
+    pub fn by_running(manifests: &[Manifest]) -> Self {
+        let mut held = Self::default();
+        let tabs = manifests
+            .iter()
+            .filter(|manifest| manifest.running())
+            .flat_map(|manifest| &manifest.projects)
+            .flat_map(|project| &project.tabs)
+            .filter(|tab| !tab.unopened);
+        for tab in tabs {
+            held.add(tab);
+        }
+        held
+    }
+
+    /// Record `tab`'s agent as running. A tab running no agent is in nothing.
+    fn add(&mut self, tab: &SavedTab) {
+        let kind = tab.effective_kind();
+        if kind == AgentKind::Other {
+            return;
+        }
+        for id in [&tab.agent_session_id, &tab.agent_session_name]
+            .into_iter()
+            .flatten()
+        {
+            if super::is_uuid(id) {
+                self.ids.insert((kind, id.clone()));
+            } else {
+                self.names.insert((kind, tab.cwd.clone(), id.clone()));
+            }
+        }
+        self.dirs
+            .insert((kind, tab.cwd.clone(), tab.codex_home.clone()));
+    }
+
+    /// Whether resuming `tab` in `cwd` puts it in something held: the
+    /// conversation it saved, by uuid or by a name, or, with none saved, its
+    /// agent's newest in `cwd`, which an agent of that kind and codex home
+    /// running there may be in.
+    pub fn holds(&self, tab: &SavedTab, cwd: &Path) -> bool {
+        let kind = tab.effective_kind();
+        if tab.agent_session_id.is_none() {
+            return self
+                .dirs
+                .contains(&(kind, cwd.to_path_buf(), tab.codex_home.clone()));
+        }
+        [&tab.agent_session_id, &tab.agent_session_name]
+            .into_iter()
+            .flatten()
+            .any(|id| {
+                if super::is_uuid(id) {
+                    self.ids.contains(&(kind, id.clone()))
+                } else {
+                    self.names.contains(&(kind, cwd.to_path_buf(), id.clone()))
+                }
+            })
+    }
+}
+
 /// A project's name for the picker: the last component of `dir`.
 pub fn label_of(dir: &Path) -> String {
     dir.file_name().map_or_else(
@@ -263,6 +340,73 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn agent_tab(
+        kind: &str,
+        id: Option<&str>,
+        name: Option<&str>,
+        cwd: &str,
+        home: Option<&str>,
+    ) -> SavedTab {
+        serde_json::from_value(json!({
+            "command": kind, "label": kind, "cwd": cwd, "agent_kind": kind,
+            "agent_session_id": id, "agent_session_name": name, "codex_home": home
+        }))
+        .expect("fixture")
+    }
+
+    const U1: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";
+    const U2: &str = "019e8b21-9e7c-7553-a118-d1cdada725fe";
+
+    /// A conversation is held by its uuid wherever it is resumed, and by
+    /// claude's name for it within the directory the name is claude's in,
+    /// either saved in the id's place or beside it; nothing else of that
+    /// agent's, or of another agent's, is.
+    #[test]
+    fn a_conversation_is_held_by_its_uuid_or_its_name() {
+        let mut held = Held::default();
+        held.add(&agent_tab("claude", Some(U1), Some("fix-auth"), "/w", None));
+        held.add(&agent_tab("claude", Some("named"), None, "/w", None));
+        let (at, elsewhere) = (Path::new("/w"), Path::new("/v"));
+        let claude = |id, name| agent_tab("claude", Some(id), name, "/w", None);
+        assert!(held.holds(&claude(U1, None), elsewhere), "a uuid anywhere");
+        assert!(held.holds(&claude("fix-auth", None), at));
+        assert!(
+            held.holds(&claude(U2, Some("named")), at),
+            "its name beside its id"
+        );
+        assert!(
+            !held.holds(&claude("fix-auth", None), elsewhere),
+            "another directory's name"
+        );
+        assert!(!held.holds(&claude(U2, None), at), "its own conversation");
+        let codex = agent_tab("codex", Some(U1), None, "/w", None);
+        assert!(!held.holds(&codex, at), "another agent's");
+    }
+
+    /// A tab with no conversation saved is held where an agent of its kind and
+    /// codex home runs in the directory it spawns in, which needn't be the one
+    /// it saved.
+    #[test]
+    fn an_idless_tab_is_held_by_its_agents_directory_and_home() {
+        let mut held = Held::default();
+        held.add(&agent_tab("codex", Some(U1), None, "/w", Some("/h")));
+        let idless = agent_tab("codex", None, None, "/gone", Some("/h"));
+        assert!(held.holds(&idless, Path::new("/w")), "it spawns in /w");
+        assert!(!held.holds(&idless, Path::new("/v")));
+        let other_home = agent_tab("codex", None, None, "/w", Some("/h2"));
+        assert!(
+            !held.holds(&other_home, Path::new("/w")),
+            "another home's newest"
+        );
+        let zot = agent_tab("zot", None, None, "/w", None);
+        assert!(!held.holds(&zot, Path::new("/w")), "no zot runs there");
+        held.add(&agent_tab("zot", None, None, "/w", None));
+        assert!(
+            held.holds(&zot, Path::new("/w")),
+            "zot's `--continue` would join it"
+        );
+    }
+
     fn v1() -> serde_json::Value {
         json!({
             "id": 7, "saved_at": "then", "epoch_secs": 100, "cwd": "/w/proj",
@@ -301,6 +445,7 @@ mod tests {
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
+                    unopened: false,
                 })
                 .collect(),
             active_tab: 0,

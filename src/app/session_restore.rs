@@ -9,7 +9,7 @@ use super::{
     RESTORE_RESUME_VERIFY_RETRIES, RESTORE_RESUME_VERIFY_TAIL,
 };
 use crate::agent::ResumeAction;
-use crate::state::sessions::{Manifest, SavedProject, SavedTab};
+use crate::state::sessions::{Held, Manifest, SavedProject, SavedTab};
 
 impl App {
     /// Restore's spawn: [`Self::open_pane_tab_in_home`], as the saved tab's
@@ -128,7 +128,10 @@ impl App {
     /// is left as it was, so nothing the restore didn't open is lost. A copy of
     /// a running session also leaves that spyc's agents alone: their
     /// conversations, tab ids and scope claims stay with it, and the copy's
-    /// agents start fresh.
+    /// agents start fresh. So does any tab that would resume into a
+    /// conversation another running spyc is in, whichever file saved it
+    /// ([`restore_plans`]): a copy leaves its file's pid behind, and restoring
+    /// that file again would resume the conversations the copy runs.
     pub fn restore_session(&mut self, manifest: &Manifest) -> Vec<Effect> {
         let Some(active) = manifest.active() else {
             self.state
@@ -147,7 +150,12 @@ impl App {
             return Vec::new();
         };
         let running = manifest.running();
-        let (saved_tabs, plans) = restore_plans(project, running);
+        let held = Held::by_running(&crate::state::sessions::load_manifests());
+        let TabPlans {
+            tabs: saved_tabs,
+            plans,
+            held: held_here,
+        } = restore_plans(project, running, &held);
         // A wholly refused tab set leaves the current session intact. Mixed
         // sessions proceed, without ever spawning a refused command.
         if !plans.is_empty()
@@ -167,20 +175,28 @@ impl App {
             return Vec::new();
         };
         self.restore_project(project, &saved_tabs, plans);
-        let others = self.restore_other_projects(manifest, project, running);
+        let mut others = self.restore_other_projects(manifest, project, running, &held);
+        others.held.extend(held_here);
         let adopt = !running && others.unopened.is_empty();
         if adopt {
             self.adopt_session(manifest);
         }
-        // P2: restore the scope-coordination registry verbatim, once every
+        // P2: restore the scope-coordination registry, once every
         // project's tabs are back — independent of tab-restore success. A
         // claim whose owning
         // tab failed to respawn (or whose save predates `claim_owner`) just
         // shows up "orphaned" on the registry / orchestration screen, still
         // informative and releasable rather than silently lost. A running
-        // session's claims belong to its live agents, so a copy leaves them.
+        // session's claims belong to its live agents, so a copy leaves them,
+        // and a restore leaves those of each tab it starts fresh because
+        // another spyc's agent is in its conversation.
         if !running {
-            self.state.scope_registry.clone_from(&manifest.scope_claims);
+            self.state.scope_registry = manifest
+                .scope_claims
+                .iter()
+                .filter(|claim| claim.owner.is_empty() || !others.held.contains(&claim.owner))
+                .cloned()
+                .collect();
         }
         self.record_open_roots();
         self.flash_restored(manifest, running, &others);
@@ -223,17 +239,21 @@ impl App {
         manifest: &Manifest,
         active: &SavedProject,
         running: bool,
-    ) -> OtherProjects {
+        held: &Held,
+    ) -> RestoreOutcome {
         let mut order = Vec::new();
-        let mut others = OtherProjects::default();
+        let mut others = RestoreOutcome::default();
         for saved in &manifest.projects {
             if std::ptr::eq(saved, active) {
                 order.push(self.state.active);
-            } else if let Some((id, problem)) = self.restore_out_of_view(saved, running) {
-                order.push(id);
-                others
-                    .problems
-                    .extend(problem.map(|p| format!("{}: {p}", saved_label(saved))));
+            } else if let Some(opened) = self.restore_out_of_view(saved, running, held) {
+                order.push(opened.id);
+                others.held.extend(opened.held);
+                others.problems.extend(
+                    opened
+                        .problem
+                        .map(|p| format!("{}: {p}", saved_label(saved))),
+                );
             } else {
                 others.unopened.push(saved_label(saved));
             }
@@ -245,15 +265,15 @@ impl App {
     /// Open `saved` as a project beside the one in view, its config read at
     /// its start directory, else its anchor, else column `a`'s directory, with
     /// its column `a`, tabs and split as it saved them, and its context file
-    /// written so its agents' tools answer for it. Returns its id and what
-    /// went wrong opening it, if anything. `None` when none of those
+    /// written so its agents' tools answer for it. `None` when none of those
     /// directories is left, or when an open project already has its home or
     /// its start directory, which are one project's each.
     fn restore_out_of_view(
         &mut self,
         saved: &SavedProject,
         running: bool,
-    ) -> Option<(ProjectId, Option<String>)> {
+        held: &Held,
+    ) -> Option<OutOfView> {
         let at = [saved.start_dir.as_path(), saved.anchor()]
             .into_iter()
             .chain(saved.left_cwd.as_deref())
@@ -267,11 +287,11 @@ impl App {
             return None;
         }
         let (id, config_problem) = self.create_project(&at, saved.anchor());
+        let tabs = restore_plans(saved, running, held);
         let column_problem = self.in_project(id, |app| {
             let landed = app.restore_column_a(saved, false).is_some();
             app.reconcile_harpoon();
-            let (saved_tabs, plans) = restore_plans(saved, running);
-            app.restore_project(saved, &saved_tabs, plans);
+            app.restore_project(saved, &tabs.tabs, tabs.plans);
             app.write_context();
             // `in_project` keeps the flash from the user, so its cause is read
             // here.
@@ -282,7 +302,11 @@ impl App {
                 )
             })
         });
-        Some((id, config_problem.or(column_problem)))
+        Some(OutOfView {
+            id,
+            problem: config_problem.or(column_problem),
+            held: tabs.held,
+        })
     }
 
     /// Land column `a` where the project left it: its own directory, else the
@@ -452,7 +476,7 @@ impl App {
     /// What the restore came to, in one flash: whether it was a copy and why,
     /// then any tabs kept unopened and anything that went wrong opening a
     /// project, so none of them hides another.
-    fn flash_restored(&mut self, manifest: &Manifest, running: bool, others: &OtherProjects) {
+    fn flash_restored(&mut self, manifest: &Manifest, running: bool, others: &RestoreOutcome) {
         let name = if manifest.name.is_empty() {
             "(unnamed)"
         } else {
@@ -481,6 +505,12 @@ impl App {
             .map(|p| p.deferred_tabs.len())
             .sum();
         let mut parts = vec![headline];
+        if !others.held.is_empty() {
+            parts.push(format!(
+                "{} tab(s) start fresh: another spyc has their conversations",
+                others.held.len()
+            ));
+        }
         if unopened > 0 {
             parts.push(format!(
                 "{unopened} tab(s) unopened, kept saved — session info shows reasons"
@@ -595,12 +625,33 @@ impl App {
     }
 }
 
-/// What opening a manifest's other projects came to: the labels of those that
-/// didn't open, and each config problem of those that did.
+/// What restoring a manifest came to: the labels of the projects that didn't
+/// open, each config problem of those that did, and, in every project, the
+/// claim owners of the tabs that started fresh because another spyc's agent
+/// is in their conversations ([`TabPlans::held`]), one entry per tab.
 #[derive(Default)]
-struct OtherProjects {
+struct RestoreOutcome {
     unopened: Vec<String>,
     problems: Vec<String>,
+    held: Vec<String>,
+}
+
+/// A project [`App::restore_out_of_view`] opened: its id, what went wrong
+/// opening it, if anything, and its [`TabPlans::held`].
+struct OutOfView {
+    id: ProjectId,
+    problem: Option<String>,
+    held: Vec<String>,
+}
+
+/// A project's tabs as the restore opens them, each with how it comes back.
+#[derive(Default)]
+struct TabPlans {
+    tabs: Vec<SavedTab>,
+    plans: Vec<crate::agent::RestorePlan>,
+    /// The saved claim owner of each tab that starts fresh because another
+    /// spyc's agent is in its conversation; empty for one saved without.
+    held: Vec<String>,
 }
 
 /// Where column `a` may land, in order: its own directory, the project's
@@ -628,43 +679,58 @@ fn saved_label(project: &SavedProject) -> String {
     }
 }
 
-/// `project`'s tabs as the restore opens them, each with how it comes back.
-fn restore_plans(
-    project: &SavedProject,
-    running: bool,
-) -> (Vec<SavedTab>, Vec<crate::agent::RestorePlan>) {
-    let saved_tabs: Vec<SavedTab> = if running {
-        project.tabs.iter().map(fresh_tab).collect()
-    } else {
-        project.tabs.clone()
-    };
-    let plans = saved_tabs
-        .iter()
-        .map(|tab| restore_plan(tab, project.anchor(), running))
-        .collect();
-    (saved_tabs, plans)
-}
-
-/// How `tab` comes back. A copy of a running session's tab starts its agent
-/// fresh: resuming would put a second process in that spyc's conversation, and
-/// a resume with no id still picks one (`codex resume --last`).
-fn restore_plan(
-    tab: &SavedTab,
-    anchor: &std::path::Path,
-    fresh: bool,
-) -> crate::agent::RestorePlan {
-    if fresh {
-        return crate::agent::RestorePlan {
-            command: tab.command.clone(),
-            resume: ResumeAction::None,
+/// `project`'s tabs as the restore opens them, each by the plan its agent
+/// rebuilds for it in the directory it spawns in. A tab the plan refuses stays
+/// refused, its record whole. Any other tab starts fresh, with nothing resumed
+/// ([`crate::agent::resume::fresh_command`]), when the session is still
+/// running, or when its plan would resume into something `held`: a second
+/// process in a conversation.
+///
+/// SPYC-TRAP(restore-skips-held-conversations): a resumed tab whose
+/// conversation another spyc runs splits it silently, so the check reads the
+/// plan, not the id alone: an id-less codex or zot resumes the newest.
+fn restore_plans(project: &SavedProject, running: bool, held: &Held) -> TabPlans {
+    let mut out = TabPlans::default();
+    for tab in &project.tabs {
+        let cwd = if tab.cwd.is_dir() {
+            &tab.cwd
+        } else {
+            project.anchor()
         };
+        let plan = crate::agent::resume::reconstruct_saved_tab(tab, cwd);
+        let refused = matches!(plan.resume, ResumeAction::Refuse { .. });
+        let is_held = !running && !refused && resumes(&plan, tab) && held.holds(tab, cwd);
+        if is_held {
+            out.held.push(tab.claim_owner.clone());
+        }
+        let fresh = (running || is_held) && !refused;
+        out.tabs
+            .push(if fresh { fresh_tab(tab) } else { tab.clone() });
+        out.plans.push(if fresh {
+            crate::agent::RestorePlan {
+                command: crate::agent::resume::fresh_command(tab),
+                resume: ResumeAction::None,
+            }
+        } else {
+            plan
+        });
     }
-    let cwd = if tab.cwd.is_dir() { &tab.cwd } else { anchor };
-    crate::agent::resume::reconstruct_saved_tab(tab, cwd)
+    out
 }
 
-/// `tab` as a copy of a running session restores it: without the conversation,
-/// tab id and claim owner its live agent still holds.
+/// Whether `plan` resumes a conversation: claude's by typing `/resume`, the
+/// others' by a resume its rebuilt command has that a fresh start's doesn't.
+fn resumes(plan: &crate::agent::RestorePlan, tab: &SavedTab) -> bool {
+    match &plan.resume {
+        ResumeAction::ClaudeStdin { .. } => true,
+        ResumeAction::None => plan.command != crate::agent::resume::fresh_command(tab),
+        ResumeAction::Refuse { .. } => false,
+    }
+}
+
+/// `tab` as a restore that starts it fresh keeps it, a copy of a running
+/// session's or one whose conversation another spyc's agent is in: without
+/// the conversation, tab id and claim owner that agent still has.
 fn fresh_tab(tab: &SavedTab) -> SavedTab {
     SavedTab {
         agent_session_id: None,
@@ -672,5 +738,35 @@ fn fresh_tab(tab: &SavedTab) -> SavedTab {
         pane_id: String::new(),
         claim_owner: String::new(),
         ..tab.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const UUID: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";
+
+    fn tab(command: &str, hint: Option<&str>) -> SavedTab {
+        serde_json::from_value(serde_json::json!({
+            "command": command, "label": "t", "cwd": "/tmp", "agent_kind": "codex",
+            "agent_session_id": UUID, "codex_home": "/tmp/codex-home", "agent_hint": hint
+        }))
+        .expect("fixture")
+    }
+
+    /// A plan resumes when it adds a resume to the fresh start, even one an
+    /// older save kept in its command, and a wrapper's never does.
+    #[test]
+    fn a_plan_resumes_when_it_adds_a_resume_to_the_fresh_start() {
+        let at = std::path::Path::new("/tmp");
+        for command in ["codex", &format!("codex resume {UUID}")] {
+            let saved = tab(command, None);
+            let plan = crate::agent::resume::reconstruct_saved_tab(&saved, at);
+            assert!(resumes(&plan, &saved), "{command}: {}", plan.command);
+        }
+        let wrapper = tab("my-codex", Some("codex"));
+        let plan = crate::agent::resume::reconstruct_saved_tab(&wrapper, at);
+        assert!(!resumes(&plan, &wrapper), "{}", plan.command);
     }
 }

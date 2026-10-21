@@ -71,6 +71,14 @@ fn read_saved(state_root: &std::path::Path, id: u64) -> crate::state::sessions::
     )
 }
 
+/// The first saved tab of `original`, the one a restore refuses, as a save
+/// keeps it: unchanged, and marked unopened.
+fn kept_record(original: &crate::state::sessions::Manifest) -> serde_json::Value {
+    let mut kept = serde_json::to_value(&original.projects[0].tabs[0]).unwrap();
+    kept["unopened"] = serde_json::Value::Bool(true);
+    kept
+}
+
 #[test]
 fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
     let tmp = tempfile::tempdir().unwrap();
@@ -96,7 +104,7 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
         assert_eq!(first_save.projects[0].active_tab, 1);
         assert_eq!(
             serde_json::to_value(&first_save.projects[0].tabs[0]).unwrap(),
-            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
+            kept_record(&original)
         );
         app.show_session_info();
         let text = app
@@ -124,7 +132,7 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
         assert_eq!(second_save.projects[0].active_tab, 1);
         assert_eq!(
             serde_json::to_value(&second_save.projects[0].tabs[0]).unwrap(),
-            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
+            kept_record(&original)
         );
         // Closing all live panes must not drop the unopened records.
         again.runtime.project_mut().pane_tabs = None;
@@ -133,7 +141,7 @@ fn partial_restore_preserves_refused_metadata_on_save_and_second_restore() {
         assert_eq!(last_save.projects[0].tabs.len(), 1);
         assert_eq!(
             serde_json::to_value(&last_save.projects[0].tabs[0]).unwrap(),
-            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
+            kept_record(&original)
         );
     });
 }
@@ -201,7 +209,7 @@ fn unopened_tabs_survive_debounced_autosave_without_live_panes() {
         assert_eq!(saved.projects[0].tabs.len(), 1);
         assert_eq!(
             serde_json::to_value(&saved.projects[0].tabs[0]).unwrap(),
-            serde_json::to_value(&original.projects[0].tabs[0]).unwrap()
+            kept_record(&original)
         );
         // A change to unopened metadata must dirty the autosave baseline too.
         app.state.active_project_mut().deferred_tabs[0].tab.label = "renamed deferred".into();

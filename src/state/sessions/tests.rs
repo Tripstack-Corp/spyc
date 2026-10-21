@@ -190,6 +190,7 @@ fn effective_kind_passes_through_explicit_value() {
         claim_owner: String::new(),
         pane_id: String::new(),
         agent_hint: None,
+        unopened: false,
     };
     assert_eq!(tab.effective_kind(), AgentKind::Codex);
     tab.agent_kind = AgentKind::Other;
@@ -516,6 +517,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 claim_owner: String::new(),
                 pane_id: String::new(),
                 agent_hint: None,
+                unopened: false,
             }],
         );
         save_session(&session).unwrap();
@@ -550,6 +552,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
+                    unopened: false,
                 }],
             );
             save_session(&s).unwrap();
@@ -580,6 +583,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
+                    unopened: false,
                 }],
             );
             save_session(&s).unwrap();
@@ -679,6 +683,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     claim_owner: "owner-A".into(),
                     pane_id: String::new(),
                     agent_hint: None,
+                    unopened: false,
                 },
                 SavedTab {
                     command: "codex".into(),
@@ -692,6 +697,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
+                    unopened: false,
                 },
             ],
         );
@@ -809,6 +815,7 @@ fn tab_omits_absent_session_id_in_json() {
         claim_owner: String::new(),
         pane_id: String::new(),
         agent_hint: None,
+        unopened: false,
     };
     let json = serde_json::to_value(&bare).unwrap();
     assert!(
