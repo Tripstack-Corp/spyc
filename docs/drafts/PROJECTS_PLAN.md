@@ -51,7 +51,7 @@ What approving this doc agreed to (2026-10-12):
   | `Space !`, or `^a !` from a pane | jump to the agent that needs you, in any project |
 
 - **Status bar (§5).** The `project` segment becomes `projects`: each label with
-  its attention glyph, as in `spyc ■ · web ● · api`.
+  its attention glyph, as in `spyc ■ | web ● | api`.
   - With several projects open, it takes the session name's place.
   - It shrinks in three steps when the bar is narrow, but never hides a blocked
     agent.
@@ -631,7 +631,7 @@ more than one project open it displaces the `session` segment.
 - **One project open:** unchanged. The segment shows the home's basename.
 - **Several:** each project's label with its attention glyph, the active one in
   the segment's bold style, the others dim:
-  `spyc ■ · web ● · api`. The glyphs are the tab dots' own (§6): a red `■` means
+  `spyc ■ | web ● | api`. The glyphs are the tab dots' own (§6): a red `■` means
   something there is blocked, a teal `■` means an unseen done, and a pulsing `●`
   means working.
 - **The session name leaves the bar** when several projects are open. It names
@@ -641,9 +641,21 @@ more than one project open it displaces the `session` segment.
 **At narrow widths the segment gets a budget** (a third of the bar) and degrades
 in steps, each one only if the previous still doesn't fit:
 
-1. drop inactive projects with no attention, as `+N`: `spyc ■ · web ● +2`;
+1. cut the longer labels to one length, in the middle, no shorter than 4 columns:
+   `spyc ■ | tri…atform | fika ●`;
 2. collapse the others to a count and their most urgent glyph: `spyc 2/4 ■`;
 3. the active label alone, with a `■` if any other project is blocked.
+
+**The segment holds its width** (owner decision, 2026-10-21, after 6c shipped
+with a step that dropped the quiet projects as `+N`). A segment that widened and
+narrowed as agents started, finished and blocked moved every segment after it,
+which distracts. So each glyph keeps its place, blank while there is nothing to
+show, and which step is drawn depends on the labels and the bar's width, never
+on the agents. A `+N` step can't hold a width; the cut labels of step 1 keep
+every project named in its place. A switch redraws the path and what follows
+it anyway, so the steps don't pad for the project in view. The chips are
+parted by powerline's thin chevron (`U+E0B1`, a `|` in mono), which reads as a
+boundary where a `·` read as part of the labels.
 
 A blocked agent in another project is never dropped from the bar entirely. It
 is the one thing the segment is for.

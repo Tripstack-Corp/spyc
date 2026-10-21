@@ -632,7 +632,7 @@ mod tests {
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains(" web ■ · spyc "), "{text}");
+        assert!(text.contains(" web ■ \u{e0b1} spyc "), "{text}");
         assert!(!text.contains("SAFFRON_CUMIN"), "{text}");
         let glyph = line
             .spans
@@ -706,7 +706,6 @@ mod tests {
     /// agents change, in colour and in mono, at any width: the path starts
     /// at one column whatever they are doing.
     #[test]
-    #[ignore = "red: the bar's segments shift as the projects' agents change"]
     fn the_bar_holds_its_place_as_agents_change() {
         use crate::ui::project_chips::{ProjectAttention, ProjectChip};
         for mono in [false, true] {
@@ -749,10 +748,13 @@ mod tests {
                         plain_logo: true,
                     };
                     let line = bar.build_line(Rect::new(0, 0, w, 1));
-                    let before = line
+                    let path = line
                         .spans
                         .iter()
-                        .take_while(|s| !s.content.trim_start().starts_with("~/"))
+                        .position(|s| s.content.trim_start().starts_with("~/"))
+                        .expect("the path");
+                    let before = line.spans[..path]
+                        .iter()
                         .map(|s| dw(&s.content))
                         .sum::<usize>();
                     starts.insert(before);
@@ -760,6 +762,60 @@ mod tests {
                 assert_eq!(starts.len(), 1, "mono={mono} w={w}: {starts:?}");
             }
         }
+    }
+
+    /// The parting between the chips is drawn neither bold nor dim, so it
+    /// stands out from the dim labels on either side of it.
+    #[test]
+    fn the_parting_stands_out_from_the_dim_labels() {
+        use crate::ui::project_chips::ProjectChip;
+        let theme = Theme::default();
+        let chips = ProjectChips {
+            chips: vec![
+                ProjectChip {
+                    label: "web".into(),
+                    attention: None,
+                    active: false,
+                },
+                ProjectChip {
+                    label: "api".into(),
+                    attention: None,
+                    active: false,
+                },
+                ProjectChip {
+                    label: "spyc".into(),
+                    attention: None,
+                    active: true,
+                },
+            ],
+            pulse: Color::Red,
+        };
+        let bar = StatusBar {
+            project_home: None,
+            session_name: None,
+            projects: Some(&chips),
+            path: PATH,
+            suffix: "",
+            suffix_short: None,
+            git_info: None,
+            agent_info: None,
+            theme: &theme,
+            plain_logo: true,
+        };
+        let line = bar.build_line(Rect::new(0, 0, 120, 1));
+        let parting = line
+            .spans
+            .iter()
+            .find(|s| s.content.contains('\u{e0b1}'))
+            .expect("a parting");
+        let web = line
+            .spans
+            .iter()
+            .find(|s| s.content == "web")
+            .expect("web's label");
+        let loud = Modifier::DIM | Modifier::BOLD;
+        assert!(!parting.style.add_modifier.intersects(loud), "{parting:?}");
+        assert!(web.style.add_modifier.contains(Modifier::DIM), "{web:?}");
     }
 
     #[test]

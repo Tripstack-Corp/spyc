@@ -53,104 +53,115 @@ pub fn glyph(attention: ProjectAttention, pulse: Color, theme: &Theme) -> Span<'
     }
 }
 
+/// The narrowest a label is cut to, its ellipsis included.
+const MIN_CUT: usize = 4;
+
+/// What parts the chips: powerline's thin chevron, or a `|` in mono, where the
+/// status bar draws no powerline glyphs. Both are as wide.
+const PARTING: &str = " \u{e0b1} ";
+const MONO_PARTING: &str = " | ";
+
 impl ProjectChips {
     /// The segment in at most `room` columns, the first that fits of: every
-    /// chip; the project in view and those with something to say, the rest
-    /// counted as `+N`; the project in view with its place among them (`2/4`)
-    /// and the others' most urgent glyph. Else the project in view's label,
-    /// with a red `■` while another project is blocked, however short the
-    /// room: a blocked agent elsewhere is what the segment is for. `most` is
-    /// where the bar ends, so the label is cut rather than the `■`.
+    /// chip; every chip with the longer labels cut to one length, no shorter
+    /// than [`MIN_CUT`]; the project in view with its place among them
+    /// (`2/4`) and the others' most urgent glyph, its label cut to fit. Else
+    /// the project in view's label cut to the room, with a red `■` while
+    /// another project is blocked: a blocked agent elsewhere is what the
+    /// segment is for. However short the room, that label is kept to
+    /// [`MIN_CUT`] columns, and `most`, where the bar ends, is cut to before
+    /// the `■` is lost.
+    ///
+    /// Each step is as wide whatever the agents are doing, so what follows
+    /// the segment never moves as they work, block and finish: each glyph has
+    /// its cell, blank while there is nothing to show, and which step is
+    /// drawn doesn't depend on them.
     pub fn spans(&self, room: usize, most: usize, theme: &Theme) -> Vec<Span<'static>> {
-        [
-            self.every_chip(theme),
-            self.loud_chips(theme),
-            self.collapsed(theme),
-        ]
-        .into_iter()
-        .find(|form| width(form) <= room)
-        .unwrap_or_else(|| self.alone(most, theme))
+        if let Some(cap) = self.label_cap(room, theme) {
+            return self.every_chip(cap, theme);
+        }
+        self.collapsed(room, theme)
+            .unwrap_or_else(|| self.alone(room, most, theme))
     }
 
-    fn every_chip(&self, theme: &Theme) -> Vec<Span<'static>> {
-        self.joined(self.chips.iter(), theme)
-    }
-
-    fn loud_chips(&self, theme: &Theme) -> Vec<Span<'static>> {
-        let (shown, quiet): (Vec<&ProjectChip>, Vec<&ProjectChip>) = self
+    /// The longest a label may be for every chip to fit `room`: the widest
+    /// label's width when they all fit whole, else the longest cut, no
+    /// shorter than [`MIN_CUT`], that fits. `None` when even that doesn't.
+    fn label_cap(&self, room: usize, theme: &Theme) -> Option<usize> {
+        let count = self.chips.len();
+        // A space and a cell after each label, and a parting between chips.
+        let partings = super::display_width(parting(theme)) * count.saturating_sub(1);
+        let budget = room.checked_sub(2 * count + partings)?;
+        let widths: Vec<usize> = self
             .chips
             .iter()
-            .partition(|c| c.active || c.attention.is_some());
-        let mut spans = self.joined(shown.into_iter(), theme);
-        if !quiet.is_empty() {
-            spans.push(dim(format!(" +{}", quiet.len())));
+            .map(|c| super::display_width(&c.label))
+            .collect();
+        let widest = widths.iter().copied().max().unwrap_or(0);
+        (widest.min(MIN_CUT)..=widest)
+            .rev()
+            .find(|&cap| widths.iter().map(|w| (*w).min(cap)).sum::<usize>() <= budget)
+    }
+
+    /// Every chip as `label glyph`, each label in at most `cap` columns,
+    /// [`PARTING`]s between them: the one in view bold, the others dim, and
+    /// the parting neither, to stand out from both.
+    fn every_chip(&self, cap: usize, theme: &Theme) -> Vec<Span<'static>> {
+        let mut spans = Vec::new();
+        for (i, chip) in self.chips.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(parting(theme)));
+            }
+            spans.push(label(chip, cap));
+            spans.push(Span::raw(" "));
+            spans.push(cell(chip.attention, self.pulse, theme));
         }
         spans
     }
 
-    fn collapsed(&self, theme: &Theme) -> Vec<Span<'static>> {
+    /// `label 2/4 ■` in `room`, the label cut to fit, or `None` when that
+    /// would cut it shorter than [`MIN_CUT`].
+    fn collapsed(&self, room: usize, theme: &Theme) -> Option<Vec<Span<'static>>> {
         // The project in view is always one of the open ones.
         let at = self.chips.iter().position(|c| c.active).unwrap_or(0);
-        let mut spans = self.active_label();
-        spans.push(Span::raw(format!(" {}/{}", at + 1, self.chips.len())));
+        let place = format!(" {}/{} ", at + 1, self.chips.len());
+        let cap = room.checked_sub(super::display_width(&place) + 1)?;
+        if cap < self.active_width().min(MIN_CUT) {
+            return None;
+        }
+        let mut spans = self.active_label(cap);
+        spans.push(Span::raw(place));
         let others = self.others().filter_map(|c| c.attention).max();
-        if let Some(attention) = others {
-            spans.push(Span::raw(" "));
-            spans.push(glyph(attention, self.pulse, theme));
-        }
-        spans
+        spans.push(cell(others, self.pulse, theme));
+        Some(spans)
     }
 
-    fn alone(&self, most: usize, theme: &Theme) -> Vec<Span<'static>> {
-        let mut spans = self.active_label();
-        if self
+    fn alone(&self, room: usize, most: usize, theme: &Theme) -> Vec<Span<'static>> {
+        let cap = room.max(MIN_CUT + 2).min(most).saturating_sub(2);
+        let mut spans = self.active_label(cap);
+        let blocked = self
             .others()
-            .any(|c| c.attention == Some(ProjectAttention::Blocked))
-        {
-            let keep = most.saturating_sub(2);
-            for label in &mut spans {
-                if super::display_width(&label.content) > keep {
-                    let cut = super::display_truncate(&label.content, keep.saturating_sub(1));
-                    let cut = if keep == 0 {
-                        String::new()
-                    } else {
-                        format!("{cut}\u{2026}")
-                    };
-                    label.content = cut.into();
-                }
-            }
-            spans.push(Span::raw(" "));
-            spans.push(glyph(ProjectAttention::Blocked, self.pulse, theme));
-        }
+            .any(|c| c.attention == Some(ProjectAttention::Blocked));
+        spans.push(Span::raw(" "));
+        let blocked = blocked.then_some(ProjectAttention::Blocked);
+        spans.push(cell(blocked, self.pulse, theme));
         spans
     }
 
-    /// `chips` as `label glyph`, joined by ` · `: the one in view bold, the
-    /// others dim.
-    fn joined<'c>(
-        &self,
-        chips: impl Iterator<Item = &'c ProjectChip>,
-        theme: &Theme,
-    ) -> Vec<Span<'static>> {
-        let mut spans = Vec::new();
-        for (i, chip) in chips.enumerate() {
-            if i > 0 {
-                spans.push(dim(" \u{b7} ".to_string()));
-            }
-            spans.push(label(chip));
-            if let Some(attention) = chip.attention {
-                spans.push(Span::raw(" "));
-                spans.push(glyph(attention, self.pulse, theme));
-            }
-        }
-        spans
-    }
-
-    fn active_label(&self) -> Vec<Span<'static>> {
+    /// The project in view's label's columns.
+    fn active_width(&self) -> usize {
         self.chips
             .iter()
             .find(|c| c.active)
-            .map(label)
+            .map_or(0, |c| super::display_width(&c.label))
+    }
+
+    /// The project in view's label, in at most `cap` columns.
+    fn active_label(&self, cap: usize) -> Vec<Span<'static>> {
+        self.chips
+            .iter()
+            .find(|c| c.active)
+            .map(|c| label(c, cap))
             .into_iter()
             .collect()
     }
@@ -160,17 +171,47 @@ impl ProjectChips {
     }
 }
 
-fn label(chip: &ProjectChip) -> Span<'static> {
+/// The parting `theme` draws between chips.
+const fn parting(theme: &Theme) -> &'static str {
+    if theme.mono { MONO_PARTING } else { PARTING }
+}
+
+/// The glyph for `attention`, or a blank in its place, so a glyph coming and
+/// going moves nothing beside it.
+pub fn cell(attention: Option<ProjectAttention>, pulse: Color, theme: &Theme) -> Span<'static> {
+    attention.map_or_else(|| Span::raw(" "), |a| glyph(a, pulse, theme))
+}
+
+/// `chip`'s label in at most `cap` columns ([`cut`]), bold for the project in
+/// view and dim for the others.
+fn label(chip: &ProjectChip, cap: usize) -> Span<'static> {
     let modifier = if chip.active {
         Modifier::BOLD
     } else {
         Modifier::DIM
     };
-    Span::styled(chip.label.clone(), Style::default().add_modifier(modifier))
+    Span::styled(
+        cut(&chip.label, cap),
+        Style::default().add_modifier(modifier),
+    )
 }
 
-fn dim(text: String) -> Span<'static> {
-    Span::styled(text, Style::default().add_modifier(Modifier::DIM))
+/// `label` in at most `columns`, its middle given up for an ellipsis when it
+/// doesn't fit: a third for the head and the rest for the tail, since a
+/// project's siblings often share its start (`web-api`, `web-app`).
+fn cut(label: &str, columns: usize) -> String {
+    if super::display_width(label) <= columns {
+        return label.to_owned();
+    }
+    let Some(room) = columns.checked_sub(1) else {
+        return String::new();
+    };
+    let head = room / 3;
+    format!(
+        "{}\u{2026}{}",
+        super::display_truncate(label, head),
+        super::display_truncate_tail(label, room - head)
+    )
 }
 
 /// How many columns `spans` take.
@@ -202,30 +243,33 @@ mod tests {
 
     use ProjectAttention::{Blocked, UnseenDone, Waiting, Working};
 
-    /// `x` blocked, `y` in view, `z` working and `v` quiet.
-    fn four() -> ProjectChips {
-        chips(&[
-            ("x", Some(Blocked), false),
-            ("y", None, true),
-            ("z", Some(Working), false),
-            ("v", None, false),
-        ])
-    }
-
     /// Each step is taken only when the one before doesn't fit, and the last
-    /// is drawn whatever the room.
+    /// is drawn whatever the room: every chip, the longer labels cut, the
+    /// project in view collapsed with its label cut to fit, then alone.
     #[test]
     fn the_segment_narrows_one_step_at_a_time() {
         let theme = Theme::default();
-        let c = four();
+        let c = chips(&[
+            ("alpha", Some(Blocked), false),
+            ("bravo", None, true),
+            ("charlie", Some(Working), false),
+            ("delta", None, false),
+        ]);
         let at = |room| text(&c.spans(room, 100, &theme));
-        assert_eq!(at(100), "x ■ · y · z ● · v");
-        assert_eq!(at(17), "x ■ · y · z ● · v");
-        assert_eq!(at(16), "x ■ · y · z ● +1");
-        assert_eq!(at(15), "y 2/4 ■");
-        assert_eq!(at(7), "y 2/4 ■");
-        assert_eq!(at(6), "y ■");
-        assert_eq!(at(0), "y ■");
+        let p = "\u{e0b1}";
+        let every = format!("alpha ■ {p} bravo   {p} charlie ● {p} delta  ");
+        assert_eq!(at(100), every);
+        assert_eq!(at(39), every);
+        assert_eq!(
+            at(38),
+            format!("alpha ■ {p} bravo   {p} c…rlie ● {p} delta  ")
+        );
+        assert_eq!(at(33), format!("a…ha ■ {p} b…vo   {p} c…ie ● {p} d…ta  "));
+        assert_eq!(at(32), "bravo 2/4 ■");
+        assert_eq!(at(11), "bravo 2/4 ■");
+        assert_eq!(at(10), "b…vo 2/4 ■");
+        assert_eq!(at(9), "bravo ■");
+        assert_eq!(at(0), "b…vo ■");
     }
 
     /// Collapsed, the glyph is the others' most urgent; alone, only a block
@@ -239,26 +283,30 @@ mod tests {
             ("y", Some(Blocked), true),
             ("z", Some(UnseenDone), false),
         ]);
-        let collapsed = c.collapsed(&theme);
+        let collapsed = c.collapsed(100, &theme).expect("room to collapse");
         assert_eq!(text(&collapsed), "y 2/3 ■");
         assert_eq!(collapsed.last().map(|s| s.style.fg), Some(Some(theme.take)));
-        assert_eq!(text(&c.alone(100, &theme)), "y");
+        assert_eq!(text(&c.alone(100, 100, &theme)), "y  ");
         let quiet = chips(&[("x", None, false), ("y", None, true)]);
-        assert_eq!(text(&quiet.collapsed(&theme)), "y 2/2");
+        let quiet = quiet.collapsed(100, &theme).expect("room to collapse");
+        assert_eq!(text(&quiet), "y 2/2  ");
     }
 
-    /// Where the bar ends short of the label and its `■`, the label is cut
-    /// and the `■` kept; with nothing blocked elsewhere, the label is whole.
+    /// Narrowest, the label is cut to the room, kept to `MIN_CUT` columns,
+    /// and cut further only where the bar ends short of it and its `■`, so
+    /// the `■` is kept; with nothing blocked elsewhere, the label is cut
+    /// alike and its cell left blank, so the step holds its width.
     #[test]
     fn the_narrowest_step_cuts_the_label_not_the_block() {
         let theme = Theme::default();
         let c = chips(&[("a-long-project", None, true), ("x", Some(Blocked), false)]);
-        assert_eq!(text(&c.spans(0, 16, &theme)), "a-long-project ■");
-        assert_eq!(text(&c.spans(0, 9, &theme)), "a-long… ■");
-        assert_eq!(text(&c.spans(0, 3, &theme)), "… ■");
+        assert_eq!(text(&c.spans(9, 100, &theme)), "a-\u{2026}ject ■");
+        assert_eq!(text(&c.spans(0, 100, &theme)), "a\u{2026}ct ■");
+        assert_eq!(text(&c.spans(0, 5, &theme)), "\u{2026}ct ■");
+        assert_eq!(text(&c.spans(0, 3, &theme)), "\u{2026} ■");
         assert_eq!(text(&c.spans(0, 2, &theme)), " ■");
         let quiet = chips(&[("a-long-project", None, true), ("x", Some(Working), false)]);
-        assert_eq!(text(&quiet.spans(0, 9, &theme)), "a-long-project");
+        assert_eq!(text(&quiet.spans(9, 100, &theme)), "a-\u{2026}ject  ");
     }
 
     /// The glyphs are the tab dots': shape and colour, and in mono only the
@@ -294,7 +342,6 @@ mod tests {
     /// narrows through and with each project in view, so what follows it on
     /// the bar never moves as they work, block and finish.
     #[test]
-    #[ignore = "red: the projects segment widens and narrows with its agents"]
     fn the_segment_holds_its_width_whatever_the_agents_do() {
         let theme = Theme::default();
         let states = [
@@ -326,11 +373,74 @@ mod tests {
         }
     }
 
+    /// The segment never widens as the bar narrows, and keeps to the room
+    /// but for the narrowest label it is cut to: each step is no wider than
+    /// the one before it.
+    #[test]
+    fn the_segment_never_widens_as_the_bar_narrows() {
+        let theme = Theme::default();
+        let sets = [
+            chips(&[
+                ("spyc", Some(Blocked), false),
+                ("tripstack_platform", None, true),
+            ]),
+            chips(&[
+                ("alpha", Some(Blocked), false),
+                ("bravo", None, true),
+                ("charlie", Some(Working), false),
+                ("delta", None, false),
+            ]),
+            chips(&[
+                ("web-api", None, true),
+                ("web-app", Some(UnseenDone), false),
+            ]),
+        ];
+        for c in &sets {
+            let mut before = usize::MAX;
+            for room in (0..=60).rev() {
+                let drawn = c.spans(room, 200, &theme);
+                let w = width(&drawn);
+                assert!(w <= before, "room={room}: {} after {before}", text(&drawn));
+                assert!(w <= room.max(MIN_CUT + 2), "room={room}: {}", text(&drawn));
+                before = w;
+            }
+        }
+    }
+
+    /// Where every chip doesn't fit whole, each keeps its chip, the longer
+    /// labels cut to one length in the middle, so siblings sharing a start
+    /// stay told apart; only below a cut of `MIN_CUT` columns do the chips
+    /// collapse, the label in view cut to fit.
+    #[test]
+    fn a_middle_width_cuts_every_label_to_one_length() {
+        let theme = Theme::default();
+        let c = chips(&[
+            ("spyc", Some(Blocked), false),
+            ("tripstack_platform", None, true),
+            ("fika", Some(Working), false),
+        ]);
+        let at = |room| text(&c.spans(room, 100, &theme));
+        let p = "\u{e0b1}";
+        assert_eq!(
+            at(38),
+            format!("spyc ■ {p} tripstack_platform   {p} fika ●")
+        );
+        assert_eq!(at(30), format!("spyc ■ {p} tri\u{2026}atform   {p} fika ●"));
+        assert_eq!(at(24), format!("spyc ■ {p} t\u{2026}rm   {p} fika ●"));
+        assert_eq!(at(23), "trips\u{2026}ck_platform 2/3 ■");
+        let siblings = chips(&[
+            ("web-api", None, false),
+            ("web-app", None, true),
+            ("docs", None, false),
+        ]);
+        let cut = text(&siblings.spans(25, 100, &theme));
+        assert_eq!(cut, format!("w\u{2026}pi   {p} w\u{2026}pp   {p} docs  "));
+    }
+
     /// Projects are parted by a chevron, powerline's own between the parts of
     /// one segment, or by a bar in mono, where the bar draws no powerline
     /// glyphs.
     #[test]
-    #[ignore = "red: the chips are parted by a dot"]
     fn the_chips_are_parted_by_a_chevron() {
         let c = chips(&[("web", Some(Blocked), false), ("spyc", None, true)]);
         let theme = Theme::default();
