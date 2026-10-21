@@ -81,11 +81,12 @@ impl App {
     /// key whichever one has the keyboard.
     pub(super) fn sync_watch(&self, ctx: &mut RunCtx) {
         let config = self.config_parents();
-        if config != ctx.watched_config
+        if (config != ctx.watched_config || self.view.config_watch_gen != ctx.watched_config_gen)
             && let Some(tx) = ctx.watch_tx.as_ref()
         {
             let _ = tx.send(WatchCommand::SyncConfigParents(config.clone()));
             ctx.watched_config = config;
+            ctx.watched_config_gen = self.view.config_watch_gen;
         }
         let preview = self
             .view

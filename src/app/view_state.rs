@@ -291,6 +291,9 @@ pub struct ViewState {
     /// Last terminal-window title emitted (OSC 2 dedup). `None` forces
     /// a re-emit on next draw.
     pub(super) last_term_title: Option<String>,
+    /// Bumped when the config dirs must be sent to the watch worker again
+    /// though their list is the same: one has just been made (`sync_watch`).
+    pub(super) config_watch_gen: u64,
     // --- D3: the remaining UI-layer ephemerals + activity counters ---
     /// Active harpoon menu overlay (interactive: reorder, delete, jump).
     // Module-private (type `HarpoonMenu` is module-private).
@@ -500,6 +503,7 @@ impl ViewState {
             theme,
             needs_full_repaint: false,
             last_term_title: None,
+            config_watch_gen: 0,
             harpoon_menu: None,
             attention_last: None,
             chord_hint: None,

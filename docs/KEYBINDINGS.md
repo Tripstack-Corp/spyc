@@ -299,7 +299,7 @@ appear on the top bar and persist across `spyc -r`.
 | `Space ]` / `Space [` | Go to the next / previous project, wrapping |
 | `Space !` / `^a !` | Go to the agent that needs you, in any project: the longest-blocked first, then a done you haven't seen; again for the next one |
 | `gS` | Set start dir (target of `` ` ``) to current directory |
-| `:project [.\|<path>\|clear]` | Manage `PROJECT_HOME` |
+| `:project [.\|<path>\|clear\|config]` | Manage `PROJECT_HOME`; `config` opens the project's own config file |
 | `:startdir [.\|<path>]` | Manage start dir |
 | `:name <NEW>` | Rename the active session |
 | `:whoami` | Show `user@host` in the status line |

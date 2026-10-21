@@ -1112,6 +1112,16 @@ PR, except step 5's stages:
      `settle_project_configs` reads again, quietly, a project that moved
      (`Space P`, `:project`, `gS`, `-r`), once even when it fails. Under
      test the directory resolves only through `state::with_config_root`.
+   - **Made (pair 7b).** `:project config` (`AppState::project_command`)
+     hands the loop `Effect::EditProjectConfig` with the anchor, label and
+     any file; `App::edit_project_config` opens the file in the top overlay
+     (`edit_path_in_pane`, out of `V`'s `edit_in_pane`), making one first
+     with `project_file::create` (`<label>.toml`, `-2` and on while the name
+     is another home's, create-new so nothing is written over), then reads
+     it and bumps `view.config_watch_gen`, which makes `sync_watch` resend
+     the config dirs so a directory just made is watched. `./config` reaches
+     a directory named `config`. Under test `shell::with_editor` keeps the
+     developer's editor from starting.
 8. **Recently-closed projects in the switcher.**
 
 Steps 1 and 2 are invisible and land first. Steps 3-6 are the release.

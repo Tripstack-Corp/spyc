@@ -194,16 +194,7 @@ impl AppState {
             return CommandResult::Handled;
         }
         if let Some(arg) = input.strip_prefix("project ") {
-            let arg = arg.trim();
-            if arg == "clear" {
-                self.clear_project_home();
-                return CommandResult::Handled;
-            }
-            match self.resolve_dir_arg(arg) {
-                Ok(canon) => self.set_project_home(canon),
-                Err(e) => self.flash_error(format!("project: {e:#}")),
-            }
-            return CommandResult::Handled;
+            return self.project_command(arg);
         }
 
         // :name [NEW] — rename session, or print current name when bare.

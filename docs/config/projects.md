@@ -35,6 +35,16 @@ dir = "#88c0d0"              # tint each project, so a glance says which one
 - **A project needs no file.** `Space n` on a directory with none creates
   nothing.
 
+## Making one
+
+**`:project config`** opens the project's file in your editor, in the top
+pane as `V` does, so the agents below stay in view. With no file yet, it makes
+`<name>.toml`, named for the project, with its `home` filled in (`~` for your
+home), and the project goes by it from then on; a name another project's file
+has gets `-2`. A file is never written over: one of that name that names this
+project, or no usable home, is opened as it is. Saving it reloads it. (A
+directory called `config` is `:project ./config`.)
+
 ## How it layers
 
 A project's config is three files, each overriding the one before, per field:

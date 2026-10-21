@@ -383,6 +383,77 @@ fn gitdir_status_in(path: &Path, gitdir: Option<&Path>) -> bool {
             .is_some_and(|name| matches!(name, "index" | "HEAD"))
 }
 
+impl App {
+    /// `:project config`: open the user's own config file for the project
+    /// anchored at `anchor` in the editor, in the top overlay. With none,
+    /// `file`, one is made first (`project_file::create`), read so the project
+    /// goes by it, and its directory watched. Refused while an editor is open
+    /// in the project, whose unsaved work a second one would end. A failure
+    /// flashes with its cause.
+    pub(super) fn edit_project_config(
+        &mut self,
+        anchor: &Path,
+        label: &str,
+        file: Option<PathBuf>,
+    ) {
+        let project = self.runtime.project();
+        let editing = [&project.top_overlay, &project.top_overlay_right]
+            .into_iter()
+            .flatten()
+            .any(|pane| !pane.is_closed() && pane.exit_status().is_none());
+        if editing {
+            self.state
+                .flash_info("project config: an editor is open here; close it first");
+            return;
+        }
+        let file = file.filter(|path| path.is_file());
+        let Some(path) = file.or_else(|| self.make_project_config(anchor, label)) else {
+            return;
+        };
+        self.edit_path_in_pane(&path);
+    }
+
+    /// Make the user's file for the project anchored at `anchor`, named
+    /// `label`, read it so the project goes by it, and have its directory
+    /// watched. `None`, flashed with its cause, when it can't be made.
+    fn make_project_config(&mut self, anchor: &Path, label: &str) -> Option<PathBuf> {
+        let Some(dir) = crate::config::project_file::dir() else {
+            self.state
+                .flash_error("project config: neither $XDG_CONFIG_HOME nor $HOME is set");
+            return None;
+        };
+        // One made since the project's config was read is the project's.
+        let found =
+            crate::config::project_file::find(&crate::config::project_file::scan_dir(&dir), anchor);
+        let made = found.0.map_or_else(
+            || crate::config::project_file::create(&dir, anchor, label),
+            |file| Ok(file.path),
+        );
+        match made {
+            Ok(path) => {
+                self.view.config_watch_gen += 1;
+                self.reload_config();
+                let erred = self
+                    .state
+                    .flash
+                    .as_ref()
+                    .is_some_and(|f| matches!(f.kind, FlashKind::Error));
+                if !erred {
+                    self.state.flash_info(format!(
+                        "project config: {}",
+                        crate::paths::display_tilde(&path)
+                    ));
+                }
+                Some(path)
+            }
+            Err(e) => {
+                self.state.flash_error(format!("project config: {e:#}"));
+                None
+            }
+        }
+    }
+}
+
 /// Whether `path` is a `*.toml` directly in the project files' directory,
 /// through a symlink to either: any one may name an open project.
 fn is_project_file(path: &Path) -> bool {

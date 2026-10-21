@@ -202,7 +202,10 @@ const SECTIONS: &[Section] = &[
             ("g w", "jump the focused column to its worktree / repo root"),
             ("g P", "set PROJECT_HOME to current directory"),
             ("g S", "set start dir (target of `) to current directory"),
-            (":project [.|<path>|clear]", "manage PROJECT_HOME"),
+            (
+                ":project [.|<path>|clear|config]",
+                "manage PROJECT_HOME; config: its own config file",
+            ),
             (":startdir [.|<path>]", "manage start directory"),
             (
                 ":name <NEW>",

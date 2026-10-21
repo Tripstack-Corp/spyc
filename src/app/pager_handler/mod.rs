@@ -572,10 +572,17 @@ impl App {
                 crate::app::archive_ops::MaterializeThen::Edit { in_pane: true },
             );
         }
+        self.edit_path_in_pane(&path);
+        Vec::new()
+    }
+
+    /// Open `$VISUAL`/`$EDITOR` on `path` in the top overlay, the bottom pane
+    /// left in view, as `V` does. A missing editor is flashed.
+    pub(super) fn edit_path_in_pane(&mut self, path: &std::path::Path) {
         let argv = shell::resolve_editor();
         if argv.is_empty() {
             self.state.flash_error("no $VISUAL or $EDITOR set");
-            return Vec::new();
+            return;
         }
         let cmd = format!(
             "{} {}",
@@ -583,7 +590,6 @@ impl App {
             shell::shell_quote(&path.display().to_string()),
         );
         self.spawn_top_overlay(&cmd);
-        Vec::new()
     }
 
     /// `D` — open the cursor file in spyc's in-app pager mounted in

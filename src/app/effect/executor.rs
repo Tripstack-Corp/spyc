@@ -100,6 +100,11 @@ impl App {
                         self.state.flash_error(format!("capture input: {e:#}"));
                     }
                 }
+                Effect::EditProjectConfig {
+                    anchor,
+                    label,
+                    file,
+                } => self.edit_project_config(&anchor, &label, file),
                 // A-class: the only side effect of a terminal-title update;
                 // compose + dedup already happened loop-side.
                 Effect::SetTerminalTitle { title } => {
@@ -130,17 +135,7 @@ impl App {
                             .flash_error(format!("mouse: could not set reporting: {e:#}"));
                     }
                 }
-                Effect::Notify { system, osc9, bell } => {
-                    if let Some((summary, body)) = system {
-                        crate::notifications::send(summary, body);
-                    }
-                    if let Some(msg) = osc9 {
-                        crate::notifications::notify_osc9(&msg);
-                    }
-                    if bell {
-                        crate::notifications::ring_bell();
-                    }
-                }
+                Effect::Notify { system, osc9, bell } => notify(system, osc9, bell),
                 // C-class: the chdir de-IO fork (MVU Phase 5). The blocking
                 // listing read runs here in the executor — never in the pure
                 // `apply()` transition that emitted us — then focus + flash via
@@ -423,5 +418,19 @@ impl App {
             Err(e) => format!("save failed: {e}"),
         };
         self.set_active_pager_flash(msg);
+    }
+}
+
+/// Deliver an `Effect::Notify` on each channel it names: the system notifier,
+/// an OSC 9 sequence, the terminal bell.
+fn notify(system: Option<(String, String)>, osc9: Option<String>, bell: bool) {
+    if let Some((summary, body)) = system {
+        crate::notifications::send(summary, body);
+    }
+    if let Some(msg) = osc9 {
+        crate::notifications::notify_osc9(&msg);
+    }
+    if bell {
+        crate::notifications::ring_bell();
     }
 }

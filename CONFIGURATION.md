@@ -56,7 +56,8 @@ A file under `~/.config/spyc/projects/` holds your settings for one project: its
 yours, so it is trusted as `~/.spycrc.toml` is, and it wins over both that and
 the repo's own `.spycrc.toml`: tint each project, give it its own startup tabs,
 bind keys only it needs. The file's name is the project's name. Nothing is ever
-written into the project's directory. Matching, layering and examples:
+written into the project's directory. `:project config` opens it in your
+editor, making it first when there's none. Matching, layering and examples:
 [`docs/config/projects.md`](docs/config/projects.md).
 
 ---
