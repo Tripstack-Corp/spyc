@@ -259,7 +259,8 @@ Multiple tabs, each running an independent pty:
   one, like `npx @openai/codex`, which then runs as written but is that
   agent's tab) opens those tabs at launch, the
   config-driven version of pressing `^a c` once per tab. `spyc -r` restores
-  its saved tabs instead. Yours in `~/.spycrc.toml` open unasked. A
+  its saved tabs instead. Yours in `~/.spycrc.toml`, or in a project's own
+  file under `~/.config/spyc/projects/`, open unasked. A
   project-local `.spycrc.toml` list runs only after you approve it in a
   pop-up (`y` run, `n` never, `Esc` not now). The approval binds to the
   exact commands and cwds, so an edited list asks again. `:startup-tabs`

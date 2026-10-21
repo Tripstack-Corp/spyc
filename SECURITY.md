@@ -43,6 +43,18 @@ SVG / markdown / syntax-highlighting input. A malicious file or a
 hostile child process is a realistic way to reach a parser bug. This
 is what `fuzz/fuzz_targets/` exists for — see the fuzzing caveat.
 
+### Which config files are trusted
+
+A config file can make spyc run commands: a key bound to a shell command,
+startup tabs, the clipboard command, prompt text typed at an agent. spyc honours
+those only from the user's own files, `~/.spycrc.toml` and the per-project files
+under `$XDG_CONFIG_HOME/spyc/projects/`, which sit in the user's config
+directory. A repo's `.spycrc.toml` is a cloned repo's text: its executing
+bindings, `[prompts]` and clipboard command are dropped, and its startup tabs
+run only once the user approves that exact list. A repo can't plant a
+per-project file: spyc reads them only from the user's config directory, and
+writes nothing into a project's. CONFIGURATION.md has the detail.
+
 ### MCP is not a privilege boundary against the connected agent
 
 The MCP read tools take an optional `root` argument to scope a query to

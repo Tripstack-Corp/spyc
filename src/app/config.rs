@@ -19,6 +19,7 @@ impl App {
     /// over the "reloaded" note of the one in view; one in the project in view
     /// wins over both.
     pub fn reload_config(&mut self) {
+        let files = crate::config::project_file::scan();
         let active = self.state.active;
         let others: Vec<ProjectId> = self
             .state
@@ -28,19 +29,13 @@ impl App {
             .collect();
         let mut problem = None;
         for id in others {
-            let flash = self.in_project(id, |app| {
-                app.reload_project_config();
-                app.state.flash.take()
-            });
-            if let Some(mut flash) = flash.filter(|f| matches!(f.kind, FlashKind::Error))
+            if let Some(flash) = self.reload_elsewhere(id, &files, true)
                 && problem.is_none()
             {
-                let label = self.state.label_of(id).unwrap_or_default();
-                flash.text = format!("{label}: {}", flash.text);
                 problem = Some(flash);
             }
         }
-        self.reload_project_config();
+        self.reload_project_config(&files, true);
         let users_problem = self
             .state
             .flash
@@ -55,23 +50,130 @@ impl App {
         self.reload_init_lua(false);
     }
 
-    /// Reload the active project's config. The project rc is read from its
-    /// **start dir**, not the directory the user has browsed into
-    /// (`listing.dir`): otherwise `^R` while sitting in a hostile directory
-    /// would load that directory's `.spycrc.toml`, re-opening the very
-    /// keypress-RCE vector that `load_default`'s project-trust gating closes.
-    /// (Executing project bindings are dropped regardless; pinning the dir
-    /// keeps even the cosmetic settings anchored to the project.)
-    fn reload_project_config(&mut self) {
-        match Config::load_default(&self.state.active_project().start_dir) {
-            Ok(new_config) => self.adopt_config(new_config),
+    /// Reload project `id`, out of view, as [`Self::reload_project_config`]
+    /// does, and return its problem as an error flash named for it. The flash
+    /// the user was reading stays theirs.
+    fn reload_elsewhere(
+        &mut self,
+        id: ProjectId,
+        files: &[crate::config::project_file::Entry],
+        announce: bool,
+    ) -> Option<super::FlashMessage> {
+        let flash = self.in_project(id, |app| {
+            app.reload_project_config(files, announce);
+            app.state.flash.take()
+        });
+        let mut flash = flash.filter(|f| matches!(f.kind, FlashKind::Error))?;
+        let label = self.state.label_of(id).unwrap_or_default();
+        flash.text = format!("{label}: {}", flash.text);
+        Some(flash)
+    }
+
+    /// Reload the active project's config, from `files` the user's own file
+    /// for it. The project rc is read from its **start dir**, not the
+    /// directory the user has browsed into (`listing.dir`): otherwise `^R`
+    /// while sitting in a hostile directory would load that directory's
+    /// `.spycrc.toml`, re-opening the very keypress-RCE vector that
+    /// `load_default`'s project-trust gating closes. (Executing project
+    /// bindings are dropped regardless; pinning the dir keeps even the
+    /// cosmetic settings anchored to the project.) `announce` says "reloaded
+    /// N"; a problem is said either way.
+    fn reload_project_config(
+        &mut self,
+        files: &[crate::config::project_file::Entry],
+        announce: bool,
+    ) {
+        let (start_dir, anchor) = self.state.active_project().config_inputs();
+        self.state.active_project_mut().config_key = Some((start_dir.clone(), anchor.clone()));
+        match Config::load_for_project(&start_dir, &anchor, files) {
+            Ok(new_config) if announce => self.adopt_config(new_config),
+            Ok(new_config) => {
+                let warnings = self.install_config(new_config, true);
+                let mut keymap = std::mem::take(&mut self.state.active_project_mut().user_keymap);
+                self.install_lua_maps(&mut keymap);
+                self.state.active_project_mut().user_keymap = keymap;
+                if !warnings.is_empty() {
+                    self.state
+                        .flash_error(format!("config: {}", warnings.join("; ")));
+                }
+            }
             Err(e) => self.state.flash_error(format!("config error: {e:#}")),
         }
     }
 
-    /// Put a freshly loaded config in force: keymap, theme, masks, and what
-    /// `:agent hud` chose unless the file changed `agent_hud` itself.
+    /// Read again, quietly, the config of each project whose start directory
+    /// or anchor moved since its config was read (`Project::config_key`):
+    /// `Space P`, `:project`, `gS` and `-r` re-homing a project bring in the
+    /// files that name its new place, unless the same files would be read
+    /// (`Space P` with the start dir unchanged and no other file naming the
+    /// new home), when only the key moves. A problem flashes, named for a
+    /// project out of view. Whether anything was read, for a redraw.
+    pub(super) fn settle_project_configs(&mut self) -> bool {
+        let moved: Vec<ProjectId> = self
+            .state
+            .open_projects()
+            .filter(|p| {
+                p.config_key
+                    .as_ref()
+                    .is_some_and(|k| *k != p.config_inputs())
+            })
+            .map(|p| p.id)
+            .collect();
+        if moved.is_empty() {
+            return false;
+        }
+        let files = crate::config::project_file::scan();
+        let mut read = false;
+        for id in moved {
+            let Some(project) = self.state.project(id) else {
+                continue;
+            };
+            let ((start_dir, anchor), key) = (project.config_inputs(), project.config_key.clone());
+            // The same files would be read: only the key moves.
+            let file = crate::config::project_file::find(&files, &anchor).0;
+            if key
+                .as_ref()
+                .is_some_and(|(read_at, _)| *read_at == start_dir)
+                && file.map(|f| f.path) == project.config.project.as_ref().map(|f| f.path.clone())
+            {
+                if let Some(project) = self.state.open_projects_mut().find(|p| p.id == id) {
+                    project.config_key = Some((start_dir, anchor));
+                }
+                continue;
+            }
+            read = true;
+            if id == self.state.active {
+                self.reload_project_config(&files, false);
+            } else if let Some(flash) = self.reload_elsewhere(id, &files, false) {
+                self.state.flash = Some(flash);
+            }
+        }
+        read
+    }
+
+    /// Put a freshly loaded config in force, saying how many files it read,
+    /// or what was wrong in them.
     pub(super) fn adopt_config(&mut self, new_config: Config) {
+        let count = new_config.sources.len();
+        let warnings = self.install_config(new_config, false);
+        // Non-fatal problems (bad scan-pattern regex, etc.) win over
+        // the success note so a typo is visible the moment the rc is
+        // saved, not only under --debug.
+        if warnings.is_empty() {
+            self.state
+                .flash_info(format!("reloaded {count} config file(s)"));
+        } else {
+            self.state
+                .flash_error(format!("config: {}", warnings.join("; ")));
+        }
+    }
+
+    /// Put `new_config` in force: keymap, theme, masks, and what `:agent hud`
+    /// chose unless the file changed `agent_hud` itself. Returns its warnings.
+    /// A `moved` project's read, which no edit asked for, keeps the user's
+    /// `:agent hud` choice whatever the files say, and the columns' mask
+    /// toggles while the masks the files set are the same.
+    fn install_config(&mut self, new_config: Config, moved: bool) -> Vec<String> {
         self.state.active_project_mut().user_keymap =
             UserKeymap::from_bindings(new_config.bindings.clone());
         // The theme is the project in view's; another project's colours take
@@ -86,30 +188,28 @@ impl App {
         // the rc file reverts the group to defaults on reload.
         let mut masks = IgnoreMasks::default();
         masks.apply_config(&new_config.ignore_masks);
-        let count = new_config.sources.len();
         let warnings = new_config.warnings.clone();
-        let before_hud = self.state.active_project().config.pane.agent_hud;
-        self.state
-            .active_project_mut()
-            .pane
-            .agent_hud
-            .config_reloaded(before_hud, new_config.pane.agent_hud);
+        let before = &self.state.active_project().config;
+        let (before_hud, same_masks) = (
+            before.pane.agent_hud,
+            before.ignore_masks == new_config.ignore_masks,
+        );
+        if !moved {
+            self.state
+                .active_project_mut()
+                .pane
+                .agent_hud
+                .config_reloaded(before_hud, new_config.pane.agent_hud);
+        }
         self.state.active_project_mut().config = new_config;
-        let sides: Vec<_> = self.state.active_sides().collect();
-        for side in sides {
-            self.state.col_mut(side).masks = masks.clone();
-            self.state.rebuild_rows_for(side);
+        if !(moved && same_masks) {
+            let sides: Vec<_> = self.state.active_sides().collect();
+            for side in sides {
+                self.state.col_mut(side).masks = masks.clone();
+                self.state.rebuild_rows_for(side);
+            }
         }
-        // Non-fatal problems (bad scan-pattern regex, etc.) win over
-        // the success note so a typo is visible the moment the rc is
-        // saved, not only under --debug.
-        if warnings.is_empty() {
-            self.state
-                .flash_info(format!("reloaded {count} config file(s)"));
-        } else {
-            self.state
-                .flash_error(format!("config: {}", warnings.join("; ")));
-        }
+        warnings
     }
 
     /// Candidate config paths — used by the file watcher. We watch the
@@ -138,12 +238,22 @@ impl App {
         if let Some(init) = crate::state::config_root().map(|r| r.join("init.lua")) {
             out.push(init);
         }
+        // Each project's own file, or the one `:project config` would make:
+        // a new file may name any project, so the directory is watched.
+        if let Some(dir) = crate::config::project_file::dir() {
+            out.extend(
+                self.state
+                    .open_projects()
+                    .map(|p| dir.join(format!("{}.toml", p.label()))),
+            );
+        }
         out
     }
 
     /// The parent dirs of [`Self::candidate_config_paths`], each once: what
     /// the watch worker watches, since an editor that replaces a file on save
-    /// removes the inode a file watch would follow.
+    /// removes the inode a file watch would follow. One that doesn't exist yet
+    /// is watched once it does: the worker retries it on every resend.
     pub(super) fn config_parents(&self) -> Vec<PathBuf> {
         let mut out: Vec<PathBuf> = Vec::new();
         for parent in self
@@ -164,6 +274,7 @@ impl App {
                 .state
                 .open_projects()
                 .any(|p| p.config.sources.iter().any(|c| c == path))
+            || is_project_file(path)
     }
 
     /// True iff `path` is the listing directory or anything beneath it
@@ -270,6 +381,19 @@ fn gitdir_status_in(path: &Path, gitdir: Option<&Path>) -> bool {
             .file_name()
             .and_then(|n| n.to_str())
             .is_some_and(|name| matches!(name, "index" | "HEAD"))
+}
+
+/// Whether `path` is a `*.toml` directly in the project files' directory,
+/// through a symlink to either: any one may name an open project.
+fn is_project_file(path: &Path) -> bool {
+    let Some(dir) = crate::config::project_file::dir() else {
+        return false;
+    };
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    path.extension().is_some_and(|x| x == "toml")
+        && path
+            .parent()
+            .is_some_and(|p| p == dir || canonical(p) == canonical(&dir))
 }
 
 #[cfg(test)]

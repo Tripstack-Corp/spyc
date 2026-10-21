@@ -1,15 +1,18 @@
 //! `.spycrc.toml` loader and runtime configuration.
 //!
-//! Two files are consulted in order:
-//!   1. `$HOME/.spycrc.toml` — per-user defaults.
-//!   2. `<cwd>/.spycrc.toml` — per-project overrides (win).
+//! A project's config is three files, each overriding the one before:
+//!   1. `$HOME/.spycrc.toml` — the user's defaults;
+//!   2. `<start dir>/.spycrc.toml` — the repo's own, untrusted;
+//!   3. `$XDG_CONFIG_HOME/spyc/projects/<label>.toml` — the user's for that
+//!      project, matched by its `home` key (`project_file`).
 //!
-//! Both are optional. Anything missing falls back to built-in defaults.
+//! All are optional. Anything missing falls back to built-in defaults.
 //!
 //! See `dsl` for the `map KEY action [args]` line grammar.
 
 pub mod dsl;
 mod load;
+pub mod project_file;
 
 /// Embedded default config template — emitted by `spyc --print-config`.
 /// Every option commented out at its default value, with a one-liner
@@ -89,6 +92,9 @@ pub struct Config {
     /// flash so the user knows part of their config didn't apply —
     /// not buried behind `--debug`.
     pub warnings: Vec<String>,
+
+    /// The user's own file for this project, when one names its home.
+    pub project: Option<project_file::ProjectFile>,
 }
 
 /// Where the status bar lives. Defaults to `Top` (matches stock spyc).
@@ -863,7 +869,7 @@ color_overrides! {
     diff_hunk_fg, diff_file_fg, diff_meta_fg,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IgnoreMask {
     pub group: u8,
@@ -910,6 +916,9 @@ struct FileConfig {
     scan: ScanConfig,
     #[serde(default)]
     prompts: std::collections::BTreeMap<String, String>,
+    /// The project a file under `projects/` configures; read from no other.
+    #[serde(default)]
+    home: Option<String>,
 }
 
 /// On-disk shape of `[scan]`. Holds Quick Select pattern

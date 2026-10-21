@@ -98,8 +98,8 @@
 # claude_transcript_scrollback = false
 # agy_transcript_scrollback = true
 # preview_pasted_images = true
-# Native strip for Codex and Claude Code tabs, off by default. Home config only;
-# no agent setting is changed. Runtime control: :agent hud off|compact|full;
+# Native strip for Codex and Claude Code tabs, off by default. Your own config
+# files only, not a repo's; no agent setting is changed. Runtime control: :agent hud off|compact|full;
 # :agent hud info.
 # agent_hud = "off"
 # When a Claude Code tab's plan windows (5h, 7d) reset: "clock" is your local

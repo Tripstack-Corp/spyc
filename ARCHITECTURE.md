@@ -762,17 +762,20 @@ The debug log is the exception: `spyc_debug!` output goes to
 `/tmp/spyc-debug-<ts>.log` (timestamped per run, not under XDG) so
 a log can be attached to a bug report without digging in state dirs.
 
-Configuration lives at `~/.spycrc.toml` (user) and
-`<cwd>/.spycrc.toml` (project, wins). Both are watched for live
-reload. `spyc --print-config` emits a fully-commented default
-template suitable for `>` redirect.
+Configuration lives at `~/.spycrc.toml` (user), `<cwd>/.spycrc.toml`
+(the repo's, wins) and `$XDG_CONFIG_HOME/spyc/projects/<label>.toml`
+(the user's for one project, matched by its `home` key, wins over
+both; `config::project_file`). All are watched for live reload.
+`spyc --print-config` emits a fully-commented default template
+suitable for `>` redirect.
 
-The project file is **untrusted** (spyc is routinely pointed at
+The repo's file is **untrusted** (spyc is routinely pointed at
 hostile content): its cosmetic/behavioural settings and plain
 rebindings are honoured, but *executing* keymap bindings (`unix`
 shell commands, `jump`), `[prompts]` and the `[clipboard] command` a
-yank runs are dropped — those take effect only from `~/.spycrc.toml` —
-and a scan pattern's `url` is kept only when it opens an http(s) page.
+yank runs are dropped — those take effect only from the user's own
+files, which live in directories no repo writes to — and a scan
+pattern's `url` is kept only when it opens an http(s) page.
 Started in `$HOME`, the project file is the user file, read once and
 trusted. `[pane]` startup tabs spawn their commands at launch
 with no keypress, so a project file's list is held apart

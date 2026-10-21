@@ -7,8 +7,9 @@ Everything spyc reads at runtime, with examples. Two surfaces:
 - **`~/.config/spyc/`** — Lua: `map KEY lua <name>` scripts and an optional
   `init.lua` for keybinds, `:` commands, and event hooks.
 
-Five sections have their own page under `docs/config/`: the keymap DSL, Lua,
-the mouse, notifications and the agent HUD. Each keeps a summary here.
+Six sections have their own page under `docs/config/`: the keymap DSL, Lua,
+the mouse, notifications, the agent HUD and per-project files. Each keeps a
+summary here.
 
 The fastest start: `spyc --print-config` prints a fully-commented template with
 every option at its default — pipe it to a file and uncomment what you want:
@@ -22,18 +23,22 @@ spyc --print-config > ~/.spycrc.toml
 | File | Scope |
 |------|-------|
 | `~/.spycrc.toml` | per-user defaults |
-| `<project>/.spycrc.toml` | per-project overrides — **win over** the user file |
+| `<project>/.spycrc.toml` | a repo's own settings — **win over** the user file |
+| `~/.config/spyc/projects/<label>.toml` | your settings for one project, matched by its `home` — **win over** both ([per-project files](docs/config/projects.md)) |
 | `~/.config/spyc/lua/<name>.lua` | scripts run by `map KEY lua <name>` |
 | `~/.config/spyc/init.lua` | registers keybinds / `:` commands / event hooks |
 
-Both `.spycrc.toml` files are **watched** — edits take effect **without a
-restart** (`:lua reload` or `^R` re-runs `init.lua`). Project settings layer on
-top of user settings per-field, so a bare `[notify]` in a project file doesn't
-clobber your user defaults.
+Every `.spycrc.toml` and project file is **watched** — edits take effect
+**without a restart** (`:lua reload` or `^R` re-runs `init.lua`). Each layers on
+the one before per-field, so a bare `[notify]` in a project file doesn't clobber
+your user defaults. `~/.config/spyc` is `$XDG_CONFIG_HOME/spyc` when that is set.
+
+**Your own files** are `~/.spycrc.toml` and those under
+`~/.config/spyc/projects/`; a repo's `.spycrc.toml` is someone else's text.
 
 **Security:** the *executing* keymap verbs (`unix`, `command`, `lua`, `jump`,
 `prompt`), and the four [actions](docs/config/keymap.md#action-names) that type at the pane, only take
-effect from **`~/.spycrc.toml`** — a project-local `.spycrc.toml` in an untrusted
+effect from **your own files** — a project-local `.spycrc.toml` in an untrusted
 clone can't bind a key to run code, and its
 [`[prompts]`](#prompt-templates--prompts) are ignored, so a repo can't choose
 what gets typed at your agent. Nor can it name the
@@ -43,6 +48,16 @@ page. A project file's
 [startup tabs](#startup-tabs--pane-tabs) run their commands at launch with no
 keypress at all, so they open only after you approve that exact list, and an
 edited list asks again. Lua scripts load only from `~/.config/spyc/`.
+
+## Per-project files
+
+A file under `~/.config/spyc/projects/` holds your settings for one project: its
+`home` key names the project, and the rest is `.spycrc.toml`'s own schema. It is
+yours, so it is trusted as `~/.spycrc.toml` is, and it wins over both that and
+the repo's own `.spycrc.toml`: tint each project, give it its own startup tabs,
+bind keys only it needs. The file's name is the project's name. Nothing is ever
+written into the project's directory. Matching, layering and examples:
+[`docs/config/projects.md`](docs/config/projects.md).
 
 ---
 
@@ -58,7 +73,7 @@ status_flags = "auto"          # status-bar state: only what differs, short when
 
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
-tabs = ["claude", "zsh"]       # open these tabs at launch (~/.spycrc.toml only; see below)
+tabs = ["claude", "zsh"]       # open these tabs at launch (a repo's list asks first; see below)
 new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); or "project_home" (PROJECT_HOME), "browse_dir" (the focused column's dir)
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
                                       # (only decides which comes up FIRST — `T` swaps in the view, and the
@@ -66,7 +81,7 @@ claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript i
 codex_mcp = true               # register spyc's MCP server in codex's user config; only $HOME's rc decides
 codex_daemon = false           # false: codex panes run `--no-daemon`, so their hooks + MCP reach the spyc that launched them
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
-agent_hud = "off"             # "off", "compact", or "full"; only $HOME's rc decides
+agent_hud = "off"             # "off", "compact", or "full"; only your own files decide
 agent_hud_resets = "clock"    # when a plan window resets: "clock" (3:40pm, Thu 9am) or "countdown" (2h05m)
 
 [yank]
@@ -197,8 +212,8 @@ agent = "codex"             # claude | codex | agy | zot
   the command already names the agent (`codex -m o3`), `agent` changes nothing.
   An unknown name is a config error.
 
-- **A project's own tabs need your approval first.** Yours, in
-  `~/.spycrc.toml`, open unasked. A project-local `.spycrc.toml` can declare a
+- **A project's own tabs need your approval first.** Yours, in your own
+  files, open unasked, a project file's in place of `~/.spycrc.toml`'s. A project-local `.spycrc.toml` can declare a
   list too, a repo's own claude + dev-server set for instance. Those commands
   aren't yours, so at launch spyc lists every one in a pop-up:
   - **`y`** approves that list: it opens now and on later launches, in place of
@@ -266,8 +281,8 @@ verbatim — whitespace-split into argv, same "no shell features" contract as
 redirection — and pipes the yanked text to its stdin. `via`/OSC-52 are skipped
 entirely, not layered underneath. `$SPYC_CLIPBOARD` is the env-var form and wins
 over the config key if both are set, matching how other spyc envs layer over
-static config. Only `~/.spycrc.toml` may set `command`: a project file's is
-ignored with a warning, since it would run the repo's command on a keypress.
+static config. Only your own files may set `command`: a repo's is ignored with
+a warning, since it would run the repo's command on a keypress.
 
 ## Notifications — `[notify]`
 
@@ -413,7 +428,7 @@ An uppercase label hands the filled `url` to your system opener, so a project
 `.spycrc.toml`'s template is kept only when it opens a web page (`http://` or
 `https://`). One naming a local file (`./{}.command`, `file://…`) would launch a
 program from the repo, so it is dropped with a warning; the pattern still labels
-and yanks. `~/.spycrc.toml` may use any template.
+and yanks. Your own files may use any template.
 
 ---
 
@@ -464,15 +479,15 @@ path that isn't valid UTF-8, since it can't be typed as itself.
 
 `:prompt <name>` types one without a key, and a bare `:prompt` lists them.
 
-**`[prompts]` loads only from `~/.spycrc.toml`.** A template is text typed at
-your agent, so a project-local file that defines one is ignored with a warning,
+**`[prompts]` loads only from your own files.** A template is text typed at
+your agent, so a repo's `.spycrc.toml` that defines one is ignored with a warning,
 and `prompt` is one of the executing verbs.
 
 ---
 
 ## Keymap — the `keymap` DSL
 
-`keymap = [ ... ]` holds one binding per string. `map <KEY> <action>` binds any built-in action by name (`map <F8> harpoon_jump =2` gives one a parameter); `unix`, `command`, `lua`, `prompt`, `patternpick` and `jump` bind the other forms; `unmap <KEY>` silences a key. Only `~/.spycrc.toml` may bind a form that runs something. The forms, the reserved `^a` / `^w` prefixes, and every action name: [`docs/config/keymap.md`](docs/config/keymap.md).
+`keymap = [ ... ]` holds one binding per string. `map <KEY> <action>` binds any built-in action by name (`map <F8> harpoon_jump =2` gives one a parameter); `unix`, `command`, `lua`, `prompt`, `patternpick` and `jump` bind the other forms; `unmap <KEY>` silences a key. Only your own files may bind a form that runs something. The forms, the reserved `^a` / `^w` prefixes, and every action name: [`docs/config/keymap.md`](docs/config/keymap.md).
 
 ---
 

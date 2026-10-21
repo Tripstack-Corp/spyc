@@ -3,8 +3,9 @@
 Part of [Configuring spyc](../../CONFIGURATION.md).
 
 The native agent strip, for Codex, Claude Code, and Antigravity tabs, is **off
-by default**. Set `agent_hud = "compact"` or `"full"` in `~/.spycrc.toml`;
-project-local values are ignored. `:agent hud off|compact|full` chooses for the
+by default**. Set `agent_hud = "compact"` or `"full"` in `~/.spycrc.toml`, or
+for one project in its own file under `~/.config/spyc/projects/`; a repo's
+`.spycrc.toml` values are ignored. `:agent hud off|compact|full` chooses for the
 session: the choice outranks the file, `spyc -r` brings it back, and a config
 reload keeps it unless the reload changes `agent_hud` itself. `:agent hud info`
 (or `dump`, or a double-click on the strip) names which one is in force and

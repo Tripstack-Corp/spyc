@@ -119,8 +119,8 @@ pub enum BoundAction {
     /// `map KEY command <name [args]>` — run a `:` command on keypress (e.g.
     /// `command graveyard`). The string is dispatched exactly like typed `:`
     /// input, so it can reach the `:!`/`:;` shell symbols — which is why this
-    /// is [`is_executing`](Self::is_executing) (only `$HOME/.spycrc.toml` may
-    /// bind it). Lets a user re-bind any feature that ships only as a `:`
+    /// is [`is_executing`](Self::is_executing) (only the user's own config
+    /// files may bind it). Lets a user re-bind any feature that ships only as a `:`
     /// command (graveyard, activity, …).
     Command(String),
     /// `map KEY lua <name>` — run the Lua script `<config_root>/lua/<name>.lua`

@@ -303,6 +303,13 @@ impl App {
             self.run_effects(startup_fx, terminal, foreground_exec);
         }
 
+        // A project re-homed (`Space P`, `:project`, `gS`, a `spyc -c` one
+        // just above, `-r`) reads the files that name its new place, before
+        // the mouse mode reads `[mouse]` below.
+        if self.settle_project_configs() {
+            ctx.draw.mark(3);
+        }
+
         // Reconcile the terminal's mouse mode against `[mouse] capture`. One
         // bool compare — emits nothing when they agree, so idle stays 0 dps
         // and this covers startup / `:mouse` / config reload /

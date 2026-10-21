@@ -1100,6 +1100,18 @@ PR, except step 5's stages:
      each claim's owner tab. The HUD's `conn:N` stays a total, and
      `:why-status` stays the active tab's.
 7. **The per-project config files** under `~/.config/spyc/projects/` (§1f).
+   - **Read (pair 7a).** `config::project_file` lists the directory once per
+     load and matches each project's anchor against every file's `home`
+     (`~` or absolute; a gone home is skipped quietly). The first by name
+     wins a home, with a warning naming every file that claims it.
+     `Config::load_for_project(start_dir, anchor, files)` layers the user's
+     rc, the repo's rc, then the file, trusted; a trusted file's startup
+     tabs clear a repo's held for consent. The file's stem is
+     `Project::label()`. `Project::config_key` records the
+     `(start_dir, anchor)` a load was attempted for, and
+     `settle_project_configs` reads again, quietly, a project that moved
+     (`Space P`, `:project`, `gS`, `-r`), once even when it fails. Under
+     test the directory resolves only through `state::with_config_root`.
 8. **Recently-closed projects in the switcher.**
 
 Steps 1 and 2 are invisible and land first. Steps 3-6 are the release.

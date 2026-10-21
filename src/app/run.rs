@@ -785,7 +785,8 @@ impl App {
     /// re-emit. Returns `None` when the title is unchanged.
     pub(super) fn term_title_effect(&mut self) -> Option<Effect> {
         let session = self.state.session_name.as_deref();
-        let title = if self.state.open_projects().nth(1).is_some() {
+        let named = self.state.active_project().config.project.is_some();
+        let title = if named || self.state.open_projects().nth(1).is_some() {
             let label = self.state.active_project().label();
             crate::term_title::titled(&label, self.blocked_elsewhere(), session)
         } else {

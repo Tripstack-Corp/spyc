@@ -226,6 +226,9 @@ struct Slots {
     preview: Option<PathBuf>,
     /// The config files' parent dirs.
     config: Vec<PathBuf>,
+    /// Those of them that didn't exist when last synced, so not watched: a
+    /// resend tries them again.
+    config_missing: Vec<PathBuf>,
 }
 
 impl Slots {
@@ -346,7 +349,8 @@ impl Slots {
     }
 
     /// Watch exactly `parents` as config dirs. One no longer named is
-    /// unwatched, and a new one watched, unless a slot covers it either way.
+    /// unwatched, and a new one watched, unless a slot covers it either way;
+    /// one that didn't exist last time is tried again.
     fn sync_config(&mut self, w: &mut impl Watches, parents: Vec<PathBuf>) {
         let mut wanted: Vec<PathBuf> = Vec::new();
         for parent in parents {
@@ -360,9 +364,19 @@ impl Slots {
                 w.unwatch(gone);
             }
         }
-        for new in self.config.iter().filter(|p| !old.contains(p)) {
-            if !self.covers(new) && new.is_dir() {
+        let missing = std::mem::take(&mut self.config_missing);
+        for new in self
+            .config
+            .iter()
+            .filter(|p| !old.contains(p) || missing.contains(p))
+        {
+            if self.covers(new) {
+                continue;
+            }
+            if new.is_dir() {
                 w.watch(new, RecursiveMode::NonRecursive);
+            } else {
+                self.config_missing.push(new.clone());
             }
         }
     }
@@ -659,6 +673,20 @@ mod tests {
         listing_at(&mut slots, &mut w, &start);
         slots.sync_config(&mut w, vec![start.clone()]);
         assert_eq!(w.0.get(&start), Some(&RecursiveMode::Recursive));
+    }
+
+    /// A config dir that doesn't exist yet is watched on the first resend
+    /// after it does, though the set sent is the same.
+    #[test]
+    fn a_config_dir_made_later_is_watched_on_a_resend() {
+        let tmp = tempfile::tempdir().unwrap();
+        let later = tmp.path().join("later");
+        let (mut slots, mut w) = (Slots::default(), OnePerPath::default());
+        slots.sync_config(&mut w, vec![later.clone()]);
+        assert_eq!(w.0.get(&later), None);
+        std::fs::create_dir(&later).unwrap();
+        slots.sync_config(&mut w, vec![later.clone()]);
+        assert_eq!(w.0.get(&later), Some(&RecursiveMode::NonRecursive));
     }
 
     /// A config dir no longer named is unwatched, unless a column stands in it.

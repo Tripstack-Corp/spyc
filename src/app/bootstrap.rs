@@ -56,17 +56,7 @@ impl App {
         let git_info: Option<String> = None;
         let git_files: std::collections::HashMap<String, crate::ui::list_view::GitFileStatus> =
             std::collections::HashMap::new();
-        let (config, load_note) = match Config::load_default(&cwd) {
-            Ok(c) => {
-                let note = if c.sources.is_empty() {
-                    None
-                } else {
-                    Some(format!("loaded {} config file(s)", c.sources.len()))
-                };
-                (c, note)
-            }
-            Err(e) => (Config::default(), Some(format!("config error: {e}"))),
-        };
+        let (config, load_note) = launch_config(&cwd);
         let user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         let theme = Theme::default().with_overrides(&config.colors);
         // Resolve the render colour depth: `--color` (cli_color) > `[layout]
@@ -159,8 +149,15 @@ impl App {
             harpoon,
             pending_ghosts: std::collections::HashSet::new(),
         };
-        let project =
-            state::Project::new(project_home, left, cwd, config, user_keymap, initial_pane());
+        let mut project = state::Project::new(
+            project_home,
+            left,
+            cwd.clone(),
+            config,
+            user_keymap,
+            initial_pane(),
+        );
+        project.config_key = Some((cwd.clone(), cwd));
         let active = project.id;
         let app_state = state::AppState {
             projects: vec![project],
@@ -361,6 +358,20 @@ impl App {
                 "spyc: you're already inside a spyc $ subshell — exit or ^D to get back",
             );
         }
+    }
+}
+
+/// The launch project's config, read at `cwd` as for any project, with the
+/// user's own file for it, and the note a launch flashes about it.
+fn launch_config(cwd: &std::path::Path) -> (Config, Option<String>) {
+    let files = crate::config::project_file::scan();
+    match Config::load_for_project(cwd, cwd, &files) {
+        Ok(c) => {
+            let note = (!c.sources.is_empty())
+                .then(|| format!("loaded {} config file(s)", c.sources.len()));
+            (c, note)
+        }
+        Err(e) => (Config::default(), Some(format!("config error: {e}"))),
     }
 }
 
