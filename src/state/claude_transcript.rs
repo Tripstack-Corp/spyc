@@ -84,8 +84,20 @@ fn choose_session(
         .map(|(_, id)| id.clone())
 }
 
+/// A record the view never renders, told from its opening bytes so it's passed
+/// over unparsed. Claude Code writes these (`api-request`, `mode`, …) with
+/// `type` first, and they can be most of a session's bytes; the records the
+/// view renders lead with other keys, so they reach the parser.
+fn unrendered_record(line: &[u8]) -> bool {
+    let Some(rest) = line.trim_ascii_start().strip_prefix(br#"{"type":""#) else {
+        return false;
+    };
+    !(rest.starts_with(br#"user""#) || rest.starts_with(br#"assistant""#))
+}
+
 /// Parse a Claude conversation JSONL into styled pager lines, in
-/// chronological order. Returns empty on read failure. Assistant prose
+/// chronological order, keeping the newest [`crate::state::MAX_TRANSCRIPT_LINES`]
+/// of them. Returns empty on read failure. Assistant prose
 /// is rendered through the Markdown viewer (`width` hints prose/table
 /// reflow); user prompts and tool calls stay plain, agent-styled.
 pub fn render_transcript(
@@ -94,10 +106,14 @@ pub fn render_transcript(
     width: Option<usize>,
     show_tool_calls: bool,
 ) -> Vec<Line<'static>> {
-    let Ok(text) = crate::state::read_tail_lossy(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
-    else {
+    let Some(records) = crate::state::jsonl_records(
+        path,
+        crate::state::MAX_TRANSCRIPT_RECORD_BYTES,
+        unrendered_record,
+    ) else {
         return Vec::new();
     };
+    let keep = crate::state::MAX_TRANSCRIPT_LINES;
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
@@ -109,8 +125,12 @@ pub fn render_transcript(
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut last_was_blank = true;
 
-    for line in text.lines() {
-        let line = line.trim();
+    for record in records {
+        // The newest lines win; trimming in batches keeps it linear.
+        if out.len() >= 2 * keep {
+            out.drain(..out.len() - keep);
+        }
+        let line = record.trim();
         if line.is_empty() {
             continue;
         }
@@ -190,6 +210,9 @@ pub fn render_transcript(
             }
             _ => {}
         }
+    }
+    if out.len() > keep {
+        out.drain(..out.len() - keep);
     }
     out
 }
@@ -305,7 +328,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red: ^a v shows only the last 4 MB of the file, unrendered records included"]
     fn the_first_prompt_shows_however_much_the_session_logged_beside_it() {
         let mut jsonl = prompt("the first prompt");
         for _ in 0..600 {
@@ -325,7 +347,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red: ^a v keeps every line of a transcript, however long"]
     fn a_long_conversation_keeps_its_newest_lines_within_a_scrollback() {
         let jsonl: String = (0..15_000)
             .map(|i| prompt(&format!("prompt {i}")))
@@ -344,6 +365,16 @@ mod tests {
             !flat.iter().any(|l| l.contains("prompt 0")),
             "the oldest prompts go first"
         );
+    }
+
+    #[test]
+    fn a_record_the_view_renders_is_never_passed_over_unparsed() {
+        assert!(unrendered_record(br#"{"type":"api-request","body":"x"}"#));
+        assert!(unrendered_record(br#"  {"type":"mode","mode":"default"}"#));
+        assert!(!unrendered_record(br#"{"type":"user","message":{}}"#));
+        assert!(!unrendered_record(br#"{"type":"assistant","message":{}}"#));
+        assert!(!unrendered_record(br#"{"parentUuid":null,"type":"user"}"#));
+        assert!(!unrendered_record(b"not json at all"));
     }
 
     #[test]
