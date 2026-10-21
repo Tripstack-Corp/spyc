@@ -196,7 +196,7 @@ impl App {
             self.switch_project(id);
             return;
         }
-        let (id, problem) = self.create_project(dir);
+        let (id, problem) = self.create_project(dir, dir);
         self.switch_project(id);
         self.write_context();
         let label = self.state.label_of(id).unwrap_or_default();
@@ -220,21 +220,31 @@ impl App {
 
     /// A new project homed and started at `dir`, out of view, and what was
     /// wrong with its config, if anything:
-    /// - its config read from `dir` as a launch there reads it, else the
-    ///   defaults;
+    /// - its config read from `dir` as a launch there reads it, with the
+    ///   user's own file for `anchor` (the home a restore gives it, else
+    ///   `dir`), else the defaults;
     /// - its keymap that config's bindings and `init.lua`'s maps;
     /// - column `a` at `dir`, unread, since the switch to it reads it on a
     ///   worker, with its repo root, harpoon and branch resolved now, so the
     ///   switch's git walk has a root to walk.
-    pub(super) fn create_project(&mut self, dir: &Path) -> (ProjectId, Option<String>) {
-        let (config, problem) = match Config::load_default(dir) {
-            Ok(config) => (config, None),
+    pub(super) fn create_project(
+        &mut self,
+        dir: &Path,
+        anchor: &Path,
+    ) -> (ProjectId, Option<String>) {
+        let files = crate::config::project_file::scan();
+        let (config, problem) = match Config::load_for_project(dir, anchor, &files) {
+            Ok(config) => {
+                let warned = (!config.warnings.is_empty())
+                    .then(|| format!("config: {}", config.warnings.join("; ")));
+                (config, warned)
+            }
             Err(e) => (Config::default(), Some(format!("config error: {e:#}"))),
         };
         let mut user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         self.install_lua_maps(&mut user_keymap);
         let left = state::Commander::unread_at(dir, &config);
-        let project = state::Project::new(
+        let mut project = state::Project::new(
             Some(dir.to_path_buf()),
             left,
             dir.to_path_buf(),
@@ -242,6 +252,7 @@ impl App {
             user_keymap,
             super::bootstrap::initial_pane(),
         );
+        project.config_key = Some((dir.to_path_buf(), anchor.to_path_buf()));
         let id = project.id;
         self.state.insert_project(project);
         self.runtime.insert_project(id);

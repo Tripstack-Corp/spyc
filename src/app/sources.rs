@@ -274,7 +274,15 @@ impl App {
         self.drop_gitignored_fs_events(&mut ctx.fs_pending);
         let mut git_event = false;
         let mut preview_event = false;
+        let projects_dir = crate::config::project_file::dir();
         for ev in std::mem::take(&mut ctx.fs_pending) {
+            // The project files' directory appearing in spyc's watched config
+            // dir: resend the config dirs, so the worker watches it now, and
+            // read whatever was written into it before that.
+            if ev.paths.iter().any(|p| Some(p) == projects_dir.as_ref()) {
+                ctx.watched_config.clear();
+                needs_reload = true;
+            }
             git_event |= ev.paths.iter().any(|p| self.is_gitdir_status_path(p));
             preview_event |= ev.paths.iter().any(|p| self.is_preview_path(p));
             // A working-tree edit (any path that is NOT a `.git/index`/`HEAD`

@@ -379,12 +379,12 @@ impl App {
             return;
         }
         let (path, suffix) = self.header_parts();
-        let project_label = self
-            .state
-            .active_project()
-            .home
-            .as_deref()
-            .map(path_basename_display);
+        // The user's own file names the project; else its home, hidden unset.
+        let project = self.state.active_project();
+        let project_label = project.config.project.as_ref().map_or_else(
+            || project.home.as_deref().map(path_basename_display),
+            |file| Some(file.label.clone()),
+        );
         let agent_info = self.active_agent_status();
         let chips = self.project_chips(self.spicy_pulse_color(self.view.agent_anim_frame));
         let line = StatusBar {

@@ -156,7 +156,7 @@ impl App {
         let project = self.state.active_project().config.pane.project_tabs.clone();
         match (arg.trim(), project) {
             ("" | "status", None) => self.state.flash_info(format!(
-                "startup tabs: {user} from ~/.spycrc.toml; this project declares none"
+                "startup tabs: {user} from your own config; this project declares none"
             )),
             ("" | "status", Some(p)) => {
                 let answer = match tab_consent::consent_for(&p.source, &p.tabs) {
@@ -165,7 +165,7 @@ impl App {
                     Consent::Unasked => "not yet answered (asks at launch)",
                 };
                 self.state.flash_info(format!(
-                    "startup tabs: {} declares {} — {answer}; {user} from ~/.spycrc.toml (`:startup-tabs forget` to be asked again)",
+                    "startup tabs: {} declares {} — {answer}; {user} from your own config (`:startup-tabs forget` to be asked again)",
                     crate::paths::display_tilde(&p.source),
                     p.tabs.len()
                 ));

@@ -49,7 +49,8 @@ keymap = [
 ```
 
 > Reminder: `unix` / `command` / `lua` / `jump` / `prompt`, and the actions
-> marked below, only bind from `~/.spycrc.toml`, not a project file.
+> marked below, only bind from your own files (`~/.spycrc.toml` and those
+> under `~/.config/spyc/projects/`), not a repo's `.spycrc.toml`.
 
 ## Action names
 
@@ -137,8 +138,8 @@ verbs above (`down`, `pick`,
 | `resume_pane` | open pane with claude --resume |
 | `pane_focus_down` | focus pane (down) |
 | `pane_focus_up` | focus list (up) |
-| `pane_send_selection` | send selection to pane (`~/.spycrc.toml` only) |
-| `pane_send_prefix` | send literal ^a to pane (`~/.spycrc.toml` only) |
+| `pane_send_selection` | send selection to pane (your own files only) |
+| `pane_send_prefix` | send literal ^a to pane (your own files only) |
 | `pane_grow` | grow pane |
 | `pane_shrink` | shrink pane |
 | `toggle_pane_zoom` | zoom pane (toggle fullscreen) |
@@ -153,8 +154,8 @@ verbs above (`down`, `pick`,
 | `pane_rename_tab` | rename pane tab |
 | `pane_restart_tab` | restart pane tab command |
 | `pane_fork_tab` | fork pane tab's conversation |
-| `pane_pipe_content` | pipe file contents to pane (`~/.spycrc.toml` only) |
-| `pane_pipe_inventory` | pipe inventory contents to pane (`~/.spycrc.toml` only) |
+| `pane_pipe_content` | pipe file contents to pane (your own files only) |
+| `pane_pipe_inventory` | pipe inventory contents to pane (your own files only) |
 | `vsplit_toggle` | vertical split: open / close |
 | `vsplit_toggle_height` | vertical split: full-height / top-only |
 | `vsplit_focus_left` | focus left pane (a) |

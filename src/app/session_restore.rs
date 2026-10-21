@@ -266,7 +266,7 @@ impl App {
         {
             return None;
         }
-        let (id, config_problem) = self.create_project(&at);
+        let (id, config_problem) = self.create_project(&at, saved.anchor());
         let column_problem = self.in_project(id, |app| {
             let landed = app.restore_column_a(saved, false).is_some();
             app.reconcile_harpoon();

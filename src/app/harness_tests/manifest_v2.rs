@@ -671,7 +671,6 @@ fn a_restored_projects_config_error_is_named() {
 /// names is configured by that file as it opens, named for it, though its
 /// start directory is below its home.
 #[test]
-#[ignore = "red: #99 7a, per-project config files"]
 fn a_restored_project_out_of_view_is_configured_by_its_file() {
     let tmp = tempfile::tempdir().unwrap();
     in_temp_home(tmp.path(), |state_root| {
@@ -708,6 +707,46 @@ fn a_restored_project_out_of_view_is_configured_by_its_file() {
             press(&mut app, KeyCode::Char('1'));
             let theirs = homed_at(&app, &other);
             assert_eq!(app.state.label_of(theirs).as_deref(), Some("work"));
+        });
+    });
+}
+
+/// `-r` into the project spyc started in brings in the file that names the
+/// home it restores, at the next settle.
+#[test]
+fn a_restore_into_the_launch_project_reads_its_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    in_temp_home(tmp.path(), |state_root| {
+        let base = std::fs::canonicalize(tmp.path()).unwrap();
+        let (other, config) = (base.join("other"), base.join("config"));
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::create_dir_all(config.join("projects")).unwrap();
+        std::fs::write(
+            config.join("projects").join("work.toml"),
+            format!("home = {:?}\n", other.display().to_string()),
+        )
+        .unwrap();
+        write_v1_decoy(state_root);
+        write_manifest(
+            state_root,
+            504,
+            &manifest(
+                504,
+                "ONE",
+                1_700_000_100,
+                P1,
+                vec![project(P1, &other, &other, Vec::new())],
+            ),
+        );
+        crate::state::with_config_root(&config, || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            // As a launch records its config's inputs.
+            let inputs = app.state.active_project().config_inputs();
+            app.state.active_project_mut().config_key = Some(inputs);
+            picker_lines(&mut app);
+            press(&mut app, KeyCode::Char('1'));
+            assert!(app.settle_project_configs());
+            assert_eq!(app.state.active_project().label(), "work");
         });
     });
 }

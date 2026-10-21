@@ -11,8 +11,8 @@ use super::{
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
 /// attacker-controllable, so its executing keymap bindings, `[prompts]` and
 /// `[clipboard] command` are dropped and its startup tabs await consent;
-/// `Trusted` (`$HOME/.spycrc.toml`, or explicit caller-supplied paths) is
-/// honoured in full.
+/// `Trusted` (`$HOME/.spycrc.toml`, a file under `projects/` in spyc's config
+/// directory, or explicit caller-supplied paths) is honoured in full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Trust {
     Trusted,
@@ -55,6 +55,39 @@ impl Config {
         Self::load_layered(user.as_deref(), &cwd.join(".spycrc.toml"))
     }
 
+    /// A project's config: `load_default`'s two files from `start_dir`, then
+    /// the user's own file for the project, the one of `files` whose `home`
+    /// is `anchor` (`project_file`), trusted and winning over both. What
+    /// `files` says about this project is in `warnings`.
+    pub fn load_for_project(
+        start_dir: &Path,
+        anchor: &Path,
+        files: &[super::project_file::Entry],
+    ) -> anyhow::Result<Self> {
+        let (file, warnings) = super::project_file::find(files, anchor);
+        let mut cfg = match Self::load_default(start_dir) {
+            Ok(cfg) => cfg,
+            // The user's own file for the project, and the name it gives it,
+            // outlast a repo rc this spyc can't read, which is skipped. A
+            // broken `~/.spycrc.toml` is still the error it was.
+            Err(e) if file.is_some() => {
+                let mut cfg = Self::default();
+                if let Some(user) = home_dir().map(|h| h.join(".spycrc.toml")) {
+                    cfg.load_one(&user, Trust::Trusted)?;
+                }
+                cfg.warnings.push(format!("{e:#}; skipped"));
+                cfg
+            }
+            Err(e) => return Err(e),
+        };
+        cfg.warnings.extend(warnings);
+        if let Some(file) = file {
+            cfg.load_file(&file.path, Trust::Trusted, true)?;
+            cfg.project = Some(file);
+        }
+        Ok(cfg)
+    }
+
     /// `home`'s `.spycrc.toml` alone, for a setting whose effect reaches every
     /// project, which a project's rc must not decide.
     pub fn load_home(home: &Path) -> anyhow::Result<Self> {
@@ -93,13 +126,26 @@ impl Config {
     /// Read + parse + merge one config file at the given trust level.
     /// Missing files are a no-op.
     pub(super) fn load_one(&mut self, path: &Path, trust: Trust) -> anyhow::Result<()> {
+        self.load_file(path, trust, false)
+    }
+
+    /// [`Self::load_one`], for a file that may name the project it configures
+    /// (`home`) when `names_home`: only one under `projects/` does.
+    fn load_file(&mut self, path: &Path, trust: Trust, names_home: bool) -> anyhow::Result<()> {
         if !path.is_file() {
             return Ok(());
         }
         let text = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
-        let file: FileConfig = toml::from_str(&text)
+        let mut file: FileConfig = toml::from_str(&text)
             .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+        if file.home.take().is_some() && !names_home {
+            self.warnings.push(format!(
+                "{}: `home` ignored — only a file under projects/ in spyc's config directory \
+                 names a project",
+                path.display()
+            ));
+        }
         self.merge_file(file, path, trust)
     }
 
@@ -114,7 +160,7 @@ impl Config {
                 self.clipboard.command = Some(c);
             } else {
                 self.warnings.push(format!(
-                    "{}: [clipboard] command ignored — only ~/.spycrc.toml may name one",
+                    "{}: [clipboard] command ignored — only your own config files may name one",
                     source.display()
                 ));
             }
@@ -196,6 +242,47 @@ impl Config {
         }
     }
 
+    /// Startup tabs. The two forms are mutually exclusive within one file —
+    /// merging them would hide an ambiguity, so surface it as a hard error at
+    /// load (PANE_STARTUP_TABS_PLAN.md). Whichever form is present REPLACES
+    /// any earlier file's tab list wholesale, a repo's held for consent
+    /// included, so the last file to list tabs wins.
+    ///
+    /// They spawn their commands at launch, so an untrusted rc's list is held
+    /// apart in `project_tabs` and runs only once the user approves it
+    /// (`app::startup_tabs`). A malformed one is warned, not errored: an error
+    /// would drop the trusted $HOME config too.
+    fn merge_startup_tabs(
+        &mut self,
+        tabs: Option<Vec<String>>,
+        tab: Option<Vec<FilePaneTab>>,
+        source: &Path,
+        trust: Trust,
+    ) -> anyhow::Result<()> {
+        let declared = startup_tabs_from(tabs, tab, source);
+        match trust {
+            Trust::Trusted => {
+                if let Some(tabs) = declared? {
+                    self.pane.tabs = tabs;
+                    self.pane.project_tabs = None;
+                }
+            }
+            Trust::Project => match declared {
+                Ok(Some(tabs)) => {
+                    self.pane.project_tabs = Some(ProjectTabs {
+                        source: source.to_path_buf(),
+                        tabs,
+                    });
+                }
+                Ok(None) => {}
+                Err(e) => self
+                    .warnings
+                    .push(format!("{e:#} — project startup tabs ignored")),
+            },
+        }
+        Ok(())
+    }
+
     fn merge_file(
         &mut self,
         mut file: FileConfig,
@@ -229,36 +316,7 @@ impl Config {
         }
 
         self.merge_pane_preferences(&mut file.pane, trust);
-        // Startup tabs: the two forms are mutually exclusive within one
-        // file — merging them would hide an ambiguity, so surface it as a
-        // hard error at load (PANE_STARTUP_TABS_PLAN.md). Whichever form
-        // is present REPLACES any earlier file's tab list wholesale,
-        // matching the other pane fields.
-        //
-        // They spawn their commands at launch, so an untrusted rc's list is
-        // held apart in `project_tabs` and runs only once the user approves
-        // it (`app::startup_tabs`). A malformed one is warned, not errored:
-        // an error would drop the trusted $HOME config too.
-        let declared = startup_tabs_from(file.pane.tabs, file.pane.tab, source);
-        match trust {
-            Trust::Trusted => {
-                if let Some(tabs) = declared? {
-                    self.pane.tabs = tabs;
-                }
-            }
-            Trust::Project => match declared {
-                Ok(Some(tabs)) => {
-                    self.pane.project_tabs = Some(ProjectTabs {
-                        source: source.to_path_buf(),
-                        tabs,
-                    });
-                }
-                Ok(None) => {}
-                Err(e) => self
-                    .warnings
-                    .push(format!("{e:#} — project startup tabs ignored")),
-            },
-        }
+        self.merge_startup_tabs(file.pane.tabs.take(), file.pane.tab.take(), source, trust)?;
 
         // Yank: per-field merge.
         if let Some(b) = file.yank.include_pager_title {
@@ -364,7 +422,7 @@ impl Config {
             self.prompts.extend(file.prompts);
         } else if !file.prompts.is_empty() {
             self.warnings.push(format!(
-                "{}: [prompts] ignored — only ~/.spycrc.toml may define prompt templates",
+                "{}: [prompts] ignored — only your own config files may define prompt templates",
                 source.display()
             ));
         }

@@ -37,7 +37,11 @@ One spyc holds several projects, each with its own columns, pane tabs, config
 and `PROJECT_HOME`. **`Space n`** asks for a directory (pre-filled with the
 focused column's worktree root; `Tab` completes, `~` and `$VAR` expand, and a
 relative path is read against the column) and opens it as a project: its `.spycrc.toml` is read as a launch there would read it, and its
-`[pane] tabs` start the same way, a repo's own list asking first. A directory
+`[pane] tabs` start the same way, a repo's own list asking first. Your own
+settings for a project go in a file under `~/.config/spyc/projects/` whose
+`home` names it: it wins over the repo's file, its tabs open unasked, and its
+file name becomes the project's name
+([per-project files](../config/projects.md)). A directory
 an open project is anchored at is that project's, so `Space n` onto it goes
 there instead, and says so when it is the one you're in. **`Space x`** closes
 the project in view and takes you to the one you were in last, else a

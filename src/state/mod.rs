@@ -386,6 +386,14 @@ pub fn with_config_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> 
     body()
 }
 
+/// Test-only: the root [`with_config_root`] pinned, if any. What a test reads
+/// in place of the real config directory where reading that would leak the
+/// developer's own files into the test.
+#[cfg(test)]
+pub fn config_root_override() -> Option<PathBuf> {
+    CONFIG_ROOT_OVERRIDE.with(|c| c.borrow().clone())
+}
+
 #[cfg(test)]
 mod state_writes_are_atomic {
     //! Persistent state must be replaced via [`crate::fs::write_atomic`], not

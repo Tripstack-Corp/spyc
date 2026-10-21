@@ -43,6 +43,11 @@ pub struct Project {
     /// Tabs a restore into this project refused or couldn't spawn, kept
     /// verbatim on every save of it.
     pub deferred_tabs: Vec<DeferredTab>,
+    /// The `(start_dir, anchor)` its config was last read for, kept even when
+    /// that read failed, so a move of either reads it again once
+    /// (`App::settle_project_configs`). `None` for a config never read from
+    /// files.
+    pub config_key: Option<(PathBuf, PathBuf)>,
 }
 
 impl Project {
@@ -73,13 +78,23 @@ impl Project {
             config,
             user_keymap,
             deferred_tabs: Vec::new(),
+            config_key: None,
         }
     }
 
-    /// What the project is called: its home's last component, else its start
-    /// directory's.
+    /// What the project is called: the name of the user's own file for it
+    /// (`config::project_file`), else its home's last component, else its
+    /// start directory's.
     pub fn label(&self) -> String {
-        crate::state::sessions::label_of(self.anchor())
+        self.config.project.as_ref().map_or_else(
+            || crate::state::sessions::label_of(self.anchor()),
+            |file| file.label.clone(),
+        )
+    }
+
+    /// The `(start_dir, anchor)` its config is read for.
+    pub fn config_inputs(&self) -> (PathBuf, PathBuf) {
+        (self.start_dir.clone(), self.anchor().to_path_buf())
     }
 
     /// Where the project is anchored: its home, else the start directory a
