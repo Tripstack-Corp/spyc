@@ -702,6 +702,66 @@ mod tests {
         }
     }
 
+    /// What follows the chips on the bar stays where it is as the projects'
+    /// agents change, in colour and in mono, at any width: the path starts
+    /// at one column whatever they are doing.
+    #[test]
+    #[ignore = "red: the bar's segments shift as the projects' agents change"]
+    fn the_bar_holds_its_place_as_agents_change() {
+        use crate::ui::project_chips::{ProjectAttention, ProjectChip};
+        for mono in [false, true] {
+            let theme = Theme {
+                mono,
+                ..Theme::default()
+            };
+            for w in [120u16, 40, 30] {
+                let mut starts = std::collections::BTreeSet::new();
+                for attention in [
+                    None,
+                    Some(ProjectAttention::Working),
+                    Some(ProjectAttention::Blocked),
+                ] {
+                    let chips = ProjectChips {
+                        chips: vec![
+                            ProjectChip {
+                                label: "web".into(),
+                                attention,
+                                active: false,
+                            },
+                            ProjectChip {
+                                label: "spyc".into(),
+                                attention: None,
+                                active: true,
+                            },
+                        ],
+                        pulse: Color::Red,
+                    };
+                    let bar = StatusBar {
+                        project_home: None,
+                        session_name: None,
+                        projects: Some(&chips),
+                        path: PATH,
+                        suffix: "",
+                        suffix_short: None,
+                        git_info: None,
+                        agent_info: None,
+                        theme: &theme,
+                        plain_logo: true,
+                    };
+                    let line = bar.build_line(Rect::new(0, 0, w, 1));
+                    let before = line
+                        .spans
+                        .iter()
+                        .take_while(|s| !s.content.trim_start().starts_with("~/"))
+                        .map(|s| dw(&s.content))
+                        .sum::<usize>();
+                    starts.insert(before);
+                }
+                assert_eq!(starts.len(), 1, "mono={mono} w={w}: {starts:?}");
+            }
+        }
+    }
+
     #[test]
     fn plain_logo_replaces_pepper_emoji_with_a_block() {
         // Truecolor: the 🌶️ emoji is present in the rendered header.
