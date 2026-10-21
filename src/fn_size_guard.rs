@@ -55,7 +55,7 @@ const FUNCTION: Rule = Rule {
         ),
         ("src/app/render/overlays.rs::App::render_image_gallery", 129),
         ("src/app/state/apply.rs::AppState::apply", 380),
-        ("src/app/state/dispatch.rs::AppState::dispatch_command", 201),
+        ("src/app/state/dispatch.rs::AppState::dispatch_command", 185),
         ("src/config/load.rs::Config::merge_file", 116),
         ("src/git/diff_model/build.rs::build_index_change_file", 114),
         ("src/git/diff_model/build.rs::build_tree_change_file", 120),

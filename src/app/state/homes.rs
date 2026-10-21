@@ -4,8 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{AppState, Project, ProjectId};
-use crate::app::{Mode, Prompt, PromptKind};
+use super::{AppState, CommandResult, Project, ProjectId};
+use crate::app::{Effect, Mode, Prompt, PromptKind};
 
 impl AppState {
     /// Project `id`'s label, taken from its home, else its start dir; for a
@@ -24,6 +24,28 @@ impl AppState {
         self.open_projects()
             .find(|p| p.id != except && p.anchor() == dir)
             .map(|p| p.id)
+    }
+
+    /// `:project <arg>`: `clear` the home, `config` open the project's own
+    /// config file (`Effect::EditProjectConfig`), anything else re-home onto
+    /// that directory, so `./config` reaches one named `config`.
+    pub fn project_command(&mut self, arg: &str) -> CommandResult {
+        match arg.trim() {
+            "clear" => self.clear_project_home(),
+            "config" => {
+                let project = self.active_project();
+                return CommandResult::Post(vec![Effect::EditProjectConfig {
+                    anchor: project.anchor().to_path_buf(),
+                    label: project.label(),
+                    file: project.config.project.as_ref().map(|f| f.path.clone()),
+                }]);
+            }
+            arg => match self.resolve_dir_arg(arg) {
+                Ok(canon) => self.set_project_home(canon),
+                Err(e) => self.flash_error(format!("project: {e:#}")),
+            },
+        }
+        CommandResult::Handled
     }
 
     /// Re-home the active project to `dir`, refused when another open project

@@ -456,7 +456,6 @@ fn project_dot_slash_config_re_homes_onto_a_config_directory() {
 /// `:project config` is the project's own config file, no longer a directory
 /// named `config`: the project's home stays where it was.
 #[test]
-#[ignore = "red: #99 7b, `:project config`"]
 fn project_config_does_not_re_home_onto_a_config_directory() {
     with_three(|t| {
         std::fs::create_dir_all(t.x_home.join("config")).unwrap();
@@ -469,7 +468,6 @@ fn project_config_does_not_re_home_onto_a_config_directory() {
 /// With no directory named `config`, `:project config` is no error: it hands
 /// the loop the work of opening the file.
 #[test]
-#[ignore = "red: #99 7b, `:project config`"]
 fn project_config_hands_the_loop_the_file_to_open() {
     with_three(|t| {
         let result = t.app.state.dispatch_command("project config");
@@ -484,5 +482,196 @@ fn project_config_hands_the_loop_the_file_to_open() {
             matches!(&result, state::CommandResult::Post(fx) if !fx.is_empty()),
             "{result:?}"
         );
+    });
+}
+
+/// What the loop does with `:project config`'s effect: `App::edit_project_config`.
+fn run_project_config(app: &mut App) {
+    let state::CommandResult::Post(fx) = app.state.dispatch_command("project config") else {
+        panic!("no effect: {:?}", app.flash_text());
+    };
+    for effect in fx {
+        if let Effect::EditProjectConfig {
+            anchor,
+            label,
+            file,
+        } = effect
+        {
+            app.edit_project_config(&anchor, &label, file);
+        }
+    }
+}
+
+/// With no file for the project, `:project config` makes one named for it,
+/// holding its home, opens it in the editor, and reads it: the project goes
+/// by it now.
+#[test]
+fn project_config_makes_the_projects_file_and_opens_it() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+            let file = config.join("projects").join("xproj.toml");
+            let text = std::fs::read_to_string(&file).expect("the file was made");
+            assert!(
+                text.contains(&format!("home = {:?}", t.x_home.display().to_string())),
+                "{text}"
+            );
+            let app = &t.app;
+            assert!(app.runtime.project().top_overlay.is_some(), "no editor");
+            let made = app
+                .state
+                .active_project()
+                .config
+                .project
+                .as_ref()
+                .map(|f| f.path.clone());
+            assert_eq!(made, Some(file), "the file isn't the project's yet");
+            let flash = app.flash_text().unwrap_or_default().to_owned();
+            assert!(
+                flash.starts_with("project config: ") && flash.ends_with("xproj.toml"),
+                "{flash}"
+            );
+        });
+    });
+}
+
+/// A project with a file opens that file, untouched, and makes no other.
+#[test]
+fn project_config_opens_the_projects_existing_file() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let file = project_file(config, "work", &t.x_home, "[colors]\ndir = \"#123456\"\n");
+            let before = std::fs::read_to_string(&file).unwrap();
+            t.app.reload_config();
+            let watch_gen = t.app.view.config_watch_gen;
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+            assert_eq!(t.app.view.config_watch_gen, watch_gen, "it made a file");
+            assert!(t.app.runtime.project().top_overlay.is_some(), "no editor");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+            let files = std::fs::read_dir(config.join("projects")).unwrap().count();
+            assert_eq!(files, 1, "another file was made");
+        });
+    });
+}
+
+/// A file that can't be made flashes with its cause, and no editor opens.
+#[test]
+fn project_config_that_fails_says_why() {
+    with_three(|t| {
+        let config = t.home.join("blocked");
+        std::fs::write(&config, "a file where the directory would be").unwrap();
+        crate::state::with_config_root(&config, || {
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+        });
+        let flash = t.app.flash_text().unwrap_or_default().to_owned();
+        assert!(flash.starts_with("project config: creating "), "{flash}");
+        assert!(t.app.runtime.project().top_overlay.is_none());
+    });
+}
+
+/// Making the projects directory sends the config dirs to the watch worker
+/// again, though their list is the same, so it is watched for the edits to
+/// come.
+#[test]
+fn a_projects_directory_made_by_project_config_is_watched() {
+    with_three(|t| {
+        let config = t.home.join("fresh");
+        crate::state::with_config_root(&config, || {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut ctx = RunCtx::for_test();
+            ctx.watch_tx = Some(tx);
+            t.app.sync_watch(&mut ctx);
+            let sent = |rx: &std::sync::mpsc::Receiver<_>| {
+                rx.try_iter()
+                    .filter(|c| {
+                        matches!(c, super::super::watch::WatchCommand::SyncConfigParents(_))
+                    })
+                    .count()
+            };
+            assert_eq!(sent(&rx), 1);
+            t.app.sync_watch(&mut ctx);
+            assert_eq!(sent(&rx), 0, "nothing new to send");
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+            t.app.sync_watch(&mut ctx);
+            assert_eq!(sent(&rx), 1, "the made directory wasn't sent");
+        });
+    });
+}
+
+/// While an editor is open in the project, `:project config` won't open
+/// another over it, which would end its unsaved work, and makes nothing.
+#[test]
+fn project_config_leaves_an_open_editor_alone() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let wake = t.app.make_pane_wake();
+            let context = t.app.view.project().context_path.clone();
+            let editor = crate::pane::Pane::spawn("cat", 24, 80, &t.x_home, &context, wake)
+                .expect("spawn an editor");
+            t.app.runtime.project_mut().top_overlay = Some(editor);
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+            let flash = t.app.flash_text().unwrap_or_default().to_owned();
+            assert!(flash.contains("an editor is open here"), "{flash}");
+            assert_eq!(
+                std::fs::read_dir(config.join("projects")).unwrap().count(),
+                0
+            );
+        });
+    });
+}
+
+/// A file naming the project made since its config was read is the one
+/// opened, and read: no other is made beside it.
+#[test]
+fn project_config_finds_a_file_made_meanwhile() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let file = project_file(config, "aaa", &t.x_home, "");
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+            assert_eq!(
+                std::fs::read_dir(config.join("projects")).unwrap().count(),
+                1
+            );
+            let read = t
+                .app
+                .state
+                .active_project()
+                .config
+                .project
+                .as_ref()
+                .map(|f| f.path.clone());
+            assert_eq!(read, Some(file));
+            assert_eq!(t.app.state.active_project().label(), "aaa");
+        });
+    });
+}
+
+/// The project's file deleted since it was read is made again, not opened as
+/// a path with nothing behind it.
+#[test]
+fn project_config_makes_again_a_file_deleted_meanwhile() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let file = project_file(config, "work", &t.x_home, "");
+            t.app.reload_config();
+            std::fs::remove_file(&file).unwrap();
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+            let text = std::fs::read_to_string(&file).expect("made again");
+            assert!(text.contains("home = "), "{text}");
+        });
+    });
+}
+
+/// A problem the read of the new file finds stays the flash: the file's path
+/// doesn't cover it.
+#[test]
+fn project_config_leaves_a_reload_problem_showing() {
+    with_three(|t| {
+        with_config(t, |t, _config| {
+            std::fs::write(t.home.join(".spycrc.toml"), "[layout\n").unwrap();
+            crate::shell::with_editor("cat", || run_project_config(&mut t.app));
+            let flash = t.app.flash_text().unwrap_or_default().to_owned();
+            assert!(flash.contains("config error"), "{flash}");
+        });
     });
 }

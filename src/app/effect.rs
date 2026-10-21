@@ -160,6 +160,15 @@ pub enum Effect {
     /// (`term_title_effect`); only the `term_title::set` IO is the effect.
     SetTerminalTitle { title: String },
 
+    /// `:project config`: open the user's own config file for the project
+    /// anchored at `anchor` in the editor, `file` when it has one, else one
+    /// made for it and named `label` (`App::edit_project_config`).
+    EditProjectConfig {
+        anchor: PathBuf,
+        label: String,
+        file: Option<PathBuf>,
+    },
+
     /// A-class. Fire a desktop notification and/or ring the terminal bell that an
     /// agent pane changed to `Blocked` ("needs me") or `Done` — the P3-1 ping
     /// (`docs/archive/AGENT_AWARENESS_PLAN.md`). Emitted by `settle_agent_activity` on the

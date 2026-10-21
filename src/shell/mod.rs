@@ -15,11 +15,36 @@ use std::path::Path;
 
 /// $EDITOR, fall back to $VISUAL, fall back to `vi`.
 pub fn resolve_editor() -> Vec<String> {
+    #[cfg(test)]
+    if let Some(editor) = EDITOR_OVERRIDE.with(|e| e.borrow().clone()) {
+        return split_command(&editor);
+    }
     let raw = crate::envset::var("VISUAL")
         .filter(|s| !s.is_empty())
         .or_else(|| crate::envset::var("EDITOR").filter(|s| !s.is_empty()))
         .unwrap_or_else(|| "vi".to_string());
     split_command(&raw)
+}
+
+#[cfg(test)]
+thread_local! {
+    static EDITOR_OVERRIDE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only: run `body` with [`resolve_editor`] answering `editor`, so a test
+/// that opens an editor never starts the developer's own. Unwound when `body`
+/// returns *or panics*.
+#[cfg(test)]
+pub fn with_editor<R>(editor: &str, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            EDITOR_OVERRIDE.with(|e| *e.borrow_mut() = None);
+        }
+    }
+    EDITOR_OVERRIDE.with(|e| *e.borrow_mut() = Some(editor.to_string()));
+    let _guard = Guard;
+    body()
 }
 
 /// $PAGER, fall back to `less`. Used by spyc's `p` binding to hand

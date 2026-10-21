@@ -151,6 +151,78 @@ pub fn find(entries: &[Entry], anchor: &Path) -> (Option<ProjectFile>, Vec<Strin
     (file, warnings)
 }
 
+/// The user's file for the project anchored at `anchor`, in `dir`, made if
+/// need be (`:project config`): `<label>.toml`, or `<label>-2.toml` and on
+/// while the name is another project's. A file of that name that names this
+/// project, or no usable home, is returned as it is, to be edited; one is
+/// never written over. A new one holds the project's `home`, `~` for the
+/// user's home, and must read back as the project's, or it is removed and the
+/// call fails: a file the project never goes by would be made again on every
+/// call. A label that isn't a plain file name names the file `project`.
+pub fn create(dir: &Path, anchor: &Path, label: &str) -> anyhow::Result<PathBuf> {
+    use anyhow::Context as _;
+    use std::io::Write as _;
+    let canonical = std::fs::canonicalize(anchor)
+        .with_context(|| format!("the project's home {} has gone", anchor.display()))?;
+    let stem = if label.is_empty() || label.contains('/') || label.starts_with('.') {
+        "project"
+    } else {
+        label
+    };
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    for n in 1.. {
+        let name = if n == 1 {
+            format!("{stem}.toml")
+        } else {
+            format!("{stem}-{n}.toml")
+        };
+        let path = dir.join(name);
+        if path.symlink_metadata().is_ok() {
+            if !path.is_file() {
+                continue;
+            }
+            match named_in(&path) {
+                Named::Home(home) if home != canonical => continue,
+                Named::Gone => continue,
+                Named::Home(_) | Named::Bad(_) => return Ok(path),
+            }
+        }
+        let home = toml::Value::String(tilde(&canonical));
+        let text = format!(
+            "# spyc's settings for this project, over its own .spycrc.toml and yours:\n\
+             # .spycrc.toml's keys (`spyc --print-config` lists them).\n\
+             home = {home}\n"
+        );
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .with_context(|| format!("creating {}", path.display()))?;
+        file.write_all(text.as_bytes())
+            .with_context(|| format!("writing {}", path.display()))?;
+        if !matches!(named_in(&path), Named::Home(home) if home == canonical) {
+            let _ = std::fs::remove_file(&path);
+            anyhow::bail!(
+                "{} can't name {} as its home",
+                path.display(),
+                canonical.display()
+            );
+        }
+        return Ok(path);
+    }
+    unreachable!("a free name is found: each taken one moves to the next")
+}
+
+/// `path` as a `home` names it: `~` for the user's home, as [`find`] reads it
+/// back, else as it is.
+fn tilde(path: &Path) -> String {
+    match super::home_dir().and_then(|home| path.strip_prefix(&home).ok().map(Path::to_path_buf)) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +399,91 @@ mod tests {
         assert!(
             alone.is_err(),
             "with no file of the user's, the error stands"
+        );
+    }
+
+    /// `create` makes the directory and a file named for the project, holding
+    /// its home, which `find` then matches.
+    #[test]
+    fn create_makes_a_file_naming_the_projects_home() {
+        let f = fixture();
+        let dir = f.dir.join("made");
+        let path = create(&dir, &f.home, "app").expect("made");
+        assert_eq!(path, dir.join("app.toml"));
+        let (file, warnings) = find(&scan_dir(&dir), &f.home);
+        assert_eq!(file.map(|f| f.path), Some(path));
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    /// A name another project's file has moves on to `-2`; one naming this
+    /// project, or no usable home, is the one to edit, never written over.
+    #[test]
+    fn create_never_writes_over_a_file() {
+        let f = fixture();
+        let other = f.home.parent().unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        write(
+            &f.dir,
+            "app.toml",
+            &format!("home = {:?}\n", other.display().to_string()),
+        );
+        let made = create(&f.dir, &f.home, "app").expect("made");
+        assert_eq!(made, f.dir.join("app-2.toml"));
+        assert_eq!(
+            create(&f.dir, &f.home, "app").unwrap(),
+            made,
+            "its own file again"
+        );
+        write(&f.dir, "gone.toml", "home = \"/no/such/dir/anywhere\"\n");
+        assert_eq!(
+            create(&f.dir, &f.home, "gone").unwrap(),
+            f.dir.join("gone-2.toml")
+        );
+        write(&f.dir, "broken.toml", "home = [\n");
+        assert_eq!(
+            create(&f.dir, &f.home, "broken").unwrap(),
+            f.dir.join("broken.toml")
+        );
+        let text = std::fs::read_to_string(f.dir.join("broken.toml")).unwrap();
+        assert_eq!(text, "home = [\n", "written over");
+    }
+
+    /// A home under the user's own is written with `~`, and reads back.
+    #[test]
+    fn create_writes_the_users_home_as_tilde() {
+        let f = fixture();
+        let user = f.home.parent().unwrap().to_path_buf();
+        let path = super::super::with_home_root(&user, || create(&f.dir, &f.home, "app")).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("home = \"~/app\""), "{text}");
+        let (file, _) = super::super::with_home_root(&user, || find(&scan_dir(&f.dir), &f.home));
+        assert_eq!(file.map(|f| f.path), Some(path));
+    }
+
+    /// A gone home makes no file: one the project could never go by would be
+    /// made again on every call.
+    #[test]
+    fn create_makes_nothing_for_a_gone_home() {
+        let f = fixture();
+        let err = create(&f.dir, &f.home.join("gone"), "gone").unwrap_err();
+        assert!(format!("{err:#}").contains("has gone"), "{err:#}");
+        assert_eq!(std::fs::read_dir(&f.dir).unwrap().count(), 0);
+    }
+
+    /// A label that isn't a plain file name, as the root's `/` is, names the
+    /// file `project`, inside the directory; a directory where a file would be
+    /// is a name taken.
+    #[test]
+    fn create_keeps_to_the_directory_and_to_files() {
+        let f = fixture();
+        assert_eq!(
+            create(&f.dir, &f.home, "/").unwrap(),
+            f.dir.join("project.toml")
+        );
+        std::fs::create_dir(f.dir.join("app.toml")).unwrap();
+        assert_eq!(
+            create(&f.dir, &f.home, "app").unwrap(),
+            f.dir.join("app-2.toml")
         );
     }
 

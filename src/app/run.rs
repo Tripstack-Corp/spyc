@@ -105,6 +105,8 @@ pub struct RunCtx {
     /// The config-file parent dirs last sent to the worker
     /// (`WatchCommand::SyncConfigParents`), re-sent when the set changes.
     pub(super) watched_config: Vec<PathBuf>,
+    /// The `view.config_watch_gen` last sent with them.
+    pub(super) watched_config_gen: u64,
     pub(super) scheduler: Scheduler,
     /// Coalesce buffers: the recv arm pushes here; the pre-recv drains process them.
     pub(super) fs_pending: Vec<notify::Event>,
@@ -134,6 +136,7 @@ impl RunCtx {
             watched_listing_right: None,
             watched_preview: None,
             watched_config: Vec::new(),
+            watched_config_gen: 0,
             scheduler: Scheduler::new(),
             fs_pending: Vec::new(),
             git_pending: Vec::new(),
@@ -222,6 +225,7 @@ impl App {
             watched_listing_right: None,
             watched_preview: None,
             watched_config: config_parents,
+            watched_config_gen: 0,
             // MVU Phase 2: advisory deadline scheduler — computes the
             // recv_timeout wait from armed timers; the loop still fires each
             // timer via its own predicate against the threaded `now`.
