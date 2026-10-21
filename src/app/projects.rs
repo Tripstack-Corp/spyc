@@ -117,10 +117,7 @@ impl App {
             .map(|(i, p)| {
                 let tabs = tabs.get(&p.id).copied().unwrap_or(0);
                 let glyph = several.then(|| {
-                    attention.get(&p.id).map_or_else(
-                        || Span::raw(" "),
-                        |a| project_chips::glyph(*a, pulse, &self.view.theme),
-                    )
+                    project_chips::cell(attention.get(&p.id).copied(), pulse, &self.view.theme)
                 });
                 let row = project_row(i, p, label_w, tabs, p.id == active, glyph);
                 (p.id, row)

@@ -71,12 +71,16 @@ for each, in the order they were opened, the one you're in bold and the others
 dim, each with the glyph of what its agents most need, as their tab dots show
 it: a red `■` when one is blocked on you, a teal `■` for a done you haven't
 seen, `●` while one works and `○` while one waits on its own background work,
-and nothing while they're idle (`spyc ■ · web ● · api`). The chips take the
-session name's place, which stays in the terminal title and `Space s`, and
-get a third of the bar. In a narrow terminal the quiet projects go first,
-counted as `+N` (`spyc ■ · web ● +2`); then the others collapse to where you
-are among them and their most urgent glyph (`spyc 2/4 ■`, project 2 of 4);
-then the project you're in stands alone, with a red `■` while another is
+and a blank while they're idle, parted by powerline's thin chevron (`U+E0B1`;
+a `|` in mono: `spyc ■ | web ● | api`). The chips take the session name's
+place, which stays in the terminal title and `Space s`, and get a third of
+the bar. The segment keeps its width whatever the agents are doing, so the
+rest of the bar never shifts as they work and finish: each glyph has its
+place, blank while there's nothing to show. In a narrow terminal the longer
+labels are cut to one length, in the middle, so every project keeps its chip
+(`spyc ■ | tri…atform | fika ●`); narrower, the chips collapse to where you
+are among them and the others' most urgent glyph (`spyc 2/4 ■`, project 2 of
+4); then the project you're in stands alone, with a red `■` while another is
 blocked, which is never dropped: the label is cut first. Each `Space j` row
 shows its project's glyph too, as it was when the list opened. The terminal
 title counts the tabs blocked in the other projects, for when you're in

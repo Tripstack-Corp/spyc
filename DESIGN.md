@@ -50,10 +50,14 @@ These are the names. Use them in code and when writing.
   projects are open, the **projects** segment takes the place of
   `PROJECT_HOME` and the session name: a chip per project, its label
   (bold for the one in view, dim for the others) and the tab dots'
-  glyph for its most urgent agent (`spyc ■ · web ● · api`). It gets
-  a third of the bar and narrows in steps (`spyc ■ · web ● +2`, then
-  `spyc 2/4 ■`, then `spyc ■`), none of which drops a block in another
-  project: the last cuts the label before it loses that `■`.
+  glyph for its most urgent agent, parted by powerline's thin chevron
+  (`U+E0B1`; `|` in mono: `spyc ■ | web ● | api`). It gets a third of
+  the bar and narrows in steps (the longer labels cut to one length
+  in the middle, `spyc ■ | tri…atform | fika ●`; then `spyc 2/4 ■`; then
+  `spyc ■`), none of which drops a block in another project: the last
+  cuts the label before it loses that `■`. Each step holds its width as
+  the agents change: a glyph's place stays, blank, while there is nothing
+  to show, so the segments after it never shift.
 - **List** — the file area. Vi-navigated. Each row: cursor bar,
   pick check, take check, name, git marker, size/age (depending on
   mode). The "central widget" — most operations resolve against the
@@ -201,8 +205,10 @@ Used sparingly — every glyph below has a specific meaning.
 | `[N✓]` | bg task #N exited cleanly (green, divider) |
 | `[N✗]` | bg task #N non-zero exit / killed / crashed (red, divider) |
 
-Powerline arrows (``) separate status segments and require a
-Nerd Font; mono mode switches to plain spaces and a single rule.
+Powerline arrows (``) separate status segments, and its thin
+chevron (`U+E0B1`) parts the projects inside the projects segment; both
+require a Nerd Font. Mono mode switches to plain spaces, a single rule
+and a `|` between projects.
 
 Tilde-collapse (`/Users/x/src/spyc` → `~/src/spyc`) is applied
 at every user-facing path display via `paths::display_tilde`. Match

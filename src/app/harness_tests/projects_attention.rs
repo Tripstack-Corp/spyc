@@ -166,7 +166,7 @@ fn several_projects_show_in_the_bar_each_with_its_glyph() {
         t.reports(0, AgentActivity::Blocked);
         t.reports(2, AgentActivity::Done);
         t.reports(3, AgentActivity::Waiting);
-        let chips = "xproj ■ · yproj · zproj ■ · vproj ○";
+        let chips = "xproj ■ \u{e0b1} yproj   \u{e0b1} zproj ■ \u{e0b1} vproj ○";
         let buf = draw(&mut t.app, 160);
         assert!(row(&buf, 0).contains(chips), "{}", row(&buf, 0));
         let theme = crate::ui::theme::Theme::default();
@@ -187,7 +187,7 @@ fn several_projects_show_in_the_bar_each_with_its_glyph() {
 
         t.app.view.theme.mono = true;
         let mono = bar(&mut t.app, 160);
-        assert!(mono.contains(chips), "{mono}");
+        assert!(mono.contains(&chips.replace('\u{e0b1}', "|")), "{mono}");
     });
 }
 
@@ -200,7 +200,9 @@ fn the_session_name_leaves_the_bar_while_several_are_open() {
             t.app.view.theme.mono = mono;
             let text = bar(&mut t.app, 160);
             assert!(!text.contains(SESSION), "mono={mono}: {text}");
-            assert!(text.contains("xproj · yproj"), "mono={mono}: {text}");
+            let parting = if mono { "|" } else { "\u{e0b1}" };
+            let chips = format!("xproj   {parting} yproj");
+            assert!(text.contains(&chips), "mono={mono}: {text}");
         }
         assert!(title(&mut t.app).ends_with(SESSION));
     });
@@ -223,7 +225,7 @@ fn a_done_in_view_is_seen_and_one_out_of_view_is_not() {
         let buf = draw(&mut t.app, 160);
         assert_eq!(
             after(&buf, 0, "yproj").map(|c| c.symbol().to_string()),
-            Some("\u{b7}".into()),
+            Some(" ".into()),
             "{}",
             row(&buf, 0)
         );
@@ -250,7 +252,7 @@ fn an_unseen_done_is_seen_from_the_first_frame_in_view() {
         assert_eq!(glyph(&mut t.app).0, Some("■".into()), "unseen from y");
         t.app.make_active(t.ids[0]);
         let (at, text) = glyph(&mut t.app);
-        assert_eq!(at, Some("\u{b7}".into()), "seen in view: {text}");
+        assert_eq!(at, Some(" ".into()), "seen in view: {text}");
     });
 }
 
@@ -262,17 +264,50 @@ fn narrowing(t: &mut Four) {
     t.agent(3);
 }
 
-/// The chips get a third of the bar. Where they all don't fit, the projects
-/// with nothing to say go first, counted as `+N`.
+/// The chips get a third of the bar, all of them while they fit. Where they
+/// don't, none is dropped for another with something to say: they collapse
+/// together, so the segment's width doesn't follow its agents.
 #[test]
-fn a_narrow_bar_drops_the_quiet_projects_first() {
+fn a_narrow_bar_collapses_the_chips_together() {
     with_four(|t| {
         narrowing(t);
         let wide = bar(&mut t.app, 120);
-        assert!(wide.contains("xproj ■ · yproj · zproj ● · vproj"), "{wide}");
+        let every = "xproj ■ \u{e0b1} yproj   \u{e0b1} zproj ● \u{e0b1} vproj";
+        assert!(wide.contains(every), "{wide}");
         let text = bar(&mut t.app, 100);
-        assert!(text.contains("xproj ■ · yproj · zproj ● +1"), "{text}");
-        assert!(!text.contains("vproj"), "{text}");
+        assert!(text.contains("yproj 2/4 ■"), "{text}");
+        assert!(!text.contains("vproj") && !text.contains("+1"), "{text}");
+    });
+}
+
+/// What follows the chips stays where it is as another project's agent
+/// works, blocks and finishes, in colour and in mono: the projects segment
+/// ends at one column whatever its agents are doing.
+#[test]
+fn the_bar_holds_its_place_as_a_projects_agent_changes() {
+    with_four(|t| {
+        let tab = t.agent(0);
+        for mono in [false, true] {
+            t.app.view.theme.mono = mono;
+            let end = if mono { ": " } else { "\u{e0b0}" };
+            let mut ends = std::collections::BTreeSet::new();
+            for (activity, w) in [
+                (AgentActivity::Idle, 160),
+                (AgentActivity::Working, 160),
+                (AgentActivity::Blocked, 160),
+                (AgentActivity::Idle, 160),
+                (AgentActivity::Idle, 60),
+                (AgentActivity::Blocked, 60),
+                (AgentActivity::Working, 60),
+                (AgentActivity::Done, 60),
+            ] {
+                report_at(&mut t.app, t.ids[0], tab, activity, Instant::now());
+                let text = bar(&mut t.app, w);
+                let at = text.find(end).expect("the segment's end");
+                ends.insert((w, crate::ui::display_width(&text[..at])));
+            }
+            assert_eq!(ends.len(), 2, "mono={mono}: one column per width: {ends:?}");
+        }
     });
 }
 
@@ -291,19 +326,19 @@ fn a_narrower_bar_collapses_the_others() {
     });
 }
 
-/// Narrowest, the bar keeps the project in view's label and a red `■` while
-/// another project is blocked: that is what the chips are for, so it is never
-/// dropped, however narrow the bar.
+/// Narrowest, the bar keeps the project in view's label, cut to the room,
+/// and a red `■` while another project is blocked: that is what the chips are
+/// for, so it is never dropped, however narrow the bar.
 #[test]
 fn the_narrowest_bar_still_shows_a_project_is_blocked() {
     with_four(|t| {
         narrowing(t);
-        for w in [36, 24] {
+        for (w, label) in [(36, "yproj"), (24, "y\u{2026}oj")] {
             let buf = draw(&mut t.app, w);
             let text = row(&buf, 0);
-            assert!(text.contains("yproj ■"), "{w}: {text}");
+            assert!(text.contains(&format!("{label} ■")), "{w}: {text}");
             assert!(!text.contains("2/4"), "{w}: {text}");
-            let glyph = after(&buf, 0, "yproj").map(|c| c.fg);
+            let glyph = after(&buf, 0, label).map(|c| c.fg);
             assert_eq!(glyph, Some(BLOCKED_RED), "{w}: {text}");
         }
     });
@@ -395,6 +430,6 @@ fn a_suspended_agent_is_not_counted() {
         assert!(!title.contains('\u{25a0}'), "{title}");
         let buf = draw(&mut t.app, 160);
         let glyph = after(&buf, 0, "xproj").map(|c| c.symbol().to_string());
-        assert_eq!(glyph, Some("\u{b7}".into()), "{}", row(&buf, 0));
+        assert_eq!(glyph, Some(" ".into()), "{}", row(&buf, 0));
     });
 }

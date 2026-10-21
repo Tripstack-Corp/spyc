@@ -292,7 +292,7 @@ way `tab_hit.rs` does for tabs.
 | object                     | left-click         | menu rows                                                                 |
 | -------------------------- | ------------------ | ------------------------------------------------------------------------- |
 | a project label            | switch to it (`Space N`) | switch, close (`Space x`), re-home (`Space P`), jump home (`Space p`), rename (`:project name`) |
-| the segment's `+N` / count | project switcher (`Space j`) | switcher, new project (`Space n`), next/previous (`Space ]` `[`), go to the agent that needs you (`Space !`) |
+| the segment's count (`2/4`) | project switcher (`Space j`) | switcher, new project (`Space n`), next/previous (`Space ]` `[`), go to the agent that needs you (`Space !`) |
 | git segment                | —                  | worktree list / new / delete, `gd`                                        |
 | agent segment              | focus the pane     | the pane menu for that tab (§3c)                                          |
 | session segment            | —                  | `:name`, `Space s`, `spyc -r` picker                                      |
