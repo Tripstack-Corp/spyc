@@ -39,7 +39,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/key_dispatch/mod.rs::App::handle_key", 172),
         (
             "src/app/key_dispatch/prompts.rs::App::handle_vi_prompt_key",
-            144,
+            133,
         ),
         ("src/app/mcp.rs::App::execute_mcp_command", 236),
         ("src/app/mouse/mod.rs::App::handle_mouse", 108),

@@ -379,7 +379,7 @@ const SECTIONS: &[Section] = &[
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (
                 "Esc ? / Esc Space",
-                "open history editor mid-prompt (Normal mode)",
+                "open history editor mid-prompt in ! or ; (Normal mode)",
             ),
             (";", "interactive → runs in top pane (top, vim, htop, less)"),
             (

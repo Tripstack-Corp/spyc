@@ -250,32 +250,22 @@ impl App {
         // line editor, so we route it here to the same viewer.
         //
         // Dispatched by prompt kind:
-        //   PromptKind::Jump → show_jump_history_popup (j/k cd)
-        //   anything else    → show_history_popup (shell !? popup)
+        //   PromptKind::Jump                 → show_jump_history_popup (j/k cd)
+        //   PromptKind::ShellCmd{,Captured}  → show_history_popup (shell !? popup)
+        //   anything else                    → no popup; the key is the editor's
         //
-        // KNOWN LIMITATION: for `:` (command line) the !? popup
-        // shows shell history, not command_history. Tracked in
-        // ROADMAP for proper kind-routing.
-        if matches!(key.code, KeyCode::Char(' ' | '?')) {
-            let in_normal_mode = matches!(
-                &self.state.mode,
-                Mode::Prompting(p) if p.editor.as_ref().is_some_and(
-                    |e| e.mode == crate::ui::line_edit::Mode::Normal
-                )
-            );
-            if in_normal_mode {
-                let is_jump = matches!(
-                    &self.state.mode,
-                    Mode::Prompting(p) if matches!(p.kind, PromptKind::Jump)
-                );
-                self.cancel_prompt();
-                if is_jump {
-                    self.show_jump_history_popup();
-                } else {
-                    self.show_history_popup();
-                }
-                return Vec::new();
+        // The shell popup's Enter runs its line as a `!` capture, and another
+        // prompt keeps a history of its own (`:`'s is `command_history`),
+        // which no popup shows yet (#82).
+        if matches!(key.code, KeyCode::Char(' ' | '?'))
+            && let Some(popup) = self.prompt_history_popup()
+        {
+            self.cancel_prompt();
+            match popup {
+                HistoryPopup::Jump => self.show_jump_history_popup(),
+                HistoryPopup::Shell => self.show_history_popup(),
             }
+            return Vec::new();
         }
 
         // `→`/`End` on an empty buffer load the suggestion for editing: the
@@ -388,6 +378,35 @@ impl App {
     }
 }
 
+impl App {
+    /// The history popup `Space` or `?` opens from the prompt in view, once
+    /// `Esc` has put its line editor in Normal mode: `J`'s jump history, or
+    /// the shell's for a `!` or `;` prompt, and none for any other.
+    fn prompt_history_popup(&self) -> Option<HistoryPopup> {
+        let Mode::Prompting(prompt) = &self.state.mode else {
+            return None;
+        };
+        let normal = prompt
+            .editor
+            .as_ref()
+            .is_some_and(|e| e.mode == crate::ui::line_edit::Mode::Normal);
+        match prompt.kind {
+            _ if !normal => None,
+            PromptKind::Jump => Some(HistoryPopup::Jump),
+            PromptKind::ShellCmd | PromptKind::ShellCmdCaptured => Some(HistoryPopup::Shell),
+            _ => None,
+        }
+    }
+}
+
+/// Which history popup `Esc Space` (or `Esc ?`) opens from a prompt.
+enum HistoryPopup {
+    /// `J`'s: the directories jumped to.
+    Jump,
+    /// The shell's `!?`: commands run.
+    Shell,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,7 +477,6 @@ mod tests {
     /// would run the line as a `!` capture; `:` keeps a history of its own
     /// (#82). The prompt stays open.
     #[test]
-    #[ignore = "red: #82, Esc Space in a : prompt opens the shell history"]
     fn esc_space_in_a_command_prompt_opens_no_shell_history() {
         let mut app = App::test_app(std::env::temp_dir());
         app.state.history.push("echo hi");
@@ -483,6 +501,22 @@ mod tests {
             title.as_deref().is_some_and(|t| t.starts_with("history")),
             "{title:?}"
         );
+    }
+
+    /// A space typed into a `!` command is text: only Normal mode's `Space`
+    /// opens the history.
+    #[test]
+    fn a_space_typed_in_a_shell_prompt_is_text() {
+        let mut app = App::test_app(std::env::temp_dir());
+        app.state.history.push("echo hi");
+        app.state.mode = Mode::Prompting(Prompt::shell(PromptKind::ShellCmdCaptured, "!"));
+        app.handle_vi_prompt_key(key('a'));
+        app.handle_vi_prompt_key(key(' '));
+        assert!(app.view.project().pager.is_none(), "a history popup opened");
+        let Mode::Prompting(prompt) = &app.state.mode else {
+            panic!("the prompt closed");
+        };
+        assert_eq!(prompt.buffer, "a ");
     }
 
     /// Guard the gate: a user-set `=`/`:limit` filter has no paired `tab_state`,
