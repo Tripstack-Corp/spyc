@@ -170,6 +170,84 @@ pub fn open_state_file_truncate(name: &str) -> Option<std::fs::File> {
 /// Scrollback only needs recent history, so we read the tail.
 pub const MAX_TRANSCRIPT_TAIL_BYTES: u64 = 4 * 1024 * 1024;
 
+/// The most pager lines a Claude transcript view keeps, the newest: as many as
+/// a pane's terminal scrollback (`src/pane/mod.rs`), so `^a v` reaches as far
+/// back from either source.
+pub const MAX_TRANSCRIPT_LINES: usize = 10_000;
+
+/// The longest transcript record [`JsonlRecords`] hands on. A longer one is
+/// passed over unread, so one pathological line can't take the memory that
+/// reading only a file's tail used to bound.
+pub const MAX_TRANSCRIPT_RECORD_BYTES: usize = 16 * 1024 * 1024;
+
+/// A JSONL file's lines, in order, streamed. A line `skip` rejects from its
+/// bytes, or one longer than `max_record_bytes`, is passed over without being
+/// decoded or kept, so memory is bounded by one record, not by the file.
+pub struct JsonlRecords<R> {
+    reader: R,
+    max_record_bytes: usize,
+    skip: fn(&[u8]) -> bool,
+    buf: Vec<u8>,
+}
+
+/// [`JsonlRecords`] over the file at `path`; `None` when it can't be opened.
+pub fn jsonl_records(
+    path: &std::path::Path,
+    max_record_bytes: usize,
+    skip: fn(&[u8]) -> bool,
+) -> Option<JsonlRecords<std::io::BufReader<std::fs::File>>> {
+    let file = std::fs::File::open(path).ok()?;
+    Some(JsonlRecords {
+        reader: std::io::BufReader::new(file),
+        max_record_bytes,
+        skip,
+        buf: Vec::new(),
+    })
+}
+
+impl<R: std::io::BufRead> Iterator for JsonlRecords<R> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<String> {
+        loop {
+            self.buf.clear();
+            let mut oversize = false;
+            let mut read_any = false;
+            loop {
+                let Ok(available) = self.reader.fill_buf() else {
+                    return None;
+                };
+                if available.is_empty() {
+                    break;
+                }
+                read_any = true;
+                let end = available.iter().position(|&b| b == b'\n');
+                let chunk = &available[..end.map_or(available.len(), |i| i + 1)];
+                if !oversize {
+                    if self.buf.len() + chunk.len() > self.max_record_bytes {
+                        oversize = true;
+                        self.buf = Vec::new();
+                    } else {
+                        self.buf.extend_from_slice(chunk);
+                    }
+                }
+                let consumed = chunk.len();
+                self.reader.consume(consumed);
+                if end.is_some() {
+                    break;
+                }
+            }
+            if !read_any {
+                return None;
+            }
+            if oversize || (self.skip)(&self.buf) {
+                continue;
+            }
+            return Some(String::from_utf8_lossy(&self.buf).into_owned());
+        }
+    }
+}
+
 /// Read at most the last `max_bytes` of `path` as UTF-8 (lossy). When
 /// the file exceeds the cap, the leading partial line is dropped so
 /// callers always parse whole lines. Returns an io error only on
@@ -498,7 +576,7 @@ mod state_writes_are_atomic {
 
 #[cfg(test)]
 mod tests {
-    use super::{push_transcript_prompt, read_tail_lossy};
+    use super::{jsonl_records, push_transcript_prompt, read_tail_lossy};
     use std::io::Write;
 
     /// The thread-local override pins `config_root()` for the duration of the
@@ -567,6 +645,20 @@ mod tests {
         );
         assert!(out.is_empty());
         assert!(!last_was_blank);
+    }
+
+    #[test]
+    fn jsonl_records_stream_every_line_in_order_and_pass_over_what_they_skip() {
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        write!(f, "keep 1\nskip this\n{}\nkeep 2\nkeep 3", "x".repeat(64)).unwrap();
+        let skip: fn(&[u8]) -> bool = |line| line.starts_with(b"skip");
+        let got: Vec<String> = jsonl_records(f.path(), 32, skip)
+            .unwrap()
+            .map(|l| l.trim_end().to_string())
+            .collect();
+        // The 64-byte line is over the 32-byte cap; the last has no newline.
+        assert_eq!(got, ["keep 1", "keep 2", "keep 3"]);
+        assert!(jsonl_records(std::path::Path::new("/nonexistent/x.jsonl"), 32, skip).is_none());
     }
 
     #[test]
