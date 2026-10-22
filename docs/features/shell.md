@@ -18,9 +18,11 @@ Three modes of running commands, each for a different use case:
   Background tasks).
 - **!!** — repeat the last captured command.
 - **!?** — history editor popup. Opens instantly (no Enter needed).
-  Also reachable mid-prompt: after `Esc` puts the line editor in
-  Normal mode (e.g. you pressed `Esc k` to browse history), `?` (or
-  `Space`) opens the same viewer — not just `!?` from a fresh prompt.
+  Also reachable mid-prompt in a `!` or `;` prompt: after `Esc` puts the
+  line editor in Normal mode (e.g. you pressed `Esc k` to browse history),
+  `?` (or `Space`) opens the same viewer — not just `!?` from a fresh
+  prompt. In `J`'s prompt they open the jump history; in other prompts,
+  `:` among them, they open nothing.
   Defaults to Normal mode — `j`/`k`/`G`/`gg` navigate, `/` search
   with `n`/`N` to jump between matches, `:N` jumps to entry N.
   Press `i` to vi-edit the highlighted command in-place.
