@@ -314,6 +314,26 @@ mod tests {
         assert!(app.runtime.closed_rows_results.lock().unwrap().is_empty());
     }
 
+    /// Rows read for a switcher the help covers land in it, under the help,
+    /// so `q` brings the switcher back with them.
+    #[test]
+    fn rows_land_in_a_switcher_under_the_help() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = switcher_open();
+        let (seq, here) = (app.runtime.closed_rows_seq, app.state.active);
+        let press = |app: &mut App, c: char| {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
+                .unwrap();
+        };
+        press(&mut app, 'H');
+        land(&app, seq, here);
+        assert!(!app.apply_closed_rows(), "the help in view changed");
+        press(&mut app, 'q');
+        assert_eq!(rows(&app), 2);
+        let pager = app.view.project().pager.as_ref().expect("the switcher");
+        assert_eq!(pager.lines.len(), 2, "the closed row isn't drawn");
+    }
+
     /// Rows read for a switcher another pager has since covered land in
     /// neither.
     #[test]

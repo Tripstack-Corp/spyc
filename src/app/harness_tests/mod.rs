@@ -341,6 +341,7 @@ fn worktree_picker_jk_moves_highlight() {
         let mut view =
             PagerView::new_plain("worktrees", vec!["wt0".into(), "wt1".into(), "wt2".into()]);
         view.picker_cursor = Some(0);
+        view.picker = Some(crate::ui::pager::PickerKind::Worktrees);
         app.view.project_mut().pager = Some(view);
 
         let cursor = |app: &App| app.view.project().pager.as_ref().unwrap().picker_cursor;

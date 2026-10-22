@@ -127,10 +127,9 @@ impl App {
                     // on the ACTIVE pager (the focused column's slot), so closing
                     // `b`'s pager doesn't evict `a`'s — a hardcoded
                     // `view.pager.take()` here closed both columns at once.
-                    let eligible = !self.picker_is_open()
-                        && self
-                            .active_pager_ref()
-                            .is_some_and(|v| v.picker_cursor.is_none() && !v.streaming);
+                    let eligible = self.active_pager_ref().is_some_and(|v| {
+                        v.picker.is_none() && v.picker_cursor.is_none() && !v.streaming
+                    });
                     if eligible {
                         // Persist scroll BEFORE the take — otherwise the take
                         // leaves the slot None and `remember_pager_position`'s
@@ -512,7 +511,14 @@ impl App {
             // v1.5 regression: it filters out `no_history=true` views
             // (both `Mount::LowerPane` `^a-v` and `Mount::TopPane` `D`),
             // so the help would dismiss to nothing or a stale file-viewer.
-            if let Some(current) = self.view.project_mut().pager.take() {
+            // `H` in the help keeps what is stashed under it.
+            let in_help = self
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .is_some_and(|v| v.title == PAGER_HELP_TITLE);
+            if !in_help && let Some(current) = self.view.project_mut().pager.take() {
                 self.view.project_mut().pager_help_stash = Some(current);
             }
             self.view.project_mut().pager = Some(build_pager_help(&self.view.theme));

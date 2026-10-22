@@ -76,6 +76,12 @@ impl PagerHistory {
         }
     }
 
+    /// Drop every picker's pager ([`PagerView::picker`]) from both stacks.
+    pub fn drop_pickers(&mut self) {
+        self.back.retain(|view| view.picker.is_none());
+        self.forward.retain(|view| view.picker.is_none());
+    }
+
     pub const fn back_len(&self) -> usize {
         self.back.len()
     }

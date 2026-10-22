@@ -34,6 +34,7 @@ impl PagerView {
             columns: 1,
             source_path: None,
             picker_cursor: None,
+            picker: None,
             picker_edit_cursor: None,
             streaming: false,
             eof_in_content: false,
