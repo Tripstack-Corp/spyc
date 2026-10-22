@@ -258,7 +258,9 @@ Multiple tabs, each running an independent pty:
   tables with a per-tab `cwd`, `label`, and `agent` for a command that wraps
   one, like `npx @openai/codex`, which then runs as written but is that
   agent's tab) opens those tabs at launch, the
-  config-driven version of pressing `^a c` once per tab. `spyc -r` restores
+  config-driven version of pressing `^a c` once per tab. A tab whose `cwd`
+  isn't a directory opens in the default one, and the message at launch
+  names it. `spyc -r` restores
   its saved tabs instead. Yours in `~/.spycrc.toml`, or in a project's own
   file under `~/.config/spyc/projects/`, open unasked. A
   project-local `.spycrc.toml` list runs only after you approve it in a
