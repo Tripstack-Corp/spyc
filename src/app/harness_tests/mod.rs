@@ -504,6 +504,7 @@ mod mcp;
 mod pane;
 mod pane_fork;
 mod per_column;
+mod picker_routing;
 mod project_config;
 mod project_landings;
 mod project_switch;
