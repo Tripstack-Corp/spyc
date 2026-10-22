@@ -11,7 +11,8 @@ Three modes of running commands, each for a different use case:
   progress, errors, and output all appear together. `%` expands to
   the current selection, relative to the column's directory where the
   command runs, so `./%` runs the selected script; anything outside
-  stays absolute, and a name starting with `-` gets a `./`. `^C`
+  stays absolute, and a name starting with `-` gets a `./`. `%%` is a
+  literal `%`, so `!printf '%%s\n' %` prints each selected name. `^C`
   interrupts; `^\` hard-kills; `^Z` sends the task to the background,
   where it keeps capturing its output (resume with `:fg` -- see
   Background tasks).
