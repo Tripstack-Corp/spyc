@@ -77,7 +77,8 @@ end).
 
 - **`:cd <path>`** — change directory (`~` and `$VAR` expanded, bare `:cd` goes home)
 - **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext`
-  (persists across chdir); **`:sort reverse`** toggles reverse order
+  (persists across chdir), the cursor staying on its file; **`:sort reverse`**
+  toggles reverse order
 - **`:marks`** — show all marks in a pager popup
 - **`:set key=value`** — runtime settings: `:set sort=mtime`, and
   `:set flags=auto|short|full` for how the status bar writes its state

@@ -28,6 +28,9 @@ Part of spyc's [feature reference](../../FEATURES.md). The file list and what ac
   scroll the doc. Files past 5 MB fall back to `$PAGER` as a top
   overlay (streaming from disk wins for multi-GB logs)
 - **u / -** climb to the parent directory (cursor returns to the dir you came from)
+- **The cursor stays on its file** when the listing changes under it: a file
+  an agent writes above it, one deleted, a new `:sort`. Once its own file has
+  gone, it stays on its row.
 - **~ / Home** jump to home (`H` is the harpoon prefix — see Harpoon)
 - **J** jump to any path (with `~` and `$VAR` expansion, frecency-ranked
   suggestions from visit history). With nothing typed it offers the

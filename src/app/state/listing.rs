@@ -30,6 +30,19 @@ impl AppState {
         self.rebuild_rows_for(self.focused_side());
     }
 
+    /// [`Self::rebuild_rows`], with the cursor kept on the file it was on
+    /// while that file is still listed, else on its row, clamped. The listing
+    /// changed under the user (a refresh, a sort), and a row number alone
+    /// would land the cursor, and the next `dd`, on another file (#62).
+    pub fn rebuild_rows_keeping_cursor(&mut self) {
+        let col = self.cur();
+        let at = col.rows.get(col.cursor.index).map(|row| row.path.clone());
+        self.rebuild_rows();
+        if let Some(at) = at {
+            self.focus_on_path(&at);
+        }
+    }
+
     /// Rebuild one specific column's rows and bump its `list_generation`.
     pub fn rebuild_rows_for(&mut self, side: Side) {
         self.col_mut(side).list_generation = self.col(side).list_generation.wrapping_add(1);
@@ -172,7 +185,7 @@ impl AppState {
     pub fn apply_sort(&mut self) {
         let (order, reversed) = (self.cur().sort_order, self.cur().sort_reversed);
         self.cur_mut().listing.sort(order, reversed);
-        self.rebuild_rows();
+        self.rebuild_rows_keeping_cursor();
     }
 
     pub fn apply_temp_filter(&self, side: Side, rows: Vec<RowData>) -> Vec<RowData> {
@@ -328,7 +341,7 @@ impl AppState {
             new_keys,
         );
         self.col_mut(side).git.set(new_git_info, new_git_files);
-        self.rebuild_rows();
+        self.rebuild_rows_keeping_cursor();
     }
 
     /// Ready every column of the active project to be re-read, and flag each
