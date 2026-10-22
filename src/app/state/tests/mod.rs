@@ -169,7 +169,6 @@ fn cursor_name(s: &AppState) -> String {
 /// file, and `dd` would act on that one. Once its file has gone, the cursor
 /// stays on its row, clamped.
 #[test]
-#[ignore = "red: #62, a refresh keeps the cursor's row, not its file"]
 fn a_refresh_keeps_the_cursor_on_its_file() {
     let mut s = test_state();
     s.active_project_mut().left.view = crate::app::View::Dir;
@@ -187,7 +186,6 @@ fn a_refresh_keeps_the_cursor_on_its_file() {
 /// A new sort keeps the cursor on the file it was on, wherever the sort puts
 /// it (#62).
 #[test]
-#[ignore = "red: #62, a sort keeps the cursor's row, not its file"]
 fn a_sort_keeps_the_cursor_on_its_file() {
     let mut s = test_state();
     s.active_project_mut().left.view = crate::app::View::Dir;
