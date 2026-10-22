@@ -133,6 +133,76 @@ fn refreshed_listing_keeps_the_columns_sort_order() {
     );
 }
 
+/// A column of `names` in `/tmp/test`, each file's mtime its place in `names`,
+/// in seconds, as a fresh read hands it back: name-sorted.
+fn listing_of(names: &[&str]) -> crate::fs::Listing {
+    use std::time::{Duration, SystemTime};
+    let dir = PathBuf::from("/tmp/test");
+    let entries = names
+        .iter()
+        .zip(1u64..)
+        .map(|(name, secs)| crate::fs::Entry {
+            path: dir.join(name),
+            name: (*name).to_string(),
+            kind: EntryKind::File,
+            size: 0,
+            mtime: SystemTime::UNIX_EPOCH + Duration::from_secs(secs),
+        })
+        .collect();
+    let mut listing = crate::fs::Listing {
+        dir,
+        entries,
+        truncated: false,
+    };
+    listing.sort(SortMode::Name, false);
+    listing
+}
+
+/// The name of the file under the focused column's cursor.
+fn cursor_name(s: &AppState) -> String {
+    let col = s.cur();
+    col.rows[col.cursor.index].display.clone()
+}
+
+/// A refresh keeps the cursor on the file it was on (#62): an agent writing a
+/// file that sorts above it would otherwise move the highlight onto another
+/// file, and `dd` would act on that one. Once its file has gone, the cursor
+/// stays on its row, clamped.
+#[test]
+#[ignore = "red: #62, a refresh keeps the cursor's row, not its file"]
+fn a_refresh_keeps_the_cursor_on_its_file() {
+    let mut s = test_state();
+    s.active_project_mut().left.view = crate::app::View::Dir;
+    s.apply_refreshed_listing(listing_of(&["b.txt", "c.txt"]));
+    s.cur_mut().cursor.index = 1;
+    assert_eq!(cursor_name(&s), "c.txt");
+
+    s.apply_refreshed_listing(listing_of(&["a.txt", "b.txt", "c.txt"]));
+    assert_eq!(cursor_name(&s), "c.txt", "a file above moved the cursor");
+
+    s.apply_refreshed_listing(listing_of(&["a.txt", "b.txt"]));
+    assert_eq!(cursor_name(&s), "b.txt", "a gone file's row, clamped");
+}
+
+/// A new sort keeps the cursor on the file it was on, wherever the sort puts
+/// it (#62).
+#[test]
+#[ignore = "red: #62, a sort keeps the cursor's row, not its file"]
+fn a_sort_keeps_the_cursor_on_its_file() {
+    let mut s = test_state();
+    s.active_project_mut().left.view = crate::app::View::Dir;
+    s.apply_refreshed_listing(listing_of(&["a.txt", "b.txt", "c.txt"]));
+    s.cur_mut().cursor.index = 0;
+    s.cur_mut().sort_order = SortMode::Mtime;
+    s.apply_sort();
+    assert_eq!(
+        cursor_name(&s),
+        "a.txt",
+        "the sort moved the cursor off its file"
+    );
+    assert_eq!(s.cur().cursor.index, 2, "mtime puts the oldest last");
+}
+
 #[test]
 fn rebuild_rows_does_not_ghost_a_deleted_file_still_on_disk() {
     use crate::fs::Entry;
