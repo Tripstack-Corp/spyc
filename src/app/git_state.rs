@@ -268,6 +268,7 @@ impl App {
                 // `/` search syncs the cursor to its match (see
                 // `handle_pager_search_typing`). Mirrors the jump-history popup.
                 view.picker_cursor = Some(start);
+                view.picker = Some(pager::PickerKind::Worktrees);
                 view.no_history = true;
                 view.show_line_numbers = false;
                 view.wrap = false;

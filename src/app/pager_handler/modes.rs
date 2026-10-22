@@ -7,6 +7,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, Effect};
+use crate::ui::pager::PickerKind;
 
 impl App {
     /// Contextual `^C`: interrupt a viewed task, else flash an in-pager hint.
@@ -79,15 +80,18 @@ impl App {
                         // file-list status bar -- the user is looking
                         // at the pager, the message belongs there.
                         view.flash = Some("no matches".into());
-                    } else if let Some(ref mut editor) = self.view.pending_history_pick {
+                    } else if view.picker == Some(PickerKind::History)
+                        && let Some(ref mut editor) = self.view.pending_history_pick
+                    {
                         // Sync picker cursor to the first match.
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
                             Self::show_history_selection(view, editor, &self.state.history, true);
                         }
-                    } else if self.state.pending_worktrees.is_some()
-                        || self.state.pending_projects.is_some()
-                    {
+                    } else if matches!(
+                        view.picker,
+                        Some(PickerKind::Worktrees | PickerKind::Projects)
+                    ) {
                         // Worktree or project picker: land the highlighted
                         // cursor on the search match so Enter then goes there.
                         if let Some(line) = view.current_match_line() {
@@ -139,7 +143,7 @@ impl App {
                 view.jump_buf = None;
                 if let Some(n) = n {
                     let target = n.saturating_sub(1);
-                    if self.view.pending_history_pick.is_some() {
+                    if view.picker == Some(PickerKind::History) {
                         // History editor: jump to entry N.
                         let max = view.lines.len().saturating_sub(1);
                         let clamped = target.min(max);
@@ -153,7 +157,7 @@ impl App {
                         view.clamp_scroll_auto();
                     }
                 }
-                if self.view.pending_history_pick.is_some() {
+                if view.picker == Some(PickerKind::History) {
                     self.sync_history_editor_to_cursor();
                 }
             }

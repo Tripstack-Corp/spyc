@@ -578,6 +578,7 @@ impl App {
         );
         // Opens on the newest session.
         view.picker_cursor = Some(Self::SESSION_PICKER_HEADER_ROWS);
+        view.picker = Some(pager::PickerKind::Sessions);
         self.set_pager(view);
     }
 
@@ -764,6 +765,7 @@ impl App {
             lines,
         );
         view.picker_cursor = Some(0);
+        view.picker = Some(pager::PickerKind::JumpHistory);
         view.no_history = true;
         view.show_line_numbers = false;
         view.wrap = false;
@@ -798,6 +800,7 @@ impl App {
             lines,
         );
         view.picker_cursor = Some(0);
+        view.picker = Some(pager::PickerKind::History);
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
         self.view.pending_history_pick = Some(editor);
         self.set_pager(view);
