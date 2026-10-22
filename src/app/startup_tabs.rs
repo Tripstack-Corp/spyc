@@ -363,6 +363,30 @@ mod app_tests {
         tab_consent::consent_for(&dir.join(".spycrc.toml"), &tabs(project))
     }
 
+    /// A startup tab whose cwd isn't a directory opens in the default one, and
+    /// the flash names the directory, the half the user can act on.
+    #[test]
+    #[ignore = "red: #483, the flash counts the bad cwds without naming them"]
+    fn a_startup_tab_whose_cwd_is_gone_is_named() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let gone = tmp.path().join("gone");
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let tab = PaneTabConfig {
+                command: "cat".to_owned(),
+                cwd: Some(gone.clone()),
+                label: None,
+                agent: None,
+            };
+            app.seed_startup_tabs(&[tab], None);
+            let flash = app.flash_text().unwrap_or_default();
+            assert!(
+                flash.contains(&crate::paths::display_tilde(&gone)),
+                "{flash}"
+            );
+        });
+    }
+
     #[test]
     fn an_unanswered_project_list_asks_and_runs_nothing() {
         let tmp = tempfile::tempdir().unwrap();
