@@ -186,11 +186,13 @@ pub(super) struct Runtime {
     pub(super) codex_pin_pending: Landing<Vec<super::codex_pin::HomeSnapshot>>,
     pub(super) codex_scan_in_flight: bool,
     /// Tier 5: where off-thread graveyard ops (archive / restore / purge-all)
-    /// land. Each `Effect::Graveyard` worker lands its `GraveyardOutcome` here
-    /// and wakes the loop with `Message::Wake(Wake::Graveyard)`;
+    /// land. Each `Effect::Graveyard` worker lands its `GraveyardOutcome` here,
+    /// tagged with the project that started it, and wakes the loop with
+    /// `Message::Wake(Wake::Graveyard)`;
     /// `apply_graveyard_outcomes` drains it every pre-recv scan. Concurrent ops
     /// each land their own outcome, so no in-flight guard is needed.
-    pub(super) graveyard_results: Landing<graveyard_ops::GraveyardOutcome>,
+    pub(super) graveyard_results:
+        Landing<(super::state::ProjectId, graveyard_ops::GraveyardOutcome)>,
     /// Where an agent-wiring worker (`App::start_wiring`) lands its outcome
     /// before waking the loop with `Wake::Wiring`; `apply_wiring_outcomes`
     /// drains it every pre-recv scan.
@@ -266,8 +268,10 @@ pub(super) struct Runtime {
     /// handler can re-spawn for the latest state. See `App::spawn_listing_refresh`.
     pub(super) listing_refresh_inflight: bool,
     pub(super) listing_refresh_dirty: bool,
-    /// Where off-thread inventory operations land.
-    pub(super) inventory_results: Landing<inventory_ops::InventoryOutcome>,
+    /// Where off-thread inventory operations land, tagged with the project
+    /// that started them.
+    pub(super) inventory_results:
+        Landing<(super::state::ProjectId, inventory_ops::InventoryOutcome)>,
     /// Where off-thread MCP worktree create/remove/clean ops land. The
     /// worker lands a `WorktreeOutcome` (result + the MCP reply channel) here
     /// and wakes with `Message::Wake(Wake::WorktreeJob)`; `apply_worktree_outcomes`
