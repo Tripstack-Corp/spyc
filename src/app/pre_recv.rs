@@ -386,4 +386,167 @@ mod tests {
             "drain, then settle, then wait"
         );
     }
+
+    /// `src`'s method `signature`, up to the next method of its `impl`.
+    fn body<'a>(src: &'a str, signature: &str) -> &'a str {
+        let start = src
+            .find(signature)
+            .unwrap_or_else(|| panic!("no `{signature}`"));
+        let rest = &src[start + 1..];
+        let end = [
+            "\n    fn ",
+            "\n    pub fn ",
+            "\n    pub(super) fn ",
+            "\n    pub(crate) fn ",
+        ]
+        .iter()
+        .filter_map(|next| rest.find(next))
+        .min()
+        .map_or(src.len(), |at| start + 1 + at);
+        &src[start..end]
+    }
+
+    /// A test-only file under `src/app/`, whose wiring is the harness's, not
+    /// the loop's: `harness_tests/`, a `tests` module file, `test_harness.rs`.
+    fn test_only(path: &std::path::Path) -> bool {
+        path.components()
+            .any(|c| c.as_os_str() == "harness_tests" || c.as_os_str() == "tests")
+            || path.file_stem().is_some_and(|stem| {
+                let stem = stem.to_string_lossy();
+                stem == "tests" || stem.ends_with("_tests") || stem == "test_harness"
+            })
+    }
+
+    /// The fields `runtime` declares as a `Landing`, by name. A declaration
+    /// rustfmt wraps puts the type on the line after `name:`, so each
+    /// `Landing<` is read back to the single colon before it; one that isn't
+    /// a field's type fails the guard rather than going unchecked.
+    fn landing_fields(runtime: &str) -> Vec<String> {
+        runtime
+            .match_indices("Landing<")
+            .map(|(at, _)| {
+                let decl = &runtime[..at];
+                let colon = decl
+                    .rmatch_indices(':')
+                    .map(|(i, _)| i)
+                    .find(|&i| {
+                        decl[i + 1..].starts_with(char::is_whitespace) && !decl[..i].ends_with(':')
+                    })
+                    .unwrap_or_else(|| {
+                        panic!("a `Landing<` in runtime.rs with no field before it")
+                    });
+                let name: String = decl[..colon]
+                    .trim_end()
+                    .chars()
+                    .rev()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect();
+                assert!(
+                    !name.is_empty() && decl[colon + 1..].trim().is_empty(),
+                    "a `Landing<` in runtime.rs that isn't a field's type: …{}",
+                    &runtime[colon.saturating_sub(40)..at + 8]
+                );
+                name
+            })
+            .collect()
+    }
+
+    /// Every `Landing` on `Runtime` is drained by a function the loop's drain
+    /// phase calls, and every production sender wakes the loop. A landing
+    /// nothing drains grows for the session; a sender without the loop's wake
+    /// lands its value while the loop sleeps on, so the UI looks frozen until
+    /// the next key, and the test harness, which has no wake, can't tell.
+    #[test]
+    fn every_landing_is_drained_by_the_loop_and_every_sender_wakes_it() {
+        use crate::guard_support::production_half;
+        let mut sources = Vec::new();
+        let mut dirs = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app")];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") && !test_only(&path) {
+                    let src = production_half(&std::fs::read_to_string(&path).unwrap());
+                    sources.push((path, src));
+                }
+            }
+        }
+        sources.sort();
+
+        let landings = landing_fields(&production_half(include_str!("runtime.rs")));
+        assert!(landings.len() >= 10, "found only {landings:?} on `Runtime`");
+        let pre_recv = production_half(include_str!("pre_recv.rs"));
+        let drain_phase = body(&pre_recv, "fn drain_landed_work");
+        for field in &landings {
+            let drainer = sources
+                .iter()
+                .find_map(|(_, src)| {
+                    let at = [".drain()", ".latest()"]
+                        .iter()
+                        .find_map(|call| src.find(&format!(".{field}{call}")))?;
+                    let before = &src[..at];
+                    let name: String = before[before.rfind("fn ")? + 3..]
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    Some(name)
+                })
+                .unwrap_or_else(|| panic!("nothing drains `Runtime::{field}`"));
+            assert!(
+                drain_phase.contains(&format!("self.{drainer}(")),
+                "`Runtime::{field}` is drained by `{drainer}`, which `drain_landed_work` doesn't call"
+            );
+        }
+
+        // A sender built without the loop's own wake: its file, the binding
+        // it passes, and where that binding comes from. `wiring.rs` withholds
+        // the wake under test, to run its work in place.
+        const NO_LOOP_WAKE: [(&str, &str, &str); 1] = [(
+            "wiring.rs",
+            "wake",
+            "let wake = self.runtime.pane_wake_tx.clone()",
+        )];
+        let mut senders = 0;
+        for (path, src) in &sources {
+            let file = path.file_name().unwrap().to_str().unwrap();
+            for (at, _) in src.match_indices(".sender(") {
+                senders += 1;
+                let arg = src[at + ".sender(".len()..]
+                    .split(',')
+                    .next()
+                    .unwrap()
+                    .trim();
+                assert!(
+                    arg == "self.runtime.pane_wake_tx.clone()"
+                        || NO_LOOP_WAKE.iter().any(|(f, a, _)| *f == file && *a == arg),
+                    "{file}: `.sender({arg}, …)` doesn't pass the loop's wake"
+                );
+            }
+        }
+        assert!(
+            senders >= landings.len(),
+            "found only {senders} senders for {} landings",
+            landings.len()
+        );
+        for (file, arg, from) in NO_LOOP_WAKE {
+            assert!(
+                sources.iter().any(|(path, src)| path.ends_with(file)
+                    && src.contains(&format!(".sender({arg},"))
+                    && src.contains(from)),
+                "the allowance for {file}'s `{arg}` names no sender, or `{arg}` isn't `{from}`"
+            );
+        }
+    }
+
+    /// A `Landing` field rustfmt wraps onto two lines is still read.
+    #[test]
+    fn a_wrapped_landing_field_is_read() {
+        let runtime =
+            "    pub(super) one: Landing<u8>,\n    pub(super) two:\n        Landing<(A, B)>,\n";
+        assert_eq!(landing_fields(runtime), vec!["one", "two"]);
+    }
 }
