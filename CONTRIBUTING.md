@@ -90,6 +90,18 @@ We use GitHub pull requests. The target branch is `main`.
 
 ## Code conventions
 
+### Rust style
+
+`cargo fmt` settles layout, and clippy at `pedantic` settles what a machine can check: the `[lints]` tables in `Cargo.toml` and `crates/spyc-vt-sys/Cargo.toml` are the source of truth, with each exception named there. Past them, follow the [Rust Style Guide](https://doc.rust-lang.org/style-guide/), and the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/) where they fit an application rather than a library. For a judgement call those leave open, [Google's Rust style guide](https://google.github.io/styleguide/rustguide.html) is the tie-breaker.
+
+**Every `unsafe` block and impl says why it is sound**, in a `// SAFETY:` comment directly above it that names the invariant the code relies on, not what the call does. `clippy::undocumented_unsafe_blocks` checks that the comment is there; review checks that it is true. On an `unsafe impl` the comment goes below any attribute, or clippy doesn't see it. When several blocks lean on the same facts about a type's handles, the type's doc states them once (`GhosttyScreen` is the model) and each block names the ones it uses.
+
+Where spyc departs from Google's guide on purpose:
+
+- **A poisoned lock is recovered** (`unwrap_or_else(PoisonError::into_inner)`) where its data stays usable after a panic elsewhere: a worker's result queue, the `:s` environment overrides, the pane engine the parser worker rebuilds. The guide forbids reaching inside a poisoned mutex; in a TUI, a poison that turns one panicked worker into a dead terminal is the worse failure.
+- **One `catch_unwind` in production**, around the pane parser's `process` (`src/pane/mod.rs`). A pane's input is untrusted child output, and a panic in the engine costs that pane a blank grid instead of costing the process. That is the defence-in-depth case the guide allows, and `[profile.release]` keeps `panic = "unwind"` for it.
+- **Off-thread workers hand results back through `Arc<Mutex<Vec<_>>>` slots on `Runtime`**, then wake the loop with a payloadless `Message`. The guide prefers unique ownership to `Arc`, so a new worker sends its result through a channel instead (`fs::WakingSender`, which wakes the loop after each send), leaving the receiver unshared on `Runtime`.
+
 ### Action dispatch
 
 Every user-visible feature maps to an `Action` enum variant in
