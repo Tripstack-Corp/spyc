@@ -134,7 +134,8 @@ image protocols or OSC 52 clipboard writes. How it answers:
 - **^a v** enter scrollback view — browse up to 10K lines of pane
   history in the **in-app pager**. Line numbers are on by
   default here (a gutter the live pane never shows, so it reads at a
-  glance as scrolled-back rather than live; `l` toggles). All pager
+  glance as scrolled-back rather than live; `l` toggles, and
+  `[pager] scrollback_line_numbers = false` opens without them). All pager
   keys work: `/` search with `n` / `N`, `:N` jump, `V` visual line,
   `^v` visual block, `y` yanks the selection, `l` toggles line
   numbers, `w` whitespace markers, `T` swaps between terminal

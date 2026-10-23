@@ -593,11 +593,13 @@ impl App {
         let mut view = crate::ui::pager::PagerView::new_styled(title, lines);
         view.mount = crate::ui::pager::Mount::LowerPane;
         view.pane_scroll = true;
-        view.tab_width = self.state.active_project().config.pager.tab_width;
+        let pager_config = &self.state.active_project().config.pager;
+        view.tab_width = pager_config.tab_width;
         // Line numbers on by default: a gutter the live pane never has,
         // so it reads at a glance as "scrolled back, not live" (and `:N`
-        // / `V` line targeting is legible). `l` toggles it off.
-        view.show_line_numbers = true;
+        // / `V` line targeting is legible). `l` toggles it off;
+        // `[pager] scrollback_line_numbers = false` opens without it.
+        view.show_line_numbers = pager_config.scrollback_line_numbers;
         view.no_history = true;
         view.wrap = true;
         view.pending_scroll_to_bottom.set(true);

@@ -675,3 +675,37 @@ fn project_config_leaves_a_reload_problem_showing() {
         });
     });
 }
+
+/// **Each project's `^a v` follows its own `[pager] scrollback_line_numbers`,**
+/// layered as any setting is: `x` takes the user's `false` from
+/// `~/.spycrc.toml`, while `y`'s own file under `projects/` wins over it with
+/// `true`. Read by a reload, then checked by opening a scrollback in each.
+#[test]
+fn each_projects_scrollback_follows_its_own_pager_config() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let off = "[pager]\nscrollback_line_numbers = false\n";
+            std::fs::write(t.home.join(".spycrc.toml"), off).unwrap();
+            project_file(
+                config,
+                "why",
+                &t.y_home,
+                "[pager]\nscrollback_line_numbers = true\n",
+            );
+            let app = &mut t.app;
+            app.reload_config();
+            for (id, dir, want) in [(t.x, &t.x_home, false), (t.y, &t.y_home, true)] {
+                app.switch_project(id);
+                super::pane::agent_pane_with_capture(app, dir);
+                app.open_pane_scroll_pager();
+                app.mount_terminal_scrollback();
+                assert_eq!(
+                    super::pane::scrollback_numbered(app),
+                    Some(want),
+                    "{} opened its scrollback against its config",
+                    dir.display()
+                );
+            }
+        });
+    });
+}

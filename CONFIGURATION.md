@@ -90,6 +90,7 @@ include_pager_title = true     # prepend a source header to pager yanks (y/Y)
 
 [pager]
 tab_width = 4                  # columns a tab expands to (min 1)
+scrollback_line_numbers = true # ^a v scrollback opens with line numbers (l toggles)
 
 [markdown]
 open_as_rendered = true        # open .md in rendered view (m toggles source)
@@ -103,6 +104,12 @@ confirm = true                 # y/N prompt before R / dd; false = yolo (still r
 
 All optional; anything unset uses the built-in default. See `spyc --print-config`
 for the annotated version of each.
+
+A key spyc doesn't know is an error, not ignored, so a config that sets a newer
+key (`[pager] scrollback_line_numbers`, say) fails in an older spyc. That spyc
+starts on the built-in defaults, with a `config error` flash naming the key, and
+a live reload keeps the config it already had. Comment the key out before going
+back to an older build, or before sharing the file with one.
 
 ### Agent HUD — `[pane] agent_hud`
 

@@ -354,7 +354,7 @@ fn empty_scrollback_agent_pane_opens_its_transcript() {
 /// A claude-labelled pane (running `cat`, so it spawns in a test) holding real
 /// captured scrollback: the echoed lines overflow the grid, so rows genuinely
 /// leave the screen and land in the emulator's scrollback.
-fn agent_pane_with_capture(app: &mut App, dir: &std::path::Path) {
+pub(super) fn agent_pane_with_capture(app: &mut App, dir: &std::path::Path) {
     let wake = app.make_pane_wake();
     let pane = crate::pane::Pane::spawn("cat", 24, 80, dir, &app.view.project().context_path, wake)
         .expect("spawn cat");
@@ -440,6 +440,94 @@ fn capital_t_flips_the_scrollback_source_both_ways() {
             "and T again should come back to the capture: {:?}",
             title(&app)
         );
+    });
+}
+
+/// Whether the scrollback in view shows line numbers; `None` with none open.
+pub(super) fn scrollback_numbered(app: &App) -> Option<bool> {
+    app.view
+        .project()
+        .scroll_pager
+        .as_ref()
+        .map(|v| v.show_line_numbers)
+}
+
+/// **`[pager] scrollback_line_numbers` decides whether `^a v` opens with line
+/// numbers.** Default on; `false` opens the scrollback without the gutter. `l`
+/// still shows them in the open view, and the next `^a v` opens at the
+/// config's default again.
+#[test]
+fn scrollback_line_numbers_follow_the_pager_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        agent_pane_with_capture(&mut app, &dir);
+
+        app.open_pane_scroll_pager();
+        app.mount_terminal_scrollback();
+        assert_eq!(scrollback_numbered(&app), Some(true), "on by default");
+
+        app.view.project_mut().scroll_pager = None;
+        app.state
+            .active_project_mut()
+            .config
+            .pager
+            .scrollback_line_numbers = false;
+        app.open_pane_scroll_pager();
+        app.mount_terminal_scrollback();
+        assert_eq!(
+            scrollback_numbered(&app),
+            Some(false),
+            "off when the config says so"
+        );
+
+        app.handle_key(key('l')).unwrap();
+        assert_eq!(scrollback_numbered(&app), Some(true), "`l` shows them");
+
+        app.view.project_mut().scroll_pager = None;
+        app.open_pane_scroll_pager();
+        app.mount_terminal_scrollback();
+        assert_eq!(
+            scrollback_numbered(&app),
+            Some(false),
+            "a fresh `^a v` opens at the config's default, not the last toggle"
+        );
+    });
+}
+
+/// An agent's **transcript** scrollback, which streams in rather than being
+/// snapshotted, follows `[pager] scrollback_line_numbers` too.
+#[test]
+fn a_streamed_transcript_scrollback_follows_the_pager_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        app.state
+            .active_project_mut()
+            .config
+            .pager
+            .scrollback_line_numbers = false;
+        let wake = app.make_pane_wake();
+        let pane =
+            crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
+                .expect("spawn cat");
+        let entry =
+            crate::pane::tabs::TabEntry::new(pane, crate::pane::tabs::TabInfo::new("claude", dir));
+        app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(entry));
+
+        app.open_pane_scroll_pager();
+        let view = app
+            .view
+            .project()
+            .scroll_pager
+            .as_ref()
+            .expect("an agent with no capture mounts its transcript");
+        assert!(view.streaming, "the transcript is the streamed mount");
+        assert!(!view.show_line_numbers, "and it opens without line numbers");
     });
 }
 
