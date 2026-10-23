@@ -100,9 +100,15 @@ impl App {
             .runtime
             .preview_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::PreviewReload);
-        std::thread::spawn(move || {
-            let _ = results.send(reload(req));
-        });
+        let stopped_path = req.path.clone();
+        super::landing::spawn_worker(
+            results,
+            move || reload(req),
+            move |message| PreviewOutcome::Failed {
+                path: stopped_path,
+                error: format!("the reload stopped: {message}"),
+            },
+        );
     }
 
     /// Pre-recv drain: install a landed off-thread reload result, preserving the

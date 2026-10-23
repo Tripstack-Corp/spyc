@@ -94,6 +94,19 @@ impl<T> Landing<T> {
     }
 }
 
+/// Run `work` on a detached thread and send what it returns. `stopped` is the
+/// value for a `work` that ends without one, made from its panic's message.
+pub fn spawn_worker<T: Send + 'static>(
+    sender: WakingSender<T>,
+    work: impl FnOnce() -> T + Send + 'static,
+    stopped: impl FnOnce(String) -> T + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        drop(stopped);
+        let _ = sender.send(work());
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -145,5 +158,39 @@ mod tests {
         assert_eq!(landing.drain(), vec![5, 6]);
         assert!(landing.is_empty());
         assert!(!landing.wait(Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn a_worker_lands_what_it_returns() {
+        let mut landing = Landing::default();
+        spawn_worker(landing.sender(None, Wake::FileOp), || 5, |_| 0);
+        assert!(landing.wait(Duration::from_secs(5)), "nothing landed");
+        assert_eq!(landing.drain(), vec![5]);
+    }
+
+    /// A worker that panics still lands what `stopped` makes of its panic, and
+    /// wakes the loop, so the flight the loop waits on ends.
+    #[test]
+    #[ignore = "red: a worker that panics lands nothing, so its flight never ends"]
+    fn a_worker_that_panics_lands_what_stopped_makes_of_its_message() {
+        let mut landing = Landing::default();
+        let (wake_tx, wake_rx) = mpsc::channel();
+        spawn_worker(
+            landing.sender(Some(wake_tx), Wake::FileOp),
+            || -> String { panic!("the read went wrong") },
+            |message| format!("stopped: {message}"),
+        );
+        assert!(landing.wait(Duration::from_secs(5)), "nothing landed");
+        assert_eq!(
+            landing.drain(),
+            vec!["stopped: the read went wrong".to_string()]
+        );
+        assert!(
+            matches!(
+                wake_rx.recv_timeout(Duration::from_secs(1)),
+                Ok(Message::Wake(Wake::FileOp))
+            ),
+            "the loop was not woken"
+        );
     }
 }

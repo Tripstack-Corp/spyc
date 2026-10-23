@@ -201,12 +201,17 @@ impl App {
             .runtime
             .codex_pin_pending
             .sender(self.runtime.pane_wake_tx.clone(), Wake::CodexSession);
-        std::thread::spawn(move || {
-            // Brief wait so a not-yet-written rollout gets a chance to appear and
-            // repeated kicks poll at ~SCAN_DELAY rather than spin.
-            std::thread::sleep(SCAN_DELAY);
-            let _ = pending.send(collect_home_snapshots(records));
-        });
+        super::landing::spawn_worker(
+            pending,
+            move || {
+                // Brief wait so a not-yet-written rollout gets a chance to appear
+                // and repeated kicks poll at ~SCAN_DELAY rather than spin.
+                std::thread::sleep(SCAN_DELAY);
+                collect_home_snapshots(records)
+            },
+            // Stopped before the scan finished: no rollouts, so nothing pins.
+            |_| Vec::new(),
+        );
     }
 
     /// Drain a landed rollout snapshot, ending the scan in flight, and pin

@@ -454,6 +454,15 @@ pub fn restore_terminal(terminal: &mut Tui) -> Result<()> {
     Ok(())
 }
 
+/// Whether a panic on `thread` takes the TUI down, so the panic hook restores
+/// the terminal for the shell. `ui` is the thread that runs the TUI.
+pub const fn panic_ends_the_tui(
+    _thread: std::thread::ThreadId,
+    _ui: std::thread::ThreadId,
+) -> bool {
+    true
+}
+
 /// The panic hook's half of [`restore_terminal`]: it has no `Tui` to write
 /// through, so it writes to stdout.
 pub fn restore_on_panic() {
@@ -954,6 +963,28 @@ mod keyboard_enhancement_tests {
             alt < gate && gate < push,
             "resume_tui must re-enter the alternate screen, then push the flag \
              if the terminal supports it: {body}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod panic_tests {
+    use super::panic_ends_the_tui;
+
+    /// A worker thread's panic, which spyc survives, leaves the terminal as it
+    /// is: only a panic on the UI thread ends the TUI and restores it.
+    #[test]
+    #[ignore = "red: a worker thread's panic restores the terminal under a running spyc"]
+    fn only_a_panic_on_the_ui_thread_ends_the_tui() {
+        let ui = std::thread::current().id();
+        assert!(panic_ends_the_tui(ui, ui));
+        let on_a_worker =
+            std::thread::spawn(move || panic_ends_the_tui(std::thread::current().id(), ui))
+                .join()
+                .unwrap();
+        assert!(
+            !on_a_worker,
+            "a worker's panic must leave the terminal alone"
         );
     }
 }
