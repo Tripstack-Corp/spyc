@@ -9,13 +9,17 @@ use crate::state::sessions::AgentKind;
 /// arrive as arguments. It starts with `env`, as `npx` would, not a shell: a
 /// shell tab gets the agent env for being a shell, which would hide whether
 /// the hint gave it.
+///
+/// The pane id lands by a rename, so `pane.txt` exists only once it holds the
+/// id: written in place, the test could read the file between its creation
+/// and the write, and find it empty.
 fn recording_wrapper(dir: &std::path::Path) -> (String, std::path::PathBuf, std::path::PathBuf) {
     let args = dir.join("args.txt");
     let pane = dir.join("pane.txt");
     let cmd = format!(
-        "env sh -c 'printf %s \"$# $*\" > {}; printf %s \"$SPYC_PANE_ID\" > {}; exec sleep 60' wrap",
+        "env sh -c 'printf %s \"$# $*\" > {}; printf %s \"$SPYC_PANE_ID\" > {pane}.tmp; mv {pane}.tmp {pane}; exec sleep 60' wrap",
         args.display(),
-        pane.display()
+        pane = pane.display()
     );
     (cmd, args, pane)
 }
