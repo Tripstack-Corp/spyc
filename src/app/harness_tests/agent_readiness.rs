@@ -76,7 +76,6 @@ fn pager_text(app: &mut App, command: &str) -> String {
 /// does: output after it is not a new turn, so the dot stays idle rather than
 /// flipping to the timing guess.
 #[test]
-#[ignore = "red: a codex or claude idle report yields to the next redraw"]
 fn a_codex_or_claude_idle_report_survives_the_redraw_after_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
