@@ -206,8 +206,9 @@ image protocols or OSC 52 clipboard writes. How it answers:
   output (including scrollback) so paths in large diffs are still found.
   A path wrapped onto the next row — by the terminal, or by the agent's
   own line wrapping — is put back together. In a claude, codex, or agy pane
-  the scan stops at its input box (or live approval dialog), so the draft and
-  status line under it can't outrank what the agent printed. A relative path resolves
+  the scan stops at its input box, and in a codex or agy pane at a live
+  approval dialog too, so the draft and status line under it can't outrank
+  what the agent printed. A relative path resolves
   against the pane's cwd, then its worktree root (a `cargo` run from `src/`
   prints paths relative to the root), then the focused column's directory
   and its worktree root, then PROJECT_HOME; the newest line that resolves
@@ -308,7 +309,9 @@ match is overlaid with a 1- or 2-letter label.
 
 Scroll mode just works: scroll up to a Claude reply, hit `^a u`,
 the URLs in *that* reply get labels (the picker scans exactly the
-visible viewport at the user's scroll position).
+visible viewport at the user's scroll position). At the bottom of a
+codex or agy pane it leaves out the agent's input box and footer, and an
+approval dialog on screen, so a draft you're typing gets no labels.
 
 Custom patterns in `.spycrc.toml`:
 

@@ -236,7 +236,7 @@ Manage it in-app with `:skill`:
 |---|---|
 | `:skill` / `:skill status` | report installed version and whether it's stale or edited |
 | `:skill update` | install/overwrite now (also clears a remembered decline) |
-| `:skill remove` | delete `~/.claude/skills/spyc/`, `~/.codex/skills/spyc/`, and `~/.gemini/config/skills/spyc/` |
+| `:skill remove` | delete `~/.claude/skills/spyc/`, `$CODEX_HOME/skills/spyc/` (default `~/.codex`), and `~/.gemini/config/skills/spyc/` |
 | `:skill ask` | forget a decline, so the next launch offers again |
 
 ## Native agent HUD

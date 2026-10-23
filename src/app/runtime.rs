@@ -118,8 +118,8 @@ pub(super) struct Runtime {
     /// reply channel) + a clock instant, never the pure Model.
     pub(super) scope_waiters: Vec<PendingScopeWait>,
     /// Every open project's runtime, keyed by id — an id-addressed side
-    /// table background threads also touch (unlike `AppState::projects`,
-    /// which is ordered for the switcher). The active one is reached through
+    /// table (unlike `AppState::projects`, which is ordered for the
+    /// switcher). The active one is reached through
     /// [`Self::project`] / [`Self::project_mut`]; a tab's owner through
     /// [`Self::project_of_pane`] / [`Self::tab_of_pane`].
     pub(super) projects: std::collections::HashMap<super::state::ProjectId, ProjectRuntime>,

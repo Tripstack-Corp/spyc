@@ -6,10 +6,10 @@
 //! off-thread machinery + the `~/.claude/sessions/*.json` walk dispatch out of
 //! the loop file. `resolve_short_id` is a per-file JSON walk that scales with
 //! the user's accumulated sessions, so it must never run on the render thread
-//! (it once showed ~65% of main-thread CPU). Pattern mirrors
-//! `TabEntry::live_cwd` (#227): a landing + in-flight flag + a detached
-//! worker that wakes the loop on completion; render reads the cache and never
-//! blocks.
+//! (it once showed ~65% of main-thread CPU). So a landing, an in-flight flag and
+//! a detached worker that wakes the loop on completion; render reads the cache
+//! and never blocks. `TabEntry::live_cwd` (#227) is the same shape without the
+//! wake: `prepare_panes` picks its answer up.
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};

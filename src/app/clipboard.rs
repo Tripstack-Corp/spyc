@@ -486,7 +486,8 @@ impl super::App {
     ///
     /// A failure arrives *after* the verb already flashed its confirmation, so it
     /// replaces one — which is the right way round: the last thing on screen is
-    /// what actually happened.
+    /// what actually happened. The clipboard is process-wide, so the failure
+    /// flashes where the user is, whichever project copied.
     pub(crate) fn apply_clipboard_writes(&mut self) -> bool {
         let landed = self.runtime.clipboard_copy_results.drain();
         let mut dirty = false;
