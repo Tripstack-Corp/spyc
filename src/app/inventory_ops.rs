@@ -351,13 +351,11 @@ mod tests {
                 !app.apply_inventory_outcomes(),
                 "empty slot applies nothing"
             );
-            app.runtime
-                .inventory_results
-                .land(InventoryOutcome::Yanked {
-                    count: 2,
-                    skipped: 0,
-                    first_err: None,
-                });
+            app.file_inventory_outcome(InventoryOutcome::Yanked {
+                count: 2,
+                skipped: 0,
+                first_err: None,
+            });
             assert!(app.apply_inventory_outcomes());
             assert!(app.flash_text().unwrap().contains("yanked 2"));
         });

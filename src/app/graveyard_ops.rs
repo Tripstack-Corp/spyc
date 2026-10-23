@@ -311,12 +311,10 @@ mod tests {
         // Empty slot → nothing applied.
         assert!(!app.apply_graveyard_outcomes());
         // A landed outcome is drained, flashed, and the slot emptied.
-        app.runtime
-            .graveyard_results
-            .land(GraveyardOutcome::Archived {
-                archived: 3,
-                failures: Vec::new(),
-            });
+        app.file_graveyard_outcome(GraveyardOutcome::Archived {
+            archived: 3,
+            failures: Vec::new(),
+        });
         assert!(app.apply_graveyard_outcomes());
         assert!(app.flash_text().unwrap().contains("removed 3"));
         assert!(!app.apply_graveyard_outcomes());
@@ -344,12 +342,10 @@ mod tests {
             assert_eq!((trashed, errors), (0, 0), "one tiny file is under cap");
 
             let mut app = App::test_app(std::env::temp_dir());
-            app.runtime
-                .graveyard_results
-                .land(GraveyardOutcome::Cascaded {
-                    trashed: 0,
-                    errors: 0,
-                });
+            app.file_graveyard_outcome(GraveyardOutcome::Cascaded {
+                trashed: 0,
+                errors: 0,
+            });
             assert!(app.apply_graveyard_outcomes(), "outcome is still drained");
             assert!(
                 app.flash_text().is_none(),
@@ -367,12 +363,10 @@ mod tests {
     #[test]
     fn a_failing_cascade_reports_instead_of_failing_silently() {
         let mut app = App::test_app(std::env::temp_dir());
-        app.runtime
-            .graveyard_results
-            .land(GraveyardOutcome::Cascaded {
-                trashed: 2,
-                errors: 5,
-            });
+        app.file_graveyard_outcome(GraveyardOutcome::Cascaded {
+            trashed: 2,
+            errors: 5,
+        });
         assert!(app.apply_graveyard_outcomes());
         let flash = app.flash_text().expect("a failing cascade must flash");
         assert!(
@@ -390,12 +384,10 @@ mod tests {
     #[test]
     fn a_successful_cascade_names_what_it_moved() {
         let mut app = App::test_app(std::env::temp_dir());
-        app.runtime
-            .graveyard_results
-            .land(GraveyardOutcome::Cascaded {
-                trashed: 3,
-                errors: 0,
-            });
+        app.file_graveyard_outcome(GraveyardOutcome::Cascaded {
+            trashed: 3,
+            errors: 0,
+        });
         assert!(app.apply_graveyard_outcomes());
         let flash = app.flash_text().expect("flash expected");
         assert!(

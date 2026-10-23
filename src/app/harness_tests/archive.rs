@@ -124,8 +124,7 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
                     app.file_archive_outcome(outcome);
                 }
                 Effect::Inventory(op) => {
-                    let outcome = crate::app::inventory_ops::run_inventory_op(op);
-                    app.runtime.inventory_results.land(outcome);
+                    app.file_inventory_outcome(crate::app::inventory_ops::run_inventory_op(op));
                 }
                 Effect::FileOp(op) => {
                     let outcome = crate::app::file_ops::run_file_op(op);
@@ -133,8 +132,7 @@ fn settle(app: &mut App, effects: Vec<Effect>) {
                     app.runtime.file_results.land((origin, outcome));
                 }
                 Effect::Graveyard(op) => {
-                    let outcome = crate::app::graveyard_ops::run_graveyard_op(op);
-                    app.runtime.graveyard_results.land(outcome);
+                    app.file_graveyard_outcome(crate::app::graveyard_ops::run_graveyard_op(op));
                 }
                 // A mount re-issues the `ChangeDir` that was waiting for it.
                 Effect::ChangeDir {
