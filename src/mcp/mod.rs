@@ -199,8 +199,7 @@ const fn route(env: &PaneEnv, under_daemon: bool) -> Route {
 }
 
 /// The *effective* report state, given the hook's configured state and the
-/// agent event JSON piped to the hook's stdin. Both remaps are Claude-specific
-/// and inert for other agents' payloads:
+/// agent event JSON piped to the hook's stdin:
 ///
 /// - a `Notification` whose `notification_type` is `idle_prompt` ("Claude is
 ///   waiting for your input") is the agent **finished and waiting** — that's
@@ -210,10 +209,12 @@ const fn route(env: &PaneEnv, under_daemon: bool) -> Route {
 ///   `PermissionRequest` event, which fires for real tool-permission prompts)
 ///   keeps `blocked`.
 /// - a `Stop` whose payload lists in-flight background work or a scheduled
-///   wakeup is not finished: the agent resumes by itself when that work wakes
-///   it, so `done` becomes `waiting`. Claude Code's own description of those
-///   lists is "distinguish session is done from session is paused waiting for
-///   background work to wake it".
+///   wakeup (Claude Code's `background_tasks` / `session_crons`, or agy's
+///   `fullyIdle: false`) is not finished: the agent resumes by itself when that
+///   work wakes it, so `done` becomes `waiting`.
+/// - an agy `Stop` whose `terminationReason` is `USER_CANCELED` (when no
+///   background work is pending) is a cancelled turn, so `done` becomes `idle`
+///   rather than lighting the finished square or pinging.
 ///
 /// An empty or unparseable payload leaves the configured state unchanged. Pure
 /// + tested.
@@ -228,6 +229,7 @@ fn effective_report_state<'a>(configured: &'a str, hook_payload: &str) -> &'a st
             "done"
         }
         ("done", "Stop") if event.wakes_pending() == Some(true) => "waiting",
+        ("done", "Stop") if event.user_cancelled() => "idle",
         _ => configured,
     }
 }

@@ -127,9 +127,74 @@ fn a_turn_ending_with_background_work_waits_without_a_ping_until_the_work_wakes_
     });
 }
 
-/// Codex's `Stop` can't say whether work is pending, and agy's names no event
-/// at all, so a self-reported `waiting` absorbs the turn end that follows it.
-/// A second one means the agent woke and finished without reporting again.
+/// agy's `Stop` reports `fullyIdle: false` while background tasks, subagents or
+/// scheduled timers are in flight; the reporter turns that `done` into
+/// `waiting`, and the next invocation's `Stop` with `fullyIdle: true` finishes
+/// the turn as `done`.
+#[test]
+fn an_agy_turn_ending_with_background_work_waits_until_the_next_invocation_finishes() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut agy = agent_app(tmp.path(), "agy");
+        hook(
+            &mut agy,
+            "working",
+            &json!({"hook_event_name":"PreInvocation"}),
+        );
+        assert_eq!(settle(&mut agy, Instant::now()).0, AgentActivity::Working);
+        hook(
+            &mut agy,
+            "waiting",
+            &json!({
+                "hook_event_name":"Stop",
+                "termination_reason":"NO_TOOL_CALL",
+                "fully_idle":false
+            }),
+        );
+        assert_eq!(
+            settle(&mut agy, Instant::now()),
+            (AgentActivity::Waiting, false),
+            "agy: entering waiting is not a notification"
+        );
+        assert_eq!(
+            reported(&agy).unwrap().note.as_deref(),
+            Some("background work"),
+            "agy"
+        );
+        hook(
+            &mut agy,
+            "working",
+            &json!({"hook_event_name":"PreInvocation"}),
+        );
+        assert_eq!(settle(&mut agy, Instant::now()).0, AgentActivity::Working);
+        hook(
+            &mut agy,
+            "done",
+            &json!({
+                "hook_event_name":"Stop",
+                "termination_reason":"NO_TOOL_CALL",
+                "fully_idle":true
+            }),
+        );
+        assert_eq!(
+            settle(&mut agy, Instant::now()),
+            (AgentActivity::Done, true),
+            "agy: the finished work's turn end pings as done"
+        );
+        let dump = dump(&mut agy);
+        assert!(
+            dump.contains("event=PreInvocation status=working"),
+            "{dump}"
+        );
+        assert!(dump.contains("event=Stop status=waiting"), "{dump}");
+        assert!(dump.contains("event=Stop status=done"), "{dump}");
+    });
+}
+
+/// Codex's `Stop` can't say whether work is pending, and neither could an older
+/// agy `Stop` that omitted `fullyIdle`, so a self-reported `waiting` absorbs
+/// the turn end that follows it. A second one means the agent woke and finished
+/// without reporting again.
 #[test]
 fn a_self_reported_wait_outlasts_its_own_turn_end_but_not_the_next() {
     let tmp = tempfile::tempdir().unwrap();
@@ -179,29 +244,33 @@ fn a_self_reported_wait_outlasts_its_own_turn_end_but_not_the_next() {
 /// `waiting` is how a turn ends. Reported mid-turn (an agent starting a
 /// background watch and carrying on), the agent is still working: the dot
 /// says so until the turn ends, and the wait shows from then, in the agent's
-/// words. Claude Code's `Stop` names the pending work; codex's can't.
+/// words. Claude Code's and agy's `Stop` name the pending work; codex's can't.
 #[test]
 fn a_wait_reported_mid_turn_shows_working_until_the_turn_ends() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        for (name, turn_end_state, turn_end) in [
+        for (name, turn_start, turn_end_state, turn_end) in [
             (
                 "claude",
+                "UserPromptSubmit",
                 "waiting",
                 json!({"hook_event_name":"Stop", "background_tasks":1, "session_crons":0}),
             ),
             (
+                "agy",
+                "PreInvocation",
+                "waiting",
+                json!({"hook_event_name":"Stop", "termination_reason":"NO_TOOL_CALL", "fully_idle":false}),
+            ),
+            (
                 "codex",
+                "UserPromptSubmit",
                 "done",
                 json!({"hook_event_name":"Stop", "turn_id":"turn-1"}),
             ),
         ] {
             let mut app = agent_app(tmp.path(), name);
-            hook(
-                &mut app,
-                "working",
-                &json!({"hook_event_name":"UserPromptSubmit"}),
-            );
+            hook(&mut app, "working", &json!({"hook_event_name":turn_start}));
             agent(&mut app, "waiting", Some("release run"), None);
             assert_eq!(
                 settle(&mut app, Instant::now()),
@@ -242,28 +311,34 @@ fn a_wait_reported_mid_turn_shows_working_until_the_turn_ends() {
 fn a_held_wait_gives_way_to_anything_newer() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let open = |app: &mut App| {
-            hook(
-                app,
-                "working",
-                &json!({"hook_event_name":"UserPromptSubmit"}),
-            );
+        let open = |app: &mut App, turn_start: &str| {
+            hook(app, "working", &json!({"hook_event_name":turn_start}));
             agent(app, "waiting", Some("release run"), None);
         };
-        let stop_nothing_pending =
-            json!({"hook_event_name":"Stop", "background_tasks":0, "session_crons":0});
-
-        let mut app = agent_app(tmp.path(), "claude");
-        open(&mut app);
-        hook(&mut app, "done", &stop_nothing_pending);
-        assert_eq!(
-            settle(&mut app, Instant::now()),
-            (AgentActivity::Done, true),
-            "Claude Code's Stop says nothing will wake it"
-        );
+        for (name, turn_start, stop_nothing_pending) in [
+            (
+                "claude",
+                "UserPromptSubmit",
+                json!({"hook_event_name":"Stop", "background_tasks":0, "session_crons":0}),
+            ),
+            (
+                "agy",
+                "PreInvocation",
+                json!({"hook_event_name":"Stop", "termination_reason":"NO_TOOL_CALL", "fully_idle":true}),
+            ),
+        ] {
+            let mut app = agent_app(tmp.path(), name);
+            open(&mut app, turn_start);
+            hook(&mut app, "done", &stop_nothing_pending);
+            assert_eq!(
+                settle(&mut app, Instant::now()),
+                (AgentActivity::Done, true),
+                "{name}: Stop says nothing will wake it"
+            );
+        }
 
         let mut app = agent_app(tmp.path(), "codex");
-        open(&mut app);
+        open(&mut app, "UserPromptSubmit");
         agent(&mut app, "working", None, None);
         hook(
             &mut app,
@@ -277,7 +352,7 @@ fn a_held_wait_gives_way_to_anything_newer() {
         );
 
         let mut app = agent_app(tmp.path(), "codex");
-        open(&mut app);
+        open(&mut app, "UserPromptSubmit");
         app.execute_pane_input(
             PaneTarget::Active,
             PaneInput::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),

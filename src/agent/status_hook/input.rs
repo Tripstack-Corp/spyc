@@ -1,8 +1,8 @@
 //! Read complete hook JSON without retaining tool arguments or responses.
 //!
 //! serde's `IgnoredAny` validates and skips the document without allocating its
-//! strings. This reader observes only root string fields, and the entry count of
-//! two root arrays, while bytes pass by.
+//! strings. This reader observes only root metadata fields, `toolCall.name`, and
+//! the entry count of two root arrays, while bytes pass by.
 //! Fixed field slots, a bounded token buffer and a depth limit also bound memory
 //! for huge keys, oversized metadata and deeply nested ignored content.
 
@@ -11,15 +11,85 @@ use std::io::{self, Read};
 use serde::{Deserialize, de::IgnoredAny};
 use serde_json::{Map, Value};
 
-const FIELDS: [&str; 7] = [
-    "hook_event_name",
-    "tool_name",
-    "turn_id",
-    "tool_use_id",
-    "notification_type",
-    "session_id",
-    "conversationId",
-];
+#[derive(Clone, Copy)]
+#[repr(usize)]
+enum Field {
+    HookEventName,
+    ToolName,
+    TurnId,
+    ToolUseId,
+    NotificationType,
+    SessionId,
+    ConversationId,
+    TerminationReason,
+}
+
+impl Field {
+    const ALL: [Self; 8] = [
+        Self::HookEventName,
+        Self::ToolName,
+        Self::TurnId,
+        Self::ToolUseId,
+        Self::NotificationType,
+        Self::SessionId,
+        Self::ConversationId,
+        Self::TerminationReason,
+    ];
+
+    fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "hook_event_name" => Some(Self::HookEventName),
+            "tool_name" => Some(Self::ToolName),
+            "turn_id" => Some(Self::TurnId),
+            "tool_use_id" => Some(Self::ToolUseId),
+            "notification_type" => Some(Self::NotificationType),
+            "session_id" => Some(Self::SessionId),
+            "conversationId" => Some(Self::ConversationId),
+            "terminationReason" => Some(Self::TerminationReason),
+            _ => None,
+        }
+    }
+
+    const fn wire_name(self) -> &'static str {
+        match self {
+            Self::HookEventName => "hook_event_name",
+            Self::ToolName => "tool_name",
+            Self::TurnId => "turn_id",
+            Self::ToolUseId => "tool_use_id",
+            Self::NotificationType => "notification_type",
+            Self::SessionId => "session_id",
+            Self::ConversationId => "conversationId",
+            Self::TerminationReason => "termination_reason",
+        }
+    }
+}
+
+/// Root non-negative integer fields from agy's mutually exclusive
+/// `exa.hooks_pb.HookArgs` `oneof` (`PreInvocationHookArgs.invocationNum`,
+/// `StopHookArgs.executionNum`, `PreToolHookArgs.stepIdx`; confirmed by probe
+/// on agy 1.4.5), which identify the hook event when `hook_event_name` is
+/// absent.
+#[derive(Clone, Copy)]
+#[repr(usize)]
+enum IntField {
+    InvocationNum,
+    ExecutionNum,
+    StepIdx,
+}
+
+impl IntField {
+    const COUNT: usize = 3;
+
+    fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "invocationNum" => Some(Self::InvocationNum),
+            "executionNum" => Some(Self::ExecutionNum),
+            "stepIdx" => Some(Self::StepIdx),
+            _ => None,
+        }
+    }
+}
+
 /// Root arrays kept as their count of object entries, never their content:
 /// Claude Code's `Stop` lists in-flight background work and scheduled wakeups.
 const COUNTED: [&str; 2] = ["background_tasks", "session_crons"];
@@ -27,9 +97,10 @@ const TOKEN_LIMIT: usize = 1024; // Includes quotes and up to six bytes per ASCI
 const STRING_LIMIT: usize = 128;
 const DEPTH_LIMIT: usize = 128;
 
-/// Returns only bounded metadata from a valid root object. Content is never
-/// retained, including when parsing fails. `PAYLOAD_LIMIT` applies to this small
-/// normalized result, rather than to the hook's potentially large stdin body.
+/// Returns only bounded metadata from a valid root object, normalized to the
+/// wire's field names. Content is never retained, including when parsing fails.
+/// `PAYLOAD_LIMIT` applies to this small normalized result, rather than to the
+/// hook's potentially large stdin body.
 pub fn read_payload(reader: impl Read) -> Option<String> {
     let mut input = MetadataReader::new(reader);
     {
@@ -40,10 +111,31 @@ pub fn read_payload(reader: impl Read) -> Option<String> {
     if !input.root_object {
         return None;
     }
-    let fields: Map<String, Value> = FIELDS
+    let agy_tool_call = input.tool_call_name.is_some();
+    if !input.has_field(Field::ToolName) {
+        *input.field_mut(Field::ToolName) = input.tool_call_name.take();
+    }
+    if !input.has_field(Field::HookEventName) {
+        *input.field_mut(Field::HookEventName) = if input.has_field(Field::TerminationReason)
+            || input.fully_idle.is_some()
+            || input.int(IntField::ExecutionNum).is_some()
+        {
+            Some("Stop".to_owned())
+        } else if agy_tool_call || input.int(IntField::StepIdx).is_some() {
+            Some("PreToolUse".to_owned())
+        } else if input.int(IntField::InvocationNum).is_some() {
+            Some("PreInvocation".to_owned())
+        } else {
+            None
+        };
+    }
+    let mut fields: Map<String, Value> = Field::ALL
         .into_iter()
-        .zip(input.fields)
-        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), Value::String(value))))
+        .filter_map(|field| {
+            input.fields[field as usize]
+                .take()
+                .map(|value| (field.wire_name().to_owned(), Value::String(value)))
+        })
         .chain(
             COUNTED
                 .into_iter()
@@ -51,28 +143,50 @@ pub fn read_payload(reader: impl Read) -> Option<String> {
                 .filter_map(|(key, count)| count.map(|count| (key.to_owned(), Value::from(count)))),
         )
         .collect();
+    if let Some(idle) = input.fully_idle {
+        fields.insert("fully_idle".to_owned(), Value::Bool(idle));
+    }
     serde_json::to_string(&fields).ok()
+}
+
+/// Which root metadata slot the current root key's value populates.
+#[derive(Clone, Copy)]
+enum RootSlot {
+    Field(Field),
+    Int(IntField),
+    Counted(usize),
+    ToolCall,
+    FullyIdle,
 }
 
 #[derive(Clone, Copy)]
 enum Token {
     Ignored,
     Key,
-    Field(usize),
+    Field(Field),
+    ToolCallKey,
+    ToolCallName,
 }
 
 struct MetadataReader<R> {
     inner: R,
-    fields: [Option<String>; FIELDS.len()],
+    fields: [Option<String>; Field::ALL.len()],
+    ints: [Option<u32>; IntField::COUNT],
     counts: [Option<u32>; COUNTED.len()],
-    /// The counted key whose value comes next, and the counted array being read.
-    counted_key: Option<usize>,
+    tool_call_name: Option<String>,
+    fully_idle: Option<bool>,
+    slot: Option<RootSlot>,
     counting: Option<usize>,
+    int_acc: Option<u32>,
+    int_invalid: bool,
+    in_tool_call: bool,
+    nested_key_next: bool,
+    nested_name_field: bool,
+    awaiting_colon: bool,
     started: bool,
     root_object: bool,
     depth: usize,
     key_next: bool,
-    field: Option<usize>,
     in_string: bool,
     escaped: bool,
     token: Token,
@@ -85,20 +199,40 @@ impl<R> MetadataReader<R> {
         Self {
             inner,
             fields: std::array::from_fn(|_| None),
+            ints: [None; IntField::COUNT],
             counts: [None; COUNTED.len()],
-            counted_key: None,
+            tool_call_name: None,
+            fully_idle: None,
+            slot: None,
             counting: None,
+            int_acc: None,
+            int_invalid: false,
+            in_tool_call: false,
+            nested_key_next: false,
+            nested_name_field: false,
+            awaiting_colon: false,
             started: false,
             root_object: false,
             depth: 0,
             key_next: true,
-            field: None,
             in_string: false,
             escaped: false,
             token: Token::Ignored,
             bytes: Vec::with_capacity(TOKEN_LIMIT),
             overflow: false,
         }
+    }
+
+    const fn has_field(&self, field: Field) -> bool {
+        self.fields[field as usize].is_some()
+    }
+
+    const fn field_mut(&mut self, field: Field) -> &mut Option<String> {
+        &mut self.fields[field as usize]
+    }
+
+    const fn int(&self, field: IntField) -> Option<u32> {
+        self.ints[field as usize]
     }
 
     fn capture(&mut self, byte: u8) {
@@ -113,32 +247,139 @@ impl<R> MetadataReader<R> {
         }
     }
 
+    fn select_root_key(&mut self, key: Option<&str>) {
+        self.key_next = false;
+        self.awaiting_colon = true;
+        self.slot = key.and_then(|key| {
+            if let Some(field) = Field::from_key(key) {
+                Some(RootSlot::Field(field))
+            } else if let Some(field) = IntField::from_key(key) {
+                Some(RootSlot::Int(field))
+            } else if let Some(idx) = COUNTED.iter().position(|counted| *counted == key) {
+                Some(RootSlot::Counted(idx))
+            } else if key == "toolCall" {
+                Some(RootSlot::ToolCall)
+            } else if key == "fullyIdle" {
+                Some(RootSlot::FullyIdle)
+            } else {
+                None
+            }
+        });
+        // Match JSON's last-key-wins behaviour even when the later
+        // value has an invalid type or exceeds the metadata limit.
+        match self.slot {
+            Some(RootSlot::Field(field)) => *self.field_mut(field) = None,
+            Some(RootSlot::Int(field)) => {
+                self.ints[field as usize] = None;
+                self.int_acc = None;
+                self.int_invalid = false;
+            }
+            Some(RootSlot::Counted(counted)) => self.counts[counted] = None,
+            Some(RootSlot::ToolCall) => self.tool_call_name = None,
+            Some(RootSlot::FullyIdle) => self.fully_idle = None,
+            None => {}
+        }
+    }
+
     fn finish_string(&mut self) {
         let decoded = (!self.overflow)
             .then(|| serde_json::from_slice::<String>(&self.bytes).ok())
             .flatten();
         match self.token {
-            Token::Key => {
-                self.key_next = false;
-                let key = decoded.as_deref();
-                self.field = key.and_then(|key| FIELDS.iter().position(|field| *field == key));
-                self.counted_key =
-                    key.and_then(|key| COUNTED.iter().position(|counted| *counted == key));
-                // Match JSON's last-key-wins behaviour even when the later
-                // value has an invalid type or exceeds the metadata limit.
-                if let Some(field) = self.field {
-                    self.fields[field] = None;
-                }
-                if let Some(counted) = self.counted_key {
-                    self.counts[counted] = None;
+            Token::Key => self.select_root_key(decoded.as_deref()),
+            Token::Field(field) => {
+                *self.field_mut(field) = decoded.filter(|value| value.len() <= STRING_LIMIT);
+            }
+            Token::ToolCallKey => {
+                self.nested_key_next = false;
+                self.nested_name_field = decoded.as_deref() == Some("name");
+                if self.nested_name_field {
+                    self.tool_call_name = None;
                 }
             }
-            Token::Field(field) => {
-                self.fields[field] = decoded.filter(|value| value.len() <= STRING_LIMIT);
+            Token::ToolCallName => {
+                self.tool_call_name = decoded.filter(|value| value.len() <= STRING_LIMIT);
+                self.nested_name_field = false;
             }
             Token::Ignored => {}
         }
         self.in_string = false;
+    }
+
+    fn observe_root_scalar(&mut self, byte: u8) {
+        if self.depth != 1 || self.key_next {
+            return;
+        }
+        if self.awaiting_colon {
+            if byte == b':' {
+                self.awaiting_colon = false;
+            }
+            return;
+        }
+        if byte.is_ascii_whitespace() || matches!(byte, b',' | b'}') {
+            return;
+        }
+        match self.slot {
+            Some(RootSlot::FullyIdle) => {
+                self.fully_idle = match byte {
+                    b't' => Some(true),
+                    b'f' => Some(false),
+                    _ => None,
+                };
+                self.slot = None;
+            }
+            Some(RootSlot::Int(_)) => {
+                if byte.is_ascii_digit()
+                    && !self.int_invalid
+                    && let Some(next) = self
+                        .int_acc
+                        .unwrap_or(0)
+                        .checked_mul(10)
+                        .and_then(|n| n.checked_add(u32::from(byte - b'0')))
+                {
+                    self.int_acc = Some(next);
+                } else {
+                    self.int_invalid = true;
+                    self.int_acc = None;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    const fn finish_root_value(&mut self) {
+        if let Some(RootSlot::Int(field)) = self.slot
+            && !self.int_invalid
+        {
+            self.ints[field as usize] = self.int_acc.take();
+        }
+        self.key_next = true;
+        self.awaiting_colon = false;
+        self.slot = None;
+        self.int_acc = None;
+        self.int_invalid = false;
+    }
+
+    const fn string_token(&self) -> Token {
+        if self.root_object && self.depth == 1 {
+            if self.key_next {
+                Token::Key
+            } else if let Some(RootSlot::Field(field)) = self.slot {
+                Token::Field(field)
+            } else {
+                Token::Ignored
+            }
+        } else if self.in_tool_call && self.depth == 2 {
+            if self.nested_key_next {
+                Token::ToolCallKey
+            } else if self.nested_name_field {
+                Token::ToolCallName
+            } else {
+                Token::Ignored
+            }
+        } else {
+            Token::Ignored
+        }
     }
 
     fn observe(&mut self, byte: u8) -> io::Result<()> {
@@ -157,17 +398,10 @@ impl<R> MetadataReader<R> {
             }
             return Ok(());
         }
+        self.observe_root_scalar(byte);
         match byte {
             b'"' => {
-                self.token = if self.root_object && self.depth == 1 {
-                    if self.key_next {
-                        Token::Key
-                    } else {
-                        self.field.map_or(Token::Ignored, Token::Field)
-                    }
-                } else {
-                    Token::Ignored
-                };
+                self.token = self.string_token();
                 self.in_string = true;
                 self.escaped = false;
                 self.bytes.clear();
@@ -176,15 +410,25 @@ impl<R> MetadataReader<R> {
             }
             b'{' | b'[' => {
                 if byte == b'[' && self.depth == 1 && !self.key_next {
-                    self.counting = self.counted_key;
-                    if let Some(counted) = self.counting {
+                    if let Some(RootSlot::Counted(counted)) = self.slot {
+                        self.counting = Some(counted);
                         self.counts[counted] = Some(0);
                     }
                 } else if byte == b'{'
-                    && self.depth == 2
-                    && let Some(counted) = self.counting
+                    && self.depth == 1
+                    && !self.key_next
+                    && matches!(self.slot, Some(RootSlot::ToolCall))
                 {
-                    self.counts[counted] = self.counts[counted].map(|n| n.saturating_add(1));
+                    self.in_tool_call = true;
+                    self.nested_key_next = true;
+                    self.nested_name_field = false;
+                } else if self.depth == 2 {
+                    self.nested_name_field = false;
+                    if byte == b'{'
+                        && let Some(counted) = self.counting
+                    {
+                        self.counts[counted] = self.counts[counted].map(|n| n.saturating_add(1));
+                    }
                 }
                 self.depth += 1;
                 if self.depth > DEPTH_LIMIT {
@@ -195,15 +439,20 @@ impl<R> MetadataReader<R> {
                 }
             }
             b'}' | b']' => {
+                if byte == b'}' && self.depth == 1 {
+                    self.finish_root_value();
+                }
                 self.depth = self.depth.saturating_sub(1);
                 if self.depth <= 1 {
                     self.counting = None;
+                    self.in_tool_call = false;
+                    self.nested_name_field = false;
                 }
             }
-            b',' if self.depth == 1 => {
-                self.key_next = true;
-                self.field = None;
-                self.counted_key = None;
+            b',' if self.depth == 1 => self.finish_root_value(),
+            b',' if self.depth == 2 && self.in_tool_call => {
+                self.nested_key_next = true;
+                self.nested_name_field = false;
             }
             _ => {}
         }
@@ -319,6 +568,52 @@ mod tests {
             metadata(r#"{"background_tasks":[{},{}],"background_tasks":null}"#),
             serde_json::json!({}),
             "last key wins, even when its value is not a list"
+        );
+    }
+
+    /// Confirmed against `exa.hooks_pb.HookArgs` protojson on agy 1.4.5,
+    /// including protojson's variable spacing after colons and commas.
+    #[test]
+    fn agy_hook_payloads_normalize_to_wire_names_and_skip_tool_arguments() {
+        let pre_invocation = r#"{"conversationId":"conv-1","workspacePaths":["/private/proj"],"invocationNum":3,"initialNumSteps":10,"modelName":"auto"}"#;
+        assert_eq!(
+            metadata(pre_invocation),
+            serde_json::json!({"conversationId":"conv-1", "hook_event_name":"PreInvocation"})
+        );
+
+        let pre_tool = "{\n  \"conversationId\": \"conv-1\",\n  \"toolCall\": { \"args\": { \"name\": \"wrong\", \"questions\": [\"private-q\"] }, \"name\": \"ask_question\" },\n  \"stepIdx\": 19\n}";
+        assert_eq!(
+            metadata(pre_tool),
+            serde_json::json!({
+                "conversationId":"conv-1",
+                "hook_event_name":"PreToolUse",
+                "tool_name":"ask_question"
+            })
+        );
+
+        let stop = r#"{"conversationId":"conv-1", "executionNum": 1, "terminationReason": "NO_TOOL_CALL", "error": "private-error", "fullyIdle": false}"#;
+        assert_eq!(
+            metadata(stop),
+            serde_json::json!({
+                "conversationId":"conv-1",
+                "hook_event_name":"Stop",
+                "termination_reason":"NO_TOOL_CALL",
+                "fully_idle":false
+            })
+        );
+
+        assert_eq!(
+            metadata(r#"{"tool_name":"Bash"}"#),
+            serde_json::json!({"tool_name":"Bash"}),
+            "only agy's toolCall.name or stepIdx infers PreToolUse"
+        );
+
+        assert_eq!(
+            metadata(
+                r#"{"toolCall":{"name":"old"},"toolCall":null,"fullyIdle":true,"fullyIdle":"no","invocationNum":2,"invocationNum":-1,"stepIdx":4,"stepIdx":4.5,"executionNum":1,"executionNum":"1"}"#
+            ),
+            serde_json::json!({}),
+            "duplicate agy fields follow last-key-wins and reject invalid types"
         );
     }
 
