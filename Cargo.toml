@@ -276,6 +276,10 @@ split-debuginfo = "packed"
 # remove a line if you want to hear that voice again.
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
+
+# Every `unsafe` block says why it is sound, in a `// SAFETY:` comment above it
+# (CONTRIBUTING.md → "Rust style").
+undocumented_unsafe_blocks = "warn"
 nursery = { level = "warn", priority = -1 }
 
 # Short/long types with the module name baked in are fine; this lint flags

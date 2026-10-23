@@ -90,6 +90,11 @@ impl Frame {
     }
 }
 
+/// The `unsafe` blocks below lean on three facts. `t` is live from `new`,
+/// which asserts it, to `Drop`. `rs`, `it` and `rc` are null if their
+/// constructor failed, which every render-state call answers with an error or
+/// `false`. And the engine is `Send` but not `Sync`, so a `&self` method never
+/// reaches the handles from two threads, and none runs during a `&mut self` one.
 pub struct GhosttyScreen {
     t: ffi::GhosttyTerminal,
     /// Reused across frames; `begin_update` is the only call needing the
@@ -135,11 +140,15 @@ pub struct GhosttyEngine {
     clippy::non_send_fields_in_send_ty,
     reason = "the raw handle is the point; soundness argument is the trap anchor"
 )]
+// SAFETY: libghostty-vt asks for serialized access, not thread affinity, and
+// without `Sync` one thread at a time reaches the handles.
 unsafe impl Send for GhosttyEngine {}
 
 impl Drop for GhosttyEngine {
     fn drop(&mut self) {
         let s = &mut self.inner;
+        // SAFETY: `drop` runs once, so each non-null handle is freed once and
+        // never used after; `replies` came from `Box::into_raw` in `new`.
         unsafe {
             if !s.rc.is_null() {
                 ffi::ghostty_render_state_row_cells_free(s.rc);
@@ -180,8 +189,11 @@ const fn empty_grid_ref() -> ffi::GhosttyGridRef {
 }
 
 fn default_style() -> ffi::GhosttyStyle {
+    // SAFETY: `GhosttyStyle` is integers, bools and unions of integers, all
+    // valid as zero bytes.
     let mut st: ffi::GhosttyStyle = unsafe { std::mem::zeroed() };
     st.size = size_of::<ffi::GhosttyStyle>();
+    // SAFETY: `st` is a writable `GhosttyStyle` with its `size` set.
     unsafe { ffi::ghostty_style_default(&raw mut st) };
     st
 }
@@ -189,9 +201,11 @@ fn default_style() -> ffi::GhosttyStyle {
 const fn colour(c: ffi::GhosttyStyleColor) -> Color {
     match c.tag {
         ffi::GhosttyStyleColorTag::GHOSTTY_STYLE_COLOR_PALETTE => {
+            // SAFETY: the tag names `palette` as the union's active field.
             Color::Idx(unsafe { c.value.palette })
         }
         ffi::GhosttyStyleColorTag::GHOSTTY_STYLE_COLOR_RGB => {
+            // SAFETY: the tag names `rgb` as the union's active field.
             let rgb = unsafe { c.value.rgb };
             Color::Rgb(rgb.r, rgb.g, rgb.b)
         }
@@ -226,6 +240,8 @@ const fn style_from(st: &ffi::GhosttyStyle, wide: Wide) -> CellStyle {
 /// would paint ghostty's idea of colour 2 instead of the host terminal's.
 fn content_tag_bg(raw: ffi::GhosttyCell) -> Option<Color> {
     let mut tag: ffi::GhosttyCellContentTag::Type = 0;
+    // SAFETY: a `GhosttyCell` is a value, not a handle, and `CONTENT_TAG`
+    // writes a `GhosttyCellContentTag`.
     if unsafe {
         ffi::ghostty_cell_get(
             raw,
@@ -239,6 +255,7 @@ fn content_tag_bg(raw: ffi::GhosttyCell) -> Option<Color> {
     match tag {
         ffi::GhosttyCellContentTag::GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE => {
             let mut idx: ffi::GhosttyColorPaletteIndex = 0;
+            // SAFETY: `COLOR_PALETTE` writes a `GhosttyColorPaletteIndex`.
             (unsafe {
                 ffi::ghostty_cell_get(
                     raw,
@@ -250,6 +267,7 @@ fn content_tag_bg(raw: ffi::GhosttyCell) -> Option<Color> {
         }
         ffi::GhosttyCellContentTag::GHOSTTY_CELL_CONTENT_BG_COLOR_RGB => {
             let mut rgb = ffi::GhosttyColorRgb { r: 0, g: 0, b: 0 };
+            // SAFETY: `COLOR_RGB` writes a `GhosttyColorRgb`.
             (unsafe {
                 ffi::ghostty_cell_get(
                     raw,
@@ -265,6 +283,7 @@ fn content_tag_bg(raw: ffi::GhosttyCell) -> Option<Color> {
 
 fn wide_from_raw(raw: ffi::GhosttyCell) -> Wide {
     let mut w: ffi::GhosttyCellWide::Type = 0;
+    // SAFETY: `WIDE` writes a `GhosttyCellWide`.
     if unsafe { ffi::ghostty_cell_get(raw, CellData::GHOSTTY_CELL_DATA_WIDE, (&raw mut w).cast()) }
         != spyc_vt_sys::SUCCESS
     {
@@ -278,20 +297,26 @@ fn wide_from_raw(raw: ffi::GhosttyCell) -> Wide {
 }
 
 impl GhosttyScreen {
+    /// `tag` must be one whose output type is `uint16_t`.
     fn get_u16(&self, tag: Data::Type) -> Option<u16> {
         let mut v: u16 = 0;
+        // SAFETY: `t` is live, and every caller passes a `uint16_t` tag.
         let ok = unsafe { ffi::ghostty_terminal_get(self.t, tag, (&raw mut v).cast()) };
         (ok == spyc_vt_sys::SUCCESS).then_some(v)
     }
 
+    /// `tag` must be one whose output type is `size_t`.
     fn get_usize(&self, tag: Data::Type) -> Option<usize> {
         let mut v: usize = 0;
+        // SAFETY: `t` is live, and every caller passes a `size_t` tag.
         let ok = unsafe { ffi::ghostty_terminal_get(self.t, tag, (&raw mut v).cast()) };
         (ok == spyc_vt_sys::SUCCESS).then_some(v)
     }
 
+    /// `tag` must be one whose output type is `bool`.
     fn get_bool(&self, tag: Data::Type) -> Option<bool> {
         let mut v = false;
+        // SAFETY: `t` is live, and every caller passes a `bool` tag.
         let ok = unsafe { ffi::ghostty_terminal_get(self.t, tag, (&raw mut v).cast()) };
         (ok == spyc_vt_sys::SUCCESS).then_some(v)
     }
@@ -303,6 +328,8 @@ impl GhosttyScreen {
             mode: dec,
             value: false,
         };
+        // SAFETY: `t` is live, and `MODE` reads and writes a
+        // `GhosttyTerminalModeConfig` whose `mode` is set.
         let ok = unsafe {
             ffi::ghostty_terminal_get(
                 self.t,
@@ -340,6 +367,9 @@ impl GhosttyScreen {
     /// Fill `frame` from the render state — the live viewport only.
     fn fill_from_render_state(&self, frame: &mut Frame) -> bool {
         let (rows, cols) = self.geometry();
+        // SAFETY: the handles hold the facts on `GhosttyScreen`. `it` and `rc`
+        // are read before `rs` is next updated, every out pointer is a local of
+        // the type its tag names, and `gb` describes `scratch` exactly.
         unsafe {
             if ffi::ghostty_render_state_begin_update(self.rs, self.t) != spyc_vt_sys::SUCCESS {
                 return false;
@@ -471,6 +501,7 @@ impl GhosttyScreen {
             frame.wrapped.push(self.row_wrapped_at(y));
             for c in 0..cols {
                 let mut gr = empty_grid_ref();
+                // SAFETY: `t` is live, and `gr` is a writable, sized grid ref.
                 let ok = unsafe {
                     ffi::ghostty_terminal_grid_ref(
                         self.t,
@@ -485,6 +516,8 @@ impl GhosttyScreen {
                     continue;
                 }
                 let mut raw: ffi::GhosttyCell = 0;
+                // SAFETY: `gr` was filled above, and a grid ref stays valid
+                // until the terminal changes, which `&self` rules out.
                 let wide = if unsafe { ffi::ghostty_grid_ref_cell(&raw const gr, &raw mut raw) }
                     == spyc_vt_sys::SUCCESS
                 {
@@ -495,6 +528,8 @@ impl GhosttyScreen {
                 if wide != Wide::Tail {
                     let mut buf = [0u32; 32];
                     let mut n: usize = 0;
+                    // SAFETY: `gr` is valid as above, and `buf` holds
+                    // `buf.len()` codepoints; on success `n` is at most that.
                     if unsafe {
                         ffi::ghostty_grid_ref_graphemes(
                             &raw const gr,
@@ -512,6 +547,7 @@ impl GhosttyScreen {
                 let end = u32::try_from(frame.text.len()).unwrap_or(u32::MAX);
                 frame.spans.push((start, end));
                 let mut st = default_style();
+                // SAFETY: `gr` is valid as above, and `st` is a sized `GhosttyStyle`.
                 let _ = unsafe { ffi::ghostty_grid_ref_style(&raw const gr, &raw mut st) };
                 let mut cell = style_from(&st, wide);
                 if let Some(bg) = content_tag_bg(raw) {
@@ -524,6 +560,7 @@ impl GhosttyScreen {
 
     fn row_wrapped_at(&self, y: u32) -> bool {
         let mut gr = empty_grid_ref();
+        // SAFETY: `t` is live, and `gr` is a writable, sized grid ref.
         if unsafe {
             ffi::ghostty_terminal_grid_ref(
                 self.t,
@@ -535,11 +572,13 @@ impl GhosttyScreen {
             return false;
         }
         let mut row: ffi::GhosttyRow = 0;
+        // SAFETY: `gr` was just filled, and `&self` keeps the terminal unchanged.
         if unsafe { ffi::ghostty_grid_ref_row(&raw const gr, &raw mut row) } != spyc_vt_sys::SUCCESS
         {
             return false;
         }
         let mut w = false;
+        // SAFETY: a `GhosttyRow` is a value, and `WRAP` writes a `bool`.
         let ok = unsafe {
             ffi::ghostty_row_get(row, RowData::GHOSTTY_ROW_DATA_WRAP, (&raw mut w).cast())
         };
@@ -612,6 +651,7 @@ impl TerminalScreen for GhosttyScreen {
 
     fn alternate_screen(&self) -> bool {
         let mut active: ScreenKind::Type = 0;
+        // SAFETY: `t` is live, and `ACTIVE_SCREEN` writes a `GhosttyTerminalScreen`.
         let ok = unsafe {
             ffi::ghostty_terminal_get(
                 self.t,
@@ -743,6 +783,8 @@ impl Engine for GhosttyEngine {
     fn new(rows: u16, cols: u16, scrollback_rows: usize) -> Self {
         let mut t: ffi::GhosttyTerminal = std::ptr::null_mut();
         assert_eq!(
+            // SAFETY: a null allocator selects the default one, and `t` is a
+            // writable handle slot.
             unsafe { ffi::ghostty_terminal_new(std::ptr::null(), &raw mut t, cols, rows) },
             spyc_vt_sys::SUCCESS,
             "ghostty_terminal_new"
@@ -759,6 +801,8 @@ impl Engine for GhosttyEngine {
             mode: MODE_GRAPHEME_CLUSTER,
             value: true,
         };
+        // SAFETY: `t` is live, and `MODE_DEFAULT` reads a
+        // `GhosttyTerminalModeConfig` during the call.
         unsafe {
             ffi::ghostty_terminal_set(
                 t,
@@ -770,6 +814,7 @@ impl Engine for GhosttyEngine {
         // valve, and leaving either at its default truncates history.
         let limits = scrollback::limits_for_row_budget(scrollback_rows.max(1));
         let (bytes, lines) = (limits.max_bytes, limits.max_lines);
+        // SAFETY: `t` is live, and both limits read a `size_t` during the call.
         unsafe {
             ffi::ghostty_terminal_set(
                 t,
@@ -787,6 +832,8 @@ impl Engine for GhosttyEngine {
         let mut rs: ffi::GhosttyRenderState = std::ptr::null_mut();
         let mut it: ffi::GhosttyRenderStateRowIterator = std::ptr::null_mut();
         let mut rc: ffi::GhosttyRenderStateRowCells = std::ptr::null_mut();
+        // SAFETY: null allocators select the default one, and each slot is a
+        // writable handle that stays null if its constructor fails.
         unsafe {
             let _ = ffi::ghostty_render_state_new(std::ptr::null(), &raw mut rs);
             let _ = ffi::ghostty_render_state_row_iterator_new(std::ptr::null(), &raw mut it);
@@ -812,6 +859,8 @@ impl Engine for GhosttyEngine {
     }
 
     fn process(&mut self, bytes: &[u8]) {
+        // SAFETY: `t` is live and `bytes` is readable for its length. The reply
+        // callback runs inside this call, and `&mut self` excludes `take_replies`.
         unsafe { ffi::ghostty_terminal_vt_write(self.inner.t, bytes.as_ptr(), bytes.len()) };
         self.inner.synchronized = self.inner.mode(MODE_SYNCHRONIZED_OUTPUT);
         self.inner.invalidate();
@@ -826,6 +875,8 @@ impl Engine for GhosttyEngine {
             mode: MODE_SYNCHRONIZED_OUTPUT,
             value: false,
         };
+        // SAFETY: `t` is live, and `MODE` reads a `GhosttyTerminalModeConfig`
+        // during the call.
         unsafe {
             ffi::ghostty_terminal_set(
                 self.inner.t,
@@ -855,6 +906,7 @@ impl Engine for GhosttyEngine {
 impl GhosttyScreen {
     /// Resize to `rows` x `cols`, viewing the live screen again.
     pub fn set_size(&mut self, rows: u16, cols: u16) {
+        // SAFETY: `t` is live.
         let _ = unsafe { ffi::ghostty_terminal_resize(self.t, cols, rows, 8, 16) };
         self.rows = rows;
         self.cols = cols;
