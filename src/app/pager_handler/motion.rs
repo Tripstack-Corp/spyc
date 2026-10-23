@@ -279,13 +279,13 @@ impl App {
                 // pause/flash runs via run_effects (status-bar flash,
                 // never the pager footer); no post-match code follows,
                 // so returning the effect here is byte-identical.
-                let id = view.task_id.unwrap();
+                let id = view.task_id.expect("guarded by the arm's is_some");
                 return self.pause_task(Some(id));
             }
             KeyCode::Char('C') if view.task_id.is_some() => {
                 // Task viewer: C (Continue) resumes a paused task
                 // via SIGCONT. Mirrors the :resume command.
-                let id = view.task_id.unwrap();
+                let id = view.task_id.expect("guarded by the arm's is_some");
                 return self.resume_task(Some(id));
             }
             KeyCode::Char('p') => {

@@ -69,6 +69,9 @@ pub(super) fn answered(reply: &[u8]) -> bool {
 pub(super) fn install(t: ffi::GhosttyTerminal, sink: *mut Sink) {
     let no_images: u64 = 0;
     let no_glyphs = false;
+    // SAFETY: `t` is live, and each value has its option's input type: `sink`
+    // outlives the terminal (`Drop` frees it last), each callback matches its
+    // typedef, and the two limits are read during the call.
     unsafe {
         ffi::ghostty_terminal_set(
             t,
@@ -116,6 +119,8 @@ unsafe extern "C" fn write_pty(
     // libghostty-vt calls this only inside `vt_write`, which runs under
     // `&mut GhosttyEngine`, so nothing else holds a reference to the sink.
     let sink = unsafe { &mut *userdata.cast::<Sink>() };
+    // SAFETY: libghostty-vt passes `len` readable bytes at `data`, non-null
+    // as checked above, valid until the callback returns.
     let reply = unsafe { std::slice::from_raw_parts(data, len) };
     if answered(reply) && sink.buf.len() + reply.len() <= MAX_PENDING {
         sink.buf.extend_from_slice(reply);

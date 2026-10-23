@@ -278,6 +278,14 @@ split-debuginfo = "packed"
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 
+# Every `unsafe` block says why it is sound, in a `// SAFETY:` comment above it
+# (CONTRIBUTING.md → "Rust style").
+undocumented_unsafe_blocks = "warn"
+
+# Production code never unwraps: `.expect("…")` names the invariant, and a lock
+# whose data survives a panic recovers it. `clippy.toml` lets tests unwrap.
+unwrap_used = "warn"
+
 # Short/long types with the module name baked in are fine; this lint flags
 # things like `fs::FsError` which we deliberately don't have.
 module_name_repetitions = "allow"

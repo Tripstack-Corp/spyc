@@ -56,14 +56,18 @@ pub fn init(flag: bool) -> Option<String> {
 /// Returns true when the trace is armed. Callers can guard expensive
 /// formatting behind this.
 pub fn is_enabled() -> bool {
-    let slot = TRACE.lock().unwrap();
+    let slot = TRACE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     slot.is_some()
 }
 
 /// Log one trace line, prefixed with elapsed-since-start in milliseconds.
 /// No-op when the trace isn't armed.
 pub fn log(msg: &str) {
-    let mut slot = TRACE.lock().unwrap();
+    let mut slot = TRACE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(state) = slot.as_mut() {
         let elapsed_ms = state.start.elapsed().as_millis();
         let _ = writeln!(state.file, "[{elapsed_ms:>8}ms] {msg}");
@@ -74,7 +78,9 @@ pub fn log(msg: &str) {
 /// RX line is logged so `log_tx` can compute "elapsed since the last
 /// input event arrived". Cheap; no-op when the trace isn't armed.
 pub fn note_rx_event() {
-    let mut slot = TRACE.lock().unwrap();
+    let mut slot = TRACE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(state) = slot.as_mut() {
         state.last_rx_at = Some(std::time::Instant::now());
     }
@@ -86,7 +92,9 @@ pub fn note_rx_event() {
 /// RX" suffix is dropped on the very first TX before any RX (e.g.
 /// startup banner forwarding from the resume-pane path).
 pub fn log_tx(msg: &str) {
-    let mut slot = TRACE.lock().unwrap();
+    let mut slot = TRACE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(state) = slot.as_mut() {
         let now = std::time::Instant::now();
         let elapsed_ms = (now - state.start).as_millis();

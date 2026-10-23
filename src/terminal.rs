@@ -323,10 +323,11 @@ extern "C" fn signal_terminate(sig: libc::c_int) {
 /// SIGTTOU anyway (it's a background-write signal), so the inherit
 /// is harmless.
 pub fn install_signal_handlers() {
-    // The whole block is one well-isolated unsafe at startup. Signal
-    // handler installation is not exposed safely through `rustix` /
-    // `signal-hook` for our exact need (SIG_IGN inheritance for
-    // SIGTTOU) — see the function-level doc above.
+    // Signal handler installation is not exposed safely through `rustix` /
+    // `signal-hook` for our exact need (SIG_IGN inheritance for SIGTTOU) — see
+    // the function-level doc above.
+    // SAFETY: each disposition is `SIG_IGN` or an `extern "C" fn(c_int)`, and
+    // both handlers are async-signal-safe (see `signal_terminate`).
     unsafe {
         // libc::signal returns the previous handler; we don't care
         // about it. SIG_ERR ⇒ failure, but on a sane Unix this
@@ -374,8 +375,9 @@ pub fn setup_terminal() -> Result<Tui> {
     // the pre-raw termios, and the restore string (built here because the
     // handler may not build it — see `signal_terminate`).
     let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
-    // SAFETY: `tcgetattr` fills the struct; we only read it on success.
+    // SAFETY: `termios` is a writable `libc::termios`.
     if unsafe { libc::tcgetattr(libc::STDIN_FILENO, termios.as_mut_ptr()) } == 0 {
+        // SAFETY: `tcgetattr` succeeded, so it filled `termios`.
         let _ = ORIGINAL_TERMIOS.set(unsafe { termios.assume_init() });
     }
     let _ = RESTORE_SEQ.set(terminal_restore_seq());

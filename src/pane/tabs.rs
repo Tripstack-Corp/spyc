@@ -561,7 +561,11 @@ impl TabEntry {
     pub fn refresh_live_cwd(&mut self) {
         // Pick up a result a background refresh has landed. Bind the `take()`
         // first so the `MutexGuard` drops before the body (no lock held).
-        let landed = self.live_cwd_pending.lock().unwrap().take();
+        let landed = self
+            .live_cwd_pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         if landed.is_some() {
             self.live_cwd_cache = landed;
         }
@@ -579,7 +583,9 @@ impl TabEntry {
             let refreshing = Arc::clone(&self.live_cwd_refreshing);
             std::thread::spawn(move || {
                 if let Some(cwd) = crate::proc_cwd::cwd_for_pid(pid) {
-                    *pending.lock().unwrap() = Some(cwd);
+                    *pending
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(cwd);
                 }
                 refreshing.store(false, Ordering::Release);
             });
