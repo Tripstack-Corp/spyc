@@ -1,6 +1,7 @@
-//! A key this spyc doesn't know (#821): a file written for a newer spyc, or one
-//! with a typo, loads everything else, and each such key comes back as a
-//! warning naming its file and its full path.
+//! How a config file with a problem loads. A key this spyc doesn't know
+//! (#821) is skipped and named in a warning, and the rest of its file loads.
+//! A repo rc that can't load at all (#827) is skipped whole, with a warning,
+//! and the user's own `~/.spycrc.toml` still applies.
 
 use std::path::{Path, PathBuf};
 
@@ -143,4 +144,51 @@ fn the_default_template_names_no_unknown_key() {
     let rc = write(tmp.path(), "template.toml", DEFAULT_TEMPLATE);
     let cfg = Config::load_from(&[Some(&rc)]).expect("the template loads");
     assert!(cfg.warnings.is_empty(), "{:?}", cfg.warnings);
+}
+
+/// A repo rc that can't load, for any reason, is skipped whole: the user's own
+/// `~/.spycrc.toml` applies, nothing of the repo rc does, not even the
+/// `[colors]` the merge takes in before it reaches a bad `keymap` line, and a
+/// warning names it.
+#[test]
+#[ignore = "red: a repo rc that can't load discards the user's own settings (#827)"]
+fn a_repo_rc_that_cannot_load_is_skipped_whole_and_the_users_own_settings_apply() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    write(&home, ".spycrc.toml", "[pager]\ntab_width = 8\n");
+    for (why, broken) in [
+        ("not-toml", "[layout\n"),
+        ("wrong-type", "[mouse]\nscroll_lines = \"many\"\n"),
+        ("missing-required-key", "[[scan.patterns]]\nname = \"a\"\n"),
+        ("bad-keymap-line", "keymap = [\"map z no_such_action\"]\n"),
+    ] {
+        let repo = tmp.path().join(why);
+        write(
+            &repo,
+            ".spycrc.toml",
+            &format!("{broken}\n[colors]\ndir = \"#123456\"\n"),
+        );
+        let cfg = with_home_root(&home, || Config::load_for_project(&repo, &repo, &[]))
+            .unwrap_or_else(|e| panic!("{why}: the repo rc fails the load: {e:#}"));
+        assert_eq!(cfg.pager.tab_width, 8, "{why}: the user's own setting");
+        assert_eq!(cfg.colors.dir, None, "{why}: nothing of the repo rc");
+        assert!(
+            cfg.warnings
+                .iter()
+                .any(|w| w.contains(&format!("{why}/.spycrc.toml")) && w.contains("skipped")),
+            "{why}: {:?}",
+            cfg.warnings
+        );
+    }
+}
+
+/// The user's own `~/.spycrc.toml` that can't load is still the error it was:
+/// skipping it would quietly lose everything they set.
+#[test]
+fn a_users_rc_that_cannot_load_still_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (home, repo) = (tmp.path().join("home"), tmp.path().join("repo"));
+    write(&home, ".spycrc.toml", "[layout\n");
+    write(&repo, ".spycrc.toml", "[pager]\ntab_width = 3\n");
+    assert!(with_home_root(&home, || Config::load_for_project(&repo, &repo, &[])).is_err());
 }
