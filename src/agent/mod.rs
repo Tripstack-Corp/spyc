@@ -833,6 +833,9 @@ impl AgentProfile for AgyProfile {
     fn detection_rules(&self) -> &'static [DetectionRule] {
         AGY_DETECTION_RULES
     }
+    fn output_len(&self, lines: &[String]) -> usize {
+        chrome::agy_output_len(lines)
+    }
 
     /// Shift+Up / Shift+Down, verified by hand in agy's default `native terminal
     /// (inline)` rendering mode. agy discards mouse reports, so the wheel has

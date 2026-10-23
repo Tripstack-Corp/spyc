@@ -27,7 +27,10 @@ impl App {
         // scroll position.
         let mut lines = tabs.active().visible_lines();
         let agent = tabs.active_info().agent();
-        if agent.kind() == crate::state::sessions::AgentKind::Codex && !tabs.active().is_scrolling()
+        if matches!(
+            agent.kind(),
+            crate::state::sessions::AgentKind::Codex | crate::state::sessions::AgentKind::Agy
+        ) && !tabs.active().is_scrolling()
         {
             lines.truncate(agent.output_len(&lines));
         }
