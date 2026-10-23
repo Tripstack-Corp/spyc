@@ -709,3 +709,26 @@ fn each_projects_scrollback_follows_its_own_pager_config() {
         });
     });
 }
+
+/// **A reload of a file that gains a key this spyc doesn't know** (#821) puts
+/// the rest of the file in force, and the flash names the key, rather than
+/// keeping the old config with a `config error`.
+#[test]
+#[ignore = "red: an unknown key fails the whole reload (#821)"]
+fn a_reload_skips_an_unknown_key_and_applies_the_rest() {
+    with_three(|t| {
+        with_config(t, |t, _config| {
+            let rc = "[pager]\ntab_width = 2\nfrom_a_newer_spyc = true\n";
+            std::fs::write(t.home.join(".spycrc.toml"), rc).unwrap();
+            let app = &mut t.app;
+            app.reload_config();
+            assert_eq!(
+                app.state.active_project().config.pager.tab_width,
+                2,
+                "the rest of the file applies"
+            );
+            let flash = app.flash_text().unwrap_or_default().to_owned();
+            assert!(flash.contains("`pager.from_a_newer_spyc`"), "{flash}");
+        });
+    });
+}
