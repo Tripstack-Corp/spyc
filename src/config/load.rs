@@ -123,6 +123,13 @@ impl Config {
         Ok(cfg)
     }
 
+    /// [`Self::load_from`], for a test whose files hold keys this spyc doesn't
+    /// know on purpose.
+    #[cfg(test)]
+    pub fn load_from_allowing_unknown(paths: &[Option<&Path>]) -> anyhow::Result<Self> {
+        Self::load_from(paths)
+    }
+
     /// Read + parse + merge one config file at the given trust level.
     /// Missing files are a no-op.
     pub(super) fn load_one(&mut self, path: &Path, trust: Trust) -> anyhow::Result<()> {
@@ -523,3 +530,6 @@ fn startup_tabs_from(
     }
     Ok(Some(list))
 }
+
+#[cfg(test)]
+mod tests;
