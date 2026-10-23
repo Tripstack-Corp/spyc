@@ -275,12 +275,7 @@ fn a_listing_read_before_the_trip_never_replaces_the_one_after() {
         let app = &mut t.app;
         app.spawn_listing_refresh();
         assert!(
-            within_5s(app, |app| !app
-                .runtime
-                .file_results
-                .lock()
-                .unwrap()
-                .is_empty()),
+            within_5s(app, |app| !app.runtime.file_results.is_empty()),
             "X's read never landed"
         );
         std::fs::write(t.x_home.join("fresh.txt"), "x").unwrap();

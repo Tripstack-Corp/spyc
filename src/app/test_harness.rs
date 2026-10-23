@@ -100,11 +100,7 @@ impl App {
     /// outcome here.
     pub(crate) fn file_archive_outcome(&self, outcome: super::archive_ops::ArchiveOutcome) {
         let origin = self.state.active;
-        self.runtime
-            .archive_results
-            .lock()
-            .unwrap()
-            .push((origin, outcome));
+        self.runtime.archive_results.land((origin, outcome));
     }
 
     /// File an image worker's outcome as `spawn_image_work` does, tagged with
@@ -112,11 +108,7 @@ impl App {
     /// Tests run the worker inline and hand its outcome here.
     pub(crate) fn file_image_outcome(&self, outcome: super::image_ops::ImageOutcome) {
         let origin = self.state.active;
-        self.runtime
-            .image_results
-            .lock()
-            .unwrap()
-            .push((origin, outcome));
+        self.runtime.image_results.land((origin, outcome));
     }
 
     /// Wire the background git worker as `App::new` does once its thread

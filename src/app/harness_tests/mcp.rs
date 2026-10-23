@@ -797,9 +797,9 @@ fn mcp_create_worktree_runs_off_thread_and_replies() {
         let (tx, rx) = std::sync::mpsc::channel();
         app.spawn_worktree_job(job, crate::app::worktree_ops::WorktreeCompletion::Mcp(tx));
 
-        // Worker runs off-thread (no wake tx in tests); poll the landing slot.
+        // Worker runs off-thread (no wake tx in tests); poll the landing.
         for _ in 0..500 {
-            if !app.runtime.worktree_results.lock().unwrap().is_empty() {
+            if !app.runtime.worktree_results.is_empty() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -869,7 +869,7 @@ fn a_created_worktree_opens_b_only_in_the_project_that_asked() {
         let (tx, rx) = std::sync::mpsc::channel();
         let foreign = state::ProjectId::new();
         let outcome = created_worktree_outcome(&tree, true, WorktreeCompletion::Mcp(tx), foreign);
-        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        app.runtime.worktree_results.land(outcome);
         assert!(app.apply_worktree_outcomes());
         assert!(
             rx.try_recv().is_ok(),
@@ -888,7 +888,7 @@ fn a_created_worktree_opens_b_only_in_the_project_that_asked() {
         let (tx, rx) = std::sync::mpsc::channel();
         let active = app.state.active;
         let outcome = created_worktree_outcome(&tree, true, WorktreeCompletion::Mcp(tx), active);
-        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        app.runtime.worktree_results.land(outcome);
         assert!(app.apply_worktree_outcomes());
         assert!(rx.try_recv().is_ok());
         assert_eq!(
@@ -934,7 +934,7 @@ fn a_w_n_worktree_is_entered_only_by_the_project_that_asked() {
             WorktreeCompletion::InteractiveCreate,
             state::ProjectId::new(),
         );
-        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        app.runtime.worktree_results.land(outcome);
         assert!(app.apply_worktree_outcomes());
         assert_eq!(
             app.state.cur().listing.dir,
@@ -968,7 +968,7 @@ fn a_worktree_that_fails_to_open_in_b_keeps_its_error_on_screen() {
         let (tx, rx) = std::sync::mpsc::channel();
         let active = app.state.active;
         let outcome = created_worktree_outcome(&gone, true, WorktreeCompletion::Mcp(tx), active);
-        app.runtime.worktree_results.lock().unwrap().push(outcome);
+        app.runtime.worktree_results.land(outcome);
         assert!(app.apply_worktree_outcomes());
         assert!(rx.try_recv().is_ok());
         assert!(app.state.active_project().right.is_none());

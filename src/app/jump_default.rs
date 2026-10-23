@@ -6,9 +6,8 @@
 //! the prompt opens without waiting for it.
 
 use std::path::PathBuf;
-use std::sync::{Arc, PoisonError};
 
-use super::{App, Message, Mode, PromptKind, Wake};
+use super::{App, Mode, PromptKind, Wake};
 
 /// What one `J` default request found.
 pub(super) struct JumpDefaultAnswer {
@@ -30,8 +29,10 @@ impl App {
         let column_dir = col.listing.dir.clone();
         let column_root = col.git_cache.current_repo_root.clone();
         let project_home = self.state.active_project().home.clone();
-        let results = Arc::clone(&self.runtime.jump_default_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .jump_default_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::JumpDefault);
         std::thread::spawn(move || {
             let bases = super::navigate::path_ref_bases(
                 &pane_cwd,
@@ -41,27 +42,15 @@ impl App {
             );
             let path = super::navigate::find_path_ref(&lines, &bases)
                 .map(|r| crate::paths::display_tilde(&r.path));
-            results
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(JumpDefaultAnswer { seq, path });
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::JumpDefault));
-            }
+            let _ = results.send(JumpDefaultAnswer { seq, path });
         });
     }
 
     /// Hand the newest request's answer to the `J` prompt, if one is still
-    /// open. Drained every pre-recv scan, so the slot never holds a stale
+    /// open. Drained every pre-recv scan, so the landing never holds a stale
     /// answer for a later prompt. Returns whether the frame changed.
     pub(crate) fn apply_jump_defaults(&mut self) -> bool {
-        let landed = std::mem::take(
-            &mut *self
-                .runtime
-                .jump_default_results
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner),
-        );
+        let landed = self.runtime.jump_default_results.drain();
         let latest = self.runtime.jump_default_seq;
         let Some(found) = landed
             .into_iter()
@@ -91,14 +80,10 @@ mod tests {
     }
 
     fn land(app: &App, seq: u64, found: Option<&str>) {
-        app.runtime
-            .jump_default_results
-            .lock()
-            .unwrap()
-            .push(JumpDefaultAnswer {
-                seq,
-                path: found.map(String::from),
-            });
+        app.runtime.jump_default_results.land(JumpDefaultAnswer {
+            seq,
+            path: found.map(String::from),
+        });
     }
 
     fn suggestion(app: &App) -> Option<&str> {
@@ -127,7 +112,7 @@ mod tests {
         land(&app, 1, Some("/tmp/old"));
         assert!(!app.apply_jump_defaults());
         assert_eq!(suggestion(&app), None);
-        assert!(app.runtime.jump_default_results.lock().unwrap().is_empty());
+        assert!(app.runtime.jump_default_results.is_empty());
     }
 
     #[test]

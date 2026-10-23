@@ -11,7 +11,7 @@ use super::{App, ForegroundExec, RunCtx};
 impl App {
     /// Land every off-thread result that arrived since the last iteration:
     /// streaming sources, worker outcomes, pager streams, pane output. Each
-    /// slot is drained regardless of which wake survived coalescing.
+    /// landing is drained regardless of which wake survived coalescing.
     pub(super) fn drain_landed_work(
         &mut self,
         ctx: &mut RunCtx,
@@ -37,7 +37,7 @@ impl App {
         // in the always-run scan — not in `active_agent_status` — because
         // the status bar (and thus `active_agent_status`) is skipped on the
         // overlay / top-pager render paths; draining only there would leave
-        // the slot full and this nudge would busy-spin. Applying the result
+        // the landing full and this nudge would busy-spin. Applying the result
         // updates the cache so the next render shows the short-id.
         if self.apply_landed_agent_status() {
             ctx.draw.mark(3);
@@ -58,7 +58,7 @@ impl App {
 
         // Tier 5: drain any off-thread graveyard op (archive / restore /
         // purge-all) that landed (it woke us via `Message::Wake(Wake::Graveyard)`).
-        // Always drained here — the slot holds the outcome regardless of
+        // Always drained here — the landing holds the outcome regardless of
         // which wake survived coalescing; the apply does the flash + refresh.
         if self.apply_graveyard_outcomes() {
             ctx.draw.mark(3);

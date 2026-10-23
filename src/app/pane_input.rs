@@ -138,7 +138,7 @@ mod tests {
     }
 
     fn apply_pipe(app: &mut App, payload: Vec<u8>) -> Vec<Effect> {
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::PipedContent {
                 payload,
@@ -421,11 +421,7 @@ mod tests {
             };
             let expected = payload.clone();
             let origin = app.state.active;
-            app.runtime
-                .file_results
-                .lock()
-                .unwrap()
-                .push((origin, outcome));
+            app.runtime.file_results.land((origin, outcome));
             assert!(app.apply_file_outcomes().1.is_empty());
             assert!(!received.exists() || std::fs::metadata(&received).unwrap().len() == 0);
             let effects = app

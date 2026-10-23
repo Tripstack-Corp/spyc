@@ -134,6 +134,7 @@ pub mod image_ops;
 mod inventory_ops;
 mod jump_default;
 mod key_dispatch;
+mod landing;
 mod loop_steps;
 mod lua;
 mod lua_events;

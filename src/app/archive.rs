@@ -272,13 +272,7 @@ impl App {
     /// Drain landed archive outcomes. Returns whether to redraw, plus any
     /// follow-on effects (a pager open after a materialize).
     pub(crate) fn apply_archive_outcomes(&mut self) -> (bool, Vec<Effect>) {
-        let landed: Vec<(ProjectId, ArchiveOutcome)> = std::mem::take(
-            &mut *self
-                .runtime
-                .archive_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let landed = self.runtime.archive_results.drain();
         if landed.is_empty() {
             return (false, Vec::new());
         }
@@ -341,22 +335,17 @@ impl App {
         self.spawn_archive_op_from(self.state.active, op);
     }
 
-    /// Spawn the detached archive worker: run `op`, push its outcome onto
+    /// Spawn the detached archive worker: run `op`, land its outcome on
     /// `runtime.archive_results` tagged with `origin`, and wake the loop. The
     /// single spawn site. `origin` may have closed: a re-read a closed
     /// project's write starts lands as its own.
     fn spawn_archive_op_from(&self, origin: ProjectId, op: ArchiveOp) {
-        let results = std::sync::Arc::clone(&self.runtime.archive_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .archive_results
+            .sender(self.runtime.pane_wake_tx.clone(), super::Wake::Archive);
         std::thread::spawn(move || {
-            let outcome = super::archive_ops::run_archive_op(op);
-            results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((origin, outcome));
-            if let Some(tx) = wake {
-                let _ = tx.send(super::Message::Wake(super::Wake::Archive));
-            }
+            let _ = results.send((origin, super::archive_ops::run_archive_op(op)));
         });
     }
 

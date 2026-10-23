@@ -18,7 +18,7 @@
 //! The fs-watch *topology* (which dirs to watch on chdir) lives off-thread in
 //! the [`super::watch`] worker; this module only handles event *delivery*.
 
-use std::sync::Mutex;
+use std::sync::mpsc::Receiver;
 
 use anyhow::Result;
 use crossterm::event::Event;
@@ -131,18 +131,12 @@ pub fn coalesce_recv(
 /// MVU Phase 3a: the run loop's reader-death exit decision, shared by the
 /// Timeout arm (gated on `reader_done`) and the Disconnected arm. Drains a
 /// recorded fatal reader error into an `Err` (preserving the prior
-/// `event::read()?` contract); `Ok(())` means a clean stop. `.take()`s the
-/// error so it isn't propagated twice.
-pub fn take_reader_result(read_err: &Mutex<Option<std::io::Error>>) -> Result<()> {
-    // Take into a local so the mutex guard drops before the branch
-    // (clippy::significant_drop_in_scrutinee, nursery + -D warnings).
-    let fatal = read_err
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .take();
-    match fatal {
-        Some(e) => Err(e.into()),
-        None => Ok(()),
+/// `event::read()?` contract); `Ok(())` means a clean stop. Receiving the
+/// error consumes it, so it isn't propagated twice.
+pub fn take_reader_result(read_err: &Receiver<std::io::Error>) -> Result<()> {
+    match read_err.try_recv() {
+        Ok(e) => Err(e.into()),
+        Err(_) => Ok(()),
     }
 }
 
@@ -580,13 +574,14 @@ mod tests {
 
     #[test]
     fn take_reader_result_clean_when_empty() {
-        let read_err = Mutex::new(None);
+        let (_err_tx, read_err) = mpsc::channel::<std::io::Error>();
         assert!(take_reader_result(&read_err).is_ok());
     }
 
     #[test]
     fn take_reader_result_propagates_and_drains_fatal() {
-        let read_err = Mutex::new(Some(std::io::Error::other("boom")));
+        let (err_tx, read_err) = mpsc::channel();
+        err_tx.send(std::io::Error::other("boom")).unwrap();
         assert!(take_reader_result(&read_err).is_err());
         // Drained — a second call is a clean stop, never a re-propagation.
         assert!(take_reader_result(&read_err).is_ok());

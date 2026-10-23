@@ -28,14 +28,13 @@ fn rollout(home: &Path, message: &str) {
     std::fs::write(day.join(format!("rollout-now-{SID}.jsonl")), body).unwrap();
 }
 
-fn wait_for_scan(app: &App) {
-    for _ in 0..500 {
-        if app.runtime.codex_pin_pending.lock().unwrap().is_some() {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    panic!("the home-scoped scan did not land");
+fn wait_for_scan(app: &mut App) {
+    assert!(
+        app.runtime
+            .codex_pin_pending
+            .wait(std::time::Duration::from_secs(5)),
+        "the home-scoped scan did not land"
+    );
 }
 
 #[test]
@@ -146,7 +145,7 @@ fn codex_scan_keeps_claims_separate_for_two_homes_in_one_cwd() {
         rollout(&first, "first home's history");
         rollout(&second, "second home's history");
         app.kick_codex_session_scan();
-        wait_for_scan(&app);
+        wait_for_scan(&mut app);
         app.apply_codex_session_pins();
         let tabs = app.runtime.project().pane_tabs.as_ref().unwrap().tabs();
         assert_eq!(tabs[0].info.codex_session_id.as_deref(), Some(SID));
@@ -165,7 +164,7 @@ fn codex_scan_cannot_pin_a_replacement_pane_from_an_old_snapshot() {
         launch(&mut app, &cwd, &home);
         rollout(&home, "old pane");
         app.kick_codex_session_scan();
-        wait_for_scan(&app);
+        wait_for_scan(&mut app);
         app.runtime
             .project_mut()
             .pane_tabs
@@ -268,7 +267,7 @@ fn codex_home_is_the_environment_after_shell_rc() {
                 .is_none()
             {
                 app.kick_codex_session_scan();
-                wait_for_scan(&app);
+                wait_for_scan(&mut app);
                 app.apply_codex_session_pins();
             }
             assert_eq!(

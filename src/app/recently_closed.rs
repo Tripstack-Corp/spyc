@@ -6,10 +6,9 @@
 //! projects and the closed rows follow it.
 
 use std::path::Path;
-use std::sync::{Arc, PoisonError};
 
 use super::state::{ProjectId, RECENTLY_CLOSED, newest_per_anchor};
-use super::{App, Message, Wake};
+use super::{App, Wake};
 use crate::state::sessions::{ClosedProject, Manifest, SavedProject};
 
 /// What one read of the saved sessions found for a switcher.
@@ -96,8 +95,10 @@ impl App {
         let own_id = self.state.session_id;
         let open = self.open_dirs();
         let dir = crate::state::sessions::sessions_dir();
-        let results = Arc::clone(&self.runtime.closed_rows_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .closed_rows_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::ClosedRows);
         std::thread::spawn(move || {
             let saved: Vec<(Manifest, bool)> = dir
                 .as_deref()
@@ -116,28 +117,16 @@ impl App {
                 |saved| super::projects::opened_in(&open, saved),
                 |saved| super::session_restore::opens_at(saved).is_some(),
             );
-            results
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push(ClosedRows { seq, project, rows });
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::ClosedRows));
-            }
+            let _ = results.send(ClosedRows { seq, project, rows });
         });
     }
 
     /// Add the rows read for the switcher opened last to it, while it is
-    /// still open where it opened. Drained every pre-recv scan, so the slot
+    /// still open where it opened. Drained every pre-recv scan, so the landing
     /// never holds rows for a later switcher. Returns whether the frame
     /// changed.
     pub(crate) fn apply_closed_rows(&mut self) -> bool {
-        let landed = std::mem::take(
-            &mut *self
-                .runtime
-                .closed_rows_results
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner),
-        );
+        let landed = self.runtime.closed_rows_results.drain();
         let latest = self.runtime.closed_rows_seq;
         let Some(found) = landed.into_iter().find(|rows| rows.seq == latest) else {
             return false;
@@ -152,6 +141,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::landing::Landing;
     use crate::state::sessions::parse_manifest;
     use serde_json::json;
     use std::path::PathBuf;
@@ -265,21 +255,17 @@ mod tests {
     fn switcher_open() -> App {
         let mut app = App::test_app(std::env::temp_dir());
         app.open_project_switcher();
-        // The worker the switcher started lands in the slot replaced here.
-        app.runtime.closed_rows_results = Arc::default();
+        // The worker the switcher started lands on the channel replaced here.
+        app.runtime.closed_rows_results = Landing::default();
         app
     }
 
     fn land(app: &App, seq: u64, project: ProjectId) {
-        app.runtime
-            .closed_rows_results
-            .lock()
-            .unwrap()
-            .push(ClosedRows {
-                seq,
-                project,
-                rows: vec![closed("/a", 1)],
-            });
+        app.runtime.closed_rows_results.land(ClosedRows {
+            seq,
+            project,
+            rows: vec![closed("/a", 1)],
+        });
     }
 
     fn rows(app: &App) -> usize {
@@ -311,7 +297,7 @@ mod tests {
         app.clear_pending_pickers();
         land(&app, seq, here);
         assert!(!app.apply_closed_rows());
-        assert!(app.runtime.closed_rows_results.lock().unwrap().is_empty());
+        assert!(app.runtime.closed_rows_results.is_empty());
     }
 
     /// Rows read for a switcher the help covers land in it, under the help,
