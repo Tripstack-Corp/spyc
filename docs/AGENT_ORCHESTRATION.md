@@ -42,8 +42,10 @@ Codex, Claude and agy retain semantic reports (`working`, `waiting`, `done`,
 `blocked`) through output and footer redraws. Silent tool waits do not erase
 `working`, and TUI redraws after a `Stop` hook do not erase `done` or
 `waiting`; the default five-minute TTL (one hour for `waiting`) remains a
-backstop, and newer reports replace older ones. Timing-only `idle` means quiet,
-not proof that a turn stopped or finished.
+backstop, and newer reports replace older ones. A reported `idle` (codex's
+`Interrupt`, say) holds through redraws as the others do, except agy's, which
+gives way to the next output. Timing-only `idle` means quiet, not proof that a
+turn stopped or finished.
 
 **Glyphs** (shape = liveness, colour = urgency):
 

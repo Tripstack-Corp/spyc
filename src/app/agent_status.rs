@@ -63,14 +63,22 @@ const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(100);
 /// Semantic reports (`Blocked`, `Working`, `Waiting`, `Done`) survive pane
 /// output across every hosted agent: prompt redraws, TUI footer flushes after a
 /// `Stop` hook, and background-task status updates do not establish a new turn
-/// or cancel an active wait. Only an explicit `Idle` report yields to fresh
-/// output. `Blocked` is additionally latched against TTL expiry until settled
+/// or cancel an active wait. Only agy's explicit `Idle` report yields to fresh
+/// output; every other agent's report, `Idle` included, holds until a newer
+/// report or its TTL, since a redraw, such as the one after codex's
+/// `Interrupt`, is no new turn. `Blocked` is additionally latched against TTL expiry until settled
 /// by a newer report or user input (`Enter`, `Esc`, `^c` in `run_effects`, or
 /// matching tool completion for identified Codex questions), while visible
 /// approval prompts in Codex and agy temporarily override non-blocked reports
 /// via [`crate::agent::codex_approval::overrides_report`].
-fn report_superseded_by_output(r: &ReportedStatus, last_output_at: Option<Instant>) -> bool {
-    r.status == AgentActivity::Idle && last_output_at.is_some_and(|o| o > r.at)
+fn report_superseded_by_output(
+    r: &ReportedStatus,
+    last_output_at: Option<Instant>,
+    kind: AgentKind,
+) -> bool {
+    kind == AgentKind::Agy
+        && r.status == AgentActivity::Idle
+        && last_output_at.is_some_and(|o| o > r.at)
 }
 
 /// A closed pane's reports, turn and scrape describe no agent any more.
@@ -340,7 +348,7 @@ impl ActivityScan<'_> {
         // pane clear in `run_effects` or a newer report drops it.
         if let Some(r) = &entry.info.reported
             && ((r.status != AgentActivity::Blocked && self.now >= r.expiry)
-                || report_superseded_by_output(r, entry.info.last_output_at))
+                || report_superseded_by_output(r, entry.info.last_output_at, kind))
         {
             entry.info.reported = None;
         }
@@ -632,10 +640,10 @@ impl App {
             // `Blocked` is latched: no TTL expiry and output never supersedes it
             // (`report_superseded_by_output` returns false), so it holds until the
             // user answers the pane (Enter, in `run_effects`) or a newer report
-            // lands. Other semantic statuses expire at `expiry`; only `Idle`
-            // yields to newer output.
+            // lands. Other semantic statuses expire at `expiry`; only agy's
+            // `Idle` yields to newer output.
             let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
-            let superseded = report_superseded_by_output(r, last_output_at);
+            let superseded = report_superseded_by_output(r, last_output_at, kind);
             if !expired && !superseded {
                 return r.status;
             }
