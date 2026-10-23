@@ -1866,7 +1866,7 @@ dir = "#aabbcc"
     }
 
     /// A malformed project list is warned about and dropped, never an error:
-    /// an error would discard the trusted `$HOME` config along with it.
+    /// an error would skip the rest of the repo rc.
     #[test]
     fn malformed_project_startup_tabs_warn_instead_of_failing() {
         let cmds: Vec<String> = (0..10).map(|i| format!("\"cmd{i}\"")).collect();

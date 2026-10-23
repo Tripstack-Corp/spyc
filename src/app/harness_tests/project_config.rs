@@ -736,7 +736,6 @@ fn a_reload_skips_an_unknown_key_and_applies_the_rest() {
 /// `~/.spycrc.toml` stays in force for the project, and the flash says the repo
 /// rc was skipped, rather than a `config error` and the old config.
 #[test]
-#[ignore = "red: a repo rc that can't load fails the whole reload (#827)"]
 fn a_reload_skips_a_repo_rc_that_cannot_load() {
     with_three(|t| {
         with_config(t, |t, _config| {

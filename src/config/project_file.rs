@@ -395,10 +395,12 @@ mod tests {
         );
         let alone = super::super::with_home_root(&user, || {
             super::super::Config::load_for_project(&f.home, &f.home, &[])
-        });
+        })
+        .expect("with no file of the user's, the repo rc is skipped too");
         assert!(
-            alone.is_err(),
-            "with no file of the user's, the error stands"
+            alone.warnings.iter().any(|w| w.contains("parsing")),
+            "{:?}",
+            alone.warnings
         );
     }
 

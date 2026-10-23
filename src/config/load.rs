@@ -42,8 +42,9 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 impl Config {
-    /// Load and merge the standard config file locations. Missing files
-    /// are silently skipped; broken TOML / DSL returns an `Err`.
+    /// Load and merge the standard config file locations. A missing file is
+    /// skipped silently, and a project file that can't load is skipped whole,
+    /// with a warning; a user file that can't load is an `Err`.
     ///
     /// The user file (`$HOME/.spycrc.toml`) is **trusted**; the project file
     /// (`<cwd>/.spycrc.toml`) is **not** — spyc is routinely pointed at
@@ -71,21 +72,7 @@ impl Config {
         files: &[super::project_file::Entry],
     ) -> anyhow::Result<Self> {
         let (file, warnings) = super::project_file::find(files, anchor);
-        let mut cfg = match Self::load_default(start_dir) {
-            Ok(cfg) => cfg,
-            // The user's own file for the project, and the name it gives it,
-            // outlast a repo rc this spyc can't read, which is skipped. A
-            // broken `~/.spycrc.toml` is still the error it was.
-            Err(e) if file.is_some() => {
-                let mut cfg = Self::default();
-                if let Some(user) = home_dir().map(|h| h.join(".spycrc.toml")) {
-                    cfg.load_one(&user, Trust::Trusted)?;
-                }
-                cfg.warnings.push(format!("{e:#}; skipped"));
-                cfg
-            }
-            Err(e) => return Err(e),
-        };
+        let mut cfg = Self::load_default(start_dir)?;
         cfg.warnings.extend(warnings);
         if let Some(file) = file {
             cfg.load_file(&file.path, Trust::Trusted, true)?;
@@ -110,7 +97,13 @@ impl Config {
             cfg.load_one(u, Trust::Trusted)?;
         }
         if !user.is_some_and(|u| same_file(u, project)) {
-            cfg.load_one(project, Trust::Project)?;
+            // Merged into a copy, so a repo rc that fails partway leaves
+            // nothing it set before failing.
+            let mut with_repo = cfg.clone();
+            match with_repo.load_one(project, Trust::Project) {
+                Ok(()) => cfg = with_repo,
+                Err(e) => cfg.warnings.push(format!("skipped: {e:#}")),
+            }
         }
         Ok(cfg)
     }
@@ -286,7 +279,7 @@ impl Config {
     /// They spawn their commands at launch, so an untrusted rc's list is held
     /// apart in `project_tabs` and runs only once the user approves it
     /// (`app::startup_tabs`). A malformed one is warned, not errored: an error
-    /// would drop the trusted $HOME config too.
+    /// would skip the rest of the repo rc.
     fn merge_startup_tabs(
         &mut self,
         tabs: Option<Vec<String>>,
@@ -466,8 +459,8 @@ impl Config {
                 // An untrusted (project-local) rc may not introduce a binding
                 // that runs a shell command or jumps to an arbitrary path on a
                 // keypress — that's the `.spycrc` keypress-RCE vector. Drop it
-                // silently and keep loading the rest (erroring here would
-                // discard the trusted $HOME config too). Such bindings must
+                // silently and keep loading the rest (erroring here would skip
+                // the rest of the repo rc). Such bindings must
                 // live in $HOME/.spycrc.toml. Plain prompt-openers
                 // (copy/move/remove) carry no payload and are left alone.
                 if trust == Trust::Project && binding.action.is_executing() {
