@@ -322,7 +322,7 @@ fn an_error_in_the_project_in_views_rc_wins() {
             flash
                 .as_ref()
                 .is_some_and(|f| matches!(f.kind, crate::app::FlashKind::Error)
-                    && f.text.starts_with("config error")),
+                    && f.text.starts_with("config: skipped")),
             "{flash:?}"
         );
     });

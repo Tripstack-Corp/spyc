@@ -53,6 +53,9 @@ A project's config is three files, each overriding the one before, per field:
 2. the repo's own `<start dir>/.spycrc.toml`, if it ships one;
 3. the project's file here.
 
+A repo's `.spycrc.toml` that can't load is skipped whole, with a warning,
+and the other two still apply.
+
 Keymap bindings append, so a later file's binding wins its key. Startup tabs
 replace: the last file that lists any is the list, so a project file's tabs
 open in place of a repo's, without the repo's consent prompt. `[[ignore_masks]]`

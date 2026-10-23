@@ -789,7 +789,10 @@ with no keypress, so a project file's list is held apart
 (`pane.project_tabs`) and opens only after the user approves that exact
 list (`state::tab_consent`, `app::startup_tabs`); an edited list asks
 again. A malformed project list is a warning, not an error, because an
-error would discard the trusted user file too. `^R` reload re-reads the
+error would skip the rest of the project file. A project file that can't
+load is skipped whole, with a warning: it merges into a copy of the config,
+kept only if all of it loads, so it can't take the user file with it or leave
+half of itself behind. `^R` reload re-reads the
 project file from the **startup** cwd, never the browsed directory, so
 browsing into a hostile tree can't load its rc.
 

@@ -640,8 +640,8 @@ fn a_project_out_of_views_unopened_tabs_are_counted() {
     });
 }
 
-/// A project out of view whose `.spycrc.toml` doesn't parse still opens, on
-/// the defaults, and the flash names it with the error.
+/// A project out of view whose `.spycrc.toml` doesn't parse still opens,
+/// without it, and the flash names it with the error.
 #[test]
 fn a_restored_projects_config_error_is_named() {
     let tmp = tempfile::tempdir().unwrap();
@@ -671,7 +671,7 @@ fn a_restored_projects_config_error_is_named() {
         homed_at(&app, &other);
         let flash = app.flash_text().unwrap_or_default().to_owned();
         assert!(
-            flash.starts_with("session restored: 2 projects; other: config error"),
+            flash.starts_with("session restored: 2 projects; other: config: skipped"),
             "{flash}"
         );
     });
@@ -1383,7 +1383,6 @@ fn a_fresh_tab_drops_the_resume_its_command_saved() {
 /// **`-r` restores a project whose `.spycrc.toml` can't load** (#827) on the
 /// user's own settings, not the built-in defaults.
 #[test]
-#[ignore = "red: a restored project whose repo rc can't load opens on the defaults (#827)"]
 fn a_restored_project_with_a_broken_repo_rc_keeps_the_users_own_settings() {
     let tmp = tempfile::tempdir().unwrap();
     in_temp_home(tmp.path(), |state_root| {

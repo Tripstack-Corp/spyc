@@ -151,7 +151,6 @@ fn the_default_template_names_no_unknown_key() {
 /// `[colors]` the merge takes in before it reaches a bad `keymap` line, and a
 /// warning names it.
 #[test]
-#[ignore = "red: a repo rc that can't load discards the user's own settings (#827)"]
 fn a_repo_rc_that_cannot_load_is_skipped_whole_and_the_users_own_settings_apply() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");

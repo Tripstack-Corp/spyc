@@ -126,7 +126,6 @@ fn space_n_opens_a_directory_as_a_project() {
 /// it on the user's own settings, not the built-in defaults, and the flash
 /// says the repo rc was skipped.
 #[test]
-#[ignore = "red: a repo rc that can't load opens the project on the defaults (#827)"]
 fn space_n_onto_a_broken_repo_rc_opens_on_the_users_own_settings() {
     with_three(|t| {
         std::fs::write(t.home.join(".spycrc.toml"), "[pager]\ntab_width = 2\n").unwrap();

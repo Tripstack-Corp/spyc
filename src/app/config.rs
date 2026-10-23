@@ -14,10 +14,11 @@ use super::{App, Config, FlashKind, IgnoreMasks, Theme, UserKeymap};
 impl App {
     /// Reload every open project's config from its own rc and rebuild its
     /// keymap, the project in view last, so its theme is the one in force;
-    /// then re-run `init.lua` once. A project whose rc fails keeps its old
-    /// config. A problem in another project's rc is the flash, named for it,
-    /// over the "reloaded" note of the one in view; one in the project in view
-    /// wins over both.
+    /// then re-run `init.lua` once. A project whose `~/.spycrc.toml` or
+    /// `projects/` file fails keeps its old config; a repo rc that fails is
+    /// skipped, as a launch skips it. A problem in another project's rc is the
+    /// flash, named for it, over the "reloaded" note of the one in view; one in
+    /// the project in view wins over both.
     pub fn reload_config(&mut self) {
         let files = crate::config::project_file::scan();
         let active = self.state.active;

@@ -108,13 +108,16 @@ for the annotated version of each.
 A key spyc doesn't know is skipped: the rest of the file applies, and a
 `config:` flash names the file and the key (`pager.scrollback_lines`,
 `pane.tab[0].lable`), so a typo still shows and a file written for a newer spyc
-still loads. Anything else wrong still fails the file: it isn't TOML, a known
-key's value has the wrong type, an entry lacks a required key (a
-`[[scan.patterns]]` without `regex`), or a setting breaks a rule this page
-gives. spyc then starts on the built-in defaults with a `config error` flash,
-and a live reload keeps the config it already had. A spyc from before unknown
-keys were skipped rejects one the same way, so comment a newer key out before
-sharing the file with an older build.
+still loads. A spyc from before unknown keys were skipped rejects one, so
+comment a newer key out before sharing the file with an older build.
+
+Anything else wrong still fails the file: it isn't TOML, a known key's value
+has the wrong type, an entry lacks a required key (a `[[scan.patterns]]`
+without `regex`), or a setting breaks a rule this page gives. A repo's
+`.spycrc.toml` that fails is skipped whole, with a `config:` warning, and your
+own settings apply without it, on a live reload too, until it is fixed. Your
+own file failing starts spyc on the built-in defaults with a `config error`
+flash, and a live reload keeps the config it already had.
 
 ### Agent HUD — `[pane] agent_hud`
 
