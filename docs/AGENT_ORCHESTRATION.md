@@ -68,53 +68,61 @@ while work it started (a CI watch, a background build, a monitor, a scheduled
 wakeup) is still pending, and it resumes by itself when that work wakes it. Two
 sources set it:
 
-- **Claude Code says so itself.** Its `Stop` hook payload lists in-flight
-  `background_tasks` and pending `session_crons`, so the reporter turns that
-  turn end's `done` into `waiting` when either list has an entry. The reporter
-  keeps only how many entries each list had, never their descriptions or
-  commands, and the note reads "1 background task". When the work finishes,
-  Claude starts a turn by itself, its `UserPromptSubmit` hook reports `working`,
-  and the next `Stop` decides again.
+- **Claude Code and agy say so themselves.** Claude's `Stop` hook payload lists
+  in-flight `background_tasks` and pending `session_crons`, and agy's `Stop`
+  payload sets `"fullyIdle": false` when background tasks, subagents, or
+  scheduled jobs remain in flight, so the reporter turns that turn end's `done`
+  into `waiting` when work is pending. For Claude, the reporter keeps only how
+  many entries each list had, never their descriptions or commands, and the note
+  reads "1 background task"; for agy, the note reads "background work". When
+  the work finishes, the agent starts a turn by itself, its turn-start hook
+  (`UserPromptSubmit` or `PreInvocation`) reports `working`, and the next `Stop`
+  decides again.
 - **The agent reports it**: `report_status(waiting, note)`, for an agent whose
-  hooks can't say (codex, agy) or to name what it waits on ("CI on #641"). The
-  agent's note outranks the hook's count.
+  hooks can't say (codex) or to name what it waits on ("CI on #641"). The
+  agent's note outranks the hook's summary.
 
 `waiting` is how a turn ends, so an agent's own `waiting` sent while its turn is
 still open (starting a background watch, then carrying on) is held: the dot
 keeps showing the turn, and the wait takes over when the turn's end arrives,
 meeting it exactly as below. The hooks say when a turn opens (`working`) and
-ends (`done`, or Claude's `waiting`). A question or Claude's idle nudge changes
+ends (`done`, or a hook's `waiting`). A question or Claude's idle nudge changes
 neither, and an agent whose hooks report no turn start never has one open, so
 its `waiting` applies at once. Any newer report from the agent, or **Enter**,
 drops a held wait. `:why-status` shows it as `held`, with its note.
 
 A live `waiting` holds back only a hook's `done`. Claude's idle nudge is never a
-turn end. When a hook can't say whether work is pending, as with codex's and
-agy's `Stop`, `waiting` absorbs the first `done`, which ends the turn that
+turn end. When a hook can't say whether work is pending, as with codex's
+`Stop`, `waiting` absorbs the first `done`, which ends the turn that
 reported it. The next one means the agent woke and finished without reporting
-again, so it applies. A Claude `Stop` that lists no pending work applies too:
-nothing will wake the agent. Every other report replaces `waiting`, as does
-**Enter** in the pane, which starts the user's own turn. Esc and `^c` don't
-retire it: interrupting an idle agent stops nothing running in the background.
-Entering `waiting` fires no notification; the `done` or `blocked` ping fires
-when the work actually ends.
+again, so it applies. A Claude or agy `Stop` that reports no pending work
+applies too: nothing will wake the agent. Every other report replaces
+`waiting`, as does **Enter** in the pane, which starts the user's own turn. Esc
+and `^c` don't retire it: interrupting an idle agent stops nothing running in
+the background. Entering `waiting` fires no notification; the `done` or
+`blocked` ping fires when the work actually ends.
 
 **Auto-reporting.** So it works without the agent choosing to call the tool, spyc
 installs lifecycle hooks that run `spyc --report-status` (prompt-submit→working,
-needs-permission→blocked, turn-end→done, or `waiting` when Claude's `Stop` lists
-pending work), once, in each agent's own user
+needs-permission→blocked, turn-end→done, or `waiting` when Claude's or agy's
+`Stop` reports pending work), once, in each agent's own user
 configuration: **claude** (`~/.claude/settings.json`), **codex**
-(`$CODEX_HOME/hooks.json`), **agy** (`~/.gemini/config/hooks.json` — working/done
-only; agy has no approval event, so its `blocked` comes from spyc reading the
-approval prompt off the pane).
+(`$CODEX_HOME/hooks.json`), **agy** (`~/.gemini/config/hooks.json` —
+working/done, plus blocked for `ask_question`, with `Stop` remapping `done` to
+`waiting` or `idle`; agy has no tool-approval event, so that half of `blocked`
+comes from spyc reading the approval prompt off the pane).
 
 Codex also reports `idle` through its `Interrupt` hook when the main turn is
-cancelled. No general tool-completion hook clears `blocked`: a concurrent tool
-finishing is not proof that a separate permission/question prompt was answered.
+cancelled, and agy's `Stop` hook remaps `done` to `idle` when its payload
+reports `"terminationReason": "USER_CANCELED"`. No general tool-completion hook
+clears `blocked`: a concurrent tool finishing is not proof that a separate
+permission/question prompt was answered.
 
-agy's `done` needs **agy >= 1.1.10**: earlier versions evaluated `hooks.json` after
-their own termination checks, so the `Stop` handler spyc installs was unreachable
-and that half silently degraded to output timing.
+agy's `done` needs **agy >= 1.1.10** (earlier versions evaluated `hooks.json`
+after their own termination checks, so the `Stop` handler spyc installs was
+unreachable and that half silently degraded to output timing), and its
+`waiting`/`idle` `Stop` remaps read `fullyIdle` and `terminationReason` from
+`exa.hooks_pb.StopHookArgs` (confirmed by probe on agy 1.4.5).
 
 agy waits on the user in **two** different ways, and they need different instruments:
 

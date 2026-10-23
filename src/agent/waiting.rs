@@ -4,9 +4,9 @@
 //! background work it started is still running, and resumes when that work
 //! wakes it. Every agent's `Stop` hook reports `done` at a turn end, so without
 //! a rule here the hook would erase a `waiting` as soon as the turn that
-//! reported it ended. Claude Code's `Stop` says whether work is pending, and
-//! the reporter turns that `done` into `waiting` itself
-//! (`mcp::effective_report_state`). Other agents' `Stop` can't say, so a
+//! reported it ended. Claude Code's and agy's `Stop` say whether work is
+//! pending, and the reporter turns that `done` into `waiting` itself
+//! (`mcp::effective_report_state`). Codex's `Stop` can't say, so a
 //! self-reported `waiting` absorbs the one `done` that ends its own turn.
 //!
 //! A `waiting` the agent reports while its turn is still open (starting a
@@ -150,6 +150,8 @@ mod tests {
             turn_id: None,
             tool_use_id: None,
             notification_type: None,
+            termination_reason: None,
+            fully_idle: None,
             background_tasks: tasks,
             session_crons: crons,
         }
@@ -163,13 +165,14 @@ mod tests {
         let nudge = event("Notification", None, None);
         let question = event("PreToolUse", None, None);
         assert!(turn_open_after(false, Working, Some(&prompt)));
-        assert!(turn_open_after(false, Working, None), "agy names no event");
+        assert!(turn_open_after(false, Working, None), "unattributed hook");
         for end in [Done, Waiting] {
             assert!(!turn_open_after(true, end, Some(&stop)), "{end:?}");
-            assert!(!turn_open_after(true, end, None), "{end:?}: agy's Stop");
+            assert!(!turn_open_after(true, end, None), "{end:?}: unattributed");
         }
         for open in [true, false] {
             assert_eq!(turn_open_after(open, Blocked, Some(&question)), open);
+            assert_eq!(turn_open_after(open, Idle, None), open);
             assert_eq!(
                 turn_open_after(open, Done, Some(&nudge)),
                 open,
@@ -197,9 +200,10 @@ mod tests {
         }
     }
 
-    /// The case the state exists for: a codex or agy `Stop`, which can't say
-    /// whether work is pending, arrives right after the agent reported
-    /// `waiting`. That one is held; the next turn's `Stop` is not.
+    /// The case the state exists for: a codex `Stop` (or an older agy `Stop`
+    /// without `fullyIdle`), which can't say whether work is pending, arrives
+    /// right after the agent reported `waiting`. That one is held; the next
+    /// turn's `Stop` is not.
     #[test]
     fn a_waiting_report_absorbs_the_turn_end_that_follows_it_once() {
         let now = Instant::now();

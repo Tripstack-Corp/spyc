@@ -6,12 +6,26 @@ mod input;
 
 pub use input::read_payload;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const HISTORY_LIMIT: usize = 8;
 /// Cap on normalized metadata, not on raw hook arguments or responses.
 pub const PAYLOAD_LIMIT: usize = 8192;
+
+/// Why agy's `Stop` ended the turn (`exa.hooks_pb.StopHookArgs` on agy 1.4.5:
+/// `NO_TOOL_CALL`, `USER_CANCELED`, `ERROR`, `MAX_ITERATIONS`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TerminationReason {
+    #[serde(rename = "NO_TOOL_CALL")]
+    NoToolCall,
+    #[serde(rename = "USER_CANCELED")]
+    UserCancelled,
+    #[serde(rename = "ERROR")]
+    Error,
+    #[serde(rename = "MAX_ITERATIONS")]
+    MaxIterations,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct StatusHookEvent {
@@ -24,6 +38,14 @@ pub struct StatusHookEvent {
     pub tool_use_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notification_type: Option<String>,
+    /// Why agy's `Stop` ended the turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub termination_reason: Option<TerminationReason>,
+    /// Whether agy's `Stop` payload reported the session as completely idle
+    /// (`true`) or still waiting on background subagents, tasks or scheduled
+    /// timers (`false`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fully_idle: Option<bool>,
     /// How many entries Claude Code's `Stop` payload listed as in-flight
     /// background work (shells, subagents, monitors); `None` when the payload
     /// has no such list, which is not the same as an empty one.
@@ -55,23 +77,32 @@ impl StatusHookEvent {
             turn_id: identifier(&value["turn_id"], 128),
             tool_use_id: identifier(&value["tool_use_id"], 128),
             notification_type: identifier(&value["notification_type"], 64),
+            termination_reason: TerminationReason::deserialize(&value["termination_reason"]).ok(),
+            fully_idle: value["fully_idle"].as_bool(),
             background_tasks: count("background_tasks"),
             session_crons: count("session_crons"),
         })
     }
 
+    /// Whether agy's `Stop` ended because the user cancelled the turn.
+    pub fn user_cancelled(&self) -> bool {
+        self.termination_reason == Some(TerminationReason::UserCancelled)
+    }
+
     /// Whether the agent said work it started will wake it again: `Some(true)`
-    /// when either list has an entry, `Some(false)` when the payload carried the
-    /// lists and both were empty, `None` when it carried neither.
+    /// when Claude Code's lists have an entry or agy reported `fullyIdle:
+    /// false`, `Some(false)` when the payload carried those fields and nothing
+    /// is pending, `None` when it carried neither.
     pub fn wakes_pending(&self) -> Option<bool> {
         match (self.background_tasks, self.session_crons) {
-            (None, None) => None,
+            (None, None) => self.fully_idle.map(|idle| !idle),
             (tasks, crons) => Some(tasks.unwrap_or(0) > 0 || crons.unwrap_or(0) > 0),
         }
     }
 
     /// What the pending wakes are, for a hook-inferred `waiting`'s note:
-    /// "2 background tasks", "1 scheduled wakeup", or both.
+    /// "2 background tasks", "1 scheduled wakeup", both, or "background work"
+    /// when agy reports `fullyIdle: false`.
     pub fn wakes_summary(&self) -> Option<String> {
         let part = |n: Option<u32>, one: &str, many: &str| match n {
             Some(1) => Some(format!("1 {one}")),
@@ -85,7 +116,13 @@ impl StatusHookEvent {
         .into_iter()
         .flatten()
         .collect();
-        (!parts.is_empty()).then(|| parts.join(", "))
+        if !parts.is_empty() {
+            Some(parts.join(", "))
+        } else if self.fully_idle == Some(false) {
+            Some("background work".to_string())
+        } else {
+            None
+        }
     }
 }
 
@@ -157,5 +194,55 @@ mod tests {
         assert_eq!(event.notification_type.as_deref(), Some("idle_prompt"));
         assert!(StatusHookEvent::from_payload("{partial").is_none());
         assert!(StatusHookEvent::from_payload(&" ".repeat(PAYLOAD_LIMIT + 1)).is_none());
+    }
+
+    #[test]
+    fn agy_hook_metadata_infers_event_names_and_roundtrips_through_wire_json() {
+        let parse = |raw: &str| {
+            let normalized = read_payload(raw.as_bytes()).unwrap();
+            let event = StatusHookEvent::from_payload(&normalized).unwrap();
+            let wire = serde_json::to_value(&event).unwrap();
+            assert_eq!(StatusHookEvent::from_value(&wire).as_ref(), Some(&event));
+            (event, wire)
+        };
+
+        let (pre, wire) = parse(
+            r#"{"conversationId":"conv-1","invocationNum":3,"initialNumSteps":10,"modelName":"auto"}"#,
+        );
+        assert_eq!(wire, json!({"hook_event_name": "PreInvocation"}));
+        assert_eq!(pre.wakes_pending(), None);
+
+        let (_, wire) = parse(
+            r#"{"conversationId":"conv-1","toolCall":{"name":"ask_question","args":{"questions":["private"]}},"stepIdx":19}"#,
+        );
+        assert_eq!(
+            wire,
+            json!({"hook_event_name": "PreToolUse", "tool_name": "ask_question"})
+        );
+
+        let (waiting_stop, wire) = parse(
+            r#"{"conversationId":"conv-1","executionNum":1,"terminationReason":"NO_TOOL_CALL","error":"","fullyIdle":false}"#,
+        );
+        assert_eq!(
+            wire,
+            json!({
+                "hook_event_name": "Stop",
+                "termination_reason": "NO_TOOL_CALL",
+                "fully_idle": false
+            })
+        );
+        assert_eq!(waiting_stop.wakes_pending(), Some(true));
+        assert!(!waiting_stop.user_cancelled());
+        assert_eq!(
+            waiting_stop.wakes_summary().as_deref(),
+            Some("background work")
+        );
+
+        let (idle_stop, _) = parse(
+            r#"{"conversationId":"conv-1","executionNum":1,"terminationReason":"USER_CANCELED","error":"cancelled","fullyIdle":true}"#,
+        );
+        assert!(idle_stop.user_cancelled());
+        assert_eq!(idle_stop.wakes_pending(), Some(false));
+        assert_eq!(idle_stop.wakes_summary(), None);
     }
 }

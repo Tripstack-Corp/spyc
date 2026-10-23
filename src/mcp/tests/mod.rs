@@ -1155,6 +1155,38 @@ fn stop_with_pending_background_work_reports_waiting() {
 }
 
 #[test]
+fn agy_stop_remaps_pending_background_work_and_user_cancellation() {
+    let eff = |configured: &'static str, raw: &str| {
+        let normalized =
+            crate::agent::status_hook::read_payload(raw.as_bytes()).unwrap_or_default();
+        super::effective_report_state(configured, &normalized)
+    };
+    let stop = |reason: &str, fully_idle: bool| {
+        format!(
+            r#"{{"conversationId":"conv-1","executionNum":1,"terminationReason":"{reason}","error":"","fullyIdle":{fully_idle}}}"#
+        )
+    };
+
+    assert_eq!(eff("done", &stop("NO_TOOL_CALL", true)), "done");
+    assert_eq!(
+        eff("done", &stop("NO_TOOL_CALL", false)),
+        "waiting",
+        "fullyIdle: false means background subagents or tasks are still running"
+    );
+    assert_eq!(
+        eff("done", &stop("USER_CANCELED", true)),
+        "idle",
+        "a cancelled turn returns to idle without lighting the done square"
+    );
+    assert_eq!(
+        eff("done", &stop("USER_CANCELED", false)),
+        "waiting",
+        "background work that outlives a cancelled turn keeps the tab waiting"
+    );
+    assert_eq!(eff("working", &stop("USER_CANCELED", true)), "working");
+}
+
+#[test]
 fn session_id_piggybacks_from_hook_payload() {
     use super::session_id_from_hook_payload as sid;
 

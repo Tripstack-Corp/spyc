@@ -271,6 +271,48 @@ fn large_hook_body_preserves_legacy_idle_remap_and_camel_case_session() {
     assert!(!log.contains("private-content"));
 }
 
+#[test]
+fn agy_hook_reporter_forwards_event_metadata_and_remaps_stop_states() {
+    let huge = "private-content-".repeat(1600);
+    let question = format!(
+        r#"{{"conversationId":"conv-agy","toolCall":{{"name":"ask_question","args":{{"questions":["{huge}"]}}}},"stepIdx":7}}"#
+    );
+    let (request, log) = run_reporter_for("blocked", &question);
+    let args = &request["params"]["arguments"];
+    assert_eq!(args["status"], "blocked");
+    assert_eq!(args["session_id"], "conv-agy");
+    assert_eq!(
+        args["hook_event"],
+        json!({"hook_event_name": "PreToolUse", "tool_name": "ask_question"})
+    );
+    assert!(!request.to_string().contains("private-content"));
+    assert!(!log.contains("private-content"));
+
+    let waiting = format!(
+        r#"{{"conversationId":"conv-agy","executionNum":1,"terminationReason":"NO_TOOL_CALL","error":"{huge}","fullyIdle":false}}"#
+    );
+    let (request, _) = run_reporter_for("done", &waiting);
+    let args = &request["params"]["arguments"];
+    assert_eq!(args["status"], "waiting");
+    assert_eq!(
+        args["hook_event"],
+        json!({
+            "hook_event_name": "Stop",
+            "termination_reason": "NO_TOOL_CALL",
+            "fully_idle": false
+        })
+    );
+
+    let cancelled = r#"{"conversationId":"conv-agy","executionNum":2,"terminationReason":"USER_CANCELED","error":"cancelled","fullyIdle":true}"#;
+    let (request, _) = run_reporter_for("done", cancelled);
+    let args = &request["params"]["arguments"];
+    assert_eq!(args["status"], "idle");
+    assert_eq!(
+        args["hook_event"]["termination_reason"],
+        json!("USER_CANCELED")
+    );
+}
+
 /// Under codex's shared daemon, the reporter's `SPYC_PANE_ID` is whichever tab
 /// started the daemon, not its own session's, so it reports nothing rather
 /// than light that tab. The stand-in daemon's argv is the shared server's, and
