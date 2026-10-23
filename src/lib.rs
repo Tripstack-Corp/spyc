@@ -251,8 +251,11 @@ pub fn run() -> Result<()> {
     // mode / alt screen. This runs before the default handler which prints
     // the panic message to stderr.
     let default_hook = std::panic::take_hook();
+    let ui = std::thread::current().id();
     std::panic::set_hook(Box::new(move |info| {
-        terminal::restore_on_panic();
+        if terminal::panic_ends_the_tui(std::thread::current().id(), ui) {
+            terminal::restore_on_panic();
+        }
 
         // Dump to the debug log if active.
         let bt = std::backtrace::Backtrace::force_capture();

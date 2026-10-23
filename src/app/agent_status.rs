@@ -546,21 +546,33 @@ impl App {
             .runtime
             .agent_status_pending
             .sender(self.runtime.pane_wake_tx.clone(), Wake::AgentStatus);
-        let thread_cwd = cwd;
-        std::thread::spawn(move || {
-            let short_id = profile.resolve_short_id(&thread_cwd, spawn);
-            let status = Some(match short_id {
-                Some(id) => format!("{label}:{id}"),
-                None => label.to_string(),
-            });
-            let _ = pending.send(AgentStatusCache {
+        let stopped_cwd = cwd.clone();
+        super::landing::spawn_worker(
+            pending,
+            move || {
+                let short_id = profile.resolve_short_id(&cwd, spawn);
+                let status = Some(match short_id {
+                    Some(id) => format!("{label}:{id}"),
+                    None => label.to_string(),
+                });
+                AgentStatusCache {
+                    computed_at: std::time::Instant::now(),
+                    kind,
+                    cwd,
+                    spawn_epoch_secs: spawn,
+                    status,
+                }
+            },
+            // Stopped before it found the short id: the label alone, as when
+            // there is none.
+            move |_| AgentStatusCache {
                 computed_at: std::time::Instant::now(),
                 kind,
-                cwd: thread_cwd,
+                cwd: stopped_cwd,
                 spawn_epoch_secs: spawn,
-                status,
-            });
-        });
+                status: Some(label.to_string()),
+            },
+        );
     }
 
     /// MVU Phase 6: drain a landed off-thread agent-status result into the
