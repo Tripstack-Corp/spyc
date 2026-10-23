@@ -106,13 +106,11 @@ fn an_undo_landing_refreshes_the_graveyard_open_in_column_b() {
         // The undo worker restored one entry and deleted it from the graveyard.
         let restored = app.state.graveyard[2].clone();
         Graveyard::delete_entry(&restored);
-        app.runtime
-            .graveyard_results
-            .land(GraveyardOutcome::Restored {
-                filename: restored.filename,
-                dest: b,
-                result: Ok(()),
-            });
+        app.file_graveyard_outcome(GraveyardOutcome::Restored {
+            filename: restored.filename,
+            dest: b,
+            result: Ok(()),
+        });
         app.apply_graveyard_outcomes();
 
         assert_eq!(
@@ -140,12 +138,10 @@ fn a_landed_graveyard_change_leaves_a_directory_cursor_alone() {
         assert_eq!(app.state.active_project().left.rows.len(), 4);
         app.state.active_project_mut().left.cursor.index = 3;
 
-        app.runtime
-            .graveyard_results
-            .land(GraveyardOutcome::Cascaded {
-                trashed: 1,
-                errors: 0,
-            });
+        app.file_graveyard_outcome(GraveyardOutcome::Cascaded {
+            trashed: 1,
+            errors: 0,
+        });
         app.apply_graveyard_outcomes();
 
         assert_eq!(

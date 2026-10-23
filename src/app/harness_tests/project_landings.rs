@@ -1274,3 +1274,69 @@ fn a_git_view_opened_in_x_mounts_in_xs_pager() {
         assert_eq!(pager.title, "git diff one.txt");
     });
 }
+
+fn lists(app: &App, name: &str) -> bool {
+    app.state.cur().rows.iter().any(|row| row.display == name)
+}
+
+/// An `R` started in X finishes while the user is in Y: X's column re-lists
+/// without the file, and the flash says which project it was. The op runs
+/// inline, on the thread holding the test's state root, and lands as its
+/// worker's would.
+#[test]
+#[ignore = "red: a graveyard result lands in the project in view, not its own"]
+fn a_delete_finished_after_leaving_x_relists_xs_column_and_names_x() {
+    use crate::app::graveyard_ops::{GraveyardOp, run_graveyard_op};
+    with_two(|t| {
+        let app = &mut t.app;
+        let one = t.x_home.join("one.txt");
+        assert!(lists(app, "one.txt"));
+        app.file_graveyard_outcome(run_graveyard_op(GraveyardOp::Archive {
+            paths: vec![one.clone()],
+        }));
+        assert!(!one.exists(), "the delete ran");
+        app.make_active(t.y);
+        app.apply_graveyard_outcomes();
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(flash.starts_with("xproj: removed 1 item(s)"), "{flash}");
+        app.make_active(t.x);
+        assert!(
+            !lists(app, "one.txt"),
+            "X's column still lists the deleted file"
+        );
+    });
+}
+
+/// A put into X from the inventory finishes while the user is in Y: X's
+/// column re-lists with the file, and the flash says which project it was.
+#[test]
+#[ignore = "red: an inventory result lands in the project in view, not its own"]
+fn a_put_finished_after_leaving_x_relists_xs_column_and_names_x() {
+    use crate::app::inventory_ops::{InventoryOp, YankSource, run_inventory_op};
+    with_two(|t| {
+        let app = &mut t.app;
+        run_inventory_op(InventoryOp::Yank {
+            sources: vec![YankSource::plain(t.y_home.join("two.txt"))],
+        });
+        let ids: Vec<String> = crate::state::inventory::Inventory::load()
+            .items()
+            .map(|item| item.id.clone())
+            .collect();
+        assert_eq!(ids.len(), 1, "the yank ran");
+        assert!(!lists(app, "two.txt"));
+        app.file_inventory_outcome(run_inventory_op(InventoryOp::Put {
+            dest_dir: t.x_home.clone(),
+            ids,
+        }));
+        assert!(t.x_home.join("two.txt").exists(), "the put ran");
+        app.make_active(t.y);
+        app.apply_inventory_outcomes();
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(flash.starts_with("xproj: put 1 file(s)"), "{flash}");
+        app.make_active(t.x);
+        assert!(
+            lists(app, "two.txt"),
+            "X's column doesn't list the file put there"
+        );
+    });
+}
