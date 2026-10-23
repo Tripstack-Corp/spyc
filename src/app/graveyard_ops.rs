@@ -125,12 +125,13 @@ impl App {
     /// and wakes the loop; `apply_graveyard_outcomes` (pre-recv scan) does the
     /// flash + refresh.
     pub(crate) fn spawn_graveyard_op(&self, op: GraveyardOp) {
+        let origin = self.state.active;
         let results = self
             .runtime
             .graveyard_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::Graveyard);
         std::thread::spawn(move || {
-            let _ = results.send(run_graveyard_op(op));
+            let _ = results.send((origin, run_graveyard_op(op)));
         });
     }
 
@@ -145,8 +146,18 @@ impl App {
         if landed.is_empty() {
             return false;
         }
-        for outcome in landed {
-            self.apply_one_graveyard_outcome(outcome);
+        for (origin, outcome) in landed {
+            // In the project that started it, its listing and its flash; one
+            // that has closed still says what happened to its files.
+            if !self.state.has_project(origin) {
+                self.land_closed(origin, |app| app.apply_one_graveyard_outcome(outcome));
+            } else if origin == self.state.active {
+                self.apply_one_graveyard_outcome(outcome);
+            } else {
+                self.land_in(origin, |app| app.apply_one_graveyard_outcome(outcome));
+                // The graveyard is everyone's, so a view of it here changes too.
+                self.reload_graveyard_rows();
+            }
         }
         true
     }

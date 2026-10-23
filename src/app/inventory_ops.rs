@@ -130,12 +130,13 @@ impl App {
     /// Run `op` on a detached worker, the `spawn_graveyard_op` shape;
     /// `apply_inventory_outcomes` takes what it lands.
     pub(crate) fn spawn_inventory_op(&self, op: InventoryOp) {
+        let origin = self.state.active;
         let results = self
             .runtime
             .inventory_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::Inventory);
         std::thread::spawn(move || {
-            let _ = results.send(run_inventory_op(op));
+            let _ = results.send((origin, run_inventory_op(op)));
         });
     }
 
@@ -144,8 +145,17 @@ impl App {
         if landed.is_empty() {
             return false;
         }
-        for outcome in landed {
-            self.apply_one_inventory_outcome(outcome);
+        for (origin, outcome) in landed {
+            // In the project that started it, as a graveyard op lands.
+            if !self.state.has_project(origin) {
+                self.land_closed(origin, |app| app.apply_one_inventory_outcome(outcome));
+            } else if origin == self.state.active {
+                self.apply_one_inventory_outcome(outcome);
+            } else {
+                self.land_in(origin, |app| app.apply_one_inventory_outcome(outcome));
+                // The inventory is everyone's, so a view of it here changes too.
+                self.reload_inventory_rows(false);
+            }
         }
         true
     }

@@ -1284,7 +1284,6 @@ fn lists(app: &App, name: &str) -> bool {
 /// inline, on the thread holding the test's state root, and lands as its
 /// worker's would.
 #[test]
-#[ignore = "red: a graveyard result lands in the project in view, not its own"]
 fn a_delete_finished_after_leaving_x_relists_xs_column_and_names_x() {
     use crate::app::graveyard_ops::{GraveyardOp, run_graveyard_op};
     with_two(|t| {
@@ -1307,10 +1306,28 @@ fn a_delete_finished_after_leaving_x_relists_xs_column_and_names_x() {
     });
 }
 
+/// A delete whose project closed before it finished still says what happened
+/// to its files, named for that project, in the one the user is in.
+#[test]
+fn a_delete_finished_after_its_project_closed_still_says_so() {
+    use crate::app::graveyard_ops::{GraveyardOp, run_graveyard_op};
+    with_two(|t| {
+        let app = &mut t.app;
+        app.file_graveyard_outcome(run_graveyard_op(GraveyardOp::Archive {
+            paths: vec![t.x_home.join("one.txt")],
+        }));
+        app.make_active(t.y);
+        app.remove_test_project(t.x);
+        app.apply_graveyard_outcomes();
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(flash.starts_with("xproj: removed 1 item(s)"), "{flash}");
+        assert_eq!(app.state.cur().listing.dir, t.y_home, "Y's column moved");
+    });
+}
+
 /// A put into X from the inventory finishes while the user is in Y: X's
 /// column re-lists with the file, and the flash says which project it was.
 #[test]
-#[ignore = "red: an inventory result lands in the project in view, not its own"]
 fn a_put_finished_after_leaving_x_relists_xs_column_and_names_x() {
     use crate::app::inventory_ops::{InventoryOp, YankSource, run_inventory_op};
     with_two(|t| {
@@ -1337,6 +1354,82 @@ fn a_put_finished_after_leaving_x_relists_xs_column_and_names_x() {
         assert!(
             lists(app, "two.txt"),
             "X's column doesn't list the file put there"
+        );
+    });
+}
+
+/// The inventory is shared, so a yank from X that lands while Y shows the
+/// inventory lists the item in Y too.
+#[test]
+fn a_yank_from_x_lists_in_ys_inventory_view() {
+    use crate::app::inventory_ops::{InventoryOp, YankSource, run_inventory_op};
+    with_two(|t| {
+        let app = &mut t.app;
+        app.file_inventory_outcome(run_inventory_op(InventoryOp::Yank {
+            sources: vec![YankSource::plain(t.x_home.join("one.txt"))],
+        }));
+        app.make_active(t.y);
+        app.state.cur_mut().view = View::Inventory;
+        app.state.rebuild_rows();
+        assert!(
+            !app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.starts_with("one.txt"))
+        );
+        app.apply_inventory_outcomes();
+        assert!(
+            app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.starts_with("one.txt")),
+            "Y's inventory view doesn't list the yank: {:?}",
+            app.state
+                .cur()
+                .rows
+                .iter()
+                .map(|r| &r.display)
+                .collect::<Vec<_>>()
+        );
+    });
+}
+
+/// The graveyard is shared, so a delete from X that lands while Y shows the
+/// graveyard lists the entry in Y too.
+#[test]
+fn a_delete_from_x_lists_in_ys_graveyard_view() {
+    use crate::app::graveyard_ops::{GraveyardOp, run_graveyard_op};
+    with_two(|t| {
+        let app = &mut t.app;
+        app.file_graveyard_outcome(run_graveyard_op(GraveyardOp::Archive {
+            paths: vec![t.x_home.join("one.txt")],
+        }));
+        app.make_active(t.y);
+        app.state.cur_mut().view = View::Graveyard;
+        app.state.rebuild_rows();
+        assert!(
+            !app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.contains("one.txt"))
+        );
+        app.apply_graveyard_outcomes();
+        assert!(
+            app.state
+                .cur()
+                .rows
+                .iter()
+                .any(|r| r.display.contains("one.txt")),
+            "Y's graveyard view doesn't list the delete: {:?}",
+            app.state
+                .cur()
+                .rows
+                .iter()
+                .map(|r| &r.display)
+                .collect::<Vec<_>>()
         );
     });
 }

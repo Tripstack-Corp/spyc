@@ -103,19 +103,23 @@ impl App {
         self.runtime.archive_results.land((origin, outcome));
     }
 
-    /// File a graveyard worker's outcome as `spawn_graveyard_op` does, for the
-    /// drain (`apply_graveyard_outcomes`) to apply. Tests run the op inline
+    /// File a graveyard worker's outcome as `spawn_graveyard_op` does, tagged
+    /// with the active project, for the drain (`apply_graveyard_outcomes`) to
+    /// apply. Tests run the op inline
     /// (`run_graveyard_op`), on the thread that holds their state root, and
     /// hand its outcome here.
     pub(crate) fn file_graveyard_outcome(&self, outcome: super::graveyard_ops::GraveyardOutcome) {
-        self.runtime.graveyard_results.land(outcome);
+        let origin = self.state.active;
+        self.runtime.graveyard_results.land((origin, outcome));
     }
 
-    /// File an inventory worker's outcome as `spawn_inventory_op` does, for the
-    /// drain (`apply_inventory_outcomes`) to apply. Tests run the op inline
+    /// File an inventory worker's outcome as `spawn_inventory_op` does, tagged
+    /// with the active project, for the drain (`apply_inventory_outcomes`) to
+    /// apply. Tests run the op inline
     /// (`run_inventory_op`) and hand its outcome here.
     pub(crate) fn file_inventory_outcome(&self, outcome: super::inventory_ops::InventoryOutcome) {
-        self.runtime.inventory_results.land(outcome);
+        let origin = self.state.active;
+        self.runtime.inventory_results.land((origin, outcome));
     }
 
     /// File an image worker's outcome as `spawn_image_work` does, tagged with
