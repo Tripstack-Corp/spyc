@@ -217,7 +217,6 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)] // test fixtures; the module deny is for production
     use ratatui::buffer::{Buffer, Cell};
     use ratatui::layout::Rect;
     use ratatui::style::{Color, Modifier, Style};

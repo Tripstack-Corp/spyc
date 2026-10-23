@@ -336,11 +336,14 @@ impl App {
         let project = self.state.active;
         std::thread::spawn(move || {
             let result = run_worktree_job(job);
-            results.lock().unwrap().push(WorktreeOutcome {
-                result,
-                completion,
-                project,
-            });
+            results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(WorktreeOutcome {
+                    result,
+                    completion,
+                    project,
+                });
             // Wake AFTER the outcome is stored, so the pre-recv scan sees it.
             if let Some(tx) = wake {
                 let _ = tx.send(Message::Wake(Wake::WorktreeJob));
@@ -353,7 +356,13 @@ impl App {
     /// MCP client — preserving read-after-write. Returns whether a redraw is
     /// needed.
     pub(crate) fn apply_worktree_outcomes(&mut self) -> bool {
-        let outcomes = std::mem::take(&mut *self.runtime.worktree_results.lock().unwrap());
+        let outcomes = std::mem::take(
+            &mut *self
+                .runtime
+                .worktree_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         if outcomes.is_empty() {
             return false;
         }

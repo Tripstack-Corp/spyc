@@ -110,7 +110,9 @@ impl App {
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {
             let outcome = reload(req);
-            *results.lock().unwrap() = Some(outcome);
+            *results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outcome);
             reloading.store(false, std::sync::atomic::Ordering::Release);
             // Wake AFTER the result + flag are stored, so the woken pre-recv
             // scan sees `preview_results` populated and forces a redraw.
@@ -128,7 +130,13 @@ impl App {
     /// Re-kicks once if `preview_dirty` was set while the worker ran. Returns
     /// whether a redraw is needed.
     pub(crate) fn apply_preview_reloads(&mut self) -> bool {
-        let Some(outcome) = self.runtime.preview_results.lock().unwrap().take() else {
+        let Some(outcome) = self
+            .runtime
+            .preview_results
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        else {
             return false;
         };
         let current = self

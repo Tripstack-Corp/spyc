@@ -136,7 +136,10 @@ pub fn coalesce_recv(
 pub fn take_reader_result(read_err: &Mutex<Option<std::io::Error>>) -> Result<()> {
     // Take into a local so the mutex guard drops before the branch
     // (clippy::significant_drop_in_scrutinee, nursery + -D warnings).
-    let fatal = read_err.lock().unwrap().take();
+    let fatal = read_err
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
     match fatal {
         Some(e) => Err(e.into()),
         None => Ok(()),

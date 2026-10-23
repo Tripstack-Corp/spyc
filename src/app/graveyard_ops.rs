@@ -17,7 +17,7 @@
 use std::path::PathBuf;
 
 use super::state::Side;
-use super::{App, View};
+use super::{App, Message, View, Wake};
 use crate::state::graveyard::{Entry, Graveyard};
 
 /// A graveyard mutation to run off-thread. The cheap parts (picking the latest
@@ -121,6 +121,26 @@ pub fn run_graveyard_op(op: GraveyardOp) -> GraveyardOutcome {
 }
 
 impl App {
+    /// Run `op` on a detached worker. It pushes its outcome onto
+    /// `graveyard_results` and wakes the loop; `apply_graveyard_outcomes`
+    /// (pre-recv scan) does the flash + refresh. `pane_wake_tx` is `None` only
+    /// before `run()` / in the test harness, where there is no loop to wake —
+    /// the outcome still lands in the slot.
+    pub(crate) fn spawn_graveyard_op(&self, op: GraveyardOp) {
+        let results = std::sync::Arc::clone(&self.runtime.graveyard_results);
+        let wake = self.runtime.pane_wake_tx.clone();
+        std::thread::spawn(move || {
+            let outcome = run_graveyard_op(op);
+            results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(outcome);
+            if let Some(tx) = wake {
+                let _ = tx.send(Message::Wake(Wake::Graveyard));
+            }
+        });
+    }
+
     /// Drain + apply every landed graveyard outcome (flash + listing / graveyard
     /// refresh). Called every pre-recv scan, so the slot is ALWAYS emptied
     /// regardless of which wake survived coalescing. Returns whether anything
@@ -128,8 +148,13 @@ impl App {
     /// re-derive `self.state.left.view` HERE — the view may have changed since the op
     /// was kicked.
     pub(crate) fn apply_graveyard_outcomes(&mut self) -> bool {
-        let landed: Vec<GraveyardOutcome> =
-            std::mem::take(&mut *self.runtime.graveyard_results.lock().unwrap());
+        let landed: Vec<GraveyardOutcome> = std::mem::take(
+            &mut *self
+                .runtime
+                .graveyard_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         if landed.is_empty() {
             return false;
         }

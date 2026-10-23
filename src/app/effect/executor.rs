@@ -7,10 +7,7 @@ use crate::Tui;
 use crate::ui::pager::PagerView;
 
 use super::Effect;
-use crate::app::{
-    App, ForegroundExec, Message, PagerReturn, Wake, graveyard_ops, image_ops, inventory_ops,
-    kill_pg, mermaid_ops, worktree_ops,
-};
+use crate::app::{App, ForegroundExec, PagerReturn, image_ops, kill_pg, mermaid_ops, worktree_ops};
 
 impl App {
     /// Execute a tick's worth of effects, in emission order. The **sole**
@@ -248,23 +245,9 @@ impl App {
                         self.state.flash_error(format!("{program}: {e:#}"));
                     }
                 }
-                // Tier 5: run the tar+zstd / trash IO on a detached worker —
-                // never the event loop. The worker pushes its outcome onto the
-                // shared slot and wakes the loop; `apply_graveyard_outcomes`
-                // (pre-recv scan) does the flash + refresh. `pane_wake_tx` is
-                // `None` only before `run()` / in the test harness, where there
-                // is no loop to wake — the outcome still lands in the slot.
-                Effect::Graveyard(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.graveyard_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    std::thread::spawn(move || {
-                        let outcome = graveyard_ops::run_graveyard_op(op);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Graveyard));
-                        }
-                    });
-                }
+                // The tar+zstd / trash IO runs on a detached worker, never the
+                // event loop.
+                Effect::Graveyard(op) => self.spawn_graveyard_op(op),
                 // Archive mount / materialize / staging cleanup — same detached
                 // shape as Graveyard. A streamed mount can run for seconds, so
                 // it also gets the shared cancel flag (`Esc` sets it).
@@ -313,17 +296,7 @@ impl App {
                     },
                     worktree_ops::WorktreeCompletion::InteractiveCreate,
                 ),
-                Effect::Inventory(op) => {
-                    let results = std::sync::Arc::clone(&self.runtime.inventory_results);
-                    let wake = self.runtime.pane_wake_tx.clone();
-                    std::thread::spawn(move || {
-                        let outcome = inventory_ops::run_inventory_op(op);
-                        results.lock().unwrap().push(outcome);
-                        if let Some(tx) = wake {
-                            let _ = tx.send(Message::Wake(Wake::Inventory));
-                        }
-                    });
-                }
+                Effect::Inventory(op) => self.spawn_inventory_op(op),
             }
         }
     }

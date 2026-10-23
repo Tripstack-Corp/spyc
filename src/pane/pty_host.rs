@@ -306,7 +306,10 @@ impl PtyHost {
     /// re-targets the already-running reader. The reader re-loads the slot
     /// per iteration, so this takes effect on the next chunk/EOF.
     pub fn set_wake(&self, w: Wake) {
-        *self.wake.lock().unwrap() = Some(w);
+        *self
+            .wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(w);
     }
 
     /// MVU Phase 3c: fire the installed wake once, now. Called right after
@@ -317,7 +320,12 @@ impl PtyHost {
     pub fn fire_wake_now(&self) {
         // Clone the fire closure out and drop the guard before calling it
         // (don't hold the per-host lock across the wake's send).
-        let fire = self.wake.lock().unwrap().as_ref().map(|w| w.fire.clone());
+        let fire = self
+            .wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|w| w.fire.clone());
         if let Some(fire) = fire {
             fire();
         }
@@ -328,7 +336,10 @@ impl PtyHost {
     /// hard-kill, so a teardown-racing close-wake fires through `None` and
     /// never targets a container the host just left.
     pub fn clear_wake_slot(&self) {
-        *self.wake.lock().unwrap() = None;
+        *self
+            .wake
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     /// MVU Phase 3c: clear the wake edge flag (clear-before-read). The main
@@ -600,7 +611,11 @@ fn reader_loop(
     // Clone the installed Wake out of the slot (dropping the guard) so the
     // CAS + fire() never run while holding the per-host lock — clippy
     // nursery discipline + never hold a lock across the wake's msg_tx.send.
-    let load_wake = || wake.lock().unwrap().clone();
+    let load_wake = || {
+        wake.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    };
     let mut buf = [0u8; 8192];
     loop {
         match reader.read(&mut buf) {

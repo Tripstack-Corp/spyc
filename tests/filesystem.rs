@@ -1,5 +1,7 @@
 //! Integration tests for `fs::Listing` and `fs::entry::Entry` against
 //! real directory trees built with `tempfile`.
+// Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
+#![allow(clippy::unwrap_used)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

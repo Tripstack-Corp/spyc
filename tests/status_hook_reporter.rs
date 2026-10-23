@@ -1,4 +1,6 @@
 #![cfg(unix)]
+// Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
+#![allow(clippy::unwrap_used)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixListener;

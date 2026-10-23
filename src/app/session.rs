@@ -788,7 +788,7 @@ impl App {
             .map(|(i, cmd)| format!("  {:>3}  {}", i + 1, cmd))
             .collect();
         // Create a line editor loaded with the newest entry, Normal mode.
-        let newest = entries.last().unwrap();
+        let newest = entries.last().expect("checked non-empty above");
         let mut editor = LineEditor::new();
         editor.set_content(newest);
         editor.mode = crate::ui::line_edit::Mode::Normal;

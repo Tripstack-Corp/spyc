@@ -96,6 +96,8 @@ We use GitHub pull requests. The target branch is `main`.
 
 **Every `unsafe` block and impl says why it is sound**, in a `// SAFETY:` comment directly above it that names the invariant the code relies on, not what the call does. `clippy::undocumented_unsafe_blocks` checks that the comment is there; review checks that it is true. On an `unsafe impl` the comment goes below any attribute, or clippy doesn't see it. When several blocks lean on the same facts about a type's handles, the type's doc states them once (`GhosttyScreen` is the model) and each block names the ones it uses.
 
+**Production code never calls `.unwrap()`.** `.expect("…")` says why the value is there (`"guarded by is_some check above"`), so a panic names the invariant it broke; when the `None` or `Err` can really happen, handle it instead. A lock whose data survives a panic recovers it rather than panicking (below). Clippy's `unwrap_used` enforces this; `clippy.toml` exempts `#[test]` code, and an integration test whose helpers unwrap opts out at the top of its file.
+
 Where spyc departs from Google's guide on purpose:
 
 - **A poisoned lock is recovered** (`unwrap_or_else(PoisonError::into_inner)`) where its data stays usable after a panic elsewhere: a worker's result queue, the `:s` environment overrides, the pane engine the parser worker rebuilds. The guide forbids reaching inside a poisoned mutex; in a TUI, a poison that turns one panicked worker into a dead terminal is the worse failure.
