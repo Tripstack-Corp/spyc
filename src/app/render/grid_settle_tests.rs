@@ -6,7 +6,6 @@
 //! Both cases need neighbouring pages that fit different numbers of columns:
 //! `ListView::grid` sizes a page from its own names, so a long name narrows the
 //! page it lands on.
-#![allow(clippy::unwrap_used)] // test fixtures; the module deny is for production
 
 use std::path::PathBuf;
 

@@ -342,7 +342,6 @@ impl AgentHudState {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::agent::codex_metrics::{Sample, Snapshot, Source, Tokens};

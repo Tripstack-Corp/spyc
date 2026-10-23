@@ -1,6 +1,8 @@
 #![cfg(unix)]
 //! `spyc --mcp` as a stdio proxy: which spyc it reaches, and the pane it names
 //! in `initialize`.
+// Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
+#![allow(clippy::unwrap_used)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};

@@ -373,8 +373,13 @@ fn file_name_of(p: &Path) -> String {
 
 impl App {
     pub(crate) fn apply_file_outcomes(&mut self) -> (bool, Vec<Effect>) {
-        let landed: Vec<(ProjectId, FileOutcome)> =
-            std::mem::take(&mut *self.runtime.file_results.lock().unwrap());
+        let landed: Vec<(ProjectId, FileOutcome)> = std::mem::take(
+            &mut *self
+                .runtime
+                .file_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         if landed.is_empty() {
             return (false, Vec::new());
         }
@@ -622,7 +627,10 @@ impl App {
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {
             let outcome = run_file_op(op);
-            results.lock().unwrap().push((origin, outcome));
+            results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((origin, outcome));
             if let Some(tx) = wake {
                 let _ = tx.send(Message::Wake(Wake::FileOp));
             }

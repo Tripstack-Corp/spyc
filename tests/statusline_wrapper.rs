@@ -1,4 +1,6 @@
 #![cfg(unix)]
+// Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
+#![allow(clippy::unwrap_used)]
 
 //! The statusline wrapper end to end: `sh -c` running the wrapper spyc's wiring
 //! writes, the real `spyc --statusline`, and the user's command.

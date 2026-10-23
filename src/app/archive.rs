@@ -272,8 +272,13 @@ impl App {
     /// Drain landed archive outcomes. Returns whether to redraw, plus any
     /// follow-on effects (a pager open after a materialize).
     pub(crate) fn apply_archive_outcomes(&mut self) -> (bool, Vec<Effect>) {
-        let landed: Vec<(ProjectId, ArchiveOutcome)> =
-            std::mem::take(&mut *self.runtime.archive_results.lock().unwrap());
+        let landed: Vec<(ProjectId, ArchiveOutcome)> = std::mem::take(
+            &mut *self
+                .runtime
+                .archive_results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         if landed.is_empty() {
             return (false, Vec::new());
         }
@@ -345,7 +350,10 @@ impl App {
         let wake = self.runtime.pane_wake_tx.clone();
         std::thread::spawn(move || {
             let outcome = super::archive_ops::run_archive_op(op);
-            results.lock().unwrap().push((origin, outcome));
+            results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((origin, outcome));
             if let Some(tx) = wake {
                 let _ = tx.send(super::Message::Wake(super::Wake::Archive));
             }

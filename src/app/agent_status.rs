@@ -572,7 +572,9 @@ impl App {
                 Some(id) => format!("{label}:{id}"),
                 None => label.to_string(),
             });
-            *pending.lock().unwrap() = Some(AgentStatusCache {
+            *pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(AgentStatusCache {
                 computed_at: std::time::Instant::now(),
                 kind,
                 cwd: thread_cwd,
@@ -599,7 +601,12 @@ impl App {
     /// Returns whether the cache changed (the caller sets `needs_draw`).
     pub(crate) fn apply_landed_agent_status(&mut self) -> bool {
         // Bind the `take()` first so the MutexGuard drops before the body.
-        let landed = self.runtime.agent_status_pending.lock().unwrap().take();
+        let landed = self
+            .runtime
+            .agent_status_pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         let Some(result) = landed else {
             return false;
         };

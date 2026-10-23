@@ -5,6 +5,8 @@
 //! The unit tests cover each half in isolation; this asserts they compose — an
 //! index built by `read` produces the rows `listing` claims, and those rows point
 //! at bytes `materialize` can actually deliver.
+// Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
+#![allow(clippy::unwrap_used)]
 
 use std::io::Write as _;
 use std::path::Path;

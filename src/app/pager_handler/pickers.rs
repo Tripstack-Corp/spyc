@@ -104,7 +104,11 @@ impl App {
                     // taken; the jump popup has no editor so `x` is
                     // unambiguously "delete entry."
                     let cursor = view.picker_cursor.unwrap_or(0);
-                    let snapshot = self.view.pending_jump_history.as_mut().unwrap();
+                    let snapshot = self
+                        .view
+                        .pending_jump_history
+                        .as_mut()
+                        .expect("guarded by is_some check above");
                     if let Some(path_str) = snapshot.get(cursor).cloned() {
                         // Remove from real history (find by content,
                         // since snapshot indices are reverse-ordered).
@@ -425,7 +429,11 @@ impl App {
                 }
                 KeyCode::Char(c @ '1'..='9') => {
                     // Direct selection by the `[N]` shown on the row.
-                    let sessions = self.state.pending_sessions.take().unwrap();
+                    let sessions = self
+                        .state
+                        .pending_sessions
+                        .take()
+                        .expect("guarded by is_some check above");
                     let idx = (c as u8 - b'1') as usize;
                     if let Some(session) = sessions.get(idx) {
                         let session = session.clone();

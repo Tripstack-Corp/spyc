@@ -2,7 +2,6 @@
 //! cells, the active tab's cwd, background-task tags and the mode tags (#175).
 //! Panes are real `cat` children started at `/`, so the cwd text is the same on
 //! every machine.
-#![allow(clippy::unwrap_used)] // test fixtures; the module deny is for production
 
 use std::path::{Path, PathBuf};
 
