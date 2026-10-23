@@ -4,7 +4,9 @@
 //! A worker sends its result, then wakes the loop with a payloadless
 //! `Message::Wake`; the pre-recv drain takes everything that landed. Nothing is
 //! shared but the channel, so there is no lock to poison, and workers running at
-//! once each land their own result rather than racing for a slot.
+//! once each land their own result rather than racing for a slot. A flight's
+//! worker runs through [`spawn_worker`], so one that panics still lands and its
+//! in-flight flag clears.
 
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -94,17 +96,48 @@ impl<T> Landing<T> {
     }
 }
 
-/// Run `work` on a detached thread and send what it returns. `stopped` is the
-/// value for a `work` that ends without one, made from its panic's message.
+impl super::App {
+    /// Flash the newest panic noted off the UI thread ([`crate::take_worker_panics`]),
+    /// with a count of any older ones. Whether one was shown.
+    pub(super) fn show_worker_panics(&mut self) -> bool {
+        let mut noted = crate::take_worker_panics();
+        let Some(newest) = noted.pop() else {
+            return false;
+        };
+        let more = match noted.len() {
+            0 => String::new(),
+            n => format!(" (and {n} more; --debug logs each)"),
+        };
+        self.state.flash_error(format!(
+            "a background task stopped unexpectedly: {newest}{more}"
+        ));
+        true
+    }
+}
+
+/// Run `work` on a detached thread and send what it returns, or, if it panics,
+/// what `stopped` makes of the panic's message. A flight the loop waits on then
+/// always lands, so a bug in one worker fails that one task, visibly, rather
+/// than leaving its feature busy for the rest of the session.
 pub fn spawn_worker<T: Send + 'static>(
     sender: WakingSender<T>,
     work: impl FnOnce() -> T + Send + 'static,
     stopped: impl FnOnce(String) -> T + Send + 'static,
 ) {
     std::thread::spawn(move || {
-        drop(stopped);
-        let _ = sender.send(work());
+        let value = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+            .unwrap_or_else(|payload| stopped(panic_message(payload.as_ref())));
+        let _ = sender.send(value);
     });
+}
+
+/// A panic's message, as `panic!` was given it.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|message| (*message).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no message".to_owned())
 }
 
 #[cfg(test)]
@@ -171,7 +204,6 @@ mod tests {
     /// A worker that panics still lands what `stopped` makes of its panic, and
     /// wakes the loop, so the flight the loop waits on ends.
     #[test]
-    #[ignore = "red: a worker that panics lands nothing, so its flight never ends"]
     fn a_worker_that_panics_lands_what_stopped_makes_of_its_message() {
         let mut landing = Landing::default();
         let (wake_tx, wake_rx) = mpsc::channel();
@@ -192,5 +224,28 @@ mod tests {
             ),
             "the loop was not woken"
         );
+    }
+
+    /// A panic noted off the UI thread is flashed on the loop's next pass, the
+    /// newest with a count of the rest, and the drain phase asks for it.
+    #[test]
+    fn the_loop_flashes_a_noted_worker_panic() {
+        assert!(
+            crate::guard_support::production_half(include_str!("pre_recv.rs"))
+                .contains("self.show_worker_panics()"),
+            "the drain phase doesn't show noted panics"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = super::super::App::test_app(dir.path().to_path_buf());
+        assert!(!app.show_worker_panics(), "nothing noted, nothing shown");
+        crate::note_worker_panic(Some("one"), None, "first");
+        crate::note_worker_panic(Some("two"), None, "second");
+        assert!(app.show_worker_panics());
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(
+            flash.contains("two panicked: second") && flash.contains("and 1 more"),
+            "{flash}"
+        );
+        assert!(!app.show_worker_panics(), "shown once");
     }
 }

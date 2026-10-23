@@ -244,26 +244,87 @@ fn install_skill() -> Result<()> {
     Ok(())
 }
 
-/// Binary entry point. `src/main.rs` is a thin shim that just calls this;
-/// all the real startup logic lives here so the crate can also be a library.
-pub fn run() -> Result<()> {
+/// Panics off the UI thread the user hasn't been told about yet, oldest first.
+/// The loop flashes them (`App::show_worker_panics`), and `run` prints what is
+/// left once spyc has restored the terminal. A test keeps its own, per thread.
+#[cfg(not(test))]
+static WORKER_PANICS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+thread_local! {
+    static WORKER_PANICS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn with_worker_panics<R>(f: impl FnOnce(&mut Vec<String>) -> R) -> R {
+    #[cfg(not(test))]
+    {
+        f(&mut WORKER_PANICS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+    #[cfg(test)]
+    {
+        WORKER_PANICS.with_borrow_mut(f)
+    }
+}
+
+/// Note a panic on `thread` at `location`, to say once spyc can.
+fn note_worker_panic(thread: Option<&str>, location: Option<String>, message: &str) {
+    let thread = thread.unwrap_or("a background thread");
+    let at = location
+        .map(|location| format!(" at {location}"))
+        .unwrap_or_default();
+    with_worker_panics(|notes| notes.push(format!("{thread} panicked{at}: {message}")));
+}
+
+/// The panics noted off the UI thread since the last take, oldest first.
+pub(crate) fn take_worker_panics() -> Vec<String> {
+    with_worker_panics(std::mem::take)
+}
+
+/// Restore the terminal when a panic ends the TUI, and note any other panic for
+/// spyc to say once it can.
+fn install_panic_hook() {
     // Restore the terminal on panic so the user's shell isn't left in raw
     // mode / alt screen. This runs before the default handler which prints
     // the panic message to stderr.
     let default_hook = std::panic::take_hook();
     let ui = std::thread::current().id();
     std::panic::set_hook(Box::new(move |info| {
-        if terminal::panic_ends_the_tui(std::thread::current().id(), ui) {
+        let ends_the_tui = terminal::panic_ends_the_tui(std::thread::current().id(), ui);
+        if ends_the_tui {
             terminal::restore_on_panic();
+        } else {
+            note_worker_panic(
+                std::thread::current().name(),
+                info.location().map(ToString::to_string),
+                info.payload()
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("a panic with no message"),
+            );
         }
 
         // Dump to the debug log if active.
-        let bt = std::backtrace::Backtrace::force_capture();
-        debug_log::log(&format!("PANIC: {info}\n{bt}"));
+        if debug_log::enabled() {
+            let bt = std::backtrace::Backtrace::force_capture();
+            debug_log::log(&format!("PANIC: {info}\n{bt}"));
+        }
 
-        // Let the default handler print to stderr.
-        default_hook(info);
+        // Let the default handler print to stderr. A panic off the UI thread
+        // is noted instead, for the loop to show and `run` to print at exit:
+        // printed now, it would draw over the TUI still running.
+        if ends_the_tui {
+            default_hook(info);
+        }
     }));
+}
+
+/// Binary entry point. `src/main.rs` is a thin shim that just calls this;
+/// all the real startup logic lives here so the crate can also be a library.
+pub fn run() -> Result<()> {
+    install_panic_hook();
 
     let cli = Cli::parse();
 
@@ -365,12 +426,38 @@ pub fn run() -> Result<()> {
     // PR8b guarantee that pane children are always SIGTERM-graced on exit).
     let restore = restore_terminal(&mut terminal);
     app.run_teardown();
+    for note in take_worker_panics() {
+        eprintln!("spyc: {note}");
+    }
     mcp::stop_status_trace();
     if let Some(summary) = &app.exit_summary {
         println!("\u{1f336}\u{fe0f} {summary}");
     }
     restore?;
     result
+}
+
+#[cfg(test)]
+mod worker_panic_tests {
+    /// A panic off the UI thread is noted with its thread and place, and
+    /// taken once.
+    #[test]
+    fn a_noted_panic_names_its_thread_and_place_and_is_taken_once() {
+        super::note_worker_panic(
+            Some("spyc-input-reader"),
+            Some("src/x.rs:1:2".into()),
+            "boom",
+        );
+        super::note_worker_panic(None, None, "bang");
+        assert_eq!(
+            super::take_worker_panics(),
+            vec![
+                "spyc-input-reader panicked at src/x.rs:1:2: boom".to_string(),
+                "a background thread panicked: bang".to_string(),
+            ]
+        );
+        assert!(super::take_worker_panics().is_empty());
+    }
 }
 
 #[cfg(test)]

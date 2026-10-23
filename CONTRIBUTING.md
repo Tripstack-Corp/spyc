@@ -101,7 +101,9 @@ We use GitHub pull requests. The target branch is `main`.
 Where spyc departs from Google's guide on purpose:
 
 - **A poisoned lock is recovered** (`unwrap_or_else(PoisonError::into_inner)`) where its data stays usable after a panic elsewhere: the pty reader's wake target, the `:s` environment overrides, the pane engine the parser worker rebuilds. The guide forbids reaching inside a poisoned mutex; in a TUI, a poison that turns one panicked worker into a dead terminal is the worse failure.
-- **One `catch_unwind` in production**, around the pane parser's `process` (`src/pane/mod.rs`). A pane's input is untrusted child output, and a panic in the engine costs that pane a blank grid instead of costing the process. That is the defence-in-depth case the guide allows, and `[profile.release]` keeps `panic = "unwind"` for it.
+- **Two `catch_unwind`s in production**, both for defence in depth, which the guide allows; `[profile.release]` keeps `panic = "unwind"` for them.
+  - Around the pane parser's `process` (`src/pane/mod.rs`). A pane's input is untrusted child output, and a panic in the engine costs that pane a blank grid instead of costing the process.
+  - At a worker thread's edge, in `app::landing::spawn_worker`. A worker that panics lands as a stopped task, so its feature isn't left busy for the session, and the panic hook leaves the terminal alone for any panic off the UI thread.
 
 ### Action dispatch
 
