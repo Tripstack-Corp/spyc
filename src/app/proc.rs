@@ -25,7 +25,7 @@ pub(super) struct ReaderHandle {
     pub(super) park: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub(super) acked: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub(super) reader_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    pub(super) read_err: std::sync::Arc<std::sync::Mutex<Option<std::io::Error>>>,
+    pub(super) read_err: std::sync::mpsc::Receiver<std::io::Error>,
     pub(super) handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -55,14 +55,13 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
     let park = Arc::new(AtomicBool::new(false));
     let acked = Arc::new(AtomicBool::new(false));
     let reader_done = Arc::new(AtomicBool::new(false));
-    let read_err = Arc::new(std::sync::Mutex::new(None));
+    let (err_tx, read_err) = std::sync::mpsc::channel();
 
     let handle = {
         let stop = stop.clone();
         let park = park.clone();
         let acked = acked.clone();
         let reader_done = reader_done.clone();
-        let read_err = read_err.clone();
         std::thread::Builder::new()
             .name("spyc-input-reader".to_string())
             .spawn(move || {
@@ -124,9 +123,9 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                                 }
                             }
                             Err(e) => {
-                                *read_err.lock().expect("read_err mutex poisoned") = Some(e);
+                                let _ = err_tx.send(e);
                                 reader_done.store(true, Release);
-                                // MVU Phase 3d death-wake: store THEN send, so
+                                // MVU Phase 3d death-wake: error THEN flag, so
                                 // the loop-top Acquire-load sees the error. With
                                 // no poll floor, this kicks the blocking recv.
                                 let _ = tx.send(Message::Wake(Wake::ReaderExited));
@@ -135,7 +134,7 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                         },
                         Ok(false) => {} // poll timeout — re-check stop/park
                         Err(e) => {
-                            *read_err.lock().expect("read_err mutex poisoned") = Some(e);
+                            let _ = err_tx.send(e);
                             reader_done.store(true, Release);
                             let _ = tx.send(Message::Wake(Wake::ReaderExited)); // death-wake (see above)
                             return;

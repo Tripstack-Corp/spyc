@@ -9,9 +9,9 @@
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -85,7 +85,7 @@ pub struct LuaOutcome {
 /// Handle to the Lua worker thread. Held by `Runtime`.
 pub struct LuaWorker {
     job_tx: Sender<LuaJob>,
-    outcomes: Arc<Mutex<Vec<LuaOutcome>>>,
+    outcomes: Receiver<LuaOutcome>,
     abort: Arc<AtomicBool>,
     busy: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
@@ -106,16 +106,15 @@ impl LuaWorker {
         W: Fn() + Send + 'static,
     {
         let (job_tx, job_rx) = mpsc::channel::<LuaJob>();
-        let outcomes = Arc::new(Mutex::new(Vec::new()));
+        let (outcome_tx, outcomes) = mpsc::channel::<LuaOutcome>();
         let abort = Arc::new(AtomicBool::new(false));
         let busy = Arc::new(AtomicBool::new(false));
         let handle = {
-            let outcomes = Arc::clone(&outcomes);
             let abort = Arc::clone(&abort);
             let busy = Arc::clone(&busy);
             std::thread::Builder::new()
                 .name("spyc-lua".to_string())
-                .spawn(move || run(&job_rx, &outcomes, &abort, &busy, ceiling, &wake))
+                .spawn(move || run(&job_rx, &outcome_tx, &abort, &busy, ceiling, &wake))
                 .ok()
         };
         Self {
@@ -147,10 +146,7 @@ impl LuaWorker {
 
     /// Take all completed outcomes (the main loop drains these on wake).
     pub fn drain_outcomes(&self) -> Vec<LuaOutcome> {
-        self.outcomes
-            .lock()
-            .map(|mut v| std::mem::take(&mut *v))
-            .unwrap_or_default()
+        self.outcomes.try_iter().collect()
     }
 }
 
@@ -171,7 +167,7 @@ impl Drop for LuaWorker {
 /// interpreter in place (dropping every stored callback), so `lua` is `mut`.
 fn run<W: Fn()>(
     job_rx: &Receiver<LuaJob>,
-    outcomes: &Arc<Mutex<Vec<LuaOutcome>>>,
+    outcomes: &Sender<LuaOutcome>,
     abort: &Arc<AtomicBool>,
     busy: &Arc<AtomicBool>,
     ceiling: Duration,
@@ -194,7 +190,7 @@ fn run<W: Fn()>(
         }
     };
 
-    // Run one job under the busy flag + runaway deadline, push its outcome, and
+    // Run one job under the busy flag + runaway deadline, send its outcome, and
     // wake the loop. Shared by every run/reload arm so the bookkeeping is
     // identical across them.
     let run_job = |outcome_fn: &mut dyn FnMut() -> LuaOutcome| {
@@ -204,9 +200,8 @@ fn run<W: Fn()>(
         let outcome = outcome_fn();
         deadline.set(None);
         busy.store(false, Ordering::SeqCst);
-        if let Ok(mut v) = outcomes.lock() {
-            v.push(outcome);
-        }
+        // The receiver lives on `LuaWorker`, which joins this thread on drop.
+        let _ = outcomes.send(outcome);
         wake();
     };
 
@@ -432,7 +427,7 @@ fn run_registered(
 /// effectively never fail).
 fn report_setup_failure<W: Fn()>(
     job_rx: &Receiver<LuaJob>,
-    outcomes: &Arc<Mutex<Vec<LuaOutcome>>>,
+    outcomes: &Sender<LuaOutcome>,
     msg: &str,
     wake: &W,
 ) {
@@ -440,13 +435,11 @@ fn report_setup_failure<W: Fn()>(
         if matches!(job, LuaJob::Shutdown) {
             break;
         }
-        if let Ok(mut v) = outcomes.lock() {
-            v.push(LuaOutcome {
-                requests: Vec::new(),
-                registrations: Vec::new(),
-                error: Some(msg.to_string()),
-            });
-        }
+        let _ = outcomes.send(LuaOutcome {
+            requests: Vec::new(),
+            registrations: Vec::new(),
+            error: Some(msg.to_string()),
+        });
         wake();
     }
 }

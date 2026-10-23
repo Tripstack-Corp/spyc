@@ -227,8 +227,8 @@ pub enum Effect {
 
     /// Tier 5. Run a graveyard mutation (archive / restore / purge-all) on a
     /// detached worker thread — its tar+zstd / trash IO is proportional to the
-    /// tree size and must never block the event loop. The worker pushes a
-    /// `GraveyardOutcome` onto `runtime.graveyard_results` and wakes the loop
+    /// tree size and must never block the event loop. The worker lands a
+    /// `GraveyardOutcome` on `runtime.graveyard_results` and wakes the loop
     /// with `Message::Wake(Wake::Graveyard)`; `apply_graveyard_outcomes` (pre-recv
     /// scan) does the flash + listing/graveyard refresh. The cheap prep (which
     /// paths, which entry, the in-memory entry list) is done by the producer.
@@ -241,14 +241,14 @@ pub enum Effect {
 
     /// Render a ` ```mermaid ` block to a PNG on a detached worker and open it in
     /// the OS image viewer — parse/layout/raster/font-load is far too heavy for
-    /// the loop. The worker pushes an `ImageOutcome` onto
+    /// the loop. The worker lands an `ImageOutcome` on
     /// `runtime.image_results` and wakes with `Message::Wake(Wake::Image)`;
     /// `apply_image_outcomes` (pre-recv scan) surfaces it in the pager status
     /// line. See `docs/archive/MERMAID_PAGER_PLAN.md`.
     RenderMermaid(mermaid_ops::MermaidRenderOp),
 
     /// Tier 5. Read + decode an image file on a detached worker and show it
-    /// full-screen. Shares `RenderMermaid`'s landing slot and wake message —
+    /// full-screen. Shares `RenderMermaid`'s landing and wake message —
     /// same destination (the `ImageView` overlay), different producer.
     OpenImage(image_ops::ImageOpenOp),
 
@@ -272,13 +272,13 @@ pub enum Effect {
     OpenTranscriptImage(image_ops::TranscriptImageOpenOp),
 
     /// Tier 5. Run a file operation (copy / move / pipe) on a detached worker
-    /// thread to avoid blocking the event loop. The worker pushes its outcome
-    /// onto `runtime.file_results` and wakes with `Message::Wake(Wake::FileOp)`.
+    /// thread to avoid blocking the event loop. The worker lands its outcome
+    /// on `runtime.file_results` and wakes with `Message::Wake(Wake::FileOp)`.
     FileOp(file_ops::FileOp),
 
     /// Tier 5. Run an inventory mutation (yank / remove / clear / put) on a
     /// detached worker thread to avoid blocking the event loop. The worker
-    /// pushes its outcome onto `runtime.inventory_results` and wakes with
+    /// lands its outcome on `runtime.inventory_results` and wakes with
     /// `Message::Wake(Wake::Inventory)`.
     Inventory(inventory_ops::InventoryOp),
 

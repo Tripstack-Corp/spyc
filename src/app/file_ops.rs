@@ -7,7 +7,7 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use super::state::{PagerRequest, ProjectId, Side};
-use super::{App, Effect, Message, PaneInput, PaneTarget, Wake, pager_handler};
+use super::{App, Effect, PaneInput, PaneTarget, Wake, pager_handler};
 use crate::fs::listing::Listing;
 use crate::state::inventory::Inventory;
 use crate::ui::pager::PagerView;
@@ -373,13 +373,7 @@ fn file_name_of(p: &Path) -> String {
 
 impl App {
     pub(crate) fn apply_file_outcomes(&mut self) -> (bool, Vec<Effect>) {
-        let landed: Vec<(ProjectId, FileOutcome)> = std::mem::take(
-            &mut *self
-                .runtime
-                .file_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let landed = self.runtime.file_results.drain();
         if landed.is_empty() {
             return (false, Vec::new());
         }
@@ -611,29 +605,22 @@ impl App {
         });
     }
 
-    /// Spawn the detached file-op worker: run `op`, push its outcome onto
+    /// Spawn the detached file-op worker: run `op`, land its outcome on
     /// `runtime.file_results`, and wake the loop. The single spawn site shared
     /// by the [`Effect::FileOp`] executor arm and the executor-layer `gF` open
-    /// (`goto_file_navigate`), so the slot/wake wiring can't drift. `wake` is
-    /// `None` only before `run()` / in the test harness, where the outcome
-    /// still lands in the slot for a manual drain.
+    /// (`goto_file_navigate`), so the landing/wake wiring can't drift.
     ///
     /// The outcome is tagged with the active project, which is the one whose
     /// handler asked: `run_effects` runs in the user's project, and an MCP call
     /// in its caller's (`App::in_project`).
     pub(crate) fn spawn_file_op(&self, op: FileOp) {
         let origin = self.state.active;
-        let results = std::sync::Arc::clone(&self.runtime.file_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .file_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::FileOp);
         std::thread::spawn(move || {
-            let outcome = run_file_op(op);
-            results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((origin, outcome));
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::FileOp));
-            }
+            let _ = results.send((origin, run_file_op(op)));
         });
     }
 }
@@ -782,7 +769,7 @@ mod tests {
         assert!(fx.is_empty());
         // A landed PipedContent outcome is drained and surfaced as a SendToPane
         // effect for the run loop to execute (no executor bypass).
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::PipedContent {
                 payload: b"\x1b[200~hi\x1b[201~".to_vec(),
@@ -848,7 +835,7 @@ mod tests {
         let generation = app.state.col(side).list_generation;
         let listing = crate::fs::listing::Listing::read(work.path()).unwrap();
         app.runtime.listing_refresh_inflight = true;
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::ListingRefreshed {
                 side,
@@ -873,7 +860,7 @@ mod tests {
         app.runtime.listing_refresh_inflight = true;
         // Tag with a generation that no longer matches (a chdir / sync refresh
         // happened since the read was spawned) → the read must be dropped.
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::ListingRefreshed {
                 side,
@@ -919,7 +906,7 @@ mod tests {
     fn long_list_outcome_drains_into_a_pager() {
         let work = tempdir().unwrap();
         let mut app = App::test_app(work.path().to_path_buf());
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::LongListReady {
                 title: "long listing — x".to_string(),
@@ -992,7 +979,7 @@ mod tests {
             "dev".to_string(),
             vec!["a".to_string(), "b".to_string(), "c".to_string()],
         );
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::SpecialFileOpened {
                 result: Ok(Box::new(view)),
@@ -1022,7 +1009,7 @@ mod tests {
         let work = tempdir().unwrap();
         let mut app = App::test_app(work.path().to_path_buf());
         let view = PagerView::new_plain("dev".to_string(), vec!["x".to_string()]);
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::SpecialFileOpened {
                 result: Ok(Box::new(view)),
@@ -1045,7 +1032,7 @@ mod tests {
     fn special_file_outcome_flashes_on_build_error() {
         let work = tempdir().unwrap();
         let mut app = App::test_app(work.path().to_path_buf());
-        app.runtime.file_results.lock().unwrap().push((
+        app.runtime.file_results.land((
             app.state.active,
             FileOutcome::SpecialFileOpened {
                 result: Err("s.sock: not a readable file".to_string()),

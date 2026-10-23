@@ -280,7 +280,7 @@ impl App {
         terminal: &mut Tui,
         foreground_exec: &ForegroundExec,
         reader_done: &std::sync::atomic::AtomicBool,
-        read_err: &std::sync::Mutex<Option<std::io::Error>>,
+        read_err: &std::sync::mpsc::Receiver<std::io::Error>,
         ctx: &mut RunCtx,
     ) -> Result<DispatchFlow> {
         match effective {
@@ -570,7 +570,7 @@ impl App {
         // git forwarder, and pane workers (via `pane_wake_tx`) also feed the
         // channel; tasks / MCP stay polled until 3c/3d.
         let reader_handle = spawn_input_reader(msg_tx);
-        let read_err = reader_handle.read_err.clone();
+        let read_err = &reader_handle.read_err;
         // Phase 3a: extra senders (watcher/forwarder) keep the channel
         // Connected after the reader thread dies, so the `Err(Disconnected)`
         // arm no longer fires on reader death. Gate the loop-exit on this
@@ -635,7 +635,7 @@ impl App {
             // consumed by `coalesce_pending` (which drops the wake), so it
             // catches death even when the edge wake races a real message.
             if reader_done.load(std::sync::atomic::Ordering::Acquire) {
-                break take_reader_result(&read_err);
+                break take_reader_result(read_err);
             }
             // One-shot full repaint after a pane or overlay closes (or any
             // other event that leaves ratatui's diff buffer stale).
@@ -708,7 +708,7 @@ impl App {
                 terminal,
                 &foreground_exec,
                 &reader_done,
-                &read_err,
+                read_err,
                 &mut ctx,
             ) {
                 Ok(DispatchFlow::Continue) => {

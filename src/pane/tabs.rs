@@ -4,10 +4,7 @@
 //! all tab lifecycle logic out of `App`.
 
 use std::path::PathBuf;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use super::Pane;
 
@@ -457,18 +454,15 @@ pub struct TabEntry {
     /// Last-known live cwd of the child. A plain cache field: the pure
     /// `live_cwd` draw read clones it, and the `&mut refresh_live_cwd` kick
     /// (driven from `prepare_panes`, the pre-draw settle point) updates it
-    /// from `live_cwd_pending` when a background refresh lands. `None` until
+    /// from `live_cwd_lookup` when a background refresh lands. `None` until
     /// the first refresh succeeds.
     live_cwd_cache: Option<PathBuf>,
-    /// Slot a detached refresh thread writes a freshly-resolved cwd into.
+    /// The background cwd lookup in flight, if one is: at most one at a time.
     /// `cwd_for_pid` is a `lsof` fork-exec on macOS (~5–17 ms); running it
     /// inline in the render path stalled the whole event loop once per
-    /// `LIVE_CWD_TTL` (a visible per-second typing hitch), so it now runs
+    /// `LIVE_CWD_TTL` (a visible per-second typing hitch), so it runs
     /// off-thread and the result is picked up on a later frame.
-    live_cwd_pending: Arc<Mutex<Option<PathBuf>>>,
-    /// True while a background cwd refresh is in flight, so we kick at most
-    /// one at a time.
-    live_cwd_refreshing: Arc<AtomicBool>,
+    live_cwd_lookup: Option<Receiver<Option<PathBuf>>>,
     /// When we last kicked a refresh — the `LIVE_CWD_TTL` gate.
     live_cwd_kicked_at: Option<std::time::Instant>,
     /// Stashed `^a-v` scrollback pager. Holds the whole `PagerView`
@@ -520,13 +514,12 @@ pub fn strip_exit_suffix(label: &str) -> String {
 }
 
 impl TabEntry {
-    pub fn new(pane: Pane, info: TabInfo) -> Self {
+    pub const fn new(pane: Pane, info: TabInfo) -> Self {
         Self {
             pane,
             info,
             live_cwd_cache: None,
-            live_cwd_pending: Arc::new(Mutex::new(None)),
-            live_cwd_refreshing: Arc::new(AtomicBool::new(false)),
+            live_cwd_lookup: None,
             live_cwd_kicked_at: None,
             stashed_scrollback_pager: None,
         }
@@ -559,35 +552,33 @@ impl TabEntry {
     /// frame. The render path used to do all this inline behind `&self`,
     /// stalling the event loop ~once per `LIVE_CWD_TTL`.
     pub fn refresh_live_cwd(&mut self) {
-        // Pick up a result a background refresh has landed. Bind the `take()`
-        // first so the `MutexGuard` drops before the body (no lock held).
-        let landed = self
-            .live_cwd_pending
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if landed.is_some() {
-            self.live_cwd_cache = landed;
+        // Pick up the lookup that finished, if one did. One whose thread died
+        // without an answer ends too, so the next can start.
+        if let Some(lookup) = &self.live_cwd_lookup {
+            match lookup.try_recv() {
+                Ok(found) => {
+                    if found.is_some() {
+                        self.live_cwd_cache = found;
+                    }
+                    self.live_cwd_lookup = None;
+                }
+                Err(TryRecvError::Disconnected) => self.live_cwd_lookup = None,
+                Err(TryRecvError::Empty) => {}
+            }
         }
         let now = std::time::Instant::now();
         let stale = self
             .live_cwd_kicked_at
             .is_none_or(|at| now.duration_since(at) >= LIVE_CWD_TTL);
         if stale
-            && !self.live_cwd_refreshing.load(Ordering::Acquire)
+            && self.live_cwd_lookup.is_none()
             && let Some(pid) = self.pane.process_id()
         {
             self.live_cwd_kicked_at = Some(now);
-            self.live_cwd_refreshing.store(true, Ordering::Release);
-            let pending = Arc::clone(&self.live_cwd_pending);
-            let refreshing = Arc::clone(&self.live_cwd_refreshing);
+            let (tx, rx) = mpsc::channel();
+            self.live_cwd_lookup = Some(rx);
             std::thread::spawn(move || {
-                if let Some(cwd) = crate::proc_cwd::cwd_for_pid(pid) {
-                    *pending
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(cwd);
-                }
-                refreshing.store(false, Ordering::Release);
+                let _ = tx.send(crate::proc_cwd::cwd_for_pid(pid));
             });
         }
     }
@@ -1085,20 +1076,34 @@ mod tests {
     #[test]
     fn live_cwd_reads_cache_purely_and_refresh_picks_up_landed() {
         use std::path::PathBuf;
-        use std::sync::atomic::Ordering;
         let mut entry = dummy_tab();
         let spawn_cwd = entry.info.cwd.clone();
         // The pure `&self` draw read returns the spawn-time cwd until the
         // first refresh lands — and never mutates / spawns.
         assert_eq!(entry.live_cwd(), spawn_cwd);
 
-        // Seed a landed result and mark a refresh already in flight, so the
-        // `&mut` settle step only PICKS UP the landed value (no
-        // nondeterministic `lsof` kick), then the pure read reflects it.
+        // Seed a finished lookup and a fresh kick time, so the `&mut` settle
+        // step only PICKS UP the landed value (no nondeterministic `lsof`
+        // kick), then the pure read reflects it.
         let landed = PathBuf::from("/tmp/spyc-live-cwd-test");
-        *entry.live_cwd_pending.lock().unwrap() = Some(landed.clone());
-        entry.live_cwd_refreshing.store(true, Ordering::Release);
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(Some(landed.clone())).unwrap();
+        entry.live_cwd_lookup = Some(rx);
+        entry.live_cwd_kicked_at = Some(std::time::Instant::now());
         entry.refresh_live_cwd();
         assert_eq!(entry.live_cwd(), landed);
+    }
+
+    /// A lookup whose thread died without an answer ends, so the next one
+    /// can start.
+    #[test]
+    fn a_dead_lookup_ends_its_flight() {
+        let mut entry = dummy_tab();
+        let (tx, rx) = std::sync::mpsc::channel::<Option<std::path::PathBuf>>();
+        drop(tx);
+        entry.live_cwd_lookup = Some(rx);
+        entry.live_cwd_kicked_at = Some(std::time::Instant::now());
+        entry.refresh_live_cwd();
+        assert!(entry.live_cwd_lookup.is_none());
     }
 }

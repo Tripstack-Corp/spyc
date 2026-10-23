@@ -6,9 +6,8 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
-use super::message::{Message, Wake};
+use super::message::Wake;
 use super::{App, Mode, Prompt, PromptKind};
 use crate::state::sessions::AgentKind;
 use crate::state::wiring_consent;
@@ -33,9 +32,6 @@ pub(super) struct WiringOutcome {
     before: Option<Status>,
     after: Option<Status>,
 }
-
-/// Where wiring workers land their outcomes.
-pub(super) type WiringResults = Arc<Mutex<Vec<WiringOutcome>>>;
 
 /// Whether `kind`'s status hooks are in place for an agent starting now: in
 /// its user configuration, once the user wired it.
@@ -153,7 +149,10 @@ impl App {
     /// through its CLI, which can take a second. Without a loop to wake (the
     /// test harness), it runs in place.
     pub(super) fn start_wiring(&self, kind: AgentKind, op: WiringOp) {
-        let results = Arc::clone(&self.runtime.wiring_results);
+        // A test pins its wiring env to its own thread, where the work must run.
+        let wake = self.runtime.pane_wake_tx.clone().filter(|_| !cfg!(test));
+        let in_place = wake.is_none();
+        let results = self.runtime.wiring_results.sender(wake, Wake::Wiring);
         let work = move || {
             let env = Env::for_spyc();
             let before = env.as_ref().and_then(|env| wiring::status(kind, env));
@@ -161,38 +160,24 @@ impl App {
                 WiringOp::Install { .. } => wiring::install(kind, env),
                 WiringOp::Remove => wiring::remove(kind, env),
             });
-            results
-                .lock()
-                .expect("a wiring worker never panics holding the lock")
-                .push(WiringOutcome {
-                    kind,
-                    op,
-                    before,
-                    after,
-                });
+            let _ = results.send(WiringOutcome {
+                kind,
+                op,
+                before,
+                after,
+            });
         };
-        // A test pins its wiring env to its own thread, where the work must run.
-        let wake = self.runtime.pane_wake_tx.clone().filter(|_| !cfg!(test));
-        let Some(wake) = wake else {
+        if in_place {
             work();
-            return;
-        };
-        std::thread::spawn(move || {
-            work();
-            let _ = wake.send(Message::Wake(Wake::Wiring));
-        });
+        } else {
+            std::thread::spawn(work);
+        }
     }
 
     /// Report what wiring workers did, and flag the tabs that must restart to
     /// load hooks they read only at startup. Returns whether anything landed.
     pub(super) fn apply_wiring_outcomes(&mut self) -> bool {
-        let landed: Vec<WiringOutcome> = std::mem::take(
-            &mut *self
-                .runtime
-                .wiring_results
-                .lock()
-                .expect("a wiring worker never panics holding the lock"),
-        );
+        let landed = self.runtime.wiring_results.drain();
         let any = !landed.is_empty();
         for outcome in landed {
             self.apply_wiring_outcome(outcome);
@@ -365,16 +350,12 @@ impl App {
         if before == after {
             return;
         }
-        self.runtime
-            .wiring_results
-            .lock()
-            .expect("a wiring worker never panics holding the lock")
-            .push(WiringOutcome {
-                kind: AgentKind::Codex,
-                op: WiringOp::Install { restart: None },
-                before,
-                after,
-            });
+        self.runtime.wiring_results.land(WiringOutcome {
+            kind: AgentKind::Codex,
+            op: WiringOp::Install { restart: None },
+            before,
+            after,
+        });
     }
 }
 

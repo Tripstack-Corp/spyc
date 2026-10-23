@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{App, ClipMsg, Effect, Message, PaneInput, PaneTarget, Wake};
+use super::{App, ClipMsg, Effect, PaneInput, PaneTarget, Wake};
 
 impl App {
     /// yf — yank the cursor file's absolute path to the system
@@ -470,39 +470,25 @@ impl super::App {
     /// Run a clipboard write on a detached worker (the `graveyard_ops`
     /// template), landing its outcome on `runtime.clipboard_copy_results` and
     /// waking the loop.
-    ///
-    /// `pane_wake_tx` is `None` only before `run()` / in the test harness, where
-    /// there is no loop to wake — the outcome still lands in the slot.
     fn spawn_clipboard_write(&self, write: impl FnOnce() -> Result<(), String> + Send + 'static) {
-        let results = std::sync::Arc::clone(&self.runtime.clipboard_copy_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .clipboard_copy_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::ClipboardCopy);
         std::thread::spawn(move || {
-            let outcome = write().err();
-            results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(outcome);
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::ClipboardCopy));
-            }
+            let _ = results.send(write().err());
         });
     }
 
     /// Drain every landed clipboard write and flash whichever failed. Called
-    /// each pre-recv scan, so the slot is always emptied whichever wake survived
-    /// coalescing. Returns whether the frame is dirty.
+    /// each pre-recv scan, so the landing is always emptied whichever wake
+    /// survived coalescing. Returns whether the frame is dirty.
     ///
     /// A failure arrives *after* the verb already flashed its confirmation, so it
     /// replaces one — which is the right way round: the last thing on screen is
     /// what actually happened.
     pub(crate) fn apply_clipboard_writes(&mut self) -> bool {
-        let landed: Vec<Option<String>> = std::mem::take(
-            &mut *self
-                .runtime
-                .clipboard_copy_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let landed = self.runtime.clipboard_copy_results.drain();
         let mut dirty = false;
         for err in landed.into_iter().flatten() {
             self.state.flash_error(format!("clipboard: {err}"));
@@ -519,28 +505,21 @@ impl super::App {
     /// helper that never answers. On the loop thread that is a total freeze: the
     /// input reader keeps reading, but nothing dispatches and no frame is drawn,
     /// with no key to break out. So this is the `graveyard_ops` template — the
-    /// worker pushes its result onto `runtime.clipboard_paste_results` and wakes
+    /// worker lands its result on `runtime.clipboard_paste_results` and wakes
     /// the loop; `apply_clipboard_pastes` does the routing in the pre-recv scan.
-    ///
-    /// `pane_wake_tx` is `None` only before `run()` / in the test harness, where
-    /// there is no loop to wake — the result still lands in the slot.
     pub(super) fn spawn_clipboard_read(&self) {
-        let results = std::sync::Arc::clone(&self.runtime.clipboard_paste_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .clipboard_paste_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::ClipboardPaste);
         std::thread::spawn(move || {
-            let read = crate::clipboard::paste();
-            results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(read);
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::ClipboardPaste));
-            }
+            let _ = results.send(crate::clipboard::paste());
         });
     }
 
     /// Drain + route every landed clipboard read. Called every pre-recv scan, so
-    /// the slot is ALWAYS emptied regardless of which wake survived coalescing.
+    /// the landing is ALWAYS emptied regardless of which wake survived
+    /// coalescing.
     /// Returns whether the frame is dirty plus the effects the paste produced —
     /// the caller runs them, matching `apply_archive_outcomes`.
     ///
@@ -551,13 +530,7 @@ impl super::App {
     /// move focus (only the left button does), so in practice "now" and "then"
     /// are the same place.
     pub(crate) fn apply_clipboard_pastes(&mut self) -> (bool, Vec<Effect>) {
-        let landed: Vec<std::io::Result<String>> = std::mem::take(
-            &mut *self
-                .runtime
-                .clipboard_paste_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let landed = self.runtime.clipboard_paste_results.drain();
         if landed.is_empty() {
             return (false, Vec::new());
         }
@@ -640,7 +613,7 @@ mod paste_tests {
     /// The headline: a middle-click paste must not stall the loop waiting on a
     /// clipboard helper. A wedged `xclip -o` (or a hung pasteboard server) held
     /// the whole UI — no dispatch, no frame, no key out of it — for as long as
-    /// it took. The kick returns immediately; the text arrives through the slot.
+    /// it took. The kick returns immediately; the text arrives through the landing.
     #[test]
     fn a_middle_click_paste_does_not_read_the_clipboard_on_the_loop() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -671,7 +644,7 @@ mod paste_tests {
     }
 
     /// An empty clipboard is a distinct answer, not a silent no-op — and it must
-    /// still come back through the slot rather than short-circuit at kick time.
+    /// still come back through the landing rather than short-circuit at kick time.
     #[test]
     fn an_empty_clipboard_reports_itself() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -686,8 +659,8 @@ mod paste_tests {
         });
     }
 
-    /// Two clicks, two reads: the slot is a `Vec`, so a second read can't drop
-    /// the first (a middle click is cheap to repeat, and they overlap).
+    /// Two clicks, two reads: each lands its own result, so a second read
+    /// can't drop the first (a middle click is cheap to repeat, and they overlap).
     #[test]
     fn overlapping_reads_both_land() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -696,16 +669,11 @@ mod paste_tests {
             crate::clipboard::with_paste_stub(Duration::from_millis(200), "ab", || {
                 app.spawn_clipboard_read();
                 app.spawn_clipboard_read();
-                // Count what's in the slot, not how many drains saw something:
+                // Count what landed, not how many drains saw something:
                 // one drain takes everything that landed since the last.
                 let deadline = Instant::now() + Duration::from_secs(20);
                 loop {
-                    let landed = app
-                        .runtime
-                        .clipboard_paste_results
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .len();
+                    let landed = app.runtime.clipboard_paste_results.len();
                     if landed == 2 {
                         break;
                     }
@@ -800,7 +768,7 @@ mod copy_tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         crate::state::with_state_root(tmp.path(), || {
             let stub = persisting_helper(tmp.path());
-            let app = App::test_app(tmp.path().to_path_buf());
+            let mut app = App::test_app(tmp.path().to_path_buf());
 
             crate::clipboard::with_reap_budget(Duration::from_millis(150), || {
                 crate::clipboard::with_clipboard_override(&stub, || {
@@ -818,12 +786,7 @@ mod copy_tests {
                     // pass the assertion above.
                     let deadline = Instant::now() + Duration::from_secs(20);
                     loop {
-                        let landed = app
-                            .runtime
-                            .clipboard_copy_results
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .pop();
+                        let landed = app.runtime.clipboard_copy_results.latest();
                         if let Some(outcome) = landed {
                             assert_eq!(
                                 outcome, None,

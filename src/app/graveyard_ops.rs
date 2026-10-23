@@ -17,7 +17,7 @@
 use std::path::PathBuf;
 
 use super::state::Side;
-use super::{App, Message, View, Wake};
+use super::{App, View, Wake};
 use crate::state::graveyard::{Entry, Graveyard};
 
 /// A graveyard mutation to run off-thread. The cheap parts (picking the latest
@@ -121,40 +121,27 @@ pub fn run_graveyard_op(op: GraveyardOp) -> GraveyardOutcome {
 }
 
 impl App {
-    /// Run `op` on a detached worker. It pushes its outcome onto
-    /// `graveyard_results` and wakes the loop; `apply_graveyard_outcomes`
-    /// (pre-recv scan) does the flash + refresh. `pane_wake_tx` is `None` only
-    /// before `run()` / in the test harness, where there is no loop to wake —
-    /// the outcome still lands in the slot.
+    /// Run `op` on a detached worker. Its outcome lands on `graveyard_results`
+    /// and wakes the loop; `apply_graveyard_outcomes` (pre-recv scan) does the
+    /// flash + refresh.
     pub(crate) fn spawn_graveyard_op(&self, op: GraveyardOp) {
-        let results = std::sync::Arc::clone(&self.runtime.graveyard_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .graveyard_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::Graveyard);
         std::thread::spawn(move || {
-            let outcome = run_graveyard_op(op);
-            results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(outcome);
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::Graveyard));
-            }
+            let _ = results.send(run_graveyard_op(op));
         });
     }
 
     /// Drain + apply every landed graveyard outcome (flash + listing / graveyard
-    /// refresh). Called every pre-recv scan, so the slot is ALWAYS emptied
+    /// refresh). Called every pre-recv scan, so the landing is ALWAYS emptied
     /// regardless of which wake survived coalescing. Returns whether anything
     /// was applied (the caller marks the frame dirty). View-dependent refreshes
     /// re-derive `self.state.left.view` HERE — the view may have changed since the op
     /// was kicked.
     pub(crate) fn apply_graveyard_outcomes(&mut self) -> bool {
-        let landed: Vec<GraveyardOutcome> = std::mem::take(
-            &mut *self
-                .runtime
-                .graveyard_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let landed = self.runtime.graveyard_results.drain();
         if landed.is_empty() {
             return false;
         }
@@ -326,9 +313,7 @@ mod tests {
         // A landed outcome is drained, flashed, and the slot emptied.
         app.runtime
             .graveyard_results
-            .lock()
-            .unwrap()
-            .push(GraveyardOutcome::Archived {
+            .land(GraveyardOutcome::Archived {
                 archived: 3,
                 failures: Vec::new(),
             });
@@ -361,9 +346,7 @@ mod tests {
             let mut app = App::test_app(std::env::temp_dir());
             app.runtime
                 .graveyard_results
-                .lock()
-                .unwrap()
-                .push(GraveyardOutcome::Cascaded {
+                .land(GraveyardOutcome::Cascaded {
                     trashed: 0,
                     errors: 0,
                 });
@@ -386,9 +369,7 @@ mod tests {
         let mut app = App::test_app(std::env::temp_dir());
         app.runtime
             .graveyard_results
-            .lock()
-            .unwrap()
-            .push(GraveyardOutcome::Cascaded {
+            .land(GraveyardOutcome::Cascaded {
                 trashed: 2,
                 errors: 5,
             });
@@ -411,9 +392,7 @@ mod tests {
         let mut app = App::test_app(std::env::temp_dir());
         app.runtime
             .graveyard_results
-            .lock()
-            .unwrap()
-            .push(GraveyardOutcome::Cascaded {
+            .land(GraveyardOutcome::Cascaded {
                 trashed: 3,
                 errors: 0,
             });

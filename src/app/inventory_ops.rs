@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use super::{App, Message, Wake};
+use super::{App, Wake};
 use crate::state::inventory::Inventory;
 
 /// Tier 5: Inventory operations that involve filesystem IO.
@@ -130,28 +130,17 @@ impl App {
     /// Run `op` on a detached worker, the `spawn_graveyard_op` shape;
     /// `apply_inventory_outcomes` takes what it lands.
     pub(crate) fn spawn_inventory_op(&self, op: InventoryOp) {
-        let results = std::sync::Arc::clone(&self.runtime.inventory_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .inventory_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::Inventory);
         std::thread::spawn(move || {
-            let outcome = run_inventory_op(op);
-            results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(outcome);
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::Inventory));
-            }
+            let _ = results.send(run_inventory_op(op));
         });
     }
 
     pub(crate) fn apply_inventory_outcomes(&mut self) -> bool {
-        let landed: Vec<InventoryOutcome> = std::mem::take(
-            &mut *self
-                .runtime
-                .inventory_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let landed = self.runtime.inventory_results.drain();
         if landed.is_empty() {
             return false;
         }
@@ -364,9 +353,7 @@ mod tests {
             );
             app.runtime
                 .inventory_results
-                .lock()
-                .unwrap()
-                .push(InventoryOutcome::Yanked {
+                .land(InventoryOutcome::Yanked {
                     count: 2,
                     skipped: 0,
                     first_err: None,

@@ -7,11 +7,11 @@
 //! builder is `pager_handler::build_pager_view`; this module wraps it in a
 //! detached worker.
 //!
-//! Shape mirrors `agent_status` (and the graveyard/mermaid ops): a landing slot
-//! (`runtime.preview_results`), an in-flight flag (`runtime.preview_reloading`),
-//! and a detached worker that wakes the loop with `Message::Wake(Wake::PreviewReload)`
-//! on completion. The pre-recv scan drains the slot via
-//! [`App::apply_preview_reloads`]. Bursts coalesce: while a reload is in flight,
+//! Shape mirrors `agent_status` (and the graveyard/mermaid ops): a landing
+//! (`runtime.preview_results`), an in-flight flag (`runtime.preview_reloading`)
+//! the drain clears, and a detached worker that wakes the loop with
+//! `Message::Wake(Wake::PreviewReload)` on completion. The pre-recv scan drains
+//! the landing via [`App::apply_preview_reloads`]. Bursts coalesce: while a reload is in flight,
 //! further events set `view.preview_dirty` instead of spawning a second worker;
 //! the drain re-kicks once if it's set, so the FINAL save is always the one that
 //! sticks — without a thread per filesystem event.
@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 use crate::ui::pager::PagerView;
 
-use super::{App, Message, Wake, pager_handler};
+use super::{App, Wake, pager_handler};
 
 /// A reload request handed to the worker. Carries everything the pure builder
 /// needs so the worker touches no `App` state: the file, a clone of the theme,
@@ -84,17 +84,11 @@ impl App {
         else {
             return;
         };
-        if self
-            .runtime
-            .preview_reloading
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if self.runtime.preview_reloading {
             self.view.preview_dirty = true;
             return;
         }
-        self.runtime
-            .preview_reloading
-            .store(true, std::sync::atomic::Ordering::Release);
+        self.runtime.preview_reloading = true;
         self.view.preview_dirty = false;
         let req = PreviewReloadReq {
             path,
@@ -102,23 +96,12 @@ impl App {
             open_as_rendered: self.state.active_project().config.markdown.open_as_rendered,
             wrap_width: self.right_preview_body_width(),
         };
-        let results = std::sync::Arc::clone(&self.runtime.preview_results);
-        let reloading = std::sync::Arc::clone(&self.runtime.preview_reloading);
-        // Clone of the unified-channel sender so the worker can WAKE the loop on
-        // completion (None before `run()` / in the test harness → no wake, which
-        // is correct: those paths don't render in a loop).
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .preview_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::PreviewReload);
         std::thread::spawn(move || {
-            let outcome = reload(req);
-            *results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outcome);
-            reloading.store(false, std::sync::atomic::Ordering::Release);
-            // Wake AFTER the result + flag are stored, so the woken pre-recv
-            // scan sees `preview_results` populated and forces a redraw.
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::PreviewReload));
-            }
+            let _ = results.send(reload(req));
         });
     }
 
@@ -130,15 +113,10 @@ impl App {
     /// Re-kicks once if `preview_dirty` was set while the worker ran. Returns
     /// whether a redraw is needed.
     pub(crate) fn apply_preview_reloads(&mut self) -> bool {
-        let Some(outcome) = self
-            .runtime
-            .preview_results
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        else {
+        let Some(outcome) = self.runtime.preview_results.latest() else {
             return false;
         };
+        self.runtime.preview_reloading = false;
         let current = self
             .view
             .project()
@@ -215,11 +193,10 @@ mod tests {
     /// isn't asserted here; this pins the no-second-worker half.)
     #[test]
     fn kick_coalesces_while_a_reload_is_in_flight() {
-        use std::sync::atomic::Ordering;
         let mut app = App::test_app(PathBuf::from("/repo"));
         open_preview(&mut app, "/repo/doc.md", 10, 0);
         // Simulate an in-flight worker.
-        app.runtime.preview_reloading.store(true, Ordering::Release);
+        app.runtime.preview_reloading = true;
         app.view.preview_dirty = false;
 
         app.kick_preview_reload();
@@ -229,9 +206,24 @@ mod tests {
             "in-flight reload → mark dirty for one trailing re-render"
         );
         assert!(
-            app.runtime.preview_reloading.load(Ordering::Acquire),
+            app.runtime.preview_reloading,
             "flag untouched — no second worker was kicked"
         );
+    }
+
+    /// A landed reload ends the one in flight, so the next save starts a
+    /// reload instead of waiting on one that already finished.
+    #[test]
+    fn a_landed_reload_ends_the_one_in_flight() {
+        let mut app = App::test_app(PathBuf::from("/repo"));
+        open_preview(&mut app, "/repo/doc.md", 3, 0);
+        app.runtime.preview_reloading = true;
+        app.view.preview_dirty = false;
+        app.runtime
+            .preview_results
+            .land(reloaded("/repo/doc.md", 5));
+        assert!(app.apply_preview_reloads());
+        assert!(!app.runtime.preview_reloading);
     }
 
     /// A matching reload installs the fresh view and preserves the reader's
@@ -240,7 +232,9 @@ mod tests {
     fn apply_installs_and_preserves_scroll() {
         let mut app = App::test_app(PathBuf::from("/repo"));
         open_preview(&mut app, "/repo/doc.md", 3, 5);
-        *app.runtime.preview_results.lock().unwrap() = Some(reloaded("/repo/doc.md", 20));
+        app.runtime
+            .preview_results
+            .land(reloaded("/repo/doc.md", 20));
 
         assert!(app.apply_preview_reloads(), "a real install redraws");
         let v = app.view.project().right_pager.as_ref().unwrap();
@@ -254,7 +248,9 @@ mod tests {
     fn apply_clamps_scroll_when_file_shrank() {
         let mut app = App::test_app(PathBuf::from("/repo"));
         open_preview(&mut app, "/repo/doc.md", 50, 40);
-        *app.runtime.preview_results.lock().unwrap() = Some(reloaded("/repo/doc.md", 5));
+        app.runtime
+            .preview_results
+            .land(reloaded("/repo/doc.md", 5));
 
         assert!(app.apply_preview_reloads());
         assert_eq!(
@@ -270,7 +266,9 @@ mod tests {
     fn apply_discards_stale_result_for_swapped_preview() {
         let mut app = App::test_app(PathBuf::from("/repo"));
         open_preview(&mut app, "/repo/current.md", 3, 0);
-        *app.runtime.preview_results.lock().unwrap() = Some(reloaded("/repo/old.md", 20));
+        app.runtime
+            .preview_results
+            .land(reloaded("/repo/old.md", 20));
 
         assert!(!app.apply_preview_reloads(), "stale result → no redraw");
         let v = app.view.project().right_pager.as_ref().unwrap();
@@ -287,7 +285,7 @@ mod tests {
     fn apply_failed_keeps_last_good_and_flashes() {
         let mut app = App::test_app(PathBuf::from("/repo"));
         open_preview(&mut app, "/repo/doc.md", 7, 2);
-        *app.runtime.preview_results.lock().unwrap() = Some(PreviewOutcome::Failed {
+        app.runtime.preview_results.land(PreviewOutcome::Failed {
             path: PathBuf::from("/repo/doc.md"),
             error: "read: no such file".to_string(),
         });

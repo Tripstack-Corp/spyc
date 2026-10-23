@@ -7,7 +7,7 @@
 //! the loop file. `resolve_short_id` is a per-file JSON walk that scales with
 //! the user's accumulated sessions, so it must never run on the render thread
 //! (it once showed ~65% of main-thread CPU). Pattern mirrors
-//! `TabEntry::live_cwd` (#227): a landing slot + in-flight flag + a detached
+//! `TabEntry::live_cwd` (#227): a landing + in-flight flag + a detached
 //! worker that wakes the loop on completion; render reads the cache and never
 //! blocks.
 
@@ -15,8 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use super::{
-    AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Effect, Message, RunCtx,
-    VisualBell, Wake,
+    AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Effect, RunCtx, VisualBell, Wake,
 };
 use crate::config::{DesktopVia, NotifyConfig};
 use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
@@ -525,12 +524,6 @@ impl App {
     /// showed ~65% of main-thread CPU here on a long-running user), so it runs
     /// OFF-thread; the result lands in `agent_status_pending` and is applied by
     /// the scan on a later frame. Same off-thread pattern as `live_cwd` (#227).
-    //
-    // `&mut self` is deliberate even though the stores go through interior
-    // mutability (Arc<AtomicBool>): it is the structural guarantee that the
-    // `&self` draw pass CANNOT call this — the whole point of moving the spawn
-    // off render. Hence the allow.
-    #[allow(clippy::needless_pass_by_ref_mut)]
     pub(crate) fn kick_agent_status_refresh(&mut self) {
         let Some((profile, kind, cwd, spawn, pinned)) = self.active_agent_key() else {
             return;
@@ -547,24 +540,15 @@ impl App {
                 .agent_status_cache
                 .as_ref()
                 .is_some_and(|c| c.computed_at.elapsed() < AGENT_STATUS_TTL);
-        if fresh
-            || self
-                .runtime
-                .agent_status_refreshing
-                .load(std::sync::atomic::Ordering::Acquire)
-        {
+        if fresh || self.runtime.agent_status_refreshing {
             return;
         }
-        self.runtime
-            .agent_status_refreshing
-            .store(true, std::sync::atomic::Ordering::Release);
+        self.runtime.agent_status_refreshing = true;
         let label = profile.name();
-        let pending = std::sync::Arc::clone(&self.runtime.agent_status_pending);
-        let refreshing = std::sync::Arc::clone(&self.runtime.agent_status_refreshing);
-        // Clone of the unified-channel sender so the worker can WAKE the loop on
-        // completion (None before `run()` / in the test harness → no wake, which
-        // is correct: those paths don't render in a loop).
-        let wake = self.runtime.pane_wake_tx.clone();
+        let pending = self
+            .runtime
+            .agent_status_pending
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::AgentStatus);
         let thread_cwd = cwd;
         std::thread::spawn(move || {
             let short_id = profile.resolve_short_id(&thread_cwd, spawn);
@@ -572,44 +556,30 @@ impl App {
                 Some(id) => format!("{label}:{id}"),
                 None => label.to_string(),
             });
-            *pending
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(AgentStatusCache {
+            let _ = pending.send(AgentStatusCache {
                 computed_at: std::time::Instant::now(),
                 kind,
                 cwd: thread_cwd,
                 spawn_epoch_secs: spawn,
                 status,
             });
-            refreshing.store(false, std::sync::atomic::Ordering::Release);
-            // Wake AFTER the result + flag are stored, so the woken pre-recv
-            // scan sees `agent_status_pending` populated and forces a redraw.
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::AgentStatus));
-            }
         });
     }
 
     /// MVU Phase 6: drain a landed off-thread agent-status result into the
-    /// cache. Called from the PRE-RECV SCAN every loop iteration, so the
-    /// landing slot is ALWAYS emptied — regardless of which render path runs
-    /// (the status bar, hence `active_agent_status`, is skipped while an
-    /// overlay / top-pager is open; draining only there would leave the slot
-    /// full and the scan's redraw nudge would busy-spin). Applies the result
+    /// cache, ending the refresh in flight. Called from the PRE-RECV SCAN every
+    /// loop iteration, so the landing is ALWAYS emptied — regardless of which
+    /// render path runs (the status bar, hence `active_agent_status`, is skipped
+    /// while an overlay / top-pager is open; draining only there would leave
+    /// the landing full and the scan's redraw nudge would busy-spin). Applies the result
     /// only if it's for the CURRENT active pane — a late result for a
     /// since-switched pane is discarded, never clobbering the active cache.
     /// Returns whether the cache changed (the caller sets `needs_draw`).
     pub(crate) fn apply_landed_agent_status(&mut self) -> bool {
-        // Bind the `take()` first so the MutexGuard drops before the body.
-        let landed = self
-            .runtime
-            .agent_status_pending
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        let Some(result) = landed else {
+        let Some(result) = self.runtime.agent_status_pending.latest() else {
             return false;
         };
+        self.runtime.agent_status_refreshing = false;
         let matches = self
             .runtime
             .project()
@@ -1025,6 +995,20 @@ mod tests {
         assert!(!app.agent_cache_matches(AgentKind::Claude, Path::new("/tmp/proj"), 0));
     }
 
+    /// Any landed result ends the refresh in flight, even one for a pane no
+    /// longer active, or no refresh would ever start again.
+    #[test]
+    fn a_landed_result_ends_the_refresh_in_flight() {
+        let cwd = PathBuf::from("/tmp/proj");
+        let mut app = App::test_app(cwd.clone());
+        app.runtime.agent_status_refreshing = true;
+        app.runtime
+            .agent_status_pending
+            .land(cache(AgentKind::Claude, &cwd, 42));
+        app.apply_landed_agent_status();
+        assert!(!app.runtime.agent_status_refreshing);
+    }
+
     #[test]
     fn no_active_pane_yields_none_and_kick_is_a_noop() {
         // The pure draw read returns None with no agent pane, and the kick
@@ -1033,11 +1017,7 @@ mod tests {
         let mut app = App::test_app(PathBuf::from("/tmp/proj"));
         assert_eq!(app.active_agent_status(), None);
         app.kick_agent_status_refresh();
-        assert!(
-            !app.runtime
-                .agent_status_refreshing
-                .load(std::sync::atomic::Ordering::Acquire)
-        );
+        assert!(!app.runtime.agent_status_refreshing);
     }
 
     // Agent-activity (P0): the requirement behind the dot — Working only while
