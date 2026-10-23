@@ -71,6 +71,55 @@ fn pager_text(app: &mut App, command: &str) -> String {
         .join("\n")
 }
 
+/// An `idle` report from codex or claude (codex's `Interrupt` hook sends one)
+/// holds through the redraw that follows it, as every other report of theirs
+/// does: output after it is not a new turn, so the dot stays idle rather than
+/// flipping to the timing guess.
+#[test]
+#[ignore = "red: a codex or claude idle report yields to the next redraw"]
+fn a_codex_or_claude_idle_report_survives_the_redraw_after_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for name in ["codex", "claude"] {
+            let mut app = agent_app(tmp.path(), name);
+            report(&mut app, "idle");
+            let at = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .clone()
+                .unwrap()
+                .at;
+            app.runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut()
+                .last_output_at = Some(at + Duration::from_secs(1));
+            let mut ctx = RunCtx::for_test();
+            app.settle_agent_activity(at + Duration::from_millis(1500), &mut ctx);
+            let info = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info();
+            assert_eq!(
+                info.activity,
+                AgentActivity::Idle,
+                "{name}: a redraw must not turn an idle report into working"
+            );
+            assert!(info.reported.is_some(), "{name}: the report was dropped");
+        }
+    });
+}
+
 #[test]
 fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
     let tmp = tempfile::tempdir().unwrap();
