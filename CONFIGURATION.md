@@ -105,6 +105,12 @@ confirm = true                 # y/N prompt before R / dd; false = yolo (still r
 All optional; anything unset uses the built-in default. See `spyc --print-config`
 for the annotated version of each.
 
+A key spyc doesn't know is an error, not ignored, so a config that sets a newer
+key (`[pager] scrollback_line_numbers`, say) fails in an older spyc. That spyc
+starts on the built-in defaults, with a `config error` flash naming the key, and
+a live reload keeps the config it already had. Comment the key out before going
+back to an older build, or before sharing the file with one.
+
 ### Agent HUD — `[pane] agent_hud`
 
 The native agent strip below a Codex, Claude Code or Antigravity tab is **off by default**: `agent_hud = "compact"` (two rows) or `"full"` (four) in `~/.spycrc.toml`, or `:agent hud off|compact|full` for the session, and `agent_hud_resets` picks clock times or countdowns. What each row shows and where its facts come from: [`docs/config/agent-hud.md`](docs/config/agent-hud.md).
