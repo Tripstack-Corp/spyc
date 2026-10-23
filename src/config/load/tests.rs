@@ -21,7 +21,6 @@ fn warns(cfg: &Config, file: &str, key: &str) -> bool {
 }
 
 #[test]
-#[ignore = "red: an unknown key fails the whole file (#821)"]
 fn an_unknown_key_is_skipped_and_named_and_the_rest_of_the_file_applies() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = write(
@@ -42,7 +41,6 @@ fn an_unknown_key_is_skipped_and_named_and_the_rest_of_the_file_applies() {
 /// so a key the repo's file has that this spyc doesn't know must not take the
 /// user's own settings with it.
 #[test]
-#[ignore = "red: an unknown key in a repo rc discards the user's own settings too (#821)"]
 fn an_unknown_key_in_a_repo_rc_keeps_the_users_own_settings() {
     let tmp = tempfile::tempdir().unwrap();
     let (home, repo) = (tmp.path().join("home"), tmp.path().join("a-repo"));
@@ -76,7 +74,6 @@ fn an_unknown_key_in_a_repo_rc_keeps_the_users_own_settings() {
 }
 
 #[test]
-#[ignore = "red: an unknown key fails the whole file (#821)"]
 fn an_unknown_key_in_a_nested_table_is_named_by_its_full_path() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = write(
@@ -105,7 +102,6 @@ fn an_unknown_key_in_a_nested_table_is_named_by_its_full_path() {
 /// A file with many unknown keys, a repo rc's thousands among them, names the
 /// first few and counts the rest, so the flash stays readable.
 #[test]
-#[ignore = "red: an unknown key fails the whole file (#821)"]
 fn many_unknown_keys_name_the_first_few_and_count_the_rest() {
     let tmp = tempfile::tempdir().unwrap();
     let rc = write(

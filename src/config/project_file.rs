@@ -215,7 +215,7 @@ pub fn create(dir: &Path, anchor: &Path, label: &str) -> anyhow::Result<PathBuf>
 
 /// `path` as a `home` names it: `~` for the user's home, as [`find`] reads it
 /// back, else as it is.
-fn tilde(path: &Path) -> String {
+pub(super) fn tilde(path: &Path) -> String {
     match super::home_dir().and_then(|home| path.strip_prefix(&home).ok().map(Path::to_path_buf)) {
         Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
         Some(rest) => format!("~/{}", rest.display()),

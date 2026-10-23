@@ -1,5 +1,11 @@
 //! Reading the config files: which ones, at what trust, and how each one
 //! merges into the accumulated [`Config`].
+//!
+//! A key this spyc doesn't know is skipped and named in a warning, not an
+//! error (`parse_file`): a file written for a newer spyc still loads, and so
+//! does the user's own file beside a repo rc that has one. Anything else wrong
+//! still fails the file: it isn't TOML, a known key's value has the wrong type,
+//! or an entry lacks a required key.
 
 use std::path::Path;
 
@@ -113,13 +119,17 @@ impl Config {
     /// paths override earlier ones for settings; keymap bindings and ignore
     /// masks are **appended** in order so both files can contribute. Test-only
     /// since production loads via `load_default` (which assigns per-file
-    /// trust); kept as the harness for the merge/precedence test matrix.
+    /// trust); kept as the harness for the merge/precedence test matrix. A key
+    /// this spyc doesn't know fails it, so a fixture's typo can't pass for a
+    /// setting that keeps its default.
     #[cfg(test)]
     pub fn load_from(paths: &[Option<&Path>]) -> anyhow::Result<Self> {
-        let mut cfg = Self::default();
-        for path in paths.iter().flatten() {
-            cfg.load_one(path, Trust::Trusted)?;
-        }
+        let cfg = Self::load_from_allowing_unknown(paths)?;
+        assert!(
+            !cfg.warnings.iter().any(|w| w.contains("unknown key")),
+            "a key this spyc doesn't know: {:?}",
+            cfg.warnings
+        );
         Ok(cfg)
     }
 
@@ -127,7 +137,11 @@ impl Config {
     /// know on purpose.
     #[cfg(test)]
     pub fn load_from_allowing_unknown(paths: &[Option<&Path>]) -> anyhow::Result<Self> {
-        Self::load_from(paths)
+        let mut cfg = Self::default();
+        for path in paths.iter().flatten() {
+            cfg.load_one(path, Trust::Trusted)?;
+        }
+        Ok(cfg)
     }
 
     /// Read + parse + merge one config file at the given trust level.
@@ -144,8 +158,11 @@ impl Config {
         }
         let text = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
-        let mut file: FileConfig = toml::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+        let (mut file, unknown) =
+            parse_file(&text).map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
+        if !unknown.is_empty() {
+            self.warnings.push(unknown_keys_warning(path, &unknown));
+        }
         if file.home.take().is_some() && !names_home {
             self.warnings.push(format!(
                 "{}: `home` ignored — only a file under projects/ in spyc's config directory \
@@ -529,6 +546,58 @@ fn startup_tabs_from(
         );
     }
     Ok(Some(list))
+}
+
+/// One file's tables, and the path of each key in it this spyc doesn't know,
+/// which is skipped.
+fn parse_file(text: &str) -> Result<(FileConfig, Vec<String>), toml::de::Error> {
+    let mut unknown = Vec::new();
+    let file = serde_ignored::deserialize(toml::Deserializer::parse(text)?, |path| {
+        unknown.push(key_path(&path));
+    })?;
+    Ok((file, unknown))
+}
+
+/// A key's path as the file spells it, `pane.tab[0].lable`: an `Option`
+/// or newtype around a value is no step in the file.
+fn key_path(path: &serde_ignored::Path<'_>) -> String {
+    use serde_ignored::Path;
+    match path {
+        Path::Root => String::new(),
+        Path::Seq { parent, index } => format!("{}[{index}]", key_path(parent)),
+        Path::Map { parent, key } => {
+            let parent = key_path(parent);
+            if parent.is_empty() {
+                key.clone()
+            } else {
+                format!("{parent}.{key}")
+            }
+        }
+        Path::Some { parent }
+        | Path::NewtypeStruct { parent }
+        | Path::NewtypeVariant { parent } => key_path(parent),
+    }
+}
+
+/// The warning for a file's unknown keys. It names the first few, so a long
+/// list, or a repo rc's thousands, can't fill the flash.
+fn unknown_keys_warning(path: &Path, keys: &[String]) -> String {
+    const NAMED: usize = 3;
+    let names: Vec<String> = keys.iter().take(NAMED).map(|k| format!("`{k}`")).collect();
+    let more = match keys.len().saturating_sub(NAMED) {
+        0 => String::new(),
+        n => format!(" and {n} more"),
+    };
+    let (noun, why) = if keys.len() == 1 {
+        ("key", "a newer spyc's setting, or a typo")
+    } else {
+        ("keys", "a newer spyc's settings, or typos")
+    };
+    format!(
+        "{}: unknown {noun} {}{more} ignored ({why})",
+        super::project_file::tilde(path),
+        names.join(", ")
+    )
 }
 
 #[cfg(test)]

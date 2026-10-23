@@ -203,7 +203,7 @@ fn a_re_home_reads_its_file_at_the_next_settle() {
 fn a_failed_read_is_not_repeated() {
     with_three(|t| {
         with_config(t, |t, config| {
-            w_with_file(t, config, "[layout]\nno_such_key = 1\n");
+            w_with_file(t, config, "[layout]\nstatus_position = 1\n");
             let app = &mut t.app;
             leader(app, 'P');
             assert!(app.settle_project_configs());
@@ -365,7 +365,7 @@ fn a_moved_project_out_of_view_names_its_problem() {
         with_config(t, |t, config| {
             let w_home = t.home.parent().unwrap().join("wproj");
             std::fs::create_dir_all(&w_home).unwrap();
-            project_file(config, "work", &w_home, "[layout]\nno_such_key = 1\n");
+            project_file(config, "work", &w_home, "[layout]\nstatus_position = 1\n");
             let (app, y) = (&mut t.app, t.y);
             app.as_project(y, |app| {
                 let inputs = app.state.active_project().config_inputs();
@@ -714,7 +714,6 @@ fn each_projects_scrollback_follows_its_own_pager_config() {
 /// the rest of the file in force, and the flash names the key, rather than
 /// keeping the old config with a `config error`.
 #[test]
-#[ignore = "red: an unknown key fails the whole reload (#821)"]
 fn a_reload_skips_an_unknown_key_and_applies_the_rest() {
     with_three(|t| {
         with_config(t, |t, _config| {

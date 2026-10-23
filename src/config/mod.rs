@@ -193,7 +193,6 @@ impl Default for LayoutConfig {
 /// otherwise a project file with no `[layout]` would clobber a value
 /// from the user file with the Deserialize default.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileLayout {
     #[serde(default)]
     status_position: Option<StatusPosition>,
@@ -350,7 +349,6 @@ impl PaneConfig {
 /// On-disk shape of `[pane]`. `Option` for the same "didn't set"
 /// distinguishability as `[layout]`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FilePane {
     #[serde(default)]
     default_command: Option<String>,
@@ -381,7 +379,6 @@ struct FilePane {
 
 /// On-disk shape of one `[[pane.tab]]` entry.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FilePaneTab {
     command: String,
     #[serde(default)]
@@ -414,7 +411,6 @@ impl Default for YankConfig {
 /// On-disk shape of `[yank]`. `Option` for the same "didn't set"
 /// distinguishability as the other tables.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileYank {
     #[serde(default)]
     include_pager_title: Option<bool>,
@@ -510,7 +506,6 @@ impl Default for MouseConfig {
 /// On-disk shape of `[pager]`. `Option` for the same "didn't set"
 /// distinguishability as the other tables.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FilePager {
     #[serde(default)]
     tab_width: Option<usize>,
@@ -521,7 +516,6 @@ struct FilePager {
 /// `[mouse]` as parsed from the file — every field optional so an absent key
 /// keeps the built-in default rather than zeroing it.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileMouse {
     #[serde(default)]
     capture: Option<bool>,
@@ -573,7 +567,6 @@ impl Default for DeleteConfig {
 /// — letting the user write `[delete]` with no body still keeps
 /// defaults.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileDelete {
     confirm: Option<bool>,
 }
@@ -645,7 +638,6 @@ impl ArchiveConfig {
 
 /// On-disk shape of `[archive]`.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileArchive {
     enable: Option<bool>,
     extract_budget_mb: Option<u64>,
@@ -773,7 +765,6 @@ impl Default for NotifyConfig {
 /// On-disk shape of `[notify]`. `Option` per field for "didn't set" disambig,
 /// so a project file with a bare `[notify]` doesn't clobber user defaults.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileClipboard {
     #[serde(default)]
     via: Option<ClipboardVia>,
@@ -782,7 +773,6 @@ struct FileClipboard {
 }
 
 #[derive(Debug, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 struct FileNotify {
     #[serde(default)]
     desktop: Option<bool>,
@@ -804,7 +794,6 @@ struct FileNotify {
 
 /// On-disk shape of `[markdown]`. `Option` for "didn't set" disambig.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileMarkdown {
     #[serde(default)]
     open_as_rendered: Option<bool>,
@@ -838,7 +827,6 @@ pub enum Intraline {
 
 /// On-disk shape of `[diff]`. `Option` for "didn't set" disambig.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct FileDiff {
     #[serde(default)]
     intraline: Option<Intraline>,
@@ -853,7 +841,6 @@ macro_rules! color_overrides {
         /// Per-element colour overrides parsed from `[colors]`. Each is an
         /// optional hex/named colour; `None` means "use the theme default".
         #[derive(Debug, Clone, Default, Deserialize)]
-        #[serde(deny_unknown_fields)]
         pub struct ColorOverrides {
             $(pub $field: Option<String>,)+
         }
@@ -879,7 +866,6 @@ color_overrides! {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct IgnoreMask {
     pub group: u8,
     #[serde(default)]
@@ -891,7 +877,6 @@ pub struct IgnoreMask {
 /// On-disk shape of a single `.spycrc.toml`. We parse each file into one
 /// of these, then merge them into the final `Config`.
 #[derive(Debug, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
 struct FileConfig {
     #[serde(default)]
     keymap: Vec<String>,
@@ -934,7 +919,6 @@ struct FileConfig {
 /// definitions; bad regexes are reported and dropped at load
 /// rather than failing the whole config.
 #[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ScanConfig {
     #[serde(default)]
     patterns: Vec<ScanPatternFile>,
@@ -942,7 +926,6 @@ struct ScanConfig {
 
 /// On-disk shape of one `[[scan.patterns]]` entry.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ScanPatternFile {
     name: String,
     regex: String,
