@@ -115,6 +115,9 @@ serde_json = { version = "1", features = ["preserve_order"] }
 # Edits codex's `config.toml` in place: the user's comments and layout survive.
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 toml = { version = "1", default-features = false, features = ["parse", "display", "serde"] }
+# Names each key a config file has that this spyc doesn't know, which is
+# skipped with a warning rather than failing the file.
+serde_ignored = "0.1"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 portable-pty = "0.9"
 # The version is what crates.io resolves; `path` is dropped from the packaged
