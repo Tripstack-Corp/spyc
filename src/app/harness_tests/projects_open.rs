@@ -122,6 +122,31 @@ fn space_n_opens_a_directory_as_a_project() {
     });
 }
 
+/// **`Space n` onto a directory whose `.spycrc.toml` can't load** (#827) opens
+/// it on the user's own settings, not the built-in defaults, and the flash
+/// says the repo rc was skipped.
+#[test]
+#[ignore = "red: a repo rc that can't load opens the project on the defaults (#827)"]
+fn space_n_onto_a_broken_repo_rc_opens_on_the_users_own_settings() {
+    with_three(|t| {
+        std::fs::write(t.home.join(".spycrc.toml"), "[pager]\ntab_width = 2\n").unwrap();
+        std::fs::write(t.z_home.join(".spycrc.toml"), "[layout\n").unwrap();
+        let app = &mut t.app;
+        open(app, &t.z_home);
+        assert_eq!(
+            app.state.active,
+            project_at(app, &t.z_home).expect("a project homed at zproj")
+        );
+        assert_eq!(
+            app.state.active_project().config.pager.tab_width,
+            2,
+            "the user's own setting"
+        );
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(flash.contains("skipped"), "{flash}");
+    });
+}
+
 /// `Space n` onto a directory that is already an open project's home goes to
 /// that project rather than opening a second one there.
 #[test]

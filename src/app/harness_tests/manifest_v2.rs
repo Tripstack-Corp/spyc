@@ -1379,3 +1379,45 @@ fn a_fresh_tab_drops_the_resume_its_command_saved() {
         );
     });
 }
+
+/// **`-r` restores a project whose `.spycrc.toml` can't load** (#827) on the
+/// user's own settings, not the built-in defaults.
+#[test]
+#[ignore = "red: a restored project whose repo rc can't load opens on the defaults (#827)"]
+fn a_restored_project_with_a_broken_repo_rc_keeps_the_users_own_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    in_temp_home(tmp.path(), |state_root| {
+        std::fs::write(
+            tmp.path().join("home").join(".spycrc.toml"),
+            "[pager]\ntab_width = 2\n",
+        )
+        .unwrap();
+        let other = std::fs::canonicalize(tmp.path()).unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join(".spycrc.toml"), "[layout\n").unwrap();
+        write_v1_decoy(state_root);
+        write_manifest(
+            state_root,
+            505,
+            &manifest(
+                505,
+                "BAD_RC_KEPT",
+                1_700_000_100,
+                P2,
+                vec![
+                    project(P1, &other, &other, Vec::new()),
+                    project(P2, &crate_root(), &crate_root(), vec![tab("mine", &other)]),
+                ],
+            ),
+        );
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        picker_lines(&mut app);
+        press(&mut app, KeyCode::Char('1'));
+
+        let restored = homed_at(&app, &other);
+        let tab_width = app.as_project(restored, |app| {
+            app.state.active_project().config.pager.tab_width
+        });
+        assert_eq!(tab_width, 2, "the user's own setting");
+    });
+}
