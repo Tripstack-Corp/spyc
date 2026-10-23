@@ -205,9 +205,9 @@ image protocols or OSC 52 clipboard writes. How it answers:
   opens the pager at the referenced line. Scans the last 200 lines of
   output (including scrollback) so paths in large diffs are still found.
   A path wrapped onto the next row — by the terminal, or by the agent's
-  own line wrapping — is put back together. In a claude pane the scan
-  stops at its input box, so the status line under it can't outrank what
-  claude printed. A relative path resolves
+  own line wrapping — is put back together. In a claude, codex, or agy pane
+  the scan stops at its input box (or live approval dialog), so the draft and
+  status line under it can't outrank what the agent printed. A relative path resolves
   against the pane's cwd, then its worktree root (a `cargo` run from `src/`
   prints paths relative to the root), then the focused column's directory
   and its worktree root, then PROJECT_HOME; the newest line that resolves

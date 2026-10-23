@@ -25,8 +25,12 @@ impl App {
             }
             return;
         };
-        let codex_history = history && agent.kind() == crate::state::sessions::AgentKind::Codex;
-        if !(matches!(then, PaneTextSink::Clipboard { .. }) || codex_history) {
+        let scroll_history = history
+            && matches!(
+                agent.kind(),
+                crate::state::sessions::AgentKind::Codex | crate::state::sessions::AgentKind::Agy
+            );
+        if !(matches!(then, PaneTextSink::Clipboard { .. }) || scroll_history) {
             lines.truncate(agent.output_len(&lines));
         }
         match then {

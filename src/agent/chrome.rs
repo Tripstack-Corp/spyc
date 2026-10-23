@@ -1,11 +1,11 @@
 //! An agent's own chrome pinned to the bottom of its pane — input box, status
 //! line, mode line — which a scan for what the agent *printed* must skip.
 //!
-//! Claude Code's shape, as captured from v2.1 in a pty: a full-width `─` rule,
-//! the `❯` input row(s), a second full-width `─` rule, then the footer (status
-//! line, `-- INSERT --` mode line). Both rules start at column 0; a rule claude
-//! prints in its output is indented under the reply's `⏺`, which is what keeps
-//! a markdown `---` from being read as the box.
+//! Claude Code's and Antigravity's (`agy`) composer shape, as captured in a pty:
+//! a full-width `─` rule, the `❯` / `>` input row(s), a second full-width `─`
+//! rule, then the footer (status line, mode line, workspace path). Both rules
+//! start at column 0; `agy` additionally verifies its footer and `>` prompt row
+//! so two user-turn divider rules in scrollback are never mistaken for a box.
 
 mod codex;
 pub use codex::codex_output_len;
@@ -42,6 +42,74 @@ pub fn claude_output_len(lines: &[String]) -> usize {
         .take(INPUT_MAX_ROWS)
         .find_map(|(i, l)| is_box_rule(l).then_some(i))
         .unwrap_or(lines.len())
+}
+
+/// How many of `lines` (oldest first) come before agy's live composer box or
+/// active tool-approval dialog — or all of them when neither is on screen.
+pub fn agy_output_len(lines: &[String]) -> usize {
+    agy_composer_start(lines)
+        .or_else(|| agy_approval_start(lines))
+        .unwrap_or(lines.len())
+}
+
+fn agy_composer_start(lines: &[String]) -> Option<usize> {
+    let bottom = lines
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, l)| !l.trim().is_empty())
+        .take(FOOTER_MAX_ROWS)
+        .find_map(|(i, l)| is_box_rule(l).then_some(i))?;
+    if !has_agy_footer(&lines[bottom + 1..]) {
+        return None;
+    }
+    let bottom_rule = lines[bottom].trim_end();
+    lines[..bottom]
+        .iter()
+        .enumerate()
+        .rev()
+        .take(INPUT_MAX_ROWS)
+        .find_map(|(i, l)| {
+            (is_box_rule(l)
+                && l.trim_end() == bottom_rule
+                && lines.get(i + 1).is_some_and(|r| is_agy_composer_prompt(r)))
+            .then_some(i)
+        })
+}
+
+fn is_agy_composer_prompt(row: &str) -> bool {
+    row.starts_with('>') || row.starts_with('❯')
+}
+
+fn has_agy_footer(footer: &[String]) -> bool {
+    footer.iter().any(|row| {
+        row.contains("? for shortcuts")
+            || row.contains("sandbox:")
+            || row.contains("-- INSERT --")
+            || row.contains("-- NORMAL --")
+            || row.contains("-- VISUAL --")
+    })
+}
+
+fn agy_approval_start(lines: &[String]) -> Option<usize> {
+    super::detect_rules::scan(lines, super::AGY_DETECTION_RULES)?;
+    let req_idx = lines
+        .iter()
+        .rposition(|row| row.trim() == "Requesting permission for:")?;
+    let proceed_offset = lines[req_idx + 1..]
+        .iter()
+        .position(|row| row.trim() == "Do you want to proceed?")?;
+    let tail = &lines[req_idx + 1 + proceed_offset + 1..];
+    if !tail.iter().any(|row| row.contains("1. Yes"))
+        || !tail.iter().any(|row| row.contains("to cancel"))
+    {
+        return None;
+    }
+    if req_idx > 0 && lines[req_idx - 1].trim() == "Command" {
+        Some(req_idx - 1)
+    } else {
+        Some(req_idx)
+    }
 }
 
 fn is_box_rule(line: &str) -> bool {
@@ -136,6 +204,102 @@ mod tests {
     #[test]
     fn no_lines_is_no_output() {
         assert_eq!(claude_output_len(&[]), 0);
+        assert_eq!(agy_output_len(&[]), 0);
+    }
+
+    fn agy_screen(output: &[&str], draft: &[&str]) -> Vec<String> {
+        let mut v = lines(output);
+        v.push(String::new());
+        v.push(rule());
+        if draft.is_empty() {
+            v.push("> Accept-edits mode: file edits auto-approved (shift+tab to cycle)".into());
+        } else {
+            for (i, row) in draft.iter().enumerate() {
+                if i == 0 {
+                    v.push(format!("> {row}"));
+                } else {
+                    v.push(format!("  {row}"));
+                }
+            }
+        }
+        v.push(rule());
+        v.push("? for shortcuts                                         accept-edits".into());
+        v.push("                                               Gemini 3.1 Pro (High)".into());
+        v.push("~/src/spyc (main)                                       sandbox: off".into());
+        v
+    }
+
+    #[test]
+    fn agy_output_ends_at_the_composer_top_rule() {
+        let screen = agy_screen(
+            &["● Edited src/main.rs", "  done"],
+            &["inspect src/draft.rs"],
+        );
+        let n = agy_output_len(&screen);
+        assert_eq!(
+            &screen[..n],
+            &lines(&["● Edited src/main.rs", "  done", ""])[..]
+        );
+    }
+
+    #[test]
+    fn agy_user_turn_dividers_without_a_composer_stay_in_output() {
+        let turn_rule = "─".repeat(50);
+        let screen = lines(&[
+            &turn_rule,
+            "first user prompt mentioning src/first.rs",
+            "",
+            "● Explored 1 file (src/first.rs)",
+            "",
+            &turn_rule,
+            "second user prompt mentioning src/second.rs",
+            "",
+            "Thought for 4.0s",
+            "Running cargo test in src/lib.rs.",
+        ]);
+        assert_eq!(agy_output_len(&screen), screen.len());
+    }
+
+    #[test]
+    fn agy_approval_dialog_and_footer_are_excluded_from_output() {
+        let screen = lines(&[
+            "● Wrote src/printed.rs",
+            "● run_command (Git status check)",
+            "Command",
+            "Requesting permission for:",
+            "  git -C /Users/example/src/spyc status --short",
+            "Purpose:",
+            "  Git status check",
+            "Do you want to proceed?",
+            "❯ 1. Yes",
+            "  2. Yes, and always allow (Persist to settings.json)",
+            "  3. No",
+            "↑/↓ Navigate · tab Amend · ctrl+g edit/expand command",
+            "esc to cancel                          Gemini 3.1 Pro (High)",
+            "~/src/spyc (main)                      sandbox: off",
+        ]);
+        let n = agy_output_len(&screen);
+        assert_eq!(
+            &screen[..n],
+            &lines(&["● Wrote src/printed.rs", "● run_command (Git status check)",])[..]
+        );
+    }
+
+    #[test]
+    fn agy_quoted_approval_above_a_live_composer_remains_output() {
+        let screen = agy_screen(
+            &[
+                "● Wrote src/printed.rs",
+                "Command",
+                "Requesting permission for:",
+                "  git status",
+                "Do you want to proceed?",
+                "❯ 1. Yes",
+                "esc to cancel",
+            ],
+            &[],
+        );
+        assert_eq!(agy_output_len(&screen), 8);
     }
 }
 
