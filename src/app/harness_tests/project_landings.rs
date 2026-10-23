@@ -59,7 +59,7 @@ fn spawn(app: &App, effects: Vec<Effect>) {
 /// Wait for the worker's result, then drain it as the loop does.
 fn land(app: &mut App) -> Vec<Effect> {
     let deadline = Instant::now() + Duration::from_secs(10);
-    while app.runtime.file_results.lock().unwrap().is_empty() {
+    while app.runtime.file_results.is_empty() {
         assert!(Instant::now() < deadline, "the file op never finished");
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -233,10 +233,10 @@ fn settle_archive(app: &mut App) -> Vec<Effect> {
             .partition(|e| matches!(e, Effect::Archive(_)));
         rest.extend(others);
         run_archive_ops(app, ops);
-        if app.runtime.archive_results.lock().unwrap().is_empty() {
+        if app.runtime.archive_results.is_empty() {
             // A worker the drain started itself may still be running.
             std::thread::sleep(Duration::from_millis(50));
-            if app.runtime.archive_results.lock().unwrap().is_empty() {
+            if app.runtime.archive_results.is_empty() {
                 return rest;
             }
         }
@@ -522,11 +522,7 @@ fn run_unfiled(effects: Vec<Effect>) -> ArchiveOutcome {
 
 /// File `outcome` as project `origin`'s, open or closed.
 fn file_as(app: &App, origin: state::ProjectId, outcome: ArchiveOutcome) {
-    app.runtime
-        .archive_results
-        .lock()
-        .unwrap()
-        .push((origin, outcome));
+    app.runtime.archive_results.land((origin, outcome));
 }
 
 fn starts_a_read(effects: &[Effect]) -> bool {
@@ -1003,7 +999,7 @@ fn an_image_worker_started_in_x_lands_in_x() {
         app.spawn_image_work(|_| ImageOutcome::Failed("boom".into()));
         app.make_active(t.y);
         let deadline = Instant::now() + Duration::from_secs(10);
-        while app.runtime.image_results.lock().unwrap().is_empty() {
+        while app.runtime.image_results.is_empty() {
             assert!(Instant::now() < deadline, "the image worker never finished");
             std::thread::sleep(Duration::from_millis(5));
         }

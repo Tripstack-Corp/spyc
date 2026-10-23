@@ -1077,11 +1077,7 @@ fn an_edit_saved_while_a_closed_projects_write_ran_is_kept_pending() {
         app.remove_test_project(x);
         for effect in write {
             if let Effect::Archive(op) = effect {
-                app.runtime
-                    .archive_results
-                    .lock()
-                    .unwrap()
-                    .push((x, run_archive_op(op)));
+                app.runtime.archive_results.land((x, run_archive_op(op)));
             }
         }
         // The re-read the landing starts runs on a worker: done once the mount

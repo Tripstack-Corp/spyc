@@ -513,9 +513,7 @@ fn an_unpinned_codex_in_another_project_is_scanned_for() {
         app.make_active(t.y);
         app.kick_codex_session_scan();
         assert!(
-            app.runtime
-                .codex_scan_in_flight
-                .load(std::sync::atomic::Ordering::Acquire),
+            app.runtime.codex_scan_in_flight,
             "no scan started for X's codex"
         );
     });
@@ -548,7 +546,7 @@ fn a_codex_session_claimed_in_one_project_is_not_given_to_another() {
             started_secs: at,
             mtime_secs: at,
         };
-        *app.runtime.codex_pin_pending.lock().unwrap() = Some(vec![HomeSnapshot {
+        app.runtime.codex_pin_pending.land(vec![HomeSnapshot {
             home,
             pane_ids: [x_tab, y_tab].into_iter().collect(),
             rollouts: vec![rollout(TAKEN, spawn + 1), rollout(FREE, spawn + 2)],

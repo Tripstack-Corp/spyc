@@ -24,14 +24,14 @@
 //! `App::execute_mcp_command` path (direct callers / tests) and this async path
 //! share `plan_worktree_job` + `run_worktree_job` + `after_worktree_mutation`,
 //! so the IO logic can't diverge — only the completion (`WorktreeCompletion`)
-//! differs. Shape mirrors `preview_ops` / `mermaid_ops`: a landing slot
+//! differs. Shape mirrors `preview_ops` / `mermaid_ops`: a landing
 //! (`runtime.worktree_results`) drained on a `Message::Wake(Wake::WorktreeJob)` wake.
 
 use std::sync::mpsc::Sender;
 
 use crate::mcp_cmd::{McpCommand, McpResponse};
 
-use super::{App, Message, Wake};
+use super::{App, Wake};
 
 /// A fully-resolved worktree mutation, ready for the worker (absolute paths,
 /// validated). Built by [`App::plan_worktree_job`] on the main loop.
@@ -328,26 +328,21 @@ impl App {
     /// `runtime.worktree_results`, and wakes the loop; `apply_worktree_outcomes`
     /// re-applies + answers the client.
     pub(crate) fn spawn_worktree_job(&self, job: WorktreeJob, completion: WorktreeCompletion) {
-        let results = std::sync::Arc::clone(&self.runtime.worktree_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .worktree_results
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::WorktreeJob);
         // Both callers spawn in the same pass as the key or MCP command that
         // asked, and an MCP command is served inside its caller's project
         // (`in_project`), so the active project is the one that asked.
         let project = self.state.active;
         std::thread::spawn(move || {
             let result = run_worktree_job(job);
-            results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(WorktreeOutcome {
-                    result,
-                    completion,
-                    project,
-                });
-            // Wake AFTER the outcome is stored, so the pre-recv scan sees it.
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::WorktreeJob));
-            }
+            let _ = results.send(WorktreeOutcome {
+                result,
+                completion,
+                project,
+            });
         });
     }
 
@@ -356,13 +351,7 @@ impl App {
     /// MCP client — preserving read-after-write. Returns whether a redraw is
     /// needed.
     pub(crate) fn apply_worktree_outcomes(&mut self) -> bool {
-        let outcomes = std::mem::take(
-            &mut *self
-                .runtime
-                .worktree_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
+        let outcomes = self.runtime.worktree_results.drain();
         if outcomes.is_empty() {
             return false;
         }

@@ -82,7 +82,7 @@ pub enum Message {
 /// change to the event loop**: `coalesce_pending`, `coalesce_recv` and
 /// `dispatch_effective` each match `Message::Wake(..)` once, so a new kind is
 /// collapsed correctly the moment it exists.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum Wake {
     /// The bounded HUD startup slot or exact-rollout subscription has changed.
     AgentHud,
@@ -142,79 +142,80 @@ pub enum Wake {
     /// so a landed result would otherwise sit unread (and unrendered) until an
     /// unrelated event. Payloadless: collapses to a Timeout like the other
     /// re-scan wakes (drop-safe in coalesce). The redraw + apply both happen
-    /// in the pre-recv scan: `apply_landed_agent_status` drains the slot into
+    /// in the pre-recv scan: `apply_landed_agent_status` drains it into
     /// the cache and `kick_agent_status_refresh` re-arms — NOT in the draw
     /// (`active_agent_status` is a pure `&self` cache read since #346). Driven
     /// by the scan, not by this message surviving coalesce.
     AgentStatus,
     /// Tier 5: an off-thread graveyard op (archive / restore / purge-all,
-    /// `Effect::Graveyard`) finished and pushed its outcome onto
+    /// `Effect::Graveyard`) finished and landed its outcome on
     /// `runtime.graveyard_results`. Payloadless wake — the outcome rides the
-    /// slot, drained unconditionally by `apply_graveyard_outcomes` in the
+    /// landing, drained unconditionally by `apply_graveyard_outcomes` in the
     /// pre-recv scan. Collapses to a Timeout like the other re-scan wakes
     /// (drop-safe in coalesce); the redraw is driven by the drain, not by this
-    /// message surviving. Same shape as `AgentStatusReady`.
+    /// message surviving. Same shape as `AgentStatus`.
     Graveyard,
     /// An off-thread image render (`Effect::RenderMermaid` / `Effect::OpenImage`)
-    /// finished and pushed its outcome onto `runtime.image_results`. Payloadless
-    /// wake — `apply_image_outcomes` drains the slot in the pre-recv scan. Same
-    /// shape as `GraveyardDone`. One message for every producer: what the render
+    /// finished and landed its outcome on `runtime.image_results`. Payloadless
+    /// wake — `apply_image_outcomes` drains it in the pre-recv scan. Same
+    /// shape as `Graveyard`. One message for every producer: what the render
     /// *was* rides `ImageOrigin` on the outcome, not the wake.
     Image,
-    /// An off-thread archive op (`Effect::Archive`) finished and pushed its
-    /// outcome onto `runtime.archive_results` — a mount, a materialized member,
+    /// An off-thread archive op (`Effect::Archive`) finished and landed its
+    /// outcome on `runtime.archive_results` — a mount, a materialized member,
     /// or a staging cleanup. Payloadless wake of the same shape as
-    /// `GraveyardDone`; `apply_archive_outcomes` drains the slot in the pre-recv
+    /// `Graveyard`; `apply_archive_outcomes` drains it in the pre-recv
     /// scan.
     Archive,
-    /// An off-thread file op (`Effect::FileOp`) finished and pushed its outcome.
+    /// An off-thread file op (`Effect::FileOp`) finished and landed its outcome on
+    /// `runtime.file_results`.
     FileOp,
     /// A middle-click clipboard read (`Effect::PasteFromClipboard`) finished and
-    /// pushed its result onto `runtime.clipboard_paste_results`. Payloadless
-    /// wake of the same shape as `GraveyardDone`; `apply_clipboard_pastes`
-    /// drains the slot in the pre-recv scan and feeds the text to `handle_paste`.
+    /// landed its result on `runtime.clipboard_paste_results`. Payloadless
+    /// wake of the same shape as `Graveyard`; `apply_clipboard_pastes`
+    /// drains it in the pre-recv scan and feeds the text to `handle_paste`.
     ClipboardPaste,
-    /// An off-thread clipboard *write* finished and pushed its outcome onto
+    /// An off-thread clipboard *write* finished and landed its outcome on
     /// `runtime.clipboard_copy_results`. Payloadless, same shape as
-    /// `ClipboardPasteDone`; `apply_clipboard_writes` drains the slot in the
+    /// `ClipboardPaste`; `apply_clipboard_writes` drains it in the
     /// pre-recv scan and flashes anything that failed.
     ClipboardCopy,
     /// An agent-wiring worker (`App::start_wiring`) installed or removed an
-    /// agent's user-scope wiring and pushed its outcome onto
+    /// agent's user-scope wiring and landed its outcome on
     /// `runtime.wiring_results`. Payloadless; `apply_wiring_outcomes` drains
-    /// the slot in the pre-recv scan and flashes what happened.
+    /// it in the pre-recv scan and flashes what happened.
     Wiring,
     /// `J`'s off-thread default (`spawn_jump_default`) found its path, or
-    /// didn't, and pushed the answer onto `runtime.jump_default_results`.
-    /// Payloadless, same shape as `ClipboardPasteDone`; `apply_jump_defaults`
-    /// drains the slot in the pre-recv scan.
+    /// didn't, and landed the answer on `runtime.jump_default_results`.
+    /// Payloadless, same shape as `ClipboardPaste`; `apply_jump_defaults`
+    /// drains it in the pre-recv scan.
     JumpDefault,
-    /// The switcher's closed rows (`spawn_closed_rows`) were read and pushed
-    /// onto `runtime.closed_rows_results`. Payloadless, same shape as
-    /// `JumpDefault`; `apply_closed_rows` drains the slot in the pre-recv scan.
+    /// The switcher's closed rows (`spawn_closed_rows`) were read and landed
+    /// on `runtime.closed_rows_results`. Payloadless, same shape as
+    /// `JumpDefault`; `apply_closed_rows` drains it in the pre-recv scan.
     ClosedRows,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
     Inventory,
-    /// An off-thread MCP worktree op (create/remove/clean) finished and pushed
-    /// its outcome onto `runtime.worktree_results`. Payloadless wake —
+    /// An off-thread MCP worktree op (create/remove/clean) finished and landed
+    /// its outcome on `runtime.worktree_results`. Payloadless wake —
     /// `apply_worktree_outcomes` drains it in the pre-recv scan, re-applies the
     /// listing/context update, then answers the MCP client. Same shape as
-    /// `ImageDone`.
+    /// `Image`.
     WorktreeJob,
     /// A Lua script finished on the worker thread (`runtime.lua`). Payloadless
     /// wake — `handle_lua_done` drains the worker's outcome buffer in the
     /// pre-recv scan and translates the requests into effects/actions. Same
-    /// shape as `WorktreeJobDone`, except the outcomes ride the worker's own
-    /// buffer (`LuaWorker::drain_outcomes`), not a `runtime.*_results` slot.
+    /// shape as `WorktreeJob`, except the outcomes ride the worker's own
+    /// channel (`LuaWorker::drain_outcomes`), not a `runtime.*_results` landing.
     Lua,
     /// An off-thread vertical-split preview reload (`kick_preview_reload`)
-    /// finished and pushed its outcome onto `runtime.preview_results`.
-    /// Payloadless wake — `apply_preview_reloads` drains the slot in the
-    /// pre-recv scan. Same shape as `ImageDone`.
+    /// finished and landed its outcome on `runtime.preview_results`.
+    /// Payloadless wake — `apply_preview_reloads` drains it in the
+    /// pre-recv scan. Same shape as `Image`.
     PreviewReload,
     /// Option B (`codex_pin`): an off-thread home-scoped scan landed a
     /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
-    /// rides the slot, drained by `apply_codex_session_pins` in the pre-recv
+    /// rides the landing, drained by `apply_codex_session_pins` in the pre-recv
     /// scan. Collapses to a Timeout like the other re-scan wakes.
     CodexSession,
 }

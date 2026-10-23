@@ -9,6 +9,7 @@
 //! had as private items of `app`: the whole `app` subtree, which is what the
 //! handler, effect and loop-step modules read them through.
 
+use super::landing::Landing;
 use super::{
     AgentStatusCache, BackgroundTasks, Effect, FindPicker, Message, PendingCapture, archive_ops,
     file_ops, git_view_session, graveyard_ops, image_ops, inventory_ops, lua, lua_events,
@@ -173,45 +174,41 @@ pub(super) struct Runtime {
     /// Monotonic pager-stream id (stale-stream guard), shared across all
     /// stream kinds and every project.
     pub(super) next_stream_id: u32,
-    /// Off-render-thread agent-status resolve: the landing slot + in-flight
-    /// flag (see `active_agent_status` / `apply_landed_agent_status`).
-    pub(super) agent_status_pending: std::sync::Arc<std::sync::Mutex<Option<AgentStatusCache>>>,
-    pub(super) agent_status_refreshing: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Option B (`codex_pin`): off-thread home-scoped scan landing slot
-    /// (with an in-flight flag). A worker dumps a rollout snapshot here and wakes
+    /// Off-render-thread agent-status resolve: its landing, and whether one is
+    /// in flight, which the drain clears (see `active_agent_status` /
+    /// `apply_landed_agent_status`).
+    pub(super) agent_status_pending: Landing<AgentStatusCache>,
+    pub(super) agent_status_refreshing: bool,
+    /// Option B (`codex_pin`): the off-thread home-scoped scan's landing, and
+    /// whether one is in flight. A worker lands a rollout snapshot here and wakes
     /// the loop with `Message::Wake(Wake::CodexSession)`; `apply_codex_session_pins`
     /// assigns session uuids to unpinned codex tabs.
-    pub(super) codex_pin_pending:
-        std::sync::Arc<std::sync::Mutex<Option<Vec<super::codex_pin::HomeSnapshot>>>>,
-    pub(super) codex_scan_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Tier 5: landing slot for off-thread graveyard ops (archive / restore /
-    /// purge-all). Each `Effect::Graveyard` worker pushes its
-    /// `GraveyardOutcome` here and wakes the loop with `Message::Wake(Wake::Graveyard)`;
-    /// `apply_graveyard_outcomes` drains it every pre-recv scan (a `Vec` so
-    /// concurrent ops never clobber each other — no in-flight guard needed).
-    pub(super) graveyard_results:
-        std::sync::Arc<std::sync::Mutex<Vec<graveyard_ops::GraveyardOutcome>>>,
+    pub(super) codex_pin_pending: Landing<Vec<super::codex_pin::HomeSnapshot>>,
+    pub(super) codex_scan_in_flight: bool,
+    /// Tier 5: where off-thread graveyard ops (archive / restore / purge-all)
+    /// land. Each `Effect::Graveyard` worker lands its `GraveyardOutcome` here
+    /// and wakes the loop with `Message::Wake(Wake::Graveyard)`;
+    /// `apply_graveyard_outcomes` drains it every pre-recv scan. Concurrent ops
+    /// each land their own outcome, so no in-flight guard is needed.
+    pub(super) graveyard_results: Landing<graveyard_ops::GraveyardOutcome>,
     /// Where an agent-wiring worker (`App::start_wiring`) lands its outcome
     /// before waking the loop with `Wake::Wiring`; `apply_wiring_outcomes`
     /// drains it every pre-recv scan.
-    pub(super) wiring_results: super::wiring::WiringResults,
-    /// Landing slot for every off-thread image render — a mermaid diagram
+    pub(super) wiring_results: Landing<super::wiring::WiringOutcome>,
+    /// Where every off-thread image render lands — a mermaid diagram
     /// (`Effect::RenderMermaid`) and an image file (`Effect::OpenImage`) share
-    /// it. The worker pushes an `ImageOutcome` here and wakes with
+    /// it. The worker lands an `ImageOutcome` here and wakes with
     /// `Message::Wake(Wake::Image)`; `apply_image_outcomes` drains it each pre-recv scan
     /// and installs or flashes the result. Same shape as `graveyard_results`.
     /// Each outcome is tagged with the project that started it
     /// (`App::spawn_image_work`).
-    pub(super) image_results:
-        std::sync::Arc<std::sync::Mutex<Vec<(super::state::ProjectId, image_ops::ImageOutcome)>>>,
-    /// Landing slot for off-thread archive ops (`Effect::Archive`): mount,
-    /// materialize, clean. Same shape as `graveyard_results` — the worker pushes
+    pub(super) image_results: Landing<(super::state::ProjectId, image_ops::ImageOutcome)>,
+    /// Where off-thread archive ops (`Effect::Archive`) land: mount,
+    /// materialize, clean. Same shape as `graveyard_results` — the worker lands
     /// and wakes with `Message::Wake(Wake::Archive)`, `apply_archive_outcomes` drains.
     /// Each outcome is tagged with the project that started it
     /// (`App::spawn_archive_op`).
-    pub(super) archive_results: std::sync::Arc<
-        std::sync::Mutex<Vec<(super::state::ProjectId, archive_ops::ArchiveOutcome)>>,
-    >,
+    pub(super) archive_results: Landing<(super::state::ProjectId, archive_ops::ArchiveOutcome)>,
     /// Cancel flag handed to the in-flight streamed mount, so a long tarball can
     /// be abandoned with `:archive cancel`. Replaced per mount the user starts,
     /// so cancelling one can never cancel the next; a mount started in the
@@ -235,62 +232,55 @@ pub(super) struct Runtime {
     /// held aside from its re-read until it is mounted again
     /// (`App::restore_late_edits`).
     pub(super) archive_held: std::collections::HashMap<std::path::PathBuf, super::archive::Held>,
-    /// Landing slot for off-thread file operations, each tagged with the
-    /// project that started it (`App::spawn_file_op`).
-    pub(super) file_results:
-        std::sync::Arc<std::sync::Mutex<Vec<(super::state::ProjectId, file_ops::FileOutcome)>>>,
-    /// Landing slot for the off-thread middle-click clipboard read
-    /// (`Effect::PasteFromClipboard`). The worker pushes the read's result here
+    /// Where off-thread file operations land, each tagged with the project
+    /// that started it (`App::spawn_file_op`).
+    pub(super) file_results: Landing<(super::state::ProjectId, file_ops::FileOutcome)>,
+    /// Where the off-thread middle-click clipboard read lands
+    /// (`Effect::PasteFromClipboard`). The worker lands the read's result here
     /// and wakes with `Message::Wake(Wake::ClipboardPaste)`; `apply_clipboard_pastes`
-    /// drains it each pre-recv scan. A `Vec`, like `graveyard_results`: a middle
-    /// click is cheap to repeat, so reads can overlap and must not clobber.
-    pub(super) clipboard_paste_results:
-        std::sync::Arc<std::sync::Mutex<Vec<std::io::Result<String>>>>,
-    /// Landing slot for `J`'s off-thread default (`spawn_jump_default`).
+    /// drains it each pre-recv scan. A middle click is cheap to repeat, so
+    /// reads can overlap, and each lands its own result.
+    pub(super) clipboard_paste_results: Landing<std::io::Result<String>>,
+    /// Where `J`'s off-thread default lands (`spawn_jump_default`).
     /// Drained by `apply_jump_defaults`, which keeps only the answer to
     /// `jump_default_seq`.
-    pub(super) jump_default_results:
-        std::sync::Arc<std::sync::Mutex<Vec<super::jump_default::JumpDefaultAnswer>>>,
+    pub(super) jump_default_results: Landing<super::jump_default::JumpDefaultAnswer>,
     /// The newest `J` default request; an answer to any other is stale.
     pub(super) jump_default_seq: u64,
-    /// Landing slot for the switcher's closed rows (`spawn_closed_rows`).
+    /// Where the switcher's closed rows land (`spawn_closed_rows`).
     /// Drained by `apply_closed_rows`, which keeps only the rows for
     /// `closed_rows_seq`, the switcher opened last.
-    pub(super) closed_rows_results:
-        std::sync::Arc<std::sync::Mutex<Vec<super::recently_closed::ClosedRows>>>,
+    pub(super) closed_rows_results: Landing<super::recently_closed::ClosedRows>,
     /// The switcher opened last; rows read for any other are stale.
     pub(super) closed_rows_seq: u64,
-    /// Landing slot for off-thread clipboard *writes*. One entry per dispatched
+    /// Where off-thread clipboard *writes* land. One value per dispatched
     /// write: `None` succeeded, `Some(msg)` is what to flash.
     ///
     /// The write runs off the loop because the helpers legitimately outlive it —
     /// `xclip`/`xsel` keep running to serve the X11 selection, so the reap poll
-    /// spends its whole budget on every yank. A `Vec` because yanks can overlap.
-    pub(super) clipboard_copy_results: std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
+    /// spends its whole budget on every yank. Yanks can overlap.
+    pub(super) clipboard_copy_results: Landing<Option<String>>,
     /// The watcher-driven listing refresh (`FileOp::RefreshListing`) reads the
     /// dir off-thread; `inflight` keeps a single read in flight at a time, and
     /// `dirty` records a refresh requested while one was running so the result
     /// handler can re-spawn for the latest state. See `App::spawn_listing_refresh`.
     pub(super) listing_refresh_inflight: bool,
     pub(super) listing_refresh_dirty: bool,
-    /// Landing slot for off-thread inventory operations.
-    pub(super) inventory_results:
-        std::sync::Arc<std::sync::Mutex<Vec<inventory_ops::InventoryOutcome>>>,
-    /// Landing slot for off-thread MCP worktree create/remove/clean ops. The
-    /// worker pushes a `WorktreeOutcome` (result + the MCP reply channel) here
+    /// Where off-thread inventory operations land.
+    pub(super) inventory_results: Landing<inventory_ops::InventoryOutcome>,
+    /// Where off-thread MCP worktree create/remove/clean ops land. The
+    /// worker lands a `WorktreeOutcome` (result + the MCP reply channel) here
     /// and wakes with `Message::Wake(Wake::WorktreeJob)`; `apply_worktree_outcomes`
     /// drains it each pre-recv scan, re-applies refresh+context, then replies.
-    pub(super) worktree_results:
-        std::sync::Arc<std::sync::Mutex<Vec<worktree_ops::WorktreeOutcome>>>,
-    /// Landing slot for the off-thread vertical-split preview reload
-    /// (`kick_preview_reload`). The worker stores its `PreviewOutcome` here
-    /// (last-wins `Option` — one preview, so no `Vec` is needed) and wakes the
-    /// loop with `Message::Wake(Wake::PreviewReload)`; `apply_preview_reloads` drains it
-    /// each pre-recv scan. `preview_reloading` is the in-flight guard that
-    /// collapses a burst of saves to one trailing re-render (see `preview_ops`).
-    pub(super) preview_results:
-        std::sync::Arc<std::sync::Mutex<Option<preview_ops::PreviewOutcome>>>,
-    pub(super) preview_reloading: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub(super) worktree_results: Landing<worktree_ops::WorktreeOutcome>,
+    /// Where the off-thread vertical-split preview reload lands
+    /// (`kick_preview_reload`). The worker lands its `PreviewOutcome` here and
+    /// wakes the loop with `Message::Wake(Wake::PreviewReload)`;
+    /// `apply_preview_reloads` drains it each pre-recv scan. `preview_reloading`
+    /// is the in-flight guard, cleared by that drain, that collapses a burst of
+    /// saves to one trailing re-render (see `preview_ops`).
+    pub(super) preview_results: Landing<preview_ops::PreviewOutcome>,
+    pub(super) preview_reloading: bool,
     /// Terminal graphics-protocol capability (Kitty/iTerm2/Sixel/halfblocks +
     /// font cell size), detected ONCE at startup in `setup_terminal` before the
     /// input reader spawns (the `from_query_stdio` reads stdin — the #444 rule).
@@ -336,32 +326,32 @@ impl Runtime {
             background_tasks: BackgroundTasks::new(),
             find_picker: None,
             next_stream_id: 0,
-            agent_status_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            agent_status_refreshing: std::sync::Arc::default(),
-            codex_pin_pending: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            codex_scan_in_flight: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            graveyard_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            wiring_results: std::sync::Arc::default(),
-            image_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            archive_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            agent_status_pending: Landing::default(),
+            agent_status_refreshing: false,
+            codex_pin_pending: Landing::default(),
+            codex_scan_in_flight: false,
+            graveyard_results: Landing::default(),
+            wiring_results: Landing::default(),
+            image_results: Landing::default(),
+            archive_results: Landing::default(),
             archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             archive_mount_then: None,
             archive_reads: std::collections::HashMap::new(),
             archive_writes: std::collections::HashMap::new(),
             archive_held: std::collections::HashMap::new(),
-            file_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            clipboard_paste_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            jump_default_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            file_results: Landing::default(),
+            clipboard_paste_results: Landing::default(),
+            jump_default_results: Landing::default(),
             jump_default_seq: 0,
-            closed_rows_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            closed_rows_results: Landing::default(),
             closed_rows_seq: 0,
-            clipboard_copy_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            clipboard_copy_results: Landing::default(),
             listing_refresh_inflight: false,
             listing_refresh_dirty: false,
-            inventory_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            worktree_results: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
-            preview_results: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            preview_reloading: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            inventory_results: Landing::default(),
+            worktree_results: Landing::default(),
+            preview_results: Landing::default(),
+            preview_reloading: false,
             picker: None,
         }
     }

@@ -42,13 +42,20 @@ Where threads exist today:
 - Agent-status worker — a short-lived thread per refresh
   (`app/agent_status.rs`) that resolves the pane agent's short-id
   off the loop and wakes it on completion.
+- **One-shot workers** — a file, graveyard, archive or inventory op, an
+  image render, a clipboard read or write, a worktree job: each runs on a
+  detached thread and sends its result on a `Landing` (`app/landing.rs`),
+  a channel whose receiver stays on `Runtime`, which then wakes the loop
+  with a payloadless `Message::Wake`. `drain_landed_work` drains every
+  landing each pre-recv scan. Nothing is shared but the channel, so there
+  is no lock to poison and concurrent workers each land their own result.
 - `F`-finder walker — a gitignore-aware streaming directory walk
   (`fs/finder.rs`) feeding the fuzzy filename picker.
 - **Pager-stream workers** (`app/pager_stream.rs`) — the unified seam
   for "read/parse off the UI thread, stream styled lines into a pager."
   A worker resolves / reads / renders and pushes payloads through a
   `fs::WakingSender` (waking the loop with a payloadless
-  `Message::PagerStreamOutput`); the main loop's `drain_pager_stream`
+  `Message::Wake(Wake::PagerStream)`); the main loop's `drain_pager_stream`
   id-gates the live pager via its `stream_id` and applies the result
   through the object-safe `PagerStream` trait (`DrainOutcome`). Stale
   output self-discards on the id mismatch — the generation-counter
@@ -327,8 +334,8 @@ The pager renders ` ```mermaid ` blocks as real images, all pure-Rust
 Kitty/iTerm2/Sixel/halfblocks). The render is far too heavy for the
 loop (parse → layout → SVG → raster → font load), so it runs on a
 detached worker like the graveyard ops (`src/app/mermaid_ops.rs`):
-`Effect::RenderMermaid` → worker → `runtime.mermaid_results` →
-`Message::MermaidDone` → `apply_mermaid_outcomes` (pre-recv drain)
+`Effect::RenderMermaid` → worker → `runtime.image_results` →
+`Message::Wake(Wake::Image)` → `apply_image_outcomes` (pre-recv drain)
 installs a `ViewState.image_view: Option<ImageView>` overlay or opens
 the PNG in the OS viewer. Two modes: `Open` (`o`, temp PNG +
 `open::that_detached` — any local terminal) and `View` (`i`, a
@@ -453,7 +460,7 @@ for PTY tabs.**
 pattern. The fs-event ingest matches the previewed file (`config::is_preview_path`,
 exempt from the gitignore drop) and `kick_preview_reload` spawns a detached worker
 that re-runs the pure `pager_handler::build_pager_view` (markdown render + syntect
-— far too heavy for the loop) → `runtime.preview_results` → `Message::PreviewReloadDone`
+— far too heavy for the loop) → `runtime.preview_results` → `Message::Wake(Wake::PreviewReload)`
 → `apply_preview_reloads` (pre-recv drain) installs the rebuilt view, preserving
 scroll. The watch worker (`watch.rs`) adds the preview's *parent* dir
 non-recursively — a file-level watch follows the old inode through an editor's

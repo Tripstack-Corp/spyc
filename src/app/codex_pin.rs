@@ -6,9 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 
-use super::{App, Message, Wake};
+use super::{App, Wake};
 use crate::state::codex_transcript::RolloutMeta;
 use crate::state::sessions::AgentKind;
 
@@ -177,17 +176,11 @@ impl App {
     /// and wakes the loop (`Message::Wake(Wake::CodexSession)`); `apply_codex_session_pins`
     /// does the assignment. The scan reads every rollout's first line, so it runs
     /// OFF the loop — never on the render/input path.
-    //
-    // `&mut self` is deliberate (the stores go through interior mutability): it
-    // is the structural guarantee that the `&self` draw pass can't call this.
-    #[allow(clippy::needless_pass_by_ref_mut)]
     pub(crate) fn kick_codex_session_scan(&mut self) {
-        if !self.needs_codex_pin() || self.runtime.codex_scan_in_flight.load(Ordering::Acquire) {
+        if !self.needs_codex_pin() || self.runtime.codex_scan_in_flight {
             return;
         }
-        self.runtime
-            .codex_scan_in_flight
-            .store(true, Ordering::Release);
+        self.runtime.codex_scan_in_flight = true;
         let records = self
             .runtime
             .every_tab_set()
@@ -204,44 +197,29 @@ impl App {
                     .map(std::path::Path::to_path_buf),
             })
             .collect();
-        let pending = std::sync::Arc::clone(&self.runtime.codex_pin_pending);
-        let flight = std::sync::Arc::clone(&self.runtime.codex_scan_in_flight);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let pending = self
+            .runtime
+            .codex_pin_pending
+            .sender(self.runtime.pane_wake_tx.clone(), Wake::CodexSession);
         std::thread::spawn(move || {
             // Brief wait so a not-yet-written rollout gets a chance to appear and
             // repeated kicks poll at ~SCAN_DELAY rather than spin.
             std::thread::sleep(SCAN_DELAY);
-            let snapshot = collect_home_snapshots(records);
-            // The mutex guards a plain `Option` and nothing between lock and store
-            // can panic, so it is only poisonable by a panic in `apply_codex_session_pins`
-            // — which would have taken the whole loop with it.
-            *pending.lock().expect("codex_pin_pending never poisoned") = Some(snapshot);
-            flight.store(false, Ordering::Release);
-            if let Some(tx) = wake {
-                let _ = tx.send(Message::Wake(Wake::CodexSession));
-            }
+            let _ = pending.send(collect_home_snapshots(records));
         });
     }
 
-    /// Drain a landed rollout snapshot and pin unclaimed sessions onto unpinned
-    /// codex tabs (spawn-ordered, shared claimed-set — see [`assign_codex_sessions`]).
+    /// Drain a landed rollout snapshot, ending the scan in flight, and pin
+    /// unclaimed sessions onto unpinned codex tabs (spawn-ordered, shared claimed-set — see [`assign_codex_sessions`]).
     /// Every project's tabs are one pool: a session one project's tab holds is
     /// claimed for all of them.
     /// Returns `false`: a pin doesn't change the rendered frame, so it never
     /// forces a redraw. Called from the pre-recv scan.
     pub(crate) fn apply_codex_session_pins(&mut self) -> bool {
-        let snapshot = {
-            // Same invariant as the writer above: nothing under this lock panics.
-            let mut slot = self
-                .runtime
-                .codex_pin_pending
-                .lock()
-                .expect("codex_pin_pending never poisoned");
-            match slot.take() {
-                Some(s) => s,
-                None => return false,
-            }
+        let Some(snapshot) = self.runtime.codex_pin_pending.latest() else {
+            return false;
         };
+        self.runtime.codex_scan_in_flight = false;
         let mut tabs: Vec<&mut crate::pane::TabEntry> = self
             .runtime
             .every_tab_set_mut()
@@ -304,6 +282,17 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A landed snapshot ends the scan in flight, so a codex tab still
+    /// unpinned gets another.
+    #[test]
+    fn a_landed_snapshot_ends_the_scan_in_flight() {
+        let mut app = App::test_app(std::path::PathBuf::from("/tmp/proj"));
+        app.runtime.codex_scan_in_flight = true;
+        app.runtime.codex_pin_pending.land(Vec::new());
+        app.apply_codex_session_pins();
+        assert!(!app.runtime.codex_scan_in_flight);
+    }
 
     /// A rollout whose file was last written at `started` — the fresh-session
     /// shape, where start and last-write coincide closely enough.

@@ -108,9 +108,7 @@ fn an_undo_landing_refreshes_the_graveyard_open_in_column_b() {
         Graveyard::delete_entry(&restored);
         app.runtime
             .graveyard_results
-            .lock()
-            .unwrap()
-            .push(GraveyardOutcome::Restored {
+            .land(GraveyardOutcome::Restored {
                 filename: restored.filename,
                 dest: b,
                 result: Ok(()),
@@ -144,9 +142,7 @@ fn a_landed_graveyard_change_leaves_a_directory_cursor_alone() {
 
         app.runtime
             .graveyard_results
-            .lock()
-            .unwrap()
-            .push(GraveyardOutcome::Cascaded {
+            .land(GraveyardOutcome::Cascaded {
                 trashed: 1,
                 errors: 0,
             });

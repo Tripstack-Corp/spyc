@@ -456,7 +456,7 @@ const fn ext_for(format: image::ImageFormat) -> &'static str {
 }
 
 impl super::App {
-    /// Run `work` on a detached image worker, push its outcome onto
+    /// Run `work` on a detached image worker, land its outcome on
     /// `runtime.image_results`, and wake the loop. `work` is handed the
     /// graphics-protocol picker (detected once at startup; `None` ⇒ no
     /// protocol) so it can build a `Protocol` off-thread. The single spawn
@@ -467,35 +467,23 @@ impl super::App {
         work: impl FnOnce(Option<Picker>) -> ImageOutcome + Send + 'static,
     ) {
         let origin = self.state.active;
-        let results = std::sync::Arc::clone(&self.runtime.image_results);
-        let wake = self.runtime.pane_wake_tx.clone();
+        let results = self
+            .runtime
+            .image_results
+            .sender(self.runtime.pane_wake_tx.clone(), super::Wake::Image);
         let picker = self.runtime.picker.clone();
         std::thread::spawn(move || {
-            let outcome = work(picker);
-            results
-                .lock()
-                .expect("image_results mutex poisoned only by a panicking worker")
-                .push((origin, outcome));
-            if let Some(tx) = wake {
-                let _ = tx.send(super::Message::Wake(super::Wake::Image));
-            }
+            let _ = results.send((origin, work(picker)));
         });
     }
 
     /// Pre-recv drain: install finished image renders and flash failures.
     /// Returns whether a redraw is needed. Mirrors `apply_graveyard_outcomes`.
     pub(crate) fn apply_image_outcomes(&mut self) -> bool {
-        let landed: Vec<(ProjectId, ImageOutcome)> = {
-            let mut slot = self
-                .runtime
-                .image_results
-                .lock()
-                .expect("image_results mutex poisoned only by a panicking worker");
-            if slot.is_empty() {
-                return false;
-            }
-            std::mem::take(&mut *slot)
-        };
+        let landed = self.runtime.image_results.drain();
+        if landed.is_empty() {
+            return false;
+        }
         let mut redraw = false;
         for (origin, outcome) in landed {
             // Per-outcome, not blanket: an empty clipboard capture must not
