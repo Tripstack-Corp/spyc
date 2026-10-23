@@ -14,8 +14,8 @@ fn is_agent(info: &TabInfo) -> bool {
 }
 
 /// The self-report the dot follows, as `effective_activity` decides it: none
-/// once the process has exited, and none while Codex's visible approval modal
-/// overrides it.
+/// once the process has exited, and none while Codex's or agy's visible
+/// approval prompt overrides it.
 fn live_report(e: &TabEntry) -> Option<&ReportedStatus> {
     let info = &e.info;
     info.reported.as_ref().filter(|_| {

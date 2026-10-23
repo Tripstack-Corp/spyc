@@ -24,7 +24,7 @@ in-memory view coordinates them all.
 ## 1. Activity dots — "which agent needs me?"
 
 Each **agent** pane tab carries a live dot in the divider. Its state comes from
-three tiers, with a narrow Codex approval exception:
+three tiers, with a visible-approval override for Codex and agy:
 
 1. **Semantic self-report** (best) — the agent calls the `report_status` MCP tool
    (or its lifecycle hook does): `working` / `blocked` / `done` / `waiting` /
@@ -33,17 +33,17 @@ three tiers, with a narrow Codex approval exception:
    its *visible screen* for a known prompt: agy's tool approval or Codex's
    complete command, file-edit, MCP-tool and network approval forms. Codex scans
    within 250 ms of the first pending repaint; agy waits for quiet.
-   Codex's verified dialogue temporarily overrides a non-blocked report;
-   semantic question/agent blocks retain precedence.
+   A verified approval prompt in Codex or agy temporarily overrides a
+   non-blocked report; semantic question/agent blocks retain precedence.
 3. **Output timing** — with neither of the above, output flowing = `working`,
    silence = `idle`.
 
-Codex and Claude retain semantic reports through output and footer redraws.
-Silent tool waits do not erase `working`; the default five-minute TTL remains
-a backstop, and newer reports replace older ones. Agy still yields non-blocked
-reports to fresh output so their uncovered
-approval prompts can be detected. Timing-only `idle` means quiet, not proof
-that a turn stopped or finished.
+Codex, Claude and agy retain semantic reports (`working`, `waiting`, `done`,
+`blocked`) through output and footer redraws. Silent tool waits do not erase
+`working`, and TUI redraws after a `Stop` hook do not erase `done` or
+`waiting`; the default five-minute TTL (one hour for `waiting`) remains a
+backstop, and newer reports replace older ones. Timing-only `idle` means quiet,
+not proof that a turn stopped or finished.
 
 **Glyphs** (shape = liveness, colour = urgency):
 

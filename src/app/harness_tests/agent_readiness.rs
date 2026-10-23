@@ -75,7 +75,7 @@ fn pager_text(app: &mut App, command: &str) -> String {
 fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        for name in ["codex", "claude"] {
+        for name in ["codex", "claude", "agy"] {
             let mut app = agent_app(tmp.path(), name);
             report(&mut app, "working");
             let at = app
@@ -111,6 +111,38 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
                 "{name}: output must not erase a working report"
             );
             assert!(info.reported.is_some());
+
+            report(&mut app, "waiting");
+            let at = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .clone()
+                .unwrap()
+                .at;
+            app.runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut()
+                .last_output_at = Some(at + Duration::from_secs(1));
+            app.settle_agent_activity(at + Duration::from_secs(30), &mut ctx);
+            assert_eq!(
+                app.runtime
+                    .project()
+                    .pane_tabs
+                    .as_ref()
+                    .unwrap()
+                    .active_info()
+                    .activity,
+                AgentActivity::Waiting,
+                "{name}: background task redraw must not erase a waiting report"
+            );
 
             report(&mut app, "done");
             let at = app

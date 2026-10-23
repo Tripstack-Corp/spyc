@@ -122,47 +122,46 @@ through. Removing the filter silently reintroduces the storm on Linux/WSL.
 <!-- SPYC-TRAP: scrape-scan-ignores-live-report -->
 `settle_scrape_quiet` (`app/agent_status.rs`) must not skip a dirty tab's
 screen scan on the grounds that `info.reported` is `Some`. It reads like a
-free optimization — a live report outranks the scrape result in
+free optimization — a live report outranks a non-blocked scrape result in
 `effective_activity`, so why pay for the screen read — and it is not, because
-of *when* the two settles run. Both fire pre-recv in the same iteration:
-`drain_pane_output` stamps `last_output_at` and sets `scrape_dirty`, then
-`settle_scrape_quiet`, then `settle_agent_activity` — which drops that very
-report through `report_superseded_by_output` (for agy, output newer than a
-non-`Blocked` report supersedes it). Codex and Claude retain semantic reports
-through output until expiry or a newer report.
-So consuming the dirty flag on the
-report's behalf discarded the scan for a report that no longer existed by the
-end of the tick.
+Codex, Claude and agy all retain semantic reports (`working`, `waiting`,
+`done`) through output until expiry or a newer report, while Codex's and agy's
+tool-approval prompts arrive during a live `working` report with no dedicated
+hook event (`Codex`'s `PermissionRequest` also fires before automatic review).
+Both rely on `codex_approval::overrides_report` to let a visible `Blocked`
+scrape result temporarily override a live non-blocked report without discarding
+it.
 
-The flag is only re-set by fresh output, which is what makes the failure
-permanent rather than merely late: an agent whose *last* output is the prompt
-it is now blocked on never emits again, so the scan never runs. That is
-exactly agy's tool-approval prompt (`PreInvocation` → `working`, draw the
-prompt, go silent), and the scrape is agy's only source of `Blocked` — agy
-has no hook event for "asking the user". The tier was therefore dead for the
-single case it exists to serve, and the symptom is a dot that quietly decays
-to Idle instead of going red, which nobody reports as a bug.
+The `scrape_dirty` flag is only re-set by fresh output, which is what makes
+skipping the scan behind a live report permanent rather than merely late: an
+agent whose *last* output is the approval prompt it is now blocked on never
+emits again, so the scan never runs. That is exactly agy's tool-approval prompt
+(`PreInvocation` → `working`, draw the prompt, go silent), and the scrape is
+agy's only source of `Blocked` for tool permissions. Skipping the scan while
+`info.reported` is `Some` leaves the tier dead for the case it exists to serve,
+and the symptom is a dot that stays on `working` until TTL expiry instead of
+going red.
 
 `scrape_step` takes `has_rules` rather than a report precisely so the pure
-decision cannot express the skip. Other live reports discard scrape guesses
-so they cannot resurface stale after expiry. A tab without detection rules
-returns `Skip` before any screen read.
+decision cannot express the skip. Non-blocked scrape guesses behind a live
+report are still discarded so they cannot resurface stale after expiry. A tab
+without detection rules returns `Skip` before any screen read.
 
 Codex's `PermissionRequest` precedes both automatic review and a human
-approval dialogue, and supplies no call id. Its metadata-bearing report is
-observational rather than a semantic user wait. A verified command, file-edit,
-MCP-tool or network approval form at the viewport bottom temporarily overrides
+approval dialogue, and supplies no call id, while agy emits no hook event for
+tool-execution approval. A verified command, file-edit, MCP-tool or network
+approval form in Codex, or tool-permission prompt in agy, temporarily overrides
 a non-blocked report. The report remains stored and resumes when the dialogue
-disappears. This
-also requires scanning behind a live report. Native question blocks and
-explicit agent blocks retain semantic precedence. `codex_approval::overrides_report`
-is shared by activity settling and both status diagnostics, so the dot and
-its explanation agree. The rules require known phrases and a complete default
-footer at the viewport bottom, including native word wrapping. Missing required
-text and other approval forms produce no guess. Codex's scan deadline starts
-with the first pending repaint rather than moving with every output event;
-continuous modal redraws therefore cannot postpone the scan indefinitely.
-Other agents retain the trailing quiet-window debounce.
+disappears. Native question blocks and explicit agent blocks retain semantic
+precedence. `codex_approval::overrides_report` is shared by activity settling
+and both status diagnostics, so the dot and its explanation agree. Codex's
+rules require known phrases and a complete default footer at the viewport
+bottom, including native word wrapping; agy's rule scans the bottom 30
+non-empty lines for its permission header and confirmation prompt. Missing
+required text and other approval forms produce no guess. Codex's scan deadline
+starts with the first pending repaint rather than moving with every output
+event; continuous modal redraws therefore cannot postpone the scan
+indefinitely. Other agents retain the trailing quiet-window debounce.
 
 Codex's complete default async-question editor or collapsed positive question
 summary supplies the same temporary attention, through `codex_questions`.

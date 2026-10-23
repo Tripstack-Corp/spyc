@@ -144,20 +144,52 @@ fn codex_permission_observation_preserves_question_correlation() {
 fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let mut app = agent_app(tmp.path(), "codex");
-        report(&mut app, "working", None);
-        let at = app
-            .runtime
-            .project()
-            .pane_tabs
-            .as_ref()
-            .unwrap()
-            .active_info()
-            .reported
-            .clone()
-            .unwrap()
-            .at;
-        {
+        for (name, blocker) in [
+            ("codex", "awaiting command approval"),
+            ("agy", "awaiting tool-execution approval"),
+        ] {
+            let mut app = agent_app(tmp.path(), name);
+            report(&mut app, "working", None);
+            let at = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .reported
+                .clone()
+                .unwrap()
+                .at;
+            {
+                let info = app
+                    .runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .active_info_mut();
+                info.last_output_at = Some(at + Duration::from_secs(1));
+                info.scrape_status = Some((AgentActivity::Blocked, Some(blocker)));
+            }
+            app.settle_agent_activity(at + Duration::from_secs(30), &mut RunCtx::for_test());
+            assert_eq!(
+                app.runtime
+                    .project()
+                    .pane_tabs
+                    .as_ref()
+                    .unwrap()
+                    .active_info()
+                    .activity,
+                AgentActivity::Blocked,
+                "{name}: visible approval must override working"
+            );
+            assert!(dump(&mut app).contains(&format!(
+                "source: SCRAPE-FALLBACK status=blocked ({blocker})"
+            )));
+            assert!(
+                super::agent_readiness::why_status(&mut app).contains("blocked (scrape-fallback:")
+            );
             let info = app
                 .runtime
                 .project_mut()
@@ -165,50 +197,26 @@ fn visible_codex_approval_temporarily_overrides_working_with_honest_diagnostics(
                 .as_mut()
                 .unwrap()
                 .active_info_mut();
-            info.last_output_at = Some(at + Duration::from_secs(1));
-            info.scrape_status = Some((AgentActivity::Blocked, Some("awaiting command approval")));
+            assert_eq!(
+                info.reported.clone().unwrap().at,
+                at,
+                "{name}: dialogue must not discard the silent-work report"
+            );
+            info.scrape_status = None;
+            app.settle_agent_activity(at + Duration::from_secs(60), &mut RunCtx::for_test());
+            assert_eq!(
+                app.runtime
+                    .project()
+                    .pane_tabs
+                    .as_ref()
+                    .unwrap()
+                    .active_info()
+                    .activity,
+                AgentActivity::Working,
+                "{name}: working must resume once approval clears"
+            );
+            assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
         }
-        app.settle_agent_activity(at + Duration::from_secs(30), &mut RunCtx::for_test());
-        assert_eq!(
-            app.runtime
-                .project()
-                .pane_tabs
-                .as_ref()
-                .unwrap()
-                .active_info()
-                .activity,
-            AgentActivity::Blocked
-        );
-        assert!(
-            dump(&mut app)
-                .contains("source: SCRAPE-FALLBACK status=blocked (awaiting command approval)")
-        );
-        assert!(super::agent_readiness::why_status(&mut app).contains("blocked (scrape-fallback:"));
-        let info = app
-            .runtime
-            .project_mut()
-            .pane_tabs
-            .as_mut()
-            .unwrap()
-            .active_info_mut();
-        assert_eq!(
-            info.reported.clone().unwrap().at,
-            at,
-            "dialogue must not discard the silent-work report"
-        );
-        info.scrape_status = None;
-        app.settle_agent_activity(at + Duration::from_secs(60), &mut RunCtx::for_test());
-        assert_eq!(
-            app.runtime
-                .project()
-                .pane_tabs
-                .as_ref()
-                .unwrap()
-                .active_info()
-                .activity,
-            AgentActivity::Working
-        );
-        assert!(dump(&mut app).contains("source: SELF-REPORT status=working"));
     });
 }
 
