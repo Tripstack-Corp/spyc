@@ -2,7 +2,7 @@
 
 Part of spyc's [feature reference](../../FEATURES.md). How a hosted agent works with spyc: the tools it reaches, the skill that teaches it, and what spyc shows about it.
 
-## MCP server (Claude + Codex integration)
+## MCP server (Claude, Codex, and Antigravity integration)
 
 spyc runs a background MCP server for the agents it hosts. Saying yes to an agent's first-launch
 `[Y/n]` adds a `spyc` entry to that agent's own MCP configuration, once, so it
@@ -236,7 +236,7 @@ Manage it in-app with `:skill`:
 |---|---|
 | `:skill` / `:skill status` | report installed version and whether it's stale or edited |
 | `:skill update` | install/overwrite now (also clears a remembered decline) |
-| `:skill remove` | delete `~/.claude/skills/spyc/` |
+| `:skill remove` | delete `~/.claude/skills/spyc/`, `~/.codex/skills/spyc/`, and `~/.gemini/config/skills/spyc/` |
 | `:skill ask` | forget a decline, so the next launch offers again |
 
 ## Native agent HUD
