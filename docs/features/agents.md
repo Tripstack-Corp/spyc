@@ -265,8 +265,8 @@ for the home-only preference and size fallbacks.
 An agent renders a pasted image as an opaque token (`[Image #3]`), so you
 can't see what you attached and can't check it later. **`^a g`** (or
 `:images`) lists the images the focused agent tab actually *received*, read
-back out of its own transcript — so it survives spyc restarts and
-`claude --resume` and Codex resume/fork:
+back out of its own transcript — so it survives spyc restarts,
+`claude --resume`, Codex resume/fork, and `agy --conversation`:
 
 ```
   1. #1    jpeg    485 KB  yesterday   it would be helpful to show the creation date…
@@ -290,7 +290,8 @@ Images you've pasted but **not sent yet** lead the list, marked 📎:
 That half is what answers "what did I just attach?" *before* you hit
 Enter — the moment the question actually gets asked. It works because an
 agent reads the system clipboard itself when you press its paste key (`^v`
-for Claude and Codex, also `Ctrl+Alt+V` for Codex on terminals that forward it).
+for Claude, Codex, and Agy; also `Ctrl+Alt+V` for Codex and `Alt+V` for Agy
+on terminals that forward them).
 The terminal can't carry image bytes, so spyc reads the same clipboard at that
 moment and keeps a copy. Purely additive: the paste
 still reaches the agent untouched.
@@ -307,7 +308,7 @@ restarts when a conversation is cleared or resumed, so the same label can
 name two different pictures. Images the agent received without a label
 appear too.
 
-Claude and Codex are supported; other agents say their transcript format isn't.
+Claude, Codex, and Agy are supported; other agents say their transcript format isn't.
 A forked Codex session lists its parent's images up to the fork. An image sent
 twice appears twice, and one attachment recorded more than one way appears once.
 A Codex image sent inline still opens after its temporary file is gone; one that

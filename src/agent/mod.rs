@@ -804,6 +804,21 @@ impl AgentProfile for AgyProfile {
             miss_message: None,
         })
     }
+    fn transcript_images(&self) -> Option<TranscriptImageSpec> {
+        Some(TranscriptImageSpec {
+            resolve: crate::state::agy_transcript::resolve_active_jsonl,
+            format: crate::state::transcript_images::Format::Agy,
+        })
+    }
+    /// Agy pastes an image from the native clipboard on `Ctrl+V` or `Alt+V`.
+    fn image_paste_keys(&self) -> &'static [crossterm::event::KeyEvent] {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        const KEYS: &[KeyEvent] = &[
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Char('v'), KeyModifiers::ALT),
+        ];
+        KEYS
+    }
     fn status_hooks(&self) -> Option<StatusHookSupport> {
         // A named hook-set in `.agents/hooks.json`, read at startup → written
         // pre-spawn. Covers `working`, `done`, and `blocked` for the `ask_question`

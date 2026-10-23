@@ -1,7 +1,8 @@
 //! Read an Antigravity (`agy`) conversation transcript from its on-disk JSONL
-//! and render it as pager lines.
+//! into styled pager lines (`^a v`) or gallery image metadata (`^a g`).
 
 use std::collections::{HashMap, HashSet};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use ratatui::{
@@ -138,6 +139,160 @@ fn is_rendered_record(val: &serde_json::Value) -> bool {
     let msg_type = val["type"].as_str().unwrap_or("");
     (source == "USER_EXPLICIT" && msg_type == "USER_INPUT")
         || (source == "MODEL" && msg_type == "PLANNER_RESPONSE")
+}
+
+const MAX_GALLERY_IMAGES: usize = 4096;
+
+/// Stream an Agy `transcript.jsonl` and index every user-attached image in
+/// chronological order for the `^a g` gallery.
+///
+/// Agy stores attached media on `USER_INPUT` records as a `"media"` array of
+/// `{ "mime_type": "image/...", "uri": "/abs/path" }` references rather than
+/// inline base64. If a record's `"content"` or `"media"` was truncated in
+/// `transcript.jsonl`, its untruncated step is resolved from sibling
+/// `transcript_full.jsonl` when present.
+pub fn index_images(path: &Path) -> Vec<super::transcript_images::TranscriptImage> {
+    let Ok(file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    if !file.metadata().is_ok_and(|m| m.is_file()) {
+        return Vec::new();
+    }
+    let (candidates, needed_steps, oversized) = scan_image_candidates(file);
+    if oversized > 0 {
+        crate::debug_log::log(&format!(
+            "agy_transcript: skipped {oversized} record(s) over {} bytes in {}",
+            crate::state::MAX_TRANSCRIPT_LINE_BYTES,
+            path.display()
+        ));
+    }
+    let full_records = load_full_records(path, &needed_steps);
+    let mut out = Vec::new();
+    for (line_no, record) in &candidates {
+        if out.len() >= MAX_GALLERY_IMAGES {
+            break;
+        }
+        let val = if needs_full_image_record(record)
+            && let Some(step) = record["step_index"].as_u64()
+            && let Some(full) = full_records.get(&step)
+        {
+            full
+        } else {
+            record
+        };
+        index_image_record(val, *line_no, &mut out);
+    }
+    out
+}
+
+fn scan_image_candidates(
+    file: std::fs::File,
+) -> (Vec<(usize, serde_json::Value)>, HashSet<u64>, usize) {
+    let mut reader = BufReader::new(file);
+    let mut buf = Vec::new();
+    let mut oversized = 0usize;
+    let mut seen_steps = HashSet::new();
+    let mut candidates = Vec::new();
+    let mut needed = HashSet::new();
+    for line_no in 0.. {
+        match crate::state::read_line_capped(
+            &mut reader,
+            &mut buf,
+            crate::state::MAX_TRANSCRIPT_LINE_BYTES,
+        ) {
+            Ok(None) | Err(_) => break,
+            Ok(Some(false)) => {
+                oversized += 1;
+                continue;
+            }
+            Ok(Some(true)) => {}
+        }
+        let Ok(line) = std::str::from_utf8(&buf) else {
+            continue;
+        };
+        if !line.contains("\"media\"") {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if val["source"].as_str() != Some("USER_EXPLICIT")
+            || val["type"].as_str() != Some("USER_INPUT")
+        {
+            continue;
+        }
+        if let Some(step) = val["step_index"].as_u64() {
+            if !seen_steps.insert(step) {
+                continue;
+            }
+            if needs_full_image_record(&val) {
+                needed.insert(step);
+            }
+        }
+        candidates.push((line_no, val));
+    }
+    (candidates, needed, oversized)
+}
+
+fn needs_full_image_record(val: &serde_json::Value) -> bool {
+    val["truncated_fields"].as_array().is_some_and(|fields| {
+        fields
+            .iter()
+            .any(|f| matches!(f.as_str(), Some("content" | "media")))
+    })
+}
+
+fn index_image_record(
+    val: &serde_json::Value,
+    line_no: usize,
+    out: &mut Vec<super::transcript_images::TranscriptImage>,
+) {
+    let Some(media) = val["media"].as_array() else {
+        return;
+    };
+    let text = strip_user_request_tags(val["content"].as_str().unwrap_or(""));
+    let labels = super::transcript_images::image_labels(text);
+    let excerpt = super::transcript_images::excerpt_of(text);
+    let timestamp = val["created_at"]
+        .as_str()
+        .or_else(|| val["timestamp"].as_str())
+        .map(str::to_owned);
+    let mut nth = 0usize;
+    for item in media {
+        if out.len() >= MAX_GALLERY_IMAGES {
+            break;
+        }
+        let media_type = item["mime_type"].as_str().unwrap_or("image");
+        if media_type != "image" && !media_type.starts_with("image/") {
+            continue;
+        }
+        let Some(uri) = item["uri"].as_str() else {
+            continue;
+        };
+        let raw_path = uri.strip_prefix("file://").unwrap_or(uri).trim();
+        if raw_path.is_empty() {
+            continue;
+        }
+        let img_path = PathBuf::from(raw_path);
+        let bytes_len = std::fs::metadata(&img_path)
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .map_or(0, |m| {
+                m.len().min(super::transcript_images::MAX_IMAGE_BYTES) as usize
+            });
+        out.push(super::transcript_images::TranscriptImage {
+            seq: out.len() + 1,
+            agent_label: labels.get(nth).cloned(),
+            media_type: media_type.to_owned(),
+            bytes_len,
+            timestamp: timestamp.clone(),
+            prompt_excerpt: excerpt.clone(),
+            line: line_no,
+            block: nth,
+            source: super::transcript_images::ImageSource::Agy { path: img_path },
+        });
+        nth += 1;
+    }
 }
 
 fn needs_full_record(val: &serde_json::Value, show_tool_calls: bool) -> bool {
@@ -510,5 +665,166 @@ mod tests {
             text.contains("compact prose kept"),
             "record with only thinking truncated should use compact transcript: {text}"
         );
+    }
+
+    #[test]
+    fn indexes_and_loads_user_media_images_and_filters_non_images() {
+        let dir = tempfile::tempdir().unwrap();
+        let img1 = dir.path().join("uploaded_media_1.png");
+        let img2 = dir.path().join("uploaded_media_2.jpg");
+        let pdf = dir.path().join("doc.pdf");
+        std::fs::write(&img1, b"\x89PNG\r\n\x1a\nfirst").unwrap();
+        std::fs::write(&img2, b"\xff\xd8\xffsecond").unwrap();
+        std::fs::write(&pdf, b"%PDF-1.4").unwrap();
+
+        let transcript = dir.path().join("transcript.jsonl");
+        let rows = [
+            serde_json::json!({
+                "step_index": 1,
+                "source": "USER_EXPLICIT",
+                "type": "USER_INPUT",
+                "created_at": "2026-10-23T10:13:55Z",
+                "content": "<USER_REQUEST>\ncompare [Image #1] and [Image #2] please\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nignored\n</ADDITIONAL_METADATA>",
+                "media": [
+                    {"mime_type": "application/pdf", "uri": pdf.display().to_string()},
+                    {"mime_type": "image/png", "uri": img1.display().to_string()},
+                    {"mime_type": "image/jpeg", "uri": format!("file://{}", img2.display())},
+                ]
+            })
+            .to_string(),
+            // Duplicate replay of step 1 must not double the gallery.
+            serde_json::json!({
+                "step_index": 1,
+                "source": "USER_EXPLICIT",
+                "type": "USER_INPUT",
+                "created_at": "2026-10-23T10:13:55Z",
+                "content": "<USER_REQUEST>compare [Image #1] and [Image #2] please</USER_REQUEST>",
+                "media": [
+                    {"mime_type": "image/png", "uri": img1.display().to_string()},
+                ]
+            })
+            .to_string(),
+            // Model step with media is ignored (only user attachments belong in ^a g).
+            serde_json::json!({
+                "step_index": 2,
+                "source": "MODEL",
+                "type": "PLANNER_RESPONSE",
+                "content": "model reply",
+                "media": [
+                    {"mime_type": "image/png", "uri": img1.display().to_string()},
+                ]
+            })
+            .to_string(),
+            // Separate user step re-attaching the first image stays a distinct row.
+            serde_json::json!({
+                "step_index": 3,
+                "source": "USER_EXPLICIT",
+                "type": "USER_INPUT",
+                "created_at": "2026-10-23T10:20:00Z",
+                "content": "<USER_REQUEST>again</USER_REQUEST>",
+                "media": [
+                    {"uri": img1.display().to_string()},
+                ]
+            })
+            .to_string(),
+        ];
+        std::fs::write(&transcript, rows.join("\n") + "\n").unwrap();
+
+        let images = index_images(&transcript);
+        assert_eq!(images.len(), 3);
+
+        assert_eq!(images[0].seq, 1);
+        assert_eq!(images[0].agent_label.as_deref(), Some("#1"));
+        assert_eq!(images[0].media_type, "image/png");
+        assert_eq!(images[0].bytes_len, 13);
+        assert_eq!(images[0].timestamp.as_deref(), Some("2026-10-23T10:13:55Z"));
+        assert_eq!(images[0].prompt_excerpt, "compare and please");
+        assert_eq!(
+            crate::state::transcript_images::load(&transcript, &images[0]).unwrap(),
+            b"\x89PNG\r\n\x1a\nfirst"
+        );
+
+        assert_eq!(images[1].seq, 2);
+        assert_eq!(images[1].agent_label.as_deref(), Some("#2"));
+        assert_eq!(images[1].media_type, "image/jpeg");
+        assert_eq!(images[1].bytes_len, 9);
+        assert_eq!(
+            crate::state::transcript_images::load(&transcript, &images[1]).unwrap(),
+            b"\xff\xd8\xffsecond"
+        );
+
+        assert_eq!(images[2].seq, 3);
+        assert!(images[2].agent_label.is_none());
+        assert_eq!(images[2].media_type, "image");
+        assert_eq!(images[2].prompt_excerpt, "again");
+    }
+
+    #[test]
+    fn truncated_image_step_falls_back_to_transcript_full_and_refuses_bad_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let img = dir.path().join("shot.png");
+        std::fs::write(&img, b"png-bytes").unwrap();
+        let huge = dir.path().join("huge.png");
+        std::fs::File::create(&huge)
+            .unwrap()
+            .set_len(crate::state::transcript_images::MAX_IMAGE_BYTES + 1)
+            .unwrap();
+
+        let compact = dir.path().join("transcript.jsonl");
+        let full = dir.path().join("transcript_full.jsonl");
+        std::fs::write(
+            &compact,
+            serde_json::json!({
+                "step_index": 7,
+                "source": "USER_EXPLICIT",
+                "type": "USER_INPUT",
+                "content": "<USER_REQUEST>trunc...",
+                "truncated_fields": ["content", "media"]
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &full,
+            serde_json::json!({
+                "step_index": 7,
+                "source": "USER_EXPLICIT",
+                "type": "USER_INPUT",
+                "created_at": "2026-10-23T11:00:00Z",
+                "content": "<USER_REQUEST>full image prompt [Image #1]</USER_REQUEST>",
+                "media": [
+                    {"mime_type": "image/png", "uri": img.display().to_string()},
+                    {"mime_type": "image/png", "uri": huge.display().to_string()},
+                    {"mime_type": "image/png", "uri": dir.path().display().to_string()},
+                    {"mime_type": "image/png", "uri": dir.path().join("missing.png").display().to_string()},
+                ]
+            })
+            .to_string()
+                + "\n",
+        )
+        .unwrap();
+
+        let spec = crate::agent::detect("agy")
+            .transcript_images()
+            .expect("agy declares transcript_images");
+        assert!(matches!(
+            spec.format,
+            crate::state::transcript_images::Format::Agy
+        ));
+
+        let images = index_images(&compact);
+        assert_eq!(images.len(), 4);
+        assert_eq!(images[0].prompt_excerpt, "full image prompt");
+        assert_eq!(images[0].agent_label.as_deref(), Some("#1"));
+        assert_eq!(
+            crate::state::transcript_images::load(&compact, &images[0]).unwrap(),
+            b"png-bytes"
+        );
+        // Oversized, directory, and missing paths fail cleanly on load.
+        assert!(crate::state::transcript_images::load(&compact, &images[1]).is_err());
+        assert_eq!(images[2].bytes_len, 0, "directory is not sized as a file");
+        assert!(crate::state::transcript_images::load(&compact, &images[2]).is_err());
+        assert!(crate::state::transcript_images::load(&compact, &images[3]).is_err());
     }
 }

@@ -41,6 +41,7 @@ pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 pub enum Format {
     Claude,
     Codex,
+    Agy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +50,9 @@ pub enum ImageSource {
     Codex {
         primary: Box<super::codex_images::Location>,
         fallback: Option<Box<super::codex_images::Location>>,
+    },
+    Agy {
+        path: std::path::PathBuf,
     },
 }
 
@@ -210,8 +214,14 @@ fn index_record(
 /// Re-reads the file to `entry.line` rather than holding bytes from the index
 /// pass — the point of the split. `Err` carries a reason for the status line.
 pub fn load(path: &Path, entry: &TranscriptImage) -> Result<Vec<u8>, String> {
-    if let ImageSource::Codex { primary, fallback } = &entry.source {
-        return super::codex_images::load(primary, fallback.as_deref());
+    match &entry.source {
+        ImageSource::Codex { primary, fallback } => {
+            return super::codex_images::load(primary, fallback.as_deref());
+        }
+        ImageSource::Agy { path } => {
+            return read_local(path);
+        }
+        ImageSource::Claude => {}
     }
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut reader = BufReader::new(file);
@@ -252,6 +262,33 @@ pub(super) fn decode_base64(data: &str) -> Result<Vec<u8>, String> {
     base64::engine::general_purpose::STANDARD
         .decode(data)
         .map_err(|e| format!("base64: {e}"))
+}
+
+pub(super) fn read_local(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let meta = file
+        .metadata()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if !meta.is_file() || meta.len() > MAX_IMAGE_BYTES {
+        return Err(format!(
+            "{}: image is not a regular file within the 64 MiB limit",
+            path.display()
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_IMAGE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err("image exceeds the 64 MiB limit".into());
+    }
+    Ok(bytes)
 }
 
 /// The `[Image #N]` labels in a prompt, in the order they appear.

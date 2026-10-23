@@ -156,14 +156,27 @@ mod tests {
         ));
     }
 
-    /// Sanity on the wiring the decision depends on: claude declares `^v`, and
-    /// a plain shell declares nothing.
+    /// Sanity on the wiring the decision depends on: claude declares `^v`, agy
+    /// declares `^v` and `Alt+v`, and a plain shell declares nothing.
     #[test]
     fn claude_declares_ctrl_v_and_a_shell_declares_nothing() {
+        let alt_v = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::ALT);
         assert_eq!(
             crate::agent::detect("claude").image_paste_keys(),
             &[ctrl_v()]
         );
+        assert_eq!(
+            crate::agent::detect("agy").image_paste_keys(),
+            &[ctrl_v(), alt_v]
+        );
+        assert!(should_capture(
+            snap(crate::agent::detect("agy").image_paste_keys(), true),
+            ctrl_v()
+        ));
+        assert!(should_capture(
+            snap(crate::agent::detect("agy").image_paste_keys(), true),
+            alt_v
+        ));
         assert!(crate::agent::detect("zsh").image_paste_keys().is_empty());
     }
 }
