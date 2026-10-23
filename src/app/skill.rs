@@ -1,4 +1,4 @@
-//! App-layer glue for the installable Claude skill (`crate::skill`): the startup
+//! App-layer glue for the installable agent skill (`crate::skill`): the startup
 //! update offer and the `:skill` command.
 
 use crate::app::{App, Effect, Mode, Prompt, PromptKind};

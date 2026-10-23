@@ -201,14 +201,17 @@ from those captures and controlled-PTY regressions.
 
 ### Image attachments
 
-`^a g` / `:images` opens the focused Claude or Codex tab's gallery. On macOS and
-Linux, spyc captures the native clipboard alongside `Ctrl+V`; Codex also accepts
-`Ctrl+Alt+V` on terminals that forward it. The original key reaches the agent.
-Pending captures appear before submission and clear on accepted Enter; a slow
-clipboard result from that draft cannot reappear afterwards. The setting
+`^a g` / `:images` opens the focused Claude, Codex, or Antigravity (`agy`) tab's
+gallery. On macOS and Linux, spyc captures the native clipboard alongside
+`Ctrl+V`; Codex also accepts `Ctrl+Alt+V` and `agy` accepts `Alt+V` on terminals
+that forward them. The original key reaches the agent. Pending captures appear
+before submission and clear on accepted Enter; a slow clipboard result from that
+draft cannot reappear afterwards. The setting
 `[pane] preview_pasted_images = false` disables capture.
 
-Codex attachments come from current `item_completed` user inputs, legacy
+Antigravity attachments come from `USER_INPUT` `media` entries in the session's
+`transcript.jsonl`, reading their on-disk image files when opened. Codex
+attachments come from current `item_completed` user inputs, legacy
 `user_message` events and user API messages. The gallery honours the pane's
 effective `CODEX_HOME` and pinned session. Resolution and indexing run off the UI
 thread, and a closed gallery cannot install an old result after reopening. The
@@ -279,8 +282,8 @@ shows the last received semantic report, hook-file marker presence, whether
 hooks existed at launch, and known config changes that require a restart.
 An MCP connection or hook file alone does not prove hooks ran. After first
 consenting to spyc's hooks, restart Codex and review `/hooks` and project trust.
-New/changed hooks need review; spyc does not authorize them for you. Codex and
-Claude reports survive redraws and quiet tool waits until TTL expiry or a newer
+New/changed hooks need review; spyc does not authorize them for you. Codex,
+Claude, and agy reports survive redraws and quiet tool waits until TTL expiry or a newer
 report; Codex cancellation reports `idle` through `Interrupt`. Without a live
 report, timing-only `idle` means silence, not confirmed completion.
 

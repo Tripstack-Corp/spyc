@@ -93,3 +93,18 @@ directory it started in, so every project is asked for that exact name, and a
 session found in two projects is not guessed between. Claude Code reports its
 session at startup but writes the transcript only with the first prompt, so a
 transcript not found yet is looked up again on the tab's next status report.
+
+For an Antigravity (`agy`) tab, `context` is the input plus prompt-cache-read
+tokens from the latest request, or `--` after a compaction until the next
+request; `out` is the output of every distinct planner response since the read
+began, `hit` the share of input read from the prompt cache, and `compacted` the
+compactions seen. When a long transcript was read from part-way through, these
+counts carry `≥` and the tools row reads `recent`. The tools row counts every
+call and failure, names what is running with `◐`, and lists the three most
+called, each marked `✓` or `✗<n>` by its own failures; spyc's own MCP calls
+keep `spyc:`, while other `call_mcp_tool` servers read `mcp`. The mode row
+counts subagent (`invoke_subagent`) calls as `agents`, followed by `hooks` and
+`mcp`. The strip reads
+`~/.gemini/antigravity-cli/brain/<session>/.system_generated/logs/transcript.jsonl`
+under `$HOME` as spyc's environment names it at startup, using the conversation
+UUID reported by the tab's status hooks or named by `--conversation`.

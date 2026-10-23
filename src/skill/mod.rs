@@ -2,11 +2,11 @@
 //! and written into each host agent's personal skills directory on
 //! `spyc --install-skill`.
 //!
-//! Claude Code and codex independently converged on the same format —
+//! Claude Code, codex, and Antigravity (`agy`) converged on the same format —
 //! `<skills-dir>/<name>/SKILL.md` with YAML frontmatter, plus optional
-//! `references/` sub-files — so one embedded copy serves both verbatim. Only the
-//! directory differs: `~/.claude/skills/` vs `$CODEX_HOME/skills/`
-//! (default `~/.codex/skills/`).
+//! `references/` sub-files — so one embedded copy serves all three verbatim. Only
+//! the directory differs: `~/.claude/skills/`, `$CODEX_HOME/skills/`
+//! (default `~/.codex/skills/`), and `~/.gemini/config/skills/`.
 //!
 //! Why a skill at all, when MCP `initialize` already carries
 //! `SERVER_INSTRUCTIONS`: that field must stay short (it is prepended to every
@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Directory name under `~/.claude/skills/`, and the skill's `name:` field.
+/// Directory name under each host's `skills/` directory, and the skill's `name:` field.
 pub const SKILL_NAME: &str = "spyc";
 
 /// Sidecar recording what spyc last wrote, so a later run can tell "the embedded
@@ -128,9 +128,9 @@ pub fn startup_offer(statuses: &[(Host, Status)], declined: bool) -> Option<bool
 
 /// An agent that discovers personal skills from a directory.
 ///
-/// Claude Code and codex converged on the same format — `<dir>/<name>/SKILL.md`
+/// Claude Code, codex, and agy use the same format — `<dir>/<name>/SKILL.md`
 /// with YAML frontmatter, plus optional `references/` sub-files — so one embedded
-/// copy serves both with no per-host content.
+/// copy serves all three with no per-host content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Host {
     Claude,
@@ -158,8 +158,8 @@ fn home() -> Option<PathBuf> {
 }
 
 /// Where each host looks for personal skills:
-/// `~/.claude/skills/spyc` and `$CODEX_HOME/skills/spyc` (codex honours
-/// `CODEX_HOME`, defaulting to `~/.codex`).
+/// `~/.claude/skills/spyc`, `$CODEX_HOME/skills/spyc` (codex honours
+/// `CODEX_HOME`, defaulting to `~/.codex`), and `~/.gemini/config/skills/spyc`.
 #[must_use]
 pub fn host_dir(host: Host) -> Option<PathBuf> {
     match host {
@@ -543,8 +543,8 @@ mod tests {
 
     #[test]
     fn each_host_dir_matches_where_that_agent_looks() {
-        // Guards the install locations themselves — both agents only discover
-        // personal skills from their own directory, and a wrong path fails
+        // Guards the install locations themselves — each agent only discovers
+        // personal skills from its own directory, and a wrong path fails
         // silently (the skill simply never triggers).
         let claude = host_dir(Host::Claude).expect("HOME resolvable in tests");
         assert!(
@@ -560,7 +560,14 @@ mod tests {
                 "unexpected codex path: {codex:?}"
             );
         }
+        let agy = host_dir(Host::Agy).expect("HOME resolvable in tests");
+        assert!(
+            agy.ends_with(".gemini/config/skills/spyc"),
+            "unexpected agy path: {agy:?}"
+        );
         assert_ne!(claude, codex, "hosts must not share a directory");
+        assert_ne!(claude, agy, "hosts must not share a directory");
+        assert_ne!(codex, agy, "hosts must not share a directory");
     }
 
     #[test]
