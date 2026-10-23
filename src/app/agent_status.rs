@@ -60,28 +60,17 @@ const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(100);
 /// Whether pane output at `last_output_at` supersedes a live report (the agent
 /// resumed → drop the report, fall back to timing).
 ///
-/// A `Blocked` report is **latched**: output never supersedes it. Blocked is the
-/// "needs me" signal raised at a prompt the agent is waiting on (Claude's
-/// `PermissionRequest` hook firing as a Yes/No prompt opens), and that prompt
-/// keeps redrawing itself while it waits — those redraws are pane output, so any
-/// output-based supersede (even behind a grace window) eventually bounces the
-/// dot off red and back to the working pulse. Blocked is cleared only by its
-/// a newer report or the user settling the prompt — answering it with
-/// Enter or dismissing it with Esc / `^c` (the `SendToPane` handler in
-/// `run_effects` drops ordinary blocks on those keystrokes). Identified Codex
-/// questions instead require their matching tool completion or a newer report.
-/// Codex/Claude semantic reports survive output; redraws do not establish a
-/// new turn or completion. Agy yields non-blocked reports to output so its
-/// uncovered approval prompt can become authoritative.
-fn report_superseded_by_output(
-    r: &ReportedStatus,
-    last_output_at: Option<Instant>,
-    kind: AgentKind,
-) -> bool {
-    if r.status == AgentActivity::Blocked || kind != AgentKind::Agy {
-        return false;
-    }
-    last_output_at.is_some_and(|o| o > r.at)
+/// Semantic reports (`Blocked`, `Working`, `Waiting`, `Done`) survive pane
+/// output across every hosted agent: prompt redraws, TUI footer flushes after a
+/// `Stop` hook, and background-task status updates do not establish a new turn
+/// or cancel an active wait. Only an explicit `Idle` report yields to fresh
+/// output. `Blocked` is additionally latched against TTL expiry until settled
+/// by a newer report or user input (`Enter`, `Esc`, `^c` in `run_effects`, or
+/// matching tool completion for identified Codex questions), while visible
+/// approval prompts in Codex and agy temporarily override non-blocked reports
+/// via [`crate::agent::codex_approval::overrides_report`].
+fn report_superseded_by_output(r: &ReportedStatus, last_output_at: Option<Instant>) -> bool {
+    r.status == AgentActivity::Idle && last_output_at.is_some_and(|o| o > r.at)
 }
 
 /// A closed pane's reports, turn and scrape describe no agent any more.
@@ -351,13 +340,13 @@ impl ActivityScan<'_> {
         // pane clear in `run_effects` or a newer report drops it.
         if let Some(r) = &entry.info.reported
             && ((r.status != AgentActivity::Blocked && self.now >= r.expiry)
-                || report_superseded_by_output(r, entry.info.last_output_at, kind))
+                || report_superseded_by_output(r, entry.info.last_output_at))
         {
             entry.info.reported = None;
         }
-        // Retain Codex's current visible wait even behind a semantic block:
-        // a later working/done report need not repaint the unanswered view.
-        // Other agents discard guesses behind live reports.
+        // Retain Codex's and agy's current visible wait even behind a live
+        // report: a later working/done report need not repaint the unanswered
+        // view. Other agents discard guesses behind live reports.
         if entry.info.reported.is_some()
             && !crate::agent::codex_approval::overrides_report(
                 None,
@@ -618,11 +607,12 @@ impl App {
     }
 
     /// Resolve semantic reports, verified approval dialogues and output timing.
-    /// Agy yields non-blocked reports to newer output. Codex's complete
-    /// approval form temporarily overrides non-blocked reports without discarding
-    /// them; semantic question/agent blocks retain precedence. Other reports
-    /// survive redraws and silent tool waits until expiry. `scrape` comes from
-    /// the debounced visible-screen scan in `settle_scrape_quiet`.
+    /// Visible approval prompts in Codex and agy temporarily override
+    /// non-blocked reports without discarding them; semantic question/agent
+    /// blocks retain precedence. Semantic reports (`Working`, `Waiting`,
+    /// `Done`, `Blocked`) survive redraws and silent tool waits until expiry
+    /// (or settlement for latched `Blocked`). `scrape` comes from the debounced
+    /// visible-screen scan in `settle_scrape_quiet`.
     /// Non-agent tabs are always `Unknown` (a report targeting one is ignored —
     /// dots are agent-only).
     fn effective_activity(
@@ -642,9 +632,10 @@ impl App {
             // `Blocked` is latched: no TTL expiry and output never supersedes it
             // (`report_superseded_by_output` returns false), so it holds until the
             // user answers the pane (Enter, in `run_effects`) or a newer report
-            // lands. Other statuses expire; only agy yields reports to output.
+            // lands. Other semantic statuses expire at `expiry`; only `Idle`
+            // yields to newer output.
             let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
-            let superseded = report_superseded_by_output(r, last_output_at, kind);
+            let superseded = report_superseded_by_output(r, last_output_at);
             if !expired && !superseded {
                 return r.status;
             }
@@ -686,16 +677,14 @@ impl App {
     /// last output's quiet window.
     ///
     /// **A live report does not cancel the scan**. Skipping the scan behind one
-    /// looks like a free optimization and is not: this runs before
-    /// `settle_agent_activity`, which in the *same* iteration drops that report
-    /// via `report_superseded_by_output`. Consuming the dirty flag on its behalf
-    /// therefore discarded the scan for a report that no longer existed by the end
-    /// of the tick — and since the flag is only re-set by fresh output, an agent
-    /// whose last output *is* the prompt it's now blocked on never got scanned at
-    /// all. That is precisely agy's approval prompt, and the scrape is agy's only
-    /// source of `Blocked`, so the tier was dead for the case it exists to serve.
-    /// Codex's visible approval modal instead temporarily overrides a live
-    /// non-blocked report without dropping it.
+    /// looks like a free optimization and is not: visible approval prompts in
+    /// Codex and agy arrive while a `working` report is already live (from
+    /// `UserPromptSubmit` / `PreInvocation`) and fire no hook of their own.
+    /// Their `Blocked` scrape result temporarily overrides that non-blocked
+    /// report via `codex_approval::overrides_report` without dropping it, and
+    /// since `scrape_dirty` is only re-set by fresh output, skipping the scan
+    /// behind a live report would permanently miss an approval prompt whose
+    /// last output was drawing the prompt itself.
     ///
     /// `&mut` settle point, PRE-recv. Returns `true` if any tab's status changed.
     pub(crate) fn settle_scrape_quiet(
@@ -715,8 +704,8 @@ impl App {
                 continue;
             }
             // SPYC-TRAP(scrape-scan-ignores-live-report): do not skip the scan
-            // because `entry.info.reported.is_some()` — agy's report may be
-            // dropped this iteration, and Codex's modal can override one.
+            // because `entry.info.reported.is_some()` — Codex's and agy's
+            // visible approval prompts override a live non-blocked report.
             let profile = entry.info.agent();
             let rules = profile.detection_rules();
             let wait_from = if profile.kind() == AgentKind::Codex {
@@ -1156,7 +1145,9 @@ mod tests {
             ),
             AgentActivity::Blocked
         );
-        // A live report still wins over a scrape guess.
+        // A live report still wins over a non-override scrape guess, while a
+        // visible `Blocked` approval prompt in Codex/agy temporarily overrides
+        // a non-blocked report.
         let report = Some(crate::pane::ReportedStatus::new(
             AgentActivity::Working,
             base,
@@ -1165,12 +1156,22 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report.as_ref(),
-                Some(AgentActivity::Blocked),
+                Some(AgentActivity::Idle),
                 AgentKind::Agy,
                 None,
                 base
             ),
             AgentActivity::Working
+        );
+        assert_eq!(
+            App::effective_activity(
+                report.as_ref(),
+                Some(AgentActivity::Blocked),
+                AgentKind::Agy,
+                None,
+                base
+            ),
+            AgentActivity::Blocked
         );
         // No scrape guess either → falls all the way through to timing.
         assert_eq!(
@@ -1238,14 +1239,13 @@ mod tests {
         }
     }
 
-    /// The scan must not be cancelled by a live report. `settle_scrape_quiet`
-    /// runs BEFORE `settle_agent_activity`, which in the same iteration drops a
-    /// non-`Blocked` report via `report_superseded_by_output` — so a decision
-    /// that consumed the dirty flag "because a report exists" threw the scan away
-    /// on behalf of a report that was gone by the end of the tick. The flag is
-    /// only re-set by fresh output, so an agent whose last output IS the prompt
-    /// it's blocked on never got scanned, and the scrape is agy's only source of
-    /// `Blocked`.
+    /// The scan must not be cancelled by a live report. Visible approval
+    /// prompts in Codex and agy arrive while a `working` report is live and
+    /// fire no hook of their own; `codex_approval::overrides_report` lets the
+    /// `Blocked` scrape result temporarily override that non-blocked report
+    /// without discarding it. Because `scrape_dirty` is only re-set by fresh
+    /// output, skipping the scan while a report is live would permanently miss
+    /// an approval prompt whose last output was drawing the prompt itself.
     ///
     /// Encoded as a type-level fact rather than a behavioural assertion: the pure
     /// step takes no report argument at all, so it cannot regress. This test
@@ -1264,8 +1264,8 @@ mod tests {
             ScrapeStep::Scan
         );
 
-        // 2. Scanning behind a live report is therefore harmless: an unexpired,
-        //    un-superseded report outranks the scrape result.
+        // 2. Scanning behind a live report is harmless when no approval blocker
+        //    matched: an unexpired report outranks a non-blocked scrape guess.
         let report = ReportedStatus::new(
             AgentActivity::Working,
             base + Duration::from_millis(10),
@@ -1274,19 +1274,18 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 Some(&report),
-                Some(AgentActivity::Blocked),
+                Some(AgentActivity::Idle),
                 AgentKind::Agy,
                 None,
                 base + Duration::from_millis(20)
             ),
             AgentActivity::Working,
-            "a live report must outrank the scrape result"
+            "a live report must outrank a non-blocked scrape result"
         );
 
-        // 3. …and once output supersedes that report, the scrape result is what
-        //    surfaces. This is the agy approval-prompt case: `PreInvocation` said
-        //    working, the prompt draw superseded it, and only the scrape knows the
-        //    agent is now waiting on the user.
+        // 3. When the scan finds a visible `Blocked` approval prompt, it
+        //    temporarily overrides the live `Working` report — and once the
+        //    prompt clears (`None`), `Working` resumes despite later output.
         let output_after = base + Duration::from_millis(50);
         assert_eq!(
             App::effective_activity(
@@ -1297,7 +1296,18 @@ mod tests {
                 output_after + Duration::from_millis(1)
             ),
             AgentActivity::Blocked,
-            "superseded report must yield to the scrape result, not to timing"
+            "visible agy approval prompt must override a live working report"
+        );
+        assert_eq!(
+            App::effective_activity(
+                Some(&report),
+                None,
+                AgentKind::Agy,
+                Some(output_after),
+                output_after + Duration::from_secs(10)
+            ),
+            AgentActivity::Working,
+            "retained working report must resume once the approval prompt clears"
         );
     }
 
@@ -1344,20 +1354,39 @@ mod tests {
             "blocked has no TTL — it stays until answered"
         );
 
-        // Contrast: a non-blocked report (done) is still superseded by later
-        // output (unchanged behaviour).
-        let done = Some(ReportedStatus::new(AgentActivity::Done, base, expiry));
+        // Contrast: an explicit `Idle` report still hands back to timing on
+        // fresh output, while semantic states (`Done`, `Waiting`, `Working`)
+        // survive redraw output until their TTL expires.
+        let idle = Some(ReportedStatus::new(AgentActivity::Idle, base, expiry));
         assert_eq!(
             App::effective_activity(
-                done.as_ref(),
+                idle.as_ref(),
                 None,
                 AgentKind::Agy,
                 Some(base + Duration::from_millis(200)),
                 base + Duration::from_millis(300),
             ),
             AgentActivity::Working,
-            "done has no latch — output supersedes it"
+            "idle report yields when fresh output arrives"
         );
+        for status in [
+            AgentActivity::Done,
+            AgentActivity::Waiting,
+            AgentActivity::Working,
+        ] {
+            let reported = Some(ReportedStatus::new(status, base, expiry));
+            assert_eq!(
+                App::effective_activity(
+                    reported.as_ref(),
+                    None,
+                    AgentKind::Agy,
+                    Some(base + Duration::from_millis(200)),
+                    base + Duration::from_secs(10),
+                ),
+                status,
+                "{status:?} survives TUI redraw output until expiry"
+            );
+        }
     }
 
     // P3-1: the pure transition → notification decision (the core of the ping).

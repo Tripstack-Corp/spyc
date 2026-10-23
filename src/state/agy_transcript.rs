@@ -1,6 +1,7 @@
 //! Read an Antigravity (`agy`) conversation transcript from its on-disk JSONL
 //! and render it as pager lines.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use ratatui::{
@@ -47,6 +48,11 @@ fn resolve_under_home(home: &Path, q: crate::agent::TranscriptQuery) -> Option<P
 /// chronological order. Returns empty on read failure. Model prose is
 /// rendered through the Markdown viewer (`width` hints prose/table
 /// reflow); user prompts and tool calls stay plain.
+///
+/// When a rendered record in `transcript.jsonl` marks `content` (or
+/// `tool_calls` while `show_tool_calls` is on) in `truncated_fields`,
+/// its untruncated counterpart is resolved by `step_index` from the
+/// sibling `transcript_full.jsonl` when present.
 pub fn render_transcript(
     path: &Path,
     theme: &Theme,
@@ -57,6 +63,9 @@ pub fn render_transcript(
     else {
         return Vec::new();
     };
+    let (records, needed_steps) = parse_rendered_records(&text, show_tool_calls);
+    let full_records = load_full_records(path, &needed_steps);
+
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
@@ -64,14 +73,16 @@ pub fn render_transcript(
 
     let mut out: Vec<Line<'static>> = Vec::new();
     let mut last_was_blank = true;
+    let mut last_was_prose = false;
 
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
+    for record in &records {
+        let val = if needs_full_record(record, show_tool_calls)
+            && let Some(step) = record["step_index"].as_u64()
+            && let Some(full) = full_records.get(&step)
+        {
+            full
+        } else {
+            record
         };
 
         let source = val["source"].as_str().unwrap_or("");
@@ -82,32 +93,18 @@ pub fn render_transcript(
             if content.is_empty() {
                 continue;
             }
-
-            // Optionally, strip <USER_REQUEST> tags if they exist.
-            // The closing tag must come after the opening one (+ its
-            // length) or the slice would panic — content is untrusted
-            // (a user message can contain a stray `</USER_REQUEST>`
-            // before a `<USER_REQUEST>`), so guard the ordering and
-            // fall back to the raw content when it doesn't hold.
-            let open = "<USER_REQUEST>";
-            let display_content = if let Some(start) = content.find(open)
-                && let Some(end) = content.find("</USER_REQUEST>")
-                && start + open.len() <= end
-            {
-                &content[start + open.len()..end]
-            } else {
-                content
-            };
-            let display_content = display_content.trim();
-
+            let display_content = strip_user_request_tags(content).trim();
             crate::state::push_transcript_prompt(
                 &mut out,
                 &mut last_was_blank,
                 display_content,
                 user_style,
             );
+            last_was_prose = false;
         } else if source == "MODEL" && msg_type == "PLANNER_RESPONSE" {
-            if let Some(content) = val["content"].as_str() {
+            if let Some(content) = val["content"].as_str()
+                && !content.trim().is_empty()
+            {
                 crate::state::push_agent_markdown(
                     &mut out,
                     &mut last_was_blank,
@@ -115,22 +112,219 @@ pub fn render_transcript(
                     theme,
                     width,
                 );
+                last_was_prose = true;
             }
 
-            // Format tool_calls
-            if show_tool_calls && let Some(tool_calls) = val["tool_calls"].as_array() {
+            if show_tool_calls
+                && let Some(tool_calls) = val["tool_calls"].as_array()
+                && !tool_calls.is_empty()
+            {
+                if last_was_prose {
+                    crate::state::push_transcript_blank(&mut out, &mut last_was_blank);
+                    last_was_prose = false;
+                }
                 for tool in tool_calls {
-                    let name = tool["name"].as_str().unwrap_or("?");
-                    out.push(Line::from(Span::styled(
-                        format!("\u{2699} {name}"),
-                        tool_style,
-                    )));
+                    out.push(Line::from(Span::styled(tool_call_label(tool), tool_style)));
                     last_was_blank = false;
                 }
             }
         }
     }
     out
+}
+
+fn is_rendered_record(val: &serde_json::Value) -> bool {
+    let source = val["source"].as_str().unwrap_or("");
+    let msg_type = val["type"].as_str().unwrap_or("");
+    (source == "USER_EXPLICIT" && msg_type == "USER_INPUT")
+        || (source == "MODEL" && msg_type == "PLANNER_RESPONSE")
+}
+
+fn needs_full_record(val: &serde_json::Value, show_tool_calls: bool) -> bool {
+    let Some(fields) = val["truncated_fields"].as_array() else {
+        return false;
+    };
+    fields.iter().any(|f| {
+        f.as_str() == Some("content") || (show_tool_calls && f.as_str() == Some("tool_calls"))
+    })
+}
+
+fn parse_rendered_records(
+    text: &str,
+    show_tool_calls: bool,
+) -> (Vec<serde_json::Value>, HashSet<u64>) {
+    let mut records = Vec::new();
+    let mut needed = HashSet::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if !is_rendered_record(&val) {
+            continue;
+        }
+        if needs_full_record(&val, show_tool_calls)
+            && let Some(step) = val["step_index"].as_u64()
+        {
+            needed.insert(step);
+        }
+        records.push(val);
+    }
+    (records, needed)
+}
+
+fn unrendered_full_record(line: &[u8]) -> bool {
+    !line
+        .windows(b"PLANNER_RESPONSE".len())
+        .any(|w| w == b"PLANNER_RESPONSE")
+        && !line
+            .windows(b"USER_INPUT".len())
+            .any(|w| w == b"USER_INPUT")
+}
+
+fn load_full_records(
+    compact_path: &Path,
+    needed: &HashSet<u64>,
+) -> HashMap<u64, serde_json::Value> {
+    let mut found = HashMap::new();
+    if needed.is_empty() {
+        return found;
+    }
+    let full_path = compact_path.with_file_name("transcript_full.jsonl");
+    let Some(records) = crate::state::jsonl_records(
+        &full_path,
+        crate::state::MAX_TRANSCRIPT_RECORD_BYTES,
+        unrendered_full_record,
+    ) else {
+        return found;
+    };
+    for line in records {
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        if is_rendered_record(&val)
+            && let Some(step) = val["step_index"].as_u64()
+            && needed.contains(&step)
+        {
+            found.insert(step, val);
+        }
+    }
+    found
+}
+
+/// Strip `<USER_REQUEST>` wrapper tags when well-formed. The closing tag must
+/// follow the opening tag or the slice would panic on untrusted input containing
+/// a stray `</USER_REQUEST>` before `<USER_REQUEST>`.
+fn strip_user_request_tags(content: &str) -> &str {
+    let open = "<USER_REQUEST>";
+    if let Some(start) = content.find(open)
+        && let Some(end) = content.find("</USER_REQUEST>")
+        && start + open.len() <= end
+    {
+        &content[start + open.len()..end]
+    } else {
+        content
+    }
+}
+
+/// Format a tool call line as `⚙ name(detail)` or `⚙ name`, unwrapping lazy
+/// `call_mcp_tool` invocations to `mcp_<server>_<tool>` and extracting a
+/// one-line summary of the most salient argument.
+fn tool_call_label(tool: &serde_json::Value) -> String {
+    let raw = tool["name"].as_str().unwrap_or("?");
+    let args = if tool["args"].is_object() {
+        &tool["args"]
+    } else {
+        &tool["parameters"]
+    };
+    let (name, detail_input);
+    let parsed_mcp_args;
+    if raw == "call_mcp_tool"
+        && let Some(server) = decode_arg_scalar(&args["ServerName"])
+        && let Some(inner) = decode_arg_scalar(&args["ToolName"])
+        && !server.is_empty()
+        && !inner.is_empty()
+    {
+        name = format!("mcp_{server}_{inner}");
+        parsed_mcp_args = match &args["Arguments"] {
+            serde_json::Value::String(s) => {
+                serde_json::from_str::<serde_json::Value>(s).unwrap_or(serde_json::Value::Null)
+            }
+            other => other.clone(),
+        };
+        detail_input = &parsed_mcp_args;
+    } else {
+        name = raw.to_owned();
+        detail_input = args;
+    }
+
+    match tool_use_detail(detail_input) {
+        Some(detail) => format!("\u{2699} {name}({detail})"),
+        None => format!("\u{2699} {name}"),
+    }
+}
+
+/// Extract a short one-line summary from a tool call's arguments object.
+fn tool_use_detail(input: &serde_json::Value) -> Option<String> {
+    const KEYS: &[&str] = &[
+        "toolSummary",
+        "description",
+        "Path",
+        "TargetFile",
+        "file_path",
+        "path",
+        "SearchPath",
+        "DirectoryPath",
+        "pattern",
+        "Query",
+        "query",
+        "CommandLine",
+        "command",
+        "branch",
+        "status",
+        "url",
+        "Url",
+        "Uri",
+        "Role",
+        "Prompt",
+        "prompt",
+        "Action",
+        "TaskId",
+        "root",
+        "id",
+    ];
+    for key in KEYS {
+        let Some(raw) = decode_arg_scalar(&input[*key]) else {
+            continue;
+        };
+        let first = raw.lines().next().unwrap_or("").trim();
+        if !first.is_empty() {
+            return Some(crate::state::truncate_chars(first, 80));
+        }
+    }
+    None
+}
+
+/// Decode a scalar argument value from an Agy tool call. `transcript.jsonl`
+/// encodes string values inside `args` as JSON string literals (e.g.
+/// `"\"src/foo.rs\""`), whereas `parameters` stores plain JSON scalars.
+fn decode_arg_scalar(val: &serde_json::Value) -> Option<String> {
+    match val {
+        serde_json::Value::String(s) => {
+            if let Ok(unquoted) = serde_json::from_str::<String>(s) {
+                Some(unquoted)
+            } else if let Ok(num) = serde_json::from_str::<i64>(s) {
+                Some(num.to_string())
+            } else {
+                Some(s.trim_matches(|c| c == '"' || c == '\'').to_owned())
+            }
+        }
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -238,5 +432,83 @@ mod tests {
         let hidden = flatten(&render_transcript(f.path(), &Theme::default(), None, false));
         assert!(hidden.contains("sure thing"), "model prose kept");
         assert!(!hidden.contains("read_file"), "tool call hidden");
+    }
+
+    #[test]
+    fn unwraps_call_mcp_tool_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.jsonl");
+        let line = r#"{"source":"MODEL","type":"PLANNER_RESPONSE","content":"checking","tool_calls":[{"name":"call_mcp_tool","args":{"Arguments":"{}","ServerName":"\"spyc\"","ToolName":"\"get_spyc_context\""}},{"name":"call_mcp_tool","parameters":{"Arguments":{"query":"agent"},"ServerName":"other","ToolName":"search"}},{"name":"read_file","args":{"Path":"\"src/state/agy_transcript.rs\""}}]}"#;
+        std::fs::write(&path, format!("{line}\n")).unwrap();
+
+        let text = flatten(&render_transcript(&path, &Theme::default(), None, true));
+        assert!(
+            text.contains("checking\n\n\u{2699} mcp_spyc_get_spyc_context\n\u{2699} mcp_other_search(agent)\n\u{2699} read_file(src/state/agy_transcript.rs)"),
+            "expected blank line after prose and grouped tool calls with details, got:\n{text}"
+        );
+        assert!(!text.contains("call_mcp_tool"), "got: {text}");
+    }
+
+    #[test]
+    fn separates_prose_from_subsequent_turn_tool_calls() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.jsonl");
+        let rows = [
+            r#"{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","content":"Running checks now."}"#,
+            r#"{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","tool_calls":[{"name":"run_command","args":{"CommandLine":"\"cargo test\"","toolSummary":"\"Run unit tests\""}}]}"#,
+            r#"{"step_index":3,"source":"MODEL","type":"PLANNER_RESPONSE","tool_calls":[{"name":"call_mcp_tool","args":{"Arguments":"{\"id\":1}","ServerName":"\"spyc\"","ToolName":"\"release_scope\""}}]}"#,
+            r#"{"step_index":4,"source":"MODEL","type":"PLANNER_RESPONSE","content":"All checks passed."}"#,
+        ];
+        std::fs::write(&path, rows.join("\n") + "\n").unwrap();
+
+        let text = flatten(&render_transcript(&path, &Theme::default(), None, true));
+        let expected = "Running checks now.\n\n\u{2699} run_command(Run unit tests)\n\u{2699} mcp_spyc_release_scope(1)\n\nAll checks passed.";
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn truncated_fields_fall_back_to_transcript_full_by_step_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let full = dir.path().join("transcript_full.jsonl");
+
+        let compact_rows = [
+            r#"{"step_index":10,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>trunc...","truncated_fields":["content"]}"#,
+            r#"{"step_index":11,"source":"MODEL","type":"PLANNER_RESPONSE","content":"short...","tool_calls":[],"truncated_fields":["content","tool_calls"]}"#,
+            r#"{"step_index":12,"source":"MODEL","type":"PLANNER_RESPONSE","content":"compact prose kept","truncated_fields":["thinking"]}"#,
+        ];
+        std::fs::write(&compact, compact_rows.join("\n") + "\n").unwrap();
+
+        // Without transcript_full.jsonl present, compact content still renders.
+        let fallback_text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        assert!(fallback_text.contains("trunc..."), "got: {fallback_text}");
+        assert!(fallback_text.contains("short..."), "got: {fallback_text}");
+
+        // Write transcript_full.jsonl with extra prefix records and swapped step order.
+        let full_rows = [
+            r#"{"step_index":1,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"earlier step not in tail"}"#,
+            r#"{"step_index":11,"source":"MODEL","type":"PLANNER_RESPONSE","content":"full planner response body","tool_calls":[{"name":"call_mcp_tool","args":{"ServerName":"\"spyc\"","ToolName":"\"git_status\""}}]}"#,
+            r#"{"step_index":10,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>full user prompt text</USER_REQUEST>"}"#,
+            r#"{"step_index":12,"source":"MODEL","type":"PLANNER_RESPONSE","content":"full step 12 should not be used when only thinking was truncated"}"#,
+        ];
+        std::fs::write(&full, full_rows.join("\n") + "\n").unwrap();
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        assert!(
+            text.contains("full user prompt text"),
+            "truncated user input should come from transcript_full.jsonl: {text}"
+        );
+        assert!(
+            text.contains("full planner response body"),
+            "truncated planner response should come from transcript_full.jsonl: {text}"
+        );
+        assert!(
+            text.contains("\u{2699} mcp_spyc_git_status"),
+            "truncated tool_calls should come from transcript_full.jsonl and unwrap: {text}"
+        );
+        assert!(
+            text.contains("compact prose kept"),
+            "record with only thinking truncated should use compact transcript: {text}"
+        );
     }
 }

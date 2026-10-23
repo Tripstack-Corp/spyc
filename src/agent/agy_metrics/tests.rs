@@ -846,3 +846,57 @@ fn only_a_leading_checkpoint_0_is_not_a_compaction() {
         Some(130)
     );
 }
+
+#[test]
+fn current_agy_tool_names_match_typed_results_and_parameters_mcp_calls() {
+    let mut reducer = Reducer::default();
+    let plan = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 10,
+        "created_at": "2026-10-14T10:00:10Z",
+        "tool_calls": [
+            { "name": "grep_search" },
+            { "name": "read_file" },
+            { "name": "edit_file" },
+            { "name": "write_file" },
+            { "name": "manage_subagents" },
+            {
+                "name": "call_mcp_tool",
+                "parameters": {
+                    "ServerName": "\"spyc\"",
+                    "ToolName": "\"get_spyc_context\""
+                }
+            }
+        ]
+    });
+    reducer.fold(decode(&plan).expect("decode plan10"));
+
+    let result = |typ: &str, step: u64, status: &str| {
+        json!({
+            "type": typ,
+            "step_index": step,
+            "status": status,
+            "created_at": format!("2026-10-14T10:00:{step}Z")
+        })
+    };
+    reducer.fold(decode(&result("VIEW_FILE", 11, "DONE")).expect("decode vf11"));
+    reducer.fold(decode(&result("CODE_ACTION", 12, "DONE")).expect("decode ca12"));
+    reducer.fold(decode(&result("CODE_ACTION", 13, "ERROR")).expect("decode ca13"));
+    reducer.fold(decode(&result("INVOKE_SUBAGENT", 14, "DONE")).expect("decode sub14"));
+
+    let snap = reducer.snapshot();
+    assert_eq!(status_of(&snap, "read_file"), ToolStatus::Completed);
+    assert_eq!(status_of(&snap, "edit_file"), ToolStatus::Completed);
+    assert_eq!(status_of(&snap, "write_file"), ToolStatus::Failed);
+    assert_eq!(status_of(&snap, "manage_subagents"), ToolStatus::Completed);
+    assert_eq!(
+        status_of(&snap, "grep_search"),
+        ToolStatus::Started,
+        "typed results must match their own tool names rather than falling back to the first call"
+    );
+    assert_eq!(
+        status_of(&snap, "mcp_spyc_get_spyc_context"),
+        ToolStatus::Started,
+        "call_mcp_tool with parameters must unwrap spyc tool name"
+    );
+}

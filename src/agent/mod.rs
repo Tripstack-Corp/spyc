@@ -729,7 +729,7 @@ impl AgentProfile for CodexProfile {
 /// runtime-formatted string is absent from it, which is exactly how `esc to cancel`
 /// got mistaken for a phrase agy never prints.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
-    region: detect_rules::Region::BottomNonEmptyLines(15),
+    region: detect_rules::Region::BottomNonEmptyLines(30),
     matcher: detect_rules::Matcher::All(&["Requesting permission for:", "Do you want to proceed?"]),
     state: crate::pane::AgentActivity::Blocked,
     visible_blocker: Some("awaiting tool-execution approval"),
@@ -1007,6 +1007,41 @@ mod tests {
         // "needs me" square is worse than no fallback.
         assert_eq!(scan(&["asking: Do you want to proceed?"]), None);
         assert_eq!(scan(&["Requesting permission for: ls"]), None);
+
+        // agy 1.4.5's 5-option command approval menu with a wrapped command and
+        // wrapped option lines pushes "Requesting permission for:" past 15
+        // non-empty lines from the viewport bottom.
+        assert_eq!(
+            scan(&[
+                "\u{25cf} run_command (Git status check)",
+                "Command",
+                "Requesting permission for:",
+                "  git -C /Users/example/src/spyc.worktrees/feat/agy-transcript-parity",
+                "  status --short --branch",
+                "  --untracked-files=all",
+                "Purpose:",
+                "  Git status check",
+                "Do you want to proceed?",
+                "\u{276f} 1. Yes",
+                "  2. Yes, and use Auto mode until you exit (auto-approve edits and",
+                "     safe commands)",
+                "  3. Yes, and always allow in this conversation for commands that",
+                "     start with 'git -C",
+                "     /Users/example/src/spyc.worktrees/feat/agy-transcript-parity'",
+                "  4. Yes, and always allow for commands that start with 'git -C",
+                "     /Users/example/src/spyc.worktrees/feat/agy-transcript-parity'",
+                "     (Persist to settings.json)",
+                "  5. No",
+                "\u{2191}/\u{2193} Navigate \u{b7} tab Amend \u{b7} ctrl+g edit/expand command",
+                "esc to cancel                          Gemini 3.1 Pro (High)",
+                "~/src/spyc (main)                      sandbox: off",
+            ]),
+            Some((
+                crate::pane::AgentActivity::Blocked,
+                Some("awaiting tool-execution approval")
+            )),
+            "wrapped 5-option agy 1.4.5 approval prompt must still scrape as Blocked"
+        );
     }
 
     /// Which agents claim a wheel scroll key, and what it encodes to on the wire.

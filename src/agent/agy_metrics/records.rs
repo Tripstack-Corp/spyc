@@ -89,7 +89,11 @@ fn unquote(s: &str) -> &str {
 }
 
 fn decode_call_mcp_tool(block: &Value) -> Option<String> {
-    let args = &block["args"];
+    let args = if block["args"].is_object() {
+        &block["args"]
+    } else {
+        &block["parameters"]
+    };
     let server = unquote(args["ServerName"].as_str()?);
     if server != "spyc" {
         return Some("mcp".to_owned());

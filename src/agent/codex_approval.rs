@@ -82,7 +82,7 @@ pub fn overrides_report(
     scrape: Option<AgentActivity>,
     kind: AgentKind,
 ) -> bool {
-    kind == AgentKind::Codex
+    matches!(kind, AgentKind::Codex | AgentKind::Agy)
         && scrape == Some(AgentActivity::Blocked)
         && reported.is_none_or(|report| report.status != AgentActivity::Blocked)
 }

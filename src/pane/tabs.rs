@@ -112,9 +112,10 @@ impl AgentActivity {
 ///
 /// Authority model (`App::effective_activity`): a report wins over the timing
 /// fallback until it expires (`expiry`, a backstop against a crashed agent's
-/// stale report). Agy yields non-blocked reports to fresh output. Codex's
-/// visible approval modal temporarily overrides a non-blocked report without
-/// discarding it. Other reports survive redraws and silent tool waits.
+/// stale report). Visible approval prompts in Codex and agy temporarily
+/// override a non-blocked report without discarding it; semantic reports
+/// (`Working`, `Waiting`, `Done`, `Blocked`) survive redraws and silent tool
+/// waits.
 #[derive(Clone, Debug)]
 pub struct ReportedStatus {
     /// The reported state.

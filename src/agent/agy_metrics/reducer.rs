@@ -351,7 +351,7 @@ fn find_pending_tool(
 /// `GENERIC` result is matched by step alone.
 fn type_matches_tool(typ: &str, tool: &str) -> bool {
     match typ {
-        "VIEW_FILE" => tool == "view_file",
+        "VIEW_FILE" => tool == "view_file" || tool == "read_file",
         "RUN_COMMAND" => tool == "run_command" || tool == "manage_task",
         "GREP_SEARCH" => tool == "grep_search",
         "SEARCH_WEB" => tool == "search_web",
@@ -361,12 +361,17 @@ fn type_matches_tool(typ: &str, tool: &str) -> bool {
         "LIST_RESOURCES" => tool == "list_resources",
         "ASK_QUESTION" => tool == "ask_question",
         "INVOKE_SUBAGENT" => {
-            tool == "invoke_subagent" || tool == "define_subagent" || tool == "send_message"
+            tool == "invoke_subagent"
+                || tool == "define_subagent"
+                || tool == "send_message"
+                || tool == "manage_subagents"
         }
         "CODE_ACTION" => {
             tool == "replace_file_content"
                 || tool == "write_to_file"
                 || tool == "multi_replace_file_content"
+                || tool == "edit_file"
+                || tool == "write_file"
         }
         _ => false,
     }
