@@ -22,6 +22,10 @@ impl App {
         // streaming.rs). Each returns whether it needs a redraw. These
         // wake the channel themselves now (`SinkOutput`), so the poll
         // floor that once backstopped them is gone (see below).
+        // A worker that panicked, said once.
+        if self.show_worker_panics() {
+            ctx.draw.mark(3);
+        }
         if self.drain_pending_capture() {
             ctx.draw.mark(3);
         }

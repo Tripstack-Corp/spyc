@@ -136,14 +136,8 @@ impl crossterm::Command for DisableWheelReporting {
 ///
 /// A process-global rather than a field on `ViewState`, because two of the three
 /// things that change this state run outside `App` and cannot reach its fields:
-/// [`restore_terminal`] and the **panic hook**. The hook is not exit-only —
-/// `pane::parser_worker` deliberately `catch_unwind`s a parser panic on
-/// untrusted child output (`Cargo.toml`'s `[profile.release]` says why) and
-/// spyc keeps running — so
-/// with the flag on `ViewState` that path disabled reporting at the terminal
-/// while `App` still believed it was on. `settle_mouse_mode` then saw no
-/// divergence and never re-enabled: the mouse was dead for the rest of the
-/// session, and `:mouse` reported "on" because want matched the stale actual.
+/// [`restore_terminal`] and the **panic hook**, which restores the terminal when
+/// a panic on the UI thread ends the TUI ([`panic_ends_the_tui`]).
 static MOUSE_CAPTURE_ON: AtomicBool = AtomicBool::new(false);
 
 /// Whether the real terminal replied to the kitty keyboard-enhancement query
@@ -455,12 +449,13 @@ pub fn restore_terminal(terminal: &mut Tui) -> Result<()> {
 }
 
 /// Whether a panic on `thread` takes the TUI down, so the panic hook restores
-/// the terminal for the shell. `ui` is the thread that runs the TUI.
-pub const fn panic_ends_the_tui(
-    _thread: std::thread::ThreadId,
-    _ui: std::thread::ThreadId,
-) -> bool {
-    true
+/// the terminal for the shell: only one on `ui`, the thread that runs the TUI.
+/// spyc outlives a panic on any other thread, a worker's (noted for the loop to
+/// show, and its task landing as stopped through `app::landing::spawn_worker`)
+/// or a pane parser's (caught, and the parser rebuilt), so the terminal it is
+/// drawing in must stay as it is.
+pub fn panic_ends_the_tui(thread: std::thread::ThreadId, ui: std::thread::ThreadId) -> bool {
+    thread == ui
 }
 
 /// The panic hook's half of [`restore_terminal`]: it has no `Tui` to write
@@ -486,9 +481,7 @@ pub fn restore_on_panic() {
         ShowMousePointer,
         crossterm::cursor::Show,
     );
-    // This hook is NOT exit-only (`pane::Pane` catches a parser panic and
-    // spyc keeps running), so the flag has to follow the terminal or the
-    // reconcile will believe capture is still on and never restore it.
+    // The flag follows the terminal, as `restore_terminal`'s does.
     MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
     let _ = term_title::pop();
 }
@@ -974,7 +967,6 @@ mod panic_tests {
     /// A worker thread's panic, which spyc survives, leaves the terminal as it
     /// is: only a panic on the UI thread ends the TUI and restores it.
     #[test]
-    #[ignore = "red: a worker thread's panic restores the terminal under a running spyc"]
     fn only_a_panic_on_the_ui_thread_ends_the_tui() {
         let ui = std::thread::current().id();
         assert!(panic_ends_the_tui(ui, ui));

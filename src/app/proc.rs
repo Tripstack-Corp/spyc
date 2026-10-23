@@ -39,6 +39,28 @@ impl Drop for ReaderHandle {
     }
 }
 
+/// Ends the input reader as a read error would, if its thread panics: the loop
+/// then exits and restores the terminal, rather than running on deaf.
+struct ReaderDeath {
+    reader_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    err_tx: std::sync::mpsc::Sender<std::io::Error>,
+    tx: std::sync::mpsc::Sender<Message>,
+}
+
+impl Drop for ReaderDeath {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            // Error, then flag, then wake: the order a read error takes.
+            let _ = self
+                .err_tx
+                .send(std::io::Error::other("the input reader panicked"));
+            self.reader_done
+                .store(true, std::sync::atomic::Ordering::Release);
+            let _ = self.tx.send(Message::Wake(Wake::ReaderExited));
+        }
+    }
+}
+
 /// Spawn the parkable input reader. It uses a FINITE `event::poll(10ms)`
 /// loop — never a bare `event::read()`, which would pin crossterm's
 /// process-global reader mutex indefinitely — so a parked reader holds
@@ -65,6 +87,11 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
         std::thread::Builder::new()
             .name("spyc-input-reader".to_string())
             .spawn(move || {
+                let _death = ReaderDeath {
+                    reader_done: reader_done.clone(),
+                    err_tx: err_tx.clone(),
+                    tx: tx.clone(),
+                };
                 // Park-latency bound — NOT the loop cadence. 10ms <= the
                 // 16ms typing tier, so input still surfaces within one
                 // main-loop tick.
@@ -330,6 +357,40 @@ fn paint_subshell_banner(terminal: &Tui) {
 
 #[cfg(test)]
 mod foreground_exec_tests {
+    /// A reader thread that panics ends as a read error would: an error to
+    /// report, the done flag, and a wake, so the loop exits; one that returns
+    /// leaves nothing behind.
+    #[test]
+    fn a_reader_that_panics_ends_as_a_read_error_would() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        for panics in [true, false] {
+            let reader_done = Arc::new(AtomicBool::new(false));
+            let (err_tx, read_err) = std::sync::mpsc::channel();
+            let (tx, wake) = std::sync::mpsc::channel();
+            let death = super::ReaderDeath {
+                reader_done: reader_done.clone(),
+                err_tx,
+                tx,
+            };
+            let _ = std::thread::spawn(move || {
+                let _death = death;
+                assert!(!panics, "a parse went wrong");
+            })
+            .join();
+            assert_eq!(reader_done.load(Ordering::Acquire), panics, "{panics}");
+            assert_eq!(read_err.try_recv().is_ok(), panics, "{panics}");
+            assert_eq!(
+                matches!(
+                    wake.try_recv(),
+                    Ok(super::Message::Wake(super::Wake::ReaderExited))
+                ),
+                panics,
+                "{panics}"
+            );
+        }
+    }
+
     use super::ForegroundExec;
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;

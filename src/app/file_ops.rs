@@ -167,6 +167,28 @@ pub enum FileOutcome {
     ColumnsRelisted {
         reads: Vec<(Side, PathBuf, Result<Listing, String>)>,
     },
+    /// The operation's worker stopped before it finished (it panicked), with
+    /// the panic's message: what it had done is on disk, the rest isn't.
+    Stopped(String),
+}
+
+/// What a file operation whose worker stopped lands as: a listing read as a
+/// failed read, so the refresh in flight ends, and anything else as stopped.
+fn stopped_outcome(op: &FileOp) -> impl FnOnce(String) -> FileOutcome + Send + 'static {
+    let listing = match op {
+        FileOp::RefreshListing {
+            side, generation, ..
+        } => Some((*side, *generation)),
+        _ => None,
+    };
+    move |message| match listing {
+        Some((side, generation)) => FileOutcome::ListingRefreshed {
+            side,
+            generation,
+            result: Err(message),
+        },
+        None => FileOutcome::Stopped(message),
+    }
 }
 
 /// Read `dir`'s listing: the heavy 50k-entry walk + sort, off the input thread.
@@ -474,48 +496,7 @@ impl App {
                 payload,
                 count,
                 skipped,
-            } => {
-                if count == 0 {
-                    self.state
-                        .flash_error("no readable text files in selection");
-                    return;
-                }
-                let msg = if skipped > 0 {
-                    format!("piped {count} file(s), skipped {skipped} binary/unreadable")
-                } else {
-                    format!("piped {count} file(s) to pane")
-                };
-                if payload.len() > crate::pane::pty_host::MAX_INPUT_BYTES {
-                    let Some(info) = self.active_tab_info() else {
-                        self.state.flash_error("pipe failed: no pane open");
-                        return;
-                    };
-                    if !matches!(self.state.mode, super::Mode::Normal) {
-                        self.state
-                            .flash_error("pipe failed: finish the current prompt, then retry");
-                        return;
-                    }
-                    let prefix = format!(
-                        "Pipe {:.1} MiB from {count} file(s) to pane? [y/N] ",
-                        payload.len() as f64 / 1_048_576.0
-                    );
-                    self.state.mode = super::Mode::Prompting(super::Prompt::simple(
-                        super::PromptKind::PipeConfirm {
-                            payload,
-                            tab_id: info.id.clone(),
-                            on_ok: msg,
-                        },
-                        prefix,
-                    ));
-                    return;
-                }
-                effects.push(Effect::SendToPane {
-                    target: PaneTarget::Active,
-                    input: PaneInput::Bytes(payload),
-                    on_ok: Some(msg),
-                    err_prefix: Some("pipe failed"),
-                });
-            }
+            } => self.apply_piped_content(payload, count, skipped, effects),
             FileOutcome::LongListReady { title, lines } => {
                 self.open_pager_request(PagerRequest {
                     title,
@@ -550,7 +531,61 @@ impl App {
                     self.view.project_mut().context_dirty = true;
                 }
             }
+            FileOutcome::Stopped(message) => self
+                .state
+                .flash_error(format!("a file operation stopped unexpectedly: {message}")),
         }
+    }
+
+    /// Deliver piped file content to the pane in view: sent now, or, when it's
+    /// over the input cap, held behind a `[y/N]`.
+    fn apply_piped_content(
+        &mut self,
+        payload: Vec<u8>,
+        count: usize,
+        skipped: usize,
+        effects: &mut Vec<Effect>,
+    ) {
+        if count == 0 {
+            self.state
+                .flash_error("no readable text files in selection");
+            return;
+        }
+        let msg = if skipped > 0 {
+            format!("piped {count} file(s), skipped {skipped} binary/unreadable")
+        } else {
+            format!("piped {count} file(s) to pane")
+        };
+        if payload.len() > crate::pane::pty_host::MAX_INPUT_BYTES {
+            let Some(info) = self.active_tab_info() else {
+                self.state.flash_error("pipe failed: no pane open");
+                return;
+            };
+            if !matches!(self.state.mode, super::Mode::Normal) {
+                self.state
+                    .flash_error("pipe failed: finish the current prompt, then retry");
+                return;
+            }
+            let prefix = format!(
+                "Pipe {:.1} MiB from {count} file(s) to pane? [y/N] ",
+                payload.len() as f64 / 1_048_576.0
+            );
+            self.state.mode = super::Mode::Prompting(super::Prompt::simple(
+                super::PromptKind::PipeConfirm {
+                    payload,
+                    tab_id: info.id.clone(),
+                    on_ok: msg,
+                },
+                prefix,
+            ));
+            return;
+        }
+        effects.push(Effect::SendToPane {
+            target: PaneTarget::Active,
+            input: PaneInput::Bytes(payload),
+            on_ok: Some(msg),
+            err_prefix: Some("pipe failed"),
+        });
     }
 
     /// Land a watcher-driven listing read ([`FileOp::RefreshListing`]).
@@ -619,9 +654,12 @@ impl App {
             .runtime
             .file_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::FileOp);
-        std::thread::spawn(move || {
-            let _ = results.send((origin, run_file_op(op)));
-        });
+        let stopped = stopped_outcome(&op);
+        super::landing::spawn_worker(
+            results,
+            move || (origin, run_file_op(op)),
+            move |message| (origin, stopped(message)),
+        );
     }
 }
 
@@ -825,6 +863,69 @@ mod tests {
         let listing = result.expect("read ok");
         assert!(listing.entries.iter().any(|e| e.name == "alpha.txt"));
         assert!(listing.entries.iter().any(|e| e.name == "beta.txt"));
+    }
+
+    /// A file operation whose worker stopped says so: a copy that panicked
+    /// partway isn't left looking as if it never ran, or ran in full.
+    #[test]
+    fn a_file_op_whose_worker_stopped_says_so() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        app.runtime.file_results.land((
+            app.state.active,
+            FileOutcome::Stopped("the copy went wrong".to_string()),
+        ));
+        let (drew, _fx) = app.apply_file_outcomes();
+        assert!(drew);
+        let flash = app.flash_text().unwrap_or_default().to_owned();
+        assert!(
+            flash.contains("stopped unexpectedly: the copy went wrong"),
+            "{flash}"
+        );
+    }
+
+    /// A listing read whose worker stopped carries its staleness tag into the
+    /// failed read it lands as; any other operation lands as stopped.
+    #[test]
+    fn a_stopped_listing_read_lands_as_a_failed_read_and_any_other_op_as_stopped() {
+        let read = FileOp::RefreshListing {
+            side: Side::Left,
+            dir: PathBuf::from("/nowhere"),
+            generation: 7,
+        };
+        assert!(matches!(
+            super::stopped_outcome(&read)("boom".to_string()),
+            FileOutcome::ListingRefreshed { side: Side::Left, generation: 7, result: Err(m) } if m == "boom"
+        ));
+        let copy = FileOp::Copy {
+            paths: Vec::new(),
+            dest: PathBuf::from("/nowhere"),
+        };
+        assert!(matches!(
+            super::stopped_outcome(&copy)("boom".to_string()),
+            FileOutcome::Stopped(m) if m == "boom"
+        ));
+    }
+
+    /// A listing read whose worker stopped lands as a failed read, which ends
+    /// the refresh in flight, so the column follows the disk again.
+    #[test]
+    fn a_listing_read_that_stopped_ends_its_flight() {
+        let work = tempdir().unwrap();
+        let mut app = App::test_app(work.path().to_path_buf());
+        let side = app.state.focused_side();
+        let generation = app.state.col(side).list_generation;
+        app.runtime.listing_refresh_inflight = true;
+        app.runtime.file_results.land((
+            app.state.active,
+            FileOutcome::ListingRefreshed {
+                side,
+                generation,
+                result: Err("the read went wrong".to_string()),
+            },
+        ));
+        app.apply_file_outcomes();
+        assert!(!app.runtime.listing_refresh_inflight, "in-flight cleared");
     }
 
     #[test]
