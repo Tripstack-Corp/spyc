@@ -305,6 +305,9 @@ pub fn index_transcript(op: TranscriptIndexOp) -> ImageOutcome {
             crate::state::transcript_images::Format::Codex => {
                 crate::state::codex_images::index(path)
             }
+            crate::state::transcript_images::Format::Agy => {
+                crate::state::agy_transcript::index_images(path)
+            }
         },
     );
     ImageOutcome::Indexed(TranscriptIndexResult {

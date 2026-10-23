@@ -277,7 +277,7 @@ fn load_location(location: &Location) -> Result<Vec<u8>, String> {
                 records::data_url(url).ok_or("image is not a supported inline data URL")?;
             super::transcript_images::decode_base64(data)
         }
-        Input::Local(path) => read_local(
+        Input::Local(path) => super::transcript_images::read_local(
             &local_path(path, location.cwd.as_deref())
                 .ok_or("relative image path has no recorded cwd")?,
         ),
@@ -292,32 +292,6 @@ fn local_path(path: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     } else {
         cwd.map(|cwd| cwd.join(path))
     }
-}
-
-fn read_local(path: &Path) -> Result<Vec<u8>, String> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(path)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    let meta = file
-        .metadata()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    if !meta.is_file() || meta.len() > MAX_IMAGE_BYTES {
-        return Err(format!(
-            "{}: image is not a regular file within the 64 MiB limit",
-            path.display()
-        ));
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_IMAGE_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("{}: {e}", path.display()))?;
-    if bytes.len() as u64 > MAX_IMAGE_BYTES {
-        return Err("image exceeds the 64 MiB limit".into());
-    }
-    Ok(bytes)
 }
 
 fn hash(bytes: &[u8]) -> u64 {
