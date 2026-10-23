@@ -90,6 +90,7 @@ include_pager_title = true     # prepend a source header to pager yanks (y/Y)
 
 [pager]
 tab_width = 4                  # columns a tab expands to (min 1)
+scrollback_line_numbers = true # ^a v scrollback opens with line numbers (l toggles)
 
 [markdown]
 open_as_rendered = true        # open .md in rendered view (m toggles source)

@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use super::{
-    Config, FileClipboard, FileConfig, FilePane, FilePaneTab, PaneTabConfig, ProjectTabs,
-    ScanPatternFile, dsl, home_dir,
+    Config, FileClipboard, FileConfig, FilePager, FilePane, FilePaneTab, PaneTabConfig,
+    ProjectTabs, ScanPatternFile, dsl, home_dir,
 };
 
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
@@ -167,6 +167,17 @@ impl Config {
         }
     }
 
+    /// `[pager]`, per field. `tab_width` is clamped to at least 1 so a 0 in
+    /// the config can't make tabs render as zero-width (invisible).
+    fn merge_pager(&mut self, file: &FilePager) {
+        if let Some(w) = file.tab_width {
+            self.pager.tab_width = w.max(1);
+        }
+        if let Some(b) = file.scrollback_line_numbers {
+            self.pager.scrollback_line_numbers = b;
+        }
+    }
+
     /// `[[scan.patterns]]`, appended. A bad regex is logged and skipped rather
     /// than failing the whole config — one user-typed typo shouldn't lock them
     /// out of starting spyc. An uppercase label hands the filled `url` to the
@@ -323,11 +334,7 @@ impl Config {
             self.yank.include_pager_title = b;
         }
 
-        // Pager: per-field merge. Clamp tab_width to >= 1 so a 0 in the
-        // config can't make tabs render as zero-width (invisible).
-        if let Some(w) = file.pager.tab_width {
-            self.pager.tab_width = w.max(1);
-        }
+        self.merge_pager(&file.pager);
 
         // Mouse: per-field merge. Clamp scroll_lines to >= 1 so a 0 can't make
         // the wheel a no-op on spyc-owned surfaces.

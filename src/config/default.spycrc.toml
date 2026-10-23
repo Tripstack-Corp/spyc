@@ -143,8 +143,11 @@
 # to. `w` reveals each expanded tab with a `→` marker; with `w` off the
 # tab is plain indentation. Minimum 1 (a 0 is clamped — a zero-width
 # tab would vanish).
+# `scrollback_line_numbers` (default true): open the `^a v` scrollback
+# with line numbers. `l` still toggles them once it's open.
 [pager]
 # tab_width = 4
+# scrollback_line_numbers = true
 
 # ── mouse ─────────────────────────────────────────────────────────────
 # `capture` (default true): ask the terminal for real mouse reporting

@@ -443,6 +443,40 @@ fn capital_t_flips_the_scrollback_source_both_ways() {
     });
 }
 
+/// **`[pager] scrollback_line_numbers` decides whether `^a v` opens with line
+/// numbers.** Default on; `false` opens the scrollback without the gutter.
+#[test]
+fn scrollback_line_numbers_follow_the_pager_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        agent_pane_with_capture(&mut app, &dir);
+        let numbered = |a: &App| {
+            a.view
+                .project()
+                .scroll_pager
+                .as_ref()
+                .map(|v| v.show_line_numbers)
+        };
+
+        app.open_pane_scroll_pager();
+        app.mount_terminal_scrollback();
+        assert_eq!(numbered(&app), Some(true), "on by default");
+
+        app.view.project_mut().scroll_pager = None;
+        app.state
+            .active_project_mut()
+            .config
+            .pager
+            .scrollback_line_numbers = false;
+        app.open_pane_scroll_pager();
+        app.mount_terminal_scrollback();
+        assert_eq!(numbered(&app), Some(false), "off when the config says so");
+    });
+}
+
 /// `T` on a pane with only one source says which one is missing. Doing nothing
 /// silently is what sent a user hunting through the config in the first place.
 #[test]

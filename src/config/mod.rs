@@ -428,11 +428,18 @@ pub struct PagerConfig {
     /// with a `→` marker; with `w` off the tab is plain indentation.
     /// Clamped to at least 1 on load (a 0-width tab would vanish).
     pub tab_width: usize,
+    /// Whether the `^a v` scrollback opens with line numbers. Default on:
+    /// a gutter the live pane never has, so the view reads as scrolled
+    /// back. `l` still toggles it once open.
+    pub scrollback_line_numbers: bool,
 }
 
 impl Default for PagerConfig {
     fn default() -> Self {
-        Self { tab_width: 4 }
+        Self {
+            tab_width: 4,
+            scrollback_line_numbers: true,
+        }
     }
 }
 
@@ -507,6 +514,8 @@ impl Default for MouseConfig {
 struct FilePager {
     #[serde(default)]
     tab_width: Option<usize>,
+    #[serde(default)]
+    scrollback_line_numbers: Option<bool>,
 }
 
 /// `[mouse]` as parsed from the file — every field optional so an absent key
@@ -1264,6 +1273,17 @@ mod tests {
         std::fs::write(&path, "[pager]\ntab_width = 0\n").unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
         assert_eq!(cfg.pager.tab_width, 1, "a 0-width tab would vanish");
+    }
+
+    #[test]
+    fn pager_scrollback_line_numbers_defaults_on_and_parses_off() {
+        assert!(Config::default().pager.scrollback_line_numbers);
+        let tmp = tempdir().unwrap();
+        let path = tmp.path().join("rc.toml");
+        std::fs::write(&path, "[pager]\nscrollback_line_numbers = false\n").unwrap();
+        let cfg = Config::load_from(&[Some(&path)]).unwrap();
+        assert!(!cfg.pager.scrollback_line_numbers);
+        assert_eq!(cfg.pager.tab_width, 4, "an unset sibling keeps its default");
     }
 
     #[test]
