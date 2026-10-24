@@ -256,6 +256,12 @@ pub fn read_tail_lossy(path: &std::path::Path, max_bytes: u64) -> std::io::Resul
     read_prefix_tail_lossy(path, u64::MAX, max_bytes)
 }
 
+/// [`read_tail_lossy`] on an already-opened [`std::fs::File`], so a caller that
+/// verified the handle with `O_NONBLOCK` + `is_file()` never reopens the path.
+pub fn read_file_tail_lossy(f: std::fs::File, max_bytes: u64) -> std::io::Result<String> {
+    read_file_prefix_tail_lossy(f, u64::MAX, max_bytes)
+}
+
 /// [`read_tail_lossy`] of the file's first `end` bytes: the tail of that prefix,
 /// not of the file.
 pub fn read_prefix_tail_lossy(
@@ -263,8 +269,16 @@ pub fn read_prefix_tail_lossy(
     end: u64,
     max_bytes: u64,
 ) -> std::io::Result<String> {
+    let f = std::fs::File::open(path)?;
+    read_file_prefix_tail_lossy(f, end, max_bytes)
+}
+
+fn read_file_prefix_tail_lossy(
+    mut f: std::fs::File,
+    end: u64,
+    max_bytes: u64,
+) -> std::io::Result<String> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = std::fs::File::open(path)?;
     let end = f.metadata()?.len().min(end);
     let start = end.saturating_sub(max_bytes);
     if start == 0 {

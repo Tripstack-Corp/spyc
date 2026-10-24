@@ -156,7 +156,11 @@ Inside either view:
   instead of parking you at `[EOF]`
 
 Transcript sources per agent live under `src/state/` (`claude_transcript.rs`,
-`codex_transcript.rs`, `agy_transcript.rs`). zot has none yet.
+`codex_transcript.rs`, `agy_transcript.rs`). When an Antigravity step in
+`transcript.jsonl` marks `content` or `tool_calls` in `truncated_fields`, spyc
+hydrates the newest truncated steps from sibling `transcript_full.jsonl` within
+a bounded scan and byte budget; any step left unhydrated renders its compact
+preview followed by a `[truncated]` line. zot has none yet.
 
 Codex scrollback accepts both legacy message/function-call events and current
 `item_completed` user/agent, command and MCP items, plus custom-tool calls.
