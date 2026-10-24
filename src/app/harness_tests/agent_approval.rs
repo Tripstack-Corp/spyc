@@ -2,6 +2,7 @@ use super::agent_readiness::{agent_app, dump};
 use super::*;
 use crate::mcp_cmd::{McpCommand, McpResponse};
 use crate::pane::AgentActivity;
+use crate::state::sessions::AgentKind;
 use std::time::{Duration, Instant};
 
 fn report(app: &mut App, status: &str, event: Option<serde_json::Value>) {

@@ -1,4 +1,6 @@
 use super::*;
+use crate::app::RowData;
+use crate::fs::EntryKind;
 
 /// A `!` capture runs in the FOCUSED column's dir — `!touch foo` with `b`
 /// focused lands in `b`, not `a`/PROJECT_HOME. Regression: `start_capture`

@@ -1,4 +1,6 @@
 use super::*;
+use crate::app::RowData;
+use crate::fs::EntryKind;
 
 /// `^s |` is a plain open/close on one file — no mode cycling in between — and
 /// closing clears the right-region preview.

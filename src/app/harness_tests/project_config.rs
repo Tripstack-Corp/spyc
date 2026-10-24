@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use super::projects_open::{Three, leader, open, with_three};
 use super::*;
+use crate::app::FlashKind;
 
 /// Run `test` with spyc's config directory at `<home>/config`, and return it.
 fn with_config(t: &mut Three, test: impl FnOnce(&mut Three, &Path)) {
