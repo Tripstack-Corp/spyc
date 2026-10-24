@@ -1,7 +1,6 @@
 use serde_json::{Value, json};
 
 use super::records::{Event, decode};
-use super::reducer::MAX_TOOLS;
 use super::*;
 
 const SESSION: &str = "c1a0de00-0000-4000-8000-000000000001";

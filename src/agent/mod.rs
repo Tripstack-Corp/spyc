@@ -24,6 +24,7 @@ pub mod codex_questions;
 pub mod codex_records;
 pub mod codex_recovery;
 pub mod detect_rules;
+pub mod metrics;
 pub mod resume;
 pub mod status_hook;
 pub mod tail;

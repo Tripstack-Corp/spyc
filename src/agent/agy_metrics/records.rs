@@ -189,7 +189,9 @@ fn model_from_settings(content: &str) -> Option<String> {
     label(raw)
 }
 
-/// All three counts, or none: a usage missing one is not a measurement.
+/// All three counts, or none: a usage missing one is not a measurement. agy's
+/// `input_tokens` excludes cache reads, as [`Usage::input`] does, and agy
+/// reports no cache writes.
 fn usage(value: &Value) -> Option<Usage> {
     Some(Usage {
         input: value["input_tokens"].as_u64()?,

@@ -44,7 +44,7 @@ One line per module: its `//!` doc has the rest, ARCHITECTURE.md the decisions b
 
 **Other crates.**
 
-- **`src/agent/`** — one `AgentProfile` impl and one `REGISTRY` entry per hosted agent (claude, codex, agy, zot); scrape-fallback rules for states hooks can't report (`detect_rules.rs`); native chrome boundaries, so `gf`/`J` read the agent's output (`chrome/`); per-agent transcript metrics for the HUD (`codex_metrics/`, `claude_metrics/`, `agy_metrics/`) over `tail/`, a bounded follower of one session file that its own watch wakes, never a poll; `waiting.rs`, the precedence of a live `waiting` over hook `done`s.
+- **`src/agent/`** — one `AgentProfile` impl and one `REGISTRY` entry per hosted agent (claude, codex, agy, zot); scrape-fallback rules for states hooks can't report (`detect_rules.rs`); native chrome boundaries, so `gf`/`J` read the agent's output (`chrome/`); per-agent transcript metrics for the HUD (`codex_metrics/`, `claude_metrics/`, `agy_metrics/`, sharing `metrics.rs`'s types) over `tail/`, a bounded follower of one session file that its own watch wakes, never a poll; `waiting.rs`, the precedence of a live `waiting` over hook `done`s.
 - **`src/archive/`** — the pure archive core. A mount is an **index, not a directory**; name normalization makes a zip-slip name unrepresentable, and extraction never traverses a symlink.
 - **`crates/spyc-vt-sys/`** — the FFI to libghostty-vt at a pinned commit: bindings checked in, prebuilt archives vendored for five targets (CI's test host among them) and SHA-256-checked by `build.rs`. A pin bump owes a full harness re-run; scrollback rows are the UX contract, bytes a safety valve.
 - **`src/keymap/`** — the `Action` vocabulary, each with its `tier()`; resolver, DSL parser, default bindings.

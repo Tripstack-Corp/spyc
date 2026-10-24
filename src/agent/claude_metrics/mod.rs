@@ -5,8 +5,8 @@
 //! `waiting` included, comes from the status hooks.
 //!
 //! Claude's token counts are not Codex's: `input` excludes the cache reads and
-//! cache writes, which are separate and additive. That is why these types are
-//! not `codex_metrics`'s.
+//! cache writes, which are separate and additive. That is why its usage is
+//! [`Usage`], from [`crate::agent::metrics`], and not `codex_metrics`'s `Tokens`.
 
 pub mod records;
 mod reducer;
@@ -18,9 +18,11 @@ use std::path::PathBuf;
 
 use jiff::Timestamp;
 
+pub use crate::agent::metrics::{
+    MAX_TOOL_NAMES, MAX_TOOLS, OTHER_TOOLS, Sample, ToolCount, ToolStatus, Usage,
+};
 pub use crate::agent::tail::Availability;
-pub use reducer::{MAX_TOOL_NAMES, MAX_TOOLS, OTHER_TOOLS, Reducer};
-pub(crate) use reducer::{count_tool, replace};
+pub use reducer::Reducer;
 
 /// Claude Code's configuration directory: `$CLAUDE_CONFIG_DIR`, else
 /// `~/.claude`. Only an absolute one names a place to read.
@@ -59,58 +61,6 @@ impl Update {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sample<T> {
-    pub at: Timestamp,
-    pub value: T,
-}
-
-impl<T> Sample<T> {
-    /// Pure freshness decision; the consumer decides when an event warrants it.
-    pub fn is_stale_at(&self, now: Timestamp, max_age_secs: i64) -> bool {
-        now.as_second().saturating_sub(self.at.as_second()) > max_age_secs.max(0)
-    }
-}
-
-/// One message's `usage`. The four counts are disjoint, so a sum is a total.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Usage {
-    /// Input not read from or written to the prompt cache.
-    pub input: u64,
-    pub cache_write: u64,
-    pub cache_read: u64,
-    pub output: u64,
-}
-
-impl Usage {
-    /// What the context held when this message was requested.
-    pub const fn context(&self) -> u64 {
-        self.input
-            .saturating_add(self.cache_write)
-            .saturating_add(self.cache_read)
-    }
-
-    #[must_use]
-    pub const fn saturating_add(self, other: Self) -> Self {
-        Self {
-            input: self.input.saturating_add(other.input),
-            cache_write: self.cache_write.saturating_add(other.cache_write),
-            cache_read: self.cache_read.saturating_add(other.cache_read),
-            output: self.output.saturating_add(other.output),
-        }
-    }
-
-    #[must_use]
-    pub const fn saturating_sub(self, other: Self) -> Self {
-        Self {
-            input: self.input.saturating_sub(other.input),
-            cache_write: self.cache_write.saturating_sub(other.cache_write),
-            cache_read: self.cache_read.saturating_sub(other.cache_read),
-            output: self.output.saturating_sub(other.output),
-        }
-    }
-}
-
 /// How the session runs; each field is its latest report, `None` until one.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Mode {
@@ -136,13 +86,6 @@ pub struct Compaction {
     pub pre_tokens: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolStatus {
-    Started,
-    Completed,
-    Failed,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Tool {
     pub name: Option<String>,
@@ -150,15 +93,6 @@ pub struct Tool {
     pub at: Timestamp,
     /// Started with `run_in_background`, so its result only says it began.
     pub background: bool,
-}
-
-/// Calls of one tool since the read began.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolCount {
-    /// [`reducer::OTHER_TOOLS`] once [`reducer::MAX_TOOL_NAMES`] are counted.
-    pub name: String,
-    pub calls: u32,
-    pub failed: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -177,7 +111,7 @@ pub struct Snapshot {
     pub plan: Option<Sample<Plan>>,
     pub compaction: Option<Sample<Compaction>>,
     pub compactions: u32,
-    /// Recent tool calls, oldest first, at most `reducer::MAX_TOOLS`.
+    /// Recent tool calls, oldest first, at most [`MAX_TOOLS`].
     pub tools: Vec<Tool>,
     /// False once a result named a call the read never saw start, or a call
     /// was evicted: counts over `tools` are then not exhaustive.

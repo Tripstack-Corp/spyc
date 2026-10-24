@@ -16,11 +16,9 @@ use std::path::PathBuf;
 
 use jiff::Timestamp;
 
-// agy's `input_tokens` excludes cache reads, as Claude's does, so Claude's
-// `Usage` fits with `cache_write` left at 0.
-pub use crate::agent::claude_metrics::{Sample, ToolCount, ToolStatus, Usage};
+pub use crate::agent::metrics::{MAX_TOOLS, Sample, ToolCount, ToolStatus, Usage};
 pub use crate::agent::tail::Availability;
-pub use reducer::{MAX_TOOLS, Reducer};
+pub use reducer::Reducer;
 
 /// agy's user home directory (`$HOME`): state lives under
 /// `.gemini/antigravity-cli/brain/<session_id>/`.
@@ -84,7 +82,7 @@ pub struct Snapshot {
     pub mode: Option<Sample<Mode>>,
     pub compaction: Option<Sample<Compaction>>,
     pub compactions: u32,
-    /// Recent tool calls, oldest first, at most `reducer::MAX_TOOLS`.
+    /// Recent tool calls, oldest first, at most [`MAX_TOOLS`].
     pub tools: Vec<Tool>,
     /// False once an evicted call or an unobserved start prevents exhaustive history.
     pub tools_complete: bool,

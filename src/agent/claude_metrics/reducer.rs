@@ -9,11 +9,8 @@ use jiff::Timestamp;
 
 use super::records::{Event, TaskOutcome, ToolCall};
 use super::{Compaction, Mode, Plan, Sample, Snapshot, Tool, ToolCount, ToolStatus, Usage};
+use crate::agent::metrics::{MAX_TOOLS, count_tool, replace};
 
-pub const MAX_TOOLS: usize = 64;
-/// Tools counted by name; later names share [`OTHER_TOOLS`].
-pub const MAX_TOOL_NAMES: usize = 24;
-pub const OTHER_TOOLS: &str = "other";
 /// How many message ids are remembered to deduplicate their records. A
 /// message's records are written together, so a short window is enough.
 const RECENT_MESSAGES: usize = 64;
@@ -185,8 +182,7 @@ impl Reducer {
         }
     }
 
-    /// The tally for `name`. Past [`MAX_TOOL_NAMES`] distinct names, new ones
-    /// share [`OTHER_TOOLS`], so the list stays bounded.
+    /// The tally for `name`, bounded as [`count_tool`] describes.
     fn count(&mut self, name: Option<&str>) -> &mut ToolCount {
         count_tool(&mut self.snapshot.tool_counts, name)
     }
@@ -236,34 +232,5 @@ impl Reducer {
             }
             replace(&mut self.snapshot.compaction, at, compaction);
         }
-    }
-}
-
-pub fn count_tool<'a>(counts: &'a mut Vec<ToolCount>, name: Option<&str>) -> &'a mut ToolCount {
-    let name = name.unwrap_or("tool");
-    let index = counts.iter().position(|c| c.name == name).or_else(|| {
-        (counts.len() >= MAX_TOOL_NAMES)
-            .then(|| counts.iter().position(|c| c.name == OTHER_TOOLS))
-            .flatten()
-    });
-    let index = index.unwrap_or_else(|| {
-        let name = if counts.len() >= MAX_TOOL_NAMES {
-            OTHER_TOOLS
-        } else {
-            name
-        };
-        counts.push(ToolCount {
-            name: name.to_owned(),
-            calls: 0,
-            failed: 0,
-        });
-        counts.len() - 1
-    });
-    &mut counts[index]
-}
-
-pub fn replace<T>(slot: &mut Option<Sample<T>>, at: Timestamp, value: T) {
-    if slot.as_ref().is_none_or(|old| at >= old.at) {
-        *slot = Some(Sample { at, value });
     }
 }
