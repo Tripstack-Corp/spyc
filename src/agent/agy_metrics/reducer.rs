@@ -8,10 +8,8 @@ use jiff::Timestamp;
 
 use super::records::{Event, ToolCall};
 use super::{Compaction, Mode, Sample, Snapshot, Tool, ToolStatus, Usage};
+use crate::agent::metrics::{MAX_TOOLS, count_tool, replace};
 
-use crate::agent::claude_metrics::{count_tool, replace};
-
-pub const MAX_TOOLS: usize = 64;
 /// How many planner responses are remembered to deduplicate their records.
 const RECENT_MESSAGES: usize = 64;
 

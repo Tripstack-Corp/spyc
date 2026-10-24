@@ -386,8 +386,11 @@ closed tabs are discarded. Pending image bytes remain in memory only.
 
 ## Native agent HUD
 
-The optional strip is a visible consumer of `codex_metrics` for a Codex tab and
-`claude_metrics` for a Claude Code tab, not an activity authority.
+The optional strip is a visible consumer of `codex_metrics` for a Codex tab,
+`claude_metrics` for a Claude Code tab and `agy_metrics` for an agy tab, not an
+activity authority. Claude's and agy's readers fill one set of types,
+`agent::metrics`, whose token counts are disjoint; Codex's overlap, so it keeps
+its own.
 `AppState.pane.agent_hud` holds one bounded snapshot keyed by its feed, stable
 pane id, session (Codex's pinned thread, or the session Claude Code's hooks
 reported), the agent's home and a monotonic worker generation. The feed is part

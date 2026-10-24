@@ -8,8 +8,7 @@ use jiff::Timestamp;
 
 use super::{Sample, Snapshot, Source, Tool, ToolStatus};
 use crate::agent::codex_records::metrics::Event;
-
-pub const MAX_TOOLS: usize = 64;
+use crate::agent::metrics::MAX_TOOLS;
 
 /// Cumulative token snapshots replace older samples; they are never summed.
 #[derive(Default)]

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use jiff::Timestamp;
 
+pub use crate::agent::metrics::ToolStatus;
 pub use crate::agent::tail::Availability;
 pub use reducer::Reducer;
 
@@ -59,13 +60,6 @@ pub struct Mode {
     pub effort: Option<String>,
     pub approval: Option<String>,
     pub sandbox: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolStatus {
-    Started,
-    Completed,
-    Failed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
