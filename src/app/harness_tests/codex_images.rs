@@ -1,6 +1,7 @@
 //! Image gallery and paste capture through the pane's actual App routes.
 use super::*;
 use crate::app::image_ops;
+use crate::app::{PaneInput, PaneTarget};
 
 const SID: &str = "019e8b21-9e7c-7553-a118-d1cdada725fd";
 const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

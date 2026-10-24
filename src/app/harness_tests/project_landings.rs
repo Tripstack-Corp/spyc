@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::*;
+use crate::app::View;
 
 struct Two {
     app: App,

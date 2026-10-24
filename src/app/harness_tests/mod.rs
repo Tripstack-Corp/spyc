@@ -1,13 +1,16 @@
 //! Harness-driven tests for the App event loop / lifecycle, relocated from
 //! mod.rs (800-LoC campaign).
+//!
+//! Each file here opens with `use super::*`, so these imports are the vocabulary
+//! every harness file shares. A name one or two files need, they import.
 
-use super::*;
 use crate::app::effect::matchers::EffectSliceExt;
+use crate::app::{
+    App, Effect, Message, Mode, PaneTextKind, PaneTextSink, Prompt, PromptKind, RunCtx, Wake, state,
+};
 use crate::keymap::Action;
-// `KeyEvent` used to arrive through `use super::*`, because mod.rs imported it
-// for the pure key predicates. Those moved to `util.rs`, so these fixtures name
-// it themselves rather than keeping a production-unused import alive upstream.
-use crossterm::event::{KeyEvent, KeyModifiers};
+use crate::ui::pager::PagerView;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())
@@ -486,6 +489,21 @@ fn agent_transition_notifies_even_when_activity_preset_by_report() {
             "a Blocked transition must ping even when `activity` was pre-set by the report",
         );
     });
+}
+
+/// The prelude above names its imports: a glob of `super` here would hand every
+/// harness file the whole of `app/mod.rs`'s namespace, its imports included.
+#[test]
+fn the_harness_prelude_names_what_it_imports() {
+    let src = include_str!("mod.rs");
+    assert!(
+        src.contains("use crate::app::{"),
+        "the harness prelude moved; point this guard at it"
+    );
+    assert!(
+        !src.lines().any(|line| line.trim() == "use super::*;"),
+        "`harness_tests/mod.rs` globs `app/mod.rs`; import the names it needs instead"
+    );
 }
 
 mod agent_approval;

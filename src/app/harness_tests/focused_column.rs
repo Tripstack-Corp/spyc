@@ -2,6 +2,7 @@
 //! `state.left` — column `a` — while the keyboard was in `b`.
 
 use super::*;
+use crate::app::View;
 use crate::app::graveyard_ops::GraveyardOutcome;
 use crate::state::graveyard::Graveyard;
 

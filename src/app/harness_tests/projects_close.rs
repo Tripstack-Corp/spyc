@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::projects_open::{leader, open, with_three};
 use super::*;
+use crate::app::runtime::PendingScopeWait;
 use crate::mcp_cmd::McpResponse;
 use crate::state::scope_registry::{ScopeClaim, ScopeIntent};
 use crossterm::event::KeyCode;

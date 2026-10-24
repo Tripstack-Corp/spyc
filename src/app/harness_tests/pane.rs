@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::tasks::TaskStatus;
 
 // ── pane/pty workflow smoke tests (testing campaign, cluster 4) ──
 // These spawn a real `cat` pane (the established pattern — cat blocks on
