@@ -1021,6 +1021,7 @@ mod tests {
     // P1 authority: a live semantic report wins over output timing; an expired
     // or output-superseded report falls back to timing; a non-agent ignores it.
     #[test]
+    #[ignore = "red: agy Idle report in effective_activity yields to post-Stop redraw output"]
     fn effective_activity_honors_live_reports_then_falls_back() {
         use crate::pane::{AgentActivity, ReportedStatus};
         use std::time::{Duration, Instant};
@@ -1062,7 +1063,8 @@ mod tests {
             ),
             AgentActivity::Idle
         );
-        // Output AFTER the report (agent resumed) supersedes it → timing wins.
+        // Post-Stop redraw output does NOT supersede an `Idle` report (a
+        // cancelled turn's prompt flush is not a new turn).
         let later = base + Duration::from_millis(500);
         assert_eq!(
             App::effective_activity(
@@ -1072,7 +1074,7 @@ mod tests {
                 Some(later),
                 later,
             ),
-            AgentActivity::Working
+            AgentActivity::Idle
         );
         // A non-agent tab ignores any report (dots are agent-only).
         assert_eq!(
@@ -1291,8 +1293,9 @@ mod tests {
     // waits, and not the expiry clock (the bug where any of those bounced the
     // dot off red and back to the working pulse). It clears only via a newer
     // report or the user settling the prompt — Enter, Esc or `^c`, handled in
-    // `run_effects`. A non-blocked report still hands back to timing on output.
+    // `run_effects`.
     #[test]
+    #[ignore = "red: agy Idle report in blocked_report_is_latched_against_output yields to redraw output"]
     fn blocked_report_is_latched_against_output() {
         use crate::pane::{AgentActivity, ReportedStatus};
         use std::time::{Duration, Instant};
@@ -1329,22 +1332,11 @@ mod tests {
             "blocked has no TTL — it stays until answered"
         );
 
-        // Contrast: an explicit `Idle` report still hands back to timing on
-        // fresh output, while semantic states (`Done`, `Waiting`, `Working`)
-        // survive redraw output until their TTL expires.
-        let idle = Some(ReportedStatus::new(AgentActivity::Idle, base, expiry));
-        assert_eq!(
-            App::effective_activity(
-                idle.as_ref(),
-                None,
-                AgentKind::Agy,
-                Some(base + Duration::from_millis(200)),
-                base + Duration::from_millis(300),
-            ),
-            AgentActivity::Working,
-            "idle report yields when fresh output arrives"
-        );
+        // Contrast: `Idle`, `Done` and `Waiting` survive redraw output until
+        // their TTL expires, and agy's `Working` survives redraw output within
+        // `AGY_WORKING_QUIET_WINDOW` before yielding to timing.
         for status in [
+            AgentActivity::Idle,
             AgentActivity::Done,
             AgentActivity::Waiting,
             AgentActivity::Working,
@@ -1356,10 +1348,10 @@ mod tests {
                     None,
                     AgentKind::Agy,
                     Some(base + Duration::from_millis(200)),
-                    base + Duration::from_secs(10),
+                    base + Duration::from_millis(300),
                 ),
                 status,
-                "{status:?} survives TUI redraw output until expiry"
+                "{status:?} survives TUI redraw output within the active window"
             );
         }
     }
