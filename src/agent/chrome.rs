@@ -45,10 +45,10 @@ pub fn claude_output_len(lines: &[String]) -> usize {
 }
 
 /// How many of `lines` (oldest first) come before agy's live composer box or
-/// active tool-approval dialog — or all of them when neither is on screen.
+/// active approval/question dialog — or all of them when neither is on screen.
 pub fn agy_output_len(lines: &[String]) -> usize {
     agy_composer_start(lines)
-        .or_else(|| agy_approval_start(lines))
+        .or_else(|| super::agy_approval::dialog_top(lines))
         .unwrap_or(lines.len())
 }
 
@@ -72,8 +72,15 @@ fn agy_composer_start(lines: &[String]) -> Option<usize> {
         .find_map(|(i, l)| {
             (is_box_rule(l)
                 && l.trim_end() == bottom_rule
-                && lines.get(i + 1).is_some_and(|r| is_agy_composer_prompt(r)))
+                && is_agy_composer_body(&lines[i + 1..bottom]))
             .then_some(i)
+        })
+}
+
+fn is_agy_composer_body(body: &[String]) -> bool {
+    body.first().is_some_and(|r| is_agy_composer_prompt(r))
+        && !body.iter().any(|r| {
+            is_box_rule(r) || r.trim_start().starts_with("● ") || r.trim_start().starts_with("○ ")
         })
 }
 
@@ -88,31 +95,16 @@ fn has_agy_footer(footer: &[String]) -> bool {
             || row.contains("-- INSERT --")
             || row.contains("-- NORMAL --")
             || row.contains("-- VISUAL --")
+    }) && !footer.iter().any(|row| {
+        let t = row.trim_start();
+        t == "Requesting permission for:"
+            || t.starts_with("● ")
+            || t.starts_with("○ ")
+            || is_box_rule(row)
     })
 }
 
-fn agy_approval_start(lines: &[String]) -> Option<usize> {
-    super::detect_rules::scan(lines, super::AGY_DETECTION_RULES)?;
-    let req_idx = lines
-        .iter()
-        .rposition(|row| row.trim() == "Requesting permission for:")?;
-    let proceed_offset = lines[req_idx + 1..]
-        .iter()
-        .position(|row| row.trim() == "Do you want to proceed?")?;
-    let tail = &lines[req_idx + 1 + proceed_offset + 1..];
-    if !tail.iter().any(|row| row.contains("1. Yes"))
-        || !tail.iter().any(|row| row.contains("to cancel"))
-    {
-        return None;
-    }
-    if req_idx > 0 && lines[req_idx - 1].trim() == "Command" {
-        Some(req_idx - 1)
-    } else {
-        Some(req_idx)
-    }
-}
-
-fn is_box_rule(line: &str) -> bool {
+pub(super) fn is_box_rule(line: &str) -> bool {
     let rule = line.trim_end();
     !rule.starts_with(char::is_whitespace)
         && rule.chars().count() >= MIN_RULE_CHARS
@@ -419,7 +411,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red: agy_approval_start knows only `Do you want to proceed?`, so a `Run this command?` dialog is left in the output"]
     fn agy_short_approval_after_quoted_prompt_keeps_turn_output_and_strips_dialog() {
         let turn_rule = "─".repeat(60);
         let dialog_rule = "─".repeat(80);
@@ -456,7 +447,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red: agy_output_len only strips Command dialogs with Do you want to proceed? and leaves the box rule, File, Pending edit, and Question dialogs in output"]
     fn agy_captured_approval_and_question_fixtures_strip_dialog_from_header_down() {
         for (fixture, header) in [
             ("approval-command.txt", "Command"),
@@ -512,7 +502,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red: agy_composer_start accepts turn output or rules inside a rule pair or below the bottom rule as a composer"]
     fn agy_composer_rejects_turn_rows_or_rules_inside_body_and_footer() {
         let rule60 = "─".repeat(60);
         let rule80 = "─".repeat(80);

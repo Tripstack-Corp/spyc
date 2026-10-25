@@ -529,7 +529,6 @@ impl Replaced for str {
 }
 
 #[test]
-#[ignore = "red: AGY_DETECTION_RULES only matches Do you want to proceed? and misses agy 1.4.5/1.4.7 Run this command?, Allow access to this file?, and Accept this file edit? dialogs"]
 fn agy_approval_detector_recognizes_captured_live_approval_screen() {
     let rules = crate::agent::profile_for(AgentKind::Agy).detection_rules();
     let text = include_str!("../../../tests/fixtures/agy-output/approval-command.txt");
@@ -631,7 +630,6 @@ fn agy_approval_detector_recognizes_captured_live_approval_screen() {
 }
 
 #[test]
-#[ignore = "red: AGY_DETECTION_RULES matches unanchored Requesting permission for: + Do you want to proceed? anywhere in the 30-row window"]
 fn agy_approval_detector_rejects_output_mentions_grep_diff_and_answered_prompts() {
     let rules = crate::agent::profile_for(AgentKind::Agy).detection_rules();
     let text = include_str!("../../../tests/fixtures/agy-output/approval-command.txt");
@@ -813,7 +811,6 @@ fn agy_spinner_below_an_answered_dialog_is_not_a_live_approval() {
 }
 
 #[test]
-#[ignore = "red: settle_scrape_quiet behind a live agy working report never matches agy 1.4.5's Run this command? approval screen"]
 fn agy_approval_scrape_runs_behind_a_live_working_report() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
