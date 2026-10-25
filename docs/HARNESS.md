@@ -187,11 +187,11 @@ verified composer/footer rows and active approval or question dialogs (`Command`
 `File`, `Pending edit`, and `Question` in `agy`, just as `gf`/`gF` and `J` stop at
 Claude's composer box). A Codex composer needs its native input shape, blank
 separation and a recognized context, Vim-mode or shortcut footer; an agy composer
-needs its equal-width `─` box rules, `>` or `❯` prompt row and a recognized
-shortcut, Vim-mode or `sandbox:` footer (including when `esc to cancel` also
-appears on the footer row during a turn, while `agy` `1.4.7` normally hides the
-composer box during active execution), so user-turn divider rules in scrollback
-are never mistaken for a composer. Unknown/customized or clipped forms retain all
+needs its equal-width `─` box rules, a `>` or `❯` prompt row, and nothing below
+the box but a shortcut, Vim-mode, `sandbox:` or working `esc to cancel` footer.
+`agy` `1.4.7` keeps its composer on screen while a turn runs, so a draft typed
+mid-turn is excluded too, and two user-turn divider rules around a reply don't
+pass as a composer. Unknown/customized or clipped forms retain all
 text. Shortcut help in Codex is excluded when its complete heading and close hint
 are present.
 
@@ -203,12 +203,10 @@ follow an agent running in a shell tab's foreground.
 
 The Codex renderer fixtures match Codex CLI `0.162.1`
 ([provenance](../tests/fixtures/codex-output/README.md)); the Antigravity
-viewport fixtures ([provenance](../tests/fixtures/agy-output/README.md)) combine
-live PTY captures (`approval-command.txt` from `agy` `1.4.5`, plus
-`approval-command-narrow.txt`, `composer-empty.txt`, `composer-draft.txt`,
-`approval-edit.txt`, and `approval-question.txt` from `agy` `1.4.7`) with two
-synthetic fixtures (`approval-file.txt` and `working.txt`). Each provenance note
-distinguishes captured snapshots from synthetic replay data. A local native-CLI
+viewport fixtures ([provenance](../tests/fixtures/agy-output/README.md)) are
+captures of `agy` `1.4.7` through spyc's own pane, made by the ignored
+`agy_live_capture_viewport_fixtures` test, except the synthetic
+`approval-file.txt`. A local native-CLI
 smoke test is separate from those captures and controlled-PTY regressions.
 
 ### Image attachments
@@ -247,10 +245,11 @@ release's
 [user inputs](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/protocol/src/user_input.rs)
 and [rollout policy](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/rollout/src/policy.rs);
 the Antigravity (`agy` `1.4.7`) paste bindings (`Ctrl+V` / `Alt+V`) were
-verified in a live smoke test and against the embedded keymap and help strings
-(`Paste`, `ctrl+v`, and `Use Alt+V to paste images from clipboard on Windows when
-Ctrl+V doesn't work`, while spyc captures `Alt+V` on macOS/Linux as well) in the
-installed `~/.local/bin/agy` Go binary, and the `USER_INPUT.media` transcript
+checked against the installed `~/.local/bin/agy` binary's keymap strings
+(`Paste`, `ctrl+v`) and its `1.0.15` release note ("Added `alt+v` as an
+alternative paste shortcut on Windows to resolve issues where ctrl+v is
+intercepted by the terminal emulator"; spyc captures `Alt+V` on macOS and Linux
+as well), and the `USER_INPUT.media` transcript
 schema was checked against live
 `<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl`
 sessions.

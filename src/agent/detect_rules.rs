@@ -7,8 +7,8 @@
 //! Kept deliberately small: one [`Region`] (the bottom of the pane's visible
 //! text, where an interactive prompt renders) and [`Matcher`] variants anchored
 //! to each agent's verified bottom-of-viewport prompt chrome
-//! ([`Matcher::AllAtBottom`], [`Matcher::CodexAsyncQuestions`], and
-//! [`Matcher::AgyApproval`], plus the test-only [`Matcher::All`]).
+//! ([`Matcher::AllAtBottom`], [`Matcher::CodexAsyncQuestions`] and
+//! [`Matcher::AgyApproval`]; `Matcher::All` exists only for tests).
 
 use crate::pane::AgentActivity;
 

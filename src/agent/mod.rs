@@ -722,8 +722,9 @@ impl AgentProfile for CodexProfile {
 ///
 /// [`detect_rules::Matcher::AgyApproval`] anchors the match to where `agy`
 /// draws a live approval menu at the bottom of the viewport: the dialog header
-/// (`Command`, `File`, `Pending edit`, etc.), a full-width `─` rule,
-/// `Requesting permission for:` (or the file-edit diff preview), a recognized
+/// (`Command`, `File`, `Pending edit`, etc.), the `─` rule under it (which the
+/// 1.1.11 sample below lacks), `Requesting permission for:` (or the file-edit
+/// diff preview), a recognized
 /// approval question (`Run this command?`, `Allow access to this file?`,
 /// `Accept this file edit?`, `Do you want to proceed?`, etc.), sequential
 /// numbered options from `1. Yes` to `N. No`, the `↑/↓ Navigate` hint row, and
@@ -732,9 +733,9 @@ impl AgentProfile for CodexProfile {
 /// Mentioning those phrases in ordinary output, grep results, diffs, or an
 /// answered prompt above a subsequent turn does not match.
 ///
-/// Verify a needle against a real pane, not the binary's string table — a
-/// runtime-formatted string is absent from it, which is how `esc to cancel`
-/// got mistaken for a phrase agy never prints.
+/// Verify a needle against a real pane (`harness_tests/agy_live.rs` captures
+/// one), not the binary's string table, where a runtime-formatted string such
+/// as `%s to cancel`'s output can be absent.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     region: detect_rules::Region::BottomNonEmptyLines(30),
     matcher: detect_rules::Matcher::AgyApproval,

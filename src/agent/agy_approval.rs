@@ -77,16 +77,20 @@ fn permission_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
         .rev()
         .find(|&i| is_col0(rows[i]) && rows[i].trim() == "Requesting permission for:")?;
     let target = &rows[req_idx + 1..q_idx];
-    if req_idx < 2
-        || target.is_empty()
+    if target.is_empty()
         || target.len() > MAX_TARGET_ROWS
         || target.iter().any(|&r| is_turn_or_rule_row(r))
-        || !is_box_rule(rows[req_idx - 1])
-        || !is_permission_header(rows[req_idx - 2])
     {
         return None;
     }
-    Some(req_idx - 2)
+    // agy 1.4.7 draws a rule under the header; the 1.1.11 sample has none.
+    let above = req_idx.checked_sub(1)?;
+    let header = if is_box_rule(rows[above]) {
+        above.checked_sub(1)?
+    } else {
+        above
+    };
+    is_permission_header(rows[header]).then_some(header)
 }
 
 fn pending_edit_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
@@ -100,7 +104,7 @@ fn pending_edit_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
     let body = &rows[rule_idx + 1..q_idx - 1];
     if body.is_empty()
         || body.len() > MAX_EDIT_DIFF_ROWS
-        || body.iter().any(|&r| is_turn_or_rule_row(r))
+        || body.iter().any(|&r| is_turn_row(r))
         || !is_edit_header(rows[rule_idx - 1])
     {
         return None;
@@ -142,7 +146,7 @@ fn is_navigate_row(row: &str) -> bool {
 /// Agy formats its cancel hint from `"%s to cancel"`, so `<key token> to cancel`
 /// matches both the default `esc` key and any user-rebound cancel key while
 /// rejecting ordinary prose words such as `"how to cancel"`.
-fn is_cancel_footer(row: &str) -> bool {
+pub(super) fn is_cancel_footer(row: &str) -> bool {
     let trimmed = row.trim_start();
     let Some((token, _)) = trimmed.split_once(" to cancel") else {
         return false;
@@ -164,13 +168,7 @@ fn is_key_token(token: &str) -> bool {
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .unwrap_or(token);
-    if inner.is_empty()
-        || token.len() > 20
-        || inner.chars().any(char::is_whitespace)
-        || !inner
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '^' | '_'))
-    {
+    if inner.is_empty() || token.len() > 20 {
         return false;
     }
     let mut parts = inner.split(['+', '-', '^']).filter(|p| !p.is_empty());
@@ -181,7 +179,8 @@ fn is_key_token(token: &str) -> bool {
 }
 
 fn is_key_part(part: &str) -> bool {
-    if part.len() == 1 && part.chars().all(|c| c.is_ascii_alphanumeric()) {
+    // A letter, a digit, or a punctuation key such as `ctrl+]`'s.
+    if part.len() == 1 {
         return true;
     }
     if let Some(digits) = part.strip_prefix('f').or_else(|| part.strip_prefix('F'))
@@ -244,8 +243,20 @@ fn is_col0(row: &str) -> bool {
 }
 
 fn is_turn_or_rule_row(row: &str) -> bool {
+    is_box_rule(row) || is_turn_row(row)
+}
+
+fn is_turn_row(row: &str) -> bool {
     let t = row.trim_start();
-    is_box_rule(row) || t.starts_with("● ") || t.starts_with("○ ")
+    t.starts_with("● ") || t.starts_with("○ ")
+}
+
+/// agy's spinner row (`⣽  Running command...`) starts with a braille glyph.
+pub(super) fn is_spinner_row(row: &str) -> bool {
+    row.trim_start()
+        .chars()
+        .next()
+        .is_some_and(|c| ('\u{2800}'..='\u{28ff}').contains(&c))
 }
 
 fn is_permission_header(row: &str) -> bool {
@@ -313,6 +324,7 @@ fn is_option_continuation(row: &str) -> bool {
     !trimmed.is_empty()
         && parse_option(row).is_none()
         && !trimmed.starts_with(['●', '○', '─'])
+        && !is_spinner_row(row)
         && !trimmed.starts_with("↑/↓")
         && !is_cancel_footer(row)
         && !is_approval_question(trimmed)

@@ -4,8 +4,9 @@
 //! Claude Code's and Antigravity's (`agy`) composer shape, as captured in a pty:
 //! a full-width `─` rule, the `❯` / `>` input row(s), a second full-width `─`
 //! rule, then the footer (status line, mode line, workspace path). Both rules
-//! start at column 0; `agy` additionally verifies its footer and `>` prompt row
-//! so two user-turn divider rules in scrollback are never mistaken for a box.
+//! start at column 0; `agy` additionally verifies its `>` prompt row and that
+//! everything below the box is its footer, so two user-turn divider rules in
+//! scrollback don't pass as a box.
 
 mod codex;
 pub use codex::codex_output_len;
@@ -88,6 +89,11 @@ fn is_agy_composer_prompt(row: &str) -> bool {
     row.starts_with('>') || row.starts_with('❯')
 }
 
+/// The rows below the box are agy's footer: a shortcut, Vim-mode, workspace or
+/// working `<key> to cancel` row. agy 1.4.7 keeps the box on screen while a turn
+/// runs, so a draft typed mid-turn sits above the cancel footer. A `>` prompt
+/// or a turn row below the bottom rule means that rule was a turn divider, not
+/// the box.
 fn has_agy_footer(footer: &[String]) -> bool {
     footer.iter().any(|row| {
         row.contains("? for shortcuts")
@@ -95,12 +101,13 @@ fn has_agy_footer(footer: &[String]) -> bool {
             || row.contains("-- INSERT --")
             || row.contains("-- NORMAL --")
             || row.contains("-- VISUAL --")
+            || super::agy_approval::is_cancel_footer(row)
     }) && !footer.iter().any(|row| {
         let t = row.trim_start();
         t == "Requesting permission for:"
             || t.starts_with("● ")
             || t.starts_with("○ ")
-            || is_box_rule(row)
+            || is_agy_composer_prompt(row)
     })
 }
 
@@ -281,7 +288,6 @@ mod tests {
     /// `>` prompt and the reply look like a composer body. The rows below the
     /// next divider (a `>` prompt, the spinner) are no composer footer.
     #[test]
-    #[ignore = "red: two turn-divider rules around a prose reply pass as the composer box"]
     fn agy_prose_only_earlier_turn_is_output() {
         let rule = "─".repeat(60);
         let screen = lines(&[
@@ -313,7 +319,6 @@ mod tests {
     /// working `esc to cancel` row, with no vim marker or `sandbox:` row. The
     /// draft is not output.
     #[test]
-    #[ignore = "red: a composer above the working `esc to cancel` footer isn't recognized, so its draft reads as output"]
     fn agy_mid_turn_draft_under_the_cancel_footer_is_not_output() {
         let rule = "─".repeat(100);
         let screen = lines(&[
@@ -386,7 +391,6 @@ mod tests {
     /// `esc to cancel` footer (after `-- INSERT --` in vim mode). The output
     /// stops at the composer's top rule and keeps the running turn.
     #[test]
-    #[ignore = "red: a composer above the working `esc to cancel` footer isn't recognized, so it reads as output"]
     fn agy_working_fixtures_stop_at_the_composer_and_keep_the_turn() {
         for fixture in ["working.txt", "working-draft.txt"] {
             let screen = agy_fixture(fixture);
