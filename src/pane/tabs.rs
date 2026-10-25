@@ -107,16 +107,6 @@ impl AgentActivity {
     }
 }
 
-/// Quiet grace for an `agy` `Working` report before giving way to output timing
-/// when `Stop` never arrives (e.g. `agy` < 1.1.10 or a dropped hook). Across an
-/// active turn in `agy` 1.4.7, the TUI redraws its braille spinner (`○ Thought
-/// for Ns ...` or `⣟ Running command...`) roughly every 100 ms: model thinking
-/// produced 119 pty drains in 13.1s (max gap 124 ms), a 16.0s blocking
-/// `wait_for_scope_clear` MCP tool call produced 167 drains (max gap 124 ms),
-/// and a foreground `sleep 8` / `sleep 9` command produced 186 drains in 17.9s,
-/// so real pane silence begins only after the turn stops emitting output.
-pub const AGY_WORKING_QUIET_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
-
 /// Why a previously live [`ReportedStatus`] yielded before its TTL backstop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RetiredReason {
@@ -203,6 +193,31 @@ impl ReportedStatus {
         if scrape_overrides || self.overridden_by_approval {
             self.quiet_since = self.quiet_since.max(now);
             self.overridden_by_approval = scrape_overrides;
+        }
+    }
+
+    /// Whether this report has given way to output timing. agy's `Idle` yields
+    /// to output after it, and a `Working` report from an agent with a
+    /// [`crate::agent::AgentProfile::working_quiet_window`] (agy) yields once
+    /// the pane has been quiet that long, so a missing `Stop` can't pulse for
+    /// the whole TTL. Every other report holds through prompt redraws, footer
+    /// flushes after `Stop` and background-task updates until a newer report
+    /// or its TTL, and `Blocked` is latched until settled (`Enter`, `Esc`, `^c`
+    /// in `run_effects`, or a matching tool completion for a Codex question).
+    pub fn yields_to_timing(
+        &self,
+        last_output_at: Option<std::time::Instant>,
+        kind: crate::state::sessions::AgentKind,
+        now: std::time::Instant,
+    ) -> bool {
+        match (kind, self.status) {
+            (crate::state::sessions::AgentKind::Agy, AgentActivity::Idle) => {
+                last_output_at.is_some_and(|o| o > self.at)
+            }
+            (_, AgentActivity::Working) => self
+                .working_quiet_expiry(last_output_at, kind)
+                .is_some_and(|exp| now >= exp),
+            _ => false,
         }
     }
 }
@@ -388,6 +403,44 @@ pub struct TabInfo {
 }
 
 impl TabInfo {
+    /// Drops a report that expired or gave way to output timing, noting why for
+    /// `:why-status`, keeps the approval quiet clock, and clears a scrape guess
+    /// a live report outranks. Returns whether a visible approval prompt
+    /// overrides the report.
+    pub fn settle_report(
+        &mut self,
+        kind: crate::state::sessions::AgentKind,
+        now: std::time::Instant,
+    ) -> bool {
+        let scrape = self.scrape_status.map(|(status, _)| status);
+        let scrape_overrides =
+            crate::agent::codex_approval::overrides_report(self.reported.as_ref(), scrape, kind);
+        if let Some(r) = &mut self.reported {
+            r.settle_approval_override(scrape_overrides, now);
+        }
+        if let Some(r) = &self.reported {
+            let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
+            let yielded = !scrape_overrides && r.yields_to_timing(self.last_output_at, kind, now);
+            if expired || yielded {
+                if !expired
+                    && r.status == AgentActivity::Working
+                    && let Some(window) = crate::agent::profile_for(kind).working_quiet_window()
+                    && let Some(last) = &mut self.last_reported
+                    && last.at == r.at
+                {
+                    last.retired_reason = Some(RetiredReason::PaneQuiet(window));
+                }
+                self.reported = None;
+            }
+        }
+        if self.reported.is_some()
+            && !crate::agent::codex_approval::overrides_report(None, scrape, kind)
+        {
+            self.scrape_status = None;
+        }
+        scrape_overrides
+    }
+
     /// The activity its dot shows: a done the user hasn't seen keeps its teal
     /// `■` after the report decays to idle, until the tab is `seen` (in view,
     /// `App::in_view_tab`).

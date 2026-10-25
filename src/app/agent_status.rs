@@ -57,40 +57,6 @@ type ActiveAgentKey = (
 /// an all-idle pane set still draws 0 fps.
 const AGENT_ANIM_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Whether pane output or quiet after `last_output_at` causes a live report
-/// to yield to output timing (`Idle` after output, or `Working` after the
-/// agent's [`crate::agent::AgentProfile::working_quiet_window`] of pane
-/// silence when `Stop` never arrives).
-///
-/// Semantic reports (`Blocked`, `Working`, `Waiting`, `Done`) survive pane
-/// output across every hosted agent: prompt redraws, TUI footer flushes after a
-/// `Stop` hook, and background-task status updates do not establish a new turn
-/// or cancel an active wait. Only agy's explicit `Idle` report yields to fresh
-/// output, and agy's `Working` report yields after
-/// [`crate::pane::tabs::AGY_WORKING_QUIET_WINDOW`] of silence (once agy's ~100
-/// ms braille spinner stops updating `last_output_at`) so a missing `Stop`
-/// cannot pulse for the 5-minute TTL; every other agent's report, `Idle`
-/// included, holds until a newer report or its TTL. `Blocked` is latched
-/// against TTL expiry until settled by a newer report or user input (`Enter`,
-/// `Esc`, `^c` in `run_effects`, or matching tool completion for identified
-/// Codex questions), while visible approval prompts in Codex and agy
-/// temporarily override non-blocked reports via
-/// [`crate::agent::codex_approval::overrides_report`].
-fn report_yields_to_timing(
-    r: &ReportedStatus,
-    last_output_at: Option<Instant>,
-    kind: AgentKind,
-    now: Instant,
-) -> bool {
-    match (kind, r.status) {
-        (AgentKind::Agy, AgentActivity::Idle) => last_output_at.is_some_and(|o| o > r.at),
-        (_, AgentActivity::Working) => r
-            .working_quiet_expiry(last_output_at, kind)
-            .is_some_and(|exp| now >= exp),
-        _ => false,
-    }
-}
-
 /// A closed pane's reports, turn and scrape describe no agent any more.
 fn forget_closed_agent(info: &mut crate::pane::tabs::TabInfo) {
     info.reported = None;
@@ -336,45 +302,6 @@ impl ActivityScan<'_> {
         }
     }
 
-    /// Drop a report that expired or yielded to timing, advance approval-quiet
-    /// tracking, and clear non-overriding scrape guesses behind a live report.
-    fn settle_tab_report(&self, info: &mut crate::pane::TabInfo, kind: AgentKind) -> bool {
-        let scrape_overrides = crate::agent::codex_approval::overrides_report(
-            info.reported.as_ref(),
-            info.scrape_status.map(|(status, _)| status),
-            kind,
-        );
-        if let Some(r) = &mut info.reported {
-            r.settle_approval_override(scrape_overrides, self.now);
-        }
-        if let Some(r) = &info.reported {
-            let expired = r.status != AgentActivity::Blocked && self.now >= r.expiry;
-            let yielded = !scrape_overrides
-                && report_yields_to_timing(r, info.last_output_at, kind, self.now);
-            if expired || yielded {
-                if !expired
-                    && r.status == AgentActivity::Working
-                    && let Some(window) = crate::agent::profile_for(kind).working_quiet_window()
-                    && let Some(last) = &mut info.last_reported
-                    && last.at == r.at
-                {
-                    last.retired_reason = Some(crate::pane::RetiredReason::PaneQuiet(window));
-                }
-                info.reported = None;
-            }
-        }
-        if info.reported.is_some()
-            && !crate::agent::codex_approval::overrides_report(
-                None,
-                info.scrape_status.map(|(status, _)| status),
-                kind,
-            )
-        {
-            info.scrape_status = None;
-        }
-        scrape_overrides
-    }
-
     /// Settle one tab, `index` its place in `project` (0-based). `focused`:
     /// the user is looking at it, so a transition doesn't ping them.
     fn settle_tab(
@@ -390,7 +317,7 @@ impl ActivityScan<'_> {
             forget_closed_agent(&mut entry.info);
             self.codex_recovery.remove(&entry.info.id);
         }
-        let scrape_overrides = self.settle_tab_report(&mut entry.info, kind);
+        let scrape_overrides = entry.info.settle_report(kind, self.now);
         let new = if closed {
             App::activity_for(kind != AgentKind::Other, None, self.now)
         } else {
@@ -659,9 +586,9 @@ impl App {
     /// Resolve semantic reports, verified approval dialogues and output timing.
     /// Visible approval prompts in Codex and agy temporarily override
     /// non-blocked reports without discarding them; semantic question/agent
-    /// blocks retain precedence. Semantic reports (`Working`, `Waiting`,
-    /// `Done`, `Blocked`) survive redraws and silent tool waits until expiry
-    /// (or settlement for latched `Blocked`). `scrape` comes from the debounced
+    /// blocks retain precedence. A report survives redraws and silent tool
+    /// waits until expiry (settlement for a latched `Blocked`), except as
+    /// [`ReportedStatus::yields_to_timing`] says. `scrape` comes from the debounced
     /// visible-screen scan in `settle_scrape_quiet`.
     /// Non-agent tabs are always `Unknown` (a report targeting one is ignored —
     /// dots are agent-only).
@@ -679,14 +606,11 @@ impl App {
             return AgentActivity::Blocked;
         }
         if let Some(r) = reported {
-            // `Blocked` is latched: no TTL expiry and output never supersedes it
-            // (`report_yields_to_timing` returns false), so it holds until the
-            // user answers the pane (Enter, in `run_effects`) or a newer report
-            // lands. Other semantic statuses expire at `expiry`; agy's `Idle`
-            // yields to newer output and agy's `Working` yields after
-            // `AGY_WORKING_QUIET_WINDOW` of silence.
+            // `Blocked` is latched: no TTL expiry, and output never supersedes
+            // it, so it holds until the user answers the pane (Enter, in
+            // `run_effects`) or a newer report lands.
             let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
-            let superseded = report_yields_to_timing(r, last_output_at, kind, now);
+            let superseded = r.yields_to_timing(last_output_at, kind, now);
             if !expired && !superseded {
                 return r.status;
             }

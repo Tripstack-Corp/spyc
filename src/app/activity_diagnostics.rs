@@ -241,6 +241,33 @@ fn tab_report(i: usize, e: &TabEntry, is_active: bool, now: Instant) -> Vec<Stri
     out
 }
 
+/// When a live report stops counting: never for a latched `Blocked`, after
+/// the quiet window for agy's `working`, else at its TTL.
+fn report_expiry(
+    r: &crate::pane::ReportedStatus,
+    info: &crate::pane::TabInfo,
+    now: Instant,
+) -> String {
+    if r.status == AgentActivity::Blocked {
+        "latched until answered/dismissed or a newer report".to_string()
+    } else if let Some(quiet_exp) = r.working_quiet_expiry(info.last_output_at, info.agent().kind())
+    {
+        format!(
+            "expires in {:.0}s of quiet ({:.0}s TTL backstop)",
+            quiet_exp
+                .min(r.expiry)
+                .saturating_duration_since(now)
+                .as_secs_f32(),
+            r.expiry.saturating_duration_since(now).as_secs_f32(),
+        )
+    } else {
+        format!(
+            "expires in {:.0}s",
+            r.expiry.saturating_duration_since(now).as_secs_f32()
+        )
+    }
+}
+
 /// Where the dot's state comes from, the last report received and whether it
 /// still counts, and the hook events behind it.
 fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
@@ -253,25 +280,7 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
             "    source: SELF-REPORT status={} set {:.1}s ago, {}",
             r.status.name(),
             r.at.elapsed().as_secs_f32(),
-            if r.status == AgentActivity::Blocked {
-                "latched until answered/dismissed or a newer report".to_string()
-            } else if let Some(quiet_exp) =
-                r.working_quiet_expiry(info.last_output_at, info.agent().kind())
-            {
-                format!(
-                    "expires in {:.0}s of quiet ({:.0}s TTL backstop)",
-                    quiet_exp
-                        .min(r.expiry)
-                        .saturating_duration_since(now)
-                        .as_secs_f32(),
-                    r.expiry.saturating_duration_since(now).as_secs_f32(),
-                )
-            } else {
-                format!(
-                    "expires in {:.0}s",
-                    r.expiry.saturating_duration_since(now).as_secs_f32()
-                )
-            },
+            report_expiry(r, info, now),
         ),
         (false, None, Some((s, hint))) => format!(
             "    source: SCRAPE-FALLBACK status={}{}",

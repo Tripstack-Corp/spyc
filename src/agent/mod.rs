@@ -842,16 +842,14 @@ impl AgentProfile for AgyProfile {
         //
         // `done` needs agy >= 1.1.10: before it, `Stop` sat unreachable behind
         // agy's built-in termination checks, so the hook was installed and never
-        // ran. When `Stop` never arrives, an `agy` `working` report stays live
-        // while `agy`'s ~100 ms braille spinner (`○ Thought for Ns ...` during
-        // model thinking and blocking MCP tool waits, or `⣟ Running command...`
-        // during foreground commands) keeps `last_output_at` moving and yields
-        // to output timing (`idle`) after `AGY_WORKING_QUIET_WINDOW` of pane
-        // silence instead of pulsing for the full 5-minute report TTL.
+        // ran. Without `Stop`, `working_quiet_window` ends a `working` report.
         Some(StatusHookSupport { live_reload: false })
     }
+    /// agy redraws its spinner about every 100 ms while a turn runs, so 15 s of
+    /// silence means the turn ended without `Stop`. `docs/HARNESS.md` records
+    /// the probe.
     fn working_quiet_window(&self) -> Option<std::time::Duration> {
-        Some(crate::pane::tabs::AGY_WORKING_QUIET_WINDOW)
+        Some(std::time::Duration::from_secs(15))
     }
     fn detection_rules(&self) -> &'static [DetectionRule] {
         AGY_DETECTION_RULES
