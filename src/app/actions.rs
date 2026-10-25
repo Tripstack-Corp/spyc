@@ -328,6 +328,7 @@ impl App {
             | Action::PaneShrink
             | Action::TogglePaneZoom
             | Action::PaneScrollEnter
+            | Action::OpenThinkingHistory
             | Action::PaneScrollSave
             | Action::PaneNewTab
             | Action::PaneCloseTab
@@ -390,9 +391,7 @@ impl App {
                 });
             }
             Action::TogglePaneZoom => self.toggle_pane_zoom(),
-            Action::PaneScrollEnter => {
-                self.open_pane_scroll_pager();
-            }
+            Action::PaneScrollEnter => self.open_pane_scroll_pager(),
             Action::PaneScrollSave => self.pane_scroll_save(),
 
             Action::PaneNewTab => self.start_new_tab_prompt(),
@@ -445,6 +444,7 @@ impl App {
 
             Action::QuickSelectOpen => self.open_quick_select(),
             Action::OpenImageGallery => return Ok(self.open_image_gallery()),
+            Action::OpenThinkingHistory => self.open_thinking_history(),
             Action::OpenGraveyardView => {
                 self.state.open_graveyard_view();
                 // Discoverability hint on entry only — open_graveyard_view

@@ -108,7 +108,8 @@ counts subagent (`invoke_subagent`) calls as `agents`, followed by `hooks` and
 turn has recorded reasoning, that row reads `thinking` and the reasoning's
 latest line instead, cut from the left with `…` so the newest words stay in
 view. The mode row comes back when the turn settles; a new prompt or a
-compaction clears the line. The strip reads
+compaction clears the line. `^a t` pages the session's whole thinking
+history. The strip reads
 `~/.gemini/antigravity-cli/brain/<session>/.system_generated/logs/transcript.jsonl`
 under `$HOME` as spyc's environment names it at startup, using the conversation
 UUID reported by the tab's status hooks or named by `--conversation`.

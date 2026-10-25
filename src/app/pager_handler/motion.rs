@@ -409,11 +409,10 @@ impl App {
             }
             KeyCode::Char('H') | KeyCode::F(1) => self.show_pager_help(),
             KeyCode::Char('r') if view.pane_scroll => {
-                // Reload a transcript scrollback: re-resolve + re-read + render
-                // off-thread (a full-screen agent keeps appending, so the
-                // snapshot goes stale). `open_pane_scroll_pager` re-spawns into
-                // `view.scroll_pager`. (`view`'s borrow ends at the guard.)
-                self.open_pane_scroll_pager();
+                // Reload a transcript or thinking scrollback: re-resolve +
+                // re-read + render off-thread (an agent keeps appending, so the
+                // snapshot goes stale). (`view`'s borrow ends at the guard.)
+                self.reload_pane_scroll_pager();
             }
             KeyCode::Char('t') if view.pane_scroll => {
                 // Toggle agent tool-use / tool-result lines in a transcript

@@ -1,5 +1,6 @@
 //! Read an Antigravity (`agy`) conversation transcript from its on-disk JSONL
-//! into styled pager lines (`^a v`) or gallery image metadata (`^a g`).
+//! into styled pager lines (`^a v`), its thinking history (`^a t`, in
+//! [`thinking`]) or gallery image metadata (`^a g`).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -12,6 +13,10 @@ use ratatui::{
 };
 
 use crate::ui::theme::Theme;
+
+mod thinking;
+
+pub use thinking::render_thinking_history;
 
 /// Resolve the conversation JSONL for the Agy session running in the pane.
 ///
@@ -293,30 +298,40 @@ fn index_images_with_limits(
     out
 }
 
-fn scan_image_candidates(
+/// A reader over the last `max_scan_bytes` of `file`, starting at the first
+/// whole line in them, and whether that left the start of the file out.
+fn window_reader(
     mut file: std::fs::File,
     max_scan_bytes: u64,
-) -> (Vec<(usize, serde_json::Value)>, HashSet<u64>, usize) {
+) -> Option<(BufReader<std::fs::File>, bool)> {
     let file_len = file.metadata().map_or(0, |m| m.len());
-    let hit_scan_cap = file_len > max_scan_bytes;
-    if hit_scan_cap {
-        crate::debug_log::log("agy_transcript: gallery scan reached its byte or image limit");
-        if file
-            .seek(SeekFrom::Start(file_len - max_scan_bytes - 1))
-            .is_err()
-        {
-            return (Vec::new(), HashSet::new(), 0);
-        }
+    let cut = file_len > max_scan_bytes;
+    if cut {
+        file.seek(SeekFrom::Start(file_len - max_scan_bytes - 1))
+            .ok()?;
     }
     let mut reader = BufReader::new(file);
-    let mut buf = Vec::new();
-    if hit_scan_cap {
+    if cut {
         let _ = crate::state::read_line_capped(
             &mut reader,
-            &mut buf,
+            &mut Vec::new(),
             crate::state::MAX_TRANSCRIPT_LINE_BYTES,
         );
     }
+    Some((reader, cut))
+}
+
+fn scan_image_candidates(
+    file: std::fs::File,
+    max_scan_bytes: u64,
+) -> (Vec<(usize, serde_json::Value)>, HashSet<u64>, usize) {
+    let Some((mut reader, cut)) = window_reader(file, max_scan_bytes) else {
+        return (Vec::new(), HashSet::new(), 0);
+    };
+    if cut {
+        crate::debug_log::log("agy_transcript: gallery scan reached its byte or image limit");
+    }
+    let mut buf = Vec::new();
     let mut oversized = 0usize;
     let mut seen_steps = HashSet::new();
     let mut candidates = Vec::new();
@@ -522,10 +537,11 @@ fn parse_rendered_records(
 }
 
 /// Lightweight projection of one hydrated record from `transcript_full.jsonl` so
-/// multi-megabyte tool-call arguments and thinking traces are dropped as soon
-/// as the step is parsed.
+/// multi-megabyte tool-call arguments are dropped as soon as the step is parsed.
 struct HydratedRecord {
     content: Option<String>,
+    /// For `^a t`; within the same hydration budget as the rest.
+    thinking: Option<String>,
     tool_labels: Option<Vec<String>>,
     media: Option<Vec<serde_json::Value>>,
     timestamp: Option<String>,
@@ -535,6 +551,7 @@ impl HydratedRecord {
     fn from_value(val: &serde_json::Value, show_tool_calls: bool) -> Self {
         Self {
             content: val["content"].as_str().map(str::to_owned),
+            thinking: val["thinking"].as_str().map(str::to_owned),
             tool_labels: show_tool_calls
                 .then(|| {
                     val["tool_calls"]

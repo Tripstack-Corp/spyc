@@ -166,6 +166,7 @@ verbs above (`down`, `pick`,
 | `open_graveyard_view` | open graveyard viewer (recover deleted) |
 | `quick_select_open` | quick select — pick URL/path/SHA/IP from pane |
 | `open_image_gallery` | gallery of images the agent received |
+| `open_thinking_history` | open agy thinking history in pager (`^a t`) |
 | `harpoon_jump =N` | jump to harpoon slot `N` (1 to 9) |
 | `harpoon_append` | harpoon — append cursor file |
 | `harpoon_remove` | harpoon — remove cursor file |
