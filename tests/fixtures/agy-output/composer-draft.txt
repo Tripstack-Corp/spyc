@@ -1,22 +1,22 @@
 
       ▄▀▀▄        Antigravity CLI 1.4.7
-     ▀▀▀▀▀▀       user@example.com (Agent Platform)
-    ▀▀▀▀▀▀▀▀      GCP Project: example-project
-   ▄▀▀    ▀▀▄     Gemini 4 Argon (High)
-  ▄▀▀      ▀▀▄    /Users/example/src/spyc
+     ▀▀▀▀▀▀       Gemini 4 Argon (High)
+    ▀▀▀▀▀▀▀▀      /Users/example/src/spyc
+   ▄▀▀    ▀▀▄
+  ▄▀▀      ▀▀▄
 
 ────────────────────────────────────────────────────────────
-> Use read_file on src/printed.rs and reply with only: Checked src/printed.rs
+> Use run_command to run `uname -a && sleep 8` and wait for it, then reply with only: done
 
-● Explored 1 file (printed.rs) (ctrl+o to expand)
+○ Thought for 5.0s (Executing Command Promptly)
+● Ran (uname -a && sleep 8) (ctrl+o to expand)
 
-  Checked src/printed.rs
+  done
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 > check src/unsubmitted.rs
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 -- INSERT --                                                    accept-edits · Gemini 4 Argon · high
-
 
 
 

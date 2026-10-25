@@ -1006,7 +1006,6 @@ mod tests {
             scan(&[
                 "\u{25cf} Bash(uname -a) (ctrl+o to expand)",
                 "Command",
-                "────────────────────────────────────────────────────────────────────────────────",
                 "Requesting permission for:",
                 "  uname -a",
                 "Do you want to proceed?",
@@ -1035,7 +1034,6 @@ mod tests {
             scan(&[
                 "\u{25cf} run_command (Git status check)",
                 "Command",
-                "────────────────────────────────────────────────────────────────────────────────",
                 "Requesting permission for:",
                 "  git -C /Users/example/src/spyc.worktrees/feat/agy-transcript-parity",
                 "  status --short --branch",

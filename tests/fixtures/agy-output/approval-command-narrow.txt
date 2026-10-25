@@ -1,27 +1,27 @@
+○ Thought for 5.0s (Executing Command Promptly)
+● Ran (uname -a && sleep 8) (ctrl+o to expand)
 
-      ▄▀▀▄        Antigravity CLI 1.4.7
-     ▀▀▀▀▀▀       user@example.com (Agent Platform)
-    ▀▀▀▀▀▀▀▀      GCP Project: example-project
-   ▄▀▀    ▀▀▄     Gemini 4 Argon (High)
-  ▄▀▀      ▀▀▄    /Users/example/src/spyc
+  done
 
 ────────────────────────────────────────────────────────────
-> Use run_command to execute `gh pr list --limit 5`.
+> Use run_command to run `uname -m` and wait for it, then reply with
+  only: listed
 
-● Ran (gh pr list --limit 5) (ctrl+o to expand)
+○ Thought for 5.1s (Executing Command Promptly)
+● Ran (uname -m) (ctrl+o to expand)
 
 Command
 ──────────────────────────────────────────────────────────────────────
 
 Requesting permission for:
-   gh pr list --limit 5
+   uname -m
 
 Run this command?
 > 1. Yes, run command
   2. Yes, and always allow in this conversation for commands that
-start with 'gh'
-  3. Yes, and always allow for commands that start with 'gh' (Persist
-to settings.json)
+start with 'uname'
+  3. Yes, and always allow for commands that start with 'uname'
+(Persist to settings.json)
   4. No, cancel
 
   ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command

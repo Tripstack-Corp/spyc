@@ -511,6 +511,7 @@ mod agent_hint;
 mod agent_readiness;
 mod agent_spawn;
 mod agent_waiting;
+mod agy_live;
 mod archive;
 mod codex_home;
 mod codex_images;

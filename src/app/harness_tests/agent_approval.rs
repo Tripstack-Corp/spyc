@@ -512,6 +512,22 @@ fn codex_command_approval_handles_recorded_native_wrapping() {
     );
 }
 
+/// `str::replace` for a fixture: panics when `from` is absent, so a recaptured
+/// fixture can't leave a case quietly testing the unedited screen.
+trait Replaced {
+    fn replaced(&self, from: &str, to: &str) -> String;
+}
+
+impl Replaced for str {
+    fn replaced(&self, from: &str, to: &str) -> String {
+        assert!(
+            self.contains(from),
+            "the fixture no longer contains {from:?}"
+        );
+        self.replace(from, to)
+    }
+}
+
 #[test]
 #[ignore = "red: AGY_DETECTION_RULES only matches Do you want to proceed? and misses agy 1.4.5/1.4.7 Run this command?, Allow access to this file?, and Accept this file edit? dialogs"]
 fn agy_approval_detector_recognizes_captured_live_approval_screen() {
@@ -533,15 +549,15 @@ fn agy_approval_detector_recognizes_captured_live_approval_screen() {
     assert_eq!(
         scan(
             &text
-                .replace("> 1. Yes, run command", "  1. Yes, run command")
-                .replace("  4. No, cancel", "> 4. No, cancel")
+                .replaced("> 1. Yes, run command", "  1. Yes, run command")
+                .replaced("  4. No, cancel", "> 4. No, cancel")
         ),
         expected,
         "moving the selection cursor to another option still needs the user"
     );
-    for cancel_key in ["  ctrl+c to cancel", "  [esc] to cancel"] {
+    for cancel_key in ["ctrl+c to cancel", "[esc] to cancel", "ctrl+] to cancel"] {
         assert_eq!(
-            scan(&text.replace("  esc to cancel", cancel_key)),
+            scan(&text.replaced("\nesc to cancel", &format!("\n{cancel_key}"))),
             expected,
             "a custom or bracketed cancel key ({cancel_key}) formatted from `%s to cancel` still matches"
         );
@@ -551,7 +567,7 @@ fn agy_approval_detector_recognizes_captured_live_approval_screen() {
         "[shift+tab] to auto-approve file edits",
     ] {
         assert_eq!(
-            scan(&edit.replace("shift+tab to auto-approve file edits", auto_approve)),
+            scan(&edit.replaced("shift+tab to auto-approve file edits", auto_approve)),
             expected,
             "a custom or bracketed key token before `to auto-approve file edits` ({auto_approve}) still matches"
         );
@@ -559,12 +575,12 @@ fn agy_approval_detector_recognizes_captured_live_approval_screen() {
     assert_eq!(
         scan(
             &narrow
-                .replace(
-                    "  gh pr list --limit 5",
-                    "  git -C /Users/example/src/spyc\n  -C worktree status\n  > /tmp/out.txt"
+                .replaced(
+                    "   uname -m",
+                    "   git -C /Users/example/src/spyc\n  -C worktree status\n  > /tmp/out.txt"
                 )
-                .replace(
-                    "start with 'gh'",
+                .replaced(
+                    "start with 'uname'",
                     "-C /Users/example/src/spyc\n> /tmp/out.txt'"
                 )
         ),
@@ -572,16 +588,23 @@ fn agy_approval_detector_recognizes_captured_live_approval_screen() {
         "wrapped command and option continuation rows starting with `-` or `>` still match"
     );
     assert_eq!(
-        scan(&narrow.replace(
+        scan(&narrow.replaced(
             "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command",
             "  ↑/↓ Navigate · tab Amend · ctrl+g\nedit/expand command"
         )),
         expected,
         "a narrow pane that wraps the `↑/↓ Navigate` row across two lines still matches"
     );
+    assert_eq!(
+        scan(&text.replaced(
+            "────────────────────────────────────────────────────────────────────────────────────────────────────\n",
+            ""
+        )),
+        expected,
+        "a dialog drawn without the rule under its header (older agy) still matches"
+    );
     for required in [
         "Command\n",
-        "────────────────────────────────────────────────────────────────────────────────────────────────────\n",
         "Requesting permission for:",
         "Run this command?",
         "1. Yes, run command",
@@ -590,18 +613,18 @@ fn agy_approval_detector_recognizes_captured_live_approval_screen() {
         "esc to cancel",
     ] {
         assert_eq!(
-            scan(&text.replace(required, "")),
+            scan(&text.replaced(required, "")),
             None,
             "missing {required} must not match"
         );
     }
     assert_eq!(
-        scan(&text.replace("  2. Yes, and always allow", "  3. Yes, and always allow")),
+        scan(&text.replaced("  2. Yes, and always allow", "  3. Yes, and always allow")),
         None,
         "out-of-order option numbering must not match"
     );
     assert_eq!(
-        scan(&text.replace("  4. No, cancel", "  4. Maybe later")),
+        scan(&text.replaced("  4. No, cancel", "  4. Maybe later")),
         None,
         "options must end with a No choice"
     );
@@ -717,14 +740,14 @@ fn agy_approval_detector_rejects_output_mentions_grep_diff_and_answered_prompts(
     // 6. Each column-0 anchored row in a command or pending-edit dialog must fail when indented.
     for col0_row in ["Command", "Requesting permission for:", "Run this command?"] {
         assert_eq!(
-            scan_text(&text.replace(&format!("\n{col0_row}\n"), &format!("\n  {col0_row}\n"))),
+            scan_text(&text.replaced(&format!("\n{col0_row}\n"), &format!("\n  {col0_row}\n"))),
             None,
             "indenting `{col0_row}` by two columns must reject the dialog"
         );
     }
     for col0_edit_row in ["Pending edit", "Accept this file edit?"] {
         assert_eq!(
-            scan_text(&edit.replace(
+            scan_text(&edit.replaced(
                 &format!("\n{col0_edit_row}\n"),
                 &format!("\n  {col0_edit_row}\n")
             )),
@@ -737,35 +760,55 @@ fn agy_approval_detector_rejects_output_mentions_grep_diff_and_answered_prompts(
     let rule80 = "─".repeat(80);
     for intruder in ["● Ran (git status)", "○ Thought for 2s", rule80.as_str()] {
         assert_eq!(
-            scan_text(&text.replace(
-                "  gh pr list --limit 10",
-                &format!("  gh pr list --limit 10\n{intruder}")
+            scan_text(&text.replaced(
+                "   uname -a && sleep 8",
+                &format!("   uname -a && sleep 8\n{intruder}")
             )),
             None,
             "command target containing `{intruder}` must not match"
         );
         assert_eq!(
-            scan_text(&edit.replace("  1  +  edited", &format!(" 2 +edited\n{intruder}"))),
+            scan_text(&edit.replaced("      1u8", &format!("      1u8\n{intruder}"))),
             None,
             "pending-edit body containing `{intruder}` must not match"
         );
     }
 
     // 8. Prose words before ` to cancel` or ` to auto-approve file edits` are not key tokens.
-    for non_key in ["  how to cancel", "  click to cancel"] {
+    for non_key in ["how to cancel", "click to cancel"] {
         assert_eq!(
-            scan_text(&text.replace("  esc to cancel", non_key)),
+            scan_text(&text.replaced("\nesc to cancel", &format!("\n{non_key}"))),
             None,
             "prose `{non_key}` must not match cancel footer"
         );
     }
     assert_eq!(
-        scan_text(&edit.replace(
+        scan_text(&edit.replaced(
             "shift+tab to auto-approve file edits",
             "how to auto-approve file edits"
         )),
         None,
         "prose before `to auto-approve file edits` must not match"
+    );
+}
+
+/// A spinner below a dialog that was answered but is still drawn is the turn
+/// running on, not the `↑/↓ Navigate` row's wrapped tail.
+#[test]
+fn agy_spinner_below_an_answered_dialog_is_not_a_live_approval() {
+    let rules = crate::agent::profile_for(AgentKind::Agy).detection_rules();
+    let narrow = include_str!("../../../tests/fixtures/agy-output/approval-command-narrow.txt");
+    let answered = narrow.replaced(
+        "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\n",
+        "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\n⣟  Running command... (esc to cancel, 4s)\n",
+    );
+    assert_ne!(answered, narrow);
+    assert_eq!(
+        crate::agent::detect_rules::scan(
+            &answered.lines().map(String::from).collect::<Vec<_>>(),
+            rules
+        ),
+        None
     );
 }
 
@@ -858,44 +901,4 @@ fn agy_approval_scrape_runs_behind_a_live_working_report() {
             )
         );
     });
-}
-
-#[test]
-#[ignore = "manual: requires local agy binary and auth to recapture tests/fixtures/agy-output"]
-fn agy_capture_live_viewport_fixtures() {
-    let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().canonicalize().unwrap();
-    std::fs::write(root.join("printed.rs"), "pub fn printed() {}\n").unwrap();
-    let mut app = App::test_app(root.clone());
-    let context_path = app.view.project().context_path.clone();
-    let wake = app.make_pane_wake();
-    let mut pane = crate::pane::Pane::spawn_with_env(
-        "agy --prompt-interactive \"Use run_command to execute 'gh pr list --limit 5'.\"",
-        28,
-        100,
-        &root,
-        &context_path,
-        &[("TERM", "xterm-256color")],
-        wake,
-    )
-    .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(45);
-    let mut trusted = false;
-    loop {
-        pane.drain_output();
-        let screen = pane.visible_lines().join("\n");
-        if !trusted && screen.contains("Do you trust the files in this folder?") {
-            pane.send_bytes(b"\r").unwrap();
-            trusted = true;
-        }
-        if screen.contains("↑/↓ Navigate") && screen.contains("esc to cancel") {
-            assert!(screen.contains("Requesting permission for:"));
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for live agy approval screen:\n{screen}"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }

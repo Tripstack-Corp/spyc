@@ -1,38 +1,27 @@
-  - **Scope for the sample release check:**
-    - `src/config/theme.rs`
-    - `src/ui/header.rs` and `footer.rs`
-    - `src/state/bookmarks.rs` and `history.rs`
-    - `docs/CONFIGURATION.md`
 
-    Verify the worktree list before editing any tracked files.
-  - **Verification steps:**
-    - Run the unit test suite on a clean branch first.
-    - Apply the patch on a dedicated feature branch.
-    - Check each regression test against a local build.
-  - **Gate:** run the full workspace check before committing.
-  - **Commit style:** conventional commits with a module scope.
-  - **Hand-off:** report the test binary path when ready.
+      ▄▀▀▄        Antigravity CLI 1.4.7
+     ▀▀▀▀▀▀       Gemini 4 Argon (High)
+    ▀▀▀▀▀▀▀▀      /Users/example/src/spyc
+   ▄▀▀    ▀▀▄
+  ▄▀▀      ▀▀▄
 
-─────────────────────────────────────────── Conversation compacted ───────────────────────────────────────────
+────────────────────────────────────────────────────────────
+> Use run_command to run `uname -a && sleep 8` and wait for it, then reply with only: done
 
-○ Thought for 3m 32s (Analyzing Workflow Process)
-● Called 4 MCP tools (spyc/report_status, spyc/get_spyc_context, spyc/list_worktrees, +1)
-● Ran ((cd /Users/example/src/spyc && git pull --ff-only))
-  ... 26 more actions (17 reads, 2 commands, 7 tools: 1 failed) ...
-● Explored 4 files (create_worktree.json, claim_worktree.json, register_scope.json, +1)
-● Ran 2 commands (git -C /Users/example/src/spyc pull --ff-only · gh pr list --limit 10) (ctrl+o to expand)
+○ Thought for 5.0s (Executing Command Promptly)
+● Ran (uname -a && sleep 8) (ctrl+o to expand)
 
 Command
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 Requesting permission for:
-  gh pr list --limit 10
+   uname -a && sleep 8
 
 Run this command?
 > 1. Yes, run command
-  2. Yes, and always allow in this conversation for commands that start with 'gh'
-  3. Yes, and always allow for commands that start with 'gh' (Persist to settings.json)
+  2. Yes, and always allow in this conversation for commands that start with 'uname'
+  3. Yes, and always allow for commands that start with 'uname' (Persist to settings.json)
   4. No, cancel
 
-  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command · ctrl+r Review
-  esc to cancel                                                                                accept-edits · Gemini 4 Argon · high
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                                   accept-edits · Gemini 4 Argon · high
