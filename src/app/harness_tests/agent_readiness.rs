@@ -124,7 +124,6 @@ fn a_codex_or_claude_idle_report_survives_the_redraw_after_it() {
 /// that follows it rather than flipping to a ~2-second working pulse on the
 /// post-cancel prompt flush.
 #[test]
-#[ignore = "red: agy Idle report yields to post-Stop redraw output and flips to a 2s Working pulse"]
 fn an_agy_idle_report_survives_the_redraw_after_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

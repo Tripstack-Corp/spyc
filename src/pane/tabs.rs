@@ -196,9 +196,9 @@ impl ReportedStatus {
         }
     }
 
-    /// Whether this report has given way to output timing. agy's `Idle` yields
-    /// to output after it, and a `Working` report from an agent with a
-    /// [`crate::agent::AgentProfile::working_quiet_window`] (agy) yields once
+    /// Whether this report has given way to output timing. Only a `Working`
+    /// report from an agent with a
+    /// [`crate::agent::AgentProfile::working_quiet_window`] (agy) yields, once
     /// the pane has been quiet that long, so a missing `Stop` can't pulse for
     /// the whole TTL. Every other report holds through prompt redraws, footer
     /// flushes after `Stop` and background-task updates until a newer report
@@ -210,15 +210,8 @@ impl ReportedStatus {
         kind: crate::state::sessions::AgentKind,
         now: std::time::Instant,
     ) -> bool {
-        match (kind, self.status) {
-            (crate::state::sessions::AgentKind::Agy, AgentActivity::Idle) => {
-                last_output_at.is_some_and(|o| o > self.at)
-            }
-            (_, AgentActivity::Working) => self
-                .working_quiet_expiry(last_output_at, kind)
-                .is_some_and(|exp| now >= exp),
-            _ => false,
-        }
+        self.working_quiet_expiry(last_output_at, kind)
+            .is_some_and(|exp| now >= exp)
     }
 }
 
