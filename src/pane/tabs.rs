@@ -107,6 +107,23 @@ impl AgentActivity {
     }
 }
 
+/// Quiet grace for an `agy` `Working` report before giving way to output timing
+/// when `Stop` never arrives (e.g. `agy` < 1.1.10 or a dropped hook). Across an
+/// active turn in `agy` 1.4.7, the TUI redraws its braille spinner (`○ Thought
+/// for Ns ...` or `⣟ Running command...`) roughly every 100 ms: model thinking
+/// produced 119 pty drains in 13.1s (max gap 124 ms), a 16.0s blocking
+/// `wait_for_scope_clear` MCP tool call produced 167 drains (max gap 124 ms),
+/// and a foreground `sleep 8` / `sleep 9` command produced 186 drains in 17.9s,
+/// so real pane silence begins only after the turn stops emitting output.
+pub const AGY_WORKING_QUIET_WINDOW: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Why a previously live [`ReportedStatus`] yielded before its TTL backstop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetiredReason {
+    /// The pane remained quiet for the agent's [`crate::agent::AgentProfile::working_quiet_window`].
+    PaneQuiet(std::time::Duration),
+}
+
 /// A semantic activity self-report from a cooperative agent via the
 /// `report_status` MCP tool — the P1 channel that supersedes output timing.
 ///
@@ -115,7 +132,8 @@ impl AgentActivity {
 /// stale report). Visible approval prompts in Codex and agy temporarily
 /// override a non-blocked report without discarding it; semantic reports
 /// (`Working`, `Waiting`, `Done`, `Blocked`) survive redraws and silent tool
-/// waits.
+/// waits (with `Working` yielding after the agent's
+/// [`crate::agent::AgentProfile::working_quiet_window`] of pane silence when set).
 #[derive(Clone, Debug)]
 pub struct ReportedStatus {
     /// The reported state.
@@ -125,6 +143,17 @@ pub struct ReportedStatus {
     /// Non-blocked backstop expiry (five minutes at most, an hour for
     /// `waiting`); blocked remains latched until settled while the pane is alive.
     pub expiry: std::time::Instant,
+    /// Base instant for [`crate::agent::AgentProfile::working_quiet_window`];
+    /// starts at `at` and advances when a visible approval override holds or is
+    /// answered so time spent at the prompt does not consume the post-answer
+    /// quiet grace.
+    pub quiet_since: std::time::Instant,
+    /// True while a visible approval prompt overrides this report, or until the
+    /// first activity settle after that prompt clears stamps its timestamp into
+    /// [`Self::quiet_since`].
+    pub overridden_by_approval: bool,
+    /// Why a previously live report yielded before TTL expiry, for `:why-status`.
+    pub retired_reason: Option<RetiredReason>,
     /// What the agent said it is doing, bounded and stripped of control
     /// characters (`mcp_cmd::report_note`). For a hook-inferred `waiting`, what
     /// it waits on.
@@ -144,8 +173,36 @@ impl ReportedStatus {
             status,
             at,
             expiry,
+            quiet_since: at,
+            overridden_by_approval: false,
+            retired_reason: None,
             note: None,
             turn_end_absorbed: false,
+        }
+    }
+
+    /// When a `Working` report's per-agent quiet grace ends (`None` for other
+    /// statuses or agents without [`crate::agent::AgentProfile::working_quiet_window`]).
+    pub fn working_quiet_expiry(
+        &self,
+        last_output_at: Option<std::time::Instant>,
+        kind: crate::state::sessions::AgentKind,
+    ) -> Option<std::time::Instant> {
+        (self.status == AgentActivity::Working)
+            .then(|| crate::agent::profile_for(kind).working_quiet_window())
+            .flatten()
+            .map(|window| {
+                last_output_at.map_or(self.quiet_since, |o| o.max(self.quiet_since)) + window
+            })
+    }
+
+    /// Keep [`Self::quiet_since`] pinned to `now` while a visible approval
+    /// prompt overrides this report, and on the first settle after that prompt
+    /// clears.
+    pub fn settle_approval_override(&mut self, scrape_overrides: bool, now: std::time::Instant) {
+        if scrape_overrides || self.overridden_by_approval {
+            self.quiet_since = self.quiet_since.max(now);
+            self.overridden_by_approval = scrape_overrides;
         }
     }
 }

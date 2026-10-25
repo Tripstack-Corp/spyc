@@ -304,10 +304,14 @@ shows the last received semantic report, hook-file marker presence, whether
 hooks existed at launch, and known config changes that require a restart.
 An MCP connection or hook file alone does not prove hooks ran. After first
 consenting to spyc's hooks, restart Codex and review `/hooks` and project trust.
-New/changed hooks need review; spyc does not authorize them for you. Codex,
-Claude, and agy reports survive redraws and quiet tool waits until TTL expiry or a newer
-report; Codex cancellation reports `idle` through `Interrupt`. Without a live
-report, timing-only `idle` means silence, not confirmed completion.
+New/changed hooks need review; spyc does not authorize them for you. Codex and
+Claude reports survive redraws and quiet tool waits until TTL expiry or a newer
+report, while agy's `working` report stays live across its ~100 ms braille
+spinner redraws (during model thinking, blocking MCP tool calls, and foreground
+commands) and yields after `AGY_WORKING_QUIET_WINDOW` of pane silence (`Waiting`,
+`Done` and `Blocked` still hold to TTL or settlement); Codex cancellation
+reports `idle` through `Interrupt`. Without a live report, timing-only `idle`
+means silence, not confirmed completion.
 
 The dump includes up to eight reported hook-event summaries per pane. Event,
 tool and available turn/call ids help diagnose permission transitions without

@@ -255,6 +255,17 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
             r.at.elapsed().as_secs_f32(),
             if r.status == AgentActivity::Blocked {
                 "latched until answered/dismissed or a newer report".to_string()
+            } else if let Some(quiet_exp) =
+                r.working_quiet_expiry(info.last_output_at, info.agent().kind())
+            {
+                format!(
+                    "expires in {:.0}s of quiet ({:.0}s TTL backstop)",
+                    quiet_exp
+                        .min(r.expiry)
+                        .saturating_duration_since(now)
+                        .as_secs_f32(),
+                    r.expiry.saturating_duration_since(now).as_secs_f32(),
+                )
             } else {
                 format!(
                     "expires in {:.0}s",
@@ -302,7 +313,15 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
                 {
                     "retained behind visible approval".into()
                 }
-                None => "no longer authoritative".into(),
+                None => match report.retired_reason {
+                    Some(crate::pane::RetiredReason::PaneQuiet(window)) => {
+                        format!(
+                            "no longer authoritative: pane quiet for {}s",
+                            window.as_secs()
+                        )
+                    }
+                    None => "no longer authoritative".into(),
+                },
             },
         ),
         None => "    last_report: none received".to_string(),

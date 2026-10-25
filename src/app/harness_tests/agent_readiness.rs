@@ -383,7 +383,6 @@ fn agy_working_grace_counts_from_the_answer_not_the_dialog_draw() {
 }
 
 #[test]
-#[ignore = "red: why-status does not report agy's working-quiet window or quiet retirement reason"]
 fn agy_working_why_status_reports_quiet_expiry_alongside_ttl_backstop() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -416,7 +415,6 @@ fn agy_working_why_status_reports_quiet_expiry_alongside_ttl_backstop() {
 }
 
 #[test]
-#[ignore = "red: agy working report does not yield after post-approval quiet window"]
 fn agy_working_approval_override_preserves_post_answer_quiet_grace() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

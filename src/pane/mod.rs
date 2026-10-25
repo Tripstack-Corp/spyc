@@ -18,7 +18,9 @@ pub mod snapshot;
 pub mod tabs;
 mod widget;
 
-pub use tabs::{AgentActivity, PaneTabs, ReportedStatus, RunningAgent, TabEntry, TabInfo};
+pub use tabs::{
+    AgentActivity, PaneTabs, ReportedStatus, RetiredReason, RunningAgent, TabEntry, TabInfo,
+};
 pub use widget::selection_text;
 pub use widget::{PaneWidget, cell_style};
 

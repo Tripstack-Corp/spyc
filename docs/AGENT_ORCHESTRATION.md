@@ -40,12 +40,21 @@ three tiers, with a visible-approval override for Codex and agy:
 
 Codex, Claude and agy retain semantic reports (`working`, `waiting`, `done`,
 `blocked`) through output and footer redraws. Silent tool waits do not erase
-`working`, and TUI redraws after a `Stop` hook do not erase `done` or
-`waiting`; the default five-minute TTL (one hour for `waiting`) remains a
-backstop, and newer reports replace older ones. A reported `idle` (codex's
-`Interrupt`, say) holds through redraws as the others do, except agy's, which
-gives way to the next output. Timing-only `idle` means quiet, not proof that a
-turn stopped or finished.
+Codex or Claude `working`, and TUI redraws after a `Stop` hook do not erase
+`done` or `waiting`; the default five-minute TTL (one hour for `waiting`)
+remains a backstop, and newer reports replace older ones. Because agy ends a
+turn only through `Stop` (missing on agy `< 1.1.10` or if the hook is dropped),
+an agy `working` report yields to output timing once the pane has been quiet
+for `AGY_WORKING_QUIET_WINDOW` (15 seconds) after the report, the pane's last
+output, or an approval prompt's resolution — across an active turn in agy 1.4.7,
+agy redraws its braille spinner (`○ Thought for Ns ...` or `⣟ Running command...
+(esc to cancel, Ns)`) roughly every 100 ms (119 pty drains in 13.1s during model
+thinking with a 124 ms max gap, 167 drains during a 16.0s blocking
+`wait_for_scope_clear` MCP tool call with a 124 ms max gap, and 186 drains in
+17.9s during `sleep 8` / `sleep 9`), so the quiet window applies only once pty
+output stops. A reported `idle` (codex's `Interrupt`, say) holds through redraws
+as the others do, except agy's, which gives way to the next output. Timing-only
+`idle` means quiet, not proof that a turn stopped or finished.
 
 **Glyphs** (shape = liveness, colour = urgency):
 
@@ -122,7 +131,9 @@ permission/question prompt was answered.
 
 agy's `done` needs **agy >= 1.1.10** (earlier versions evaluated `hooks.json`
 after their own termination checks, so the `Stop` handler spyc installs was
-unreachable and that half silently degraded to output timing), and its
+unreachable; when `Stop` never arrives, agy's `working` report yields to output
+timing after `AGY_WORKING_QUIET_WINDOW` of pane silence instead of pulsing for
+its full five-minute TTL), and its
 `waiting`/`idle` `Stop` remaps read `fullyIdle` and `terminationReason` from
 `exa.hooks_pb.StopHookArgs` (confirmed by probe on agy 1.4.5).
 
@@ -459,7 +470,10 @@ restarting Codex.
 
 ### Interruption and process exit
 
-A working report survives redraws and silent tool waits until its backstop.
+A Codex or Claude `working` report survives redraws and silent tool waits until
+its backstop; an agy `working` report survives while its ~100 ms braille
+spinner or output keeps `last_output_at` moving and yields after
+`AGY_WORKING_QUIET_WINDOW` of pane silence.
 Accepted Escape or `Ctrl-C` input retires that report so cancelled work falls
 back to output timing and then idle. Enter, ordinary typing, arrows and pasted
 control bytes preserve working reports. An input rejected by the PTY queue
