@@ -338,17 +338,20 @@ pub(super) fn run_proxy(
         stream,
         pane_id,
         cwd,
+        PROXY_IO_TIMEOUT,
     )
 }
 
 /// [`run_proxy`] over any agent-side reader and writer, naming `pane_id` and
-/// `cwd` in the `initialize` it forwards.
+/// `cwd` in the `initialize` it forwards, and waiting `io_timeout` on the
+/// server ([`PROXY_IO_TIMEOUT`] outside tests).
 pub(super) fn proxy_io(
     mut stdin_reader: impl BufRead,
     mut stdout_writer: impl Write,
     stream: UnixStream,
     pane_id: Option<&str>,
     cwd: Option<&Path>,
+    io_timeout: std::time::Duration,
 ) -> anyhow::Result<()> {
     let sock_clone = match stream.try_clone() {
         Ok(c) => c,
@@ -360,8 +363,8 @@ pub(super) fn proxy_io(
     // Bound socket IO (see `PROXY_IO_TIMEOUT`) so a wedged server can't hang
     // the agent forever — `read_lsp_message` below would otherwise block
     // indefinitely on a silent server thread.
-    let _ = sock_clone.set_read_timeout(Some(PROXY_IO_TIMEOUT));
-    let _ = stream.set_write_timeout(Some(PROXY_IO_TIMEOUT));
+    let _ = sock_clone.set_read_timeout(Some(io_timeout));
+    let _ = stream.set_write_timeout(Some(io_timeout));
     let mut sock_reader = io::BufReader::new(sock_clone);
     let mut sock_writer = stream;
     mcp_log("proxy: ready, waiting for stdin");

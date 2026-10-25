@@ -18,6 +18,7 @@ use super::*;
 
 mod attribution;
 mod coexistence;
+mod slow_replies;
 mod status_events;
 
 fn make_request(id: u64, method: &str, params: Value) -> String {

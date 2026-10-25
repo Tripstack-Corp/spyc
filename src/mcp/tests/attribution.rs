@@ -200,6 +200,7 @@ fn the_proxy_carries_its_pane_to_the_server() {
         agent_side,
         Some("abc"),
         None,
+        PROXY_IO_TIMEOUT,
     )
     .unwrap();
 
@@ -266,6 +267,7 @@ fn the_proxy_carries_its_cwd_to_the_loop() {
         agent_side,
         None,
         Some(cwd),
+        PROXY_IO_TIMEOUT,
     )
     .unwrap();
 
