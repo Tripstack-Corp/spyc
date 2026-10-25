@@ -1,6 +1,7 @@
 //! Folds an agy transcript's events, in file order, into the HUD's [`Snapshot`]:
-//! usage, mode, compactions and tool calls, each result paired with its call and
-//! a result that arrives first held until its call does.
+//! usage, mode, compactions, the turn's latest reasoning and tool calls, each
+//! result paired with its call and a result that arrives first held until its
+//! call does.
 
 use std::collections::{BTreeMap, VecDeque};
 
@@ -46,6 +47,9 @@ pub struct Reducer {
     clock: Option<Timestamp>,
     compacted_at: Option<Timestamp>,
     compacted_step: Option<u64>,
+    turn_at: Option<Timestamp>,
+    turn_step: Option<u64>,
+    reasoning_step: Option<u64>,
 }
 
 impl Reducer {
@@ -73,6 +77,7 @@ impl Reducer {
                 at,
                 step_index,
                 usage,
+                reasoning,
                 calls,
             } => {
                 self.tick(at);
@@ -81,6 +86,15 @@ impl Reducer {
                     return;
                 };
                 self.close_older_pending_tools(step, at);
+                if let Some(reasoning) = reasoning
+                    && self.should_record_reasoning(at, step)
+                {
+                    self.snapshot.reasoning = Some(Sample {
+                        at,
+                        value: reasoning,
+                    });
+                    self.reasoning_step = Some(step);
+                }
                 if let Some(usage) = usage {
                     self.fold_usage(step, usage, at);
                 }
@@ -104,9 +118,14 @@ impl Reducer {
                 self.fold_result(step, failed, at, record_type.as_deref());
             }
             Event::Checkpoint { at, step_index } => self.fold_compaction(at, step_index),
-            Event::Model { at, model } => {
+            Event::UserInput { at, step_index } => self.fold_turn_boundary(at, step_index),
+            Event::Model {
+                at,
+                step_index,
+                model,
+            } => {
+                self.fold_turn_boundary(at, step_index);
                 if let Some(at) = at {
-                    self.tick(at);
                     self.mode_at = Some(at);
                 } else {
                     self.mode_at = self.clock;
@@ -165,6 +184,65 @@ impl Reducer {
             return true;
         }
         false
+    }
+
+    fn should_record_reasoning(&self, at: Timestamp, step: u64) -> bool {
+        if !Self::should_restore_context(self.compacted_at, self.compacted_step, at, step) {
+            return false;
+        }
+        if !Self::is_after_turn(self.turn_at, self.turn_step, at, step) {
+            return false;
+        }
+        match self.reasoning_step {
+            Some(prev_step) => step >= prev_step,
+            None => self
+                .snapshot
+                .reasoning
+                .as_ref()
+                .is_none_or(|sample| at >= sample.at),
+        }
+    }
+
+    fn is_after_turn(
+        turn_at: Option<Timestamp>,
+        turn_step: Option<u64>,
+        at: Timestamp,
+        step: u64,
+    ) -> bool {
+        if let Some(cut_step) = turn_step
+            && step <= cut_step
+        {
+            return false;
+        }
+        if let Some(cut_at) = turn_at
+            && at < cut_at
+        {
+            return false;
+        }
+        true
+    }
+
+    /// A prompt starts a turn: the last turn's reasoning goes, and a planner
+    /// response from before the prompt can't bring it back.
+    fn fold_turn_boundary(&mut self, at: Option<Timestamp>, step_index: Option<u64>) {
+        if let Some(at) = at {
+            self.tick(at);
+            self.turn_at = Some(self.turn_at.map_or(at, |prev| prev.max(at)));
+        }
+        if let Some(step) = step_index {
+            self.turn_step = Some(self.turn_step.map_or(step, |prev| prev.max(step)));
+        }
+        let clear = match (step_index, self.reasoning_step) {
+            (Some(u_step), Some(r_step)) if u_step != r_step => u_step > r_step,
+            _ => match (at, self.snapshot.reasoning.as_ref()) {
+                (Some(u_at), Some(sample)) => u_at >= sample.at,
+                _ => true,
+            },
+        };
+        if clear {
+            self.snapshot.reasoning = None;
+            self.reasoning_step = None;
+        }
     }
 
     fn fold_call(&mut self, id: String, planner_step: u64, call: ToolCall, at: Timestamp) {
@@ -310,6 +388,20 @@ impl Reducer {
             .is_some_and(|sample| sample.at <= at)
         {
             self.snapshot.context_tokens = None;
+        }
+        // Reasoning written after the checkpoint survives it, as context does
+        // on the planner response that follows.
+        let kept = self
+            .snapshot
+            .reasoning
+            .as_ref()
+            .zip(self.reasoning_step)
+            .is_some_and(|(sample, step)| {
+                Self::should_restore_context(Some(at), step_index, sample.at, step)
+            });
+        if !kept {
+            self.snapshot.reasoning = None;
+            self.reasoning_step = None;
         }
         replace(&mut self.snapshot.compaction, at, Compaction);
     }

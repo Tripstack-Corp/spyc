@@ -197,20 +197,29 @@ pub fn lines(
         } => agy::rows(snapshot, tail_only, view, p),
     };
     let mut rows = vec![activity(view, p), agent.usage];
+    let mut measured = Vec::new();
     if mode == AgentHudMode::Full {
         let mut mode_row = agent.mode;
         mode_row.cells.push(hooks(view.hooks, p));
         mode_row.cells.push(mcp(view.mcp_connections, p));
         rows.push(agent.tools);
-        rows.push(mode_row);
+        match thinking_row(view, p) {
+            // The mode row still sizes the columns, so none moves as the
+            // thinking row comes and goes.
+            Some(thinking) => {
+                rows.push(thinking);
+                measured.push(mode_row);
+            }
+            None => rows.push(mode_row),
+        }
     }
     // The rows below hang from the dot, each heading under the activity label.
-    for row in &mut rows[1..] {
+    for row in rows[1..].iter_mut().chain(&mut measured) {
         if let Some(first) = row.cells.first_mut() {
             first.0.splice(0..0, [p.label("│"), Span::raw(" ")]);
         }
     }
-    let mut lines = grid(rows, usize::from(width), first_column_width());
+    let mut lines = grid(rows, measured, usize::from(width), first_column_width());
     if theme.mono {
         // Shape and weight carry the meaning; no span keeps a colour.
         for span in lines.iter_mut().flat_map(|line| line.spans.iter_mut()) {
@@ -232,7 +241,13 @@ struct AgentRows {
 struct Row {
     cells: Vec<Field>,
     /// Placed after the last cell and outside the grid, so it widens no column.
-    trailer: Option<Field>,
+    trailer: Option<Trailer>,
+}
+
+struct Trailer {
+    field: Field,
+    /// Cut from the left, keeping the end in view.
+    tail: bool,
 }
 
 impl Row {
@@ -275,33 +290,73 @@ impl Field {
         }
         Self(spans)
     }
+
+    /// At most `max` columns wide, starting with `…` when cut, so the end
+    /// stays in view.
+    fn clip_tail(self, max: usize) -> Self {
+        if self.width() <= max {
+            return self;
+        }
+        let mut room = max.saturating_sub(1);
+        let mut spans = Vec::new();
+        let mut first = Style::default();
+        for span in self.0.into_iter().rev() {
+            if room == 0 {
+                break;
+            }
+            let kept = display_truncate_tail(&span.content, room).to_owned();
+            let cut = kept.len() < span.content.len();
+            room -= display_width(&kept);
+            first = span.style;
+            spans.push(Span::styled(kept, span.style));
+            // A wide character that didn't fit leaves room no earlier span
+            // may use without skipping it.
+            if cut {
+                break;
+            }
+        }
+        if let Some(cut) = spans.last_mut() {
+            cut.content = cut.content.trim_start().to_owned().into();
+        }
+        if max > 0 {
+            spans.push(Span::styled("…", first));
+        }
+        spans.reverse();
+        Self(spans)
+    }
 }
 
 /// Lays `rows` out so column `j` starts at the same x on every row. A cell
 /// past the right edge is dropped, never wrapped, except in the first two
 /// columns: the activity and the session have first claim on the width, so
-/// they are cut instead. The first column is at least `first` wide.
-fn grid(rows: Vec<Row>, width: usize, first: usize) -> Vec<Line<'static>> {
-    let columns = rows.iter().map(|row| row.cells.len()).max().unwrap_or(0);
+/// they are cut instead. The first column is at least `first` wide. The
+/// `measured` rows size the columns without being drawn.
+fn grid(rows: Vec<Row>, measured: Vec<Row>, width: usize, first: usize) -> Vec<Line<'static>> {
+    let columns = rows
+        .iter()
+        .chain(&measured)
+        .map(|row| row.cells.len())
+        .max()
+        .unwrap_or(0);
     // The last column moves nothing, so only the width of the strip cuts it.
-    let rows: Vec<Row> = rows
-        .into_iter()
-        .map(|row| Row {
-            cells: row
-                .cells
-                .into_iter()
-                .enumerate()
-                .map(|(j, c)| if j + 1 < columns { c.clip(MAX_CELL) } else { c })
-                .collect(),
-            trailer: row.trailer,
-        })
-        .collect();
+    let clip = |row: Row| Row {
+        cells: row
+            .cells
+            .into_iter()
+            .enumerate()
+            .map(|(j, c)| if j + 1 < columns { c.clip(MAX_CELL) } else { c })
+            .collect(),
+        trailer: row.trailer,
+    };
+    let rows: Vec<Row> = rows.into_iter().map(clip).collect();
+    let measured: Vec<Row> = measured.into_iter().map(clip).collect();
     let mut starts = Vec::with_capacity(columns);
     let mut x = 0;
     for j in 0..columns {
         starts.push(x);
         let widest = rows
             .iter()
+            .chain(&measured)
             .filter_map(|row| row.cells.get(j))
             .map(Field::width)
             .max()
@@ -335,11 +390,20 @@ fn place(row: Row, starts: &[usize], width: usize) -> Line<'static> {
         spans.extend(cell.0);
     }
     if let Some(trailer) = row.trailer {
-        let start = if x == 0 { 0 } else { x + GAP };
+        let start = if x == 0 {
+            0
+        } else {
+            (x + GAP).max(starts.get(1).copied().unwrap_or(0))
+        };
         if start < width {
-            let trailer = trailer.clip(width - start);
+            let room = width - start;
+            let field = if trailer.tail {
+                trailer.field.clip_tail(room)
+            } else {
+                trailer.field.clip(room)
+            };
             pad(&mut spans, start - x);
-            spans.extend(trailer.0);
+            spans.extend(field.0);
         }
     }
     Line::from(spans)
@@ -498,13 +562,36 @@ fn activity(view: &HudView<'_>, p: Palette) -> Row {
             place,
             Field(vec![elapsed]),
         ],
-        trailer: view.note.map(|note| {
-            Field(vec![Span::styled(
+        trailer: view.note.map(|note| Trailer {
+            field: Field(vec![Span::styled(
                 safe_label(note),
                 Style::default().fg(colour.unwrap_or(p.value)),
-            )])
+            )]),
+            tail: false,
         }),
     }
+}
+
+/// A `working` Antigravity (`agy`) agent's latest reasoning line, which stands
+/// in for the mode row and runs to the right edge.
+fn thinking_row(view: &HudView<'_>, p: Palette) -> Option<Row> {
+    if view.attention != Attention::Working {
+        return None;
+    }
+    let Metrics::Agy { snapshot, .. } = view.metrics else {
+        return None;
+    };
+    let text = snapshot
+        .and_then(|s| s.reasoning.as_ref())
+        .map(|r| r.value.as_str())
+        .filter(|text| !text.is_empty())?;
+    Some(Row {
+        cells: vec![Field(vec![p.heading("thinking")])],
+        trailer: Some(Trailer {
+            field: Field(vec![p.value(text)]),
+            tail: true,
+        }),
+    })
 }
 
 /// The model and effort, from either agent's latest mode report.
@@ -1099,5 +1186,123 @@ mod tests {
         assert!(rendered[1].starts_with("│ context") && rendered[1].contains(" -- "));
         assert!(rendered[1].contains("thread 900.0M"));
         assert!(rendered[2].starts_with("│ recent") && rendered[2].contains("0 calls"));
+    }
+
+    fn agy_thinking() -> agy_metrics::Snapshot {
+        let at = Timestamp::from_second(1_791_892_800).unwrap();
+        agy_metrics::Snapshot {
+            context_tokens: Some(agy_metrics::Sample { at, value: 22_800 }),
+            totals: agy_metrics::Usage {
+                input: 10_000,
+                cache_write: 0,
+                cache_read: 90_000,
+                output: 12_400,
+            },
+            mode: Some(agy_metrics::Sample {
+                at,
+                value: agy_metrics::Mode {
+                    model: Some("Gemini 4 Argon (High)".into()),
+                },
+            }),
+            reasoning: Some(agy_metrics::Sample {
+                at,
+                value: "Pinpointing `scan_image_candidates` bounds in `agy_transcript.rs`.".into(),
+            }),
+            subagent_calls: 2,
+            ..agy_metrics::Snapshot::default()
+        }
+    }
+
+    fn agy_working(snapshot: &agy_metrics::Snapshot, hooks: Hooks) -> HudView<'_> {
+        HudView {
+            session: Some("537fb604-0a1b-478f-be17-3c76df17b585"),
+            dot: Some(Span::raw("●")),
+            attention: Attention::Working,
+            note: None,
+            repository: Some("spyc"),
+            branch: Some("main"),
+            elapsed_secs: Some(32 * 60),
+            metrics: Metrics::Agy {
+                snapshot: Some(snapshot),
+                tail_only: false,
+            },
+            availability: Some(Availability::Available),
+            now: None,
+            local_tz: None,
+            resets: crate::config::AgentHudResets::Clock,
+            hooks,
+            mcp_connections: 1,
+        }
+    }
+
+    #[test]
+    fn working_agy_agent_with_reasoning_shares_row_four_and_restores_mode_row_when_settled() {
+        let snapshot = agy_thinking();
+        let mut view = agy_working(&snapshot, Hooks::Reported);
+        let working = text(&lines(&view, AgentHudMode::Full, 120, &Theme::default()));
+        assert!(
+            working[3].starts_with("│ thinking"),
+            "working row 4 should show thinking: {:?}",
+            working[3]
+        );
+        assert!(working[3].contains("Pinpointing `scan_image_candidates` bounds"));
+        assert_eq!(
+            x_of(&working[3], "Pinpointing"),
+            x_of(&working[0], "df17b585"),
+            "thinking text aligns with column 1 without shifting upper columns"
+        );
+
+        // Narrow width clips from the left (`…` + tail) so the end of the thought stays visible.
+        let narrow = text(&lines(&view, AgentHudMode::Full, 48, &Theme::default()));
+        assert!(narrow[3].starts_with("│ thinking"));
+        assert!(narrow[3].contains('…'));
+        assert!(narrow[3].ends_with("in `agy_transcript.rs`."));
+        assert!(display_width(&narrow[3]) <= 48);
+
+        // Once settled, row 4 returns to the normal agents/hooks/mcp row.
+        for settled in [
+            Attention::Done,
+            Attention::NeedsYou,
+            Attention::Waiting,
+            Attention::Idle,
+            Attention::Suspended,
+            Attention::Unknown,
+        ] {
+            view.attention = settled;
+            let rows = text(&lines(&view, AgentHudMode::Full, 120, &Theme::default()));
+            assert!(
+                rows[3].starts_with("│ agents") && rows[3].contains("hooks ✓"),
+                "{settled:?} should restore mode row: {:?}",
+                rows[3]
+            );
+        }
+    }
+
+    /// The thinking row stands in for the mode row, which still sizes the
+    /// columns: with no model reported, `hooks unverified` is the widest cell
+    /// of its column, and the rows above must not shift each time the agent
+    /// starts or settles.
+    #[test]
+    fn the_thinking_row_moves_no_column_above_it() {
+        let snapshot = agy_metrics::Snapshot {
+            mode: None,
+            ..agy_thinking()
+        };
+        let mut view = agy_working(&snapshot, Hooks::Unverified);
+        let working = text(&lines(&view, AgentHudMode::Full, 160, &Theme::default()));
+        assert!(working[3].starts_with("│ thinking"), "{:?}", working[3]);
+        view.attention = Attention::Done;
+        let settled = text(&lines(&view, AgentHudMode::Full, 160, &Theme::default()));
+        assert!(settled[3].contains("hooks unverified"), "{:?}", settled[3]);
+        assert_eq!(working[1..3], settled[1..3]);
+    }
+
+    #[test]
+    fn a_cut_from_the_left_skips_nothing_around_a_wide_character() {
+        let field = Field(vec![Span::raw("ab"), Span::raw("中文字")]);
+        let cut = field.clip_tail(6);
+        let shown: String = cut.0.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(shown, "…文字");
+        assert!(cut.width() <= 6);
     }
 }

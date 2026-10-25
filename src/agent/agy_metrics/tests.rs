@@ -900,3 +900,202 @@ fn current_agy_tool_names_match_typed_results_and_parameters_mcp_calls() {
         "call_mcp_tool with parameters must unwrap spyc tool name"
     );
 }
+
+/// The reasoning line the HUD would show.
+fn reasoning(reducer: &Reducer) -> Option<String> {
+    reducer.snapshot().reasoning.map(|sample| sample.value)
+}
+
+fn fold(reducer: &mut Reducer, record: &serde_json::Value) {
+    reducer.fold(decode(record).expect("the record decodes"));
+}
+
+fn thought(step: u64, at: &str, thinking: &str) -> serde_json::Value {
+    json!({
+        "type": "PLANNER_RESPONSE",
+        "source": "MODEL",
+        "step_index": step,
+        "created_at": at,
+        "thinking": thinking
+    })
+}
+
+fn checkpoint_at(step: u64, at: &str) -> serde_json::Value {
+    json!({
+        "type": "CHECKPOINT",
+        "source": "SYSTEM",
+        "step_index": step,
+        "created_at": at,
+        "content": "Compacted conversation context."
+    })
+}
+
+#[test]
+fn planner_response_extracts_latest_reasoning_step_and_compaction_clears_it() {
+    let mut reducer = Reducer::default();
+    let plan1 = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 1,
+        "created_at": "2026-10-14T10:00:01Z",
+        "thinking": "**Analyzing Transcript State**\n\nI've pinpointed the relevant code sections in `agy_transcript.rs`.",
+        "input_tokens": 100,
+        "cache_read_tokens": 20,
+        "output_tokens": 30
+    });
+    reducer.fold(decode(&plan1).expect("decode plan1"));
+    assert_eq!(
+        reasoning(&reducer).as_deref(),
+        Some("I've pinpointed the relevant code sections in `agy_transcript.rs`.")
+    );
+
+    // A follow-up planner step without `thinking` preserves the active turn's reasoning.
+    let plan2 = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 2,
+        "created_at": "2026-10-14T10:00:02Z",
+        "tool_calls": [{ "name": "read_file" }]
+    });
+    reducer.fold(decode(&plan2).expect("decode plan2"));
+    assert_eq!(
+        reasoning(&reducer).as_deref(),
+        Some("I've pinpointed the relevant code sections in `agy_transcript.rs`.")
+    );
+
+    // Compaction clears prior reasoning until a new post-compaction step arrives.
+    let chk = json!({
+        "type": "CHECKPOINT",
+        "step_index": 3,
+        "created_at": "2026-10-14T10:00:05Z",
+        "content": "Compacted conversation context."
+    });
+    reducer.fold(decode(&chk).expect("decode checkpoint"));
+    assert!(reasoning(&reducer).is_none());
+}
+
+#[test]
+fn user_input_clears_previous_turn_reasoning_and_suppresses_pre_turn_samples() {
+    let mut reducer = Reducer::default();
+
+    // Turn A records reasoning.
+    let turn_a_plan = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 1,
+        "created_at": "2026-10-14T10:00:01Z",
+        "thinking": "**Turn A**\n\nFinished analysing Turn A."
+    });
+    reducer.fold(decode(&turn_a_plan).expect("decode turn_a_plan"));
+    assert_eq!(
+        reasoning(&reducer).as_deref(),
+        Some("Finished analysing Turn A.")
+    );
+
+    // Submitting Turn B (ordinary USER_INPUT) clears Turn A's reasoning immediately.
+    let turn_b_input = json!({
+        "type": "USER_INPUT",
+        "source": "USER_EXPLICIT",
+        "step_index": 2,
+        "created_at": "2026-10-14T10:00:10Z",
+        "content": "<USER_REQUEST>start turn B</USER_REQUEST>"
+    });
+    reducer.fold(decode(&turn_b_input).expect("decode turn_b_input"));
+    assert!(
+        reasoning(&reducer).is_none(),
+        "ordinary USER_INPUT must clear previous-turn reasoning"
+    );
+
+    // An initial Turn B planner response without `thinking` keeps reasoning empty.
+    let turn_b_initial = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 3,
+        "created_at": "2026-10-14T10:00:11Z",
+        "tool_calls": [{ "name": "mcp_spyc_report_status" }]
+    });
+    reducer.fold(decode(&turn_b_initial).expect("decode turn_b_initial"));
+    assert!(
+        reasoning(&reducer).is_none(),
+        "Turn B step without thinking must not resurrect Turn A reasoning"
+    );
+
+    // A late/replayed pre-turn planner sample predating Turn B is suppressed.
+    reducer.fold(decode(&turn_a_plan).expect("decode turn_a_plan replay"));
+    assert!(
+        reasoning(&reducer).is_none(),
+        "samples predating the current turn boundary must be suppressed"
+    );
+
+    // Once Turn B emits its own thinking, it becomes the active reasoning sample.
+    let turn_b_thought = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 4,
+        "created_at": "2026-10-14T10:00:12Z",
+        "thinking": "**Turn B**\n\nInspecting Turn B changes."
+    });
+    reducer.fold(decode(&turn_b_thought).expect("decode turn_b_thought"));
+    assert_eq!(
+        reasoning(&reducer).as_deref(),
+        Some("Inspecting Turn B changes.")
+    );
+}
+
+#[test]
+fn reasoning_after_a_compaction_shows_and_survives_a_late_checkpoint() {
+    let mut reducer = Reducer::default();
+    fold(
+        &mut reducer,
+        &thought(1, "2026-10-14T10:00:01Z", "Before compacting."),
+    );
+    fold(&mut reducer, &checkpoint_at(2, "2026-10-14T10:00:05Z"));
+    assert_eq!(reasoning(&reducer), None);
+    fold(
+        &mut reducer,
+        &thought(3, "2026-10-14T10:00:06Z", "After compacting."),
+    );
+    assert_eq!(reasoning(&reducer).as_deref(), Some("After compacting."));
+    // A checkpoint for an earlier step, written after this response in the
+    // same second, doesn't take the response's reasoning with it.
+    fold(
+        &mut reducer,
+        &thought(8, "2026-10-14T10:00:07Z", "Newest step."),
+    );
+    fold(&mut reducer, &checkpoint_at(7, "2026-10-14T10:00:07Z"));
+    assert_eq!(reasoning(&reducer).as_deref(), Some("Newest step."));
+}
+
+#[test]
+fn a_prompt_that_changes_the_model_starts_a_turn_too() {
+    let mut reducer = Reducer::default();
+    fold(&mut reducer, &thought(1, "2026-10-14T10:00:01Z", "Turn A."));
+    fold(
+        &mut reducer,
+        &json!({
+            "type": "USER_INPUT",
+            "source": "USER_EXPLICIT",
+            "step_index": 2,
+            "created_at": "2026-10-14T10:00:10Z",
+            "content": "<USER_REQUEST>go</USER_REQUEST><USER_SETTINGS_CHANGE>The user changed setting `Model Selection` from None to Gemini 2.5 Pro. No need to comment.</USER_SETTINGS_CHANGE>"
+        }),
+    );
+    assert_eq!(reasoning(&reducer), None);
+    assert_eq!(
+        reducer.snapshot().mode.map(|m| m.value.model),
+        Some(Some("Gemini 2.5 Pro".to_owned()))
+    );
+}
+
+#[test]
+fn only_the_users_own_prompt_starts_a_turn() {
+    let mut reducer = Reducer::default();
+    fold(
+        &mut reducer,
+        &thought(1, "2026-10-14T10:00:01Z", "Mid-turn."),
+    );
+    let injected = json!({
+        "type": "USER_INPUT",
+        "source": "SYSTEM",
+        "step_index": 2,
+        "created_at": "2026-10-14T10:00:02Z",
+        "content": "continue"
+    });
+    assert_eq!(decode(&injected), None);
+    assert_eq!(reasoning(&reducer).as_deref(), Some("Mid-turn."));
+}

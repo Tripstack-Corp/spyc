@@ -80,6 +80,9 @@ pub struct Snapshot {
     pub totals: Usage,
     pub messages: u64,
     pub mode: Option<Sample<Mode>>,
+    /// The current turn's latest reasoning line, from a planner response's
+    /// `thinking`. A new prompt or a compaction clears it.
+    pub reasoning: Option<Sample<String>>,
     pub compaction: Option<Sample<Compaction>>,
     pub compactions: u32,
     /// Recent tool calls, oldest first, at most [`MAX_TOOLS`].

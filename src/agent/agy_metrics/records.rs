@@ -1,6 +1,6 @@
 //! The metrics projection of one agy transcript record. Only labels,
-//! token counts and tool names leave it: no prompt, response, reasoning,
-//! tool arguments or tool output.
+//! token counts, tool names and a bounded latest reasoning step leave it:
+//! no prompt, response, tool arguments or tool output.
 
 use jiff::Timestamp;
 use serde_json::Value;
@@ -9,6 +9,8 @@ use super::Usage;
 
 /// At most this many tool calls are taken from one record.
 const MAX_BLOCKS: usize = 64;
+/// At most this many bytes of a reasoning line are kept, from its end.
+const MAX_REASONING_BYTES: usize = 512;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
@@ -17,11 +19,12 @@ pub struct ToolCall {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// A planner response with token usage and tool calls.
+    /// A planner response with token usage, latest reasoning step and tool calls.
     PlannerResponse {
         at: Timestamp,
         step_index: Option<u64>,
         usage: Option<Usage>,
+        reasoning: Option<String>,
         calls: Vec<ToolCall>,
     },
     /// A tool execution record (generic or typed).
@@ -36,9 +39,15 @@ pub enum Event {
         at: Timestamp,
         step_index: Option<u64>,
     },
+    /// The user's prompt, which starts a turn.
+    UserInput {
+        at: Option<Timestamp>,
+        step_index: Option<u64>,
+    },
     /// Model setting update from user settings change.
     Model {
         at: Option<Timestamp>,
+        step_index: Option<u64>,
         model: String,
     },
 }
@@ -59,6 +68,7 @@ fn planner_response(value: &Value) -> Option<Event> {
     let at = timestamp(value)?;
     let step_index = value["step_index"].as_u64();
     let usage = usage(value);
+    let reasoning = value["thinking"].as_str().and_then(clean_reasoning);
     let calls = value["tool_calls"]
         .as_array()
         .into_iter()
@@ -70,6 +80,7 @@ fn planner_response(value: &Value) -> Option<Event> {
         at,
         step_index,
         usage,
+        reasoning,
         calls,
     })
 }
@@ -164,11 +175,20 @@ fn checkpoint(value: &Value) -> Option<Event> {
     Some(Event::Checkpoint { at, step_index })
 }
 
+/// A model change, or the user's own prompt; as in `^a v`, only that starts a
+/// turn.
 fn user_input(value: &Value) -> Option<Event> {
-    let content = value["content"].as_str()?;
-    let model = model_from_settings(content)?;
     let at = timestamp(value);
-    Some(Event::Model { at, model })
+    let step_index = value["step_index"].as_u64();
+    if let Some(model) = value["content"].as_str().and_then(model_from_settings) {
+        return Some(Event::Model {
+            at,
+            step_index,
+            model,
+        });
+    }
+    (value["source"].as_str() == Some("USER_EXPLICIT"))
+        .then_some(Event::UserInput { at, step_index })
 }
 
 fn model_from_settings(content: &str) -> Option<String> {
@@ -217,4 +237,91 @@ fn label(value: &str) -> Option<String> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"_.:/ ()-".contains(&b)))
     .then(|| value.to_owned())
+}
+
+/// The last line of a planner response's `thinking` that has words in it, as
+/// plain text: markdown markers stripped, whitespace collapsed, and at most
+/// [`MAX_REASONING_BYTES`] kept from its end.
+fn clean_reasoning(raw: &str) -> Option<String> {
+    let line = raw.lines().filter_map(clean_reasoning_line).next_back()?;
+    Some(bound_reasoning_tail(line, MAX_REASONING_BYTES))
+}
+
+fn clean_reasoning_line(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with("```") || is_truncation_marker(trimmed) {
+        return None;
+    }
+    let body = trimmed.trim_start_matches(['#', '>', '-', '*', ' ', '\t']);
+    let mut out = String::with_capacity(body.len().min(MAX_REASONING_BYTES));
+    let mut prev_space = false;
+    for token in body.split("**") {
+        for ch in token.chars() {
+            if ch.is_whitespace() {
+                if !out.is_empty() && !prev_space {
+                    out.push(' ');
+                    prev_space = true;
+                }
+            } else if !ch.is_control() {
+                out.push(ch);
+                prev_space = false;
+            }
+        }
+    }
+    if prev_space {
+        out.pop();
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// agy's own line where it cut a long field: `<truncated 6726 bytes>`.
+fn is_truncation_marker(s: &str) -> bool {
+    s.starts_with("<truncated") && s.ends_with('>')
+}
+
+fn bound_reasoning_tail(mut s: String, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    const ELLIPSIS: &str = "…";
+    let budget = max_bytes.saturating_sub(ELLIPSIS.len());
+    let mut start = s.len().saturating_sub(budget);
+    while start < s.len() && !s.is_char_boundary(start) {
+        start += 1;
+    }
+    let tail = s.split_off(start);
+    let trimmed = tail.trim_start();
+    format!("{ELLIPSIS}{trimmed}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_reasoning_picks_latest_non_empty_line_and_strips_markdown() {
+        let raw = "**Analyzing Transcript State**\n\n- Checking `scan_image_candidates` bounds\n<truncated 6726 bytes>\n\n";
+        assert_eq!(
+            clean_reasoning(raw).as_deref(),
+            Some("Checking `scan_image_candidates` bounds")
+        );
+    }
+
+    #[test]
+    fn clean_reasoning_falls_back_to_single_heading_line() {
+        assert_eq!(
+            clean_reasoning("**Planning HUD layout**").as_deref(),
+            Some("Planning HUD layout")
+        );
+        assert_eq!(clean_reasoning("   \n```\n<truncated 336 bytes>\n"), None);
+    }
+
+    #[test]
+    fn clean_reasoning_bounds_overlong_line_from_tail() {
+        let raw = format!("prefix {} tail-marker", "word ".repeat(200));
+        let cleaned = clean_reasoning(&raw).expect("non-empty reasoning");
+        assert!(cleaned.len() <= MAX_REASONING_BYTES);
+        assert!(cleaned.starts_with('…'));
+        assert!(cleaned.ends_with("tail-marker"));
+    }
 }
