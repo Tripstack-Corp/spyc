@@ -200,6 +200,12 @@ image protocols or OSC 52 clipboard writes. How it answers:
     pager-keys help (separate but linked), and `Esc`/`q` returns to the
     scrollback. (`H` is a no-op in the *generic* overlay pager only when
     it's a bottom scrollback — there it's this transcript help.)
+- **^a t** open the active `agy` tab's thinking history in the
+  **in-app pager**, in the bottom pane: each turn's prompt (`❯ …`), then
+  the reasoning agy recorded for it, oldest first, without its replies or
+  tool calls. A long session shows its newest turns under a line saying
+  older ones were left out. `r` reloads while the agent keeps running;
+  `Esc` (or scrolling down past the end) returns to the live pane.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of

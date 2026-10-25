@@ -210,6 +210,7 @@ impl Resolver {
                 Act("F", A::PaneForkTab),
                 Act("z", A::TogglePaneZoom),
                 Act("v", A::PaneScrollEnter),
+                Act("t", A::OpenThinkingHistory),
                 Act("+", A::PaneGrow),
                 Act("-", A::PaneShrink),
                 Act("s", A::PaneSendSelection),
@@ -332,6 +333,7 @@ impl Resolver {
             KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
             KeyCode::Char('z' | 'Z') => ResolverOutcome::Action(Action::TogglePaneZoom),
             KeyCode::Char('v' | 'V') => ResolverOutcome::Action(Action::PaneScrollEnter),
+            KeyCode::Char('t' | 'T') => ResolverOutcome::Action(Action::OpenThinkingHistory),
             // Send / pipe content to pane.
             KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::PaneSendSelection),
             KeyCode::Char('P') => ResolverOutcome::Action(Action::PanePipeContent),

@@ -251,7 +251,8 @@ Code tab also gets a `todo` cell once `TodoWrite` or `TaskCreate`/`TaskUpdate`
 has reported: completed over total, with how many are in progress. While an
 Antigravity (`agy`) tab is `working` and has recorded reasoning in this turn,
 its fourth row reads `thinking` and the reasoning's latest line, cut from the
-left with `…` so the newest words stay in view. Usage scopes
+left with `…` so the newest words stay in view, and **`^a t`** pages the
+session's whole thinking history. Usage scopes
 stay separate, and unavailable context occupancy and limits stay explicit. A
 Claude Code tab's context is a token count, followed by Claude Code's own
 percentage and the plan's five-hour and seven-day usage once spyc's statusline

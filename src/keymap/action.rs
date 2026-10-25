@@ -164,6 +164,9 @@ pub enum Action {
     /// `^a g` — gallery of the images the focused agent tab actually received,
     /// read back out of its transcript.
     OpenImageGallery,
+    /// `^a t` — open the active Antigravity (`agy`) tab's thinking history in
+    /// the lower-pane scrollback pager.
+    OpenThinkingHistory,
 
     // Harpoon — small per-project pinned list of file pointers.
     HarpoonJump(u8), // H 1..9 — chdir to slot N's parent + cursor on it
@@ -310,7 +313,8 @@ impl Action {
             | Self::OpenSecondCommander
             | Self::CloseSecondCommander
             | Self::QuickSelectOpen
-            | Self::OpenImageGallery => Tier::Pane,
+            | Self::OpenImageGallery
+            | Self::OpenThinkingHistory => Tier::Pane,
             // Meta — cross-cutting / informational.
             Self::Help
             | Self::About
@@ -417,6 +421,7 @@ impl Action {
             Self::OpenGraveyardView => "open graveyard viewer (recover deleted)",
             Self::QuickSelectOpen => "quick select — pick URL/path/SHA/IP from pane",
             Self::OpenImageGallery => "gallery of images the agent received",
+            Self::OpenThinkingHistory => "open agy thinking history in pager",
             Self::HarpoonJump(_) => "jump to harpoon slot N",
             Self::HarpoonAppend => "harpoon — append cursor file",
             Self::HarpoonRemove => "harpoon — remove cursor file",
@@ -429,8 +434,7 @@ impl Action {
             Self::GitDiffUnstaged => "git diff (unstaged — since you staged)",
             Self::GitBlame => "git blame (cursor file)",
             Self::GitRestore => "restore deleted file (struck-through row) from git",
-            Self::GotoFile => "jump to path in pane output",
-            Self::GotoFileLine => "jump to path:line in pane output",
+            Self::GotoFile | Self::GotoFileLine => self.describe_goto(),
             Self::SetMark(_) => "set mark",
             Self::JumpMark(_) => "jump to mark",
             Self::JumpPrevDir => "jump to previous directory",
@@ -585,6 +589,7 @@ impl Action {
             // Quick Select.
             Self::QuickSelectOpen => "quick_select_open",
             Self::OpenImageGallery => "open_image_gallery",
+            Self::OpenThinkingHistory => "open_thinking_history",
             // Harpoon.
             Self::HarpoonJump(_) => "harpoon_jump",
             Self::HarpoonAppend => "harpoon_append",
@@ -601,8 +606,7 @@ impl Action {
             Self::GitBlame => "git_blame",
             Self::GitRestore => "git_restore",
             // Path references.
-            Self::GotoFile => "goto_file",
-            Self::GotoFileLine => "goto_file_line",
+            Self::GotoFile | Self::GotoFileLine => self.goto_canonical_name(),
             // Meta.
             Self::Redraw => "redraw",
             Self::Quit => "quit",
@@ -611,6 +615,20 @@ impl Action {
             Self::ReopenLastBuffer => "reopen_last_buffer",
             Self::FindFile => "find_file",
             Self::Noop => "noop",
+        }
+    }
+
+    const fn describe_goto(&self) -> &'static str {
+        match self {
+            Self::GotoFileLine => "jump to path:line in pane output",
+            _ => "jump to path in pane output",
+        }
+    }
+
+    const fn goto_canonical_name(&self) -> &'static str {
+        match self {
+            Self::GotoFileLine => "goto_file_line",
+            _ => "goto_file",
         }
     }
 }
@@ -748,6 +766,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         // Quick Select.
         "quick_select_open" => Action::QuickSelectOpen,
         "open_image_gallery" => Action::OpenImageGallery,
+        "open_thinking_history" => Action::OpenThinkingHistory,
         // Harpoon (default to slot 1).
         "harpoon_jump" => Action::HarpoonJump(1),
         "harpoon_append" => Action::HarpoonAppend,
@@ -764,8 +783,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "git_blame" => Action::GitBlame,
         "git_restore" => Action::GitRestore,
         // Path references.
-        "goto_file" => Action::GotoFile,
-        "goto_file_line" => Action::GotoFileLine,
+        "goto_file" | "goto_file_line" => goto_from_name(name),
         // Meta.
         "redraw" => Action::Redraw,
         "quit" => Action::Quit,
@@ -776,6 +794,14 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "noop" => Action::Noop,
         _ => return ProjectAction::from_name(name).map(Action::Project),
     })
+}
+
+fn goto_from_name(name: &str) -> Action {
+    if name == "goto_file_line" {
+        Action::GotoFileLine
+    } else {
+        Action::GotoFile
+    }
 }
 
 /// What [`Action::Project`] does (#99): the project in view's home, and the

@@ -144,6 +144,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^s x` | Close the second file-commander (`^d` quits, keeping `b` open for `-r`) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
+| `^a t` | Open the active `agy` tab's thinking history in the in-app pager (`r` reloads) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
 | `^a ↓` | Send a literal `^a` to the pane (e.g. so Claude receives it) |
 | `^a !` | Go to the agent that needs you, in any project (as `Space !`) |
@@ -187,6 +188,10 @@ in place:
   show; `T` swaps between the two when both exist, `t` toggles
   tool-call lines, `r` reloads. Scrolling down past the end exits back
   to the live pane, same as `Esc`.
+- **`^a t`** mounts the active `agy` tab's thinking history in the
+  **bottom pane**: each turn's prompt, then the reasoning recorded for it
+  (`r` reloads, `Esc` or scrolling down past the end exits back to the
+  live pane).
 
 ### Markdown outline
 
