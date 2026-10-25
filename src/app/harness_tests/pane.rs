@@ -1978,3 +1978,54 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
         });
     });
 }
+
+/// `^a c`'s command expands `%` to the selection as `!` does, each path named
+/// from the directory the tab runs in: browsing `sub/` and starting the tab in
+/// its parent, `%` is `sub/notes.txt`. Typed through both prompts, as `tail -f %`
+/// was when it reached `tail` as a literal `%`.
+#[test]
+#[ignore = "red: ^a c starts its command with `%` unexpanded"]
+fn a_new_tab_command_expands_percent_from_the_tabs_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let work = tmp.path().canonicalize().unwrap().join("work");
+        let sub = work.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("notes.txt"), "x\n").unwrap();
+        let mut app = App::test_app(sub.clone());
+        app.state.refresh_listing(); // `test_app` doesn't list its dir
+        let cur = app.state.cur();
+        assert_eq!(cur.rows[cur.cursor.index].path, sub.join("notes.txt"));
+
+        let type_line = |app: &mut App, text: &str| {
+            let clear = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
+            let keys = std::iter::once(clear)
+                .chain(
+                    text.chars()
+                        .map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty())),
+                )
+                .chain(std::iter::once(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::empty(),
+                )));
+            for key in keys {
+                app.handle_key(key).unwrap();
+            }
+        };
+        app.apply(&Action::PaneNewTab).unwrap();
+        type_line(&mut app, "printf '%%s\\n' % > got.txt");
+        type_line(&mut app, work.to_str().unwrap());
+
+        let got = work.join("got.txt");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline
+            && std::fs::read_to_string(&got).map_or(true, |s| !s.ends_with('\n'))
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&got).ok().as_deref(),
+            Some("sub/notes.txt\n")
+        );
+    });
+}
