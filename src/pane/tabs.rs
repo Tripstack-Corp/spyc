@@ -120,10 +120,8 @@ pub enum RetiredReason {
 /// Authority model (`App::effective_activity`): a report wins over the timing
 /// fallback until it expires (`expiry`, a backstop against a crashed agent's
 /// stale report). Visible approval prompts in Codex and agy temporarily
-/// override a non-blocked report without discarding it; semantic reports
-/// (`Working`, `Waiting`, `Done`, `Blocked`) survive redraws and silent tool
-/// waits (with `Working` yielding after the agent's
-/// [`crate::agent::AgentProfile::working_quiet_window`] of pane silence when set).
+/// override a non-blocked report without discarding it. Every report survives
+/// redraws and silent tool waits, except as [`Self::yields_to_timing`] says.
 #[derive(Clone, Debug)]
 pub struct ReportedStatus {
     /// The reported state.
@@ -413,7 +411,7 @@ impl TabInfo {
         }
         if let Some(r) = &self.reported {
             let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
-            let yielded = !scrape_overrides && r.yields_to_timing(self.last_output_at, kind, now);
+            let yielded = r.yields_to_timing(self.last_output_at, kind, now);
             if expired || yielded {
                 if !expired
                     && r.status == AgentActivity::Working

@@ -1078,7 +1078,6 @@ mod tests {
     // agy's `idle` from `Stop` holds through the redraws after it, as every
     // other report does, until a newer report or its TTL.
     #[test]
-    #[ignore = "red: agy's idle report gives way to the next output"]
     fn an_agy_idle_report_holds_against_later_output() {
         use crate::pane::{AgentActivity, ReportedStatus};
         use std::time::{Duration, Instant};

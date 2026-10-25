@@ -307,8 +307,8 @@ consenting to spyc's hooks, restart Codex and review `/hooks` and project trust.
 New/changed hooks need review; spyc does not authorize them for you. Codex and
 Claude reports survive redraws and quiet tool waits until TTL expiry or a newer
 report. agy's `working` report gives way to output timing after 15 seconds of
-pane silence, its `idle` to the next output, and its `waiting`, `done` and
-`blocked` hold to TTL or settlement. Codex cancellation reports `idle` through
+pane silence, and its `idle`, `waiting`, `done` and `blocked` hold to TTL or
+settlement. Codex cancellation reports `idle` through
 `Interrupt`. Without a live report, timing-only `idle` means silence, not
 confirmed completion.
 
