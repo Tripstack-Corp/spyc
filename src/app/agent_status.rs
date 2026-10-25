@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     // P1 authority: a live semantic report wins over output timing; an expired
-    // or output-superseded report falls back to timing; a non-agent ignores it.
+    // report falls back to timing; a non-agent ignores it.
     #[test]
     fn effective_activity_honors_live_reports_then_falls_back() {
         use crate::pane::{AgentActivity, ReportedStatus};
@@ -1062,18 +1062,6 @@ mod tests {
             ),
             AgentActivity::Idle
         );
-        // Output AFTER the report (agent resumed) supersedes it → timing wins.
-        let later = base + Duration::from_millis(500);
-        assert_eq!(
-            App::effective_activity(
-                report(AgentActivity::Idle, base, base + Duration::from_secs(60)).as_ref(),
-                None,
-                AgentKind::Agy,
-                Some(later),
-                later,
-            ),
-            AgentActivity::Working
-        );
         // A non-agent tab ignores any report (dots are agent-only).
         assert_eq!(
             App::effective_activity(
@@ -1085,6 +1073,30 @@ mod tests {
             ),
             AgentActivity::Unknown
         );
+    }
+
+    // agy's `idle` from `Stop` holds through the redraws after it, as every
+    // other report does, until a newer report or its TTL.
+    #[test]
+    #[ignore = "red: agy's idle report gives way to the next output"]
+    fn an_agy_idle_report_holds_against_later_output() {
+        use crate::pane::{AgentActivity, ReportedStatus};
+        use std::time::{Duration, Instant};
+        let base = Instant::now();
+        let idle = ReportedStatus::new(AgentActivity::Idle, base, base + Duration::from_secs(60));
+        for (output, now) in [(500, 500), (200, 10_000)] {
+            assert_eq!(
+                App::effective_activity(
+                    Some(&idle),
+                    None,
+                    AgentKind::Agy,
+                    Some(base + Duration::from_millis(output)),
+                    base + Duration::from_millis(now),
+                ),
+                AgentActivity::Idle,
+                "output at {output} ms, read at {now} ms"
+            );
+        }
     }
 
     // P1-2: the scrape fallback sits BETWEEN a live report and output timing —
@@ -1291,7 +1303,7 @@ mod tests {
     // waits, and not the expiry clock (the bug where any of those bounced the
     // dot off red and back to the working pulse). It clears only via a newer
     // report or the user settling the prompt — Enter, Esc or `^c`, handled in
-    // `run_effects`. A non-blocked report still hands back to timing on output.
+    // `run_effects`.
     #[test]
     fn blocked_report_is_latched_against_output() {
         use crate::pane::{AgentActivity, ReportedStatus};
@@ -1329,21 +1341,8 @@ mod tests {
             "blocked has no TTL — it stays until answered"
         );
 
-        // Contrast: an explicit `Idle` report still hands back to timing on
-        // fresh output, while semantic states (`Done`, `Waiting`, `Working`)
-        // survive redraw output until their TTL expires.
-        let idle = Some(ReportedStatus::new(AgentActivity::Idle, base, expiry));
-        assert_eq!(
-            App::effective_activity(
-                idle.as_ref(),
-                None,
-                AgentKind::Agy,
-                Some(base + Duration::from_millis(200)),
-                base + Duration::from_millis(300),
-            ),
-            AgentActivity::Working,
-            "idle report yields when fresh output arrives"
-        );
+        // Contrast: `Done` and `Waiting` survive redraw output until their TTL
+        // expires, and agy's `Working` survives it inside its quiet window.
         for status in [
             AgentActivity::Done,
             AgentActivity::Waiting,

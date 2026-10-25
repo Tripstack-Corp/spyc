@@ -119,6 +119,53 @@ fn a_codex_or_claude_idle_report_survives_the_redraw_after_it() {
     });
 }
 
+/// An `agy` `Stop` hook with `terminationReason == "USER_CANCELED"` remaps
+/// `done` to `idle`; that `Idle` report must hold through the prompt redraw
+/// that follows it rather than flipping to a ~2-second working pulse on the
+/// post-cancel prompt flush.
+#[test]
+#[ignore = "red: agy Idle report yields to post-Stop redraw output and flips to a 2s Working pulse"]
+fn an_agy_idle_report_survives_the_redraw_after_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        report(&mut app, "idle");
+        let at = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .reported
+            .clone()
+            .unwrap()
+            .at;
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .last_output_at = Some(at + Duration::from_secs(1));
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_activity(at + Duration::from_millis(1500), &mut ctx);
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
+        assert_eq!(
+            info.activity,
+            AgentActivity::Idle,
+            "agy: a post-Stop redraw must not turn an idle report into working"
+        );
+        assert!(info.reported.is_some(), "agy: the idle report was dropped");
+    });
+}
+
 #[test]
 fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
     let tmp = tempfile::tempdir().unwrap();
