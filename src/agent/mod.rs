@@ -257,6 +257,13 @@ pub trait AgentProfile: Sync {
         None
     }
 
+    /// Quiet window after which a live `Working` report yields to output timing
+    /// when `Stop` never arrives (`None` for agents whose `Working` report holds
+    /// across silent tool waits until its TTL backstop).
+    fn working_quiet_window(&self) -> Option<std::time::Duration> {
+        None
+    }
+
     /// P1-2 scrape fallback: priority-ordered pane-text detection rules for an
     /// state the agent cannot self-report. Codex's verified command approval
     /// temporarily overrides non-blocked reports; semantic blocks retain
@@ -835,8 +842,14 @@ impl AgentProfile for AgyProfile {
         //
         // `done` needs agy >= 1.1.10: before it, `Stop` sat unreachable behind
         // agy's built-in termination checks, so the hook was installed and never
-        // ran. On an older agy that half degrades to output timing.
+        // ran. Without `Stop`, `working_quiet_window` ends a `working` report.
         Some(StatusHookSupport { live_reload: false })
+    }
+    /// agy redraws its spinner about every 100 ms while a turn runs, so 15 s of
+    /// silence means the turn ended without `Stop`. `docs/HARNESS.md` records
+    /// the probe.
+    fn working_quiet_window(&self) -> Option<std::time::Duration> {
+        Some(std::time::Duration::from_secs(15))
     }
     fn detection_rules(&self) -> &'static [DetectionRule] {
         AGY_DETECTION_RULES

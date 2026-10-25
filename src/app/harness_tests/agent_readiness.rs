@@ -296,7 +296,6 @@ fn agy_working_quiet_window_restarts_on_later_output() {
 /// With no `Stop`, 15 s of pane silence ends agy's `working`: the report is
 /// dropped, output timing says idle, and nothing stays armed to pulse the dot.
 #[test]
-#[ignore = "red: agy's working report stands for its whole TTL when Stop never arrives"]
 fn agy_working_yields_to_timing_after_the_quiet_window() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -346,7 +345,6 @@ fn agy_waiting_and_done_survive_post_stop_redraws() {
 /// The dialog draws at 10 s, which is the pane's last output, and is answered
 /// at 60 s. The post-answer grace counts from the answer, not from the draw.
 #[test]
-#[ignore = "red: agy's working report has no quiet window to measure from the answer"]
 fn agy_working_grace_counts_from_the_answer_not_the_dialog_draw() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -383,7 +381,6 @@ fn agy_working_grace_counts_from_the_answer_not_the_dialog_draw() {
 }
 
 #[test]
-#[ignore = "red: why-status does not report agy's working-quiet window or quiet retirement reason"]
 fn agy_working_why_status_reports_quiet_expiry_alongside_ttl_backstop() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -416,7 +413,6 @@ fn agy_working_why_status_reports_quiet_expiry_alongside_ttl_backstop() {
 }
 
 #[test]
-#[ignore = "red: agy working report does not yield after post-approval quiet window"]
 fn agy_working_approval_override_preserves_post_answer_quiet_grace() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

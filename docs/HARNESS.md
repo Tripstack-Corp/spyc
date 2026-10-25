@@ -304,10 +304,30 @@ shows the last received semantic report, hook-file marker presence, whether
 hooks existed at launch, and known config changes that require a restart.
 An MCP connection or hook file alone does not prove hooks ran. After first
 consenting to spyc's hooks, restart Codex and review `/hooks` and project trust.
-New/changed hooks need review; spyc does not authorize them for you. Codex,
-Claude, and agy reports survive redraws and quiet tool waits until TTL expiry or a newer
-report; Codex cancellation reports `idle` through `Interrupt`. Without a live
-report, timing-only `idle` means silence, not confirmed completion.
+New/changed hooks need review; spyc does not authorize them for you. Codex and
+Claude reports survive redraws and quiet tool waits until TTL expiry or a newer
+report. agy's `working` report gives way to output timing after 15 seconds of
+pane silence, its `idle` to the next output, and its `waiting`, `done` and
+`blocked` hold to TTL or settlement. Codex cancellation reports `idle` through
+`Interrupt`. Without a live report, timing-only `idle` means silence, not
+confirmed completion.
+
+**agy's quiet window rests on a probe.** `agy_live_output_gaps_while_working`
+(`src/app/harness_tests/agy_live.rs`, run by hand) drives agy in a spyc pane and
+records the longest stretch without output while a turn runs. On agy `1.4.7`,
+2026-10-24:
+
+| Turn | Length | Longest gap |
+|---|---|---|
+| `sleep 40`, agy choosing its own wait | 26.5 s | 0.23 s |
+| `sleep 40`, backgrounded after 2 s | 31.6 s | 0.13 s |
+| a long think | 109.2 s | 0.14 s |
+
+agy moves a long command to the background (the first `sleep 40` after about
+17 s), its footer counting `1 task(s)`, and can end the turn while the task
+runs. Until the turn ends, its spinner redraws about every 100 ms, so 15 seconds
+of silence means the turn ended without `Stop`. Re-run the probe after an agy
+release that changes its spinner.
 
 The dump includes up to eight reported hook-event summaries per pane. Event,
 tool and available turn/call ids help diagnose permission transitions without

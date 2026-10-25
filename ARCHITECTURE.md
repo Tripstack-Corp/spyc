@@ -174,6 +174,22 @@ the latest live report resumes, and expiry still applies. Unknown/customized or
 clipped footers produce no guess. No question content or answer ids are retained,
 and no new hook, subscription or idle timer is introduced.
 
+## agy's `working` gives way after 15 seconds of quiet
+
+agy ends a turn only through its `Stop` hook. When that never arrives (agy
+before 1.1.10, or a dropped hook) a `working` report would pulse until its
+five-minute TTL. So agy's profile has a quiet window
+(`AgentProfile::working_quiet_window`, 15 s): its `working` report gives way to
+output timing once the pane has been silent that long. No other agent has one;
+Codex's and Claude's `working` holds through silent tool waits.
+
+The window rests on a measurement. While a turn is live, agy redraws its
+spinner about every 100 ms, through thinking, tool calls and a command it has
+moved to the background; `agy_live_output_gaps_while_working` found no gap over
+a quarter of a second (HARNESS.md has the numbers). A visible approval prompt
+can stand for minutes with no output, so it pauses the window, and the grace
+restarts when the prompt is answered (`ReportedStatus::quiet_since`). Re-run the
+probe before shortening the window.
 ## Update model: Elm-architecture (MVU)
 
 spyc follows the Elm/Model-View-Update pattern. The structural migration
