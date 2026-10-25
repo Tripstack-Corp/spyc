@@ -1409,6 +1409,41 @@ mod tests {
         }
     }
 
+    #[test]
+    #[ignore = "red: agy Working report in effective_activity does not yield after 15s of pane silence"]
+    fn agy_working_effective_activity_yields_after_quiet_window() {
+        use crate::pane::{AgentActivity, ReportedStatus};
+        use crate::state::sessions::AgentKind;
+        use std::time::{Duration, Instant};
+
+        let base = Instant::now();
+        let expiry = base + Duration::from_secs(300);
+        let working = Some(ReportedStatus::new(AgentActivity::Working, base, expiry));
+        assert_eq!(
+            App::effective_activity(
+                working.as_ref(),
+                None,
+                AgentKind::Agy,
+                Some(base + Duration::from_millis(200)),
+                base + Duration::from_secs(10),
+            ),
+            AgentActivity::Working,
+            "agy working survives redraw output within the active window"
+        );
+        let quiet_end = base + Duration::from_millis(200) + Duration::from_secs(15);
+        assert_eq!(
+            App::effective_activity(
+                working.as_ref(),
+                None,
+                AgentKind::Agy,
+                Some(base + Duration::from_millis(200)),
+                quiet_end,
+            ),
+            AgentActivity::Idle,
+            "agy working yields to timing once the pane has been quiet for 15s"
+        );
+    }
+
     // P3-1: the pure transition → notification decision (the core of the ping).
     // `false` = not the focused tab; `false` = not over SSH (so `auto` → system).
     #[test]
