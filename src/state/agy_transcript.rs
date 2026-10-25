@@ -65,7 +65,7 @@ pub fn render_transcript(
         return Vec::new();
     };
     let (records, needed_steps) = parse_rendered_records(&text, show_tool_calls);
-    let full_records = load_full_records(path, &needed_steps);
+    let full_records = load_full_records(path, &needed_steps, show_tool_calls, MAX_FULL_SCAN_BYTES);
 
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
@@ -142,6 +142,8 @@ fn is_rendered_record(val: &serde_json::Value) -> bool {
 }
 
 const MAX_GALLERY_IMAGES: usize = 4096;
+/// Maximum trailing bytes of `transcript_full.jsonl` scanned when hydrating truncated steps.
+const MAX_FULL_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Stream an Agy `transcript.jsonl` and index every user-attached image in
 /// chronological order for the `^a g` gallery.
@@ -174,7 +176,7 @@ fn index_images_with_limits(
             path.display()
         ));
     }
-    let full_records = load_full_records(path, &needed_steps);
+    let full_records = load_full_records(path, &needed_steps, false, MAX_FULL_SCAN_BYTES);
     let mut out = Vec::new();
     for (line_no, record) in &candidates {
         if out.len() >= max_images {
@@ -358,6 +360,8 @@ std::thread_local! {
 fn load_full_records(
     compact_path: &Path,
     needed: &HashSet<u64>,
+    _show_tool_calls: bool,
+    _scan_window: u64,
 ) -> HashMap<u64, serde_json::Value> {
     #[cfg(test)]
     FULL_LOAD_COUNTS.with(|c| c.set((0, 0, 0)));
@@ -952,13 +956,15 @@ mod tests {
         );
         let (lines_inspected, _records_parsed, bytes_read) =
             FULL_LOAD_COUNTS.with(std::cell::Cell::get);
-        assert_eq!(
-            lines_inspected, 6,
-            "backward scan should inspect steps 200..=195 and stop once step 195 < 196 (got {lines_inspected})"
+        // Steps 200..=196 and a few more below 196, since a step can be
+        // written after a higher one: never the 200-line file.
+        assert!(
+            lines_inspected <= 20,
+            "backward scan should stop shortly below step 196 (inspected {lines_inspected})"
         );
         assert!(
-            bytes_read <= 64 * 1024,
-            "backward scan should stop in the trailing 64 KiB chunk (got {bytes_read})"
+            bytes_read <= 4 * 64 * 1024,
+            "backward scan should stop within a few 64 KiB chunks (read {bytes_read})"
         );
     }
 
@@ -1234,23 +1240,13 @@ mod tests {
             serde_json::json!({"mime_type": "image/png", "uri": remote_host_uri}),
         ];
 
+        // Indexing records a path without opening it, so a non-UTF-8 name is
+        // checked on the decoded path: APFS refuses to create one.
         #[cfg(unix)]
-        let raw_bytes_expected = {
-            use std::os::unix::ffi::OsStringExt;
-            let raw_name = std::ffi::OsString::from_vec(b"raw_\x80_byte.png".to_vec());
-            let raw_img = logs_dir.join(&raw_name);
-            if std::fs::write(&raw_img, b"raw-non-utf8").is_ok() {
-                media.push(serde_json::json!({
-                    "mime_type": "image/png",
-                    "uri": format!("file://{}/raw_%80_byte.png", logs_dir.display()),
-                }));
-                true
-            } else {
-                false
-            }
-        };
-        #[cfg(not(unix))]
-        let raw_bytes_expected = false;
+        media.push(serde_json::json!({
+            "mime_type": "image/png",
+            "uri": "file:///nonexistent-spyc/raw_%80_byte.png",
+        }));
 
         let transcript = logs_dir.join("transcript.jsonl");
         let rec = serde_json::json!({
@@ -1264,7 +1260,7 @@ mod tests {
         std::fs::write(&transcript, format!("{rec}\n")).unwrap();
 
         let images = index_images(&transcript);
-        let expected_len = if raw_bytes_expected { 5 } else { 4 };
+        let expected_len = if cfg!(unix) { 5 } else { 4 };
         assert_eq!(
             images.len(),
             expected_len,
@@ -1286,12 +1282,177 @@ mod tests {
             crate::state::transcript_images::load(&transcript, &images[3]).unwrap(),
             b"localhost-bytes"
         );
-        if raw_bytes_expected {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let crate::state::transcript_images::ImageSource::Agy { path } = &images[4].source
+            else {
+                panic!("expected an agy image source");
+            };
             assert_eq!(
-                crate::state::transcript_images::load(&transcript, &images[4]).unwrap(),
-                b"raw-non-utf8"
+                path.as_os_str().as_bytes(),
+                b"/nonexistent-spyc/raw_\x80_byte.png"
             );
         }
+    }
+
+    /// Writes `rows` as `transcript_full.jsonl` beside `compact` and returns
+    /// each row's byte offset.
+    fn write_full(compact: &Path, rows: &[String]) -> Vec<u64> {
+        let mut offsets = Vec::with_capacity(rows.len());
+        let mut body = String::new();
+        for row in rows {
+            offsets.push(body.len() as u64);
+            body.push_str(row);
+            body.push('\n');
+        }
+        std::fs::write(compact.with_file_name("transcript_full.jsonl"), body).unwrap();
+        offsets
+    }
+
+    fn planner_row(step: u64, content: &str) -> String {
+        format!(
+            r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"{content}"}}"#
+        )
+    }
+
+    fn truncated_row(step: u64) -> String {
+        format!(
+            r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview {step}","truncated_fields":["content"]}}"#
+        )
+    }
+
+    /// The backward scan reads in 64 KiB chunks, and a chunk boundary can fall
+    /// inside an oversize line's leading `{"step_index":197`. The step it reads
+    /// must still be 197: read as 1, it ends the scan above the older needed 196.
+    /// That holds whether the line was already oversize before its first bytes
+    /// arrived (5 MiB) or tips over on them (just past the 4 MiB cap).
+    #[test]
+    fn an_oversize_line_split_inside_its_step_index_keeps_its_step() {
+        const CHUNK: usize = 64 * 1024;
+        let cap = crate::state::MAX_TRANSCRIPT_TAIL_BYTES as usize;
+        for line_len in [5 * 1024 * 1024, cap + 10] {
+            for split_at in [1, 15] {
+                let dir = tempfile::tempdir().unwrap();
+                let compact = dir.path().join("transcript.jsonl");
+                std::fs::write(
+                    &compact,
+                    [truncated_row(196), truncated_row(198)].join("\n") + "\n",
+                )
+                .unwrap();
+                let filler = line_len - planner_row(197, "").len();
+                let unneeded = planner_row(197, &"u".repeat(filler));
+                assert_eq!(unneeded.len(), line_len);
+                let newest =
+                    |pad: usize| planner_row(198, &format!("hydrated 198{}", " ".repeat(pad)));
+                let unpadded = unneeded.len() + 1 + newest(0).len() + 1 - split_at;
+                let pad = (CHUNK - unpadded % CHUNK) % CHUNK;
+                write_full(
+                    &compact,
+                    &[planner_row(196, "hydrated 196"), unneeded, newest(pad)],
+                );
+
+                let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+                assert!(
+                    text.contains("hydrated 198") && text.contains("hydrated 196"),
+                    "line of {line_len} bytes split {split_at} bytes in: {}",
+                    text.lines().take(6).collect::<Vec<_>>().join(" | ")
+                );
+            }
+        }
+    }
+
+    /// The scan reads no more than its window, and a line that starts exactly
+    /// at the window's floor is whole, so it is hydrated. One byte less and the
+    /// line is cut, so it is not.
+    #[test]
+    #[ignore = "red: load_full_records reads the whole file and ignores its scan window"]
+    fn the_full_scan_stays_inside_its_window_and_keeps_a_line_at_its_floor() {
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let mut rows = vec![planner_row(5, "hydrated 5"), planner_row(10, "hydrated 10")];
+        rows.extend((11..=60).map(|step| planner_row(step, &"p".repeat(80))));
+        rows.push(planner_row(70, "hydrated 70"));
+        let offsets = write_full(&compact, &rows);
+        let file_len = std::fs::metadata(compact.with_file_name("transcript_full.jsonl"))
+            .unwrap()
+            .len();
+        let needed: HashSet<u64> = [5, 10, 70].into();
+
+        let window = file_len - offsets[1];
+        let found = load_full_records(&compact, &needed, true, window);
+        let (_, _, bytes_read) = FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(found.contains_key(&70) && found.contains_key(&10));
+        assert!(!found.contains_key(&5), "step 5 lies below the window");
+        assert!(
+            (bytes_read as u64) <= window,
+            "read {bytes_read} of a {window}-byte window"
+        );
+
+        let found = load_full_records(&compact, &needed, true, window - 1);
+        let (_, _, bytes_read) = FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(found.contains_key(&70));
+        assert!(
+            !found.contains_key(&10),
+            "step 10 starts one byte below the window"
+        );
+        assert!((bytes_read as u64) < window);
+    }
+
+    /// Agy can write a step after a higher one; this module's own fixture runs
+    /// 1, 11, 10, 12. The scan must not stop at the first lower step it meets.
+    #[test]
+    fn a_step_written_after_a_higher_one_is_still_hydrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        std::fs::write(&compact, truncated_row(11) + "\n").unwrap();
+        write_full(
+            &compact,
+            &[
+                planner_row(1, "one"),
+                planner_row(11, "hydrated 11"),
+                planner_row(10, "ten"),
+                planner_row(12, "twelve"),
+            ],
+        );
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        assert!(text.contains("hydrated 11"), "got: {text}");
+    }
+
+    /// Once the hydration budget is spent no later needed step can be
+    /// hydrated, so the scan stops reading instead of walking the window.
+    #[test]
+    #[ignore = "red: load_full_records reads the whole file however much it has hydrated"]
+    fn the_full_scan_stops_reading_once_the_hydration_budget_is_spent() {
+        let cap = crate::state::MAX_TRANSCRIPT_TAIL_BYTES as usize;
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        std::fs::write(
+            &compact,
+            [truncated_row(1), truncated_row(200)].join("\n") + "\n",
+        )
+        .unwrap();
+        let mut rows = vec![planner_row(1, "hydrated 1")];
+        rows.extend((2..=150).map(|step| planner_row(step, &"p".repeat(16 * 1024))));
+        let filler = cap - planner_row(200, "budget 200 ").len();
+        rows.push(planner_row(
+            200,
+            &format!("budget 200 {}", "x".repeat(filler)),
+        ));
+        assert_eq!(rows.last().unwrap().len(), cap);
+        write_full(&compact, &rows);
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        let (_, _, bytes_read) = FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(text.contains("budget 200"));
+        assert!(
+            !text.contains("hydrated 1"),
+            "step 1 is past the spent budget"
+        );
+        assert!(
+            bytes_read <= cap + 2 * 64 * 1024,
+            "read {bytes_read} bytes after a {cap}-byte budget was spent"
+        );
     }
 
     #[cfg(unix)]
