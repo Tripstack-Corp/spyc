@@ -598,6 +598,31 @@ impl App {
         self.state.mode = Mode::Prompting(p);
     }
 
+    /// `^a c`'s second step: start the command its first step took, in `cwd`,
+    /// with `%` expanded to the selection as named from there.
+    pub(super) fn open_prompted_pane_tab(&mut self, cwd: &str) {
+        let Some(cmd) = self.state.pending_new_tab_cmd.take() else {
+            return;
+        };
+        // Empty = the user cleared the pre-fill; fall back to the configured
+        // default cwd (so clearing it agrees with what the prompt was
+        // pre-filled with under either mode).
+        let cwd_path = if cwd.is_empty() {
+            self.state.default_pane_cwd()
+        } else if cwd.starts_with('~') {
+            let home = std::env::var("HOME").unwrap_or_default();
+            std::path::PathBuf::from(cwd.replacen('~', &home, 1))
+        } else {
+            std::path::PathBuf::from(cwd)
+        };
+        match self.state.expand_selection_percent_in(&cmd, &cwd_path) {
+            Ok(cmd) => {
+                self.open_pane_tab_in(&cmd, &cwd_path);
+            }
+            Err(e) => self.state.flash_error(e.to_string()),
+        }
+    }
+
     /// ^W x — close the active pane tab. If its child is still running (a live
     /// claude, a shell mid-task), confirm first — closing it loses that
     /// session. An already-exited tab closes silently.

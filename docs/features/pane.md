@@ -230,7 +230,10 @@ in [`docs/HARNESS.md`](../HARNESS.md).
 
 Multiple tabs, each running an independent pty:
 
-- **^a c** new tab (prompts for command and working directory)
+- **^a c** new tab (prompts for command and working directory). `%` in the
+  command expands to the selection as it does for `!`, each path named from
+  the tab's working directory, so `tail -f %` follows the highlighted file;
+  `%%` is a literal `%`.
 - **^a K / ^a x** close the active tab — confirms first (`y`/`N`) when the
   tab's child is still running, so a stray keystroke can't kill a live agent
   session; an already-exited tab closes silently

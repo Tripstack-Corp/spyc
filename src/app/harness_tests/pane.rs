@@ -1984,7 +1984,6 @@ fn typing_into_a_fresh_agent_pane_is_not_eaten_by_the_consent_prompt() {
 /// its parent, `%` is `sub/notes.txt`. Typed through both prompts, as `tail -f %`
 /// was when it reached `tail` as a literal `%`.
 #[test]
-#[ignore = "red: ^a c starts its command with `%` unexpanded"]
 fn a_new_tab_command_expands_percent_from_the_tabs_directory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
