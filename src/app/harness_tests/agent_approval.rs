@@ -511,3 +511,394 @@ fn codex_command_approval_handles_recorded_native_wrapping() {
         None
     );
 }
+
+/// `str::replace` for a fixture: panics when `from` is absent, so a recaptured
+/// fixture can't leave a case quietly testing the unedited screen.
+trait Replaced {
+    fn replaced(&self, from: &str, to: &str) -> String;
+}
+
+impl Replaced for str {
+    fn replaced(&self, from: &str, to: &str) -> String {
+        assert!(
+            self.contains(from),
+            "the fixture no longer contains {from:?}"
+        );
+        self.replace(from, to)
+    }
+}
+
+#[test]
+#[ignore = "red: AGY_DETECTION_RULES only matches Do you want to proceed? and misses agy 1.4.5/1.4.7 Run this command?, Allow access to this file?, and Accept this file edit? dialogs"]
+fn agy_approval_detector_recognizes_captured_live_approval_screen() {
+    let rules = crate::agent::profile_for(AgentKind::Agy).detection_rules();
+    let text = include_str!("../../../tests/fixtures/agy-output/approval-command.txt");
+    let narrow = include_str!("../../../tests/fixtures/agy-output/approval-command-narrow.txt");
+    let edit = include_str!("../../../tests/fixtures/agy-output/approval-edit.txt");
+    let file = include_str!("../../../tests/fixtures/agy-output/approval-file.txt");
+    let scan = |text: &str| {
+        crate::agent::detect_rules::scan(&text.lines().map(String::from).collect::<Vec<_>>(), rules)
+    };
+    let expected = Some((
+        AgentActivity::Blocked,
+        Some("awaiting tool-execution approval"),
+    ));
+    for fixture in [text, narrow, edit, file] {
+        assert_eq!(scan(fixture), expected);
+    }
+    assert_eq!(
+        scan(
+            &text
+                .replaced("> 1. Yes, run command", "  1. Yes, run command")
+                .replaced("  4. No, cancel", "> 4. No, cancel")
+        ),
+        expected,
+        "moving the selection cursor to another option still needs the user"
+    );
+    for cancel_key in ["ctrl+c to cancel", "[esc] to cancel", "ctrl+] to cancel"] {
+        assert_eq!(
+            scan(&text.replaced("\nesc to cancel", &format!("\n{cancel_key}"))),
+            expected,
+            "a custom or bracketed cancel key ({cancel_key}) formatted from `%s to cancel` still matches"
+        );
+    }
+    for auto_approve in [
+        "alt+a to auto-approve file edits",
+        "[shift+tab] to auto-approve file edits",
+    ] {
+        assert_eq!(
+            scan(&edit.replaced("shift+tab to auto-approve file edits", auto_approve)),
+            expected,
+            "a custom or bracketed key token before `to auto-approve file edits` ({auto_approve}) still matches"
+        );
+    }
+    assert_eq!(
+        scan(
+            &narrow
+                .replaced(
+                    "   uname -m",
+                    "   git -C /Users/example/src/spyc\n  -C worktree status\n  > /tmp/out.txt"
+                )
+                .replaced(
+                    "start with 'uname'",
+                    "-C /Users/example/src/spyc\n> /tmp/out.txt'"
+                )
+        ),
+        expected,
+        "wrapped command and option continuation rows starting with `-` or `>` still match"
+    );
+    assert_eq!(
+        scan(&narrow.replaced(
+            "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command",
+            "  ↑/↓ Navigate · tab Amend · ctrl+g\nedit/expand command"
+        )),
+        expected,
+        "a narrow pane that wraps the `↑/↓ Navigate` row across two lines still matches"
+    );
+    assert_eq!(
+        scan(&text.replaced(
+            "────────────────────────────────────────────────────────────────────────────────────────────────────\n",
+            ""
+        )),
+        expected,
+        "a dialog drawn without the rule under its header (older agy) still matches"
+    );
+    for required in [
+        "Command\n",
+        "Requesting permission for:",
+        "Run this command?",
+        "1. Yes, run command",
+        "4. No, cancel",
+        "↑/↓ Navigate",
+        "esc to cancel",
+    ] {
+        assert_eq!(
+            scan(&text.replaced(required, "")),
+            None,
+            "missing {required} must not match"
+        );
+    }
+    assert_eq!(
+        scan(&text.replaced("  2. Yes, and always allow", "  3. Yes, and always allow")),
+        None,
+        "out-of-order option numbering must not match"
+    );
+    assert_eq!(
+        scan(&text.replaced("  4. No, cancel", "  4. Maybe later")),
+        None,
+        "options must end with a No choice"
+    );
+}
+
+#[test]
+#[ignore = "red: AGY_DETECTION_RULES matches unanchored Requesting permission for: + Do you want to proceed? anywhere in the 30-row window"]
+fn agy_approval_detector_rejects_output_mentions_grep_diff_and_answered_prompts() {
+    let rules = crate::agent::profile_for(AgentKind::Agy).detection_rules();
+    let text = include_str!("../../../tests/fixtures/agy-output/approval-command.txt");
+    let edit = include_str!("../../../tests/fixtures/agy-output/approval-edit.txt");
+    let scan = |lines: &[&str]| {
+        let owned = lines.iter().copied().map(String::from).collect::<Vec<_>>();
+        crate::agent::detect_rules::scan(&owned, rules)
+    };
+    let scan_text = |s: &str| {
+        crate::agent::detect_rules::scan(&s.lines().map(String::from).collect::<Vec<_>>(), rules)
+    };
+
+    // 1. Ordinary file-view output showing src/agent/mod.rs above the live working footer.
+    assert_eq!(
+        scan(&[
+            "● Explored 1 file (src/agent/mod.rs) (ctrl+o to expand)",
+            "731: static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {",
+            "732:     matcher: Matcher::All(&[\"Requesting permission for:\", \"Do you want to proceed?\"]),",
+            "733:     state: AgentActivity::Blocked,",
+            "734: }];",
+            "  esc to cancel                                  accept-edits · Gemini 4 Argon · high",
+            "  ~/src/spyc (main)                                                      sandbox: off",
+        ]),
+        None,
+        "file view of src/agent/mod.rs above the working footer must not trigger Blocked"
+    );
+
+    // 2. A grep line containing both phrases above the live working footer.
+    assert_eq!(
+        scan(&[
+            "src/agent/mod.rs:732:    matcher: Matcher::All(&[\"Requesting permission for:\", \"Do you want to proceed?\"]),",
+            "  esc to cancel                                  accept-edits · Gemini 4 Argon · high",
+            "  ~/src/spyc (main)                                                      sandbox: off",
+        ]),
+        None,
+        "grep output above the working footer must not trigger Blocked"
+    );
+
+    // 3. A git diff showing the phrases above the live working footer.
+    assert_eq!(
+        scan(&[
+            "diff --git a/src/agent/mod.rs b/src/agent/mod.rs",
+            "@@ -730,5 +730,5 @@",
+            "-    matcher: Matcher::All(&[\"Requesting permission for:\", \"Do you want to proceed?\"]),",
+            "+    matcher: Matcher::AgyApproval,",
+            "  esc to cancel                                  accept-edits · Gemini 4 Argon · high",
+            "  ~/src/spyc (main)                                                      sandbox: off",
+        ]),
+        None,
+        "git diff above the working footer must not trigger Blocked"
+    );
+
+    // 4. An answered prompt left on screen after the next turn starts.
+    assert_eq!(
+        scan(&[
+            "Command",
+            "────────────────────────────────────────────────────────────────────────────────",
+            "Requesting permission for:",
+            "  uname -a",
+            "Do you want to proceed?",
+            "> 1. Yes",
+            "  2. No",
+            "  ↑/↓ Navigate · tab Amend",
+            "  esc to cancel                                  Gemini 4 Argon · high",
+            "○ Thought for 2s (Running checks)",
+            "● Ran (cargo test --lib)",
+            "  esc to cancel                                  Gemini 4 Argon · high",
+        ]),
+        None,
+        "answered prompt above a new turn must not stay Blocked"
+    );
+
+    // 5. A complete dialog indented two columns (as agy indents prose and tool output),
+    // both above a spinner + working footer and directly above the working footer.
+    let indented_dialog = [
+        "● Explored 1 file (tests/fixtures/agy-output/approval-command.txt)",
+        "  Command",
+        "  ────────────────────────────────────────────────────────────────────────────────",
+        "  Requesting permission for:",
+        "    gh pr list --limit 10",
+        "  Do you want to proceed?",
+        "  > 1. Yes, run command",
+        "    2. No, cancel",
+        "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command",
+    ];
+    let mut with_spinner = indented_dialog.to_vec();
+    with_spinner.push("○ Thought for 2s (Inspecting fixture)");
+    with_spinner.push(
+        "  esc to cancel                                  accept-edits · Gemini 4 Argon · high",
+    );
+    assert_eq!(
+        scan(&with_spinner),
+        None,
+        "complete dialog indented two columns above spinner and working footer must not match"
+    );
+    let mut directly_above_footer = indented_dialog.to_vec();
+    directly_above_footer.push(
+        "  esc to cancel                                  accept-edits · Gemini 4 Argon · high",
+    );
+    assert_eq!(
+        scan(&directly_above_footer),
+        None,
+        "complete dialog indented two columns directly above the working footer must not match"
+    );
+
+    // 6. Each column-0 anchored row in a command or pending-edit dialog must fail when indented.
+    for col0_row in ["Command", "Requesting permission for:", "Run this command?"] {
+        assert_eq!(
+            scan_text(&text.replaced(&format!("\n{col0_row}\n"), &format!("\n  {col0_row}\n"))),
+            None,
+            "indenting `{col0_row}` by two columns must reject the dialog"
+        );
+    }
+    for col0_edit_row in ["Pending edit", "Accept this file edit?"] {
+        assert_eq!(
+            scan_text(&edit.replaced(
+                &format!("\n{col0_edit_row}\n"),
+                &format!("\n  {col0_edit_row}\n")
+            )),
+            None,
+            "indenting `{col0_edit_row}` by two columns must reject the edit dialog"
+        );
+    }
+
+    // 7. Turn output (`● `, `○ `) or a box rule inside `target` or edit `body` must be rejected.
+    let rule80 = "─".repeat(80);
+    for intruder in ["● Ran (git status)", "○ Thought for 2s", rule80.as_str()] {
+        assert_eq!(
+            scan_text(&text.replaced(
+                "   uname -a && sleep 8",
+                &format!("   uname -a && sleep 8\n{intruder}")
+            )),
+            None,
+            "command target containing `{intruder}` must not match"
+        );
+        assert_eq!(
+            scan_text(&edit.replaced("      1u8", &format!("      1u8\n{intruder}"))),
+            None,
+            "pending-edit body containing `{intruder}` must not match"
+        );
+    }
+
+    // 8. Prose words before ` to cancel` or ` to auto-approve file edits` are not key tokens.
+    for non_key in ["how to cancel", "click to cancel"] {
+        assert_eq!(
+            scan_text(&text.replaced("\nesc to cancel", &format!("\n{non_key}"))),
+            None,
+            "prose `{non_key}` must not match cancel footer"
+        );
+    }
+    assert_eq!(
+        scan_text(&edit.replaced(
+            "shift+tab to auto-approve file edits",
+            "how to auto-approve file edits"
+        )),
+        None,
+        "prose before `to auto-approve file edits` must not match"
+    );
+}
+
+/// A spinner below a dialog that was answered but is still drawn is the turn
+/// running on, not the `↑/↓ Navigate` row's wrapped tail.
+#[test]
+fn agy_spinner_below_an_answered_dialog_is_not_a_live_approval() {
+    let rules = crate::agent::profile_for(AgentKind::Agy).detection_rules();
+    let narrow = include_str!("../../../tests/fixtures/agy-output/approval-command-narrow.txt");
+    let answered = narrow.replaced(
+        "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\n",
+        "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command\n⣟  Running command... (esc to cancel, 4s)\n",
+    );
+    assert_ne!(answered, narrow);
+    assert_eq!(
+        crate::agent::detect_rules::scan(
+            &answered.lines().map(String::from).collect::<Vec<_>>(),
+            rules
+        ),
+        None
+    );
+}
+
+#[test]
+#[ignore = "red: settle_scrape_quiet behind a live agy working report never matches agy 1.4.5's Run this command? approval screen"]
+fn agy_approval_scrape_runs_behind_a_live_working_report() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        assert!(app.open_pane_tab_in("sh -c 'stty raw -echo; printf READY; exec cat'", tmp.path()));
+        let wait_screen = |app: &mut App, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let pane = &mut app
+                    .runtime
+                    .project_mut()
+                    .pane_tabs
+                    .as_mut()
+                    .unwrap()
+                    .tabs_mut()[0]
+                    .pane;
+                pane.drain_output();
+                let visible = pane.visible_lines().join("\n");
+                if visible.contains(expected) {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "screen did not contain {expected}: {visible}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        wait_screen(&mut app, "READY");
+        let fixture = include_str!("../../../tests/fixtures/agy-output/approval-command.txt");
+        {
+            let entry = &mut app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .tabs_mut()[0];
+            entry.info.command = "agy".into();
+            entry.pane.resize(30, 132).unwrap();
+            entry
+                .pane
+                .send_bytes(format!("\x1b[2J\x1b[H{}", fixture.replace('\n', "\r\n")).as_bytes())
+                .unwrap();
+        }
+        wait_screen(&mut app, "· high");
+        report(&mut app, "working", None);
+        let base = Instant::now();
+        let mut ctx = RunCtx::for_test();
+        {
+            let info = app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut();
+            info.last_output_at = Some(base);
+            info.scrape_dirty = true;
+        }
+        let scan_at = base + Duration::from_millis(300);
+        app.settle_scrape_quiet(scan_at, &mut ctx);
+        app.settle_agent_activity(scan_at, &mut ctx);
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
+        assert_eq!(
+            info.activity,
+            AgentActivity::Blocked,
+            "settle_scrape_quiet behind a live agy working report must surface Blocked"
+        );
+        assert_eq!(
+            info.reported.clone().unwrap().status,
+            AgentActivity::Working,
+            "retain live working report behind scrape override"
+        );
+        assert!(!info.scrape_dirty, "quiet scan consumes scrape_dirty");
+        assert!(
+            dump(&mut app).contains(
+                "source: SCRAPE-FALLBACK status=blocked (awaiting tool-execution approval)"
+            )
+        );
+    });
+}

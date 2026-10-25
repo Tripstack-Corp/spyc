@@ -285,6 +285,83 @@ mod tests {
         );
     }
 
+    /// A prose reply carries no `●`/`○`, so an earlier turn's divider rule, its
+    /// `>` prompt and the reply look like a composer body. The rows below the
+    /// next divider (a `>` prompt, the spinner) are no composer footer.
+    #[test]
+    #[ignore = "red: two turn-divider rules around a prose reply pass as the composer box"]
+    fn agy_prose_only_earlier_turn_is_output() {
+        let rule = "─".repeat(60);
+        let screen = lines(&[
+            "● Explored 2 files",
+            "",
+            &rule,
+            "> what does src/printed.rs do?",
+            "  It prints a greeting; see src/printed.rs:1.",
+            "",
+            &rule,
+            "> now explain src/other.rs",
+            "",
+            "⣟  Thinking... (esc to cancel, 2s)",
+            "",
+            "esc to cancel     accept-edits · Gemini 4 Argon · high",
+            "/Users/example/src/spyc (main)     sandbox: off",
+        ]);
+        let n = agy_output_len(&screen);
+        assert!(
+            screen[..n]
+                .iter()
+                .any(|r| r.contains("It prints a greeting")),
+            "the earlier reply was cut from the output: {:?}",
+            &screen[..n]
+        );
+    }
+
+    /// A draft typed while a turn runs sits in a composer whose footer is the
+    /// working `esc to cancel` row, with no vim marker or `sandbox:` row. The
+    /// draft is not output.
+    #[test]
+    #[ignore = "red: a composer above the working `esc to cancel` footer isn't recognized, so its draft reads as output"]
+    fn agy_mid_turn_draft_under_the_cancel_footer_is_not_output() {
+        let rule = "─".repeat(100);
+        let screen = lines(&[
+            "● Edited 1 file (src/printed.rs) (ctrl+o to expand)",
+            "",
+            "⣟  Running command... (esc to cancel, 4s)",
+            "",
+            &rule,
+            "> check src/unsubmitted.rs",
+            &rule,
+            "esc to cancel                                       accept-edits · Gemini 4 Argon · high",
+        ]);
+        assert_eq!(agy_output_len(&screen), 4);
+    }
+
+    /// Below an answered dialog that is still drawn, the spinner is not the
+    /// `↑/↓ Navigate` row's wrapped tail: nothing is live, so all of it is output.
+    #[test]
+    fn agy_spinner_below_an_answered_dialog_keeps_the_output() {
+        let rule = "─".repeat(70);
+        let screen = lines(&[
+            "● Ran (gh pr list --limit 5) (ctrl+o to expand)",
+            "",
+            "Command",
+            &rule,
+            "",
+            "Requesting permission for:",
+            "   gh pr list --limit 5",
+            "",
+            "Run this command?",
+            "> 1. Yes, run command",
+            "  2. No, cancel",
+            "",
+            "  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command",
+            "⣟  Running command... (esc to cancel, 4s)",
+            "esc to cancel                     accept-edits · Gemini 4 Argon · high",
+        ]);
+        assert_eq!(agy_output_len(&screen), screen.len());
+    }
+
     #[test]
     fn agy_quoted_approval_above_a_live_composer_remains_output() {
         let screen = agy_screen(
@@ -300,6 +377,302 @@ mod tests {
             &[],
         );
         assert_eq!(agy_output_len(&screen), 8);
+    }
+
+    fn agy_fixture(name: &str) -> Vec<String> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/agy-output")
+            .join(name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+            .lines()
+            .map(String::from)
+            .collect()
+    }
+
+    /// agy 1.4.7 draws its composer while a turn runs, under the working
+    /// `esc to cancel` footer (after `-- INSERT --` in vim mode). The output
+    /// stops at the composer's top rule and keeps the running turn.
+    #[test]
+    #[ignore = "red: a composer above the working `esc to cancel` footer isn't recognized, so it reads as output"]
+    fn agy_working_fixtures_stop_at_the_composer_and_keep_the_turn() {
+        for fixture in ["working.txt", "working-draft.txt"] {
+            let screen = agy_fixture(fixture);
+            let prompt = screen
+                .iter()
+                .rposition(|row| row.starts_with('>'))
+                .unwrap_or_else(|| panic!("{fixture} must contain the composer's `>` row"));
+            let n = agy_output_len(&screen);
+            assert_eq!(
+                n,
+                prompt - 1,
+                "{fixture} must stop at the composer's top rule"
+            );
+            assert!(
+                screen[..n]
+                    .iter()
+                    .any(|row| row.contains("Running (uname -a && sleep 8)")),
+                "{fixture} must keep the running turn: {:?}",
+                &screen[..n]
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "red: agy_approval_start knows only `Do you want to proceed?`, so a `Run this command?` dialog is left in the output"]
+    fn agy_short_approval_after_quoted_prompt_keeps_turn_output_and_strips_dialog() {
+        let turn_rule = "─".repeat(60);
+        let dialog_rule = "─".repeat(80);
+        let screen = lines(&[
+            &turn_rule,
+            "> > out.txt redirect",
+            "",
+            "● Edited 1 file (src/printed.rs)",
+            "",
+            "Command",
+            &dialog_rule,
+            "",
+            "Requesting permission for:",
+            "  git status",
+            "",
+            "Run this command?",
+            "> 1. Yes, run command",
+            "  2. No, cancel",
+            "",
+            "  ↑/↓ Navigate · tab Amend",
+            "esc to cancel                                     accept-edits · Gemini 4 Argon · high",
+        ]);
+        let n = agy_output_len(&screen);
+        assert_eq!(
+            &screen[..n],
+            &lines(&[
+                &turn_rule,
+                "> > out.txt redirect",
+                "",
+                "● Edited 1 file (src/printed.rs)",
+                "",
+            ])[..]
+        );
+    }
+
+    #[test]
+    #[ignore = "red: agy_output_len only strips Command dialogs with Do you want to proceed? and leaves the box rule, File, Pending edit, and Question dialogs in output"]
+    fn agy_captured_approval_and_question_fixtures_strip_dialog_from_header_down() {
+        for (fixture, header) in [
+            ("approval-command.txt", "Command"),
+            ("approval-command-narrow.txt", "Command"),
+            ("approval-file.txt", "File"),
+            ("approval-edit.txt", "Pending edit"),
+            ("approval-question.txt", "Question"),
+        ] {
+            let screen = agy_fixture(fixture);
+            let expected = screen
+                .iter()
+                .rposition(|row| row.trim() == header)
+                .unwrap_or_else(|| panic!("{fixture} missing {header} header"));
+            assert_eq!(
+                agy_output_len(&screen),
+                expected,
+                "{fixture} must strip from the `{header}` header row downward"
+            );
+        }
+
+        // Question header and prompt must sit at column 0; indented prose is output.
+        let q_screen = agy_fixture("approval-question.txt");
+        let indented_hdr: Vec<String> = q_screen
+            .iter()
+            .map(|r| {
+                if r.trim_end() == "Question" {
+                    format!("  {r}")
+                } else {
+                    r.clone()
+                }
+            })
+            .collect();
+        assert_eq!(
+            agy_output_len(&indented_hdr),
+            indented_hdr.len(),
+            "indented Question header must remain output"
+        );
+        let indented_prompt: Vec<String> = q_screen
+            .iter()
+            .map(|r| {
+                if r.starts_with("Question 1/1:") {
+                    format!("  {r}")
+                } else {
+                    r.clone()
+                }
+            })
+            .collect();
+        assert_eq!(
+            agy_output_len(&indented_prompt),
+            indented_prompt.len(),
+            "indented Question prompt row must remain output"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: agy_composer_start accepts turn output or rules inside a rule pair or below the bottom rule as a composer"]
+    fn agy_composer_rejects_turn_rows_or_rules_inside_body_and_footer() {
+        let rule60 = "─".repeat(60);
+        let rule80 = "─".repeat(80);
+        for body_intruder in [
+            rule80.as_str(),
+            "● Edited 1 file (src/printed.rs)",
+            "○ Thought for 2.0s",
+        ] {
+            let screen = lines(&[
+                "● Explored 1 file (src/first.rs)",
+                &rule80,
+                "> first user prompt",
+                body_intruder,
+                &rule80,
+                "? for shortcuts                                         accept-edits · Gemini 4 Argon · high",
+            ]);
+            assert_eq!(
+                agy_output_len(&screen),
+                screen.len(),
+                "composer body containing `{body_intruder}` must not be stripped as a composer"
+            );
+        }
+
+        for footer_intruder in [
+            "Requesting permission for:",
+            "● Edited 1 file (src/printed.rs)",
+            "○ Thought for 2.0s",
+            rule60.as_str(),
+        ] {
+            let screen = lines(&[
+                "● Explored 1 file (src/first.rs)",
+                &rule80,
+                "> first user prompt",
+                &rule80,
+                footer_intruder,
+                "/Users/example/src/spyc (main)                                                          sandbox: off",
+            ]);
+            assert_eq!(
+                agy_output_len(&screen),
+                screen.len(),
+                "footer containing `{footer_intruder}` below bottom rule must not match a composer"
+            );
+        }
+
+        let mid_turn_composer = lines(&[
+            "● Edited 1 file (src/printed.rs)",
+            &rule80,
+            "> check src/unsubmitted.rs",
+            &rule80,
+            "esc to cancel · -- INSERT --                            accept-edits · Gemini 4 Argon · high",
+        ]);
+        assert_eq!(
+            agy_output_len(&mid_turn_composer),
+            1,
+            "a live composer box during a turn with `esc to cancel` in its footer must still strip the draft"
+        );
+    }
+
+    #[test]
+    fn agy_composer_empty_and_draft_fixtures_stop_at_the_top_box_rule() {
+        for (fixture, draft_token) in [
+            ("composer-empty.txt", ">"),
+            ("composer-draft.txt", "> check src/unsubmitted.rs"),
+        ] {
+            let screen = agy_fixture(fixture);
+            let prompt_idx = screen
+                .iter()
+                .rposition(|row| row.trim_end() == draft_token)
+                .unwrap_or_else(|| panic!("{fixture} must contain `{draft_token}`"));
+            let n = agy_output_len(&screen);
+            assert_eq!(
+                n,
+                prompt_idx - 1,
+                "{fixture} must stop at the composer's top box rule"
+            );
+            assert!(
+                screen[..n]
+                    .iter()
+                    .any(|row| row.contains("● Ran (uname -a && sleep 8)")),
+                "{fixture} must retain turn output above composer"
+            );
+        }
+    }
+
+    #[test]
+    fn agy_composer_requires_a_verified_footer_below_the_bottom_rule() {
+        let rule80 = "─".repeat(80);
+        let screen = lines(&[
+            "● Edited 1 file (src/printed.rs)",
+            &rule80,
+            "> check src/unsubmitted.rs",
+            &rule80,
+            "  /Users/example/src/spyc",
+        ]);
+        assert_eq!(
+            agy_output_len(&screen),
+            screen.len(),
+            "box rules without a recognized agy footer must remain output"
+        );
+    }
+
+    #[test]
+    fn agy_composer_requires_matching_top_and_bottom_rule_widths() {
+        let rule60 = "─".repeat(60);
+        let rule80 = "─".repeat(80);
+        let screen = lines(&[
+            "● Edited 1 file (src/printed.rs)",
+            &rule60,
+            "> check src/unsubmitted.rs",
+            &rule80,
+            "? for shortcuts                                         accept-edits · Gemini 4 Argon · high",
+        ]);
+        assert_eq!(
+            agy_output_len(&screen),
+            screen.len(),
+            "mismatched rule widths must not be treated as a composer box"
+        );
+    }
+
+    #[test]
+    fn agy_composer_requires_a_prompt_glyph_on_the_first_box_row() {
+        let rule80 = "─".repeat(80);
+        let without_glyph = lines(&[
+            "● Edited 1 file (src/printed.rs)",
+            &rule80,
+            "  plain table or markdown block inside rules",
+            &rule80,
+            "? for shortcuts                                         accept-edits · Gemini 4 Argon · high",
+        ]);
+        assert_eq!(
+            agy_output_len(&without_glyph),
+            without_glyph.len(),
+            "a rule box whose first line lacks `>` or `❯` must remain output"
+        );
+
+        let with_ascii_glyph = lines(&[
+            "● Edited 1 file (src/printed.rs)",
+            &rule80,
+            "> draft using ascii prompt glyph",
+            &rule80,
+            "? for shortcuts                                         accept-edits · Gemini 4 Argon · high",
+        ]);
+        assert_eq!(
+            agy_output_len(&with_ascii_glyph),
+            1,
+            "`>` prompt glyph must be recognized as a composer box"
+        );
+
+        let with_heavy_glyph = lines(&[
+            "● Edited 1 file (src/printed.rs)",
+            &rule80,
+            "❯ draft using heavy prompt glyph",
+            &rule80,
+            "? for shortcuts                                         accept-edits · Gemini 4 Argon · high",
+        ]);
+        assert_eq!(
+            agy_output_len(&with_heavy_glyph),
+            1,
+            "`❯` prompt glyph must be recognized as a composer box"
+        );
     }
 }
 

@@ -340,3 +340,69 @@ fn agy_gf_and_quick_select_skip_composer_and_footer_until_scrolling() {
         );
     });
 }
+
+#[test]
+#[ignore = "red: agy_output_len does not strip a Run this command? approval dialog, so J suggests files/footer.rs from the dialog footer"]
+fn agy_jump_suggests_the_printed_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let root = tmp.path().canonicalize().unwrap();
+        let mut app = App::test_app(root.clone());
+        std::fs::create_dir_all(root.join("files")).unwrap();
+        let rule = "─".repeat(60);
+        let screen = format!(
+            "\x1b[2J\x1b[H● Printed files/printed.rs:2\r\n\r\nCommand\r\n{rule}\r\n\r\nRequesting permission for:\r\n  cat files/draft-only.rs\r\n\r\nRun this command?\r\n> 1. Yes, run command\r\n  2. No, cancel\r\n\r\n↑/↓ Navigate · tab Amend\r\nesc to cancel                                     accept-edits\r\nfiles/footer.rs (main)                            sandbox: off\r\n"
+        );
+        std::fs::write(root.join("screen.txt"), screen).unwrap();
+        for file in ["files/printed.rs", "files/draft-only.rs", "files/footer.rs"] {
+            std::fs::write(root.join(file), "first\nsecond\nthird\n").unwrap();
+        }
+        let wake = app.make_pane_wake();
+        let pane = crate::pane::Pane::spawn(
+            "/bin/sh -c 'cat screen.txt; sleep 30'",
+            24,
+            100,
+            &root,
+            &app.view.project().context_path,
+            wake,
+        )
+        .unwrap();
+        let info = crate::pane::tabs::TabInfo::new("agy", root.clone());
+        app.runtime.project_mut().pane_tabs = Some(crate::pane::tabs::PaneTabs::new(
+            crate::pane::tabs::TabEntry::new(pane, info),
+        ));
+        let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            tabs.active_mut().drain_output();
+            if tabs
+                .active()
+                .visible_lines()
+                .iter()
+                .any(|row| row.contains("sandbox: off"))
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "fixture never reached the pane"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let effects = app.handle_key(key('J')).unwrap();
+        execute_text_effects(&mut app, effects);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !app.apply_jump_defaults() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let Mode::Prompting(prompt) = &app.state.mode else {
+            panic!("J opens the prompt");
+        };
+        assert_eq!(
+            prompt.suggestion.as_deref(),
+            Some(crate::paths::display_tilde(&root.join("files/printed.rs")).as_str())
+        );
+    });
+}

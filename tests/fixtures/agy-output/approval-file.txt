@@ -1,0 +1,27 @@
+
+      ▄▀▀▄        Antigravity CLI 1.4.7
+     ▀▀▀▀▀▀       user@example.com (Agent Platform)
+    ▀▀▀▀▀▀▀▀      GCP Project: example-project
+   ▄▀▀    ▀▀▄     Gemini 4 Argon (High)
+  ▄▀▀      ▀▀▄    /Users/example/src/spyc
+
+────────────────────────────────────────────────────────────
+> Read /tmp/outside.txt and summarize it.
+
+● Explored 1 file (src/printed.rs) (ctrl+o to expand)
+
+File
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Requesting permission for:
+   /tmp/outside.txt
+
+Allow access to this file?
+> 1. Yes, allow access
+  2. Yes, and always allow access to '/tmp' (Persist to settings.json)
+  3. No, deny access
+
+  ↑/↓ Navigate · tab Amend
+esc to cancel                                                   accept-edits · Gemini 4 Argon · high
+
+

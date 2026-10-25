@@ -1,0 +1,27 @@
+
+      ▄▀▀▄        Antigravity CLI 1.4.7
+     ▀▀▀▀▀▀       Gemini 4 Argon (High)
+    ▀▀▀▀▀▀▀▀      /Users/example/src/spyc
+   ▄▀▀    ▀▀▄
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> Use run_command to run `uname -a && sleep 8` and wait for it, then reply with only: done
+
+○ Thought for 5.0s (Executing Command Promptly)
+● Ran (uname -a && sleep 8) (ctrl+o to expand)
+
+Command
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Requesting permission for:
+   uname -a && sleep 8
+
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that start with 'uname'
+  3. Yes, and always allow for commands that start with 'uname' (Persist to settings.json)
+  4. No, cancel
+
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                                                   accept-edits · Gemini 4 Argon · high
