@@ -123,7 +123,7 @@ fn a_codex_or_claude_idle_report_survives_the_redraw_after_it() {
 fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        for name in ["codex", "claude", "agy"] {
+        for name in ["codex", "claude"] {
             let mut app = agent_app(tmp.path(), name);
             report(&mut app, "working");
             let at = app
@@ -239,6 +239,261 @@ fn codex_and_claude_reports_survive_output_and_quiet_tool_waits() {
                 "expired reports must not keep idle animation running"
             );
         }
+    });
+}
+
+fn tab(app: &App) -> &crate::pane::TabInfo {
+    app.runtime
+        .project()
+        .pane_tabs
+        .as_ref()
+        .unwrap()
+        .active_info()
+}
+
+fn tab_mut(app: &mut App) -> &mut crate::pane::TabInfo {
+    app.runtime
+        .project_mut()
+        .pane_tabs
+        .as_mut()
+        .unwrap()
+        .active_info_mut()
+}
+
+/// Reports `status` and returns the instant the report landed.
+fn report_at(app: &mut App, status: &str) -> std::time::Instant {
+    report(app, status);
+    tab(app).reported.as_ref().unwrap().at
+}
+
+/// agy's spinner redraws during a turn, and a pause shorter than the quiet
+/// window, leave its `working` report standing.
+#[test]
+fn agy_working_survives_redraws_and_a_brief_pause() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        let at = report_at(&mut app, "working");
+        tab_mut(&mut app).last_output_at = Some(at + Duration::from_secs(1));
+        app.settle_agent_activity(at + Duration::from_secs(5), &mut RunCtx::for_test());
+        assert_eq!(tab(&app).activity, AgentActivity::Working);
+    });
+}
+
+/// Output during the turn restarts the quiet window.
+#[test]
+fn agy_working_quiet_window_restarts_on_later_output() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        let at = report_at(&mut app, "working");
+        tab_mut(&mut app).last_output_at = Some(at + Duration::from_secs(20));
+        app.settle_agent_activity(at + Duration::from_secs(25), &mut RunCtx::for_test());
+        assert_eq!(tab(&app).activity, AgentActivity::Working);
+    });
+}
+
+/// With no `Stop`, 15 s of pane silence ends agy's `working`: the report is
+/// dropped, output timing says idle, and nothing stays armed to pulse the dot.
+#[test]
+#[ignore = "red: agy's working report stands for its whole TTL when Stop never arrives"]
+fn agy_working_yields_to_timing_after_the_quiet_window() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        let at = report_at(&mut app, "working");
+        tab_mut(&mut app).last_output_at = Some(at + Duration::from_secs(20));
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_activity(at + Duration::from_secs(35), &mut ctx);
+        assert_eq!(tab(&app).activity, AgentActivity::Idle);
+        assert!(tab(&app).reported.is_none(), "the quiet report is dropped");
+        assert!(
+            ctx.scheduler.next().is_none(),
+            "nothing stays armed to pulse the dot"
+        );
+    });
+}
+
+/// The quiet window applies to `working` only: agy's `waiting` and `done`
+/// survive the redraws after `Stop`, and `done` ends at its TTL.
+#[test]
+fn agy_waiting_and_done_survive_post_stop_redraws() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        for (status, expected) in [
+            ("waiting", AgentActivity::Waiting),
+            ("done", AgentActivity::Done),
+        ] {
+            let at = report_at(&mut app, status);
+            tab_mut(&mut app).last_output_at = Some(at + Duration::from_secs(1));
+            let mut ctx = RunCtx::for_test();
+            app.settle_agent_activity(at + Duration::from_secs(30), &mut ctx);
+            assert_eq!(tab(&app).activity, expected, "agy {status}");
+        }
+        let at = tab(&app).reported.as_ref().unwrap().at;
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_activity(at + Duration::from_secs(300), &mut ctx);
+        assert_eq!(
+            tab(&app).activity,
+            AgentActivity::Idle,
+            "done ends at its TTL"
+        );
+        assert!(ctx.scheduler.next().is_none());
+    });
+}
+
+/// The dialog draws at 10 s, which is the pane's last output, and is answered
+/// at 60 s. The post-answer grace counts from the answer, not from the draw.
+#[test]
+#[ignore = "red: agy's working report has no quiet window to measure from the answer"]
+fn agy_working_grace_counts_from_the_answer_not_the_dialog_draw() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        let at = report_at(&mut app, "working");
+        let mut ctx = RunCtx::for_test();
+        {
+            let info = tab_mut(&mut app);
+            info.last_output_at = Some(at + Duration::from_secs(10));
+            info.scrape_status = Some((
+                AgentActivity::Blocked,
+                Some("awaiting tool-execution approval"),
+            ));
+        }
+        app.settle_agent_activity(at + Duration::from_secs(10), &mut ctx);
+        app.settle_agent_activity(at + Duration::from_secs(30), &mut ctx);
+        assert_eq!(tab(&app).activity, AgentActivity::Blocked);
+        app.settle_agent_activity(at + Duration::from_secs(60), &mut ctx);
+        crate::app::effect::clear_blocked_for_input(
+            tab_mut(&mut app),
+            &crate::app::effect::PaneInput::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            None,
+        );
+        app.settle_agent_activity(at + Duration::from_secs(61), &mut ctx);
+        app.settle_agent_activity(at + Duration::from_secs(70), &mut ctx);
+        assert_eq!(
+            tab(&app).activity,
+            AgentActivity::Working,
+            "nine seconds after the answer is inside the grace"
+        );
+        app.settle_agent_activity(at + Duration::from_secs(80), &mut ctx);
+        assert_eq!(tab(&app).activity, AgentActivity::Idle);
+    });
+}
+
+#[test]
+#[ignore = "red: why-status does not report agy's working-quiet window or quiet retirement reason"]
+fn agy_working_why_status_reports_quiet_expiry_alongside_ttl_backstop() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        report(&mut app, "working");
+        let at = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .reported
+            .clone()
+            .unwrap()
+            .at;
+        let why = why_status(&mut app);
+        assert!(
+            why.contains("of quiet (") && why.contains("TTL backstop)"),
+            "why-status must report agy's working-quiet window alongside the TTL backstop: {why}"
+        );
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_activity(at + Duration::from_secs(15), &mut ctx);
+        let why = why_status(&mut app);
+        assert!(
+            why.contains("no longer authoritative: pane quiet for 15s"),
+            "why-status must explain that agy working yielded after 15s of pane silence: {why}"
+        );
+    });
+}
+
+#[test]
+#[ignore = "red: agy working report does not yield after post-approval quiet window"]
+fn agy_working_approval_override_preserves_post_answer_quiet_grace() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "agy");
+        report(&mut app, "working");
+        let at = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .reported
+            .clone()
+            .unwrap()
+            .at;
+        let mut ctx = RunCtx::for_test();
+        app.runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut()
+            .scrape_status = Some((AgentActivity::Blocked, Some("agy waiting on tool approval")));
+        app.settle_agent_activity(at + Duration::from_secs(10), &mut ctx);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .activity,
+            AgentActivity::Blocked
+        );
+        {
+            let info = app
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .unwrap()
+                .active_info_mut();
+            crate::app::effect::clear_blocked_for_input(
+                info,
+                &crate::app::effect::PaneInput::Key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                )),
+                None,
+            );
+        }
+        app.settle_agent_activity(at + Duration::from_secs(30), &mut ctx);
+        app.settle_agent_activity(at + Duration::from_secs(40), &mut ctx);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .activity,
+            AgentActivity::Working,
+            "answering an approval after >15s must not drop working before the 15s post-answer window"
+        );
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_activity(at + Duration::from_secs(45), &mut ctx);
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .activity,
+            AgentActivity::Idle
+        );
     });
 }
 
