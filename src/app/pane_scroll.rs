@@ -1,9 +1,9 @@
 //! Pane scrollback / transcript pager (`^a-v`): snapshot the active pane's
 //! terminal scrollback (or an agent's on-disk transcript) into a lower-pane
-//! pager, the vi-style scroll-mode key handler, and the tab-switch stash/
-//! restore pair that keeps a scrollback pager attached to its tab. Extracted
-//! verbatim from `app/mod.rs` (the impl-extraction sweep). The open / stash /
-//! restore / key-handler entry points are `pub` (called from `actions` /
+//! pager, an agy tab's thinking history there too (`^a t`), the vi-style
+//! scroll-mode key handler, and the tab-switch stash/restore pair that keeps
+//! a scrollback pager attached to its tab. The open / stash / restore /
+//! key-handler entry points are `pub` (called from `actions` /
 //! `key_dispatch`); `mount_scroll_pager` is internal.
 
 use ratatui::text::Line;
@@ -11,6 +11,9 @@ use ratatui::text::Line;
 use super::pager_stream::{DrainOutcome, PagerStream, PagerStreamMount, RenderCtx};
 use super::{App, Effect, PaneTextKind, PaneTextSink, state};
 use crate::ui::pager::PagerView;
+
+/// What ends the title of `^a t`'s view, which `r`, `T` and `t` tell apart by.
+const THINKING_TITLE: &str = " (thinking)";
 
 /// How long the terminal scrollback snapshot waits for in-flight pty bytes to
 /// land before taking it.
@@ -304,6 +307,10 @@ impl App {
     /// reaching the transcript no longer means editing
     /// `[pane] claude_transcript_scrollback` and relaunching.
     pub(crate) fn flip_scrollback_source(&mut self) {
+        if self.is_thinking_scroll_pager() {
+            self.state.flash_info("source flip: ^a v's scrollback only");
+            return;
+        }
         let Some(snap) = self.scroll_snapshot() else {
             return;
         };
@@ -548,18 +555,78 @@ impl App {
         self.view.needs_full_repaint = true;
     }
 
-    /// Build + install a bottom-pane scrollback `PagerView` with the shared
-    /// LowerPane flags (gutter off so content doesn't jump horizontally, wrap
-    /// on so long lines aren't clipped, excluded from buffer history, parked at
-    /// the bottom on first render), enter the pty's scroll mode, focus the pane,
-    /// and flash. Shared by the static `mount_scroll_pager` and the streaming
-    /// `pager_stream::mount_stream_pager` LowerPane arm (`stream_id` set → the
-    /// view is a live stream). The two used to set this flag block independently.
+    /// Whether the scrollback in view is `^a t`'s thinking history.
+    pub(crate) fn is_thinking_scroll_pager(&self) -> bool {
+        self.view
+            .project()
+            .scroll_pager
+            .as_ref()
+            .is_some_and(|v| v.title.ends_with(THINKING_TITLE))
+    }
+
+    /// `r` in a scrollback: read its source again (an agent keeps appending).
+    pub(crate) fn reload_pane_scroll_pager(&mut self) {
+        if self.is_thinking_scroll_pager() {
+            self.open_thinking_history();
+        } else {
+            self.open_pane_scroll_pager();
+        }
+    }
+
+    /// `^a t`: the active agy tab's thinking history in the lower-pane
+    /// scrollback, read and rendered off-thread from its session's transcript.
+    pub fn open_thinking_history(&mut self) {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
+            self.state
+                .flash_info("no pane tab — open an agy tab with ^a c first");
+            return;
+        };
+        let active_info = tabs.active_info();
+        if active_info.agent().kind() != crate::state::sessions::AgentKind::Agy {
+            self.state.flash_info("thinking history: agy tabs only");
+            return;
+        }
+        let label = active_info.label.clone();
+        let command = active_info.command.clone();
+        let cwd = active_info.cwd.clone();
+        let spawn = active_info.agent_epoch_secs();
+        let session_id = active_info.pinned_session_id().map(str::to_string);
+        let theme = self.view.theme.clone();
+        // As `^a v`: the full-width lower pane, less its two border columns.
+        let (term_w, _) = self.view.term_size;
+        let width = Some(usize::from(term_w.saturating_sub(2)));
+        let title = format!(" {label}{THINKING_TITLE}");
+        let miss = "agy: no thinking history found for this session".to_string();
+        self.spawn_pager_stream(
+            PagerStreamMount::LowerPane { title },
+            move |tx| {
+                let query = crate::agent::TranscriptQuery {
+                    cwd: &cwd,
+                    spawn_epoch_secs: spawn,
+                    command: &command,
+                    session_id: session_id.as_deref(),
+                    codex_home: None,
+                };
+                let lines = crate::state::agy_transcript::resolve_active_jsonl(query)
+                    .map(|path| {
+                        crate::state::agy_transcript::render_thinking_history(&path, &theme, width)
+                    })
+                    .unwrap_or_default();
+                let _ = tx.send(lines);
+            },
+            |id, rx| Box::new(TranscriptStream { id, rx, miss }),
+        );
+    }
+
     /// `t` in an agent-transcript scrollback: flip whether the agent's
     /// tool-use / tool-result lines render, then re-spawn so the change
     /// shows (the worker re-runs `render` with the new flag). A no-op with
     /// a hint on a plain terminal scrollback — there are no tool calls there.
     pub(crate) fn toggle_scrollback_tool_calls(&mut self) {
+        if self.is_thinking_scroll_pager() {
+            self.state.flash_info("tool calls: ^a v's transcript only");
+            return;
+        }
         let has_transcript = self
             .runtime
             .project()
@@ -581,6 +648,13 @@ impl App {
         self.state.flash_info(format!("tool calls: {shown}"));
     }
 
+    /// Build + install a bottom-pane scrollback `PagerView` with the shared
+    /// LowerPane flags (gutter off so content doesn't jump horizontally, wrap
+    /// on so long lines aren't clipped, excluded from buffer history, parked at
+    /// the bottom on first render), enter the pty's scroll mode, focus the pane,
+    /// and flash. Shared by the static `mount_scroll_pager` and the streaming
+    /// `pager_stream::mount_stream_pager` LowerPane arm (`stream_id` set → the
+    /// view is a live stream). The two used to set this flag block independently.
     pub(crate) fn install_lower_pane_scroll_view(
         &mut self,
         title: String,
@@ -953,6 +1027,24 @@ mod tests {
                 "is_alt_screen={alt}"
             );
         }
+    }
+
+    #[test]
+    fn open_thinking_history_without_pane_tabs_flashes_hint() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.open_thinking_history();
+            assert!(app.view.project().scroll_pager.is_none());
+            assert!(
+                app.state
+                    .flash
+                    .as_ref()
+                    .is_some_and(|f| f.text.contains("no pane tab")),
+                "expected no-pane hint, got {:?}",
+                app.state.flash
+            );
+        });
     }
 }
 

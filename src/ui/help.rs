@@ -338,6 +338,10 @@ const SECTIONS: &[Section] = &[
                 "^a v",
                 "scroll pane history in the in-app pager (/ ? n/N, :N, V, ^v, y; T swaps capture/transcript, t toggles transcript tool calls; H transcript help)",
             ),
+            (
+                "^a t",
+                "open agy thinking history in the in-app pager (r reload, Esc close)",
+            ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
             (
                 "^a g",

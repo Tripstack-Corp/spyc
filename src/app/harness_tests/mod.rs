@@ -540,6 +540,7 @@ mod prompt_templates;
 mod second_commander;
 mod send_selection;
 mod tab_completion;
+mod thinking_history;
 mod vsplit;
 mod why_status;
 

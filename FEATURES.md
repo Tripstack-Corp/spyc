@@ -60,7 +60,7 @@ Full reference: [The agent pane](docs/features/pane.md).
 
 ## Agents and MCP
 
-Every agent spyc launches reaches spyc's MCP server: tools to read the user's view, drive the file list, search, read git in-process, manage worktrees and report the agent's status. `spyc --install-skill` installs a guide that teaches an agent those tools. `:agent hud` shows a strip of the agent's own session facts below its pane, and `^a g` lists the images an agent actually received.
+Every agent spyc launches reaches spyc's MCP server: tools to read the user's view, drive the file list, search, read git in-process, manage worktrees and report the agent's status. `spyc --install-skill` installs a guide that teaches an agent those tools. `:agent hud` shows a strip of the agent's own session facts below its pane, `^a g` lists the images an agent actually received, and `^a t` pages an `agy` tab's thinking history.
 
 Full reference: [Agents and MCP](docs/features/agents.md).
 
