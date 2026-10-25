@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
+use super::deadline::{READ_TOOL_TIMEOUT, reply_budget, scope_wait_ms};
 use super::framing::{send_error, send_result, send_tool_error, send_tool_result};
 use super::readers::{
     DiffMode, claim_worktree_result, effective_root, git_diff_text, git_log_json, git_status_json,
@@ -15,31 +16,8 @@ use super::readers::{
     read_picks_from_context, release_worktree_result,
 };
 use super::{
-    CONTEXT_URI, PROTOCOL_VERSION, PROXY_IO_TIMEOUT, SERVER_INSTRUCTIONS, SERVER_NAME,
-    SERVER_VERSION, mcp_log,
+    CONTEXT_URI, PROTOCOL_VERSION, SERVER_INSTRUCTIONS, SERVER_NAME, SERVER_VERSION, mcp_log,
 };
-
-/// Per-call ceiling for the read tools that walk the filesystem / git (search,
-/// git status / log / diff, worktree listing). Kept a few seconds below
-/// `PROXY_IO_TIMEOUT` so a slow call fails *server-side* with a clean JSON-RPC
-/// error first: the stdio proxy reacts to its own read timeout by killing the
-/// whole MCP connection, so the server must reply before that fires. Derived
-/// from `PROXY_IO_TIMEOUT` so the two can't drift apart.
-const READ_TOOL_TIMEOUT: std::time::Duration = {
-    let proxy_secs = PROXY_IO_TIMEOUT.as_secs();
-    std::time::Duration::from_secs(if proxy_secs > 5 {
-        proxy_secs - 5
-    } else {
-        proxy_secs
-    })
-};
-
-/// P2 `wait_for_scope_clear` bounds: the default wait when the caller gives no
-/// `timeout_ms`, and a hard ceiling so a wedged waiter can't pin a socket thread
-/// forever. The socket-side reply timeout is derived from these + a buffer so it
-/// always outlasts the loop's own timed-out reply.
-const DEFAULT_SCOPE_WAIT_MS: u64 = 300_000;
-const MAX_SCOPE_WAIT_MS: u64 = 600_000;
 
 /// Why a tree-walking tool can't run against `root`, when `root` is inside a
 /// mounted archive.
@@ -817,10 +795,7 @@ fn handle_tools_call(
                     }
                     let pane_id = target_pane_id(args, caller);
                     let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
-                    let timeout_ms = args["timeout_ms"]
-                        .as_u64()
-                        .unwrap_or(DEFAULT_SCOPE_WAIT_MS)
-                        .min(MAX_SCOPE_WAIT_MS);
+                    let timeout_ms = scope_wait_ms(args);
                     McpCommand::WaitForScopeClear {
                         pane_id,
                         pane,
@@ -843,28 +818,7 @@ fn handle_tools_call(
             {
                 return send_tool_error(w, id, "spyc is not running");
             }
-            // Worktree mutations can run a status walk + tar.zst archive off
-            // the main loop (§5 of docs/archive/WORKTREE_MCP_PLAN.md); a large tree easily
-            // outlasts the interactive 5s window, so give them a generous
-            // ceiling. Everything else is a fast in-memory model edit. (Stage 0
-            // of the async/Tasks plan — §5.1; Stage 1 returns a task handle
-            // instead of blocking.)
-            let reply_timeout = match name {
-                "create_worktree" | "remove_worktree" | "clean_worktree" => {
-                    std::time::Duration::from_secs(60)
-                }
-                // The loop parks this and replies (cleared/timed_out) by
-                // `timeout_ms`; wait a hair longer so the socket read always
-                // receives that reply instead of giving up first.
-                "wait_for_scope_clear" => {
-                    let ms = args["timeout_ms"]
-                        .as_u64()
-                        .unwrap_or(DEFAULT_SCOPE_WAIT_MS)
-                        .min(MAX_SCOPE_WAIT_MS);
-                    std::time::Duration::from_millis(ms) + std::time::Duration::from_secs(2)
-                }
-                _ => std::time::Duration::from_secs(5),
-            };
+            let reply_timeout = reply_budget(name, args);
             match reply_rx.recv_timeout(reply_timeout) {
                 Ok(McpResponse::Ok { message }) => send_tool_result(w, id, &message),
                 Ok(McpResponse::Error { message }) => send_tool_error(w, id, &message),
@@ -934,12 +888,5 @@ mod tests {
             1
         });
         assert_eq!(got, Err("timed out".to_string()));
-    }
-
-    /// The read-tool deadline must sit strictly below the proxy's socket
-    /// timeout, or a slow call races the proxy and the connection dies anyway.
-    #[test]
-    fn read_tool_timeout_stays_below_proxy_timeout() {
-        assert!(READ_TOOL_TIMEOUT < PROXY_IO_TIMEOUT);
     }
 }

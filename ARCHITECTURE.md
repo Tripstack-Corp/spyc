@@ -987,6 +987,30 @@ by then. The proxy already falls back to project-scoped discovery, and the
 status-hook reporter does the same, but only with a pane id to report for:
 without one, discovery would deliver the report to whichever tab is focused.
 
+## The proxy outwaits every reply
+
+<!-- SPYC-TRAP: proxy-outwaits-server-replies -->
+When the stdio proxy gives up waiting for an answer, it replies to the agent
+with an error and ends the connection, since a late reply would arrive as the
+answer to the next request. The agent then has no spyc tools for the rest of
+its session. So each call's budget on the server and the proxy's wait for it
+come from one place, `src/mcp/deadline.rs`. The server answers within
+`reply_budget`, either with its result or with its own timed-out error:
+
+- 5 s for a loop command;
+- 15 s for the read tools that walk the filesystem or git;
+- 60 s for a worktree mutation;
+- the requested wait plus 2 s for `wait_for_scope_clear`.
+
+The proxy waits that budget plus a margin, and never less than
+`PROXY_IO_TIMEOUT` (20 s).
+
+While the proxy waited a flat 20 s, nothing reported the gap. A real scope
+wait, or a slow worktree removal, simply cut the agent off, which defeated the
+one tool meant for queueing merges. A budget set anywhere but `reply_budget`
+brings the gap back. `the_proxy_outwaits_every_tools_reply_budget` checks
+every tool in the list.
+
 ## The agents' MCP entry names no instance
 
 <!-- SPYC-TRAP: mcp-entry-names-no-socket -->

@@ -343,8 +343,8 @@ pub(super) fn run_proxy(
 }
 
 /// [`run_proxy`] over any agent-side reader and writer, naming `pane_id` and
-/// `cwd` in the `initialize` it forwards, and waiting `io_timeout` on the
-/// server ([`PROXY_IO_TIMEOUT`] outside tests).
+/// `cwd` in the `initialize` it forwards, and waiting at least `io_timeout` on
+/// the server ([`PROXY_IO_TIMEOUT`] outside tests).
 pub(super) fn proxy_io(
     mut stdin_reader: impl BufRead,
     mut stdout_writer: impl Write,
@@ -362,7 +362,8 @@ pub(super) fn proxy_io(
     };
     // Bound socket IO (see `PROXY_IO_TIMEOUT`) so a wedged server can't hang
     // the agent forever — `read_lsp_message` below would otherwise block
-    // indefinitely on a silent server thread.
+    // indefinitely on a silent server thread. Each request's read is bounded
+    // again below, by what the server may take over it.
     let _ = sock_clone.set_read_timeout(Some(io_timeout));
     let _ = stream.set_write_timeout(Some(io_timeout));
     let mut sock_reader = io::BufReader::new(sock_clone);
@@ -404,13 +405,17 @@ pub(super) fn proxy_io(
         }
 
         // Check if this is a request (has "id") or notification (no "id").
-        let is_request = serde_json::from_str::<Value>(msg).map_or(true, |v| v.get("id").is_some()); // assume request if parse fails
+        let parsed = serde_json::from_str::<Value>(msg).ok();
+        let is_request = parsed.as_ref().is_none_or(|v| v.get("id").is_some()); // assume request if parse fails
 
         // Forward to socket (Content-Length framed for the socket server).
         send_message(&mut sock_writer, msg)?;
 
         // Only read a response for requests (notifications get no reply).
         if is_request {
+            let wait =
+                super::deadline::proxy_wait(parsed.as_ref().unwrap_or(&Value::Null), io_timeout);
+            let _ = sock_reader.get_ref().set_read_timeout(Some(wait));
             let response = match read_lsp_message(&mut sock_reader) {
                 Ok(r) => r,
                 Err(e) => {

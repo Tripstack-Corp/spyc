@@ -82,7 +82,6 @@ fn text(reply: &Value) -> Option<&str> {
 }
 
 #[test]
-#[ignore = "red: the proxy gives up on any reply slower than its own 20 s and ends the connection"]
 fn a_scope_wait_longer_than_the_proxys_timeout_still_answers() {
     let tx = fake_loop(|c| matches!(c, McpCommand::WaitForScopeClear { .. }));
     let replies = through_proxy(
@@ -106,7 +105,6 @@ fn a_scope_wait_longer_than_the_proxys_timeout_still_answers() {
 }
 
 #[test]
-#[ignore = "red: the proxy gives up on any reply slower than its own 20 s and ends the connection"]
 fn a_slow_worktree_removal_still_answers() {
     let tx = fake_loop(|c| matches!(c, McpCommand::RemoveWorktree { .. }));
     let replies = through_proxy(
