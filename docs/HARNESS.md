@@ -183,14 +183,17 @@ walk a branch would show none of the history it was forked to keep.
 ### Output navigation
 
 In a live Codex or agy pane, `gf`/`gF`, `J` and `^a u` Quick Select exclude
-verified composer/footer rows and active approval dialogs (just as `gf`/`gF` and
-`J` stop at Claude's composer box). A Codex composer needs its native input
-shape, blank separation and a recognized context, Vim-mode or shortcut footer;
-an agy composer needs its equal-width `─` box rules, `>` prompt row and a
-recognized shortcut, Vim-mode or `sandbox:` footer, so user-turn divider rules
-in scrollback are never mistaken for a composer. Unknown/customized or clipped
-forms retain all text. Shortcut help in Codex is excluded when its complete
-heading and close hint are present.
+verified composer/footer rows and active approval or question dialogs (`Command`,
+`File`, `Pending edit`, and `Question` in `agy`, just as `gf`/`gF` and `J` stop at
+Claude's composer box). A Codex composer needs its native input shape, blank
+separation and a recognized context, Vim-mode or shortcut footer; an agy composer
+needs its equal-width `─` box rules, a `>` or `❯` prompt row, and nothing below
+the box but a shortcut, Vim-mode, `sandbox:` or working `esc to cancel` footer.
+`agy` `1.4.7` keeps its composer on screen while a turn runs, so a draft typed
+mid-turn is excluded too, and two user-turn divider rules around a reply don't
+pass as a composer. Unknown/customized or clipped forms retain all
+text. Shortcut help in Codex is excluded when its complete heading and close hint
+are present.
 
 Quick Select retains the printed rows' original screen coordinates. Terminal
 scrollback and Codex's native transcript view use the visible historical text;
@@ -198,20 +201,25 @@ spyc's `^a v` transcript pager keeps its own navigation semantics. Full-pane
 copying and mouse selection still include the visible input. These rules also
 follow an agent running in a shell tab's foreground.
 
-The renderer fixtures match CLI `0.162.1`; their
-[provenance](../tests/fixtures/codex-output/README.md) distinguishes upstream
-snapshots from synthetic replay data. A local native-CLI smoke test is separate
-from those captures and controlled-PTY regressions.
+The Codex renderer fixtures match Codex CLI `0.162.1`
+([provenance](../tests/fixtures/codex-output/README.md)); the Antigravity
+viewport fixtures ([provenance](../tests/fixtures/agy-output/README.md)) are
+captures of `agy` `1.4.7` through spyc's own pane, made by the ignored
+`agy_live_capture_viewport_fixtures` test, except the synthetic
+`approval-file.txt`. A local native-CLI
+smoke test is separate from those captures and controlled-PTY regressions.
 
 ### Image attachments
 
 `^a g` / `:images` opens the focused Claude, Codex, or Antigravity (`agy`) tab's
 gallery. On macOS and Linux, spyc captures the native clipboard alongside
 `Ctrl+V`; Codex also accepts `Ctrl+Alt+V` and `agy` accepts `Alt+V` on terminals
-that forward them. The original key reaches the agent. Pending captures appear
-before submission and clear on accepted Enter; a slow clipboard result from that
-draft cannot reappear afterwards. The setting
-`[pane] preview_pasted_images = false` disables capture.
+that forward them (`agy` `1.4.7`'s composer image-paste binding is `Ctrl+V`, with
+`Alt+V` documented in the binary as a Windows fallback when `Ctrl+V` is
+intercepted, which spyc honours on macOS and Linux as well). The
+original key reaches the agent. Pending captures appear before submission and
+clear on accepted Enter; a slow clipboard result from that draft cannot reappear
+afterwards. The setting `[pane] preview_pasted_images = false` disables capture.
 
 Antigravity attachments come from `USER_INPUT` `media` entries in the session's
 `transcript.jsonl`, reading their on-disk image files when opened. Codex
@@ -231,10 +239,20 @@ logged. Opening an image reads only its source record or local file, caps encode
 bytes at 64 MiB, and applies a separate 256 MiB decode allocation budget and
 16,384-pixel width/height limits.
 
-The paste bindings and record shapes were checked against the installed release's
+The Codex paste bindings and record shapes were checked against the installed
+release's
 [keymap](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/tui/src/keymap.rs),
 [user inputs](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/protocol/src/user_input.rs)
-and [rollout policy](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/rollout/src/policy.rs).
+and [rollout policy](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/rollout/src/policy.rs);
+the Antigravity (`agy` `1.4.7`) paste bindings (`Ctrl+V` / `Alt+V`) were
+checked against the installed `~/.local/bin/agy` binary's keymap strings
+(`Paste`, `ctrl+v`) and its `1.0.15` release note ("Added `alt+v` as an
+alternative paste shortcut on Windows to resolve issues where ctrl+v is
+intercepted by the terminal emulator"; spyc captures `Alt+V` on macOS and Linux
+as well), and the `USER_INPUT.media` transcript
+schema was checked against live
+`<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl`
+sessions.
 Native clipboard and terminal graphics still need a local smoke test on each
 platform; fixture coverage does not establish that acceptance.
 
