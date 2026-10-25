@@ -48,8 +48,8 @@ an agy `working` report yields to output timing once the pane has been quiet
 for 15 seconds after the report, the pane's last output, or the answer to an
 approval prompt. While a turn runs, agy redraws its spinner about every 100 ms,
 so a live turn is never that quiet ([HARNESS.md](HARNESS.md) records the
-probe). A reported `idle` (codex's `Interrupt`, say) holds through redraws
-as the others do, except agy's, which gives way to the next output. Timing-only
+probe). A reported `idle` (codex's `Interrupt` or agy's `USER_CANCELED`
+`Stop`, say) holds through redraws as the others do. Timing-only
 `idle` means quiet, not proof that a turn stopped or finished.
 
 **Glyphs** (shape = liveness, colour = urgency):

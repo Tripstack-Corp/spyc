@@ -120,10 +120,8 @@ pub enum RetiredReason {
 /// Authority model (`App::effective_activity`): a report wins over the timing
 /// fallback until it expires (`expiry`, a backstop against a crashed agent's
 /// stale report). Visible approval prompts in Codex and agy temporarily
-/// override a non-blocked report without discarding it; semantic reports
-/// (`Working`, `Waiting`, `Done`, `Blocked`) survive redraws and silent tool
-/// waits (with `Working` yielding after the agent's
-/// [`crate::agent::AgentProfile::working_quiet_window`] of pane silence when set).
+/// override a non-blocked report without discarding it. Every report survives
+/// redraws and silent tool waits, except as [`Self::yields_to_timing`] says.
 #[derive(Clone, Debug)]
 pub struct ReportedStatus {
     /// The reported state.
@@ -196,9 +194,9 @@ impl ReportedStatus {
         }
     }
 
-    /// Whether this report has given way to output timing. agy's `Idle` yields
-    /// to output after it, and a `Working` report from an agent with a
-    /// [`crate::agent::AgentProfile::working_quiet_window`] (agy) yields once
+    /// Whether this report has given way to output timing. Only a `Working`
+    /// report from an agent with a
+    /// [`crate::agent::AgentProfile::working_quiet_window`] (agy) yields, once
     /// the pane has been quiet that long, so a missing `Stop` can't pulse for
     /// the whole TTL. Every other report holds through prompt redraws, footer
     /// flushes after `Stop` and background-task updates until a newer report
@@ -210,15 +208,8 @@ impl ReportedStatus {
         kind: crate::state::sessions::AgentKind,
         now: std::time::Instant,
     ) -> bool {
-        match (kind, self.status) {
-            (crate::state::sessions::AgentKind::Agy, AgentActivity::Idle) => {
-                last_output_at.is_some_and(|o| o > self.at)
-            }
-            (_, AgentActivity::Working) => self
-                .working_quiet_expiry(last_output_at, kind)
-                .is_some_and(|exp| now >= exp),
-            _ => false,
-        }
+        self.working_quiet_expiry(last_output_at, kind)
+            .is_some_and(|exp| now >= exp)
     }
 }
 
@@ -420,7 +411,7 @@ impl TabInfo {
         }
         if let Some(r) = &self.reported {
             let expired = r.status != AgentActivity::Blocked && now >= r.expiry;
-            let yielded = !scrape_overrides && r.yields_to_timing(self.last_output_at, kind, now);
+            let yielded = r.yields_to_timing(self.last_output_at, kind, now);
             if expired || yielded {
                 if !expired
                     && r.status == AgentActivity::Working
