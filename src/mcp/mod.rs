@@ -44,12 +44,10 @@ will wake you.\n\
 See the spyc skill for workflows and tool descriptions for arguments.";
 const CONTEXT_URI: &str = "spyc://context";
 
-/// Socket IO deadline for the stdio proxy. Bounds how long it waits on a
-/// server response (and on a write) so a wedged / silent / panicked server
-/// thread surfaces as a clean JSON-RPC error to the agent instead of
-/// hanging it indefinitely. Generous — well above the server's own 5 s
-/// writable-action timeout — so a legitimately slow reply isn't cut off;
-/// only a genuine indefinite stall trips it.
+/// The least the stdio proxy waits on a server response (and on a write), so a
+/// wedged / silent / panicked server thread surfaces as a clean JSON-RPC error
+/// to the agent instead of hanging it. A tool call the server may take longer
+/// over is waited out for longer (`deadline::proxy_wait`).
 const PROXY_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Append a line to `<state>/mcp.log` for debugging MCP connection issues.
@@ -122,6 +120,7 @@ pub fn socket_path() -> Option<PathBuf> {
 }
 
 mod config;
+mod deadline;
 mod framing;
 mod hooks;
 mod protocol;
