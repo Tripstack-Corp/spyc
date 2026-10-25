@@ -65,7 +65,7 @@ pub fn render_transcript(
         return Vec::new();
     };
     let (records, needed_steps) = parse_rendered_records(&text, show_tool_calls);
-    let full_records = load_full_records(path, &needed_steps);
+    let full_records = load_full_records(path, &needed_steps, show_tool_calls, MAX_FULL_SCAN_BYTES);
 
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
@@ -142,6 +142,8 @@ fn is_rendered_record(val: &serde_json::Value) -> bool {
 }
 
 const MAX_GALLERY_IMAGES: usize = 4096;
+/// Maximum trailing bytes of `transcript_full.jsonl` scanned when hydrating truncated steps.
+const MAX_FULL_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Stream an Agy `transcript.jsonl` and index every user-attached image in
 /// chronological order for the `^a g` gallery.
@@ -152,13 +154,21 @@ const MAX_GALLERY_IMAGES: usize = 4096;
 /// `transcript.jsonl`, its untruncated step is resolved from sibling
 /// `transcript_full.jsonl` when present.
 pub fn index_images(path: &Path) -> Vec<super::transcript_images::TranscriptImage> {
+    index_images_with_limits(path, 256 * 1024 * 1024, MAX_GALLERY_IMAGES)
+}
+
+fn index_images_with_limits(
+    path: &Path,
+    max_scan_bytes: u64,
+    max_images: usize,
+) -> Vec<super::transcript_images::TranscriptImage> {
     let Ok(file) = std::fs::File::open(path) else {
         return Vec::new();
     };
     if !file.metadata().is_ok_and(|m| m.is_file()) {
         return Vec::new();
     }
-    let (candidates, needed_steps, oversized) = scan_image_candidates(file);
+    let (candidates, needed_steps, oversized) = scan_image_candidates(file, max_scan_bytes);
     if oversized > 0 {
         crate::debug_log::log(&format!(
             "agy_transcript: skipped {oversized} record(s) over {} bytes in {}",
@@ -166,10 +176,10 @@ pub fn index_images(path: &Path) -> Vec<super::transcript_images::TranscriptImag
             path.display()
         ));
     }
-    let full_records = load_full_records(path, &needed_steps);
+    let full_records = load_full_records(path, &needed_steps, false, MAX_FULL_SCAN_BYTES);
     let mut out = Vec::new();
     for (line_no, record) in &candidates {
-        if out.len() >= MAX_GALLERY_IMAGES {
+        if out.len() >= max_images {
             break;
         }
         let val = if needs_full_image_record(record)
@@ -180,13 +190,14 @@ pub fn index_images(path: &Path) -> Vec<super::transcript_images::TranscriptImag
         } else {
             record
         };
-        index_image_record(val, *line_no, &mut out);
+        index_image_record(val, *line_no, max_images, &mut out);
     }
     out
 }
 
 fn scan_image_candidates(
     file: std::fs::File,
+    _max_scan_bytes: u64,
 ) -> (Vec<(usize, serde_json::Value)>, HashSet<u64>, usize) {
     let mut reader = BufReader::new(file);
     let mut buf = Vec::new();
@@ -245,6 +256,7 @@ fn needs_full_image_record(val: &serde_json::Value) -> bool {
 fn index_image_record(
     val: &serde_json::Value,
     line_no: usize,
+    max_images: usize,
     out: &mut Vec<super::transcript_images::TranscriptImage>,
 ) {
     let Some(media) = val["media"].as_array() else {
@@ -259,7 +271,7 @@ fn index_image_record(
         .map(str::to_owned);
     let mut nth = 0usize;
     for item in media {
-        if out.len() >= MAX_GALLERY_IMAGES {
+        if out.len() >= max_images {
             break;
         }
         let media_type = item["mime_type"].as_str().unwrap_or("image");
@@ -340,10 +352,19 @@ fn unrendered_full_record(line: &[u8]) -> bool {
             .any(|w| w == b"USER_INPUT")
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static FULL_LOAD_COUNTS: std::cell::Cell<(usize, usize, usize)> = const { std::cell::Cell::new((0, 0, 0)) };
+}
+
 fn load_full_records(
     compact_path: &Path,
     needed: &HashSet<u64>,
+    _show_tool_calls: bool,
+    _scan_window: u64,
 ) -> HashMap<u64, serde_json::Value> {
+    #[cfg(test)]
+    FULL_LOAD_COUNTS.with(|c| c.set((0, 0, 0)));
     let mut found = HashMap::new();
     if needed.is_empty() {
         return found;
@@ -357,6 +378,11 @@ fn load_full_records(
         return found;
     };
     for line in records {
+        #[cfg(test)]
+        FULL_LOAD_COUNTS.with(|c| {
+            let (lines, parsed, bytes) = c.get();
+            c.set((lines + 1, parsed + 1, bytes + line.len()));
+        });
         let Ok(val) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
             continue;
         };
@@ -826,5 +852,666 @@ mod tests {
         assert_eq!(images[2].bytes_len, 0, "directory is not sized as a file");
         assert!(crate::state::transcript_images::load(&compact, &images[2]).is_err());
         assert!(crate::state::transcript_images::load(&compact, &images[3]).is_err());
+    }
+
+    #[test]
+    #[ignore = "red: load_full_records scans from EOF-0 instead of backward, parses non-needed steps, and scans past the last needed step"]
+    fn load_full_records_skips_unneeded_steps_without_parsing_and_stops_once_found() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let full = dir.path().join("transcript_full.jsonl");
+
+        std::fs::write(
+            &compact,
+            r#"{"step_index":196,"source":"MODEL","type":"PLANNER_RESPONSE","content":"short...","truncated_fields":["content"]}"#.to_owned()
+                + "\n",
+        )
+        .unwrap();
+
+        let padding = "p".repeat(8 * 1024);
+        let mut f = std::fs::File::create(&full).unwrap();
+        for step in 1..=200 {
+            if step == 196 {
+                writeln!(
+                    f,
+                    r#"{{"step_index":196,"source":"MODEL","type":"PLANNER_RESPONSE","content":"hydrated step 196 body"}}"#
+                )
+                .unwrap();
+            } else if step == 200 {
+                // Nested "step_index":196 inside content and tool parameters must not
+                // trick extract_leading_step into parsing step 200.
+                writeln!(
+                    f,
+                    r#"{{"step_index":200,"source":"MODEL","type":"PLANNER_RESPONSE","content":"quote {{\"step_index\":196}}","tool_calls":[{{"name":"read_file","parameters":{{"step_index":196,"Path":"src/lib.rs"}}}}]}}"#
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    f,
+                    r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"unneeded {padding}"}}"#
+                )
+                .unwrap();
+            }
+        }
+        f.flush().unwrap();
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        assert!(text.contains("hydrated step 196 body"), "got: {text}");
+        let (lines_inspected, records_parsed, bytes_read) =
+            FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert_eq!(
+            records_parsed, 1,
+            "only the needed step should be parsed in full (got {records_parsed})"
+        );
+        assert_eq!(
+            lines_inspected, 5,
+            "backward scan from EOF should inspect steps 200..=196 and stop (got {lines_inspected})"
+        );
+        assert!(
+            bytes_read <= 64 * 1024,
+            "backward scan should read only the trailing 64 KiB chunk (got {bytes_read})"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: load_full_records does not stop when the leading step_index falls below the smallest needed step"]
+    fn load_full_records_stops_once_below_smallest_needed_step() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let full = dir.path().join("transcript_full.jsonl");
+
+        std::fs::write(
+            &compact,
+            r#"{"step_index":196,"source":"MODEL","type":"PLANNER_RESPONSE","content":"compact 196","truncated_fields":["content"]}"#.to_owned()
+                + "\n",
+        )
+        .unwrap();
+
+        let padding = "p".repeat(8 * 1024);
+        let mut f = std::fs::File::create(&full).unwrap();
+        for step in 1..=200 {
+            if step == 196 {
+                // Step 196 in transcript_full.jsonl is not a rendered record type.
+                writeln!(
+                    f,
+                    r#"{{"step_index":196,"source":"SYSTEM","type":"TOOL_RESULT","content":"unrendered"}}"#
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    f,
+                    r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"unneeded {padding}"}}"#
+                )
+                .unwrap();
+            }
+        }
+        f.flush().unwrap();
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        assert!(
+            text.contains("compact 196") && text.lines().any(|l| l == "[truncated]"),
+            "missing rendered step must fall back to compact preview + [truncated], got:\n{text}"
+        );
+        let (lines_inspected, _records_parsed, bytes_read) =
+            FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        // Steps 200..=196 and a few more below 196, since a step can be
+        // written after a higher one: never the 200-line file.
+        assert!(
+            lines_inspected <= 20,
+            "backward scan should stop shortly below step 196 (inspected {lines_inspected})"
+        );
+        assert!(
+            bytes_read <= 4 * 64 * 1024,
+            "backward scan should stop within a few 64 KiB chunks (read {bytes_read})"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: jsonl_records drops records over 4 MiB or load_full_records scans every record"]
+    fn load_full_records_hydrates_older_step_past_unneeded_oversize_line() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let full = dir.path().join("transcript_full.jsonl");
+
+        let compact_rows = [
+            r#"{"step_index":196,"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview 196","truncated_fields":["content"]}"#,
+            r#"{"step_index":198,"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview 198","truncated_fields":["content"]}"#,
+        ];
+        std::fs::write(&compact, compact_rows.join("\n") + "\n").unwrap();
+
+        let five_mib = "u".repeat(5 * 1024 * 1024);
+        let mut f = std::fs::File::create(&full).unwrap();
+        writeln!(
+            f,
+            r#"{{"step_index":196,"source":"MODEL","type":"PLANNER_RESPONSE","content":"hydrated step 196"}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"step_index":197,"source":"MODEL","type":"PLANNER_RESPONSE","content":"unneeded {five_mib}"}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"step_index":198,"source":"MODEL","type":"PLANNER_RESPONSE","content":"hydrated step 198"}}"#
+        )
+        .unwrap();
+        f.flush().unwrap();
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        let (_lines_inspected, records_parsed, _bytes_read) =
+            FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(
+            text.contains("hydrated step 198"),
+            "step 198 must be hydrated, got:\n{text}"
+        );
+        assert!(
+            text.contains("hydrated step 196"),
+            "step 196 before unneeded 5 MiB step 197 must still be hydrated, got:\n{text}"
+        );
+        assert_eq!(
+            records_parsed, 2,
+            "only needed steps 198 and 196 should be parsed (got {records_parsed})"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: load_full_records parses or aborts on a needed 5 MiB step instead of marking it [truncated] and continuing"]
+    fn load_full_records_skips_needed_oversize_step_without_parsing_and_continues() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let full = dir.path().join("transcript_full.jsonl");
+
+        let compact_rows = [
+            r#"{"step_index":196,"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview 196","truncated_fields":["content"]}"#,
+            r#"{"step_index":198,"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview 198","truncated_fields":["content"]}"#,
+        ];
+        std::fs::write(&compact, compact_rows.join("\n") + "\n").unwrap();
+
+        let five_mib = "x".repeat(5 * 1024 * 1024);
+        let mut f = std::fs::File::create(&full).unwrap();
+        writeln!(
+            f,
+            r#"{{"step_index":196,"source":"MODEL","type":"PLANNER_RESPONSE","content":"hydrated step 196"}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"step_index":198,"source":"MODEL","type":"PLANNER_RESPONSE","content":"oversize-198 {five_mib}"}}"#
+        )
+        .unwrap();
+        f.flush().unwrap();
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        let (_lines_inspected, records_parsed, _bytes_read) =
+            FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(
+            !text.contains("oversize-198"),
+            "needed 5 MiB step 198 must not be hydrated"
+        );
+        assert!(
+            text.contains("preview 198") && text.lines().any(|l| l == "[truncated]"),
+            "needed 5 MiB step 198 must render its compact preview and [truncated], got:\n{text}"
+        );
+        assert!(
+            text.contains("hydrated step 196"),
+            "scan must continue past oversize needed step 198 and hydrate step 196, got:\n{text}"
+        );
+        assert_eq!(
+            records_parsed, 1,
+            "needed 5 MiB step 198 must never be parsed in full (got {records_parsed})"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: load_full_records has no byte cap, hydrates oldest first, and renders no standalone truncation marker"]
+    fn load_full_records_caps_hydrated_bytes_and_marks_unhydrated_truncation() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let full = dir.path().join("transcript_full.jsonl");
+
+        let compact_rows = [
+            r#"{"step_index":18,"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview eighteen\n```rust\nlet unclosed = 1;","truncated_fields":["content"]}"#,
+            r#"{"step_index":19,"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview nineteen","truncated_fields":["content"]}"#,
+            r#"{"step_index":20,"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview twenty","truncated_fields":["content"]}"#,
+        ];
+        std::fs::write(&compact, compact_rows.join("\n") + "\n").unwrap();
+
+        let chunk = "x".repeat(2 * 1024 * 1024 - 256);
+        let mut f = std::fs::File::create(&full).unwrap();
+        for step in 1..=17 {
+            writeln!(
+                f,
+                r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"earlier {step}"}}"#
+            )
+            .unwrap();
+        }
+        for (step, tag) in [
+            (18, "over-cap-eighteen"),
+            (19, "hydrated-nineteen"),
+            (20, "hydrated-twenty"),
+        ] {
+            writeln!(
+                f,
+                r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"{tag} {chunk}"}}"#
+            )
+            .unwrap();
+        }
+        f.flush().unwrap();
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        let (lines_inspected, records_parsed, _bytes_read) =
+            FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(
+            text.contains("hydrated-twenty"),
+            "newest record is hydrated first"
+        );
+        assert!(
+            text.contains("hydrated-nineteen"),
+            "second newest record fits in the 4 MiB budget"
+        );
+        assert!(
+            !text.contains("over-cap-eighteen"),
+            "oldest record exceeds the 4 MiB hydration cap and must not be hydrated"
+        );
+        assert!(
+            text.contains("preview eighteen") && text.lines().any(|l| l == "[truncated]"),
+            "unhydrated truncated step must show its compact preview and a standalone [truncated] line outside any code fence, got:\n{text}"
+        );
+        assert_eq!(
+            records_parsed, 2,
+            "must not parse the record that pushes hydration past the byte cap"
+        );
+        assert_eq!(
+            lines_inspected, 3,
+            "must stop scanning backward once the hydration byte cap is reached"
+        );
+    }
+
+    #[test]
+    #[ignore = "red: index_images has no tail scan budget and keeps the oldest images instead of the newest"]
+    fn index_images_enforces_scan_budget_and_keeps_newest_images() {
+        use std::io::{Seek, SeekFrom, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let old_img = dir.path().join("old_before_window.png");
+        let mid_img = dir.path().join("mid_in_tail.png");
+        let new1_img = dir.path().join("new1_in_tail.png");
+        let new2_img = dir.path().join("new2_in_tail.png");
+        for p in [&old_img, &mid_img, &new1_img, &new2_img] {
+            std::fs::write(p, b"\x89PNG\r\n\x1a\nimg").unwrap();
+        }
+
+        let transcript = dir.path().join("transcript.jsonl");
+        let mut f = std::fs::File::create(&transcript).unwrap();
+        let old_rec = serde_json::json!({
+            "step_index": 1,
+            "source": "USER_EXPLICIT",
+            "type": "USER_INPUT",
+            "content": "<USER_REQUEST>old before window</USER_REQUEST>",
+            "media": [{"mime_type": "image/png", "uri": old_img.display().to_string()}],
+        })
+        .to_string();
+        writeln!(f, "{old_rec}").unwrap();
+
+        let budget = 4 * 1024u64;
+        let tail_end = (old_rec.len() as u64) + 1 + budget;
+        f.set_len(tail_end).unwrap();
+        f.seek(SeekFrom::Start(tail_end - 1024)).unwrap();
+        f.write_all(b"\n").unwrap();
+        let mid_rec = serde_json::json!({
+            "step_index": 98,
+            "source": "USER_EXPLICIT",
+            "type": "USER_INPUT",
+            "content": "<USER_REQUEST>mid in tail</USER_REQUEST>",
+            "media": [{"mime_type": "image/png", "uri": mid_img.display().to_string()}],
+        })
+        .to_string();
+        let new_rec = serde_json::json!({
+            "step_index": 99,
+            "source": "USER_EXPLICIT",
+            "type": "USER_INPUT",
+            "content": "<USER_REQUEST>newest two [Image #1] [Image #2]</USER_REQUEST>",
+            "media": [
+                {"mime_type": "image/png", "uri": new1_img.display().to_string()},
+                {"mime_type": "image/png", "uri": new2_img.display().to_string()},
+            ],
+        })
+        .to_string();
+        writeln!(f, "{mid_rec}").unwrap();
+        writeln!(f, "{new_rec}").unwrap();
+        f.flush().unwrap();
+
+        let (candidates, _, _) =
+            scan_image_candidates(std::fs::File::open(&transcript).unwrap(), budget);
+        assert_eq!(
+            candidates.len(),
+            2,
+            "only records in the trailing {budget} bytes should be scanned, got: {}",
+            candidates.len()
+        );
+
+        let images = index_images_with_limits(&transcript, budget, 2);
+        assert_eq!(
+            images.len(),
+            2,
+            "image cap should return 2 images, got: {images:?}"
+        );
+        assert_eq!(images[0].seq, 1);
+        assert_eq!(images[0].agent_label.as_deref(), Some("#1"));
+        assert_eq!(images[1].seq, 2);
+        assert_eq!(images[1].agent_label.as_deref(), Some("#2"));
+    }
+
+    #[test]
+    #[ignore = "red: relative image URIs resolve against process cwd and file:// URIs skip percent-decoding and host validation"]
+    fn index_images_resolves_relative_uris_percent_decoding_and_file_localhost() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs_dir = dir.path().join("session/.system_generated/logs");
+        let uploaded_dir = dir.path().join("session/.user_uploaded");
+        std::fs::create_dir_all(logs_dir.join("sub")).unwrap();
+        std::fs::create_dir_all(&uploaded_dir).unwrap();
+
+        let rel_logs_img = logs_dir.join("sub/from_logs.png");
+        let rel_session_img = uploaded_dir.join("from_session.png");
+        let pct_img = logs_dir.join("space & hash #1.png");
+        let localhost_img = logs_dir.join("localhost.png");
+        std::fs::write(&rel_logs_img, b"logs-rel").unwrap();
+        std::fs::write(&rel_session_img, b"session-rel").unwrap();
+        std::fs::write(&pct_img, b"pct-decoded").unwrap();
+        std::fs::write(&localhost_img, b"localhost-bytes").unwrap();
+
+        let pct_uri = format!(
+            "file://{}/space%20%26%20hash%20%231.png",
+            logs_dir.display()
+        );
+        let localhost_uri = format!("file://localhost{}", localhost_img.display());
+        let remote_host_uri = format!("file://otherhost{}", localhost_img.display());
+
+        let mut media = vec![
+            serde_json::json!({"mime_type": "image/png", "uri": "sub/from_logs.png"}),
+            serde_json::json!({"mime_type": "image/png", "uri": ".user_uploaded/from_session.png"}),
+            serde_json::json!({"mime_type": "image/png", "uri": pct_uri}),
+            serde_json::json!({"mime_type": "image/png", "uri": localhost_uri}),
+            serde_json::json!({"mime_type": "image/png", "uri": remote_host_uri}),
+        ];
+
+        // Indexing records a path without opening it, so a non-UTF-8 name is
+        // checked on the decoded path: APFS refuses to create one.
+        #[cfg(unix)]
+        media.push(serde_json::json!({
+            "mime_type": "image/png",
+            "uri": "file:///nonexistent-spyc/raw_%80_byte.png",
+        }));
+
+        let transcript = logs_dir.join("transcript.jsonl");
+        let rec = serde_json::json!({
+            "step_index": 1,
+            "source": "USER_EXPLICIT",
+            "type": "USER_INPUT",
+            "content": "<USER_REQUEST>valid uris and one remote host</USER_REQUEST>",
+            "media": media,
+        })
+        .to_string();
+        std::fs::write(&transcript, format!("{rec}\n")).unwrap();
+
+        let images = index_images(&transcript);
+        let expected_len = if cfg!(unix) { 5 } else { 4 };
+        assert_eq!(
+            images.len(),
+            expected_len,
+            "non-localhost file:// host must be rejected"
+        );
+        assert_eq!(
+            crate::state::transcript_images::load(&transcript, &images[0]).unwrap(),
+            b"logs-rel"
+        );
+        assert_eq!(
+            crate::state::transcript_images::load(&transcript, &images[1]).unwrap(),
+            b"session-rel"
+        );
+        assert_eq!(
+            crate::state::transcript_images::load(&transcript, &images[2]).unwrap(),
+            b"pct-decoded"
+        );
+        assert_eq!(
+            crate::state::transcript_images::load(&transcript, &images[3]).unwrap(),
+            b"localhost-bytes"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            let crate::state::transcript_images::ImageSource::Agy { path } = &images[4].source
+            else {
+                panic!("expected an agy image source");
+            };
+            assert_eq!(
+                path.as_os_str().as_bytes(),
+                b"/nonexistent-spyc/raw_\x80_byte.png"
+            );
+        }
+    }
+
+    /// Writes `rows` as `transcript_full.jsonl` beside `compact` and returns
+    /// each row's byte offset.
+    fn write_full(compact: &Path, rows: &[String]) -> Vec<u64> {
+        let mut offsets = Vec::with_capacity(rows.len());
+        let mut body = String::new();
+        for row in rows {
+            offsets.push(body.len() as u64);
+            body.push_str(row);
+            body.push('\n');
+        }
+        std::fs::write(compact.with_file_name("transcript_full.jsonl"), body).unwrap();
+        offsets
+    }
+
+    fn planner_row(step: u64, content: &str) -> String {
+        format!(
+            r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"{content}"}}"#
+        )
+    }
+
+    fn truncated_row(step: u64) -> String {
+        format!(
+            r#"{{"step_index":{step},"source":"MODEL","type":"PLANNER_RESPONSE","content":"preview {step}","truncated_fields":["content"]}}"#
+        )
+    }
+
+    /// The backward scan reads in 64 KiB chunks, and a chunk boundary can fall
+    /// inside an oversize line's leading `{"step_index":197`. The step it reads
+    /// must still be 197: read as 1, it ends the scan above the older needed 196.
+    /// That holds whether the line was already oversize before its first bytes
+    /// arrived (5 MiB) or tips over on them (just past the 4 MiB cap).
+    #[test]
+    fn an_oversize_line_split_inside_its_step_index_keeps_its_step() {
+        const CHUNK: usize = 64 * 1024;
+        let cap = crate::state::MAX_TRANSCRIPT_TAIL_BYTES as usize;
+        for line_len in [5 * 1024 * 1024, cap + 10] {
+            for split_at in [1, 15] {
+                let dir = tempfile::tempdir().unwrap();
+                let compact = dir.path().join("transcript.jsonl");
+                std::fs::write(
+                    &compact,
+                    [truncated_row(196), truncated_row(198)].join("\n") + "\n",
+                )
+                .unwrap();
+                let filler = line_len - planner_row(197, "").len();
+                let unneeded = planner_row(197, &"u".repeat(filler));
+                assert_eq!(unneeded.len(), line_len);
+                let newest =
+                    |pad: usize| planner_row(198, &format!("hydrated 198{}", " ".repeat(pad)));
+                let unpadded = unneeded.len() + 1 + newest(0).len() + 1 - split_at;
+                let pad = (CHUNK - unpadded % CHUNK) % CHUNK;
+                write_full(
+                    &compact,
+                    &[planner_row(196, "hydrated 196"), unneeded, newest(pad)],
+                );
+
+                let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+                assert!(
+                    text.contains("hydrated 198") && text.contains("hydrated 196"),
+                    "line of {line_len} bytes split {split_at} bytes in: {}",
+                    text.lines().take(6).collect::<Vec<_>>().join(" | ")
+                );
+            }
+        }
+    }
+
+    /// The scan reads no more than its window, and a line that starts exactly
+    /// at the window's floor is whole, so it is hydrated. One byte less and the
+    /// line is cut, so it is not.
+    #[test]
+    #[ignore = "red: load_full_records reads the whole file and ignores its scan window"]
+    fn the_full_scan_stays_inside_its_window_and_keeps_a_line_at_its_floor() {
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        let mut rows = vec![planner_row(5, "hydrated 5"), planner_row(10, "hydrated 10")];
+        rows.extend((11..=60).map(|step| planner_row(step, &"p".repeat(80))));
+        rows.push(planner_row(70, "hydrated 70"));
+        let offsets = write_full(&compact, &rows);
+        let file_len = std::fs::metadata(compact.with_file_name("transcript_full.jsonl"))
+            .unwrap()
+            .len();
+        let needed: HashSet<u64> = [5, 10, 70].into();
+
+        let window = file_len - offsets[1];
+        let found = load_full_records(&compact, &needed, true, window);
+        let (_, _, bytes_read) = FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(found.contains_key(&70) && found.contains_key(&10));
+        assert!(!found.contains_key(&5), "step 5 lies below the window");
+        assert!(
+            (bytes_read as u64) <= window,
+            "read {bytes_read} of a {window}-byte window"
+        );
+
+        let found = load_full_records(&compact, &needed, true, window - 1);
+        let (_, _, bytes_read) = FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(found.contains_key(&70));
+        assert!(
+            !found.contains_key(&10),
+            "step 10 starts one byte below the window"
+        );
+        assert!((bytes_read as u64) < window);
+    }
+
+    /// Agy can write a step after a higher one; this module's own fixture runs
+    /// 1, 11, 10, 12. The scan must not stop at the first lower step it meets.
+    #[test]
+    fn a_step_written_after_a_higher_one_is_still_hydrated() {
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        std::fs::write(&compact, truncated_row(11) + "\n").unwrap();
+        write_full(
+            &compact,
+            &[
+                planner_row(1, "one"),
+                planner_row(11, "hydrated 11"),
+                planner_row(10, "ten"),
+                planner_row(12, "twelve"),
+            ],
+        );
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        assert!(text.contains("hydrated 11"), "got: {text}");
+    }
+
+    /// Once the hydration budget is spent no later needed step can be
+    /// hydrated, so the scan stops reading instead of walking the window.
+    #[test]
+    #[ignore = "red: load_full_records reads the whole file however much it has hydrated"]
+    fn the_full_scan_stops_reading_once_the_hydration_budget_is_spent() {
+        let cap = crate::state::MAX_TRANSCRIPT_TAIL_BYTES as usize;
+        let dir = tempfile::tempdir().unwrap();
+        let compact = dir.path().join("transcript.jsonl");
+        std::fs::write(
+            &compact,
+            [truncated_row(1), truncated_row(200)].join("\n") + "\n",
+        )
+        .unwrap();
+        let mut rows = vec![planner_row(1, "hydrated 1")];
+        rows.extend((2..=150).map(|step| planner_row(step, &"p".repeat(16 * 1024))));
+        let filler = cap - planner_row(200, "budget 200 ").len();
+        rows.push(planner_row(
+            200,
+            &format!("budget 200 {}", "x".repeat(filler)),
+        ));
+        assert_eq!(rows.last().unwrap().len(), cap);
+        write_full(&compact, &rows);
+
+        let text = flatten(&render_transcript(&compact, &Theme::default(), None, true));
+        let (_, _, bytes_read) = FULL_LOAD_COUNTS.with(std::cell::Cell::get);
+        assert!(text.contains("budget 200"));
+        assert!(
+            !text.contains("hydrated 1"),
+            "step 1 is past the spent budget"
+        );
+        assert!(
+            bytes_read <= cap + 2 * 64 * 1024,
+            "read {bytes_read} bytes after a {cap}-byte budget was spent"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "red: File::open runs before is_file without O_NONBLOCK so a FIFO at transcript.jsonl or transcript_full.jsonl hangs"]
+    fn named_pipe_at_transcript_path_returns_immediately_without_blocking() {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("transcript.jsonl");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+
+        let full_dir = tempfile::tempdir().unwrap();
+        let compact_with_trunc = full_dir.path().join("transcript.jsonl");
+        let full_fifo = full_dir.path().join("transcript_full.jsonl");
+        std::fs::write(
+            &compact_with_trunc,
+            r#"{"step_index":1,"source":"USER_EXPLICIT","type":"USER_INPUT","content":"<USER_REQUEST>short</USER_REQUEST>","media":[{"mime_type":"image/png","uri":"/tmp/x.png"}],"truncated_fields":["content","media"]}"#.to_owned()
+                + "\n",
+        )
+        .unwrap();
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&full_fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let fifo_clone = fifo.clone();
+        std::thread::spawn(move || {
+            let imgs1 = index_images(&fifo_clone);
+            let lines1 = render_transcript(&fifo_clone, &Theme::default(), None, true);
+            let imgs2 = index_images(&compact_with_trunc);
+            let lines2 = render_transcript(&compact_with_trunc, &Theme::default(), None, true);
+            let _ = tx.send((imgs1.len(), lines1.len(), imgs2.len(), !lines2.is_empty()));
+        });
+
+        let result = rx.recv_timeout(Duration::from_secs(5));
+        if result.is_err() {
+            for pipe in [&fifo, &full_fifo] {
+                let _ = std::fs::OpenOptions::new()
+                    .write(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(pipe);
+            }
+        }
+        assert_eq!(
+            result,
+            Ok((0, 0, 1, true)),
+            "FIFO at transcript.jsonl or transcript_full.jsonl blocked the worker instead of returning immediately"
+        );
     }
 }
