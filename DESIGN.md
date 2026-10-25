@@ -149,7 +149,12 @@ column after it is cut past 32, and the repository and branch past 28, so an
 unusually long branch name can only push the columns after it so far. As the
 frame narrows, whole cells drop from the right, except the activity and the
 session, which are cut instead. A waiting agent's note trails the activity row
-outside the grid, so it widens no column.
+outside the grid, so it widens no column. While a `working` Antigravity (`agy`)
+agent has recorded reasoning in this turn, the fourth row reads `thinking` and
+the reasoning's latest line, from the first value column to the right edge,
+cut from the left with `…` so the newest words stay in view. The mode row it
+stands in for still sizes the columns, so nothing above moves as the agent
+starts and settles.
 
 The tools row is collapsed: every call, every failure, what is running (`◌ none`
 when nothing is) and the three most called, each marked `✓` when it has no

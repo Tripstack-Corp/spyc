@@ -688,4 +688,23 @@ mod tests {
                 .any(|l| l.contains("view_file: 5 calls; 1 failed"))
         );
     }
+
+    #[test]
+    fn diagnostic_dumps_omit_agy_reasoning_prose() {
+        let at: Timestamp = "2026-10-14T08:00:00Z".parse().unwrap();
+        let sentinel = "PRIVATE_REASONING_DUMP_SENTINEL";
+        let agy_snap = agy_metrics::Snapshot {
+            reasoning: Some(agy_metrics::Sample {
+                at,
+                value: sentinel.to_owned(),
+            }),
+            ..Default::default()
+        };
+        for line in agy_lines(&agy_snap, false, at) {
+            assert!(
+                !line.contains(sentinel),
+                "reasoning leaked into dump: {line}"
+            );
+        }
+    }
 }

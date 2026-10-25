@@ -42,7 +42,7 @@ No account request or additional Codex session is opened. Samples older than
 60 seconds are labelled stale; finite expiry edges can wake once. Elapsed time
 updates on other events and existing activity animation, so an idle strip has
 no recurring clock. Diagnostics contain source, identity, freshness and bounded
-metric observations, with no prompts, tool arguments or output.
+metric observations, with no prompts, reasoning text, tool arguments or output.
 
 For a Claude Code tab, `context` is what its latest request sent, in tokens:
 input plus prompt-cache reads and writes; after a compaction it reads `--` until
@@ -104,7 +104,11 @@ call and failure, names what is running with `◐`, and lists the three most
 called, each marked `✓` or `✗<n>` by its own failures; spyc's own MCP calls
 keep `spyc:`, while other `call_mcp_tool` servers read `mcp`. The mode row
 counts subagent (`invoke_subagent`) calls as `agents`, followed by `hooks` and
-`mcp`. The strip reads
+`mcp`. While the agent is `working` and a planner response in the current
+turn has recorded reasoning, that row reads `thinking` and the reasoning's
+latest line instead, cut from the left with `…` so the newest words stay in
+view. The mode row comes back when the turn settles; a new prompt or a
+compaction clears the line. The strip reads
 `~/.gemini/antigravity-cli/brain/<session>/.system_generated/logs/transcript.jsonl`
 under `$HOME` as spyc's environment names it at startup, using the conversation
 UUID reported by the tab's status hooks or named by `--conversation`.
