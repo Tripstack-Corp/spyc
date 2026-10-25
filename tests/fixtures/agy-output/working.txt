@@ -1,0 +1,27 @@
+
+      ▄▀▀▄        Antigravity CLI 1.4.7
+     ▀▀▀▀▀▀       Gemini 4 Argon (High)
+    ▀▀▀▀▀▀▀▀      /Users/example/src/spyc
+   ▄▀▀    ▀▀▄
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> Use run_command to run `uname -a && sleep 8` and wait for it, then reply with only: done
+
+○ Thought for 5.0s (Executing Command Promptly)
+○ Running (uname -a && sleep 8) (ctrl+o to expand)
+⣽  Running command...
+└ Tip: Press ctrl+g to open an external editor for long prompts.
+────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────
+esc to cancel                                                   accept-edits · Gemini 4 Argon · high
+
+
+
+
+
+
+
+
+
