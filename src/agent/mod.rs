@@ -12,6 +12,7 @@
 //! meet at [`profile_for`] (kind → profile, for restored tabs) and
 //! [`detect`] (command → profile, for live panes).
 
+pub mod agy_approval;
 pub mod agy_metrics;
 pub mod chrome;
 pub mod claude_metrics;
@@ -719,19 +720,25 @@ impl AgentProfile for CodexProfile {
 /// since a `PreToolUse` handler must answer with `allow`/`deny`/`ask`. So the
 /// approval prompt is read off the screen instead.
 ///
-/// Both phrases are required (see [`detect_rules::Matcher::All`]): an agent
-/// discussing permissions prints either one readily, and a false red "needs me"
-/// square is worse than no fallback. They're the dialog's own two lines, which is
-/// why the footer key-hint is deliberately NOT a third needle: agy renders that
-/// from `"%s to cancel"` and gives each dialog a different one, so it discriminates
-/// nothing and rots on any UI change.
+/// [`detect_rules::Matcher::AgyApproval`] anchors the match to where `agy`
+/// draws a live approval menu at the bottom of the viewport: the dialog header
+/// (`Command`, `File`, `Pending edit`, etc.), the `─` rule under it (which the
+/// 1.1.11 sample below lacks), `Requesting permission for:` (or the file-edit
+/// diff preview), a recognized
+/// approval question (`Run this command?`, `Allow access to this file?`,
+/// `Accept this file edit?`, `Do you want to proceed?`, etc.), sequential
+/// numbered options from `1. Yes` to `N. No`, the `↑/↓ Navigate` hint row, and
+/// the cancel footer at the bottom. Agy formats that footer from `"%s to cancel"`,
+/// so the matcher accepts `<token> to cancel` rather than a literal `esc to cancel`.
+/// Mentioning those phrases in ordinary output, grep results, diffs, or an
+/// answered prompt above a subsequent turn does not match.
 ///
-/// Verify a needle against a real pane, not the binary's string table — a
-/// runtime-formatted string is absent from it, which is exactly how `esc to cancel`
-/// got mistaken for a phrase agy never prints.
+/// Verify a needle against a real pane (`harness_tests/agy_live.rs` captures
+/// one), not the binary's string table, where a runtime-formatted string such
+/// as `%s to cancel`'s output can be absent.
 static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     region: detect_rules::Region::BottomNonEmptyLines(30),
-    matcher: detect_rules::Matcher::All(&["Requesting permission for:", "Do you want to proceed?"]),
+    matcher: detect_rules::Matcher::AgyApproval,
     state: crate::pane::AgentActivity::Blocked,
     visible_blocker: Some("awaiting tool-execution approval"),
 }];

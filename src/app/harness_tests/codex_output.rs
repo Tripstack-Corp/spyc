@@ -342,7 +342,6 @@ fn agy_gf_and_quick_select_skip_composer_and_footer_until_scrolling() {
 }
 
 #[test]
-#[ignore = "red: agy_output_len does not strip a Run this command? approval dialog, so J suggests files/footer.rs from the dialog footer"]
 fn agy_jump_suggests_the_printed_path() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {

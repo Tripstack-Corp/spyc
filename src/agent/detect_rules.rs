@@ -5,9 +5,10 @@
 //! class; see the plan's "Explicitly OUT of scope").
 //!
 //! Kept deliberately small: one [`Region`] (the bottom of the pane's visible
-//! text, where an interactive prompt renders) and one [`Matcher`] (a conjunction
-//! of substrings). Extend with `Regex` / more regions only when a real rule
-//! needs one — no speculative surface.
+//! text, where an interactive prompt renders) and [`Matcher`] variants anchored
+//! to each agent's verified bottom-of-viewport prompt chrome
+//! ([`Matcher::AllAtBottom`], [`Matcher::CodexAsyncQuestions`] and
+//! [`Matcher::AgyApproval`]; `Matcher::All` exists only for tests).
 
 use crate::pane::AgentActivity;
 
@@ -35,6 +36,7 @@ pub enum Matcher {
     /// readily prints any one phrase from a permission prompt while merely
     /// discussing permissions, and a false red "needs me" square is worse than
     /// no detection at all.
+    #[cfg(test)]
     All(&'static [&'static str]),
     /// Codex's verified collapsed summary or complete async-question footer.
     CodexAsyncQuestions,
@@ -45,11 +47,18 @@ pub enum Matcher {
         needles: &'static [&'static str],
         last_line: &'static str,
     },
+    /// Antigravity (`agy`) live tool-approval menu anchored to the bottom rows:
+    /// dialog header (`Command`, `File`, `Pending edit`, etc.), full-width `─`
+    /// rule, `Requesting permission for:` (or the file-edit diff preview),
+    /// recognized approval question, sequential numbered options (`1. Yes...`
+    /// .. `N. No...`), `↑/↓ Navigate` hint row, and `<token> to cancel` footer.
+    AgyApproval,
 }
 
 impl Matcher {
     fn matches(self, haystack: &str) -> bool {
         match self {
+            #[cfg(test)]
             Self::All(needles) => needles.iter().all(|n| haystack.contains(n)),
             Self::CodexAsyncQuestions => super::codex_questions::matches(haystack),
             Self::AllAtBottom { needles, last_line } => {
@@ -59,6 +68,7 @@ impl Matcher {
                 let text = normalize(haystack);
                 needles.iter().all(|n| text.contains(n))
             }
+            Self::AgyApproval => super::agy_approval::matches(haystack),
         }
     }
 }
