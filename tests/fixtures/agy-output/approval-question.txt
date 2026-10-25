@@ -1,0 +1,27 @@
+
+      ▄▀▀▄        Antigravity CLI 1.4.7
+     ▀▀▀▀▀▀       user@example.com (Agent Platform)
+    ▀▀▀▀▀▀▀▀      GCP Project: example-project
+   ▄▀▀    ▀▀▄     Gemini 4 Argon (High)
+  ▄▀▀      ▀▀▄    /Users/example/src/spyc
+
+────────────────────────────────────────────────────────────
+> Immediately call ask_question with question 'Which profile?' and options 'Debug' and 'Release'.
+
+? Which profile?
+
+Question
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Question 1/1: Which profile?
+
+> 1. Debug
+  2. Release
+  3. Write-in...
+
+  ↑/↓ Navigate · enter Select · esc Skip
+esc to cancel                                                   accept-edits · Gemini 4 Argon · high
+
+
+
+

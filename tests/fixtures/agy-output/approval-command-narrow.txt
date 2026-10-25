@@ -1,0 +1,28 @@
+
+      ▄▀▀▄        Antigravity CLI 1.4.7
+     ▀▀▀▀▀▀       user@example.com (Agent Platform)
+    ▀▀▀▀▀▀▀▀      GCP Project: example-project
+   ▄▀▀    ▀▀▄     Gemini 4 Argon (High)
+  ▄▀▀      ▀▀▄    /Users/example/src/spyc
+
+────────────────────────────────────────────────────────────
+> Use run_command to execute `gh pr list --limit 5`.
+
+● Ran (gh pr list --limit 5) (ctrl+o to expand)
+
+Command
+──────────────────────────────────────────────────────────────────────
+
+Requesting permission for:
+   gh pr list --limit 5
+
+Run this command?
+> 1. Yes, run command
+  2. Yes, and always allow in this conversation for commands that
+start with 'gh'
+  3. Yes, and always allow for commands that start with 'gh' (Persist
+to settings.json)
+  4. No, cancel
+
+  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command
+esc to cancel                     accept-edits · Gemini 4 Argon · high

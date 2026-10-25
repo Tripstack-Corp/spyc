@@ -1,0 +1,27 @@
+
+      ▄▀▀▄        Antigravity CLI 1.4.7
+     ▀▀▀▀▀▀       user@example.com (Agent Platform)
+    ▀▀▀▀▀▀▀▀      GCP Project: example-project
+   ▄▀▀    ▀▀▄     Gemini 4 Argon (High)
+  ▄▀▀      ▀▀▄    /Users/example/src/spyc
+
+────────────────────────────────────────────────────────────
+> Use read_file on src/printed.rs and reply with only: Checked src/printed.rs
+
+● Explored 1 file (printed.rs) (ctrl+o to expand)
+
+  Checked src/printed.rs
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                 accept-edits · Gemini 4 Argon · high
+
+
+
+
+
+
+
+
+
