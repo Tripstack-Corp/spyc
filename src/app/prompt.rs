@@ -290,21 +290,7 @@ impl App {
             PromptKind::CopyTo => self.run_selection_to(&prompt.buffer, false),
             PromptKind::MoveTo => self.run_selection_to(&prompt.buffer, true),
             PromptKind::PaneNewTabCwd => {
-                let cwd = prompt.buffer.trim().to_string();
-                if let Some(cmd) = self.state.pending_new_tab_cmd.take() {
-                    // Empty = the user cleared the pre-fill; fall back to the
-                    // configured default cwd (so clearing it agrees with what
-                    // the prompt was pre-filled with under either mode).
-                    let cwd_path = if cwd.is_empty() {
-                        self.state.default_pane_cwd()
-                    } else if cwd.starts_with('~') {
-                        let home = std::env::var("HOME").unwrap_or_default();
-                        std::path::PathBuf::from(cwd.replacen('~', &home, 1))
-                    } else {
-                        std::path::PathBuf::from(&cwd)
-                    };
-                    self.open_pane_tab_in(&cmd, &cwd_path);
-                }
+                self.open_prompted_pane_tab(prompt.buffer.trim());
                 Vec::new()
             }
             PromptKind::ProjectOpen => {

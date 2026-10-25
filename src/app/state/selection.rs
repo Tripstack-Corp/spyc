@@ -58,8 +58,21 @@ impl AppState {
         &self,
         template: &str,
     ) -> Result<String, crate::shell::expand::NonUtf8Path> {
-        let dir = self.cur().listing.dir.as_path();
-        let cwd = self.mounts.resolve(dir).is_none().then_some(dir);
+        self.expand_selection_percent_in(template, self.cur().listing.dir.as_path())
+    }
+
+    /// [`Self::expand_selection_percent`] for a command that runs in `run_dir`,
+    /// such as a `^a c` tab's: each path named from `run_dir`.
+    pub fn expand_selection_percent_in(
+        &self,
+        template: &str,
+        run_dir: &std::path::Path,
+    ) -> Result<String, crate::shell::expand::NonUtf8Path> {
+        let in_mount = self
+            .mounts
+            .resolve(self.cur().listing.dir.as_path())
+            .is_some();
+        let cwd = (!in_mount).then_some(run_dir);
         crate::shell::expand_percent(template, &self.selection_paths(), cwd)
     }
 

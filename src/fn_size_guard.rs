@@ -47,7 +47,7 @@ const FUNCTION: Rule = Rule {
             "src/app/pager_handler/motion.rs::App::handle_pager_motion",
             305,
         ),
-        ("src/app/prompt.rs::App::dispatch_prompt", 162),
+        ("src/app/prompt.rs::App::dispatch_prompt", 151),
         (
             "src/app/render/activity_hud.rs::App::render_activity_hud",
             157,
