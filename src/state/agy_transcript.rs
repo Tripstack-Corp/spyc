@@ -1,7 +1,7 @@
 //! Read an Antigravity (`agy`) conversation transcript from its on-disk JSONL
 //! into styled pager lines (`^a v`) or gallery image metadata (`^a g`).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -72,110 +72,119 @@ pub fn render_transcript(
     let (records, needed_steps) = parse_rendered_records(&text, show_tool_calls);
     let full_records = load_full_records(path, &needed_steps, show_tool_calls, MAX_FULL_SCAN_BYTES);
 
-    let user_style = Style::default()
-        .fg(theme.prompt_prefix)
-        .add_modifier(Modifier::BOLD);
-    let tool_style = Style::default().fg(theme.take);
-
-    let mut out: Vec<Line<'static>> = Vec::new();
-    let mut last_was_blank = true;
-    let mut last_was_prose = false;
-
+    let mut page = TranscriptPage {
+        theme,
+        width,
+        show_tool_calls,
+        user_style: Style::default()
+            .fg(theme.prompt_prefix)
+            .add_modifier(Modifier::BOLD),
+        tool_style: Style::default().fg(theme.take),
+        out: Vec::new(),
+        last_was_blank: true,
+        last_was_prose: false,
+    };
     for record in &records {
         let hydrated = record["step_index"]
             .as_u64()
             .and_then(|step| full_records.get(&step));
-        render_one_record(
-            record,
-            hydrated,
-            theme,
-            width,
-            show_tool_calls,
-            user_style,
-            tool_style,
-            &mut out,
-            &mut last_was_blank,
-            &mut last_was_prose,
-        );
+        page.push_record(record, hydrated);
     }
-    out
+    page.out
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_one_record(
-    record: &serde_json::Value,
-    hydrated: Option<&HydratedRecord>,
-    theme: &Theme,
+/// The pager lines being built, and the spacing state carried between records.
+struct TranscriptPage<'a> {
+    theme: &'a Theme,
     width: Option<usize>,
     show_tool_calls: bool,
     user_style: Style,
     tool_style: Style,
-    out: &mut Vec<Line<'static>>,
-    last_was_blank: &mut bool,
-    last_was_prose: &mut bool,
-) {
-    let source = record["source"].as_str().unwrap_or("");
-    let msg_type = record["type"].as_str().unwrap_or("");
-    let content_truncated = field_is_truncated(record, "content");
-    let raw_content = hydrated
-        .filter(|_| content_truncated)
-        .and_then(|h| h.content.as_deref())
-        .or_else(|| record["content"].as_str())
-        .unwrap_or("");
-    let unhydrated_content =
-        content_truncated && hydrated.and_then(|h| h.content.as_ref()).is_none();
+    out: Vec<Line<'static>>,
+    last_was_blank: bool,
+    last_was_prose: bool,
+}
 
-    if source == "USER_EXPLICIT" && msg_type == "USER_INPUT" {
-        if raw_content.is_empty() && !unhydrated_content {
-            return;
-        }
-        let stripped = strip_user_request_tags(raw_content).trim();
-        if !stripped.is_empty() {
-            crate::state::push_transcript_prompt(out, last_was_blank, stripped, user_style);
-        }
-        if unhydrated_content {
-            crate::state::push_transcript_blank(out, last_was_blank);
-            out.push(Line::from("[truncated]"));
-            *last_was_blank = false;
-        }
-        *last_was_prose = false;
-    } else if source == "MODEL" && msg_type == "PLANNER_RESPONSE" {
-        if !raw_content.trim().is_empty() {
-            crate::state::push_agent_markdown(out, last_was_blank, raw_content, theme, width);
-            *last_was_prose = true;
-        }
-        if unhydrated_content {
-            crate::state::push_transcript_blank(out, last_was_blank);
-            out.push(Line::from("[truncated]"));
-            *last_was_blank = false;
-            *last_was_prose = true;
-        }
+impl TranscriptPage<'_> {
+    fn push_record(&mut self, record: &serde_json::Value, hydrated: Option<&HydratedRecord>) {
+        let source = record["source"].as_str().unwrap_or("");
+        let msg_type = record["type"].as_str().unwrap_or("");
+        let content_truncated = field_is_truncated(record, "content");
+        let raw_content = hydrated
+            .filter(|_| content_truncated)
+            .and_then(|h| h.content.as_deref())
+            .or_else(|| record["content"].as_str())
+            .unwrap_or("");
+        let unhydrated_content =
+            content_truncated && hydrated.and_then(|h| h.content.as_ref()).is_none();
 
-        if show_tool_calls {
-            let tools_truncated = field_is_truncated(record, "tool_calls");
-            let labels: Vec<String> = if tools_truncated
-                && let Some(hydrated_labels) = hydrated.and_then(|h| h.tool_labels.as_ref())
-            {
-                hydrated_labels.clone()
-            } else if let Some(tool_calls) = record["tool_calls"].as_array() {
-                let mut v: Vec<String> = tool_calls.iter().map(tool_call_label).collect();
-                if tools_truncated {
-                    v.push("\u{2699} [truncated]".to_owned());
-                }
-                v
-            } else if tools_truncated {
-                vec!["\u{2699} [truncated]".to_owned()]
-            } else {
-                Vec::new()
-            };
-            if !labels.is_empty() {
-                if *last_was_prose {
-                    crate::state::push_transcript_blank(out, last_was_blank);
-                    *last_was_prose = false;
-                }
-                for label in labels {
-                    out.push(Line::from(Span::styled(label, tool_style)));
-                    *last_was_blank = false;
+        if source == "USER_EXPLICIT" && msg_type == "USER_INPUT" {
+            if raw_content.is_empty() && !unhydrated_content {
+                return;
+            }
+            let stripped = strip_user_request_tags(raw_content).trim();
+            if !stripped.is_empty() {
+                crate::state::push_transcript_prompt(
+                    &mut self.out,
+                    &mut self.last_was_blank,
+                    stripped,
+                    self.user_style,
+                );
+            }
+            if unhydrated_content {
+                crate::state::push_transcript_blank(&mut self.out, &mut self.last_was_blank);
+                self.out.push(Line::from("[truncated]"));
+                self.last_was_blank = false;
+            }
+            self.last_was_prose = false;
+        } else if source == "MODEL" && msg_type == "PLANNER_RESPONSE" {
+            if !raw_content.trim().is_empty() {
+                crate::state::push_agent_markdown(
+                    &mut self.out,
+                    &mut self.last_was_blank,
+                    raw_content,
+                    self.theme,
+                    self.width,
+                );
+                self.last_was_prose = true;
+            }
+            if unhydrated_content {
+                crate::state::push_transcript_blank(&mut self.out, &mut self.last_was_blank);
+                self.out.push(Line::from("[truncated]"));
+                self.last_was_blank = false;
+                self.last_was_prose = true;
+            }
+
+            if self.show_tool_calls {
+                let tools_truncated = field_is_truncated(record, "tool_calls");
+                let labels: Vec<String> = if tools_truncated
+                    && let Some(hydrated_labels) = hydrated.and_then(|h| h.tool_labels.as_ref())
+                {
+                    hydrated_labels.clone()
+                } else if let Some(tool_calls) = record["tool_calls"].as_array() {
+                    let mut v: Vec<String> = tool_calls.iter().map(tool_call_label).collect();
+                    if tools_truncated {
+                        v.push("\u{2699} [truncated]".to_owned());
+                    }
+                    v
+                } else if tools_truncated {
+                    vec!["\u{2699} [truncated]".to_owned()]
+                } else {
+                    Vec::new()
+                };
+                if !labels.is_empty() {
+                    if self.last_was_prose {
+                        crate::state::push_transcript_blank(
+                            &mut self.out,
+                            &mut self.last_was_blank,
+                        );
+                        self.last_was_prose = false;
+                    }
+                    for label in labels {
+                        self.out
+                            .push(Line::from(Span::styled(label, self.tool_style)));
+                        self.last_was_blank = false;
+                    }
                 }
             }
         }
@@ -199,6 +208,13 @@ const MAX_FULL_HYDRATION_BYTES: usize = crate::state::MAX_TRANSCRIPT_TAIL_BYTES 
 const MAX_FULL_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 /// Chunk size for the reverse `transcript_full.jsonl` scanner.
 const BACKWARD_CHUNK_BYTES: usize = 64 * 1024;
+/// Leading bytes kept of a line too large to hydrate: enough for
+/// `extract_leading_step` to read its `"step_index"`.
+const OVERSIZE_HEAD_BYTES: usize = 128;
+/// How far below the smallest needed step the backward scan reads before it
+/// stops. Agy can write a step after a higher one (a planner response after the
+/// tool step it started); in real transcripts the inversion spans one or two steps.
+const STEP_ORDER_SLACK: u64 = 8;
 
 /// Open `path` as a regular file without blocking if `path` is a named pipe.
 fn open_regular_file(path: &Path) -> Option<std::fs::File> {
@@ -358,9 +374,10 @@ fn needs_full_image_record(val: &serde_json::Value) -> bool {
 /// Resolve a media `uri` from an Agy transcript into an on-disk path.
 ///
 /// Handles `file://` and `file://localhost/` URLs with percent-decoding (preserving
-/// raw non-UTF-8 bytes on Unix), and anchors relative paths to the transcript
-/// directory (or the enclosing session directory when the transcript lives under
-/// `.system_generated/logs`) rather than spyc's mutable process working directory.
+/// raw non-UTF-8 bytes on Unix). A relative path resolves against the transcript's
+/// directory, else whichever of its two nearest ancestors holds the file (the
+/// session directory when the transcript lives under `.system_generated/logs`),
+/// never spyc's process working directory.
 fn resolve_image_uri(transcript_path: &Path, uri: &str) -> Option<PathBuf> {
     let trimmed = uri.trim();
     if trimmed.is_empty() {
@@ -541,8 +558,8 @@ std::thread_local! {
 
 /// Extract the leading `"step_index": N` field from an Agy JSONL record without
 /// parsing the full JSON object. Agy records emit `"step_index"` as the first
-/// field of each line; we check only the opening key so multi-megabyte payloads
-/// are never parsed unless their step is in `remaining`.
+/// field of each line, so only the opening key is checked and a multi-megabyte
+/// payload is never parsed unless its step is needed.
 fn extract_leading_step(line: &str) -> Option<u64> {
     let after_brace = line.trim_start().strip_prefix('{')?.trim_start();
     let after_key = after_brace.strip_prefix("\"step_index\"")?.trim_start();
@@ -558,7 +575,7 @@ fn load_full_records(
     compact_path: &Path,
     needed: &HashSet<u64>,
     show_tool_calls: bool,
-    _scan_window: u64,
+    scan_window: u64,
 ) -> HashMap<u64, HydratedRecord> {
     #[cfg(test)]
     FULL_LOAD_COUNTS.with(|c| c.set((0, 0, 0)));
@@ -570,17 +587,21 @@ fn load_full_records(
     let Some(file) = open_regular_file(&full_path) else {
         return found;
     };
-    let mut remaining = needed.clone();
-    scan_full_records_backward(file, &mut remaining, show_tool_calls, &mut found);
+    let mut remaining: BTreeSet<u64> = needed.iter().copied().collect();
+    scan_full_records_backward(
+        file,
+        scan_window,
+        &mut remaining,
+        show_tool_calls,
+        &mut found,
+    );
     found
 }
 
 /// Accumulates trailing chunks of a JSONL line while scanning backward from the
-/// end of `transcript_full.jsonl`. Once the accumulated bytes for a single line
-/// exceed `MAX_FULL_HYDRATION_BYTES`, the line cannot be hydrated anyway: we
-/// mark it `oversize` and keep only the newest prefix chunk so
-/// `extract_leading_step` can still inspect the leading `"step_index"` field
-/// without shifting a multi-megabyte buffer on every 64 KiB chunk.
+/// end of `transcript_full.jsonl`. A line over `MAX_FULL_HYDRATION_BYTES` can't
+/// be hydrated, so it is marked `oversize` and only its first
+/// `OVERSIZE_HEAD_BYTES` are kept, for `extract_leading_step`.
 struct BackwardLineBuffer {
     parts: Vec<Vec<u8>>,
     total_len: usize,
@@ -605,11 +626,16 @@ impl BackwardLineBuffer {
             return;
         }
         if self.oversize || self.total_len + slice.len() > MAX_FULL_HYDRATION_BYTES {
+            // A chunk boundary can fall inside `{"step_index":NNN`, so the head is
+            // `slice` followed by what was kept: `slice` alone can read as a lower step.
+            let mut head = Vec::with_capacity(OVERSIZE_HEAD_BYTES);
+            for part in std::iter::once(slice).chain(self.parts.iter().rev().map(Vec::as_slice)) {
+                let room = OVERSIZE_HEAD_BYTES - head.len();
+                head.extend_from_slice(&part[..part.len().min(room)]);
+            }
             self.oversize = true;
-            self.parts.clear();
-            let head_len = slice.len().min(128);
-            self.parts.push(slice[..head_len].to_vec());
-            self.total_len = head_len;
+            self.total_len = head.len();
+            self.parts = vec![head];
         } else {
             self.parts.push(slice.to_vec());
             self.total_len += slice.len();
@@ -636,7 +662,8 @@ impl BackwardLineBuffer {
 /// and hydrated first without streaming the whole file from step 1.
 fn scan_full_records_backward(
     mut file: std::fs::File,
-    remaining: &mut HashSet<u64>,
+    scan_window: u64,
+    remaining: &mut BTreeSet<u64>,
     show_tool_calls: bool,
     found: &mut HashMap<u64, HydratedRecord>,
 ) {
@@ -644,7 +671,7 @@ fn scan_full_records_backward(
         return;
     };
     let file_len = meta.len();
-    let scan_floor = file_len.saturating_sub(MAX_FULL_SCAN_BYTES);
+    let scan_floor = file_len.saturating_sub(scan_window);
     let mut pos = file_len;
     let mut chunk_buf = vec![0u8; BACKWARD_CHUNK_BYTES];
     let mut line_buf = BackwardLineBuffer::new();
@@ -703,7 +730,7 @@ fn scan_full_records_backward(
 fn inspect_full_line(
     raw: &[u8],
     oversize: bool,
-    remaining: &mut HashSet<u64>,
+    remaining: &mut BTreeSet<u64>,
     show_tool_calls: bool,
     hydrated_bytes: &mut usize,
     found: &mut HashMap<u64, HydratedRecord>,
@@ -717,23 +744,20 @@ fn inspect_full_line(
         let (lines, parsed, bytes) = c.get();
         c.set((lines + 1, parsed, bytes));
     });
-    let Some(min_needed) = remaining.iter().copied().min() else {
+    let Some(&min_needed) = remaining.first() else {
         return ControlFlow::Break(());
     };
     let text = String::from_utf8_lossy(trimmed_bytes);
     let Some(candidate_step) = extract_leading_step(&text) else {
         return ControlFlow::Continue(());
     };
-    if candidate_step < min_needed {
+    if candidate_step.saturating_add(STEP_ORDER_SLACK) < min_needed {
         return ControlFlow::Break(());
     }
     if !remaining.contains(&candidate_step) {
         return ControlFlow::Continue(());
     }
-    if oversize
-        || (*hydrated_bytes > 0
-            && hydrated_bytes.saturating_add(text.len()) > MAX_FULL_HYDRATION_BYTES)
-    {
+    if oversize || hydrated_bytes.saturating_add(text.len()) > MAX_FULL_HYDRATION_BYTES {
         remaining.remove(&candidate_step);
         return if remaining.is_empty() {
             ControlFlow::Break(())
@@ -1728,7 +1752,6 @@ mod tests {
     /// at the window's floor is whole, so it is hydrated. One byte less and the
     /// line is cut, so it is not.
     #[test]
-    #[ignore = "red: load_full_records reads the whole file and ignores its scan window"]
     fn the_full_scan_stays_inside_its_window_and_keeps_a_line_at_its_floor() {
         let dir = tempfile::tempdir().unwrap();
         let compact = dir.path().join("transcript.jsonl");
@@ -1784,7 +1807,6 @@ mod tests {
     /// Once the hydration budget is spent no later needed step can be
     /// hydrated, so the scan stops reading instead of walking the window.
     #[test]
-    #[ignore = "red: load_full_records reads the whole file however much it has hydrated"]
     fn the_full_scan_stops_reading_once_the_hydration_budget_is_spent() {
         let cap = crate::state::MAX_TRANSCRIPT_TAIL_BYTES as usize;
         let dir = tempfile::tempdir().unwrap();
