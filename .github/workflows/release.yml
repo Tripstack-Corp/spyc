@@ -69,7 +69,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.14.0
-      - uses: taiki-e/install-action@v2.87.29
+      - uses: taiki-e/install-action@v2.87.31
         with:
           tool: cargo-zigbuild
       - name: Toolchain (auto from rust-toolchain.toml)
@@ -134,7 +134,7 @@ jobs:
           cd dist
           cosign sign-blob --yes SHA256SUMS --bundle SHA256SUMS.cosign.bundle
       - name: Generate release notes (git-cliff, this tag's section)
-        uses: taiki-e/install-action@v2.87.29
+        uses: taiki-e/install-action@v2.87.31
         with:
           tool: git-cliff
       - name: Write this tag's notes
@@ -230,7 +230,7 @@ jobs:
         # publish a moving `v1` major alias (only exact `v1.x.y`), so `@v1`
         # 404s — same gotcha as the cosign-installer pin below. Dependabot
         # bumps this as new versions ship.
-        uses: rust-lang/crates-io-auth-action@v1.0.5
+        uses: rust-lang/crates-io-auth-action@v1.0.6
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
