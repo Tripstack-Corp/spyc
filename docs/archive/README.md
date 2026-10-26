@@ -15,3 +15,5 @@ roadmap is [`ROADMAP.md`](../../ROADMAP.md) at the repo root.
 | `native_scroll_plan.md`, `mouse_selection_plan.md` | v2.1.0 — the mouse suite (capture, wheel, buttons, drag-select). Neither plan was amended while it was built; the banners name the divergences. |
 | `pasted-image-preview-plan.md` | v2.1.0 — paste capture, image preview, and the `^a g` gallery ([#119](https://github.com/Tripstack-Corp/spyc/issues/119)). |
 | `2.1-release-notes.md` | The human-facing v2.1 notes, as written at tag time. |
+| `2.2-release-notes.md` | The human-facing v2.2 notes, as written at tag time. |
+| `2.3-release-notes.md` | The human-facing v2.3 notes, as written at tag time. |
