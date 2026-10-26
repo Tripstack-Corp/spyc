@@ -494,6 +494,84 @@ mod version_flag_tests {
     }
 }
 
+/// A stand-in that resolves no cwd file, so `cwd_file_option_tests` compile
+/// and fail.
+#[cfg(test)]
+const fn cwd_file_target(
+    _cli: &Cli,
+    _env: Option<&std::ffi::OsStr>,
+    _launch_dir: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    None
+}
+
+#[cfg(test)]
+mod cwd_file_option_tests {
+    //! `--cwd-file` and `$SPYC_CWD_FILE` (#63), parsed as `spyc` parses its
+    //! command line. The variable is handed in, never read from the process.
+
+    use super::{Cli, cwd_file_target};
+    use clap::Parser as _;
+    use std::ffi::OsStr;
+    use std::path::{Path, PathBuf};
+
+    const LAUNCH: &str = "/launched/here";
+
+    fn target(args: &[&str], env: Option<&str>) -> Option<PathBuf> {
+        let cli = Cli::try_parse_from(args).expect("spyc parses its command line");
+        cwd_file_target(&cli, env.map(OsStr::new), Path::new(LAUNCH))
+    }
+
+    #[test]
+    #[ignore = "red: there is no --cwd-file flag"]
+    fn the_flag_wins_over_the_variable() {
+        assert_eq!(
+            target(&["spyc", "--cwd-file", "/from/flag"], Some("/from/env")),
+            Some(PathBuf::from("/from/flag"))
+        );
+    }
+
+    #[test]
+    #[ignore = "red: $SPYC_CWD_FILE is not read"]
+    fn the_variable_names_the_file_when_the_flag_is_absent() {
+        assert_eq!(
+            target(&["spyc"], Some("/from/env")),
+            Some(PathBuf::from("/from/env"))
+        );
+        assert_eq!(
+            target(&["spyc"], Some("")),
+            None,
+            "an empty variable is unset"
+        );
+        assert_eq!(target(&["spyc"], None), None);
+    }
+
+    /// spyc's own cwd follows the column the user browses, so a relative path
+    /// left relative would land wherever they quit from.
+    #[test]
+    #[ignore = "red: there is no --cwd-file flag"]
+    fn a_relative_path_is_anchored_where_spyc_was_launched() {
+        assert_eq!(
+            target(&["spyc", "--cwd-file", "out/cwd"], None),
+            Some(Path::new(LAUNCH).join("out/cwd"))
+        );
+        assert_eq!(
+            target(&["spyc"], Some("env/cwd")),
+            Some(Path::new(LAUNCH).join("env/cwd"))
+        );
+    }
+
+    /// `spyc --help` names the flag and the variable behind it.
+    #[test]
+    #[ignore = "red: there is no --cwd-file flag"]
+    fn the_help_names_the_flag_and_its_variable() {
+        use clap::CommandFactory as _;
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("--cwd-file"), "{help}");
+        assert!(help.contains("SPYC_CWD_FILE"), "{help}");
+    }
+}
+
 #[cfg(test)]
 mod fn_size_guard;
 
