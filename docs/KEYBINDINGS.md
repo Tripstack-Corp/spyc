@@ -58,6 +58,7 @@ file cache that survives across sessions.
 | `t` | Toggle pick |
 | `T` | Pick by glob |
 | `^T` | Pick all / clear all |
+| `]p` / `[p` | Cursor to next / prev picked entry (wraps) |
 | `yy` | Yank to inventory (copies file to cache) |
 | `yf` | Yank cursor file's absolute path (or picks) to clipboard |
 | `yp` | Yank visible pane output to clipboard |

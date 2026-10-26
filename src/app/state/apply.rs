@@ -60,20 +60,12 @@ impl AppState {
             Action::GotoFirst => self.goto_col_top(rows_per_col),
             Action::GotoLast => self.goto_col_bottom(rows_per_col, len),
 
-            // ]g / [g — cursor to next/prev git-changed entry. Wraps
-            // when there's no match in the desired direction so the
-            // user can keep pressing the chord without thinking about
-            // direction. No-op flash when the listing has no changes.
-            Action::JumpNextGitChange => {
-                if !self.jump_to_git_change(true) {
-                    self.flash_info("no git changes in this directory");
-                }
-            }
-            Action::JumpPrevGitChange => {
-                if !self.jump_to_git_change(false) {
-                    self.flash_info("no git changes in this directory");
-                }
-            }
+            // ]g / [g, ]p / [p — next/prev git-changed or picked entry,
+            // wrapping; a flash when the listing has none.
+            Action::JumpNextGitChange
+            | Action::JumpPrevGitChange
+            | Action::JumpNextPick
+            | Action::JumpPrevPick => self.jump_or_flash(action),
 
             // -- Navigation --
             Action::Climb => return ApplyResult::Post(self.climb()),

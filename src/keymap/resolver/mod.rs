@@ -35,9 +35,9 @@ enum PendingSeq {
     /// Seen uppercase `H`, waiting for a harpoon sub-command:
     /// `1`..`9` = jump to slot, `a` = append, `x` = remove, `h` = open menu.
     Harpoon,
-    /// Seen `]`, waiting for a "next" sub-command (`g` = next git change).
+    /// Seen `]`, waiting for a "next" sub-command (`g` git change, `p` pick).
     NextBracket,
-    /// Seen `[`, waiting for a "prev" sub-command (`g` = prev git change).
+    /// Seen `[`, waiting for a "prev" sub-command (`g` git change, `p` pick).
     PrevBracket,
     /// Seen `d`, waiting for the second `d` of the vim-style
     /// `dd` (or `Ndd`) delete chord. Cancels on any other key.
@@ -77,6 +77,29 @@ pub enum ChordEntry {
     Act(&'static str, Action),
     /// `key` opens a submenu the popup labels `label` (e.g. `"worktree"`).
     Sub(&'static str, &'static str),
+}
+
+/// The `]` / `[` chords: each second key, with the jump `]` and then `[`
+/// makes on it. The resolver and the chord hint both read it.
+const BRACKET_JUMPS: [(&str, Action, Action); 2] = [
+    ("g", Action::JumpNextGitChange, Action::JumpPrevGitChange),
+    ("p", Action::JumpNextPick, Action::JumpPrevPick),
+];
+
+/// The jump a `]` (`next`) or `[` chord's second key names.
+fn bracket_jump(next: bool, code: KeyCode) -> Option<Action> {
+    BRACKET_JUMPS
+        .into_iter()
+        .find(|(key, ..)| matches!(code, KeyCode::Char(c) if key.chars().eq([c])))
+        .map(|(_, fwd, back)| if next { fwd } else { back })
+}
+
+/// The chord hint's rows for a pending `]` (`next`) or `[`.
+fn bracket_rows(next: bool) -> Vec<ChordEntry> {
+    BRACKET_JUMPS
+        .into_iter()
+        .map(|(key, fwd, back)| ChordEntry::Act(key, if next { fwd } else { back }))
+        .collect()
 }
 
 impl Resolver {
@@ -249,8 +272,8 @@ impl Resolver {
             ],
             PendingSeq::Mark => vec![Act("a-z", A::SetMark('a'))],
             PendingSeq::JumpMark => vec![Act("a-z", A::JumpMark('a')), Act("'", A::JumpPrevDir)],
-            PendingSeq::NextBracket => vec![Act("g", A::JumpNextGitChange)],
-            PendingSeq::PrevBracket => vec![Act("g", A::JumpPrevGitChange)],
+            PendingSeq::NextBracket => bracket_rows(true),
+            PendingSeq::PrevBracket => bracket_rows(false),
             PendingSeq::D => vec![Act("d", A::RemovePrompt(None))],
             PendingSeq::Z => vec![Act("Z", A::Quit)],
         }
@@ -547,20 +570,13 @@ impl Resolver {
         }
 
         // Mid-sequence: `[` or `]` waiting for a "next/prev <thing>"
-        // sub-command. Currently just `g` for git changes.
+        // sub-command.
         if matches!(
             self.pending,
             PendingSeq::PrevBracket | PendingSeq::NextBracket
         ) {
-            let is_next = self.pending == PendingSeq::NextBracket;
-            let out = match ev.code {
-                KeyCode::Char('g') => ResolverOutcome::Action(if is_next {
-                    Action::JumpNextGitChange
-                } else {
-                    Action::JumpPrevGitChange
-                }),
-                _ => ResolverOutcome::Ignored,
-            };
+            let out = bracket_jump(self.pending == PendingSeq::NextBracket, ev.code)
+                .map_or(ResolverOutcome::Ignored, ResolverOutcome::Action);
             self.reset();
             return out;
         }

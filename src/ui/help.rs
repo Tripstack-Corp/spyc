@@ -104,6 +104,8 @@ const SECTIONS: &[Section] = &[
             ("t", "toggle pick on cursor entry"),
             ("T", "pick by glob pattern (prompt)"),
             ("^T", "pick all / clear all"),
+            ("] p", "cursor to next picked entry (wraps)"),
+            ("[ p", "cursor to prev picked entry (wraps)"),
         ],
     },
     Section {

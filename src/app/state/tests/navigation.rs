@@ -307,7 +307,6 @@ fn picked_state(names: &[&str], picked: &[&str]) -> AppState {
 }
 
 #[test]
-#[ignore = "red: `]p` / `[p` resolve to nothing, so the cursor stays at 0"]
 fn pick_jumps_walk_the_picked_rows_both_ways_and_wrap() {
     let mut s = picked_state(&["a", "b", "c", "d", "e"], &["b", "c", "e"]);
     let mut walk = |keys| {
@@ -326,7 +325,6 @@ fn pick_jumps_walk_the_picked_rows_both_ways_and_wrap() {
 
 /// A pick that isn't a row (filtered out, or elsewhere) is no target.
 #[test]
-#[ignore = "red: `]p` / `[p` resolve to nothing, so nothing flashes"]
 fn pick_jumps_with_no_picked_row_flash_and_stay() {
     for chord in ["]p", "[p"] {
         let mut s = picked_state(&["a", "b", "c"], &["gone"]);
