@@ -63,7 +63,6 @@ fn pick(app: &mut App, name: &str) {
 }
 
 #[test]
-#[ignore = "red: `]p` is not bound, so the cursor stays on alpha.txt"]
 fn bracket_p_moves_to_each_pick_below_the_cursor_in_turn() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -82,7 +81,6 @@ fn bracket_p_moves_to_each_pick_below_the_cursor_in_turn() {
 }
 
 #[test]
-#[ignore = "red: `]p` is not bound, so the cursor stays on echo.txt"]
 fn bracket_p_wraps_from_below_the_last_pick_to_the_first() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -97,7 +95,6 @@ fn bracket_p_wraps_from_below_the_last_pick_to_the_first() {
 }
 
 #[test]
-#[ignore = "red: `[p` is not bound, so the cursor stays on echo.txt"]
 fn open_bracket_p_moves_to_each_pick_above_and_wraps_to_the_last() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -120,7 +117,6 @@ fn open_bracket_p_moves_to_each_pick_above_and_wraps_to_the_last() {
 }
 
 #[test]
-#[ignore = "red: `]p` / `[p` are not bound, so nothing flashes"]
 fn with_no_picks_the_chord_flashes_and_leaves_the_cursor() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -143,7 +139,6 @@ fn with_no_picks_the_chord_flashes_and_leaves_the_cursor() {
 /// In a vsplit the chord walks the focused column `b`'s rows and picks, and
 /// `a`'s cursor stays where it was.
 #[test]
-#[ignore = "red: `]p` / `[p` are not bound, so b's cursor stays on alpha.txt"]
 fn in_column_b_the_chord_walks_bs_picks() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -175,7 +170,6 @@ fn in_column_b_the_chord_walks_bs_picks() {
 /// A pick the `=` filter hides is off screen, so it is no jump target, as a
 /// git change the filter hides is none for `]g`.
 #[test]
-#[ignore = "red: `]p` / `[p` are not bound, so the cursor stays and nothing flashes"]
 fn a_pick_the_filter_hides_is_not_a_jump_target() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

@@ -190,6 +190,8 @@ pub enum Action {
     // listing. Vim-style "next/prev hunk" muscle memory.
     JumpNextGitChange, // ] g — cursor to next file/dir with non-clean git status (wraps)
     JumpPrevGitChange, // [ g — cursor to prev file/dir with non-clean git status (wraps)
+    JumpNextPick,      // ] p — cursor to next picked entry (wraps)
+    JumpPrevPick,      // [ p — cursor to prev picked entry (wraps)
 
     // Path references (M13).
     GotoFile,     // g f — jump file list to path reference in pane output
@@ -367,6 +369,7 @@ impl Action {
             Self::YankPaths => "yank cursor file path (or picks) to clipboard",
             Self::JumpNextGitChange => "jump to next git-changed entry",
             Self::JumpPrevGitChange => "jump to prev git-changed entry",
+            Self::JumpNextPick | Self::JumpPrevPick => self.describe_pick_jump(),
             Self::ToggleMask(_) => "toggle ignore mask",
             Self::LimitPrompt => "filter file list (glob, ! for picks, empty clears)",
             Self::CommandPrompt => "command line (:limit, :!, :!!, :;, etc.)",
@@ -487,6 +490,7 @@ impl Action {
             Self::GotoLast => "goto_last",
             Self::JumpNextGitChange => "jump_next_git_change",
             Self::JumpPrevGitChange => "jump_prev_git_change",
+            Self::JumpNextPick | Self::JumpPrevPick => self.pick_jump_canonical_name(),
             // Navigation.
             Self::EnterOrDisplay => "enter_or_display",
             Self::EnterOrEdit => "enter_or_edit",
@@ -631,6 +635,22 @@ impl Action {
             _ => "goto_file",
         }
     }
+
+    /// The pick jumps' arm of [`Self::describe`], which is at its length pin.
+    const fn describe_pick_jump(&self) -> &'static str {
+        match self {
+            Self::JumpPrevPick => "jump to prev picked entry",
+            _ => "jump to next picked entry",
+        }
+    }
+
+    /// The pick jumps' arm of [`Self::canonical_name`], which is at its length pin.
+    const fn pick_jump_canonical_name(&self) -> &'static str {
+        match self {
+            Self::JumpPrevPick => "jump_prev_pick",
+            _ => "jump_next_pick",
+        }
+    }
 }
 
 /// Resolve a snake_case [`Action::canonical_name`] back to an [`Action`],
@@ -665,6 +685,8 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "goto_last" => Action::GotoLast,
         "jump_next_git_change" => Action::JumpNextGitChange,
         "jump_prev_git_change" => Action::JumpPrevGitChange,
+        "jump_next_pick" => Action::JumpNextPick,
+        "jump_prev_pick" => Action::JumpPrevPick,
         // Navigation.
         "enter_or_display" => Action::EnterOrDisplay,
         "enter_or_edit" => Action::EnterOrEdit,

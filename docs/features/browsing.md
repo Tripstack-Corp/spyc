@@ -137,6 +137,10 @@ Two levels of selection for flexible file management.
 - **t** toggle pick on the cursor entry
 - **T** pick by glob pattern
 - **^T** pick all / clear all
+- **`]p` / `[p`** jump the cursor to the next / previous picked entry,
+  wrapping end to end like `]g` / `[g`. A pick the `=` filter or a mask
+  hides is passed over. Flashes "no picks in this directory" when there's
+  nothing to land on.
 
 **Inventory** is a file cache — yanked files are copied to a local cache
 (`~/.local/state/spyc/inventory/`), persisted across sessions:
