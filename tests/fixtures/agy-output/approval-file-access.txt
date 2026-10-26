@@ -1,0 +1,28 @@
+
+────────────────────────────────────────────────────────────
+> Without reading any files, call the spyc MCP tool list_scopes, then reply with only: called
+
+○ Thought for 7.7s (Executing MCP Tool)
+● Called 1 MCP tool (spyc/list_scopes) (ctrl+o to expand)
+
+MCP
+  ⎿  User declined the tool call
+
+────────────────────────────────────────────────────────────
+> Read src/printed.rs and reply with only its first word.
+
+● Used ReadFile (ctrl+o to expand)
+
+File access
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Read:
+/Users/example/src/spyc/src/printed.r
+s
+
+Allow access to this file?
+> 1. Yes, allow access
+  2. No, deny access
+
+  ↑/↓ Navigate
+esc to cancel                                                   accept-edits · Gemini 4 Argon · high

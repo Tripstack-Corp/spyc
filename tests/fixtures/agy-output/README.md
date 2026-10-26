@@ -10,6 +10,9 @@ row's distance from the bottom matches the live viewport.
 | `approval-command-narrow.txt` | live | 1.4.7 | 70 × 28 | `Command` approval whose options wrap to column 0 |
 | `approval-edit.txt` | live | 1.4.7 | 100 × 28 | `Pending edit` approval, default mode |
 | `approval-question.txt` | live | 1.4.7 | 100 × 28 | `ask_question` with three choices and a write-in |
+| `approval-question-narrow.txt` | live | 1.4.7 | 70 × 28 | `ask_question` whose `Question 1/1:` prompt wraps onto a second row |
+| `approval-mcp.txt` | live, hook-forced | 1.4.7 | 100 × 28 | `MCP` approval for `spyc/list_scopes` |
+| `approval-file-access.txt` | live, hook-forced | 1.4.7 | 100 × 28 | `File access` approval for a read, its target wrapped |
 | `composer-empty.txt` | live | 1.4.7 | 100 × 28 | idle, empty composer, after a turn |
 | `composer-draft.txt` | live | 1.4.7 | 100 × 28 | idle, an unsent draft in the composer |
 | `working.txt` | live | 1.4.7 | 100 × 28 | a running command, empty composer below it |
@@ -19,8 +22,9 @@ row's distance from the bottom matches the live viewport.
 ## Live screens
 
 `agy_live_capture_viewport_fixtures` in `src/app/harness_tests/agy_live.rs`
-captured them on 2026-10-24. It starts `agy` in a spyc pane, drives it through
-each screen, and writes each one sanitized. Recapture with:
+captured them on 2026-10-24, and the three added for #866 on 2026-10-26. It
+starts `agy` in a spyc pane, drives it through each screen, and writes each one
+sanitized. Recapture with:
 
 ```sh
 SPYC_AGY_CAPTURE_DIR=/tmp/agy-capture \
@@ -32,9 +36,20 @@ editor mode on, so the draft footers show `-- INSERT --`. Its user allows
 `sleep` without asking, so the command screens use `uname`, which agy asks
 about.
 
+The capture's user allows spyc's MCP tools and reads outside the workspace, so
+agy never asks about either. For `approval-mcp.txt` and `approval-file-access.txt`
+the capture starts a second agy whose workspace `.agents/hooks.json` answers
+`force_ask` before `call_mcp_tool` and `read_file`, which makes agy ask about
+each with its approval dialog. Each dialog is declined with its one-time
+`No` option: the `always deny` options below it write a rule into agy's
+`settings.json`. The sanitized workspace path is shorter than the real one, so
+`approval-file-access.txt`'s `Read:` target keeps the real path's wrapping.
+
 ## Synthetic screens
 
 `approval-file.txt` is hand-written. With `allowNonWorkspaceAccess` set, agy
 reads outside the workspace without asking, so the capture never sees a `File`
 dialog. It follows `approval-command.txt`'s layout with the `File` header,
-`Allow access to this file?` and three options.
+`Allow access to this file?` and three options. It predates the live
+`approval-file-access.txt`, where agy 1.4.7 draws a read's approval with a
+`File access` header and a `Read:` target, without `Requesting permission for:`.

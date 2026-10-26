@@ -9,12 +9,16 @@
 //! ```
 //!
 //! agy runs with `AGY_CLI_HIDE_ACCOUNT_INFO`, and screens are written
-//! sanitized besides: the workspace becomes `/Users/example/src/spyc`, `$HOME`
-//! `/Users/example`, an email address `user@example.com`, a GCP project
-//! `example-project` and `$USER` `example`. Read them before committing.
+//! sanitized besides: the workspace becomes `/Users/example/src/spyc`, the
+//! temporary directory `/tmp`, `$HOME` `/Users/example`, an email address
+//! `user@example.com`, a GCP project `example-project` and `$USER` `example`.
+//! Read them before committing.
 //!
 //! Both work with agy's vim editor mode, which opens the composer in NORMAL
 //! mode and makes Enter in INSERT mode a newline.
+//!
+//! No dialog is answered with an `always` option, which writes a rule into
+//! agy's `settings.json`.
 
 use super::*;
 use std::fmt::Write as _;
@@ -47,7 +51,9 @@ struct LiveAgy {
 }
 
 impl LiveAgy {
-    fn spawn(rows: u16, cols: u16) -> Self {
+    fn spawn(rows: u16, cols: u16, hooks: Option<&str>) -> Self {
+        // Before agy starts, so a run without the variable never launches it.
+        let dir = capture_dir();
         // One fixed workspace, so agy's trusted-workspace list gains one entry
         // however many times this runs.
         let root = std::env::temp_dir().join("spyc-agy-live-workspace");
@@ -55,6 +61,10 @@ impl LiveAgy {
         std::fs::create_dir_all(root.join("src")).unwrap();
         let root = root.canonicalize().unwrap();
         std::fs::write(root.join("src/printed.rs"), "pub fn printed() {}\n").unwrap();
+        if let Some(hooks) = hooks {
+            std::fs::create_dir_all(root.join(".agents")).unwrap();
+            std::fs::write(root.join(".agents/hooks.json"), hooks).unwrap();
+        }
         let mut app = App::test_app(root.clone());
         let context_path = app.view.project().context_path.clone();
         let wake = app.make_pane_wake();
@@ -74,7 +84,7 @@ impl LiveAgy {
         Self {
             pane,
             root,
-            dir: capture_dir(),
+            dir,
             started: Instant::now(),
             output_at: Vec::new(),
             timeline: String::new(),
@@ -219,11 +229,39 @@ impl LiveAgy {
         }
     }
 
+    /// Answers the dialog on screen without granting or remembering anything:
+    /// moves the cursor to its one-time `No` option and selects it, or, with
+    /// none, as on a question, skips it with Esc. The `No, and always deny`
+    /// options below it write a deny rule into agy's `settings.json`.
+    fn decline(&mut self) {
+        let Some((at, no)) = one_time_no(&self.screen()) else {
+            self.send(b"\x1b");
+            return;
+        };
+        let key: &[u8] = if no > at { b"\x1b[B" } else { b"\x1b[A" };
+        for _ in 0..at.abs_diff(no) {
+            self.send(key);
+            self.watch(Duration::from_millis(200));
+        }
+        // Never confirm a choice that would grant or persist something.
+        if one_time_no(&self.screen()).is_some_and(|(at, no)| at == no) {
+            self.send(b"\r");
+        } else {
+            self.send(b"\x1b");
+        }
+    }
+
     /// Sanitizes `text` for a fixture.
     fn clean(&self, text: &str) -> String {
         let email = regex::Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
             .expect("a valid email pattern");
         let mut out = text.replace(&self.root.display().to_string(), "/Users/example/src/spyc");
+        // A narrow pane cuts the workspace path short of the whole root.
+        let tmp = std::env::temp_dir();
+        for dir in [tmp.canonicalize().unwrap_or_else(|_| tmp.clone()), tmp] {
+            let dir = dir.display().to_string();
+            out = out.replace(dir.trim_end_matches('/'), "/tmp");
+        }
         if let Ok(home) = std::env::var("HOME")
             && !home.is_empty()
         {
@@ -274,6 +312,30 @@ impl LiveAgy {
     }
 }
 
+/// In the dialog below the screen's last rule: the selected option's index
+/// and the first `No` option's that neither remembers nor persists the choice.
+fn one_time_no(screen: &str) -> Option<(usize, usize)> {
+    let rows: Vec<&str> = screen.lines().collect();
+    let rule = rows.iter().rposition(|r| r.starts_with('─'))?;
+    let options: Vec<(bool, &str)> = rows[rule + 1..]
+        .iter()
+        .filter_map(|row| {
+            let t = row.trim_start();
+            let (selected, t) = t
+                .strip_prefix('>')
+                .map_or((false, t), |rest| (true, rest.trim_start()));
+            let (num, text) = t.split_once(". ")?;
+            num.parse::<usize>().ok()?;
+            Some((selected, text))
+        })
+        .collect();
+    let at = options.iter().position(|&(selected, _)| selected)?;
+    let no = options.iter().position(|&(_, text)| {
+        text.starts_with("No") && !text.contains("always") && !text.contains("Persist")
+    })?;
+    Some((at, no))
+}
+
 fn is_trust_prompt(screen: &str) -> bool {
     screen.contains("trust")
 }
@@ -286,6 +348,21 @@ fn is_working(screen: &str) -> bool {
 
 fn is_approval(screen: &str) -> bool {
     screen.contains("Navigate") && screen.contains("Requesting permission for:")
+}
+
+/// agy's `ask_question` dialog, under its `Question` header.
+fn is_question(screen: &str) -> bool {
+    screen.contains("Navigate") && screen.lines().any(|r| r.trim() == "Question")
+}
+
+/// Any agy dialog: its `↑/↓ Navigate` row sits just above the footer.
+fn is_dialog(screen: &str) -> bool {
+    screen
+        .lines()
+        .rev()
+        .filter(|r| !r.trim().is_empty())
+        .take(3)
+        .any(|r| r.trim_start().starts_with("↑/↓ Navigate"))
 }
 
 /// The mode word in agy's footer, before ` · <model>`.
@@ -303,7 +380,12 @@ fn last_row(screen: &str) -> Option<&str> {
 
 /// Starts agy and answers the workspace trust prompt if it asks.
 fn start(rows: u16, cols: u16) -> LiveAgy {
-    let mut agy = LiveAgy::spawn(rows, cols);
+    start_with_hooks(rows, cols, None)
+}
+
+/// [`start`], with `hooks` as the workspace's `.agents/hooks.json`.
+fn start_with_hooks(rows: u16, cols: u16, hooks: Option<&str>) -> LiveAgy {
+    let mut agy = LiveAgy::spawn(rows, cols, hooks);
     agy.expect("agy's first screen", Duration::from_secs(60), |s| {
         is_trust_prompt(s) || s.contains("accept-edits") || s.contains("for shortcuts")
     });
@@ -364,15 +446,22 @@ fn agy_live_capture_viewport_fixtures() {
         agy.send(b"\x1b");
     }
     agy.finish_turn("the narrow turn's end", Duration::from_secs(60));
+    agy.submit(
+        "Use the ask_question tool to ask me exactly: Which of these colours should the example heading use as its accent colour? Offer red, green and blue.",
+    );
+    if agy.expect("the narrow question", Duration::from_secs(90), is_question) {
+        agy.watch(Duration::from_millis(500));
+        agy.snapshot("approval-question-narrow");
+        agy.send(b"\x1b");
+    }
+    agy.finish_turn("the narrow question turn's end", Duration::from_secs(60));
     agy.pane.resize(28, 100).unwrap();
     agy.watch(Duration::from_secs(1));
 
     agy.submit(
         "Use the ask_question tool to ask me which colour I prefer, offering red, green and blue.",
     );
-    if agy.expect("the question", Duration::from_secs(90), |s| {
-        s.contains("Navigate") && s.lines().any(|r| r.trim() == "Question")
-    }) {
+    if agy.expect("the question", Duration::from_secs(90), is_question) {
         agy.watch(Duration::from_millis(500));
         agy.snapshot("approval-question");
         agy.send(b"\x1b");
@@ -420,6 +509,40 @@ fn agy_live_capture_viewport_fixtures() {
     }
 
     agy.save_timeline("capture-timeline");
+    drop(agy);
+    capture_forced_dialogs();
+}
+
+/// A workspace `PreToolUse` hook that makes agy ask before every MCP tool call
+/// and file read, which its user may allow already: spyc's tools by a rule,
+/// reads outside the workspace by `allowNonWorkspaceAccess`.
+const FORCE_ASK_HOOKS: &str = r#"{"spyc-harness-ask": {"PreToolUse": [{"matcher": "call_mcp_tool|read_file", "hooks": [{"type": "command", "command": "cat >/dev/null; echo '{\"decision\":\"force_ask\"}'"}]}]}}"#;
+
+/// The MCP tool and file access dialogs, in a second agy whose workspace holds
+/// [`FORCE_ASK_HOOKS`]. Each is declined.
+fn capture_forced_dialogs() {
+    let mut agy = start_with_hooks(28, 100, Some(FORCE_ASK_HOOKS));
+    agy.submit(
+        "Without reading any files, call the spyc MCP tool list_scopes, then reply with only: called",
+    );
+    if agy.expect("the MCP tool approval", Duration::from_secs(90), |s| {
+        is_dialog(s) && s.contains("Allow calling this tool?")
+    }) {
+        agy.watch(Duration::from_millis(500));
+        agy.snapshot("approval-mcp");
+        agy.decline();
+    }
+    agy.finish_turn("the MCP turn's end", Duration::from_secs(60));
+    agy.submit("Read src/printed.rs and reply with only its first word.");
+    if agy.expect("the file access approval", Duration::from_secs(90), |s| {
+        is_dialog(s) && s.contains("Allow access to this file?")
+    }) {
+        agy.watch(Duration::from_millis(500));
+        agy.snapshot("approval-file-access");
+        agy.decline();
+    }
+    agy.finish_turn("the file access turn's end", Duration::from_secs(60));
+    agy.save_timeline("capture-forced-timeline");
 }
 
 /// One probe: a prompt, and the longest output gap from the moment agy is

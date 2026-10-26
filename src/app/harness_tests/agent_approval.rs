@@ -810,70 +810,83 @@ fn agy_spinner_below_an_answered_dialog_is_not_a_live_approval() {
     );
 }
 
+/// Pumps the first tab until its screen contains `expected`.
+fn wait_screen(app: &mut App, expected: &str) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let pane = &mut app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0]
+            .pane;
+        pane.drain_output();
+        let visible = pane.visible_lines().join("\n");
+        if visible.contains(expected) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "screen did not contain {expected}: {visible}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Opens a tab whose command reads as agy and draws `fixture` on its 30 × 132
+/// screen from the top-left, through a pty running `cat`.
+fn draw_agy_fixture(app: &mut App, dir: &std::path::Path, fixture: &str) {
+    assert!(app.open_pane_tab_in("sh -c 'stty raw -echo; printf READY; exec cat'", dir));
+    wait_screen(app, "READY");
+    {
+        let entry = &mut app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .tabs_mut()[0];
+        entry.info.command = "agy".into();
+        entry.pane.resize(30, 132).unwrap();
+        entry
+            .pane
+            .send_bytes(format!("\x1b[2J\x1b[H{}", fixture.replace('\n', "\r\n")).as_bytes())
+            .unwrap();
+    }
+    wait_screen(app, "· high");
+}
+
+/// Reports `working`, then runs the quiet scrape over the screen.
+fn settle_scrape_behind_working(app: &mut App) {
+    report(app, "working", None);
+    let base = Instant::now();
+    let mut ctx = RunCtx::for_test();
+    {
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
+        info.last_output_at = Some(base);
+        info.scrape_dirty = true;
+    }
+    let scan_at = base + Duration::from_millis(300);
+    app.settle_scrape_quiet(scan_at, &mut ctx);
+    app.settle_agent_activity(scan_at, &mut ctx);
+}
+
 #[test]
 fn agy_approval_scrape_runs_behind_a_live_working_report() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = App::test_app(tmp.path().to_path_buf());
-        assert!(app.open_pane_tab_in("sh -c 'stty raw -echo; printf READY; exec cat'", tmp.path()));
-        let wait_screen = |app: &mut App, expected: &str| {
-            let deadline = Instant::now() + Duration::from_secs(10);
-            loop {
-                let pane = &mut app
-                    .runtime
-                    .project_mut()
-                    .pane_tabs
-                    .as_mut()
-                    .unwrap()
-                    .tabs_mut()[0]
-                    .pane;
-                pane.drain_output();
-                let visible = pane.visible_lines().join("\n");
-                if visible.contains(expected) {
-                    break;
-                }
-                assert!(
-                    Instant::now() < deadline,
-                    "screen did not contain {expected}: {visible}"
-                );
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        };
-        wait_screen(&mut app, "READY");
         let fixture = include_str!("../../../tests/fixtures/agy-output/approval-command.txt");
-        {
-            let entry = &mut app
-                .runtime
-                .project_mut()
-                .pane_tabs
-                .as_mut()
-                .unwrap()
-                .tabs_mut()[0];
-            entry.info.command = "agy".into();
-            entry.pane.resize(30, 132).unwrap();
-            entry
-                .pane
-                .send_bytes(format!("\x1b[2J\x1b[H{}", fixture.replace('\n', "\r\n")).as_bytes())
-                .unwrap();
-        }
-        wait_screen(&mut app, "· high");
-        report(&mut app, "working", None);
-        let base = Instant::now();
-        let mut ctx = RunCtx::for_test();
-        {
-            let info = app
-                .runtime
-                .project_mut()
-                .pane_tabs
-                .as_mut()
-                .unwrap()
-                .active_info_mut();
-            info.last_output_at = Some(base);
-            info.scrape_dirty = true;
-        }
-        let scan_at = base + Duration::from_millis(300);
-        app.settle_scrape_quiet(scan_at, &mut ctx);
-        app.settle_agent_activity(scan_at, &mut ctx);
+        draw_agy_fixture(&mut app, tmp.path(), fixture);
+        settle_scrape_behind_working(&mut app);
         let info = app
             .runtime
             .project()
@@ -898,4 +911,216 @@ fn agy_approval_scrape_runs_behind_a_live_working_report() {
             )
         );
     });
+}
+
+const AGY_MCP: &str = include_str!("../../../tests/fixtures/agy-output/approval-mcp.txt");
+const AGY_FILE_ACCESS: &str =
+    include_str!("../../../tests/fixtures/agy-output/approval-file-access.txt");
+const AGY_QUESTION_NARROW: &str =
+    include_str!("../../../tests/fixtures/agy-output/approval-question-narrow.txt");
+
+fn agy_scan(text: &str) -> Option<(AgentActivity, Option<&'static str>)> {
+    let rules = crate::agent::profile_for(AgentKind::Agy).detection_rules();
+    crate::agent::detect_rules::scan(&text.lines().map(String::from).collect::<Vec<_>>(), rules)
+}
+
+/// How many of `text`'s rows `gf`, `J` and `^a u` read as agy's output.
+fn agy_output_rows(text: &str) -> usize {
+    crate::agent::chrome::agy_output_len(&text.lines().map(String::from).collect::<Vec<_>>())
+}
+
+/// The index of `text`'s last row that is exactly `header`.
+fn header_row(text: &str, header: &str) -> usize {
+    text.lines()
+        .collect::<Vec<_>>()
+        .iter()
+        .rposition(|&row| row == header)
+        .unwrap_or_else(|| panic!("the fixture has no `{header}` row"))
+}
+
+/// agy 1.4.7 asks before an MCP tool call or a file read with a header, its
+/// rule and the target, and no `Requesting permission for:` row.
+#[test]
+#[ignore = "red: only a dialog with `Requesting permission for:` is an approval, and neither `MCP` nor `File access` is a header"]
+fn agy_mcp_and_file_access_approvals_scrape_as_blocked() {
+    let expected = Some((
+        AgentActivity::Blocked,
+        Some("awaiting tool-execution approval"),
+    ));
+    assert_eq!(agy_scan(AGY_MCP), expected);
+    assert_eq!(agy_scan(AGY_FILE_ACCESS), expected);
+    assert_eq!(
+        agy_scan(&AGY_FILE_ACCESS.replaced(
+            "Read:\n/Users/example/src/spyc/src/printed.r\ns\n",
+            "Read: /Users/example/src/spyc/src/printed.rs\n"
+        )),
+        expected,
+        "a target on one row still matches"
+    );
+    assert_eq!(
+        agy_scan(
+            &AGY_MCP
+                .replaced("> 1. Yes, allow tool call", "  1. Yes, allow tool call")
+                .replaced("  4. No, deny tool call", "> 4. No, deny tool call")
+        ),
+        expected,
+        "moving the cursor to another option still needs the user"
+    );
+}
+
+/// Each anchor of the header, rule and target dialog is required.
+#[test]
+fn agy_mcp_and_file_access_lookalikes_are_not_approvals() {
+    let rule = "─".repeat(100);
+    for (what, text) in [
+        (
+            "an indented `MCP` header",
+            AGY_MCP.replaced("\nMCP\n", "\n  MCP\n"),
+        ),
+        (
+            "an indented `File access` header",
+            AGY_FILE_ACCESS.replaced("\nFile access\n", "\n  File access\n"),
+        ),
+        (
+            "an unknown header",
+            AGY_MCP.replaced("\nMCP\n", "\nNotes\n"),
+        ),
+        (
+            "no rule under the header",
+            AGY_MCP.replaced(&format!("\nMCP\n{rule}\n"), "\nMCP\n"),
+        ),
+        ("no target", AGY_MCP.replaced("\nspyc/list_scopes\n", "\n")),
+        (
+            "a turn row in the target",
+            AGY_MCP.replaced(
+                "\nspyc/list_scopes\n",
+                "\nspyc/list_scopes\n● Ran (git status)\n",
+            ),
+        ),
+        (
+            "an indented question",
+            AGY_FILE_ACCESS.replaced(
+                "\nAllow access to this file?\n",
+                "\n  Allow access to this file?\n",
+            ),
+        ),
+    ] {
+        assert_eq!(agy_scan(&text), None, "{what} must not match");
+        assert_eq!(
+            agy_output_rows(&text),
+            text.lines().count(),
+            "{what} must stay output"
+        );
+    }
+}
+
+/// A `Question N/M:` prompt too long for the pane wraps onto a second row at
+/// column 0, above the options.
+#[test]
+#[ignore = "red: `question_top` expects the prompt on one row directly above the options"]
+fn agy_wrapped_question_is_not_output() {
+    let header = header_row(AGY_QUESTION_NARROW, "Question");
+    assert_eq!(agy_output_rows(AGY_QUESTION_NARROW), header);
+    assert_eq!(
+        agy_output_rows(&AGY_QUESTION_NARROW.replaced(
+            "\nits accent colour?\n",
+            "\nits accent colour, for the\nheading text?\n"
+        )),
+        header,
+        "a prompt wrapped onto three rows is a question too"
+    );
+}
+
+/// The wrapped prompt's rows sit at column 0 and hold no turn row.
+#[test]
+fn agy_wrapped_question_lookalikes_stay_output() {
+    let rule = "─".repeat(70);
+    for (what, text) in [
+        (
+            "an indented continuation row",
+            AGY_QUESTION_NARROW.replaced("\nits accent colour?\n", "\n  its accent colour?\n"),
+        ),
+        (
+            "a turn row in the prompt",
+            AGY_QUESTION_NARROW.replaced(
+                "\nits accent colour?\n",
+                "\nits accent colour?\n● Ran (git status)\n",
+            ),
+        ),
+        (
+            "an indented header",
+            AGY_QUESTION_NARROW.replaced("\nQuestion\n", "\n  Question\n"),
+        ),
+        (
+            "no rule under the header",
+            AGY_QUESTION_NARROW.replaced(&format!("\nQuestion\n{rule}\n"), "\nQuestion\n"),
+        ),
+    ] {
+        assert_eq!(
+            agy_output_rows(&text),
+            text.lines().count(),
+            "{what} must stay output"
+        );
+    }
+}
+
+/// `^a u` labels what agy printed above each dialog and nothing in it.
+#[test]
+#[ignore = "red: Quick Select reads the MCP, file access and wrapped question dialogs as output"]
+fn agy_quick_select_leaves_out_mcp_file_access_and_wrapped_question_dialogs() {
+    for (fixture, header) in [
+        (AGY_MCP.to_owned(), "MCP"),
+        (AGY_FILE_ACCESS.to_owned(), "File access"),
+        (
+            AGY_QUESTION_NARROW.replaced("● Ran (uname -m)", "● Ran (cat src/printed.rs)"),
+            "Question",
+        ),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            draw_agy_fixture(&mut app, tmp.path(), &fixture);
+            app.open_quick_select();
+            let header = header_row(&fixture, header);
+            let matches = &app
+                .view
+                .quick_select
+                .as_ref()
+                .expect("the output above the dialog holds a path")
+                .matches;
+            let in_dialog: Vec<_> = matches.iter().filter(|m| m.row >= header).collect();
+            assert!(
+                in_dialog.is_empty(),
+                "`{}` dialog rows got labels: {in_dialog:?}",
+                fixture.lines().nth(header).unwrap_or_default()
+            );
+        });
+    }
+}
+
+/// The MCP and file access approvals turn agy's dot red behind its `working`
+/// report.
+#[test]
+#[ignore = "red: the scrape doesn't recognize the MCP or file access approval"]
+fn agy_mcp_and_file_access_approvals_turn_the_dot_blocked() {
+    for fixture in [AGY_MCP, AGY_FILE_ACCESS] {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            draw_agy_fixture(&mut app, tmp.path(), fixture);
+            settle_scrape_behind_working(&mut app);
+            let activity = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .activity;
+            assert_eq!(activity, AgentActivity::Blocked);
+            assert!(dump(&mut app).contains(
+                "source: SCRAPE-FALLBACK status=blocked (awaiting tool-execution approval)"
+            ));
+        });
+    }
 }
