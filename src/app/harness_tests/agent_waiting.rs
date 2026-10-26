@@ -388,7 +388,6 @@ fn cancel(app: &mut App, status: &str, event: &serde_json::Value) -> McpResponse
 /// wait the agent held shows from the cancel, in its words and without a
 /// ping, as it does at Codex's `Stop`.
 #[test]
-#[ignore = "red: Codex's Interrupt leaves the turn open, so the wait stays held and the dot shows idle"]
 fn a_codex_cancel_ends_the_turn_on_the_wait_it_held() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -482,7 +481,6 @@ fn an_agy_cancel_shows_what_its_stop_says_is_pending() {
 /// the cancelled turn: a later turn, however it started, ends the way its
 /// own end says.
 #[test]
-#[ignore = "red: a cancel leaves the turn open, so the held wait takes over at a later turn's end"]
 fn a_wait_held_by_a_cancelled_turn_never_outlives_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

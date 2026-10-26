@@ -13,6 +13,12 @@
 //! background watch and carrying on) is held until that turn ends: until
 //! then the agent is working. The hooks say when a turn opens and ends, so an
 //! agent without them has no open turn and its `waiting` applies at once.
+//!
+//! A cancel ends the turn too: Codex's `Interrupt` and agy's cancelled `Stop`
+//! report `idle`. Cancelling a turn stops nothing running in the background,
+//! so a cancel meets a `waiting` as the turn's `done` would. Claude Code
+//! reports no cancel (`Stop` doesn't fire on an interrupt), so its turn ends
+//! at its next `Stop`.
 
 use std::time::Instant;
 
@@ -33,8 +39,8 @@ pub enum Origin<'a> {
 pub enum Verdict {
     /// It replaces the live report.
     Apply,
-    /// It is the `done` ending the turn that reported `waiting`. The live
-    /// report stays, marked so that the next turn's `done` applies.
+    /// It ends the turn that reported `waiting`. The live report stays,
+    /// marked so that the next turn's end applies.
     AbsorbTurnEnd,
     /// It says nothing new about the pending work, so the live report stays.
     Absorb,
@@ -52,8 +58,9 @@ impl Verdict {
 }
 
 /// Whether the agent's turn is open after a hook report of `incoming`: a
-/// prompt opens it, the turn's end closes it, and anything in between, a
-/// question or Claude Code's idle nudge, leaves it as it was.
+/// prompt opens it, the turn's end or a cancel's `idle` closes it, and
+/// anything in between, a question or Claude Code's idle nudge, leaves it as
+/// it was.
 pub fn turn_open_after(
     open: bool,
     incoming: AgentActivity,
@@ -64,7 +71,7 @@ pub fn turn_open_after(
     }
     match incoming {
         AgentActivity::Working => true,
-        AgentActivity::Done | AgentActivity::Waiting => false,
+        AgentActivity::Done | AgentActivity::Waiting | AgentActivity::Idle => false,
         _ => open,
     }
 }
@@ -82,10 +89,11 @@ fn live_waiting(live: Option<&ReportedStatus>, now: Instant) -> Option<&Reported
 
 /// How a report of `incoming` from `origin` meets the tab's `live` report.
 ///
-/// Only a hook's `done` is held back, since only a hook reports a turn end the
-/// agent didn't choose to. The agent's own reports always apply, and so does
-/// any hook state other than `done`: a new prompt (`working`) means the agent
-/// woke, and a question (`blocked`) needs the user more than the wait does.
+/// Only a hook's turn end, its `done` or a cancel's `idle`, is held back,
+/// since only a hook reports a turn end the agent didn't choose to. The
+/// agent's own reports always apply, and so does any other hook state: a new
+/// prompt (`working`) means the agent woke, and a question (`blocked`) needs
+/// the user more than the wait does.
 pub fn meet(
     live: Option<&ReportedStatus>,
     incoming: AgentActivity,
@@ -98,7 +106,7 @@ pub fn meet(
     let Origin::Hook(event) = origin else {
         return Verdict::Apply;
     };
-    if incoming != AgentActivity::Done {
+    if !matches!(incoming, AgentActivity::Done | AgentActivity::Idle) {
         return Verdict::Apply;
     }
     // Claude's idle nudge, which the reporter turns from `blocked` into `done`.
@@ -191,7 +199,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red: turn_open_after leaves the turn open on idle"]
     fn a_cancel_ends_the_turn() {
         use super::turn_open_after;
         let interrupt = event("Interrupt", None, None);
@@ -204,7 +211,6 @@ mod tests {
     /// Cancelling a turn stops nothing running in the background, so a cancel
     /// meets a live wait as the turn's `done` does.
     #[test]
-    #[ignore = "red: meet applies every incoming state but done"]
     fn a_cancel_meets_a_live_wait_as_its_turn_end() {
         let now = Instant::now();
         let interrupt = event("Interrupt", None, None);
