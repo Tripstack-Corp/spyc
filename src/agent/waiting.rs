@@ -13,6 +13,12 @@
 //! background watch and carrying on) is held until that turn ends: until
 //! then the agent is working. The hooks say when a turn opens and ends, so an
 //! agent without them has no open turn and its `waiting` applies at once.
+//!
+//! A cancel ends the turn too: Codex's `Interrupt` and agy's cancelled `Stop`
+//! report `idle`. Cancelling a turn stops nothing running in the background,
+//! so a cancel meets a `waiting` as the turn's `done` would. Claude Code
+//! reports no cancel (`Stop` doesn't fire on an interrupt), so its turn ends
+//! at its next `Stop`.
 
 use std::time::Instant;
 
@@ -33,8 +39,8 @@ pub enum Origin<'a> {
 pub enum Verdict {
     /// It replaces the live report.
     Apply,
-    /// It is the `done` ending the turn that reported `waiting`. The live
-    /// report stays, marked so that the next turn's `done` applies.
+    /// It ends the turn that reported `waiting`. The live report stays,
+    /// marked so that the next turn's end applies.
     AbsorbTurnEnd,
     /// It says nothing new about the pending work, so the live report stays.
     Absorb,
@@ -52,8 +58,9 @@ impl Verdict {
 }
 
 /// Whether the agent's turn is open after a hook report of `incoming`: a
-/// prompt opens it, the turn's end closes it, and anything in between, a
-/// question or Claude Code's idle nudge, leaves it as it was.
+/// prompt opens it, the turn's end or a cancel's `idle` closes it, and
+/// anything in between, a question or Claude Code's idle nudge, leaves it as
+/// it was.
 pub fn turn_open_after(
     open: bool,
     incoming: AgentActivity,
@@ -64,7 +71,7 @@ pub fn turn_open_after(
     }
     match incoming {
         AgentActivity::Working => true,
-        AgentActivity::Done | AgentActivity::Waiting => false,
+        AgentActivity::Done | AgentActivity::Waiting | AgentActivity::Idle => false,
         _ => open,
     }
 }
@@ -82,10 +89,11 @@ fn live_waiting(live: Option<&ReportedStatus>, now: Instant) -> Option<&Reported
 
 /// How a report of `incoming` from `origin` meets the tab's `live` report.
 ///
-/// Only a hook's `done` is held back, since only a hook reports a turn end the
-/// agent didn't choose to. The agent's own reports always apply, and so does
-/// any hook state other than `done`: a new prompt (`working`) means the agent
-/// woke, and a question (`blocked`) needs the user more than the wait does.
+/// Only a hook's turn end, its `done` or a cancel's `idle`, is held back,
+/// since only a hook reports a turn end the agent didn't choose to. The
+/// agent's own reports always apply, and so does any other hook state: a new
+/// prompt (`working`) means the agent woke, and a question (`blocked`) needs
+/// the user more than the wait does.
 pub fn meet(
     live: Option<&ReportedStatus>,
     incoming: AgentActivity,
@@ -98,7 +106,7 @@ pub fn meet(
     let Origin::Hook(event) = origin else {
         return Verdict::Apply;
     };
-    if incoming != AgentActivity::Done {
+    if !matches!(incoming, AgentActivity::Done | AgentActivity::Idle) {
         return Verdict::Apply;
     }
     // Claude's idle nudge, which the reporter turns from `blocked` into `done`.
@@ -135,6 +143,7 @@ pub fn note_for(
 #[cfg(test)]
 mod tests {
     use super::{AgentActivity, Origin, ReportedStatus, StatusHookEvent, Verdict, meet, note_for};
+    use crate::agent::status_hook::TerminationReason;
     use std::time::{Duration, Instant};
 
     use AgentActivity::{Blocked, Done, Idle, Waiting, Working};
@@ -172,7 +181,6 @@ mod tests {
         }
         for open in [true, false] {
             assert_eq!(turn_open_after(open, Blocked, Some(&question)), open);
-            assert_eq!(turn_open_after(open, Idle, None), open);
             assert_eq!(
                 turn_open_after(open, Done, Some(&nudge)),
                 open,
@@ -180,6 +188,69 @@ mod tests {
             );
             assert_eq!(turn_open_after(open, Blocked, Some(&nudge)), open);
         }
+    }
+
+    fn agy_cancel(fully_idle: Option<bool>) -> StatusHookEvent {
+        StatusHookEvent {
+            termination_reason: Some(TerminationReason::UserCancelled),
+            fully_idle,
+            ..event("Stop", None, None)
+        }
+    }
+
+    #[test]
+    fn a_cancel_ends_the_turn() {
+        use super::turn_open_after;
+        let interrupt = event("Interrupt", None, None);
+        for cancel in [Some(&interrupt), Some(&agy_cancel(Some(true))), None] {
+            assert!(!turn_open_after(true, Idle, cancel), "{cancel:?}");
+            assert!(!turn_open_after(false, Idle, cancel), "{cancel:?}");
+        }
+    }
+
+    /// Cancelling a turn stops nothing running in the background, so a cancel
+    /// meets a live wait as the turn's `done` does.
+    #[test]
+    fn a_cancel_meets_a_live_wait_as_its_turn_end() {
+        let now = Instant::now();
+        let interrupt = event("Interrupt", None, None);
+        let mut live = report(Waiting, now);
+        assert_eq!(
+            meet(Some(&live), Idle, Origin::Hook(Some(&interrupt)), now),
+            Verdict::AbsorbTurnEnd,
+            "Codex's Interrupt can't say whether work is pending"
+        );
+        assert_eq!(
+            meet(Some(&live), Idle, Origin::Hook(None), now),
+            Verdict::AbsorbTurnEnd,
+            "unattributed"
+        );
+        assert_eq!(
+            meet(
+                Some(&live),
+                Idle,
+                Origin::Hook(Some(&agy_cancel(Some(true)))),
+                now
+            ),
+            Verdict::Apply,
+            "agy's cancelled Stop says nothing will wake it"
+        );
+        assert_eq!(
+            meet(
+                Some(&live),
+                Idle,
+                Origin::Hook(Some(&agy_cancel(Some(false)))),
+                now
+            ),
+            Verdict::Absorb,
+            "work is still pending"
+        );
+        live.turn_end_absorbed = true;
+        assert_eq!(
+            meet(Some(&live), Idle, Origin::Hook(Some(&interrupt)), now),
+            Verdict::Apply,
+            "the wait already outlasted its own turn's end"
+        );
     }
 
     #[test]
@@ -265,12 +336,13 @@ mod tests {
     }
 
     #[test]
-    fn only_a_hook_done_against_a_live_waiting_is_held_back() {
+    fn only_a_hook_turn_end_against_a_live_waiting_is_held_back() {
         let now = Instant::now();
         let stop = event("Stop", None, None);
         let live = report(Waiting, now);
         assert_eq!(meet(Some(&live), Done, Origin::Agent, now), Verdict::Apply);
-        for incoming in [Working, Blocked, Idle, Waiting] {
+        assert_eq!(meet(Some(&live), Idle, Origin::Agent, now), Verdict::Apply);
+        for incoming in [Working, Blocked, Waiting] {
             assert_eq!(
                 meet(Some(&live), incoming, Origin::Hook(Some(&stop)), now),
                 Verdict::Apply,

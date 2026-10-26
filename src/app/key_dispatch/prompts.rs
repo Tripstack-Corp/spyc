@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::state::History;
 
+use crate::app::session::EditedHistory;
 use crate::app::update::UiMsg;
 use crate::app::{
     App, Effect, HistoryBucket, Mode, Prompt, PromptKind, history_bucket_for, is_path_prompt_kind,
@@ -249,21 +250,17 @@ impl App {
         // matches — but in Normal mode `?` is otherwise a no-op in the
         // line editor, so we route it here to the same viewer.
         //
-        // Dispatched by prompt kind:
-        //   PromptKind::Jump                 → show_jump_history_popup (j/k cd)
-        //   PromptKind::ShellCmd{,Captured}  → show_history_popup (shell !? popup)
-        //   anything else                    → no popup; the key is the editor's
-        //
-        // The shell popup's Enter runs its line as a `!` capture, and another
-        // prompt keeps a history of its own (`:`'s is `command_history`),
-        // which no popup shows yet (#82).
+        // Dispatched by prompt kind ([`Self::prompt_history_popup`]): `J`'s
+        // jump history, or the history editor over the shell's history for
+        // `!`/`;` or `:`'s own for `:`, whose Enter runs the line as that
+        // prompt would. Any other prompt opens none; the key is the editor's.
         if matches!(key.code, KeyCode::Char(' ' | '?'))
             && let Some(popup) = self.prompt_history_popup()
         {
             self.cancel_prompt();
             match popup {
                 HistoryPopup::Jump => self.show_jump_history_popup(),
-                HistoryPopup::Shell => self.show_history_popup(),
+                HistoryPopup::Editor(edited) => self.show_history_editor(edited),
             }
             return Vec::new();
         }
@@ -380,8 +377,8 @@ impl App {
 
 impl App {
     /// The history popup `Space` or `?` opens from the prompt in view, once
-    /// `Esc` has put its line editor in Normal mode: `J`'s jump history, or
-    /// the shell's for a `!` or `;` prompt, and none for any other.
+    /// `Esc` has put its line editor in Normal mode: `J`'s jump history, the
+    /// shell's for a `!` or `;` prompt, `:`'s for `:`, and none for any other.
     fn prompt_history_popup(&self) -> Option<HistoryPopup> {
         let Mode::Prompting(prompt) = &self.state.mode else {
             return None;
@@ -393,7 +390,10 @@ impl App {
         match prompt.kind {
             _ if !normal => None,
             PromptKind::Jump => Some(HistoryPopup::Jump),
-            PromptKind::ShellCmd | PromptKind::ShellCmdCaptured => Some(HistoryPopup::Shell),
+            PromptKind::ShellCmd | PromptKind::ShellCmdCaptured => {
+                Some(HistoryPopup::Editor(EditedHistory::Shell))
+            }
+            PromptKind::Command => Some(HistoryPopup::Editor(EditedHistory::Command)),
             _ => None,
         }
     }
@@ -403,8 +403,8 @@ impl App {
 enum HistoryPopup {
     /// `J`'s: the directories jumped to.
     Jump,
-    /// The shell's `!?`: commands run.
-    Shell,
+    /// The history editor over the shell's history or `:`'s.
+    Editor(EditedHistory),
 }
 
 #[cfg(test)]
@@ -471,22 +471,6 @@ mod tests {
     fn esc_space(app: &mut App) {
         app.handle_vi_prompt_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         app.handle_vi_prompt_key(key(' '));
-    }
-
-    /// `Esc Space` in a `:` prompt opens no shell-history popup, whose Enter
-    /// would run the line as a `!` capture; `:` keeps a history of its own
-    /// (#82). The prompt stays open.
-    #[test]
-    fn esc_space_in_a_command_prompt_opens_no_shell_history() {
-        let mut app = App::test_app(std::env::temp_dir());
-        app.state.history.push("echo hi");
-        app.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
-        esc_space(&mut app);
-        assert!(app.view.project().pager.is_none(), "a history popup opened");
-        assert!(
-            matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::Command)),
-            "the prompt closed"
-        );
     }
 
     /// The control: `Esc Space` in a `!` prompt opens its history.

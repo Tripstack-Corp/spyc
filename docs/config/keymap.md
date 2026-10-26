@@ -72,6 +72,8 @@ verbs above (`down`, `pick`,
 | `goto_last` | bottom of column |
 | `jump_next_git_change` | jump to next git-changed entry |
 | `jump_prev_git_change` | jump to prev git-changed entry |
+| `jump_next_pick` | jump to next picked entry |
+| `jump_prev_pick` | jump to prev picked entry |
 | `enter_or_display` | enter dir / pager on text file |
 | `enter_or_edit` | enter dir / editor on file (suspends TUI) |
 | `climb` | climb to parent |

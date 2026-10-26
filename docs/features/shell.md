@@ -1,6 +1,6 @@
 # Shell and the command line
 
-Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, the `:` command line, and commands left running in the background.
+Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, the `:` command line, taking your shell to where you quit, and commands left running in the background.
 
 ## Shell integration
 
@@ -21,8 +21,9 @@ Three modes of running commands, each for a different use case:
   Also reachable mid-prompt in a `!` or `;` prompt: after `Esc` puts the
   line editor in Normal mode (e.g. you pressed `Esc k` to browse history),
   `?` (or `Space`) opens the same viewer — not just `!?` from a fresh
-  prompt. In `J`'s prompt they open the jump history; in other prompts,
-  `:` among them, they open nothing.
+  prompt. In `J`'s prompt they open the jump history, and in the `:`
+  prompt this editor over the `:` commands you've run, where `Enter`
+  runs the line as a `:` command; other prompts open nothing.
   Defaults to Normal mode — `j`/`k`/`G`/`gg` navigate, `/` search
   with `n`/`N` to jump between matches, `:N` jumps to entry N.
   Press `i` to vi-edit the highlighted command in-place.
@@ -109,13 +110,47 @@ end).
   still works for ripgrep's full flag surface.
 - **`:q`** / **`:quit`** — quit
 
-The `:` prompt shares history with other shell prompts, so Up/Down
-cycles through previous commands.
+The `:` prompt keeps a history of its own, separate from the shell's:
+Up/Down cycle through previous `:` commands, and `Esc Space` (or `Esc ?`)
+lists them in the history editor described under `!?`, where `Enter` runs
+the chosen line as a `:` command and `Ctrl+D` deletes it.
 
 **`spyc -c <cmd>`** runs a `:` command from the shell once spyc is up:
 after `init.lua` loads, a `-r` session is picked, and any startup question is
 answered. Repeatable, run in order, the `:` optional
 (`spyc -c "sort mtime" -c "limit *.rs"`).
+
+## `cd` to where you quit
+
+**`spyc --cwd-file <path>`** writes the directory you were browsing to
+`<path>` when you quit (`Q`, `^D`, `ZZ` or `:q`), so a shell function can `cd`
+there once spyc exits. Without the flag, `$SPYC_CWD_FILE` names the file; the
+flag wins when both are set, and a relative path is taken from the directory
+spyc started in.
+
+The directory is the focused column's, in the project in view. Inside an
+archive it's the directory holding the archive, since there's no directory to
+`cd` into within one. The file holds the path alone, with no newline, and is
+replaced in one step, so it's never read half-written. If spyc can't write it,
+the line spyc prints on exit says why, and the quit goes ahead.
+
+A function for `~/.zshrc` or `~/.bashrc`. Named `spyc`, it wraps every launch,
+and keeps spyc's exit status:
+
+```sh
+spyc() {
+  local tmp dir rc
+  tmp="$(mktemp)" || return
+  command spyc --cwd-file "$tmp" "$@"
+  rc=$?
+  dir="$(cat -- "$tmp")"
+  rm -f -- "$tmp"
+  if [ -n "$dir" ] && [ "$dir" != "$PWD" ]; then
+    cd -- "$dir" || return
+  fi
+  return "$rc"
+}
+```
 
 ## Background tasks
 

@@ -321,6 +321,8 @@ pub struct ViewState {
     // `app::*` descendant modules still reach it via `self.view.…`.
     pub(super) agent_status_cache: Option<AgentStatusCache>,
     pub(super) pending_history_pick: Option<LineEditor>,
+    /// Which history `pending_history_pick` edits, set with it.
+    pub(super) history_pick_kind: super::session::EditedHistory,
     /// Snapshot of jump-history entries for the `J`-prompt popup.
     pub(super) pending_jump_history: Option<Vec<String>>,
     pub(super) history_pending_g: bool,
@@ -513,6 +515,7 @@ impl ViewState {
             graveyard_pending_g: false,
             agent_status_cache: None,
             pending_history_pick: None,
+            history_pick_kind: super::session::EditedHistory::Shell,
             pending_jump_history: None,
             history_pending_g: false,
             scroll_pending_g: false,

@@ -93,21 +93,27 @@ sources set it:
 still open (starting a background watch, then carrying on) is held: the dot
 keeps showing the turn, and the wait takes over when the turn's end arrives,
 meeting it exactly as below. The hooks say when a turn opens (`working`) and
-ends (`done`, or a hook's `waiting`). A question or Claude's idle nudge changes
+ends (`done`, a hook's `waiting`, or the `idle` of a cancel: Codex's
+`Interrupt`, agy's cancelled `Stop`). A question or Claude's idle nudge changes
 neither, and an agent whose hooks report no turn start never has one open, so
 its `waiting` applies at once. Any newer report from the agent, or **Enter**,
 drops a held wait. `:why-status` shows it as `held`, with its note.
 
-A live `waiting` holds back only a hook's `done`. Claude's idle nudge is never a
-turn end. When a hook can't say whether work is pending, as with codex's
-`Stop`, `waiting` absorbs the first `done`, which ends the turn that
-reported it. The next one means the agent woke and finished without reporting
-again, so it applies. A Claude or agy `Stop` that reports no pending work
-applies too: nothing will wake the agent. Every other report replaces
-`waiting`, as does **Enter** in the pane, which starts the user's own turn. Esc
-and `^c` don't retire it: interrupting an idle agent stops nothing running in
-the background. Entering `waiting` fires no notification; the `done` or
-`blocked` ping fires when the work actually ends.
+A live `waiting` holds back only a hook's turn end: its `done`, or a cancel's
+`idle`. Claude's idle nudge is never a turn end. When a hook can't say whether
+work is pending, as with codex's `Stop` and `Interrupt`, `waiting` absorbs the
+first turn end, which ends the turn that reported it. The next one means the
+agent woke and finished without reporting again, so it applies. A Claude or
+agy `Stop` that reports no pending work applies too, a cancelled one included:
+nothing will wake the agent. Every other report replaces `waiting`, as does
+**Enter** in the pane, which starts the user's own turn. Esc and `^c` don't
+retire it: interrupting an agent stops nothing running in the background. So
+a wait held for a turn the user cancels shows from the cancel, unless the
+cancel says nothing is pending, and never outlives that turn. Claude Code
+reports no cancel (`Stop` doesn't fire on an interrupt), so its turn, and a
+wait held for it, ends at its next `Stop`, which decides from its own lists.
+Entering `waiting` fires no notification; the `done` or `blocked` ping fires
+when the work actually ends.
 
 **Auto-reporting.** So it works without the agent choosing to call the tool, spyc
 installs lifecycle hooks that run `spyc --report-status` (prompt-submit→working,
@@ -121,9 +127,9 @@ comes from spyc reading the approval prompt off the pane).
 
 Codex also reports `idle` through its `Interrupt` hook when the main turn is
 cancelled, and agy's `Stop` hook remaps `done` to `idle` when its payload
-reports `"terminationReason": "USER_CANCELED"`. No general tool-completion hook
-clears `blocked`: a concurrent tool finishing is not proof that a separate
-permission/question prompt was answered.
+reports `"terminationReason": "USER_CANCELED"`; either ends the turn. No
+general tool-completion hook clears `blocked`: a concurrent tool finishing is
+not proof that a separate permission/question prompt was answered.
 
 agy's `done` needs **agy >= 1.1.10** (earlier versions evaluated `hooks.json`
 after their own termination checks, so the `Stop` handler spyc installs was
@@ -138,7 +144,7 @@ agy waits on the user in **two** different ways, and they need different instrum
 | agy waits via | signal | why |
 |---|---|---|
 | its `ask_question` tool | `PreToolUse` hook, matcher `ask_question` | it's a real tool, so a hook sees it exactly when it's called |
-| its tool-permission and file-edit prompts (`Requesting permission for:`, `Accept this file edit?`) | screen scrape | no event fires for them, in any agy version |
+| its tool-permission and file-edit prompts (`Run this command?`, `Allow calling this tool?`, `Allow access to this file?`, `Accept this file edit?`) | screen scrape | no event fires for them, in any agy version |
 
 `PreToolUse` cannot be widened to cover the second. A handler must answer with a
 `decision` (`allow`/`deny`/`ask`/`force_ask`), so matching every tool would put spyc

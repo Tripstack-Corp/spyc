@@ -372,6 +372,161 @@ fn a_held_wait_gives_way_to_anything_newer() {
     });
 }
 
+/// The user cancels a turn: Esc in the pane, then the agent's cancel hook.
+fn cancel(app: &mut App, status: &str, event: &serde_json::Value) -> McpResponse {
+    app.execute_pane_input(
+        PaneTarget::Active,
+        PaneInput::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        None,
+        None,
+    );
+    hook(app, status, event)
+}
+
+/// A cancel ends the turn. Cancelling stops nothing running in the
+/// background, and Codex's `Interrupt` can't say whether anything is, so the
+/// wait the agent held shows from the cancel, in its words and without a
+/// ping, as it does at Codex's `Stop`.
+#[test]
+fn a_codex_cancel_ends_the_turn_on_the_wait_it_held() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "codex");
+        hook(
+            &mut app,
+            "working",
+            &json!({"hook_event_name":"UserPromptSubmit", "turn_id":"turn-1"}),
+        );
+        agent(&mut app, "waiting", Some("release run"), None);
+
+        let interrupt = cancel(
+            &mut app,
+            "idle",
+            &json!({"hook_event_name":"Interrupt", "turn_id":"turn-1"}),
+        );
+        assert!(
+            matches!(&interrupt, McpResponse::Ok { message }
+                if message.contains("ends the turn that reported waiting")),
+            "{interrupt:?}"
+        );
+        assert_eq!(
+            app.runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info()
+                .activity,
+            AgentActivity::Waiting,
+            "shown at the cancel, not at the next settle"
+        );
+        assert_eq!(
+            settle(&mut app, Instant::now()),
+            (AgentActivity::Waiting, false)
+        );
+        assert_eq!(reported(&app).unwrap().note.as_deref(), Some("release run"));
+        let why = why_status(&mut app);
+        assert!(!why.contains("shown once this turn ends"), "{why}");
+    });
+}
+
+/// agy's cancelled `Stop` says whether work is still pending, and that
+/// decides the wait the agent held: with nothing pending the cancel shows
+/// `idle`, and with background work in flight the reporter makes it
+/// `waiting`, in the agent's words.
+#[test]
+fn an_agy_cancel_shows_what_its_stop_says_is_pending() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for (fully_idle, state, shown, note) in [
+            (true, "idle", AgentActivity::Idle, None),
+            (
+                false,
+                "waiting",
+                AgentActivity::Waiting,
+                Some("release run"),
+            ),
+        ] {
+            let mut app = agent_app(tmp.path(), "agy");
+            hook(
+                &mut app,
+                "working",
+                &json!({"hook_event_name":"PreInvocation"}),
+            );
+            agent(&mut app, "waiting", Some("release run"), None);
+            cancel(
+                &mut app,
+                state,
+                &json!({
+                    "hook_event_name":"Stop",
+                    "termination_reason":"USER_CANCELED",
+                    "fully_idle":fully_idle
+                }),
+            );
+            assert_eq!(
+                settle(&mut app, Instant::now()),
+                (shown, false),
+                "fullyIdle: {fully_idle}"
+            );
+            assert_eq!(
+                reported(&app).and_then(|r| r.note),
+                note.map(String::from),
+                "fullyIdle: {fully_idle}"
+            );
+        }
+    });
+}
+
+/// Whatever a cancel makes of the wait the agent held, the wait belongs to
+/// the cancelled turn: a later turn, however it started, ends the way its
+/// own end says.
+#[test]
+fn a_wait_held_by_a_cancelled_turn_never_outlives_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for (name, turn_start, interrupt, end_state, end, shown, note) in [
+            (
+                "codex",
+                json!({"hook_event_name":"UserPromptSubmit"}),
+                json!({"hook_event_name":"Interrupt", "turn_id":"turn-1"}),
+                "done",
+                json!({"hook_event_name":"Stop", "turn_id":"turn-2"}),
+                (AgentActivity::Done, true),
+                None,
+            ),
+            (
+                "agy",
+                json!({"hook_event_name":"PreInvocation"}),
+                json!({"hook_event_name":"Stop", "termination_reason":"USER_CANCELED", "fully_idle":true}),
+                "waiting",
+                json!({"hook_event_name":"Stop", "termination_reason":"NO_TOOL_CALL", "fully_idle":false}),
+                (AgentActivity::Waiting, false),
+                Some("background work"),
+            ),
+        ] {
+            let mut app = agent_app(tmp.path(), name);
+            hook(&mut app, "working", &turn_start);
+            agent(&mut app, "waiting", Some("release run"), None);
+            cancel(&mut app, "idle", &interrupt);
+            settle(&mut app, Instant::now());
+
+            hook(&mut app, "working", &turn_start);
+            assert_eq!(
+                settle(&mut app, Instant::now()).0,
+                AgentActivity::Working,
+                "{name}"
+            );
+            hook(&mut app, end_state, &end);
+            assert_eq!(settle(&mut app, Instant::now()), shown, "{name}");
+            assert_eq!(
+                reported(&app).and_then(|r| r.note),
+                note.map(String::from),
+                "{name}: the later turn's own note"
+            );
+        }
+    });
+}
+
 /// A wait held for its turn's end is visible in the diagnostics, so a working
 /// dot doesn't hide that the agent said it will wait.
 #[test]

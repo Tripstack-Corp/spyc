@@ -12,7 +12,7 @@ use crate::keymap::Action;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-fn build_zip(path: &Path) {
+pub(super) fn build_zip(path: &Path) {
     let file = std::fs::File::create(path).unwrap();
     let mut w = zip::ZipWriter::new(file);
     let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
@@ -29,7 +29,7 @@ fn build_zip(path: &Path) {
 
 /// Run the mount the way the loop would — worker first, then the drain that
 /// applies the outcome — and hand back the effects the drain produced.
-fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
+pub(super) fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec<Effect> {
     let outcome = run_archive_op(ArchiveOp::Mount {
         path: archive.to_path_buf(),
         staging_root: staging.to_path_buf(),

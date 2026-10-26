@@ -1,12 +1,38 @@
 //! `AppState` cursor movement + jumps: vertical/column moves, goto-col,
-//! viewport visibility, incremental find, and mark/dir/git-change jumps.
+//! viewport visibility, incremental find, and mark/dir/git-change/pick jumps.
 //! Split from `state` verbatim; `impl AppState` reading fields directly.
 
 use anyhow::{Context, Result};
 
-use crate::app::{Effect, Matcher};
+use crate::app::{Effect, Matcher, RowData};
+use crate::keymap::Action;
 
 use super::{AppState, Side};
+
+const NO_GIT_CHANGES: &str = "no git changes in this directory";
+const NO_PICKS: &str = "no picks in this directory";
+
+/// The first row `hit` accepts, walking from `cursor` `forward` or back and
+/// wrapping around the list. The cursor's own row is tried last, so a walk
+/// from one hit lands on the next.
+fn wrapping_find(
+    rows: &[RowData],
+    cursor: usize,
+    forward: bool,
+    hit: impl Fn(&RowData) -> bool,
+) -> Option<usize> {
+    let len = rows.len();
+    let cur = cursor.min(len.checked_sub(1)?);
+    (1..=len)
+        .map(|n| {
+            if forward {
+                (cur + n) % len
+            } else {
+                (cur + len - (n % len)) % len
+            }
+        })
+        .find(|&idx| hit(&rows[idx]))
+}
 
 impl AppState {
     /// j/k — move within the current column only. Wraps at column
@@ -99,6 +125,21 @@ impl AppState {
         self.cur_mut().cursor.index = col_end - 1;
     }
 
+    /// `]g` / `[g` / `]p` / `[p`: the cursor to the next or previous git
+    /// change or pick, or a flash when the listing has none.
+    pub fn jump_or_flash(&mut self, action: &Action) {
+        let (landed, none) = match action {
+            Action::JumpNextGitChange => (self.jump_to_git_change(true), NO_GIT_CHANGES),
+            Action::JumpPrevGitChange => (self.jump_to_git_change(false), NO_GIT_CHANGES),
+            Action::JumpNextPick => (self.jump_to_pick(true), NO_PICKS),
+            Action::JumpPrevPick => (self.jump_to_pick(false), NO_PICKS),
+            _ => return,
+        };
+        if !landed {
+            self.flash_info(none);
+        }
+    }
+
     /// Move the cursor to the next (or previous) row whose git status
     /// is non-clean — i.e., a row carrying a `~`/`+`/`?`/`-` marker
     /// in the listing. Wraps around the end of the list (so a user
@@ -106,37 +147,34 @@ impl AppState {
     /// Returns `false` when no row in the listing has a git change,
     /// so the caller can flash an empty-search message.
     pub fn jump_to_git_change(&mut self, forward: bool) -> bool {
-        let len = self.cur().rows.len();
-        if len == 0 || self.cur().git.files.is_empty() {
+        let col = self.cur();
+        let target = wrapping_find(&col.rows, col.cursor.index, forward, |r| {
+            col.git
+                .files
+                .get(&r.display)
+                .copied()
+                .is_some_and(|s| !s.is_clean())
+        });
+        self.land_cursor(target)
+    }
+
+    /// [`Self::jump_to_git_change`] for picked rows. A pick the listing
+    /// doesn't show, filtered or masked out, is no target.
+    pub fn jump_to_pick(&mut self, forward: bool) -> bool {
+        let col = self.cur();
+        let target = wrapping_find(&col.rows, col.cursor.index, forward, |r| {
+            col.picks.contains(&r.path)
+        });
+        self.land_cursor(target)
+    }
+
+    /// Put the cursor on `target`; `false` when there is none.
+    fn land_cursor(&mut self, target: Option<usize>) -> bool {
+        let Some(idx) = target else {
             return false;
-        }
-        let cur = self.cur().cursor.index.min(len.saturating_sub(1));
-        let is_changed = |idx: usize| -> bool {
-            self.cur().rows.get(idx).is_some_and(|r| {
-                self.cur()
-                    .git
-                    .files
-                    .get(&r.display)
-                    .copied()
-                    .is_some_and(|s| !s.is_clean())
-            })
         };
-        // Walk every other index, in the requested direction, with wrap.
-        // `n` = 1..len means we never re-test the cursor's own row, so a
-        // press from a dirty row advances to the *next* dirty one rather
-        // than staying put.
-        for n in 1..=len {
-            let idx = if forward {
-                (cur + n) % len
-            } else {
-                (cur + len - (n % len)) % len
-            };
-            if is_changed(idx) {
-                self.cur_mut().cursor.index = idx;
-                return true;
-            }
-        }
-        false
+        self.cur_mut().cursor.index = idx;
+        true
     }
 
     /// Move the cursor by `delta` columns.

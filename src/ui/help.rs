@@ -104,6 +104,8 @@ const SECTIONS: &[Section] = &[
             ("t", "toggle pick on cursor entry"),
             ("T", "pick by glob pattern (prompt)"),
             ("^T", "pick all / clear all"),
+            ("] p", "cursor to next picked entry (wraps)"),
+            ("[ p", "cursor to prev picked entry (wraps)"),
         ],
     },
     Section {
@@ -383,7 +385,7 @@ const SECTIONS: &[Section] = &[
             ("!?", "history editor — vi-edit, /search, :N jump, ^D del"),
             (
                 "Esc ? / Esc Space",
-                "open history editor mid-prompt in ! or ; (Normal mode)",
+                "open the prompt's history editor mid-prompt in !, ; or : (Normal mode)",
             ),
             (";", "interactive → runs in top pane (top, vim, htop, less)"),
             (

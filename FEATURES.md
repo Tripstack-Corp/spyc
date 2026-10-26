@@ -78,7 +78,7 @@ Full reference: [The pager and git views](docs/features/pager.md).
 
 ## Shell and the command line
 
-`!` runs a command and streams its output into the pager, `;` runs it in the foreground with the terminal handed over, and `$` opens an interactive shell. `:` opens a vim-style command line, where the less frequent features live as commands rather than default keys. `^Z` on a running `!` capture sends it to the background, where `:fg` resumes it and `:task N` peeks.
+`!` runs a command and streams its output into the pager, `;` runs it in the foreground with the terminal handed over, and `$` opens an interactive shell. `:` opens a vim-style command line, where the less frequent features live as commands rather than default keys. `^Z` on a running `!` capture sends it to the background, where `:fg` resumes it and `:task N` peeks. `spyc --cwd-file <path>` (or `$SPYC_CWD_FILE`) writes the directory you were browsing when you quit, for a shell function to `cd` into.
 
 Full reference: [Shell and the command line](docs/features/shell.md).
 

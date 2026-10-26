@@ -117,6 +117,7 @@ mod codex_pin;
 pub mod command_table;
 mod commands;
 mod config;
+mod cwd_file;
 mod effect;
 mod file_ops;
 mod find_picker;
