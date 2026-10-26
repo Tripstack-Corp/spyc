@@ -21,8 +21,9 @@ Three modes of running commands, each for a different use case:
   Also reachable mid-prompt in a `!` or `;` prompt: after `Esc` puts the
   line editor in Normal mode (e.g. you pressed `Esc k` to browse history),
   `?` (or `Space`) opens the same viewer — not just `!?` from a fresh
-  prompt. In `J`'s prompt they open the jump history; in other prompts,
-  `:` among them, they open nothing.
+  prompt. In `J`'s prompt they open the jump history, and in the `:`
+  prompt this editor over the `:` commands you've run, where `Enter`
+  runs the line as a `:` command; other prompts open nothing.
   Defaults to Normal mode — `j`/`k`/`G`/`gg` navigate, `/` search
   with `n`/`N` to jump between matches, `:N` jumps to entry N.
   Press `i` to vi-edit the highlighted command in-place.
@@ -109,8 +110,10 @@ end).
   still works for ripgrep's full flag surface.
 - **`:q`** / **`:quit`** — quit
 
-The `:` prompt shares history with other shell prompts, so Up/Down
-cycles through previous commands.
+The `:` prompt keeps a history of its own, separate from the shell's:
+Up/Down cycle through previous `:` commands, and `Esc Space` (or `Esc ?`)
+lists them in the history editor described under `!?`, where `Enter` runs
+the chosen line as a `:` command and `Ctrl+D` deletes it.
 
 **`spyc -c <cmd>`** runs a `:` command from the shell once spyc is up:
 after `init.lua` loads, a `-r` session is picked, and any startup question is

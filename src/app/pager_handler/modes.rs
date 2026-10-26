@@ -86,7 +86,8 @@ impl App {
                         // Sync picker cursor to the first match.
                         if let Some(line) = view.current_match_line() {
                             view.picker_cursor = Some(line);
-                            Self::show_history_selection(view, editor, &self.state.history, true);
+                            let history = self.view.history_pick_kind.history(&self.state);
+                            Self::show_history_selection(view, editor, history, true);
                         }
                     } else if matches!(
                         view.picker,
