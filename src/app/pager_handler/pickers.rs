@@ -5,6 +5,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::app::session::EditedHistory;
 use crate::app::{App, Effect};
 use crate::ui::line_edit::{EditResult, Mode as LineMode};
 use crate::ui::pager::PickerKind;
@@ -253,6 +254,7 @@ impl App {
     }
 
     /// History editor: vi-edit the highlighted line, Enter runs, Ctrl+D deletes.
+    /// Its history is the shell's or `:`'s ([`EditedHistory`]).
     pub(super) fn handle_pager_history_editor(
         &mut self,
         key: KeyEvent,
@@ -271,7 +273,7 @@ impl App {
         };
         match action {
             HistoryKey::Delete => self.delete_selected_history(),
-            HistoryKey::Edit => self.feed_history_editor(key, viewport),
+            HistoryKey::Edit => return Some(self.feed_history_editor(key, viewport)),
             _ => self.navigate_history(action, viewport),
         }
         Some(Vec::new())
@@ -323,52 +325,55 @@ impl App {
             HistoryKey::ArmG | HistoryKey::Delete | HistoryKey::Edit => false,
         };
         if moved {
-            Self::show_history_selection(view, editor, &self.state.history, true);
+            let history = self.view.history_pick_kind.history(&self.state);
+            Self::show_history_selection(view, editor, history, true);
         }
     }
 
-    /// Ctrl+D: delete the selected command from history. The next one takes
-    /// its row; deleting the last closes the popup.
+    /// Ctrl+D: delete the selected command from the popup's history. The next
+    /// one takes its row; deleting the last closes the popup.
     fn delete_selected_history(&mut self) {
         let cursor = active_pager_mut!(self)
             .and_then(|v| v.picker_cursor)
             .unwrap_or(0);
-        let entries = self.state.history.entries();
+        let edited = self.view.history_pick_kind;
+        let history = edited.history_mut(&mut self.state);
+        let entries = history.entries();
         let hist_idx = entries.len().saturating_sub(1 + cursor);
         if hist_idx >= entries.len() {
             return;
         }
-        self.state.history.remove(hist_idx);
-        if self.state.history.entries().is_empty() {
+        history.remove(hist_idx);
+        if history.entries().is_empty() {
             self.clear_pager();
             self.view.pending_history_pick = None;
             self.view.needs_full_repaint = true;
-            self.state.flash_info("history is empty");
+            self.state.flash_info(edited.empty_note());
             return;
         }
-        self.show_history_popup();
+        self.show_history_editor(edited);
         if let (Some(view), Some(editor)) = self.view.top_pager_and_history_pick_mut() {
             let max = view.line_count().saturating_sub(1);
             view.picker_cursor = Some(cursor.min(max));
-            Self::show_history_selection(view, editor, &self.state.history, true);
+            Self::show_history_selection(view, editor, edited.history(&self.state), true);
         }
     }
 
     /// Any other key edits the selected command; Enter runs it, Esc in Normal
     /// mode closes, and Up/Down while typing move between commands.
-    fn feed_history_editor(&mut self, key: KeyEvent, viewport: u16) {
+    fn feed_history_editor(&mut self, key: KeyEvent, viewport: u16) -> Vec<Effect> {
         let (Some(view), Some(editor)) = (
             active_pager_mut!(self),
             self.view.pending_history_pick.as_mut(),
         ) else {
-            return;
+            return Vec::new();
         };
         let result = editor.feed(key);
         Self::show_edited_history_row(view, editor);
         match result {
             EditResult::Submit => {
                 let cmd = editor.text();
-                self.run_history_command(cmd);
+                return self.run_history_command(cmd);
             }
             EditResult::Cancel => {
                 // Esc in Insert → Normal (handled by editor, returns Continue).
@@ -385,26 +390,32 @@ impl App {
                     1
                 };
                 view.picker_move(delta, viewport);
-                Self::show_history_selection(view, editor, &self.state.history, false);
+                let history = self.view.history_pick_kind.history(&self.state);
+                Self::show_history_selection(view, editor, history, false);
             }
             EditResult::TabComplete | EditResult::Continue => {}
         }
+        Vec::new()
     }
 
-    /// Close the popup and run `cmd`, the (possibly edited) command. An emptied
-    /// line runs nothing.
-    fn run_history_command(&mut self, cmd: String) {
+    /// Close the popup, remember `cmd`, the (possibly edited) line, in the
+    /// popup's history, and run it: as a `!` capture from the shell's history,
+    /// as a `:` command from `:`'s. An emptied line runs nothing.
+    fn run_history_command(&mut self, cmd: String) -> Vec<Effect> {
         self.clear_pager();
         self.view.pending_history_pick = None;
         self.view.needs_full_repaint = true;
         if cmd.trim().is_empty() {
-            return;
+            return Vec::new();
         }
-        self.state.last_captured_cmd = Some(cmd.clone());
-        self.state.history.push(cmd.trim());
-        match self.state.expand_selection_percent(&cmd) {
-            Ok(expanded) => self.start_capture(&expanded, &cmd, &cmd),
-            Err(e) => self.state.flash_error(e.to_string()),
+        let edited = self.view.history_pick_kind;
+        edited.history_mut(&mut self.state).push(cmd.trim());
+        match edited {
+            EditedHistory::Shell => {
+                self.run_captured_shell(&cmd, &cmd);
+                Vec::new()
+            }
+            EditedHistory::Command => self.dispatch_command(&cmd),
         }
     }
 

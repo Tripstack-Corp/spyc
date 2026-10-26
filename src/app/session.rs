@@ -3,8 +3,8 @@
 //! cwd from a saved `Session`), `show_session_picker` (the `-r` picker
 //! pager), `show_session_info` (the session-info overlay), `request_quit`
 //! (the quit lifecycle), and the history-popup helpers
-//! (`show_history_popup` / `show_jump_history_popup` /
-//! `sync_history_editor_to_cursor` + `HIST_PREFIX_W`).
+//! (`show_history_editor` over an [`EditedHistory`] / `show_jump_history_popup`
+//! / `sync_history_editor_to_cursor` + `HIST_PREFIX_W`).
 //!
 //! Same child-module `impl App` pattern: reads App's private state via the
 //! descendant-module rule. These are all `pub`, called from the run
@@ -13,6 +13,7 @@
 //! `pane_tabs.rs`.
 
 use crate::pane::PaneTabs;
+use crate::state::History;
 use crate::state::sessions::{
     AgentKind, ClosedProject, Manifest, SavedProject, SavedTab, SavedVsplit,
 };
@@ -21,8 +22,48 @@ use crate::ui::pager::{self, PagerView};
 
 use std::time::{Duration, Instant};
 
-use super::state::{ProjectId, Side, VsplitMode};
+use super::state::{AppState, ProjectId, Side, VsplitMode};
 use super::{App, Deadline, RunCtx};
+
+/// Which history the history editor popup lists, edits and runs from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum EditedHistory {
+    /// The shell's (`!?`): Enter runs the line as a `!` capture.
+    Shell,
+    /// `:`'s: Enter runs the line as a `:` command.
+    Command,
+}
+
+impl EditedHistory {
+    pub(super) const fn history(self, state: &AppState) -> &History {
+        match self {
+            Self::Shell => &state.history,
+            Self::Command => &state.command_history,
+        }
+    }
+
+    pub(super) const fn history_mut(self, state: &mut AppState) -> &mut History {
+        match self {
+            Self::Shell => &mut state.history,
+            Self::Command => &mut state.command_history,
+        }
+    }
+
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Shell => "history — j/k move, i edit, Enter run, ^D delete, q close",
+            Self::Command => ": history — j/k move, i edit, Enter run, ^D delete, q close",
+        }
+    }
+
+    /// The flash when there is nothing to list.
+    pub(super) const fn empty_note(self) -> &'static str {
+        match self {
+            Self::Shell => "history is empty",
+            Self::Command => ": history is empty",
+        }
+    }
+}
 
 /// P3-2 debounce window: persist this long after the last session-relevant
 /// change. Bounds SIGKILL data loss to ~this window while coalescing bursts of
@@ -703,8 +744,9 @@ impl App {
     /// Sync the history editor after moving the picker cursor to a new line.
     /// Updates the LineEditor content and the display line.
     pub fn sync_history_editor_to_cursor(&mut self) {
+        let edited = self.view.history_pick_kind;
         if let (Some(view), Some(editor)) = self.view.top_pager_and_history_pick_mut() {
-            Self::show_history_selection(view, editor, &self.state.history, true);
+            Self::show_history_selection(view, editor, edited.history(&self.state), true);
         }
     }
 
@@ -774,10 +816,17 @@ impl App {
         self.view.needs_full_repaint = true;
     }
 
+    /// The `!?` popup: the shell's history in the history editor.
     pub fn show_history_popup(&mut self) {
-        let entries = self.state.history.entries();
+        self.show_history_editor(EditedHistory::Shell);
+    }
+
+    /// Open the history editor over `edited`'s entries, newest first, with the
+    /// newest loaded in Normal mode.
+    pub(super) fn show_history_editor(&mut self, edited: EditedHistory) {
+        let entries = edited.history(&self.state).entries();
         if entries.is_empty() {
-            self.state.flash_info("history is empty");
+            self.state.flash_info(edited.empty_note());
             return;
         }
         // Show newest-first, numbered from 1.
@@ -795,14 +844,12 @@ impl App {
         if !editor.buf.is_empty() {
             editor.cursor = editor.buf.len() - 1;
         }
-        let mut view = pager::PagerView::new_plain(
-            "history — j/k move, i edit, Enter run, ^D delete, q close",
-            lines,
-        );
+        let mut view = pager::PagerView::new_plain(edited.title(), lines);
         view.picker_cursor = Some(0);
         view.picker = Some(pager::PickerKind::History);
         view.picker_edit_cursor = Some((Self::HIST_PREFIX_W + editor.cursor, editor.mode));
         self.view.pending_history_pick = Some(editor);
+        self.view.history_pick_kind = edited;
         self.set_pager(view);
     }
 }

@@ -344,7 +344,6 @@ fn command_history(app: &App) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "red: the `:` prompt opens no history popup (#82)"]
 fn esc_space_in_the_command_prompt_lists_the_commands_run() {
     after_two_commands(|app| {
         for key in [' ', '?'] {
@@ -368,7 +367,6 @@ fn esc_space_in_the_command_prompt_lists_the_commands_run() {
 }
 
 #[test]
-#[ignore = "red: the `:` prompt opens no history popup (#82)"]
 fn enter_runs_the_chosen_entry_as_a_command() {
     after_two_commands(|app| {
         from_the_command_prompt(app, ' ');
@@ -400,7 +398,6 @@ fn enter_runs_the_chosen_entry_as_a_command() {
 }
 
 #[test]
-#[ignore = "red: the `:` prompt opens no history popup (#82)"]
 fn an_edited_entry_runs_as_edited() {
     after_two_commands(|app| {
         from_the_command_prompt(app, ' ');
@@ -419,7 +416,6 @@ fn an_edited_entry_runs_as_edited() {
 }
 
 #[test]
-#[ignore = "red: the `:` prompt opens no history popup (#82)"]
 fn ctrl_d_deletes_from_the_command_history_only() {
     after_two_commands(|app| {
         from_the_command_prompt(app, ' ');
@@ -442,7 +438,6 @@ fn ctrl_d_deletes_from_the_command_history_only() {
 /// A chosen command's effects reach the loop as a typed one's do: Enter on
 /// `cd /an/elsewhere` hands back that change of directory.
 #[test]
-#[ignore = "red: the `:` prompt opens no history popup (#82)"]
 fn a_chosen_commands_effects_reach_the_loop() {
     after_two_commands(|app| {
         press(app, KeyCode::Char(':'));
@@ -460,7 +455,6 @@ fn a_chosen_commands_effects_reach_the_loop() {
 
 /// Every way of moving the selection loads the `:` command it lands on.
 #[test]
-#[ignore = "red: the `:` prompt opens no history popup (#82)"]
 fn moving_through_the_command_popup_loads_its_commands() {
     after_two_commands(|app| {
         from_the_command_prompt(app, ' ');
