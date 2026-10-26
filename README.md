@@ -214,7 +214,7 @@ The essentials. Press `?` in spyc for the full overlay, or see
 | `^a s` | Send picked paths to the pane |
 | `gf` / `gF` | Jump from pane output to a file (+ line) |
 | `F` / `:grep` | Fuzzy filename finder / project content search |
-| `?` / `q` | Full help overlay / quit |
+| `?` / `Q` | Full help overlay / quit (`q` is reserved for macro recording) |
 
 ## Configuration
 
