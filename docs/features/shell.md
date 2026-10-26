@@ -1,6 +1,6 @@
 # Shell and the command line
 
-Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, the `:` command line, and commands left running in the background.
+Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, the `:` command line, taking your shell to where you quit, and commands left running in the background.
 
 ## Shell integration
 
@@ -119,6 +119,38 @@ the chosen line as a `:` command and `Ctrl+D` deletes it.
 after `init.lua` loads, a `-r` session is picked, and any startup question is
 answered. Repeatable, run in order, the `:` optional
 (`spyc -c "sort mtime" -c "limit *.rs"`).
+
+## `cd` to where you quit
+
+**`spyc --cwd-file <path>`** writes the directory you were browsing to
+`<path>` when you quit (`Q`, `^D`, `ZZ` or `:q`), so a shell function can `cd`
+there once spyc exits. Without the flag, `$SPYC_CWD_FILE` names the file; the
+flag wins when both are set, and a relative path is taken from the directory
+spyc started in.
+
+The directory is the focused column's, in the project in view. Inside an
+archive it's the directory holding the archive, since there's no directory to
+`cd` into within one. The file holds the path alone, with no newline, and is
+replaced in one step, so it's never read half-written. If spyc can't write it,
+the line spyc prints on exit says why, and the quit goes ahead.
+
+A function for `~/.zshrc` or `~/.bashrc`. Named `spyc`, it wraps every launch,
+and keeps spyc's exit status:
+
+```sh
+spyc() {
+  local tmp dir rc
+  tmp="$(mktemp)" || return
+  command spyc --cwd-file "$tmp" "$@"
+  rc=$?
+  dir="$(cat -- "$tmp")"
+  rm -f -- "$tmp"
+  if [ -n "$dir" ] && [ "$dir" != "$PWD" ]; then
+    cd -- "$dir" || return
+  fi
+  return "$rc"
+}
+```
 
 ## Background tasks
 

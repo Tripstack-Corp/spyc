@@ -60,6 +60,9 @@ mod wiring;
 /// surfaced over MCP via the `initialize` `serverInfo` and `get_spyc_context`.
 pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SPYC_GIT_SHA"), ")");
 
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use clap::Parser;
 
@@ -96,6 +99,12 @@ struct Cli {
     ///   spyc -c "sort mtime" -c "limit *.rs"
     #[arg(short = 'c', long = "cmd", value_name = "CMD")]
     cmd: Vec<String>,
+
+    /// On quit, write the directory the file list shows to PATH, for a shell
+    /// function to `cd` into: the path alone, with no newline. Without the
+    /// flag, `$SPYC_CWD_FILE` names the file.
+    #[arg(long, value_name = "PATH")]
+    cwd_file: Option<PathBuf>,
 
     /// Write debug log to an owner-only spyc-debug-<ts>.log in the state dir
     #[arg(short, long)]
@@ -203,6 +212,20 @@ struct Cli {
     /// every concurrent PR collides on; exits non-zero on any real conflict.
     #[arg(long, num_args = 3, value_names = ["BASE", "CURRENT", "OTHER"], hide = true)]
     merge_driver: Option<Vec<String>>,
+}
+
+/// Names the cwd file when `--cwd-file` isn't given.
+const CWD_FILE_ENV: &str = "SPYC_CWD_FILE";
+
+/// The file a quit writes its directory to: `--cwd-file`, else a non-empty
+/// `$SPYC_CWD_FILE`. A relative path is anchored at `launch_dir`, since spyc's
+/// own cwd follows the column the user browses.
+fn cwd_file_target(cli: &Cli, env: Option<&OsStr>, launch_dir: &Path) -> Option<PathBuf> {
+    let path = cli
+        .cwd_file
+        .clone()
+        .or_else(|| env.filter(|v| !v.is_empty()).map(PathBuf::from))?;
+    Some(launch_dir.join(path))
 }
 
 /// A one-shot setup command (`--print-config`, `--install-skill`,
@@ -410,8 +433,14 @@ pub fn run() -> Result<()> {
             .map_err(|e| anyhow::anyhow!(e))?,
         None => config::ColorMode::default(),
     };
+    let cwd_file = cwd_file_target(
+        &cli,
+        std::env::var_os(CWD_FILE_ENV).as_deref(),
+        &std::env::current_dir().unwrap_or_default(),
+    );
     let mut terminal = setup_terminal()?;
     let mut app = App::new(cli.resume, color_mode);
+    app.set_cwd_file(cwd_file);
     app.queue_startup_commands(cli.cmd);
     // Detect the terminal's graphics protocol (Kitty/iTerm2/Sixel/halfblocks +
     // font cell size) for inline diagram rendering — ONCE, here, before the
@@ -494,17 +523,6 @@ mod version_flag_tests {
     }
 }
 
-/// A stand-in that resolves no cwd file, so `cwd_file_option_tests` compile
-/// and fail.
-#[cfg(test)]
-const fn cwd_file_target(
-    _cli: &Cli,
-    _env: Option<&std::ffi::OsStr>,
-    _launch_dir: &std::path::Path,
-) -> Option<std::path::PathBuf> {
-    None
-}
-
 #[cfg(test)]
 mod cwd_file_option_tests {
     //! `--cwd-file` and `$SPYC_CWD_FILE` (#63), parsed as `spyc` parses its
@@ -523,7 +541,6 @@ mod cwd_file_option_tests {
     }
 
     #[test]
-    #[ignore = "red: there is no --cwd-file flag"]
     fn the_flag_wins_over_the_variable() {
         assert_eq!(
             target(&["spyc", "--cwd-file", "/from/flag"], Some("/from/env")),
@@ -532,7 +549,6 @@ mod cwd_file_option_tests {
     }
 
     #[test]
-    #[ignore = "red: $SPYC_CWD_FILE is not read"]
     fn the_variable_names_the_file_when_the_flag_is_absent() {
         assert_eq!(
             target(&["spyc"], Some("/from/env")),
@@ -549,7 +565,6 @@ mod cwd_file_option_tests {
     /// spyc's own cwd follows the column the user browses, so a relative path
     /// left relative would land wherever they quit from.
     #[test]
-    #[ignore = "red: there is no --cwd-file flag"]
     fn a_relative_path_is_anchored_where_spyc_was_launched() {
         assert_eq!(
             target(&["spyc", "--cwd-file", "out/cwd"], None),
@@ -563,7 +578,6 @@ mod cwd_file_option_tests {
 
     /// `spyc --help` names the flag and the variable behind it.
     #[test]
-    #[ignore = "red: there is no --cwd-file flag"]
     fn the_help_names_the_flag_and_its_variable() {
         use clap::CommandFactory as _;
         let help = Cli::command().render_long_help().to_string();

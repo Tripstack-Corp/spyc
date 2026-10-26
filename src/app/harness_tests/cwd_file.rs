@@ -47,7 +47,6 @@ fn bytes(path: &Path) -> Vec<u8> {
 /// `Q` with `b` focused writes `b`'s directory, and only once the second tap
 /// confirms the quit.
 #[test]
-#[ignore = "red: a quit writes no cwd file yet"]
 fn quitting_with_q_writes_the_focused_column_directory() {
     with_root(|root| {
         let cwd_file = root.join("cwd");
@@ -71,7 +70,6 @@ fn quitting_with_q_writes_the_focused_column_directory() {
 /// `:q` takes the same path, and with `a` focused it is `a`'s directory that
 /// is written, though `b` is still open beside it.
 #[test]
-#[ignore = "red: a quit writes no cwd file yet"]
 fn quitting_with_colon_q_writes_column_a_when_it_has_focus() {
     with_root(|root| {
         let cwd_file = root.join("cwd");
@@ -90,7 +88,6 @@ fn quitting_with_colon_q_writes_column_a_when_it_has_focus() {
 /// replaces it whole, by a rename, so a reader sees the old file or the new
 /// one and never a half-written path, and no byte of the old contents is left.
 #[test]
-#[ignore = "red: a quit writes no cwd file yet"]
 fn the_cwd_file_is_replaced_whole_never_rewritten_in_place() {
     use std::os::unix::fs::MetadataExt as _;
     with_root(|root| {
@@ -114,7 +111,6 @@ fn the_cwd_file_is_replaced_whole_never_rewritten_in_place() {
 /// With two projects open, the one in view is the one whose directory is
 /// written.
 #[test]
-#[ignore = "red: a quit writes no cwd file yet"]
 fn quitting_writes_the_directory_of_the_project_in_view() {
     with_root(|root| {
         let cwd_file = root.join("cwd");
@@ -134,7 +130,6 @@ fn quitting_writes_the_directory_of_the_project_in_view() {
 /// Inside a mounted archive the column shows a path no shell can `cd` into, so
 /// the quit writes the directory that holds the archive.
 #[test]
-#[ignore = "red: a quit writes no cwd file yet"]
 fn quitting_inside_an_archive_writes_the_directory_holding_it() {
     with_root(|root| {
         let cwd_file = root.join("cwd");
@@ -156,7 +151,6 @@ fn quitting_inside_an_archive_writes_the_directory_holding_it() {
 /// A cwd file that can't be written doesn't keep spyc from quitting: the
 /// failure joins the exit summary, beside what the session save reported.
 #[test]
-#[ignore = "red: a quit writes no cwd file yet, so reports no failure"]
 fn an_unwritable_cwd_file_is_reported_at_exit_and_spyc_still_quits() {
     with_root(|root| {
         let cwd_file: PathBuf = root.join("missing").join("cwd");

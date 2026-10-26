@@ -688,8 +688,8 @@ impl App {
 
     /// Run the canonical quit lifecycle: first call arms a 2-second
     /// confirm window (and flashes any running-process count); a
-    /// second call inside that window persists the session and sets
-    /// `should_quit`. Shared by `Action::Quit` (the Q / ^D keybindings)
+    /// second call inside that window persists the session, writes the
+    /// `--cwd-file` and sets `should_quit`. Shared by `Action::Quit` (the Q / ^D keybindings)
     /// and the `:q` / `:quit` command — both paths must save and warn
     /// identically.
     pub fn request_quit(&mut self) {
@@ -706,6 +706,7 @@ impl App {
             // otherwise drop the in-memory scroll on the floor.
             self.remember_pager_position();
             self.save_session();
+            self.write_cwd_file();
             self.state.should_quit = true;
         } else {
             self.state.quit_pending = Some(now);
@@ -852,13 +853,6 @@ impl App {
         self.view.history_pick_kind = edited;
         self.set_pager(view);
     }
-}
-
-#[cfg(test)]
-impl App {
-    /// A stand-in that records no cwd file, so the `--cwd-file` harness cases
-    /// compile and fail.
-    pub(crate) fn set_cwd_file(&self, _path: Option<std::path::PathBuf>) {}
 }
 
 #[cfg(test)]
