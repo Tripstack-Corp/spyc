@@ -47,7 +47,7 @@ four-archive set fails the gate on the PR that adds it.
 
 | target | why |
 |---|---|
-| `aarch64-apple-darwin` | release; the dev machine |
+| `aarch64-apple-darwin` | release; the dev machine; CI's macOS lint host |
 | `x86_64-apple-darwin` | release |
 | `x86_64-unknown-linux-musl` | release (static) |
 | `aarch64-unknown-linux-musl` | release (static) |

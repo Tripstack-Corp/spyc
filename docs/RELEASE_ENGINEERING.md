@@ -327,7 +327,7 @@ are the source of truth — Actions *call them* so local and CI never drift.
 
 ### `ci.yml` — quality gate (PR + push to `main`) — **IMPLEMENTED**
 - Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy) ∥
-  `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
+  `lint-macos` ∥ `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
   --all-targets --fail-under-lines 84`) on pushes to `main`. Supply-chain
   (cargo-deny) moved to `audit.yml` — see §6. Toolchain cached via
   `Swatinem/rust-cache`; `cargo-llvm-cov` is the same sha-pinned prebuilt binary
@@ -340,11 +340,16 @@ are the source of truth — Actions *call them* so local and CI never drift.
   renaming either one is a three-step operation: drop the old context from
   protection, merge the rename, add the new context. Renaming without that dance
   deadlocks every open PR on a context that will never report again.
-- **Follow-ups:** (1) add a `macos-latest` matrix leg to catch OS-gated lints
-  both ways (replaces needing `make lint-linux` + zig locally) — the initial
-  port is Linux-only, matching the retired pipeline; (2) extend the trigger to
-  `stable/*` / `releng/*` once Stage 2 branches exist. Both are cheap once the
-  Linux gate is confirmed green on GitHub.
+- **`lint-macos`** (`Lint macOS (fmt, clippy)`, #76) runs the same
+  `make fmt-check lint` on `macos-latest`, so code behind
+  `cfg(target_os = "macos")`, which the Linux clippy compiles out, is linted
+  before merge. It runs no tests and no workflow lint, and is not a required
+  context: requiring it is a change to branch protection, and once required its
+  `name` takes the same three-step rename. Together the two lint jobs cover
+  OS-gated code both ways; `make lint-linux` stays as the local check before a
+  push.
+- **Follow-up:** extend the trigger to `stable/*` / `releng/*` once Stage 2
+  branches exist.
 
 ### `release.yml` — build, sign, publish (on tag `v*`) — **IMPLEMENTED**
 - **Trigger:** `push: tags: ['v*']`. Detect `-alpha`/`-beta`/`-rc` → mark GitHub

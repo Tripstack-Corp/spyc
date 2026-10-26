@@ -352,9 +352,13 @@ happened and wants a human.
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs the quality gate on every PR
-(fmt + clippy as one job, tests in parallel) and adds a coverage gate on
-merges to `main`. All jobs must pass before merge. CI pins the toolchain via
-`rust-toolchain.toml`, so it matches your local `make check`.
+(fmt + clippy as one job on Linux and another on macOS, tests in parallel) and
+adds a coverage gate on merges to `main`. The macOS lint job exists because
+clippy compiles out code behind another OS's `cfg`: Linux CI never sees
+`cfg(target_os = "macos")` code, and a Mac never sees `cfg(target_os = "linux")`
+code (`make lint-linux` checks that before a push). All jobs must pass before
+merge. CI pins the toolchain via `rust-toolchain.toml`, so it matches your local
+`make check`.
 
 **The lint job also lints the workflows themselves** (`make lint-workflows`:
 actionlint, plus shellcheck over every `run:` block). Worth knowing why that
