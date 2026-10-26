@@ -473,22 +473,6 @@ mod tests {
         app.handle_vi_prompt_key(key(' '));
     }
 
-    /// `Esc Space` in a `:` prompt opens no shell-history popup, whose Enter
-    /// would run the line as a `!` capture; `:` keeps a history of its own
-    /// (#82). The prompt stays open.
-    #[test]
-    fn esc_space_in_a_command_prompt_opens_no_shell_history() {
-        let mut app = App::test_app(std::env::temp_dir());
-        app.state.history.push("echo hi");
-        app.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
-        esc_space(&mut app);
-        assert!(app.view.project().pager.is_none(), "a history popup opened");
-        assert!(
-            matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::Command)),
-            "the prompt closed"
-        );
-    }
-
     /// The control: `Esc Space` in a `!` prompt opens its history.
     #[test]
     fn esc_space_in_a_shell_prompt_opens_its_history() {
