@@ -941,7 +941,6 @@ fn header_row(text: &str, header: &str) -> usize {
 /// agy 1.4.7 asks before an MCP tool call or a file read with a header, its
 /// rule and the target, and no `Requesting permission for:` row.
 #[test]
-#[ignore = "red: only a dialog with `Requesting permission for:` is an approval, and neither `MCP` nor `File access` is a header"]
 fn agy_mcp_and_file_access_approvals_scrape_as_blocked() {
     let expected = Some((
         AgentActivity::Blocked,
@@ -1017,7 +1016,6 @@ fn agy_mcp_and_file_access_lookalikes_are_not_approvals() {
 /// A `Question N/M:` prompt too long for the pane wraps onto a second row at
 /// column 0, above the options.
 #[test]
-#[ignore = "red: `question_top` expects the prompt on one row directly above the options"]
 fn agy_wrapped_question_is_not_output() {
     let header = header_row(AGY_QUESTION_NARROW, "Question");
     assert_eq!(agy_output_rows(AGY_QUESTION_NARROW), header);
@@ -1066,7 +1064,6 @@ fn agy_wrapped_question_lookalikes_stay_output() {
 
 /// `^a u` labels what agy printed above each dialog and nothing in it.
 #[test]
-#[ignore = "red: Quick Select reads the MCP, file access and wrapped question dialogs as output"]
 fn agy_quick_select_leaves_out_mcp_file_access_and_wrapped_question_dialogs() {
     for (fixture, header) in [
         (AGY_MCP.to_owned(), "MCP"),
@@ -1101,7 +1098,6 @@ fn agy_quick_select_leaves_out_mcp_file_access_and_wrapped_question_dialogs() {
 /// The MCP and file access approvals turn agy's dot red behind its `working`
 /// report.
 #[test]
-#[ignore = "red: the scrape doesn't recognize the MCP or file access approval"]
 fn agy_mcp_and_file_access_approvals_turn_the_dot_blocked() {
     for fixture in [AGY_MCP, AGY_FILE_ACCESS] {
         let tmp = tempfile::tempdir().unwrap();

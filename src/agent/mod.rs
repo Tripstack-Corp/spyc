@@ -731,7 +731,8 @@ impl AgentProfile for CodexProfile {
 /// draws a live approval menu at the bottom of the viewport: the dialog header
 /// (`Command`, `File`, `Pending edit`, etc.), the `─` rule under it (which the
 /// 1.1.11 sample below lacks), `Requesting permission for:` (or the file-edit
-/// diff preview), a recognized
+/// diff preview, or for 1.4.7's `MCP` and `File access` headers the target
+/// right under the rule), a recognized
 /// approval question (`Run this command?`, `Allow access to this file?`,
 /// `Accept this file edit?`, `Do you want to proceed?`, etc.), sequential
 /// numbered options from `1. Yes` to `N. No`, the `↑/↓ Navigate` hint row, and

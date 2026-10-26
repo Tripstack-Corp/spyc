@@ -52,7 +52,8 @@ fn approval_top(rows: &[&str]) -> Option<usize> {
 }
 
 /// Index in `rows` (non-empty lines) of the `Question` header starting a live
-/// `agy` `ask_question` dialog.
+/// `agy` `ask_question` dialog. A prompt too long for the pane wraps onto more
+/// rows at column 0 above the options.
 fn question_top(rows: &[&str]) -> Option<usize> {
     let cancel_idx = cancel_footer_index(rows)?;
     let nav_idx = navigate_row_index(rows, cancel_idx)?;
@@ -63,16 +64,25 @@ fn question_top(rows: &[&str]) -> Option<usize> {
         return None;
     }
     let prompt_idx = hdr_idx + 2;
-    if !is_col0(rows[prompt_idx])
-        || (!rows[prompt_idx].starts_with("Question ")
-            && !rows[prompt_idx].trim_end().ends_with('?'))
+    let options_idx = (prompt_idx + 1..nav_idx).find(|&i| parse_option(rows[i]).is_some())?;
+    let prompt = &rows[prompt_idx..options_idx];
+    if !prompt.iter().all(|&r| is_col0(r) && !is_turn_row(r))
+        || (!prompt[0].starts_with("Question ")
+            && !prompt[prompt.len() - 1].trim_end().ends_with('?'))
     {
         return None;
     }
-    has_ordered_options(&rows[prompt_idx + 1..nav_idx], false).then_some(hdr_idx)
+    has_ordered_options(&rows[options_idx..nav_idx], false).then_some(hdr_idx)
 }
 
+/// The header of a permission dialog asking `rows[q_idx]`: one with a
+/// `Requesting permission for:` row, or agy 1.4.7's MCP tool and file access
+/// dialogs, whose target sits directly under the header's rule.
 fn permission_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
+    requesting_header_top(rows, q_idx).or_else(|| ruled_header_top(rows, q_idx))
+}
+
+fn requesting_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
     let req_idx = (0..q_idx)
         .rev()
         .find(|&i| is_col0(rows[i]) && rows[i].trim() == "Requesting permission for:")?;
@@ -91,6 +101,16 @@ fn permission_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
         above
     };
     is_permission_header(rows[header]).then_some(header)
+}
+
+fn ruled_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
+    let rule_idx = (0..q_idx).rev().find(|&i| is_box_rule(rows[i]))?;
+    let target = &rows[rule_idx + 1..q_idx];
+    if target.is_empty() || target.iter().any(|&r| is_turn_row(r)) {
+        return None;
+    }
+    let header = rule_idx.checked_sub(1)?;
+    is_ruled_permission_header(rows[header]).then_some(header)
 }
 
 fn pending_edit_header_top(rows: &[&str], q_idx: usize) -> Option<usize> {
@@ -263,8 +283,13 @@ fn is_permission_header(row: &str) -> bool {
     is_col0(row)
         && matches!(
             row.trim(),
-            "Command" | "File" | "Directory" | "URL" | "MCP Tool" | "Permission" | "Edit"
+            "Command" | "File" | "Directory" | "URL" | "Permission" | "Edit"
         )
+}
+
+/// The headers of agy 1.4.7's dialogs with no `Requesting permission for:` row.
+fn is_ruled_permission_header(row: &str) -> bool {
+    is_col0(row) && matches!(row.trim(), "MCP" | "File access")
 }
 
 fn is_edit_header(row: &str) -> bool {

@@ -144,7 +144,7 @@ agy waits on the user in **two** different ways, and they need different instrum
 | agy waits via | signal | why |
 |---|---|---|
 | its `ask_question` tool | `PreToolUse` hook, matcher `ask_question` | it's a real tool, so a hook sees it exactly when it's called |
-| its tool-permission and file-edit prompts (`Requesting permission for:`, `Accept this file edit?`) | screen scrape | no event fires for them, in any agy version |
+| its tool-permission and file-edit prompts (`Run this command?`, `Allow calling this tool?`, `Allow access to this file?`, `Accept this file edit?`) | screen scrape | no event fires for them, in any agy version |
 
 `PreToolUse` cannot be widened to cover the second. A handler must answer with a
 `decision` (`allow`/`deny`/`ask`/`force_ask`), so matching every tool would put spyc
