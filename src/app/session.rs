@@ -855,6 +855,13 @@ impl App {
 }
 
 #[cfg(test)]
+impl App {
+    /// A stand-in that records no cwd file, so the `--cwd-file` harness cases
+    /// compile and fail.
+    pub(crate) fn set_cwd_file(&self, _path: Option<std::path::PathBuf>) {}
+}
+
+#[cfg(test)]
 mod tests {
     use super::{App, AutosaveAction, autosave_action};
     use std::time::{Duration, Instant};
