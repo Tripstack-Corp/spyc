@@ -184,8 +184,8 @@ walk a branch would show none of the history it was forked to keep.
 
 In a live Codex or agy pane, `gf`/`gF`, `J` and `^a u` Quick Select exclude
 verified composer/footer rows and active approval or question dialogs (`Command`,
-`File`, `Pending edit`, and `Question` in `agy`, just as `gf`/`gF` and `J` stop at
-Claude's composer box). A Codex composer needs its native input shape, blank
+`File`, `File access`, `MCP`, `Pending edit`, and `Question`, whose prompt may
+wrap, in `agy`, just as `gf`/`gF` and `J` stop at Claude's composer box). A Codex composer needs its native input shape, blank
 separation and a recognized context, Vim-mode or shortcut footer; an agy composer
 needs its equal-width `─` box rules, a `>` or `❯` prompt row, and nothing below
 the box but a shortcut, Vim-mode, `sandbox:` or working `esc to cancel` footer.
