@@ -280,6 +280,68 @@ fn jump_returns_false_when_no_changes() {
     assert!(!s.jump_to_git_change(false));
 }
 
+// ── ]p / [p ───────────────────────────────────────────────────
+
+/// Resolve `keys` as typed and apply each action: a key press's pure half,
+/// with no `App` around it.
+fn press_chord(s: &mut AppState, keys: &str) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut r = crate::keymap::Resolver::new();
+    let user = crate::keymap::UserKeymap::default();
+    for c in keys.chars() {
+        let ev = KeyEvent::new(KeyCode::Char(c), KeyModifiers::empty());
+        if let crate::keymap::ResolverOutcome::Action(a) = r.feed(ev, &user) {
+            s.apply(&a);
+        }
+    }
+}
+
+fn picked_state(names: &[&str], picked: &[&str]) -> AppState {
+    let mut s = state_with_rows(names);
+    for p in picked {
+        s.cur_mut()
+            .picks
+            .insert(&PathBuf::from(format!("/tmp/test/{p}")));
+    }
+    s
+}
+
+#[test]
+#[ignore = "red: `]p` / `[p` resolve to nothing, so the cursor stays at 0"]
+fn pick_jumps_walk_the_picked_rows_both_ways_and_wrap() {
+    let mut s = picked_state(&["a", "b", "c", "d", "e"], &["b", "c", "e"]);
+    let mut walk = |keys| {
+        press_chord(&mut s, keys);
+        s.cur().cursor.index
+    };
+    assert_eq!(walk("]p"), 1);
+    assert_eq!(walk("]p"), 2, "off a pick to the next one");
+    assert_eq!(walk("]p"), 4);
+    assert_eq!(walk("]p"), 1, "wraps from the last pick to the first");
+    assert_eq!(walk("[p"), 4, "wraps from the first pick to the last");
+    assert_eq!(walk("[p"), 2);
+    assert_eq!(walk("[p"), 1);
+    assert!(s.flash.is_none(), "a jump that lands flashes nothing");
+}
+
+/// A pick that isn't a row (filtered out, or elsewhere) is no target.
+#[test]
+#[ignore = "red: `]p` / `[p` resolve to nothing, so nothing flashes"]
+fn pick_jumps_with_no_picked_row_flash_and_stay() {
+    for chord in ["]p", "[p"] {
+        let mut s = picked_state(&["a", "b", "c"], &["gone"]);
+        s.cur_mut().cursor.index = 1;
+        press_chord(&mut s, chord);
+        assert_eq!(s.cur().cursor.index, 1, "{chord} left the cursor");
+        let flash = s
+            .flash
+            .as_ref()
+            .unwrap_or_else(|| panic!("{chord} flashes"));
+        assert_eq!(flash.text, "no picks in this directory");
+        assert!(matches!(flash.kind, FlashKind::Info));
+    }
+}
+
 // ── property tests (testing campaign, cluster 2) ──────────────
 // These assert *invariants* over the whole input space rather than one
 // hand-picked example: the cursor can never escape the listing under any
