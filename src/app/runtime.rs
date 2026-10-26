@@ -291,6 +291,9 @@ pub(super) struct Runtime {
     /// `None` ⇒ detection failed / no graphics; the mermaid `View` mode then
     /// reports "no image protocol". Cloned into the render worker by `run_effects`.
     pub(super) picker: Option<ratatui_image::picker::Picker>,
+    /// Where a confirmed quit writes the browsed directory (`--cwd-file`,
+    /// `App::write_cwd_file`).
+    pub(super) cwd_file: Option<std::path::PathBuf>,
 }
 
 impl Runtime {
@@ -357,6 +360,7 @@ impl Runtime {
             preview_results: Landing::default(),
             preview_reloading: false,
             picker: None,
+            cwd_file: None,
         }
     }
 
