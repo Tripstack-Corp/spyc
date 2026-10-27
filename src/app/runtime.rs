@@ -294,6 +294,13 @@ pub(super) struct Runtime {
     /// Where a confirmed quit writes the browsed directory (`--cwd-file`,
     /// `App::write_cwd_file`).
     pub(super) cwd_file: Option<std::path::PathBuf>,
+    /// This run's stderr log (`crate::stderr_capture`); `None` when stderr
+    /// wasn't redirected.
+    pub(super) stderr_log: Option<std::path::PathBuf>,
+    /// The worker following `stderr_log`: it reads what is appended and wakes
+    /// the loop with `Wake::Stderr` (`App::apply_stderr`).
+    pub(super) stderr_follow:
+        Option<crate::agent::tail::watch::Subscription<super::state::StderrSnapshot>>,
 }
 
 impl Runtime {
@@ -361,6 +368,8 @@ impl Runtime {
             preview_reloading: false,
             picker: None,
             cwd_file: None,
+            stderr_log: None,
+            stderr_follow: None,
         }
     }
 

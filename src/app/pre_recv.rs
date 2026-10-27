@@ -26,6 +26,11 @@ impl App {
         if self.show_worker_panics() {
             ctx.draw.mark(3);
         }
+        // What spyc's stderr received (woke via `Wake::Stderr`): the status
+        // bar's `⚠N`, and an open `:stderr` pager.
+        if self.apply_stderr() {
+            ctx.draw.mark(3);
+        }
         if self.drain_pending_capture() {
             ctx.draw.mark(3);
         }

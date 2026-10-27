@@ -4,6 +4,15 @@
 use super::{AppState, ProjectId};
 use crate::app::{FlashKind, FlashMessage};
 
+impl FlashMessage {
+    pub const fn error(text: String) -> Self {
+        Self {
+            text,
+            kind: FlashKind::Error,
+        }
+    }
+}
+
 impl AppState {
     pub fn flash_info<S: Into<String>>(&mut self, text: S) {
         self.flash = Some(FlashMessage {
