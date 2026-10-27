@@ -931,4 +931,261 @@ mod tests {
             crate::set_mouse_capture_for_test(false);
         });
     }
+
+    // ── an open chord menu owns the pointer ──
+    //
+    // The which-key popup is painted over the layout, so a click on it must not
+    // reach what lies beneath (B1), and a click anywhere else must close it
+    // rather than act while the chord stays armed (B2): an armed leader takes
+    // the next key, where `p` changes directory and `x` closes the project.
+
+    const FRAME: ratatui::layout::Rect = ratatui::layout::Rect::new(0, 0, 120, 24);
+
+    /// An App over a directory of `n` files, so a cursor move is observable.
+    fn app_over_files(tmp: &std::path::Path, n: usize) -> App {
+        let dir = tmp.join("work");
+        std::fs::create_dir(&dir).unwrap();
+        for i in 0..n {
+            std::fs::write(dir.join(format!("file{i:02}.txt")), "x").unwrap();
+        }
+        let mut app = App::test_app(dir);
+        app.view.term_size = (FRAME.width, FRAME.height);
+        app.state.refresh_listing();
+        app
+    }
+
+    /// The open menu's box as the frame draws it, found by its titled border,
+    /// so the tests aim at what the user sees rather than at the geometry
+    /// under test.
+    fn drawn_menu(app: &mut App, title: &str) -> ratatui::layout::Rect {
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
+            FRAME.width,
+            FRAME.height,
+        ))
+        .unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let sym = |x: u16, y: u16| buf[(x, y)].symbol().to_string();
+        let heading = format!(" {title} ");
+        for y in 0..FRAME.height {
+            for x in 0..FRAME.width {
+                let follows: String = (x + 1..FRAME.width.min(x + 1 + 16))
+                    .map(|c| sym(c, y))
+                    .collect();
+                if sym(x, y) != "┌" || !follows.starts_with(&heading) {
+                    continue;
+                }
+                let right = (x + 1..FRAME.width)
+                    .find(|&c| sym(c, y) == "┐")
+                    .expect("the menu's top-right corner");
+                let bottom = (y + 1..FRAME.height)
+                    .find(|&r| sym(x, r) == "└")
+                    .expect("the menu's bottom-left corner");
+                return ratatui::layout::Rect::new(x, y, right - x + 1, bottom - y + 1);
+            }
+        }
+        panic!("no menu titled {title:?} is drawn");
+    }
+
+    /// Right-click at `point`, then let the loop build the popup, as one
+    /// iteration of the real loop does; returns the box as drawn.
+    fn open_the_leader_by_right_click(
+        app: &mut App,
+        (col, row): (u16, u16),
+    ) -> ratatui::layout::Rect {
+        app.handle_mouse(at(MouseEventKind::Down(MouseButton::Right), col, row));
+        app.handle_mouse(at(MouseEventKind::Up(MouseButton::Right), col, row));
+        app.settle_chord_hint(Instant::now(), &mut crate::app::RunCtx::for_test());
+        assert!(
+            app.view.chord_hint.is_some(),
+            "premise: the leader menu is open"
+        );
+        drawn_menu(app, "leader")
+    }
+
+    fn click(app: &mut App, (col, row): (u16, u16)) -> Vec<Effect> {
+        let mut fx = app.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), col, row));
+        fx.extend(app.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), col, row)));
+        fx
+    }
+
+    fn centre(r: ratatui::layout::Rect) -> (u16, u16) {
+        (r.x + r.width / 2, r.y + r.height / 2)
+    }
+
+    fn inside(r: ratatui::layout::Rect, (col, row): (u16, u16)) -> bool {
+        r.contains(ratatui::layout::Position::new(col, row))
+    }
+
+    /// The owner's report: right-click opens the leader, and a left click
+    /// anywhere else must close it. The click does nothing else — every menu
+    /// dismisses rather than acts on a click outside it.
+    #[test]
+    #[ignore = "red: a click outside the open menu selects the row under it, copying its name, and leaves the leader armed (B2)"]
+    fn a_left_click_outside_the_open_leader_menu_closes_it_and_does_nothing_else() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_over_files(tmp.path(), 12);
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(FRAME);
+            let menu = open_the_leader_by_right_click(&mut app, (layout.list.x + 1, layout.list.y));
+            let elsewhere = (layout.list.x + 1, layout.list.y + 3);
+            assert!(
+                !inside(menu, elsewhere),
+                "premise: the click lands beside the menu"
+            );
+            let cursor = app.state.cur().cursor.index;
+
+            let fx = click(&mut app, elsewhere);
+
+            assert!(
+                fx.is_empty(),
+                "closing the menu is state, not an effect: {fx:?}"
+            );
+            assert!(
+                !app.state.resolver.is_pending(),
+                "the leader is disarmed, so the next key is an ordinary key"
+            );
+            assert!(app.view.chord_hint.is_none(), "the menu is closed");
+            assert_eq!(
+                app.state.cur().cursor.index,
+                cursor,
+                "the click only closed the menu; the cursor stays"
+            );
+            assert!(
+                app.view.mouse_selection.is_none(),
+                "and no row selection began"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// B2's repro from the clickable-menus draft: arm `g`, wait for its menu,
+    /// click a row. The chord must not survive the click, or the next `g`
+    /// completes `gg` and jumps to the top.
+    #[test]
+    #[ignore = "red: a click while `g` is armed leaves it armed, so the next `g` completes `gg` (B2)"]
+    fn a_click_while_a_keyboard_chord_is_armed_cancels_the_chord() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_over_files(tmp.path(), 12);
+            crate::set_mouse_capture_for_test(true);
+            app.state.cur_mut().cursor.index = 5;
+            let g = crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char('g'),
+                crossterm::event::KeyModifiers::NONE,
+            );
+            app.handle_key(g).unwrap();
+            app.settle_chord_hint(
+                Instant::now() + Duration::from_secs(60),
+                &mut crate::app::RunCtx::for_test(),
+            );
+            let menu = drawn_menu(&mut app, "g");
+            let layout = app.frame_layout(FRAME);
+            let row = (layout.list.x + 1, layout.list.y + 2);
+            assert!(
+                !inside(menu, row),
+                "premise: the click lands beside the menu"
+            );
+
+            click(&mut app, row);
+
+            assert!(!app.state.resolver.is_pending(), "the click disarmed `g`");
+            assert!(app.view.chord_hint.is_none(), "and closed its menu");
+            assert_eq!(app.state.cur().cursor.index, 5, "and moved nothing");
+            app.handle_key(g).unwrap();
+            assert_eq!(
+                app.state.resolver.pending_display().as_deref(),
+                Some("g-"),
+                "the next `g` arms a fresh chord instead of completing `gg`"
+            );
+            assert_eq!(
+                app.state.cur().cursor.index,
+                5,
+                "so nothing jumped to the top"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// B1: the popup is painted over the list, so a click or a wheel tick on it
+    /// must not select or scroll the rows beneath. The menu stays open; its rows
+    /// are not clickable yet.
+    #[test]
+    #[ignore = "red: a click on the open menu selects the list row beneath it (B1)"]
+    fn a_click_on_the_open_menu_reaches_no_list_row_beneath_it() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_over_files(tmp.path(), 40);
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(FRAME);
+            let menu = open_the_leader_by_right_click(&mut app, (layout.list.x + 1, layout.list.y));
+            let on_menu = centre(menu);
+            assert_eq!(
+                region_at(&layout, on_menu.0, on_menu.1),
+                Some(route::Region::List),
+                "premise: the list lies beneath the menu"
+            );
+            let cursor = app.state.cur().cursor.index;
+
+            click(&mut app, on_menu);
+            app.handle_mouse(at(MouseEventKind::ScrollDown, on_menu.0, on_menu.1));
+
+            assert_eq!(
+                app.state.cur().cursor.index,
+                cursor,
+                "neither the click nor the wheel reached the list"
+            );
+            assert!(app.view.mouse_selection.is_none(), "no row selection began");
+            assert!(
+                app.state.resolver.is_pending() && app.view.chord_hint.is_some(),
+                "a click on the menu leaves it open"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// B1 where it costs most: the popup over a mouse-aware agent. A click on
+    /// the menu must not be forwarded into the child under it.
+    #[test]
+    #[ignore = "red: a click on the open menu is forwarded into the agent beneath it (B1)"]
+    fn a_click_on_the_open_menu_is_never_forwarded_to_the_pane_beneath() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir);
+            app.view.term_size = (FRAME.width, FRAME.height);
+            app.open_pane_tab("cat");
+            make_pane_speak_mouse(&mut app);
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(FRAME);
+            let pane = layout.pane.expect("a pane is open");
+            let menu = open_the_leader_by_right_click(&mut app, (layout.list.x + 1, layout.list.y));
+            let overlap = menu.intersection(pane);
+            assert!(
+                !overlap.is_empty(),
+                "premise: the menu is drawn over the pane"
+            );
+            let (col, row) = centre(overlap);
+
+            // The press alone: its release would discharge the forwarded flag.
+            let fx = app.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), col, row));
+
+            assert!(
+                !app.view.mouse_press_forwarded && fx.is_empty(),
+                "the press must not reach the child beneath the menu: {fx:?}"
+            );
+            app.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), col, row));
+            assert!(
+                app.state.resolver.is_pending() && app.view.chord_hint.is_some(),
+                "a click on the menu leaves it open"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
 }
