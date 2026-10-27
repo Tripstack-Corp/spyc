@@ -992,3 +992,73 @@ mod confirm_tests {
         }));
     }
 }
+
+/// `pane_toggle_suspend` is what `^z` does on a non-shell tab, as an action a
+/// menu can fire and a user can bind.
+#[cfg(test)]
+mod suspend_action_tests {
+    use crate::app::App;
+    use crate::app::tasks::menu_action_tests::{bind, key};
+
+    fn app_with_tab(tmp: &std::path::Path, cmd: &str) -> App {
+        let dir = tmp.join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir);
+        app.open_pane_tab(cmd);
+        app.set_pane_focus(false);
+        bind(&mut app, "map X pane_toggle_suspend");
+        app
+    }
+
+    fn suspended(app: &App) -> bool {
+        app.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .expect("a pane tab")
+            .active_info()
+            .suspended
+    }
+
+    #[test]
+    #[ignore = "red: the keymap knows no `pane_toggle_suspend` action"]
+    fn a_key_bound_to_pane_toggle_suspend_suspends_then_resumes_the_tab() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_with_tab(tmp.path(), "sleep 30");
+
+            let fx = app.handle_key(key('X')).unwrap();
+            assert!(suspended(&app), "the tab is suspended");
+            assert!(
+                fx.iter()
+                    .any(|e| matches!(e, crate::app::Effect::SignalPane { resume: false, .. })),
+                "and its process group is stopped: {fx:?}"
+            );
+
+            app.handle_key(key('X')).unwrap();
+            assert!(!suspended(&app), "a second press resumes it");
+        });
+    }
+
+    /// A shell tab keeps `^z` for its own job control, so the action leaves it
+    /// running and says why.
+    #[test]
+    #[ignore = "red: the keymap knows no `pane_toggle_suspend` action"]
+    fn pane_toggle_suspend_leaves_a_shell_tab_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_with_tab(tmp.path(), "sh");
+
+            app.handle_key(key('X')).unwrap();
+
+            assert!(!suspended(&app), "the shell keeps running");
+            let flash = app
+                .state
+                .flash
+                .as_ref()
+                .map(|f| f.text.clone())
+                .unwrap_or_default();
+            assert!(flash.contains("shell"), "the refusal says why: {flash:?}");
+        });
+    }
+}

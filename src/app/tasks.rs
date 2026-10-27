@@ -871,3 +871,122 @@ mod tests {
         });
     }
 }
+
+/// The actions a context menu fires from the task machinery, each through its
+/// real entry point: the `:exec` command, and a `.spycrc.toml` binding by
+/// action name.
+#[cfg(test)]
+pub(super) mod menu_action_tests {
+    use crate::app::App;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use std::os::unix::fs::PermissionsExt;
+
+    /// Bind `line` (a `.spycrc.toml` keymap line) in the active project.
+    pub fn bind(app: &mut App, line: &str) {
+        let binding = crate::config::dsl::parse(line)
+            .unwrap_or_else(|e| panic!("`{line}` should parse: {e}"))
+            .expect("a binding");
+        app.state.active_project_mut().user_keymap =
+            crate::keymap::user::UserKeymap::from_bindings(vec![binding]);
+    }
+
+    pub fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    /// An App over `work/`, holding `name` with `mode`, the cursor on it.
+    fn app_on_file(tmp: &std::path::Path, name: &str, mode: u32) -> App {
+        let dir = tmp.join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join(name);
+        std::fs::write(&file, "#!/bin/sh\necho hello\n").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+        let mut app = App::test_app(dir);
+        app.state.refresh_listing();
+        let at = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.path == file)
+            .expect("the file is listed");
+        app.state.cur_mut().cursor.index = at;
+        app
+    }
+
+    /// `:exec` runs the executable under the cursor as a `!` capture in the
+    /// live pager, as `!./name` would.
+    #[test]
+    #[ignore = "red: there is no `:exec` command"]
+    fn exec_runs_the_executable_under_the_cursor_as_a_capture() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_on_file(tmp.path(), "hello.sh", 0o755);
+
+            app.dispatch_command("exec");
+
+            let capture = app
+                .runtime
+                .pending_capture
+                .as_ref()
+                .expect("`:exec` started a capture");
+            assert_eq!(capture.title, "! ./hello.sh");
+        });
+    }
+
+    /// A file without the executable bit is refused by name, and nothing runs.
+    #[test]
+    #[ignore = "red: there is no `:exec` command"]
+    fn exec_refuses_a_file_that_is_not_executable() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_on_file(tmp.path(), "notes.txt", 0o644);
+
+            app.dispatch_command("exec");
+
+            assert!(app.runtime.pending_capture.is_none(), "nothing ran");
+            let flash = app
+                .state
+                .flash
+                .as_ref()
+                .map(|f| f.text.clone())
+                .unwrap_or_default();
+            assert!(
+                flash.contains("notes.txt") && flash.contains("not executable"),
+                "the refusal names the file: {flash:?}"
+            );
+        });
+    }
+
+    /// `pane_to_task` binds by name and moves the active pane tab to the
+    /// background tasks, as `:pane-to-task` does.
+    #[test]
+    #[ignore = "red: the keymap knows no `pane_to_task` action"]
+    fn a_key_bound_to_pane_to_task_moves_the_active_tab_to_the_tasks() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let dir = tmp.path().join("work");
+            std::fs::create_dir(&dir).unwrap();
+            let mut app = App::test_app(dir);
+            app.open_pane_tab("sleep 30");
+            app.set_pane_focus(false);
+            bind(&mut app, "map X pane_to_task");
+
+            app.handle_key(key('X')).unwrap();
+
+            assert_eq!(
+                app.runtime.background_tasks.tasks.len(),
+                1,
+                "the tab became a background task"
+            );
+            assert!(
+                app.runtime
+                    .project()
+                    .pane_tabs
+                    .as_ref()
+                    .is_none_or(|t| t.tabs().is_empty()),
+                "and left the tab bar"
+            );
+        });
+    }
+}
