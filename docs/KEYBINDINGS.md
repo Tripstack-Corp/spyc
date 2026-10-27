@@ -374,6 +374,7 @@ focus.
 | Middle click | Paste the clipboard |
 | Right click | Open the leader menu |
 | Any click outside an open menu | Close it, and nothing else |
+| Left click on a menu row | Do what its key does; a range row (`1-9`) names its keys |
 | `Shift` + drag | Your terminal's own selection, bypassing spyc (Option/Fn on iTerm2) |
 
 **Capture costs your terminal's native click-drag selection while it's on** —

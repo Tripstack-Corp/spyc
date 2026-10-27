@@ -111,6 +111,23 @@ pub fn chord_hint_layout(
     })
 }
 
+/// The entry drawn at (`col`, `row`): the cell under a click, mapped through
+/// the same columns the renderer stitches. `None` on the border, past a
+/// column's last line, or outside the box.
+pub fn entry_at(layout: &ChordHintLayout, col: u16, row: u16) -> Option<usize> {
+    let rect = layout.rect;
+    let inside = col > rect.x
+        && row > rect.y
+        && col < rect.right().saturating_sub(1)
+        && row < rect.bottom().saturating_sub(1);
+    if !inside {
+        return None;
+    }
+    let column = usize::from(col - rect.x - 1) / layout.col_w.max(1);
+    let line = usize::from(row - rect.y - 1);
+    layout.columns.get(column)?.get(line).map(|l| l.entry)
+}
+
 /// Flow cells into columns, balancing by rendered-line count so a tall menu (or
 /// one with wrapped labels) splits into columns rather than overflowing the
 /// screen height. An entry never splits across columns.
@@ -173,6 +190,39 @@ mod tests {
             (nudged.width, nudged.height),
             (centred.width, centred.height)
         );
+    }
+
+    /// Every body cell of a multi-column menu maps to the entry drawn there,
+    /// column by column, and the border maps to none: the column packing is
+    /// where a re-derived hit-test would drift.
+    #[test]
+    fn a_click_maps_to_the_entry_drawn_under_it_in_every_column() {
+        let labels: Vec<String> = (0..30).map(|i| format!("entry {i}")).collect();
+        let rows: Vec<(&str, &str)> = labels.iter().map(|l| ("k", l.as_str())).collect();
+        let layout = chord_hint_layout(&rows, AREA, None, None).expect("a box");
+        assert!(
+            layout.columns.len() > 1,
+            "premise: thirty rows need two columns"
+        );
+        let r = layout.rect;
+        for (c, column) in layout.columns.iter().enumerate() {
+            for (l, line) in column.iter().enumerate() {
+                for dx in 0..layout.col_w {
+                    let x = r.x + 1 + u16::try_from(c * layout.col_w + dx).unwrap();
+                    let y = r.y + 1 + u16::try_from(l).unwrap();
+                    assert_eq!(entry_at(&layout, x, y), Some(line.entry), "({x}, {y})");
+                }
+            }
+        }
+        for x in r.x..r.right() {
+            assert_eq!(entry_at(&layout, x, r.y), None, "the top border");
+            assert_eq!(
+                entry_at(&layout, x, r.bottom() - 1),
+                None,
+                "the bottom border"
+            );
+        }
+        assert_eq!(entry_at(&layout, r.x, r.y + 1), None, "the left border");
     }
 
     #[test]

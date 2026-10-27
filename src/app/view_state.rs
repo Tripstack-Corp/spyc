@@ -103,7 +103,11 @@ pub struct ImageView {
 pub struct ChordHint {
     /// The armed prefix, e.g. `"^a"` or `"g"`.
     pub(super) title: String,
-    /// `(keys, label)` per continuation, e.g. `("z", "zoom pane (toggle fullscreen)")`.
+    /// The continuations as the resolver offers them, so a click on a row
+    /// fires what the row's key fires.
+    pub(super) entries: Vec<crate::keymap::ChordEntry>,
+    /// `(keys, label)` per entry, e.g. `("z", "zoom pane (toggle fullscreen)")`:
+    /// what is drawn and hit-tested.
     pub(super) rows: Vec<(&'static str, &'static str)>,
 }
 

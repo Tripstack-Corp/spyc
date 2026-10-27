@@ -115,10 +115,10 @@ fn walk(r: &Resolver, prefix: &str, seen: &mut Vec<String>, out: &mut Vec<Bindin
     seen.push(table);
     for row in rows {
         match row {
-            ChordEntry::Act(keys, _) => {
+            ChordEntry::Act(keys, _) | ChordEntry::Range(keys, _) => {
                 out.extend(keys.split_whitespace().map(|t| binding(prefix, t)));
             }
-            ChordEntry::Sub(keys, _) => {
+            ChordEntry::Sub(keys, _, _) => {
                 for token in keys.split_whitespace() {
                     let mut next = r.clone();
                     let Some(ev) = token_event(token) else {
