@@ -22,6 +22,8 @@ use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 pub(super) mod chord_hit;
 mod forward;
 #[cfg(test)]
+mod menu_tests;
+#[cfg(test)]
 mod pane_copy_tests;
 mod route;
 mod scroll;
@@ -665,7 +667,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     /// A synthetic report at `(col, row)` with no modifiers.
-    fn at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    pub(super) fn at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
         MouseEvent {
             kind,
             column,
@@ -1026,10 +1028,10 @@ mod tests {
     // rather than act while the chord stays armed (B2): an armed leader takes
     // the next key, where `p` changes directory and `x` closes the project.
 
-    const FRAME: ratatui::layout::Rect = ratatui::layout::Rect::new(0, 0, 120, 24);
+    pub(super) const FRAME: ratatui::layout::Rect = ratatui::layout::Rect::new(0, 0, 120, 24);
 
     /// An App over a directory of `n` files, so a cursor move is observable.
-    fn app_over_files(tmp: &std::path::Path, n: usize) -> App {
+    pub(super) fn app_over_files(tmp: &std::path::Path, n: usize) -> App {
         app_over_files_in(&tmp.join("work"), n)
     }
 
@@ -1046,7 +1048,7 @@ mod tests {
     }
 
     /// One frame, as the terminal would draw it.
-    fn drawn(app: &mut App) -> ratatui::buffer::Buffer {
+    pub(super) fn drawn(app: &mut App) -> ratatui::buffer::Buffer {
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
             FRAME.width,
             FRAME.height,
@@ -1058,7 +1060,7 @@ mod tests {
 
     /// The menu titled `title` in `buf`, found by its titled border, so the
     /// tests aim at what the user sees rather than at the geometry under test.
-    fn menu_in(buf: &ratatui::buffer::Buffer, title: &str) -> ratatui::layout::Rect {
+    pub(super) fn menu_in(buf: &ratatui::buffer::Buffer, title: &str) -> ratatui::layout::Rect {
         let sym = |x: u16, y: u16| buf[(x, y)].symbol().to_string();
         let heading = format!(" {title} ");
         for y in 0..FRAME.height {
@@ -1082,13 +1084,13 @@ mod tests {
     }
 
     /// The open menu's box as the frame draws it.
-    fn drawn_menu(app: &mut App, title: &str) -> ratatui::layout::Rect {
+    pub(super) fn drawn_menu(app: &mut App, title: &str) -> ratatui::layout::Rect {
         menu_in(&drawn(app), title)
     }
 
     /// The cell where `text` is drawn inside the menu titled `title`: where a
     /// click on that row aims.
-    fn drawn_row(app: &mut App, title: &str, text: &str) -> (u16, u16) {
+    pub(super) fn drawn_row(app: &mut App, title: &str, text: &str) -> (u16, u16) {
         let buf = drawn(app);
         let menu = menu_in(&buf, title);
         for y in menu.y + 1..menu.bottom() - 1 {
@@ -1110,7 +1112,7 @@ mod tests {
         panic!("no row {text:?} in the menu titled {title:?}");
     }
 
-    fn press(app: &mut App, c: char) {
+    pub(super) fn press(app: &mut App, c: char) {
         app.handle_key(crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char(c),
             crossterm::event::KeyModifiers::NONE,
@@ -1150,17 +1152,17 @@ mod tests {
         drawn_menu(app, "leader")
     }
 
-    fn click(app: &mut App, (col, row): (u16, u16)) -> Vec<Effect> {
+    pub(super) fn click(app: &mut App, (col, row): (u16, u16)) -> Vec<Effect> {
         let mut fx = app.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), col, row));
         fx.extend(app.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), col, row)));
         fx
     }
 
-    fn centre(r: ratatui::layout::Rect) -> (u16, u16) {
+    pub(super) fn centre(r: ratatui::layout::Rect) -> (u16, u16) {
         (r.x + r.width / 2, r.y + r.height / 2)
     }
 
-    fn inside(r: ratatui::layout::Rect, (col, row): (u16, u16)) -> bool {
+    pub(super) fn inside(r: ratatui::layout::Rect, (col, row): (u16, u16)) -> bool {
         r.contains(ratatui::layout::Position::new(col, row))
     }
 
