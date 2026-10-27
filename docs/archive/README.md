@@ -17,3 +17,4 @@ roadmap is [`ROADMAP.md`](../../ROADMAP.md) at the repo root.
 | `2.1-release-notes.md` | The human-facing v2.1 notes, as written at tag time. |
 | `2.2-release-notes.md` | The human-facing v2.2 notes, as written at tag time. |
 | `2.3-release-notes.md` | The human-facing v2.3 notes, as written at tag time. |
+| `CLICKABLE_MENUS_PLAN.md` | Not shipped on its own: absorbed into the 2.4 UX plan ([`UX_2_0_PLAN.md`](../drafts/UX_2_0_PLAN.md)) as its slices 1–2 when that plan was approved. |
