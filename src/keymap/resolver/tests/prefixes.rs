@@ -265,9 +265,27 @@ fn chord_continuations_resolve_to_their_actions() {
             "{name} chord has no continuations for the popup"
         );
         for row in rows {
-            let keys = match &row {
-                ChordEntry::Act(k, _) | ChordEntry::Sub(k, _) => *k,
-            };
+            let keys = row.keys();
+            if let ChordEntry::Act(..) = &row {
+                assert!(
+                    !is_range(keys),
+                    "{name}{keys} is a range, so its row must be a `Range`: a click can't \
+                     choose one member"
+                );
+            }
+            // A range row shows its first member's action; that member's key
+            // must fire exactly it.
+            if let ChordEntry::Range(_, first) = &row {
+                let start = keys.chars().next().expect("a range names its first key");
+                let mut r2 = Resolver::new();
+                feed(&mut r2, *entry);
+                assert_eq!(
+                    feed(&mut r2, key(start)),
+                    ResolverOutcome::Action(first.clone()),
+                    "{name}{start}, the range's first key, should fire the action its row shows"
+                );
+                continue;
+            }
             // A label may name SEVERAL keys for one action (`"\\ C"` for the
             // pane toggle, `"a h"` for vsplit-focus-left), and every one of them
             // is a promise the popup makes. Each single-byte ASCII token is
@@ -292,11 +310,19 @@ fn chord_continuations_resolve_to_their_actions() {
                         ResolverOutcome::Action(action.clone()),
                         "{name}{tok} should resolve to the action the popup advertises"
                     ),
-                    ChordEntry::Sub(_, _) => assert_eq!(
-                        got,
-                        ResolverOutcome::Pending,
-                        "{name}{tok} should open the submenu the popup advertises"
-                    ),
+                    ChordEntry::Sub(_, _, seq) => {
+                        assert_eq!(
+                            got,
+                            ResolverOutcome::Pending,
+                            "{name}{tok} should open the submenu the popup advertises"
+                        );
+                        assert_eq!(
+                            r2.pending, *seq,
+                            "{name}{tok} should enter the submenu its row names, which a \
+                             click enters"
+                        );
+                    }
+                    ChordEntry::Range(..) => unreachable!("range rows are checked above"),
                 }
             }
         }
@@ -393,6 +419,62 @@ fn candidate_keys() -> Vec<crossterm::event::KeyEvent> {
     out
 }
 
+/// Whether a row's keys name a range (`1-9`, `a-z`) rather than one key.
+fn is_range(keys: &str) -> bool {
+    let chars: Vec<char> = keys.chars().collect();
+    chars.len() == 3 && chars[1] == '-'
+}
+
+/// A click on a menu row does what the row's key does, from every chord state
+/// the popup draws, with and without a count typed first: the click path
+/// (`take_menu_action`, `enter`) is the key path's twin, so it can't drift from
+/// it. A range row is the exception, since a click fires none of its members.
+#[test]
+fn a_click_on_a_menu_row_does_what_its_key_does() {
+    let mut checked = 0;
+    for (label, entry) in chord_states() {
+        for count in [None, Some('3')] {
+            let mut armed = Resolver::new();
+            if let Some(c) = count {
+                feed(&mut armed, key(c));
+            }
+            for ev in &entry {
+                feed(&mut armed, *ev);
+            }
+            if !armed.is_pending() {
+                continue;
+            }
+            for row in armed.continuations() {
+                let Some(ev) = row.keys().split_whitespace().find_map(hint_key) else {
+                    continue;
+                };
+                let mut by_key = armed.clone();
+                let got = feed(&mut by_key, ev);
+                let mut by_click = armed.clone();
+                match row {
+                    ChordEntry::Act(keys, action) => assert_eq!(
+                        got,
+                        ResolverOutcome::Action(by_click.take_menu_action(action)),
+                        "{count:?} {label} {keys}: a click fires what the key fires"
+                    ),
+                    ChordEntry::Sub(keys, _, seq) => {
+                        by_click.enter(seq);
+                        assert_eq!(got, ResolverOutcome::Pending, "{label} {keys}");
+                    }
+                    ChordEntry::Range(..) => continue,
+                }
+                assert_eq!(
+                    format!("{by_key:?}"),
+                    format!("{by_click:?}"),
+                    "{count:?} {label}: a click leaves the resolver as the key does"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 40, "the walk reached only {checked} rows");
+}
+
 /// The single key a `ChordEntry` label stands for, when it names exactly one.
 fn hint_key(label: &str) -> Option<crossterm::event::KeyEvent> {
     match label {
@@ -442,7 +524,7 @@ fn chord_states() -> Vec<(String, Vec<crossterm::event::KeyEvent>)> {
             feed(&mut r, *ev);
         }
         for c in r.continuations() {
-            if let ChordEntry::Sub(k, _) = c
+            if let ChordEntry::Sub(k, _, _) = c
                 && let Some(ev) = hint_key(k)
             {
                 let mut deeper = entry.clone();
@@ -533,7 +615,7 @@ fn every_action_a_chord_binds_is_offered_in_its_hints() {
             .continuations()
             .into_iter()
             .filter_map(|e| match e {
-                ChordEntry::Act(_, a) => Some(kind(&a)),
+                ChordEntry::Act(_, a) | ChordEntry::Range(_, a) => Some(kind(&a)),
                 ChordEntry::Sub(..) => None,
             })
             .collect();
@@ -583,7 +665,7 @@ fn leader_and_pane_namespaces_respect_tiers() {
                 r.continuations()
                     .into_iter()
                     .filter_map(|e| match e {
-                        ChordEntry::Act(_, a) => Some((label.clone(), a)),
+                        ChordEntry::Act(_, a) | ChordEntry::Range(_, a) => Some((label.clone(), a)),
                         ChordEntry::Sub(..) => None,
                     })
                     .collect::<Vec<_>>()

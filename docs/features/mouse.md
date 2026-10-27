@@ -18,6 +18,12 @@ nothing else, so the next key you type is an ordinary key again. A click on
 the menu reaches nothing beneath it: not the list, and not the agent in the
 pane.
 
+Click a row to do what its key does. An action row fires and the menu closes;
+a submenu row, such as the leader's `worktree`, opens that menu; a range row,
+such as `1-9`, stands for several keys, so it names them and stays open for
+you to type one. A count typed first (`3`, then `d`) reaches the row you click,
+as it would the key.
+
 ## Selecting and copying
 
 - **Drag in a pane whose child ignores the mouse to select its text**; release

@@ -186,18 +186,15 @@ impl App {
                     .pending_display()
                     .map(|s| s.trim_end_matches('-').to_string())
                     .unwrap_or_default();
-                let rows: Vec<(&'static str, &'static str)> = self
-                    .state
-                    .resolver
-                    .continuations()
-                    .into_iter()
-                    .map(|e| match e {
-                        crate::keymap::ChordEntry::Act(keys, action) => (keys, action.describe()),
-                        crate::keymap::ChordEntry::Sub(keys, label) => (keys, label),
-                    })
-                    .collect();
+                let entries = self.state.resolver.continuations();
+                let rows: Vec<(&'static str, &'static str)> =
+                    entries.iter().map(|e| (e.keys(), e.label())).collect();
                 if !rows.is_empty() {
-                    self.view.chord_hint = Some(ChordHint { title, rows });
+                    self.view.chord_hint = Some(ChordHint {
+                        title,
+                        entries,
+                        rows,
+                    });
                     ctx.draw.mark(3);
                 }
             }

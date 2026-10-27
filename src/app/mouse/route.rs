@@ -128,6 +128,8 @@ pub enum MouseSink {
     LeaderMenu,
     /// Disarm the pending chord and close its popup, and nothing else.
     DismissChord,
+    /// Fire entry `n` of the open which-key popup, as its key would.
+    ChordRow(usize),
 }
 
 /// What the user did, reduced to the axis routing cares about.
@@ -213,6 +215,9 @@ pub struct MouseSnapshot {
     /// [`super::chord_hit::chord_hint_layout`] places it. Region-independent
     /// for the reason `covering_pager` is: the popup is drawn over the layout.
     pub over_chord_hint: bool,
+    /// The popup's entry the pointer is on, from [`super::chord_hit::entry_at`]:
+    /// `None` off the popup, and on its border or blank cells.
+    pub chord_row: Option<usize>,
 }
 
 impl MouseSnapshot {
@@ -435,13 +440,17 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
         return MouseSink::Swallow;
     }
     // The which-key popup is drawn over everything below it, so the pointer on
-    // it reaches nothing beneath: no list row, no agent. A click anywhere else
+    // it reaches nothing beneath: no list row, no agent. A left click on one of
+    // its rows fires that row, as the row's key would. A click anywhere else
     // while a chord is armed only disarms it, like every menu's outside click.
     // Acting as well would leave the chord armed for the next key, where the
     // leader's `p` changes directory and `x` closes the project. The wheel
     // beside the popup scrolls as ever, and the chord waits.
     if snap.over_chord_hint {
-        return MouseSink::Swallow;
+        return match (gesture, snap.chord_row) {
+            (Gesture::Left, Some(row)) => MouseSink::ChordRow(row),
+            _ => MouseSink::Swallow,
+        };
     }
     if snap.chord_armed && !matches!(gesture, Gesture::Wheel) {
         return MouseSink::DismissChord;
@@ -716,7 +725,29 @@ mod tests {
             over_stderr_notice: false,
             chord_armed: false,
             over_chord_hint: false,
+            chord_row: None,
         }
+    }
+
+    /// Only a left click on one of the popup's rows fires it; every other
+    /// gesture on the popup, and a click on its border, does nothing.
+    #[test]
+    fn a_left_click_on_a_menu_row_fires_it_and_nothing_else_does() {
+        let mut s = snap(Some(Region::Pane));
+        s.pane_wants_mouse = true;
+        s.chord_armed = true;
+        s.over_chord_hint = true;
+        s.chord_row = Some(2);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::ChordRow(2));
+        for gesture in [Gesture::Middle, Gesture::Right, Gesture::Wheel] {
+            assert_eq!(route_mouse(s, gesture), MouseSink::Swallow, "{gesture:?}");
+        }
+        s.chord_row = None;
+        assert_eq!(
+            route_mouse(s, Gesture::Left),
+            MouseSink::Swallow,
+            "the border"
+        );
     }
 
     /// The status bar is drawn through the chrome funnel too, so over the `⚠N`

@@ -385,6 +385,7 @@ impl super::App {
                 }
             }
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
+            MouseSink::ChordRow(index) => self.fire_chord_row(index),
             MouseSink::DismissChord => {
                 self.state.resolver.cancel();
                 self.clear_chord_hint();
@@ -431,6 +432,7 @@ impl super::App {
         frame: ratatui::layout::Rect,
         region: Option<route::Region>,
     ) -> MouseSnapshot {
+        let (over_chord_hint, chord_row) = self.chord_menu_at(layout, frame, ev);
         MouseSnapshot {
             // Same precedence the keyboard uses — one owner for "which modal
             // wins", so mouse and keys can't disagree about it.
@@ -464,31 +466,73 @@ impl super::App {
             // "what got drawn" and "what a click can select".
             over_chrome_row: self.chrome_col_at(ev).is_some(),
             chord_armed: self.state.resolver.is_pending(),
-            over_chord_hint: self.pointer_on_chord_hint(layout, frame, ev),
+            over_chord_hint,
+            chord_row,
         }
     }
 
     /// Whether `ev` is on the open which-key popup, laid out exactly as the
-    /// renderer lays it out.
-    fn pointer_on_chord_hint(
+    /// renderer lays it out, and the entry under the pointer there, if any.
+    fn chord_menu_at(
         &self,
         layout: &FrameLayout,
         frame: ratatui::layout::Rect,
         ev: MouseEvent,
-    ) -> bool {
-        let Some(hint) = self.view.chord_hint.as_ref() else {
-            return false;
+    ) -> (bool, Option<usize>) {
+        let Some(menu) = self.view.chord_hint.as_ref().and_then(|hint| {
+            chord_hit::chord_hint_layout(
+                &hint.rows,
+                frame,
+                layout.divider.map(|r| r.y),
+                layout.vdivider.map(|r| r.x),
+            )
+        }) else {
+            return (false, None);
         };
-        chord_hit::chord_hint_layout(
-            &hint.rows,
-            frame,
-            layout.divider.map(|r| r.y),
-            layout.vdivider.map(|r| r.x),
-        )
-        .is_some_and(|menu| {
-            menu.rect
-                .contains(ratatui::layout::Position::new(ev.column, ev.row))
-        })
+        let on = menu
+            .rect
+            .contains(ratatui::layout::Position::new(ev.column, ev.row));
+        (on, chord_hit::entry_at(&menu, ev.column, ev.row))
+    }
+
+    /// A click on entry `index` of the open which-key popup: what the row's key
+    /// would do, through the key's own path. A range row (`1-9`) can't say
+    /// which member, so it names its keys and leaves the menu open for them.
+    fn fire_chord_row(&mut self, index: usize) -> Vec<Effect> {
+        use crate::keymap::ChordEntry;
+        let Some(entry) = self
+            .view
+            .chord_hint
+            .as_ref()
+            .and_then(|hint| hint.entries.get(index))
+            .cloned()
+        else {
+            return Vec::new();
+        };
+        match entry {
+            ChordEntry::Act(_, action) => {
+                let action = self.state.resolver.take_menu_action(action);
+                self.clear_chord_hint();
+                self.update(super::update::UiMsg::Action(action))
+                    .unwrap_or_else(|e| {
+                        self.state.flash_error(format!("{e:#}"));
+                        Vec::new()
+                    })
+            }
+            ChordEntry::Sub(_, _, seq) => {
+                self.state.resolver.enter(seq);
+                // Drawn now, not after the keyboard's hesitation delay: the
+                // user is already reading a menu.
+                self.clear_chord_hint();
+                self.view.chord_hint_due = Some(std::time::Instant::now());
+                Vec::new()
+            }
+            ChordEntry::Range(keys, _) => {
+                self.state
+                    .flash_info(format!("{keys}: type the one you want"));
+                Vec::new()
+            }
+        }
     }
 }
 
@@ -1296,7 +1340,6 @@ mod tests {
     /// A click on an action row fires that action, as its key would, and the
     /// menu closes as the key would close it.
     #[test]
-    #[ignore = "red: a click on a menu row is swallowed, so `gg` never fires"]
     fn a_click_on_a_menu_row_fires_its_action() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -1326,7 +1369,6 @@ mod tests {
     /// A click on a submenu row walks into the submenu, as its key does, and the
     /// submenu is drawn at once: the user is already reading a menu.
     #[test]
-    #[ignore = "red: a click on the leader's worktree row is swallowed"]
     fn a_click_on_a_submenu_row_opens_the_submenu() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -1353,7 +1395,6 @@ mod tests {
     /// A count typed before the chord reaches the action its row fires, as on the
     /// key path: `3`, `d`, then a click on `dd`'s row asks what `3dd` asks.
     #[test]
-    #[ignore = "red: a click on the `dd` row is swallowed, so the count goes nowhere"]
     fn a_count_typed_before_the_chord_reaches_the_row_a_click_fires() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -1385,7 +1426,6 @@ mod tests {
     /// A range row stands for keys a click cannot choose between, so a click on
     /// it fires nothing and names the keys; the menu stays open for them.
     #[test]
-    #[ignore = "red: a click on the leader's `1-9` row is swallowed and says nothing"]
     fn a_click_on_a_range_row_fires_nothing_and_names_its_keys() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();

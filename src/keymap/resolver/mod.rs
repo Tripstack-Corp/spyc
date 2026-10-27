@@ -7,6 +7,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::action::{Action, ProjectAction};
 use super::user::{BoundAction, UserKeymap};
 
+mod hints;
+pub use hints::ChordEntry;
+
 /// State carried between keystrokes while we wait for a multi-key sequence
 /// to complete (count prefix, `gg`, future operator-pending, marks, search).
 #[derive(Debug, Default, Clone)]
@@ -16,7 +19,7 @@ pub struct Resolver {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-enum PendingSeq {
+pub enum PendingSeq {
     #[default]
     Normal,
     /// Seen a `g`, waiting for a second one (`gg`).
@@ -68,17 +71,6 @@ pub enum ResolverOutcome {
     Ignored,
 }
 
-/// One row of the which-key chord-hint popup for a pending chord: either a key
-/// that fires an `Action`, or a key that opens a nested submenu (shown with its
-/// own label). Returned by [`Resolver::continuations`].
-#[derive(Debug, Clone)]
-pub enum ChordEntry {
-    /// `key` fires `action`; the popup renders `key → action.describe()`.
-    Act(&'static str, Action),
-    /// `key` opens a submenu the popup labels `label` (e.g. `"worktree"`).
-    Sub(&'static str, &'static str),
-}
-
 /// The `]` / `[` chords: each second key, with the jump `]` and then `[`
 /// makes on it. The resolver and the chord hint both read it.
 const BRACKET_JUMPS: [(&str, Action, Action); 2] = [
@@ -92,14 +84,6 @@ fn bracket_jump(next: bool, code: KeyCode) -> Option<Action> {
         .into_iter()
         .find(|(key, ..)| matches!(code, KeyCode::Char(c) if key.chars().eq([c])))
         .map(|(_, fwd, back)| if next { fwd } else { back })
-}
-
-/// The chord hint's rows for a pending `]` (`next`) or `[`.
-fn bracket_rows(next: bool) -> Vec<ChordEntry> {
-    BRACKET_JUMPS
-        .into_iter()
-        .map(|(key, fwd, back)| ChordEntry::Act(key, if next { fwd } else { back }))
-        .collect()
 }
 
 impl Resolver {
@@ -137,6 +121,25 @@ impl Resolver {
         self.pending = PendingSeq::Leader;
     }
 
+    /// Enter `seq` as its key would: the submenu a click on a `Sub` row opens.
+    pub const fn enter(&mut self, seq: PendingSeq) {
+        self.pending = seq;
+    }
+
+    /// The action a click on a menu row naming `action` fires: the pending
+    /// count applied where that row's key applies it, and the chord disarmed
+    /// as the key leaves it. Inside a chord only `Ndd` reads the count.
+    pub fn take_menu_action(&mut self, action: Action) -> Action {
+        let action = match action {
+            Action::RemovePrompt(_) if self.pending == PendingSeq::D => {
+                Action::RemovePrompt(self.count.map(|n| n as usize))
+            }
+            other => other,
+        };
+        self.reset();
+        action
+    }
+
     /// Abandon a pending sequence and its count, as a key that continues
     /// nothing does: the end of a chord that comes from no key, such as a
     /// click beside its menu.
@@ -164,126 +167,6 @@ impl Resolver {
             PendingSeq::Leader => "leader-",
         };
         Some(format!("{prefix}{seq}"))
-    }
-
-    /// The built-in keys that complete the current pending chord, each paired
-    /// with the `Action` it fires. This is the data behind the which-key hint
-    /// popup (rendered as `keys → action.describe()`); user-keymap bindings
-    /// under the prefix are merged on top by the popup builder.
-    ///
-    /// Authored alongside `feed`'s chord arms — the exhaustive match means a
-    /// new `PendingSeq` variant *must* get an entry here (a build error
-    /// otherwise), and `chord_continuations_resolve_to_their_actions` guards
-    /// that every listed single-byte key actually resolves to its action, so
-    /// the popup can't silently drift from the real bindings.
-    ///
-    /// A display string may name several keys for one action (`"a h"`,
-    /// `"\\ C"`); each single-byte ASCII one among them is feed-verified, so an
-    /// alias listed in a shared row is checked like any other key. A range
-    /// (`"1-9"`, `"a-z"`) or a non-char key (`"↓"`) names no key that can be
-    /// fed and is not. A [`ChordEntry::Sub`] names a key that opens a nested
-    /// submenu rather than firing an action.
-    pub fn continuations(&self) -> Vec<ChordEntry> {
-        use Action as A;
-        use ChordEntry::{Act, Sub};
-        match self.pending {
-            PendingSeq::Normal => Vec::new(),
-            // Leader (global / workspace): `Space` in list focus, `^a Space`
-            // from pane focus.
-            PendingSeq::Leader => vec![
-                Sub("w", "worktree"),
-                Act("p", A::Project(ProjectAction::JumpHome)),
-                Act("P", A::Project(ProjectAction::SetHomeHere)),
-                Act("n", A::Project(ProjectAction::Open)),
-                Act("x", A::Project(ProjectAction::Close)),
-                Act("j", A::Project(ProjectAction::List)),
-                Act("Space", A::Project(ProjectAction::Last)),
-                Act("1-9", A::Project(ProjectAction::ByIndex(0))),
-                Act("]", A::Project(ProjectAction::Next)),
-                Act("[", A::Project(ProjectAction::Prev)),
-                Act("!", A::Project(ProjectAction::Attention)),
-                Act("s", A::ShowMemory),
-                Act("?", A::Help),
-                Act("a", A::About),
-            ],
-            PendingSeq::G => vec![
-                Act("g", A::GotoFirst),
-                Act("d", A::GitDiff),
-                Act("D", A::GitDiffCached),
-                Act("u", A::GitDiffUnstaged),
-                Act("b", A::GitBlame),
-                Act("r", A::GitRestore),
-                Act("f", A::GotoFile),
-                Act("F", A::GotoFileLine),
-                Act("w", A::JumpWorktreeRoot),
-                Act("P", A::Project(ProjectAction::SetHomeHere)),
-                Act("S", A::SetStartDirHere),
-                Act("p", A::ReopenLastBuffer),
-                Act("B", A::OpenTaskViewer),
-                Act("V", A::Version),
-            ],
-            PendingSeq::W => vec![
-                Act("j", A::PaneFocusDown),
-                Act("k", A::PaneFocusUp),
-                Act("a h", A::VsplitFocusLeft),
-                Act("b l", A::VsplitFocusRight),
-                Act("|", A::VsplitToggle),
-                Act("f", A::VsplitToggleHeight),
-                Act("d", A::ToggleDim),
-                Act("n ]", A::PaneNextTab),
-                Act("p [", A::PanePrevTab),
-                Act("c", A::PaneNewTab),
-                Act("1-9", A::PaneTabByIndex(0)),
-                Act("x", A::PaneCloseTab),
-                Act("r", A::PaneRenameTab),
-                Act("R", A::PaneRestartTab),
-                Act("F", A::PaneForkTab),
-                Act("z", A::TogglePaneZoom),
-                Act("v", A::PaneScrollEnter),
-                Act("t", A::OpenThinkingHistory),
-                Act("+", A::PaneGrow),
-                Act("-", A::PaneShrink),
-                Act("s", A::PaneSendSelection),
-                Act("↓", A::PaneSendPrefix),
-                Act("P", A::PanePipeContent),
-                Act("i", A::PanePipeInventory),
-                Act("u", A::QuickSelectOpen),
-                Act("g", A::OpenImageGallery),
-                Act("\\ C", A::TogglePane),
-                Act("!", A::Project(ProjectAction::Attention)),
-                Sub("Space", "global menu"),
-            ],
-            PendingSeq::CtrlS => vec![
-                Act("|", A::VsplitToggle),
-                Act("f", A::VsplitToggleHeight),
-                Act("n", A::OpenSecondCommander),
-                Act("x", A::CloseSecondCommander),
-            ],
-            PendingSeq::Worktree => vec![
-                Act("l", A::WorktreeList),
-                Act("n", A::WorktreeNew),
-                Act("d", A::WorktreeDelete),
-            ],
-            PendingSeq::Harpoon => vec![
-                Act("1-9", A::HarpoonJump(0)),
-                Act("a", A::HarpoonAppend),
-                Act("x", A::HarpoonRemove),
-                Act("h", A::HarpoonOpenMenu),
-            ],
-            PendingSeq::Yank => vec![
-                Act("y", A::Take),
-                Act("f", A::YankPaths),
-                Act("p", A::YankPrompt),
-                Act("P", A::YankLastPrompt),
-                Act("a", A::YankScrollback),
-            ],
-            PendingSeq::Mark => vec![Act("a-z", A::SetMark('a'))],
-            PendingSeq::JumpMark => vec![Act("a-z", A::JumpMark('a')), Act("'", A::JumpPrevDir)],
-            PendingSeq::NextBracket => bracket_rows(true),
-            PendingSeq::PrevBracket => bracket_rows(false),
-            PendingSeq::D => vec![Act("d", A::RemovePrompt(None))],
-            PendingSeq::Z => vec![Act("Z", A::Quit)],
-        }
     }
 
     /// Mid-sequence: leader (`Space` / `^a Space`) — the global/workspace menu.
