@@ -5,18 +5,49 @@ Part of spyc's [feature reference](../../FEATURES.md). What the mouse does in sp
 With mouse reporting on, the wheel scrolls whatever is under the pointer,
 left-click focuses that region (and clicks through to a mouse-aware agent),
 middle-click pastes (a clipboard tool that hangs reports itself instead of
-freezing spyc), right-click opens the leader menu. **Costs native click-drag
-text selection while on** (hold Shift to select anyway — Option/Fn on iTerm2);
+freezing spyc), and right-click opens the menu of what it lands on. **Costs
+native click-drag text selection while on** (hold Shift to select anyway —
+Option/Fn on iTerm2);
 `:mouse off` gives it back immediately, no restart, and survives a config
 reload (`:mouse auto` returns to following the config). Default **on**
 (`[mouse] capture`; `capture = false` turns it off permanently). `^a u`
 quick-select and `y` in the pager are the mouse-free yank paths.
+
+## Right-click: the menu of what's under it
+
+- **On a file row**, the cursor moves there and that entry's menu opens: open,
+  edit, pick, copy, move, remove, its git views, send it to the pane, and the
+  rest, as `.` opens it from the keyboard.
+- **On the pane**, while its program runs, the pane takes the keyboard and
+  the active tab's menu opens: restart, suspend, fork, rename, close, zoom, scroll back, and the
+  rest, as `^a .` opens it.
+- **On a pane tab's label**, spyc switches to that tab, as a left click does,
+  and opens its menu.
+- **Anywhere else** (blank list space, the divider past the tabs, the status
+  bar, the prompt row, the agent strip), the leader menu opens.
+
+Each row shows the key that does the same, so the menu teaches it. A row
+shown with `(list)` works from the file list, since in the pane the key
+would be typed into the agent. `↑` and `↓` highlight a row and `Enter` fires
+it; `Esc` closes the menu. Any other key closes the menu and then does what it
+always does, so typing a row's key does what the row says, and from the pane
+a letter still reaches the agent. A row appears only where its action applies:
+no `e` on a directory, no suspend on a shell tab, and inside an archive no row
+the archive refuses.
+
+iTerm2 keeps a plain right-click for its own menu, so hold **⌃** while you
+right-click there; spyc reads a right-click with any modifier the same.
+
+## Open menus
 
 While a which-key menu is open (the leader from a right-click, or a chord
 you are part-way through), a click anywhere outside it closes it and does
 nothing else, so the next key you type is an ordinary key again. A click on
 the menu reaches nothing beneath it: not the list, and not the agent in the
 pane.
+
+The same holds for an entry's or a tab's menu, and the wheel beside one
+closes it too, rather than move the cursor off the entry it names.
 
 Click a row to do what its key does. An action row fires and the menu closes;
 a submenu row, such as the leader's `worktree`, opens that menu; a range row,

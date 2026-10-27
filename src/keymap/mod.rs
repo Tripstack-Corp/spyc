@@ -3,8 +3,10 @@
 //! Handles counts (e.g. `5j`), motion/verb keys, vi-style marks (`m{a-z}` /
 //! `'{a-z}`), search (`/`, `n`), and user-defined maps from `.spycrc` (parsed
 //! by the `config::dsl` module). Operators (e.g. `d{motion}`) are not modelled.
+//! The rows of an object's menu (`.`, `^a .`, a right-click) are `menu`'s.
 
 pub mod action;
+pub mod menu;
 pub mod resolver;
 pub mod user;
 

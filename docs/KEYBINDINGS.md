@@ -24,6 +24,7 @@ bound too, and on by default — see [Mouse](#mouse).
 | `R` | Remove selection (picks, else cursor) to the graveyard |
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
+| `.` | Menu for the entry under the cursor: each row shows its key. `↑`/`↓` highlight a row, `Enter` fires it, `Esc` closes; any other key closes the menu and does what it always does |
 | `u` / `-` | Climb to parent |
 | `/` | Search current listing (incremental; glob-aware, `^`/`$` anchors) |
 | `n` / `N` | Next / previous match of the last search |
@@ -144,6 +145,7 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^s n` | Open a second file-commander (column b, at PROJECT_HOME; top-only, `^s f` for full-height) |
 | `^s x` | Close the second file-commander (`^d` quits, keeping `b` open for `-r`) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
+| `^a .` | Menu for the active pane tab: restart, suspend, fork, rename, close and the rest, each with its key (keys as in `.`'s menu) |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
 | `^a t` | Open the active `agy` tab's thinking history in the in-app pager (`r` reloads) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
@@ -372,10 +374,16 @@ focus.
 | Double click on a chrome row | Select and copy that whole row — the status line, the divider, a flashed error |
 | `Ctrl` + left drag (list) | Copy absolute paths instead of names |
 | Middle click | Paste the clipboard |
-| Right click | Open the leader menu |
+| Right click on a file row | Move the cursor there and open that entry's menu, as `.` does |
+| Right click on the pane | While its program runs: focus it and open the active tab's menu, as `^a .` does |
+| Right click on a pane tab | Switch to that tab and open its menu |
+| Right click anywhere else | Open the leader menu |
 | Any click outside an open menu | Close it, and nothing else |
 | Left click on a menu row | Do what its key does; a range row (`1-9`) names its keys |
 | `Shift` + drag | Your terminal's own selection, bypassing spyc (Option/Fn on iTerm2) |
+
+iTerm2 keeps a plain right click for its own menu: hold `⌃` to send it to
+spyc. `.` and `^a .` open the same menus from the keyboard.
 
 **Capture costs your terminal's native click-drag selection while it's on** —
 inherent, not a spyc choice: the terminal can't both report the drag and handle

@@ -192,4 +192,6 @@ verbs above (`down`, `pick`,
 | `open_task_viewer` | open task viewer (most-recent bg task) |
 | `reopen_last_buffer` | reopen the most-recent closed pager buffer |
 | `find_file` | find file (project-wide fuzzy) |
+| `context_menu` | menu for the entry under the cursor |
+| `pane_context_menu` | menu for the active pane tab |
 | `noop` | nothing: what `unmap` binds |

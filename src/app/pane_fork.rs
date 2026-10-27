@@ -29,6 +29,16 @@ fn fork_base(info: &TabInfo, live_cwd: PathBuf) -> (String, PathBuf) {
     }
 }
 
+/// Whether `^a F` forks a tab running what `info` names at all: the kinds
+/// [`App::fork_active_tab`] refuses before it looks for a conversation.
+pub(super) fn forks(info: &TabInfo) -> bool {
+    match info.agent().fork_mode() {
+        ForkMode::Branch(_) => !info.wraps_agent(),
+        ForkMode::Duplicate => true,
+        ForkMode::Unsupported => false,
+    }
+}
+
 impl App {
     pub fn fork_active_tab(&mut self) {
         let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {

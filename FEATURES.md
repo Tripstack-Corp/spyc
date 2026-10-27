@@ -47,6 +47,11 @@ do from here?", modelled on Neovim's which-key.
   resolver, so it can't drift out of date (a test enforces that every
   advertised key resolves to the action it shows).
 - `?` (or `F1`) still opens the full, scrollable, searchable key reference.
+- **`.` opens the same kind of menu for the entry under the cursor**, and
+  **`^a .` for the active pane tab**: what you can do to that one thing, each
+  row with its key. `↑`/`↓` and `Enter` pick a row, `Esc` closes, and any
+  other key closes the menu and does what it always does. A right-click on a
+  file row, the pane or a tab label opens the same menu.
 
 ## Browsing files
 
@@ -68,7 +73,7 @@ Full reference: [Agents and MCP](docs/features/agents.md).
 
 ## Mouse
 
-Mouse reporting is on by default: the wheel scrolls whatever is under the pointer, a click focuses it, middle-click pastes and right-click opens the leader menu. A drag selects and copies text in a pane, the pager or any chrome row, or file names in the list, and a double-click takes a whole chrome line. `:mouse off` gives the terminal its own selection back.
+Mouse reporting is on by default: the wheel scrolls whatever is under the pointer, a click focuses it, middle-click pastes, and right-click opens the menu of what it lands on (a file row, the pane, a tab label), or the leader menu anywhere else. A drag selects and copies text in a pane, the pager or any chrome row, or file names in the list, and a double-click takes a whole chrome line. `:mouse off` gives the terminal its own selection back.
 
 Full reference: [Mouse](docs/features/mouse.md).
 

@@ -10,7 +10,7 @@ mod counts;
 mod documented;
 mod keys;
 mod panes;
-mod prefixes;
+pub(in crate::keymap) mod prefixes;
 
 fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)

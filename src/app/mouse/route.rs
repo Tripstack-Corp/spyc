@@ -124,12 +124,25 @@ pub enum MouseSink {
     FocusAndSelectPane,
     /// Paste the system clipboard wherever a paste would land.
     Paste,
-    /// Open the leader menu (right-click, from anywhere).
+    /// Open the leader menu: a right-click on no object.
     LeaderMenu,
+    /// Open the menu of the object a right-click landed on.
+    ContextMenu(MenuAt),
     /// Disarm the pending chord and close its popup, and nothing else.
     DismissChord,
     /// Fire entry `n` of the open which-key popup, as its key would.
     ChordRow(usize),
+}
+
+/// The object under a right-click that has a menu of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAt {
+    /// The file row at this index of this column.
+    Row(crate::app::state::Side, usize),
+    /// The pane's body: the active tab.
+    PaneBody,
+    /// The label of the 0-based pane tab.
+    Tab(usize),
 }
 
 /// What the user did, reduced to the axis routing cares about.
@@ -209,8 +222,15 @@ pub struct MouseSnapshot {
     /// The pointer is on the status bar's `⚠N` of unread stderr, as drawn.
     pub over_stderr_notice: bool,
     /// A chord is armed: the resolver takes the next key as its continuation,
-    /// whether or not the which-key popup is drawn yet.
+    /// whether or not the which-key popup is drawn yet. An object's menu
+    /// counts, though no chord opened it: a click beside it closes it too.
     pub chord_armed: bool,
+    /// The open popup is an object's menu, which names one entry or tab: the
+    /// wheel closes it rather than move the cursor off what it names.
+    pub menu_open: bool,
+    /// The file row a right-click is on, in a column listing a directory:
+    /// [`super::App::list_row_at`], resolved only for a right-click.
+    pub list_row: Option<(crate::app::state::Side, usize)>,
     /// The pointer is on the open which-key popup, as
     /// [`super::chord_hit::chord_hint_layout`] places it. Region-independent
     /// for the reason `covering_pager` is: the popup is drawn over the layout.
@@ -257,6 +277,27 @@ impl MouseSnapshot {
     /// in the leader menu `p` is a chdir and `P` overwrites PROJECT_HOME.
     const fn resolver_will_see_the_next_key(self) -> bool {
         !self.is_prompting && !matches!(self.pager_mount, Some(Mount::Overlay))
+    }
+
+    /// The object a right-click opens a menu for: a tab label, a file row, or
+    /// the body of a live pane. A pager or chrome painted over the layout hides
+    /// the row or pane beneath it, and blank space is no object.
+    const fn menu_at(self) -> Option<MenuAt> {
+        // A tab label is drawn through the chrome funnel, so it is read first.
+        if let Some(index) = self.tab_under_pointer {
+            return Some(MenuAt::Tab(index));
+        }
+        if self.covering_pager.is_some() || self.over_chrome_row {
+            return None;
+        }
+        if let Some((side, row)) = self.list_row {
+            return Some(MenuAt::Row(side, row));
+        }
+        if matches!(self.region, Some(Region::Pane)) && !self.pane_closed && !self.has_scroll_pager
+        {
+            return Some(MenuAt::PaneBody);
+        }
+        None
     }
 }
 
@@ -445,14 +486,16 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // while a chord is armed only disarms it, like every menu's outside click.
     // Acting as well would leave the chord armed for the next key, where the
     // leader's `p` changes directory and `x` closes the project. The wheel
-    // beside the popup scrolls as ever, and the chord waits.
+    // beside a chord's popup scrolls as ever, and the chord waits; beside an
+    // object's menu it closes the menu, which would otherwise go on naming an
+    // entry the cursor had left.
     if snap.over_chord_hint {
         return match (gesture, snap.chord_row) {
             (Gesture::Left, Some(row)) => MouseSink::ChordRow(row),
             _ => MouseSink::Swallow,
         };
     }
-    if snap.chord_armed && !matches!(gesture, Gesture::Wheel) {
+    if snap.chord_armed && (snap.menu_open || !matches!(gesture, Gesture::Wheel)) {
         return MouseSink::DismissChord;
     }
     let Some(region) = snap.region else {
@@ -508,12 +551,14 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     match gesture {
         Gesture::Middle => return MouseSink::Paste,
         Gesture::Right => {
-            return if snap.resolver_will_see_the_next_key() {
-                MouseSink::LeaderMenu
-            } else {
+            return if !snap.resolver_will_see_the_next_key() {
                 // Arming a chord nothing will consume latches it — see
                 // `resolver_will_see_the_next_key`.
                 MouseSink::Swallow
+            } else if let Some(at) = snap.menu_at() {
+                MouseSink::ContextMenu(at)
+            } else {
+                MouseSink::LeaderMenu
             };
         }
         Gesture::Left => {
@@ -724,6 +769,8 @@ mod tests {
             over_chrome_row: false,
             over_stderr_notice: false,
             chord_armed: false,
+            menu_open: false,
+            list_row: None,
             over_chord_hint: false,
             chord_row: None,
         }

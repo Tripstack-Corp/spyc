@@ -495,7 +495,7 @@ fn hint_key(label: &str) -> Option<crossterm::event::KeyEvent> {
 /// rather than listed because the tier guard below used to hardcode `Space w` as
 /// the only submenu it descended into — complete the day it was written, and
 /// silently incomplete for any submenu added afterwards.
-fn chord_states() -> Vec<(String, Vec<crossterm::event::KeyEvent>)> {
+pub(in crate::keymap) fn chord_states() -> Vec<(String, Vec<crossterm::event::KeyEvent>)> {
     let mut out: Vec<(String, Vec<crossterm::event::KeyEvent>)> = Vec::new();
     let mut queue: Vec<(String, Vec<crossterm::event::KeyEvent>)> = Vec::new();
 

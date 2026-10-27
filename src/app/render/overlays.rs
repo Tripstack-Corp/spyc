@@ -505,6 +505,15 @@ impl App {
         // Stitch the columns side by side row-by-row; pad missing cells with a
         // blank `col_w`-wide span so columns stay aligned. An entry's first line
         // carries its key; its continuation lines leave the key column blank.
+        // A menu's highlighted entry is reversed on every line it takes.
+        let selected = hint.menu.and_then(|m| m.selected);
+        let lit = |style: Style, entry: usize| {
+            if selected == Some(entry) {
+                style.add_modifier(Modifier::REVERSED)
+            } else {
+                style
+            }
+        };
         let blank = Span::styled(" ".repeat(layout.col_w), label_style);
         let rows_tall = layout.columns.iter().map(Vec::len).max().unwrap_or(0);
         let mut lines: Vec<Line> = Vec::with_capacity(rows_tall);
@@ -521,10 +530,10 @@ impl App {
                 } else {
                     " ".repeat(key_w + 3)
                 };
-                spans.push(Span::styled(key_cell, key_style));
+                spans.push(Span::styled(key_cell, lit(key_style, line.entry)));
                 spans.push(Span::styled(
                     format!("{:<label_w$} ", line.label),
-                    label_style,
+                    lit(label_style, line.entry),
                 ));
             }
             lines.push(Line::from(spans));

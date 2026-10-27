@@ -86,6 +86,10 @@ const SECTIONS: &[Section] = &[
             ),
             ("V", "open $EDITOR in top pane (bottom pane stays visible)"),
             ("D", "open in pager (top pane, bottom pane stays visible)"),
+            (
+                ".",
+                "menu for the entry under the cursor (↑↓ Enter pick a row, Esc closes; or right-click it)",
+            ),
             ("u  -", "climb to parent"),
             ("~  Home", "go to home directory ($HOME)"),
             (
@@ -349,6 +353,10 @@ const SECTIONS: &[Section] = &[
                 "open agy thinking history in the in-app pager (r reload, Esc close)",
             ),
             ("^a u", "quick select — pick URL/path/SHA/IP from pane"),
+            (
+                "^a .",
+                "menu for the active pane tab (or right-click the pane or a tab label)",
+            ),
             (
                 "^a g",
                 "image gallery popup: received + unsent pastes (Enter view, q close)",

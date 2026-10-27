@@ -253,6 +253,7 @@ impl Resolver {
             KeyCode::Char('i' | 'I') => ResolverOutcome::Action(Action::PanePipeInventory),
             KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
             KeyCode::Char('g' | 'G') => ResolverOutcome::Action(Action::OpenImageGallery),
+            KeyCode::Char('.') => ResolverOutcome::Action(Action::PaneContextMenu),
             // `^a ↓` — send a literal Ctrl-A to the pane (tmux send-prefix):
             // the prefix is otherwise unreachable by the child, but Claude
             // binds ^a (e.g. expand notes), so this is the escape hatch.
@@ -784,23 +785,6 @@ impl Resolver {
                 ResolverOutcome::Action(Action::Help)
             }
 
-            // Display / edit in top pane.
-            KeyCode::Char('D') => {
-                self.reset();
-                ResolverOutcome::Action(Action::DisplayInPane)
-            }
-            KeyCode::Char('V') => {
-                self.reset();
-                ResolverOutcome::Action(Action::EditInPane)
-            }
-            KeyCode::Char('I') => {
-                self.reset();
-                ResolverOutcome::Action(Action::ShowMemory)
-            }
-            KeyCode::Char('C') => {
-                self.reset();
-                ResolverOutcome::Action(Action::ColorToggle)
-            }
             // `A` (activity monitor → :activity) and `s` (set env → :set)
             // demoted to `:`-only to slim the default map.
 
@@ -833,13 +817,28 @@ impl Resolver {
                 ResolverOutcome::Pending
             }
 
-            _ => {
+            code => {
                 self.reset();
-                ResolverOutcome::Ignored
+                single_key_action(code).map_or(ResolverOutcome::Ignored, ResolverOutcome::Action)
             }
         }
     }
 }
 
+/// The keys that fire one action on their own, with no count and no chord: the
+/// rest of [`Resolver::feed`]'s table, which is at its length pin.
+const fn single_key_action(code: KeyCode) -> Option<Action> {
+    Some(match code {
+        // Display / edit in top pane.
+        KeyCode::Char('D') => Action::DisplayInPane,
+        KeyCode::Char('V') => Action::EditInPane,
+        KeyCode::Char('I') => Action::ShowMemory,
+        KeyCode::Char('C') => Action::ColorToggle,
+        // The menu of the entry under the cursor.
+        KeyCode::Char('.') => Action::ContextMenu,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
