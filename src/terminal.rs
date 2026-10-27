@@ -1,6 +1,7 @@
 //! The host terminal: entering and leaving the TUI, handing the tty to a
 //! foreground child and back, the mouse-reporting modes, and the signal
-//! handlers that restore all of it when spyc is killed.
+//! handlers that restore all of it when spyc is killed. Every hand-over moves
+//! fd 2 with the screen (`crate::stderr_capture`).
 
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -427,6 +428,7 @@ pub fn setup_terminal() -> Result<Tui> {
 }
 
 pub fn restore_terminal(terminal: &mut Tui) -> Result<()> {
+    crate::stderr_capture::release();
     disable_raw_mode()?;
     // Pop the kitty keyboard enhancement flag (best-effort -- if
     // we never pushed it because the terminal didn't support it,
@@ -461,6 +463,9 @@ pub fn panic_ends_the_tui(thread: std::thread::ThreadId, ui: std::thread::Thread
 /// The panic hook's half of [`restore_terminal`]: it has no `Tui` to write
 /// through, so it writes to stdout.
 pub fn restore_on_panic() {
+    // SPYC-TRAP(stderr-follows-the-screen): first, so the panic's message
+    // reaches the terminal rather than the log.
+    crate::stderr_capture::release();
     // Best-effort terminal restore — ignore errors. Mirror
     // `restore_terminal` so a crash doesn't leave the shell in raw mode,
     // on the alt screen, or — the two that were easy to miss here — with
@@ -517,6 +522,9 @@ pub fn set_mouse_capture(terminal: &mut Tui, capture: bool) -> Result<()> {
 /// causes the "flash of old shell content" glitch. Instead, we blank our
 /// alt screen and let the child's `smcup` reuse or stack on top of it.
 pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
+    // SPYC-TRAP(stderr-follows-the-screen): the child inherits fd 2, and its
+    // errors belong on the screen it now owns.
+    crate::stderr_capture::release();
     disable_raw_mode()?;
     // Pop the kitty keyboard-enhancement flag BEFORE the child can see any
     // input: left pushed, a plain `$SHELL` (or any program that doesn't
@@ -549,6 +557,7 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
 /// here means that if the child's `rmcup` did drop us to the main screen
 /// we bounce right back before anything is visible.
 pub fn resume_tui(terminal: &mut Tui) -> Result<()> {
+    crate::stderr_capture::reclaim();
     enable_raw_mode()?;
     execute!(
         terminal.backend_mut(),

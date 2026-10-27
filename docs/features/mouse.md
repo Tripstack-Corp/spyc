@@ -49,6 +49,8 @@ quick-select and `y` in the pager are the mouse-free yank paths.
 ## Clicking and scrolling
 
 - **Click a pane tab to switch to it.**
+- **Click the status bar's `⚠N` to open `:stderr`**, the log of what spyc's
+  stderr received.
 - Over an agent pane the wheel scrolls in whatever way that agent can:
   **claude** and **agy** scroll their own output; **codex**'s main chat view
   doesn't scroll, so the wheel drives its `^T` transcript overlay instead —

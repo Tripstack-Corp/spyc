@@ -630,6 +630,41 @@ the alt screen, in raw mode, and — since `[mouse] capture` defaults on — wit
 session. The plan that introduced default-on capture listed this teardown as
 its prerequisite; the default shipped first, which is how the gap reached users.
 
+## spyc's stderr follows the screen
+
+<!-- SPYC-TRAP: stderr-follows-the-screen -->
+While the TUI owns the terminal, fd 2 points at a per-run log
+(`$XDG_STATE_HOME/spyc/stderr/<pid>.log`, `src/stderr_capture.rs`) instead of
+the tty. Before, anything writing stderr drew straight over the frame: a
+library's warning, a helper spawned with an inherited stderr, and macOS's
+libmalloc, which prints `MallocStackLogging: can't turn off malloc stack
+logging because it was not enabled.` from inside `fork()` in a pane's child,
+before portable-pty's `pre_exec` has pointed the child's stdio at its pty. No
+spyc code runs early enough in the child to catch that one; the parent's fd 2,
+which the child inherits, is the only place it can be caught.
+
+- **A file, not a pipe.** A write to a file never blocks, however far behind
+  the reader is; with a pipe, a stalled reader would block every stderr write
+  in the process once the buffer filled, the UI thread's included. What a
+  hard crash prints on its way down (a Zig panic in libghostty-vt, malloc
+  corruption, a stack overflow) is on disk afterwards, where a pipe's buffer
+  dies with the process. And a child that outlives spyc never writes into a
+  closed pipe and takes a `SIGPIPE`.
+- **Followed by a descriptor watch.** FSEvents reports nothing for appends
+  through a descriptor held open (it fires on the close), so the follower
+  (`src/app/stderr_log.rs`) rides `agent::tail::watch`: kqueue `EVFILT_VNODE`
+  on macOS, inotify elsewhere. Readings land in the Model through
+  `Wake::Stderr`; nothing polls.
+- **Every hand-over moves fd 2 with the screen.** `suspend_tui`,
+  `restore_terminal` and `restore_on_panic` give the original stderr back, and
+  `resume_tui` takes it again. Miss one and the failure is silent: an
+  editor's or a subshell's errors, or the UI thread's panic message, go to a
+  log nobody is looking at.
+- **Bounded.** The file is emptied past 4 MiB once read, and the Model keeps
+  the last 2,000 lines. At a clean quit an empty log is deleted and a written
+  one kept, its path printed. Another run's log goes once that run has ended:
+  straight away when empty, after a week when not.
+
 ## Grapheme clustering (DEC mode 2027)
 
 Pane terminals run mode 2027 **on**, which is not libghostty's default, so a

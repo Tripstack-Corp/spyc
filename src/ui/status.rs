@@ -39,12 +39,40 @@ pub struct StatusBar<'a> {
     /// emoji. Set on terminals that mangle the 2-cell astral glyph (GNU screen,
     /// anything not truecolor) so the header reads as branded, not broken.
     pub plain_logo: bool,
+    /// The `⚠N` of unread stderr lines ([`stderr_notice`]), drawn right after
+    /// the logo. `None` draws nothing there.
+    pub stderr_notice: Option<&'a str>,
 }
 
 /// Powerline right-pointing triangle (requires a Nerd Font or powerline-patched font).
 const PL_SEP: &str = "\u{e0b0}";
 
 const ELLIPSIS: &str = "...";
+
+/// The status bar's mark for `unread` stderr lines, `⚠3` or `⚠99+`; `None`
+/// when there are none.
+pub fn stderr_notice(unread: u64) -> Option<String> {
+    match unread {
+        0 => None,
+        1..=99 => Some(format!("\u{26a0}{unread}")),
+        _ => Some("\u{26a0}99+".to_string()),
+    }
+}
+
+/// Whether display column `col` of a drawn bar `line` falls on its `notice`.
+/// The mouse asks this of the line the renderer recorded, so a click and the
+/// glyph it hits can't disagree about where the glyph is.
+pub fn notice_at(line: &Line<'_>, col: usize, notice: &str) -> bool {
+    let mut x = 0;
+    for span in &line.spans {
+        let w = dw(&span.content);
+        if (x..x + w).contains(&col) {
+            return span.content == notice;
+        }
+        x += w;
+    }
+    false
+}
 
 fn push_segment(spans: &mut Vec<Span>, text: &str, fg: Color, bg: Color, next_bg: Color) {
     spans.push(Span::styled(
@@ -94,10 +122,31 @@ impl StatusBar<'_> {
         self.powerline(area)
     }
 
-    /// The logo. Truecolor terminals get the 🌶️ emoji; degraded ones (GNU screen,
-    /// non-truecolor) mangle the 2-cell astral glyph into junk, so paint a
-    /// spice-red block instead — same 4-col footprint, reads as intentional.
+    /// The logo, and the stderr notice after it. Truecolor terminals get the 🌶️
+    /// emoji; degraded ones (GNU screen, non-truecolor) mangle the 2-cell astral
+    /// glyph into junk, so paint a spice-red block instead — same 4-col
+    /// footprint, reads as intentional.
     fn push_logo(&self, spans: &mut Vec<Span<'static>>, term_bg: Color) {
+        self.push_pepper(spans, term_bg);
+        if let Some(notice) = self.stderr_notice {
+            spans.push(Span::styled(
+                notice.to_string(),
+                Style::default()
+                    .fg(self.theme.prompt_prefix)
+                    .bg(term_bg)
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+        }
+    }
+
+    /// Columns [`Self::push_logo`] takes: the pepper's four, and the notice
+    /// with its trailing space.
+    fn logo_width(&self) -> usize {
+        4 + self.stderr_notice.map_or(0, |notice| dw(notice) + 1)
+    }
+
+    fn push_pepper(&self, spans: &mut Vec<Span<'static>>, term_bg: Color) {
         // Pepper emoji gets its own span with terminal-default bg so the
         // emoji colour rendering isn't clipped by the segment background.
         let emoji_text = " \u{1f336}\u{fe0f} ";
@@ -139,7 +188,7 @@ impl StatusBar<'_> {
 
         let term_bg = Color::Reset;
 
-        let emoji_w = 4; // space + 🌶️ (2 cols) + space
+        let emoji_w = self.logo_width(); // space + 🌶️ (2 cols) + space, then the notice
 
         let project_spans = self.project_spans(avail);
         let session_text = self
@@ -279,6 +328,18 @@ impl StatusBar<'_> {
                 Style::default().add_modifier(Modifier::BOLD),
             )]
         };
+        if let Some(notice) = self.stderr_notice {
+            spans.splice(
+                0..0,
+                [
+                    Span::styled(
+                        notice.to_string(),
+                        Style::default().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                ],
+            );
+        }
         let pre_w = project_chips::width(&spans);
         let cost = |s: &str| if s.is_empty() { 0 } else { 2 + dw(s) };
         let suffix = self.fitting_suffix(avail.saturating_sub(pre_w), cost, dw(self.path));
@@ -436,6 +497,7 @@ mod tests {
                     agent_info,
                     theme: &theme,
                     plain_logo,
+                    stderr_notice: None,
                 };
                 f.render_widget(Paragraph::new(bar.build_line(area)), area);
             })
@@ -465,6 +527,7 @@ mod tests {
             agent_info: None,
             theme: &theme,
             plain_logo: true,
+            stderr_notice: None,
         };
         bar.build_line(Rect::new(0, 0, width, 1))
             .spans
@@ -509,6 +572,7 @@ mod tests {
             agent_info: None,
             theme: &theme,
             plain_logo: true,
+            stderr_notice: None,
         };
         let text: String = bar
             .build_line(Rect::new(0, 0, 58, 1))
@@ -629,6 +693,7 @@ mod tests {
             agent_info: None,
             theme: &theme,
             plain_logo: true,
+            stderr_notice: None,
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -687,6 +752,7 @@ mod tests {
                     agent_info: None,
                     theme: &theme,
                     plain_logo: true,
+                    stderr_notice: None,
                 };
                 let line = bar.build_line(Rect::new(0, 0, w, 1));
                 let mut col = 0;
@@ -746,6 +812,7 @@ mod tests {
                         agent_info: None,
                         theme: &theme,
                         plain_logo: true,
+                        stderr_notice: None,
                     };
                     let line = bar.build_line(Rect::new(0, 0, w, 1));
                     let path = line
@@ -801,6 +868,7 @@ mod tests {
             agent_info: None,
             theme: &theme,
             plain_logo: true,
+            stderr_notice: None,
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
         let parting = line
@@ -837,5 +905,74 @@ mod tests {
             plain.contains("/tmp"),
             "rest of the bar still renders: {plain:?}"
         );
+    }
+
+    #[test]
+    fn the_notice_counts_unread_lines_and_caps_at_ninety_nine() {
+        assert_eq!(stderr_notice(0), None);
+        assert_eq!(stderr_notice(3).as_deref(), Some("\u{26a0}3"));
+        assert_eq!(stderr_notice(99).as_deref(), Some("\u{26a0}99"));
+        assert_eq!(stderr_notice(150).as_deref(), Some("\u{26a0}99+"));
+    }
+
+    /// The notice is drawn right after the pepper, and the column the terminal
+    /// actually paints it in is the one `notice_at` answers for — the two
+    /// halves a click on it depends on.
+    #[test]
+    fn the_notice_sits_by_the_pepper_where_a_click_finds_it() {
+        for (mono, plain_logo) in [(false, false), (false, true), (true, false)] {
+            let theme = Theme {
+                mono,
+                ..Theme::default()
+            };
+            let area = Rect::new(0, 0, 80, 1);
+            let bar = StatusBar {
+                project_home: Some("spyc"),
+                session_name: None,
+                projects: None,
+                path: PATH,
+                suffix: "[hidden:1]",
+                suffix_short: None,
+                git_info: Some("main"),
+                agent_info: None,
+                theme: &theme,
+                plain_logo,
+                stderr_notice: Some("\u{26a0}3"),
+            };
+            let line = bar.build_line(area);
+            let mut terminal = Terminal::new(TestBackend::new(area.width, 1)).unwrap();
+            terminal
+                .draw(|f| f.render_widget(Paragraph::new(line.clone()), area))
+                .unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let cells: Vec<&str> = (0..area.width)
+                .map(|x| buf.cell((x, 0)).map_or(" ", |c| c.symbol()))
+                .collect();
+            let at = cells
+                .iter()
+                .position(|c| *c == "\u{26a0}")
+                .unwrap_or_else(|| panic!("no notice in {cells:?}"));
+            let expected = if mono { 0 } else { 4 };
+            assert_eq!(
+                at, expected,
+                "mono={mono} plain_logo={plain_logo}: {cells:?}"
+            );
+            assert_eq!(cells[at + 1], "3");
+            assert!(notice_at(&line, at, "\u{26a0}3"), "mono={mono}");
+            assert!(notice_at(&line, at + 1, "\u{26a0}3"), "mono={mono}");
+            assert!(!notice_at(&line, at + 2, "\u{26a0}3"), "mono={mono}");
+            if at > 0 {
+                assert!(!notice_at(&line, at - 1, "\u{26a0}3"), "mono={mono}");
+            }
+            let text: String = cells.concat();
+            assert!(text.contains(PATH), "the path still fits: {text}");
+            if !mono {
+                assert_eq!(
+                    line.width(),
+                    usize::from(area.width),
+                    "the bar fills its row"
+                );
+            }
+        }
     }
 }
