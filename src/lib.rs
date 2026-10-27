@@ -46,6 +46,7 @@ mod project_id;
 mod shell;
 mod skill;
 mod state;
+mod stderr_capture;
 mod sysinfo;
 mod term_title;
 mod terminal;
@@ -439,8 +440,10 @@ pub fn run() -> Result<()> {
         &std::env::current_dir().unwrap_or_default(),
     );
     let mut terminal = setup_terminal()?;
+    let stderr_log = stderr_capture::start();
     let mut app = App::new(cli.resume, color_mode);
     app.set_cwd_file(cwd_file);
+    app.set_stderr_log(stderr_log);
     app.queue_startup_commands(cli.cmd);
     // Detect the terminal's graphics protocol (Kitty/iTerm2/Sixel/halfblocks +
     // font cell size) for inline diagram rendering — ONCE, here, before the
@@ -459,6 +462,9 @@ pub fn run() -> Result<()> {
         eprintln!("spyc: {note}");
     }
     mcp::stop_status_trace();
+    if let Some(path) = stderr_capture::finish() {
+        eprintln!("spyc: stderr from this run \u{2192} {}", path.display());
+    }
     if let Some(summary) = &app.exit_summary {
         println!("\u{1f336}\u{fe0f} {summary}");
     }

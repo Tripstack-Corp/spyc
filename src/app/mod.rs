@@ -183,6 +183,7 @@ mod sources;
 mod startup_commands;
 mod startup_tabs;
 pub mod state;
+mod stderr_log;
 mod streaming;
 mod subshell_banner;
 mod tab_completion;

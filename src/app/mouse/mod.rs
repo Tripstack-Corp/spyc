@@ -240,6 +240,42 @@ impl super::App {
             .unwrap_or_default()
     }
 
+    /// The pane tab whose label the pointer is on. Only resolved over the
+    /// divider: the width walk allocates, and a wheel tick over the pane has no
+    /// use for it. Not while the prompt row has taken the divider, since there
+    /// are no tabs on it then.
+    fn tab_under_pointer(
+        &self,
+        region: Option<route::Region>,
+        layout: &super::FrameLayout,
+        ev: MouseEvent,
+    ) -> Option<usize> {
+        if !matches!(region, Some(route::Region::Divider))
+            || self.displaced_prompt_row(layout) == layout.divider
+        {
+            return None;
+        }
+        let bar_width = layout.divider.map_or(0, |d| d.width);
+        let widths = self.divider_tab_widths(bar_width);
+        tab_hit::tab_at_point(layout.divider, &widths, ev.column, ev.row)
+    }
+
+    /// Whether the pointer is on the `⚠N` of unread stderr, asked of the row the
+    /// renderer recorded, so only a drawn notice answers.
+    fn stderr_notice_under(&self, ev: MouseEvent) -> bool {
+        let Some(notice) = crate::ui::status::stderr_notice(self.state.stderr.unread()) else {
+            return false;
+        };
+        self.view
+            .chrome_rows
+            .borrow()
+            .iter()
+            .find(|r| r.y == ev.row && (r.x..r.x.saturating_add(r.width)).contains(&ev.column))
+            .is_some_and(|r| {
+                crate::ui::status::notice_at(&r.line, usize::from(ev.column - r.x), &notice)
+            })
+    }
+
     /// Handle one mouse event: hit-test the pointer, route it, dispatch the sink.
     ///
     /// Ignores everything unless spyc actually asked the terminal for mouse
@@ -327,18 +363,8 @@ impl super::App {
             has_scroll_pager: self.view.project().scroll_pager.is_some(),
             pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
-            // Only resolved over the divider: the width walk allocates, and a
-            // wheel tick over the pane has no use for it. Not while the prompt
-            // row has taken the divider, since there are no tabs on it then.
-            tab_under_pointer: if matches!(region, Some(route::Region::Divider))
-                && self.displaced_prompt_row(&layout) != layout.divider
-            {
-                let bar_width = layout.divider.map_or(0, |d| d.width);
-                let widths = self.divider_tab_widths(bar_width);
-                tab_hit::tab_at_point(layout.divider, &widths, ev.column, ev.row)
-            } else {
-                None
-            },
+            tab_under_pointer: self.tab_under_pointer(region, &layout, ev),
+            over_stderr_notice: self.stderr_notice_under(ev),
             // The renderer records every selectable chrome row each frame, so
             // this is a lookup rather than a second hit-test — one source for
             // "what got drawn" and "what a click can select".
@@ -373,6 +399,7 @@ impl super::App {
                 self.begin_pane_selection(ev)
             }
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
+            MouseSink::StderrLog => self.open_stderr_log(),
             MouseSink::PaneTab(index) => {
                 // Reuse the keyboard's own tab switch rather than calling
                 // `tabs.switch_to`: it also stashes/restores the per-tab

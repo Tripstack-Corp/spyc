@@ -1,6 +1,6 @@
 # Shell and the command line
 
-Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, the `:` command line, taking your shell to where you quit, and commands left running in the background.
+Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, the `:` command line, taking your shell to where you quit, commands left running in the background, and where spyc's own stderr goes.
 
 ## Shell integration
 
@@ -108,6 +108,8 @@ end).
   so `gf`/`gF` jump from a hit to the file in-place. Capped at 5000
   matches; refine the pattern if you hit it. Power users: `! rg foo`
   still works for ripgrep's full flag surface.
+- **`:stderr`** — what spyc's own stderr received this run, in the pager
+  (see spyc's stderr, below)
 - **`:q`** / **`:quit`** — quit
 
 The `:` prompt keeps a history of its own, separate from the shell's:
@@ -205,3 +207,22 @@ to lock you out of spyc.
   carried over. Bring it back via `:fg` or `:task-to-pane`.
 - The quit confirmation (`Q`/`^D`) counts backgrounded running tasks
   alongside pane-tab processes.
+
+## spyc's stderr
+
+Whatever spyc, or a program it starts, writes to stderr while spyc is on
+screen goes to a log instead of over the frame: a library's warning, macOS's
+`MallocStackLogging: can't turn off malloc stack logging…` as a pane starts,
+a helper program's complaint.
+
+- **`⚠N`** appears right after the pepper in the status bar while the log has
+  lines you haven't seen (`⚠99+` past 99).
+- **`:stderr`** opens the log in the pager, newest last, and clears the `⚠`.
+  New lines appear in it while it's open. Clicking the `⚠` opens it too.
+- The log is also a file, `~/.local/state/spyc/stderr/<pid>.log` (under
+  `$XDG_STATE_HOME/spyc` when that's set), named in the pager's title. On
+  quit spyc prints its path if anything was written to it, and deletes it if
+  not; old logs go after a week.
+- A program that takes the terminal over (`$EDITOR`, `$PAGER`, the `$`
+  subshell) writes its errors to the terminal as usual, and so does a spyc
+  panic. What a harder crash prints on its way down is in the log afterwards.

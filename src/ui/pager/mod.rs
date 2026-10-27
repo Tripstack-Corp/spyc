@@ -231,6 +231,9 @@ pub struct PagerView {
     /// among task viewers; the main loop refreshes the contents from
     /// the task buffer while the task is running.
     pub task_id: Option<u32>,
+    /// When set, this pager is the `:stderr` log as it stood at this many
+    /// bytes; the main loop rebuilds it once the log has grown past that.
+    pub stderr_log: Option<u64>,
     /// When set, this pager view is backed by a [`crate::app`] *pager stream*
     /// (the unified worker→pager abstraction: grep / git-view diff·show·blame /
     /// agent transcript). The main tick loop drains the active stream into this

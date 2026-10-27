@@ -387,6 +387,7 @@ impl App {
         );
         let agent_info = self.active_agent_status();
         let chips = self.project_chips(self.spicy_pulse_color(self.view.agent_anim_frame));
+        let stderr_notice = crate::ui::status::stderr_notice(self.state.stderr.unread());
         let line = StatusBar {
             project_home: project_label.as_deref(),
             session_name: self.state.session_name.as_deref(),
@@ -399,6 +400,7 @@ impl App {
             theme: &self.view.theme,
             // Non-truecolor terminals (GNU screen) mangle the 🌶️ glyph → red block.
             plain_logo: self.view.color_depth != crate::ui::color_depth::ColorDepth::TrueColor,
+            stderr_notice: stderr_notice.as_deref(),
         }
         .build_line(rect);
         self.draw_chrome_line(frame, rect, line);

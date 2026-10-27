@@ -30,6 +30,7 @@ impl PagerView {
             fit_to_content: false,
             no_history: false,
             task_id: None,
+            stderr_log: None,
             stream_id: None,
             columns: 1,
             source_path: None,
