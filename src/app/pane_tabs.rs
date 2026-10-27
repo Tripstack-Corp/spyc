@@ -76,6 +76,22 @@ impl App {
     /// `(is_shell, suspended)` for the active tab, with no pane open treated
     /// as a shell (so `^z` is forwarded rather than toggling a suspend that
     /// has nothing to act on — see `pane_suspend_key_action`).
+    /// The `pane_toggle_suspend` action: what `^z` does on a tab that isn't a
+    /// shell. A shell keeps `^z` for its own job control, so it is left running
+    /// and the flash says so.
+    pub(super) fn toggle_suspend_action(&mut self) -> Vec<Effect> {
+        if self.runtime.project().pane_tabs.is_none() {
+            self.state.flash_info("no pane tab to suspend");
+            return Vec::new();
+        }
+        if self.active_tab_shell_and_suspended().0 {
+            self.state
+                .flash_info("a shell tab keeps ^z for its own jobs: type ^z in the shell");
+            return Vec::new();
+        }
+        self.toggle_pane_suspend()
+    }
+
     pub(super) fn active_tab_shell_and_suspended(&self) -> (bool, bool) {
         self.runtime
             .project()
@@ -1021,7 +1037,6 @@ mod suspend_action_tests {
     }
 
     #[test]
-    #[ignore = "red: the keymap knows no `pane_toggle_suspend` action"]
     fn a_key_bound_to_pane_toggle_suspend_suspends_then_resumes_the_tab() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
@@ -1043,7 +1058,6 @@ mod suspend_action_tests {
     /// A shell tab keeps `^z` for its own job control, so the action leaves it
     /// running and says why.
     #[test]
-    #[ignore = "red: the keymap knows no `pane_toggle_suspend` action"]
     fn pane_toggle_suspend_leaves_a_shell_tab_running() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {

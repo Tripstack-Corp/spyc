@@ -464,6 +464,27 @@ impl App {
     /// (so rebuild via `ansi-to-tui` works) and `screen.contents()`
     /// is plain text — seeding would erase colour. Acceptable;
     /// can revisit if users hit it.
+    /// `:exec`: run the executable under the cursor as a `!` capture, as
+    /// `!./name` would, so its output streams into the live pager.
+    pub(super) fn execute_entry(&mut self) {
+        let cur = self.state.cur();
+        let Some(row) = cur.rows.get(cur.cursor.index) else {
+            self.state.flash_error("exec: nothing under the cursor");
+            return;
+        };
+        let name = row
+            .path
+            .file_name()
+            .map_or_else(|| row.display.clone(), |n| n.to_string_lossy().into_owned());
+        if row.kind != crate::fs::EntryKind::Executable {
+            self.state
+                .flash_error(format!("exec: {name} is not executable"));
+            return;
+        }
+        let run = format!("./{name}");
+        self.start_capture(&crate::shell::shell_quote(&run), &run, &run);
+    }
+
     pub fn demote_pane_to_task(&mut self) {
         let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
             self.state.flash_error("no pane to demote");
@@ -917,7 +938,6 @@ pub(super) mod menu_action_tests {
     /// `:exec` runs the executable under the cursor as a `!` capture in the
     /// live pager, as `!./name` would.
     #[test]
-    #[ignore = "red: there is no `:exec` command"]
     fn exec_runs_the_executable_under_the_cursor_as_a_capture() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
@@ -936,7 +956,6 @@ pub(super) mod menu_action_tests {
 
     /// A file without the executable bit is refused by name, and nothing runs.
     #[test]
-    #[ignore = "red: there is no `:exec` command"]
     fn exec_refuses_a_file_that_is_not_executable() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
@@ -961,7 +980,6 @@ pub(super) mod menu_action_tests {
     /// `pane_to_task` binds by name and moves the active pane tab to the
     /// background tasks, as `:pane-to-task` does.
     #[test]
-    #[ignore = "red: the keymap knows no `pane_to_task` action"]
     fn a_key_bound_to_pane_to_task_moves_the_active_tab_to_the_tasks() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {

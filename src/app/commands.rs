@@ -701,6 +701,20 @@ pub(super) fn cmd_task_to_pane(app: &mut App, args: &str) -> Vec<Effect> {
     Vec::new()
 }
 
+/// `:exec` — run the executable under the cursor as a `!` capture.
+pub(super) fn cmd_exec(app: &mut App, args: &str) -> Vec<Effect> {
+    if !args.is_empty() {
+        app.state
+            .flash_error("exec takes no arguments: it runs the file under the cursor");
+        return Vec::new();
+    }
+    app.apply(&crate::keymap::Action::ExecuteEntry)
+        .unwrap_or_else(|e| {
+            app.state.flash_error(format!("exec: {e:#}"));
+            Vec::new()
+        })
+}
+
 /// `:pane-to-task [N]` — demote a pane tab to a background task (inverse of
 /// `:task-to-pane`). The pty keeps running; we stop displaying it. No arg =
 /// active tab; numeric arg = 1-indexed tab number (matches the `[1]` `[2]`

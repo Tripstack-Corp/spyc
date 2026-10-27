@@ -76,6 +76,7 @@ verbs above (`down`, `pick`,
 | `jump_prev_pick` | jump to prev picked entry |
 | `enter_or_display` | enter dir / pager on text file |
 | `enter_or_edit` | enter dir / editor on file (suspends TUI) |
+| `execute_entry` | run the executable, output in the pager |
 | `climb` | climb to parent |
 | `home` | home directory |
 | `toggle_pick` | toggle pick |
@@ -156,6 +157,8 @@ verbs above (`down`, `pick`,
 | `pane_rename_tab` | rename pane tab |
 | `pane_restart_tab` | restart pane tab command |
 | `pane_fork_tab` | fork pane tab's conversation |
+| `pane_toggle_suspend` | suspend / resume pane tab |
+| `pane_to_task` | move pane tab to a background task |
 | `pane_pipe_content` | pipe file contents to pane (your own files only) |
 | `pane_pipe_inventory` | pipe inventory contents to pane (your own files only) |
 | `vsplit_toggle` | vertical split: open / close |

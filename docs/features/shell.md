@@ -179,6 +179,10 @@ to lock you out of spyc.
   buffer. On close, *exited* tasks are promoted: snapshot pushed to
   buffer history, task dropped from the bg list. Running tasks stay
   put -- you can come back via `gB` / `[t`.
+- **`:exec`** runs the executable under the cursor the way `!./name`
+  would: its output streams into the live pager, and `^Z` backgrounds
+  it. A file without the executable bit is refused by name. A program
+  that asks for input belongs in `;` instead.
 - **`:pause`** / **`:pause N`** sends `SIGSTOP` to the task's
   process group, halting the whole subprocess tree (`make → cc →
   ld` all stop together). **`:resume`** / **`:resume N`** sends
