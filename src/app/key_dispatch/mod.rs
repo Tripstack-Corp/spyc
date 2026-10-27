@@ -396,7 +396,7 @@ impl App {
     /// Tear down the which-key chord-hint popup and its pending timer. If a
     /// popup was actually on screen, request a full repaint so its overlay
     /// cells are cleared from underneath (the overlay-dismiss convention).
-    fn clear_chord_hint(&mut self) {
+    pub(super) fn clear_chord_hint(&mut self) {
         self.view.chord_hint_due = None;
         if self.view.chord_hint.take().is_some() {
             self.view.needs_full_repaint = true;

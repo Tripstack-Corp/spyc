@@ -19,6 +19,7 @@ use super::modal::{ModalSnapshot, active_modal};
 use super::{Effect, FrameLayout};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
+pub(super) mod chord_hit;
 mod forward;
 #[cfg(test)]
 mod pane_copy_tests;
@@ -337,39 +338,7 @@ impl super::App {
         let layout = self.frame_layout(frame);
         let region = region_at(&layout, ev.column, ev.row);
 
-        let snap = MouseSnapshot {
-            // Same precedence the keyboard uses — one owner for "which modal
-            // wins", so mouse and keys can't disagree about it.
-            modal: active_modal(ModalSnapshot {
-                has_find_picker: self.runtime.find_picker.is_some(),
-                has_capture: self.runtime.pending_capture.is_some(),
-                overlay_awaiting_dismiss: self.view.project().overlay_awaiting_dismiss,
-                has_quick_select: self.view.quick_select.is_some(),
-                has_harpoon: self.view.harpoon_menu.is_some(),
-                has_image_gallery: self.view.image_gallery.is_some(),
-                has_image_view: self.view.image_view.is_some(),
-            }),
-            region,
-            pager_mount: self.focused_top_pager_mount(),
-            covering_pager: self.pager_slot_at(ev.column, ev.row),
-            pane_wants_mouse: self.active_pane_wants_mouse(),
-            // Same sources `route_input`'s snapshot uses (`route.rs`), so the
-            // mouse and the keyboard can't disagree about what owns the screen.
-            force_pane_selection: matches!(gesture, Gesture::Left)
-                && ev
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL),
-            is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
-            has_scroll_pager: self.view.project().scroll_pager.is_some(),
-            pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
-            pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
-            tab_under_pointer: self.tab_under_pointer(region, &layout, ev),
-            over_stderr_notice: self.stderr_notice_under(ev),
-            // The renderer records every selectable chrome row each frame, so
-            // this is a lookup rather than a second hit-test — one source for
-            // "what got drawn" and "what a click can select".
-            over_chrome_row: self.chrome_col_at(ev).is_some(),
-        };
+        let snap = self.mouse_snapshot(ev, gesture, &layout, frame, region);
 
         match route_mouse(snap, gesture) {
             MouseSink::Swallow => Vec::new(),
@@ -416,6 +385,11 @@ impl super::App {
                 }
             }
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
+            MouseSink::DismissChord => {
+                self.state.resolver.cancel();
+                self.clear_chord_hint();
+                Vec::new()
+            }
             MouseSink::LeaderMenu => {
                 self.state.resolver.enter_leader();
                 // Show the which-key popup NOW rather than after
@@ -446,6 +420,75 @@ impl super::App {
                 self.begin_pager_selection(ev, slot)
             }
         }
+    }
+
+    /// What [`route_mouse`] decides from, for `ev` over `region` of `layout`.
+    fn mouse_snapshot(
+        &self,
+        ev: MouseEvent,
+        gesture: Gesture,
+        layout: &FrameLayout,
+        frame: ratatui::layout::Rect,
+        region: Option<route::Region>,
+    ) -> MouseSnapshot {
+        MouseSnapshot {
+            // Same precedence the keyboard uses — one owner for "which modal
+            // wins", so mouse and keys can't disagree about it.
+            modal: active_modal(ModalSnapshot {
+                has_find_picker: self.runtime.find_picker.is_some(),
+                has_capture: self.runtime.pending_capture.is_some(),
+                overlay_awaiting_dismiss: self.view.project().overlay_awaiting_dismiss,
+                has_quick_select: self.view.quick_select.is_some(),
+                has_harpoon: self.view.harpoon_menu.is_some(),
+                has_image_gallery: self.view.image_gallery.is_some(),
+                has_image_view: self.view.image_view.is_some(),
+            }),
+            region,
+            pager_mount: self.focused_top_pager_mount(),
+            covering_pager: self.pager_slot_at(ev.column, ev.row),
+            pane_wants_mouse: self.active_pane_wants_mouse(),
+            // Same sources `route_input`'s snapshot uses (`route.rs`), so the
+            // mouse and the keyboard can't disagree about what owns the screen.
+            force_pane_selection: matches!(gesture, Gesture::Left)
+                && ev
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL),
+            is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
+            has_scroll_pager: self.view.project().scroll_pager.is_some(),
+            pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
+            pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
+            tab_under_pointer: self.tab_under_pointer(region, layout, ev),
+            over_stderr_notice: self.stderr_notice_under(ev),
+            // The renderer records every selectable chrome row each frame, so
+            // this is a lookup rather than a second hit-test — one source for
+            // "what got drawn" and "what a click can select".
+            over_chrome_row: self.chrome_col_at(ev).is_some(),
+            chord_armed: self.state.resolver.is_pending(),
+            over_chord_hint: self.pointer_on_chord_hint(layout, frame, ev),
+        }
+    }
+
+    /// Whether `ev` is on the open which-key popup, laid out exactly as the
+    /// renderer lays it out.
+    fn pointer_on_chord_hint(
+        &self,
+        layout: &FrameLayout,
+        frame: ratatui::layout::Rect,
+        ev: MouseEvent,
+    ) -> bool {
+        let Some(hint) = self.view.chord_hint.as_ref() else {
+            return false;
+        };
+        chord_hit::chord_hint_layout(
+            &hint.rows,
+            frame,
+            layout.divider.map(|r| r.y),
+            layout.vdivider.map(|r| r.x),
+        )
+        .is_some_and(|menu| {
+            menu.rect
+                .contains(ratatui::layout::Position::new(ev.column, ev.row))
+        })
     }
 }
 
@@ -1021,7 +1064,6 @@ mod tests {
     /// anywhere else must close it. The click does nothing else — every menu
     /// dismisses rather than acts on a click outside it.
     #[test]
-    #[ignore = "red: a click outside the open menu selects the row under it, copying its name, and leaves the leader armed (B2)"]
     fn a_left_click_outside_the_open_leader_menu_closes_it_and_does_nothing_else() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -1065,7 +1107,6 @@ mod tests {
     /// click a row. The chord must not survive the click, or the next `g`
     /// completes `gg` and jumps to the top.
     #[test]
-    #[ignore = "red: a click while `g` is armed leaves it armed, so the next `g` completes `gg` (B2)"]
     fn a_click_while_a_keyboard_chord_is_armed_cancels_the_chord() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -1114,7 +1155,6 @@ mod tests {
     /// must not select or scroll the rows beneath. The menu stays open; its rows
     /// are not clickable yet.
     #[test]
-    #[ignore = "red: a click on the open menu selects the list row beneath it (B1)"]
     fn a_click_on_the_open_menu_reaches_no_list_row_beneath_it() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();
@@ -1151,7 +1191,6 @@ mod tests {
     /// B1 where it costs most: the popup over a mouse-aware agent. A click on
     /// the menu must not be forwarded into the child under it.
     #[test]
-    #[ignore = "red: a click on the open menu is forwarded into the agent beneath it (B1)"]
     fn a_click_on_the_open_menu_is_never_forwarded_to_the_pane_beneath() {
         let _lock = crate::mouse_test_lock();
         let tmp = tempfile::tempdir().unwrap();

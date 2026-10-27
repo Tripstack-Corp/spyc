@@ -137,6 +137,13 @@ impl Resolver {
         self.pending = PendingSeq::Leader;
     }
 
+    /// Abandon a pending sequence and its count, as a key that continues
+    /// nothing does: the end of a chord that comes from no key, such as a
+    /// click beside its menu.
+    pub const fn cancel(&mut self) {
+        self.reset();
+    }
+
     pub fn pending_display(&self) -> Option<String> {
         let prefix = self.count.map(|n| n.to_string()).unwrap_or_default();
         let seq = match self.pending {

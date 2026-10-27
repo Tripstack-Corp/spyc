@@ -36,7 +36,8 @@ spyc has a lot of chord prefixes (`g`, `^a`, `H`, `W`, `y`, `m`, `[`/`]`,
 …). Rather than memorize them all, **press a prefix and wait** — after a
 short pause a popup appears listing every key that completes the chord,
 each with a one-line description, flowed into columns. Pressing the next
-key (or `Esc`) dismisses it. It's spyc's on-demand answer to "what can I
+key (or `Esc`) dismisses it, and so does a click anywhere outside it, which
+does nothing else; a click on the popup reaches nothing beneath it. It's spyc's on-demand answer to "what can I
 do from here?", modelled on Neovim's which-key.
 
 - The delay is `[layout] chord_hint_delay_ms` (default **300** ms). Set

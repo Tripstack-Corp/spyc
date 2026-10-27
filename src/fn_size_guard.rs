@@ -41,7 +41,6 @@ const FUNCTION: Rule = Rule {
             133,
         ),
         ("src/app/mcp.rs::App::execute_mcp_command", 236),
-        ("src/app/mouse/mod.rs::App::handle_mouse", 108),
         ("src/app/pager_handler/file_view.rs::build_pager_view", 151),
         (
             "src/app/pager_handler/motion.rs::App::handle_pager_motion",

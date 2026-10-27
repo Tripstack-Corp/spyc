@@ -373,6 +373,7 @@ focus.
 | `Ctrl` + left drag (list) | Copy absolute paths instead of names |
 | Middle click | Paste the clipboard |
 | Right click | Open the leader menu |
+| Any click outside an open menu | Close it, and nothing else |
 | `Shift` + drag | Your terminal's own selection, bypassing spyc (Option/Fn on iTerm2) |
 
 **Capture costs your terminal's native click-drag selection while it's on** —

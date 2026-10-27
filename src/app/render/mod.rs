@@ -35,7 +35,7 @@ mod divider_tests;
 mod grid_settle_tests;
 mod inner;
 mod layout;
-mod overlays;
+pub(super) mod overlays;
 
 /// What to do with the top overlay when its child has (or hasn't) exited.
 /// Editor/pager overlays auto-close; command overlays hold for a dismiss key.
