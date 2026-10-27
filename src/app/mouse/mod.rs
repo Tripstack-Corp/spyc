@@ -986,7 +986,11 @@ mod tests {
 
     /// An App over a directory of `n` files, so a cursor move is observable.
     fn app_over_files(tmp: &std::path::Path, n: usize) -> App {
-        let dir = tmp.join("work");
+        app_over_files_in(&tmp.join("work"), n)
+    }
+
+    fn app_over_files_in(dir: &std::path::Path, n: usize) -> App {
+        let dir = dir.to_path_buf();
         std::fs::create_dir(&dir).unwrap();
         for i in 0..n {
             std::fs::write(dir.join(format!("file{i:02}.txt")), "x").unwrap();
@@ -997,17 +1001,20 @@ mod tests {
         app
     }
 
-    /// The open menu's box as the frame draws it, found by its titled border,
-    /// so the tests aim at what the user sees rather than at the geometry
-    /// under test.
-    fn drawn_menu(app: &mut App, title: &str) -> ratatui::layout::Rect {
+    /// One frame, as the terminal would draw it.
+    fn drawn(app: &mut App) -> ratatui::buffer::Buffer {
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
             FRAME.width,
             FRAME.height,
         ))
         .unwrap();
         terminal.draw(|f| app.render(f)).unwrap();
-        let buf = terminal.backend().buffer().clone();
+        terminal.backend().buffer().clone()
+    }
+
+    /// The menu titled `title` in `buf`, found by its titled border, so the
+    /// tests aim at what the user sees rather than at the geometry under test.
+    fn menu_in(buf: &ratatui::buffer::Buffer, title: &str) -> ratatui::layout::Rect {
         let sym = |x: u16, y: u16| buf[(x, y)].symbol().to_string();
         let heading = format!(" {title} ");
         for y in 0..FRAME.height {
@@ -1028,6 +1035,59 @@ mod tests {
             }
         }
         panic!("no menu titled {title:?} is drawn");
+    }
+
+    /// The open menu's box as the frame draws it.
+    fn drawn_menu(app: &mut App, title: &str) -> ratatui::layout::Rect {
+        menu_in(&drawn(app), title)
+    }
+
+    /// The cell where `text` is drawn inside the menu titled `title`: where a
+    /// click on that row aims.
+    fn drawn_row(app: &mut App, title: &str, text: &str) -> (u16, u16) {
+        let buf = drawn(app);
+        let menu = menu_in(&buf, title);
+        for y in menu.y + 1..menu.bottom() - 1 {
+            let cells: Vec<String> = (menu.x..menu.right())
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect();
+            let mut at = 0;
+            let line = cells.concat();
+            let Some(byte) = line.find(text) else {
+                continue;
+            };
+            for (i, cell) in cells.iter().enumerate() {
+                if at == byte {
+                    return (menu.x + u16::try_from(i).unwrap(), y);
+                }
+                at += cell.len();
+            }
+        }
+        panic!("no row {text:?} in the menu titled {title:?}");
+    }
+
+    fn press(app: &mut App, c: char) {
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char(c),
+            crossterm::event::KeyModifiers::NONE,
+        ))
+        .unwrap();
+    }
+
+    /// Let the loop build the popup for whatever chord is armed, long after any
+    /// hint delay.
+    fn settle_menu(app: &mut App) {
+        app.settle_chord_hint(
+            Instant::now() + Duration::from_secs(60),
+            &mut crate::app::RunCtx::for_test(),
+        );
+    }
+
+    fn prompt_shown(app: &App) -> Option<String> {
+        match &app.state.mode {
+            crate::app::Mode::Prompting(p) => Some(p.prefix.clone()),
+            crate::app::Mode::Normal => None,
+        }
     }
 
     /// Right-click at `point`, then let the loop build the popup, as one
@@ -1223,6 +1283,136 @@ mod tests {
             assert!(
                 app.state.resolver.is_pending() && app.view.chord_hint.is_some(),
                 "a click on the menu leaves it open"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    // ── a menu row fires by click ──
+    //
+    // A row's click does what the row's key does, through the same path, so the
+    // menu teaches the key it shows rather than offering a second behaviour.
+
+    /// A click on an action row fires that action, as its key would, and the
+    /// menu closes as the key would close it.
+    #[test]
+    #[ignore = "red: a click on a menu row is swallowed, so `gg` never fires"]
+    fn a_click_on_a_menu_row_fires_its_action() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_over_files(tmp.path(), 12);
+            crate::set_mouse_capture_for_test(true);
+            app.state.cur_mut().cursor.index = 5;
+            press(&mut app, 'g');
+            settle_menu(&mut app);
+            let row = drawn_row(&mut app, "g", "top of column");
+
+            click(&mut app, row);
+
+            assert_eq!(
+                app.state.cur().cursor.index,
+                0,
+                "`gg` fired: the cursor is at the top"
+            );
+            assert!(
+                !app.state.resolver.is_pending() && app.view.chord_hint.is_none(),
+                "and the menu closed"
+            );
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// A click on a submenu row walks into the submenu, as its key does, and the
+    /// submenu is drawn at once: the user is already reading a menu.
+    #[test]
+    #[ignore = "red: a click on the leader's worktree row is swallowed"]
+    fn a_click_on_a_submenu_row_opens_the_submenu() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_over_files(tmp.path(), 12);
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(FRAME);
+            open_the_leader_by_right_click(&mut app, (layout.list.x + 1, layout.list.y));
+            let row = drawn_row(&mut app, "leader", "worktree");
+
+            click(&mut app, row);
+            app.settle_chord_hint(Instant::now(), &mut crate::app::RunCtx::for_test());
+
+            assert_eq!(
+                app.state.resolver.pending_display().as_deref(),
+                Some("W-"),
+                "the click armed the worktree chord, as `Space w` does"
+            );
+            drawn_menu(&mut app, "W");
+            crate::set_mouse_capture_for_test(false);
+        });
+    }
+
+    /// A count typed before the chord reaches the action its row fires, as on the
+    /// key path: `3`, `d`, then a click on `dd`'s row asks what `3dd` asks.
+    #[test]
+    #[ignore = "red: a click on the `dd` row is swallowed, so the count goes nowhere"]
+    fn a_count_typed_before_the_chord_reaches_the_row_a_click_fires() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut by_keys = app_over_files_in(&tmp.path().join("keys"), 12);
+            for c in ['3', 'd', 'd'] {
+                press(&mut by_keys, c);
+            }
+            let asked = prompt_shown(&by_keys);
+            assert!(asked.is_some(), "premise: `3dd` asks before removing");
+
+            let mut by_click = app_over_files_in(&tmp.path().join("click"), 12);
+            crate::set_mouse_capture_for_test(true);
+            press(&mut by_click, '3');
+            press(&mut by_click, 'd');
+            settle_menu(&mut by_click);
+            let row = drawn_row(&mut by_click, "3d", "remove (confirm)");
+            click(&mut by_click, row);
+            crate::set_mouse_capture_for_test(false);
+
+            assert_eq!(
+                prompt_shown(&by_click),
+                asked,
+                "the click asks to remove what `3dd` asks to remove"
+            );
+        });
+    }
+
+    /// A range row stands for keys a click cannot choose between, so a click on
+    /// it fires nothing and names the keys; the menu stays open for them.
+    #[test]
+    #[ignore = "red: a click on the leader's `1-9` row is swallowed and says nothing"]
+    fn a_click_on_a_range_row_fires_nothing_and_names_its_keys() {
+        let _lock = crate::mouse_test_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = app_over_files(tmp.path(), 12);
+            crate::set_mouse_capture_for_test(true);
+            let layout = app.frame_layout(FRAME);
+            open_the_leader_by_right_click(&mut app, (layout.list.x + 1, layout.list.y));
+            let row = drawn_row(&mut app, "leader", "1-9");
+            let project = app.state.active;
+
+            click(&mut app, row);
+
+            assert_eq!(app.state.active, project, "no project switch fired");
+            assert!(
+                app.state.resolver.is_pending() && app.view.chord_hint.is_some(),
+                "the menu stays open for the number"
+            );
+            let flash = app
+                .state
+                .flash
+                .as_ref()
+                .map(|f| f.text.clone())
+                .unwrap_or_default();
+            assert!(
+                flash.contains("1-9"),
+                "the flash names the keys to press: {flash:?}"
             );
             crate::set_mouse_capture_for_test(false);
         });
