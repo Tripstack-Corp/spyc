@@ -213,6 +213,10 @@ pub enum Wake {
     /// Payloadless wake — `apply_preview_reloads` drains it in the
     /// pre-recv scan. Same shape as `Image`.
     PreviewReload,
+    /// The stderr log's follower read what was appended to it and published a
+    /// reading on its mailbox. Payloadless; `apply_stderr` takes the reading in
+    /// the pre-recv scan.
+    Stderr,
     /// Option B (`codex_pin`): an off-thread home-scoped scan landed a
     /// rollout snapshot in `codex_pin_pending`. Payloadless wake — the snapshot
     /// rides the landing, drained by `apply_codex_session_pins` in the pre-recv

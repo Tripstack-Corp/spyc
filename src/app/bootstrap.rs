@@ -11,9 +11,7 @@ use crate::spyc_debug;
 use crate::state::{Cursor, Harpoon, History, IgnoreMasks, Inventory, Marks, Picks};
 use crate::ui::theme::Theme;
 
-use super::{
-    App, FlashKind, FlashMessage, Mode, Runtime, View, ViewState, state, user_host_string,
-};
+use super::{App, FlashMessage, Mode, Runtime, View, ViewState, state, user_host_string};
 
 impl App {
     /// Install the terminal graphics-protocol `Picker` detected in
@@ -196,10 +194,8 @@ impl App {
             jump_history: History::load_file("jump_history"),
             project_history: History::load_file("project_history"),
             command_history: History::load_file("command_history"),
-            flash: start_error.map(|text| FlashMessage {
-                text,
-                kind: FlashKind::Error,
-            }),
+            flash: start_error.map(FlashMessage::error),
+            stderr: state::StderrLog::default(),
             user_host: user_host_string(),
             should_quit: false,
         };

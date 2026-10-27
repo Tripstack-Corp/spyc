@@ -218,6 +218,7 @@ impl App {
         // during the session (including session-restore tabs) gets a live
         // wake, not the pre-run no-op.
         self.runtime.pane_wake_tx = Some(msg_tx.clone());
+        self.follow_stderr_log(msg_tx.clone());
 
         let mut ctx = RunCtx {
             watch_tx,

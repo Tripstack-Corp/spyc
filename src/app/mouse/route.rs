@@ -115,6 +115,9 @@ pub enum MouseSink {
     /// the divider — the cwd tail, the empty tail past the last tab — stays
     /// selectable, so copying the path still works.
     PaneTab(usize),
+    /// Open the `:stderr` log: the pointer was on the status bar's `⚠N`.
+    /// Beats [`Self::SelectChrome`] for the reason [`Self::PaneTab`] does.
+    StderrLog,
     /// Give the keyboard to the pane AND anchor a spyc-side text selection over its
     /// visible grid — for a child that ignores mouse reports, so nothing else can
     /// do the selecting (codex's `^T` transcript, a plain shell).
@@ -199,6 +202,8 @@ pub struct MouseSnapshot {
     /// layout it needs is a `Vec` of spans, and the router is a `const fn` over
     /// a `Copy` snapshot.
     pub tab_under_pointer: Option<usize>,
+    /// The pointer is on the status bar's `⚠N` of unread stderr, as drawn.
+    pub over_stderr_notice: bool,
 }
 
 impl MouseSnapshot {
@@ -496,6 +501,9 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             if let Some(index) = snap.tab_under_pointer {
                 return MouseSink::PaneTab(index);
             }
+            if snap.over_stderr_notice {
+                return MouseSink::StderrLog;
+            }
             // Recorded chrome outranks the layout beneath it, for the same
             // reason `covering_pager` does: it is painted on top. This is what
             // makes the activity HUD selectable instead of selecting list rows
@@ -684,7 +692,38 @@ mod tests {
             pane_scroll_keys: false,
             tab_under_pointer: None,
             over_chrome_row: false,
+            over_stderr_notice: false,
         }
+    }
+
+    /// The status bar is drawn through the chrome funnel too, so over the `⚠N`
+    /// both flags are true; the notice must win or a click only selects it.
+    #[test]
+    fn the_stderr_notice_beats_chrome_selection_on_the_status_bar() {
+        let mut s = snap(Some(Region::Status));
+        s.over_chrome_row = true;
+        s.over_stderr_notice = true;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::StderrLog);
+        assert_eq!(route_mouse(s, Gesture::Middle), MouseSink::Paste);
+        assert_eq!(route_mouse(s, Gesture::Right), MouseSink::LeaderMenu);
+
+        s.over_stderr_notice = false;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::SelectChrome);
+    }
+
+    /// A modal or a prompt still owns the click, as it does over a tab label.
+    #[test]
+    fn a_modal_or_prompt_still_beats_the_stderr_notice() {
+        use crate::app::modal::Modal;
+        let mut s = snap(Some(Region::Status));
+        s.over_stderr_notice = true;
+        s.is_prompting = true;
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+
+        let mut s = snap(Some(Region::Status));
+        s.over_stderr_notice = true;
+        s.modal = Some(Modal::FindPicker);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
     }
 
     /// The interaction the two features create: the divider is itself a recorded

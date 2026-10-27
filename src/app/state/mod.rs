@@ -45,6 +45,8 @@ mod project;
 pub use project::{Project, ProjectId};
 pub mod restore;
 mod selection;
+mod stderr;
+pub use stderr::{StderrLog, StderrSnapshot};
 
 /// Result of `AppState::dispatch_command` — tells the `App` caller what to do.
 #[derive(Debug)]
@@ -361,6 +363,8 @@ pub struct AppState {
     /// command on Up arrow and explode with "unknown command".
     pub command_history: History,
     pub flash: Option<FlashMessage>,
+    /// What spyc's own stderr said this run (`:stderr`).
+    pub stderr: StderrLog,
     pub should_quit: bool,
     pub quit_pending: Option<std::time::Instant>,
     /// Rows about to be deleted, populated while a `RemoveConfirm`
@@ -919,6 +923,7 @@ impl AppState {
             project_history: History::load_file("harness_prh"),
             command_history: History::load_file("harness_ch"),
             flash: None,
+            stderr: StderrLog::default(),
             should_quit: false,
             quit_pending: None,
             pending_delete_preview: None,
