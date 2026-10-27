@@ -12,6 +12,12 @@ reload (`:mouse auto` returns to following the config). Default **on**
 (`[mouse] capture`; `capture = false` turns it off permanently). `^a u`
 quick-select and `y` in the pager are the mouse-free yank paths.
 
+While a which-key menu is open (the leader from a right-click, or a chord
+you are part-way through), a click anywhere outside it closes it and does
+nothing else, so the next key you type is an ordinary key again. A click on
+the menu reaches nothing beneath it: not the list, and not the agent in the
+pane.
+
 ## Selecting and copying
 
 - **Drag in a pane whose child ignores the mouse to select its text**; release

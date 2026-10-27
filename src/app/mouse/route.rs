@@ -126,6 +126,8 @@ pub enum MouseSink {
     Paste,
     /// Open the leader menu (right-click, from anywhere).
     LeaderMenu,
+    /// Disarm the pending chord and close its popup, and nothing else.
+    DismissChord,
 }
 
 /// What the user did, reduced to the axis routing cares about.
@@ -204,6 +206,13 @@ pub struct MouseSnapshot {
     pub tab_under_pointer: Option<usize>,
     /// The pointer is on the status bar's `⚠N` of unread stderr, as drawn.
     pub over_stderr_notice: bool,
+    /// A chord is armed: the resolver takes the next key as its continuation,
+    /// whether or not the which-key popup is drawn yet.
+    pub chord_armed: bool,
+    /// The pointer is on the open which-key popup, as
+    /// [`super::chord_hit::chord_hint_layout`] places it. Region-independent
+    /// for the reason `covering_pager` is: the popup is drawn over the layout.
+    pub over_chord_hint: bool,
 }
 
 impl MouseSnapshot {
@@ -424,6 +433,18 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // A modal owns the whole screen; the pointer's region is irrelevant.
     if snap.modal.is_some() {
         return MouseSink::Swallow;
+    }
+    // The which-key popup is drawn over everything below it, so the pointer on
+    // it reaches nothing beneath: no list row, no agent. A click anywhere else
+    // while a chord is armed only disarms it, like every menu's outside click.
+    // Acting as well would leave the chord armed for the next key, where the
+    // leader's `p` changes directory and `x` closes the project. The wheel
+    // beside the popup scrolls as ever, and the chord waits.
+    if snap.over_chord_hint {
+        return MouseSink::Swallow;
+    }
+    if snap.chord_armed && !matches!(gesture, Gesture::Wheel) {
+        return MouseSink::DismissChord;
     }
     let Some(region) = snap.region else {
         return MouseSink::Swallow;
@@ -693,6 +714,8 @@ mod tests {
             tab_under_pointer: None,
             over_chrome_row: false,
             over_stderr_notice: false,
+            chord_armed: false,
+            over_chord_hint: false,
         }
     }
 
@@ -724,6 +747,67 @@ mod tests {
         s.over_stderr_notice = true;
         s.modal = Some(Modal::FindPicker);
         assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+    }
+
+    /// The open which-key popup takes every gesture on it, whatever the layout
+    /// says lies beneath — a forwardable pane included — and leaves the chord
+    /// armed: a click on the menu is not a click beside it.
+    #[test]
+    fn the_open_chord_menu_owns_the_pointer_over_any_region() {
+        for region in [
+            Region::List,
+            Region::RightColumn,
+            Region::Pane,
+            Region::Divider,
+            Region::Status,
+            Region::Prompt,
+        ] {
+            let mut s = snap(Some(region));
+            s.pane_wants_mouse = true;
+            s.chord_armed = true;
+            s.over_chord_hint = true;
+            for gesture in [
+                Gesture::Left,
+                Gesture::Middle,
+                Gesture::Right,
+                Gesture::Wheel,
+            ] {
+                assert_eq!(
+                    route_mouse(s, gesture),
+                    MouseSink::Swallow,
+                    "{gesture:?} on the menu over {region:?}"
+                );
+            }
+        }
+    }
+
+    /// Any click beside the popup while a chord is armed only disarms it; the
+    /// wheel still scrolls what it is over. Unarmed, nothing changes.
+    #[test]
+    fn a_click_beside_an_armed_chord_only_disarms_it() {
+        for region in [Region::List, Region::Pane, Region::Divider] {
+            let mut s = snap(Some(region));
+            s.pane_wants_mouse = true;
+            s.chord_armed = true;
+            for gesture in [Gesture::Left, Gesture::Middle, Gesture::Right] {
+                assert_eq!(
+                    route_mouse(s, gesture),
+                    MouseSink::DismissChord,
+                    "{gesture:?} beside the menu over {region:?}"
+                );
+            }
+        }
+        let mut armed = snap(Some(Region::List));
+        armed.chord_armed = true;
+        assert!(matches!(
+            route_mouse(armed, Gesture::Wheel),
+            MouseSink::ListCursor(_)
+        ));
+        assert_eq!(
+            route_mouse(snap(Some(Region::List)), Gesture::Right),
+            MouseSink::LeaderMenu,
+            "an unarmed right-click still opens the leader"
+        );
     }
 
     /// The interaction the two features create: the divider is itself a recorded

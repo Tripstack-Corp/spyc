@@ -471,7 +471,6 @@ impl App {
         v_divider_col: Option<u16>,
     ) {
         use ratatui::{
-            layout::Rect,
             style::{Modifier, Style},
             text::{Line, Span},
             widgets::{Block, Borders, Clear, Paragraph},
@@ -479,100 +478,54 @@ impl App {
         let Some(hint) = self.view.chord_hint.as_ref() else {
             return;
         };
-        if hint.rows.is_empty() || area.width < 24 || area.height < 8 {
+        // The mouse hit-tests this same layout, so a click on the box lands on
+        // the box drawn here.
+        let Some(layout) = crate::app::mouse::chord_hit::chord_hint_layout(
+            &hint.rows,
+            area,
+            h_divider_row,
+            v_divider_col,
+        ) else {
             return;
-        }
-
-        // Column geometry. The label column is capped so a verbose entry wraps
-        // instead of widening the box past a comfortable size; the key column is
-        // the widest key. One rendered cell line is exactly `col_w` wide:
-        // " <key padded>  <label padded> ".
-        const LABEL_MAX: usize = 38;
-        let key_w = hint
-            .rows
-            .iter()
-            .map(|(k, _)| crate::ui::display_width(k))
-            .max()
-            .unwrap_or(0);
-        let label_w = hint
-            .rows
-            .iter()
-            .map(|(_, l)| crate::ui::display_width(l))
-            .max()
-            .unwrap_or(0)
-            .clamp(1, LABEL_MAX);
-        let col_w = key_w + label_w + 4;
-
+        };
+        let (key_w, label_w) = (layout.key_w, layout.label_w);
         let key_style = Style::default()
             .fg(self.view.theme.pick)
             .add_modifier(Modifier::BOLD);
         let label_style = Style::default().fg(self.view.theme.status_path);
 
-        // Build one cell per entry: its key on the first line, the label
-        // word-wrapped to `label_w` across as many lines as it needs (the
-        // continuation lines leave the key column blank).
-        let cells: Vec<Vec<Line>> = hint
-            .rows
-            .iter()
-            .map(|(keys, label)| {
-                let segs = wrap_label(label, label_w);
-                segs.iter()
-                    .enumerate()
-                    .map(|(i, seg)| {
-                        let key_cell = if i == 0 {
-                            format!(" {keys:>key_w$}  ")
-                        } else {
-                            " ".repeat(key_w + 3)
-                        };
-                        Line::from(vec![
-                            Span::styled(key_cell, key_style),
-                            Span::styled(format!("{seg:<label_w$} "), label_style),
-                        ])
-                    })
-                    .collect()
-            })
-            .collect();
-
-        let body_h = (area.height as usize).saturating_sub(2).max(1);
-        let max_cols = ((area.width as usize).saturating_sub(2) / col_w.max(1)).max(1);
-        let columns = flow_columns(cells, body_h, max_cols);
-
-        let n = columns.len().max(1);
-        let rows_tall = columns.iter().map(Vec::len).max().unwrap_or(0);
-        let width = ((n * col_w) as u16 + 2).min(area.width);
-        let height = (rows_tall as u16 + 2).min(area.height);
-        // Centre, then nudge a border off a structural divider it would land on
-        // (a box edge collinear with the pane / split rule merges into it).
-        let cx = area.x + area.width.saturating_sub(width) / 2;
-        let cy = area.y + area.height.saturating_sub(height) / 2;
-        let x = place_clear_of_line(cx, width, v_divider_col, area.x, area.right());
-        let y = place_clear_of_line(cy, height, h_divider_row, area.y, area.bottom());
-        let rect = Rect {
-            x,
-            y,
-            width,
-            height,
-        };
-        frame.render_widget(Clear, rect);
-
+        frame.render_widget(Clear, layout.rect);
         let block = Block::default()
             .borders(Borders::ALL)
             .title(format!(" {} ", hint.title))
             .border_style(Style::default().fg(self.view.theme.popup_border));
-        let inner = block.inner(rect);
-        frame.render_widget(block, rect);
+        let inner = block.inner(layout.rect);
+        frame.render_widget(block, layout.rect);
 
         // Stitch the columns side by side row-by-row; pad missing cells with a
-        // blank `col_w`-wide span so columns stay aligned.
-        let blank = Span::styled(" ".repeat(col_w), label_style);
+        // blank `col_w`-wide span so columns stay aligned. An entry's first line
+        // carries its key; its continuation lines leave the key column blank.
+        let blank = Span::styled(" ".repeat(layout.col_w), label_style);
+        let rows_tall = layout.columns.iter().map(Vec::len).max().unwrap_or(0);
         let mut lines: Vec<Line> = Vec::with_capacity(rows_tall);
         for r in 0..rows_tall {
-            let mut spans: Vec<Span> = Vec::with_capacity(n * 2);
-            for col in &columns {
-                match col.get(r) {
-                    Some(line) => spans.extend(line.spans.iter().cloned()),
-                    None => spans.push(blank.clone()),
-                }
+            let mut spans: Vec<Span> = Vec::with_capacity(layout.columns.len() * 2);
+            for col in &layout.columns {
+                let Some(line) = col.get(r) else {
+                    spans.push(blank.clone());
+                    continue;
+                };
+                let key_cell = if line.first {
+                    let keys = hint.rows.get(line.entry).map_or("", |(k, _)| k);
+                    format!(" {keys:>key_w$}  ")
+                } else {
+                    " ".repeat(key_w + 3)
+                };
+                spans.push(Span::styled(key_cell, key_style));
+                spans.push(Span::styled(
+                    format!("{:<label_w$} ", line.label),
+                    label_style,
+                ));
             }
             lines.push(Line::from(spans));
         }
@@ -586,7 +539,13 @@ impl App {
 /// offsets (±1, ±2); if none fit (the popup nearly fills the axis, leaving no
 /// room to dodge), returns the centred value unchanged. `line: None` (no such
 /// divider on screen) is a no-op.
-fn place_clear_of_line(start: u16, size: u16, line: Option<u16>, min: u16, max_end: u16) -> u16 {
+pub(in crate::app) fn place_clear_of_line(
+    start: u16,
+    size: u16,
+    line: Option<u16>,
+    min: u16,
+    max_end: u16,
+) -> u16 {
     let Some(line) = line else {
         return start;
     };
@@ -606,33 +565,7 @@ fn place_clear_of_line(start: u16, size: u16, line: Option<u16>, min: u16, max_e
 /// Greedy word-wrap a popup label to `width` display columns. Returns one
 /// segment per line. A single word longer than `width` lands on its own line
 /// (popup labels never contain such words, so this stays simple).
-/// Flow cells into columns, balancing by rendered-line count so a tall menu (or
-/// one with wrapped labels) splits into columns rather than overflowing the
-/// screen height. An entry never splits across columns.
-fn flow_columns(
-    cells: Vec<Vec<ratatui::text::Line<'_>>>,
-    body_h: usize,
-    max_cols: usize,
-) -> Vec<Vec<ratatui::text::Line<'_>>> {
-    let total_lines: usize = cells.iter().map(Vec::len).sum();
-    let n_cols = total_lines.div_ceil(body_h).clamp(1, max_cols);
-    let target = total_lines.div_ceil(n_cols).max(1);
-
-    let mut columns = Vec::new();
-    let mut cur = Vec::new();
-    for cell in cells {
-        if !cur.is_empty() && cur.len() + cell.len() > target {
-            columns.push(std::mem::take(&mut cur));
-        }
-        cur.extend(cell);
-    }
-    if !cur.is_empty() {
-        columns.push(cur);
-    }
-    columns
-}
-
-fn wrap_label(label: &str, width: usize) -> Vec<String> {
+pub(in crate::app) fn wrap_label(label: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     if crate::ui::display_width(label) <= width {
         return vec![label.to_string()];
