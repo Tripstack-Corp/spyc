@@ -29,6 +29,7 @@ pub enum Action {
     // Navigation.
     EnterOrDisplay, // <Enter> — dir: chdir; text file: pager
     EnterOrEdit,    // e / v   — dir: chdir; file: editor
+    ExecuteEntry,   // :exec — run the executable under the cursor as a `!` capture
     Climb,          // u / -
     Home,           // H / ~
 
@@ -142,6 +143,8 @@ pub enum Action {
     PaneRenameTab,      // ^W r — rename the active tab
     PaneRestartTab,     // ^W R — restart the active tab's command
     PaneForkTab,        // ^W F — fork the active tab's conversation into a new tab
+    PaneToggleSuspend,  // ^z on a non-shell tab — suspend or resume it
+    PaneToTask,         // :pane-to-task — the active tab becomes a background task
     PanePipeContent,    // ^W p — send file contents of selection to pane
     PanePipeInventory,  // ^W i — send file contents of inventory to pane
 
@@ -305,6 +308,8 @@ impl Action {
             | Self::PaneRenameTab
             | Self::PaneRestartTab
             | Self::PaneForkTab
+            | Self::PaneToggleSuspend
+            | Self::PaneToTask
             | Self::PanePipeContent
             | Self::PanePipeInventory
             | Self::VsplitToggle
@@ -351,6 +356,7 @@ impl Action {
             Self::GotoLast => "bottom of column",
             Self::EnterOrDisplay => "enter dir / pager on text file",
             Self::EnterOrEdit => "enter dir / editor on file (suspends TUI)",
+            Self::ExecuteEntry => "run the executable, output in the pager",
             Self::EditInPane => "open editor in top pane (bottom pane stays visible)",
             Self::DisplayInPane => "open $PAGER in top pane (bottom pane stays visible)",
             Self::Climb => "climb to parent",
@@ -406,12 +412,11 @@ impl Action {
             Self::PaneNewTab => "new pane tab",
             Self::PaneCloseTab => "close pane tab",
             Self::PaneTabByIndex(_) => "switch pane tab",
-            Self::PaneNextTab => "next pane tab",
-            Self::PanePrevTab => "prev pane tab",
-            Self::PaneLastTab => "last pane tab",
+            Self::PaneNextTab | Self::PanePrevTab | Self::PaneLastTab => self.describe_tab_step(),
             Self::PaneRenameTab => "rename pane tab",
             Self::PaneRestartTab => "restart pane tab command",
             Self::PaneForkTab => "fork pane tab's conversation",
+            Self::PaneToggleSuspend | Self::PaneToTask => self.describe_tab_parking(),
             Self::PanePipeContent => "pipe file contents to pane",
             Self::PanePipeInventory => "pipe inventory contents to pane",
             Self::VsplitToggle => "vertical split: open / close",
@@ -494,6 +499,7 @@ impl Action {
             // Navigation.
             Self::EnterOrDisplay => "enter_or_display",
             Self::EnterOrEdit => "enter_or_edit",
+            Self::ExecuteEntry => "execute_entry",
             Self::Climb => "climb",
             Self::Home => "home",
             // Picks.
@@ -572,12 +578,11 @@ impl Action {
             Self::PaneNewTab => "pane_new_tab",
             Self::PaneCloseTab => "pane_close_tab",
             Self::PaneTabByIndex(_) => "pane_tab_by_index",
-            Self::PaneNextTab => "pane_next_tab",
-            Self::PanePrevTab => "pane_prev_tab",
-            Self::PaneLastTab => "pane_last_tab",
+            Self::PaneNextTab | Self::PanePrevTab | Self::PaneLastTab => self.tab_step_name(),
             Self::PaneRenameTab => "pane_rename_tab",
             Self::PaneRestartTab => "pane_restart_tab",
             Self::PaneForkTab => "pane_fork_tab",
+            Self::PaneToggleSuspend | Self::PaneToTask => self.tab_parking_name(),
             Self::PanePipeContent => "pane_pipe_content",
             Self::PanePipeInventory => "pane_pipe_inventory",
             // Vertical split.
@@ -636,11 +641,46 @@ impl Action {
         }
     }
 
+    /// The tab steps' arm of [`Self::describe`], which is at its length pin.
+    const fn describe_tab_step(&self) -> &'static str {
+        match self {
+            Self::PaneNextTab => "next pane tab",
+            Self::PanePrevTab => "prev pane tab",
+            _ => "last pane tab",
+        }
+    }
+
+    /// The arm of [`Self::describe`] for parking a tab (suspending it, or moving
+    /// it to the background tasks), which is at its length pin.
+    const fn describe_tab_parking(&self) -> &'static str {
+        match self {
+            Self::PaneToggleSuspend => "suspend / resume pane tab",
+            _ => "move pane tab to a background task",
+        }
+    }
+
     /// The pick jumps' arm of [`Self::describe`], which is at its length pin.
     const fn describe_pick_jump(&self) -> &'static str {
         match self {
             Self::JumpPrevPick => "jump to prev picked entry",
             _ => "jump to next picked entry",
+        }
+    }
+
+    /// The tab steps' arm of [`Self::canonical_name`], which is at its length pin.
+    const fn tab_step_name(&self) -> &'static str {
+        match self {
+            Self::PaneNextTab => "pane_next_tab",
+            Self::PanePrevTab => "pane_prev_tab",
+            _ => "pane_last_tab",
+        }
+    }
+
+    /// The tab-parking arm of [`Self::canonical_name`], which is at its length pin.
+    const fn tab_parking_name(&self) -> &'static str {
+        match self {
+            Self::PaneToggleSuspend => "pane_toggle_suspend",
+            _ => "pane_to_task",
         }
     }
 
@@ -690,6 +730,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         // Navigation.
         "enter_or_display" => Action::EnterOrDisplay,
         "enter_or_edit" => Action::EnterOrEdit,
+        "execute_entry" => Action::ExecuteEntry,
         "climb" => Action::Climb,
         "home" => Action::Home,
         // Picks.
@@ -753,27 +794,8 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         // Split pane.
         "toggle_pane" => Action::TogglePane,
         "resume_pane" => Action::ResumePane,
-        "pane_focus_down" => Action::PaneFocusDown,
-        "pane_focus_up" => Action::PaneFocusUp,
-        "pane_send_selection" => Action::PaneSendSelection,
-        "pane_send_prefix" => Action::PaneSendPrefix,
-        "pane_grow" => Action::PaneGrow,
-        "pane_shrink" => Action::PaneShrink,
         "toggle_pane_zoom" => Action::TogglePaneZoom,
-        "pane_scroll_enter" => Action::PaneScrollEnter,
-        "pane_scroll_save" => Action::PaneScrollSave,
-        "pane_new_tab" => Action::PaneNewTab,
-        "pane_close_tab" => Action::PaneCloseTab,
         // Default to tab 1 (the `^W 1` key).
-        "pane_tab_by_index" => Action::PaneTabByIndex(1),
-        "pane_next_tab" => Action::PaneNextTab,
-        "pane_prev_tab" => Action::PanePrevTab,
-        "pane_last_tab" => Action::PaneLastTab,
-        "pane_rename_tab" => Action::PaneRenameTab,
-        "pane_restart_tab" => Action::PaneRestartTab,
-        "pane_fork_tab" => Action::PaneForkTab,
-        "pane_pipe_content" => Action::PanePipeContent,
-        "pane_pipe_inventory" => Action::PanePipeInventory,
         // Vertical split. `vsplit_cycle` was the pre-toggle name for the same
         // key; kept so an existing `map KEY vsplit_cycle` still binds.
         "vsplit_toggle" | "vsplit_cycle" => Action::VsplitToggle,
@@ -814,7 +836,38 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "reopen_last_buffer" => Action::ReopenLastBuffer,
         "find_file" => Action::FindFile,
         "noop" => Action::Noop,
-        _ => return ProjectAction::from_name(name).map(Action::Project),
+        _ => {
+            return pane_action_from_name(name)
+                .or_else(|| ProjectAction::from_name(name).map(Action::Project));
+        }
+    })
+}
+
+/// The `pane_*` names of [`action_from_name`], which is at its length pin.
+fn pane_action_from_name(name: &str) -> Option<Action> {
+    Some(match name {
+        "pane_focus_down" => Action::PaneFocusDown,
+        "pane_focus_up" => Action::PaneFocusUp,
+        "pane_send_selection" => Action::PaneSendSelection,
+        "pane_send_prefix" => Action::PaneSendPrefix,
+        "pane_grow" => Action::PaneGrow,
+        "pane_shrink" => Action::PaneShrink,
+        "pane_scroll_enter" => Action::PaneScrollEnter,
+        "pane_scroll_save" => Action::PaneScrollSave,
+        "pane_new_tab" => Action::PaneNewTab,
+        "pane_close_tab" => Action::PaneCloseTab,
+        "pane_tab_by_index" => Action::PaneTabByIndex(1),
+        "pane_next_tab" => Action::PaneNextTab,
+        "pane_prev_tab" => Action::PanePrevTab,
+        "pane_last_tab" => Action::PaneLastTab,
+        "pane_rename_tab" => Action::PaneRenameTab,
+        "pane_restart_tab" => Action::PaneRestartTab,
+        "pane_fork_tab" => Action::PaneForkTab,
+        "pane_toggle_suspend" => Action::PaneToggleSuspend,
+        "pane_to_task" => Action::PaneToTask,
+        "pane_pipe_content" => Action::PanePipeContent,
+        "pane_pipe_inventory" => Action::PanePipeInventory,
+        _ => return None,
     })
 }
 

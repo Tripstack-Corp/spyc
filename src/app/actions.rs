@@ -244,6 +244,11 @@ impl App {
         // into `effects`, which is returned after the post-match cursor
         // clamp (so the clamp still runs for those arms, as before).
         let mut effects: Vec<Effect> = Vec::new();
+        if self.pane_action_cancels_pane_prompt(action) {
+            self.cancel_prompt();
+            return self.apply(action);
+        }
+
         match action {
             Action::EnterOrDisplay => {
                 let post = self.activate(ActivateIntent::Display);
@@ -317,52 +322,6 @@ impl App {
             Action::FindFile => self.open_find_picker(),
 
             Action::ReloadConfig => self.reload_config(),
-
-            Action::TogglePane
-            | Action::ResumePane
-            | Action::PaneFocusDown
-            | Action::PaneFocusUp
-            | Action::PaneSendSelection
-            | Action::PaneSendPrefix
-            | Action::PaneGrow
-            | Action::PaneShrink
-            | Action::TogglePaneZoom
-            | Action::PaneScrollEnter
-            | Action::OpenThinkingHistory
-            | Action::PaneScrollSave
-            | Action::PaneNewTab
-            | Action::PaneCloseTab
-            | Action::PaneTabByIndex(_)
-            | Action::PaneNextTab
-            | Action::PanePrevTab
-            | Action::PaneLastTab
-            | Action::PaneRenameTab
-            | Action::PaneRestartTab
-            | Action::PaneForkTab
-            | Action::HarpoonJump(_)
-            | Action::HarpoonAppend
-            | Action::HarpoonRemove
-            | Action::HarpoonOpenMenu
-            | Action::PanePipeContent
-            | Action::PanePipeInventory
-            | Action::VsplitToggle
-            | Action::VsplitToggleHeight
-            | Action::VsplitFocusLeft
-            | Action::VsplitFocusRight
-            | Action::ToggleDim
-                if matches!(
-                    self.state.mode,
-                    Mode::Prompting(Prompt {
-                        kind: PromptKind::PaneNewTabCmd
-                            | PromptKind::PaneNewTabCwd
-                            | PromptKind::PaneRenameTab,
-                        ..
-                    })
-                ) =>
-            {
-                self.cancel_prompt();
-                return self.apply(action);
-            }
 
             Action::TogglePane => self.toggle_pane(),
             Action::ResumePane => self.open_pane_tab("claude --resume"),
@@ -438,6 +397,9 @@ impl App {
 
             Action::PaneRestartTab => self.restart_active_tab(),
             Action::PaneForkTab => self.fork_active_tab(),
+            Action::PaneToggleSuspend => effects = self.toggle_suspend_action(),
+            Action::PaneToTask => self.demote_pane_to_task(),
+            Action::ExecuteEntry => self.execute_entry(),
 
             Action::PanePipeContent => effects = self.pipe_content_to_pane(false),
             Action::PanePipeInventory => effects = self.pipe_content_to_pane(true),
@@ -533,6 +495,56 @@ impl App {
         let row_count = self.state.cur().rows.len();
         self.state.cur_mut().cursor.clamp(row_count);
         Ok(effects)
+    }
+
+    /// A pane action while a pane-tab prompt (new tab, its cwd, a rename) is
+    /// open cancels the prompt, then runs.
+    const fn pane_action_cancels_pane_prompt(&self, action: &Action) -> bool {
+        matches!(
+            action,
+            Action::TogglePane
+                | Action::ResumePane
+                | Action::PaneFocusDown
+                | Action::PaneFocusUp
+                | Action::PaneSendSelection
+                | Action::PaneSendPrefix
+                | Action::PaneGrow
+                | Action::PaneShrink
+                | Action::TogglePaneZoom
+                | Action::PaneScrollEnter
+                | Action::OpenThinkingHistory
+                | Action::PaneScrollSave
+                | Action::PaneNewTab
+                | Action::PaneCloseTab
+                | Action::PaneTabByIndex(_)
+                | Action::PaneNextTab
+                | Action::PanePrevTab
+                | Action::PaneLastTab
+                | Action::PaneRenameTab
+                | Action::PaneRestartTab
+                | Action::PaneForkTab
+                | Action::PaneToggleSuspend
+                | Action::PaneToTask
+                | Action::HarpoonJump(_)
+                | Action::HarpoonAppend
+                | Action::HarpoonRemove
+                | Action::HarpoonOpenMenu
+                | Action::PanePipeContent
+                | Action::PanePipeInventory
+                | Action::VsplitToggle
+                | Action::VsplitToggleHeight
+                | Action::VsplitFocusLeft
+                | Action::VsplitFocusRight
+                | Action::ToggleDim
+        ) && matches!(
+            self.state.mode,
+            Mode::Prompting(Prompt {
+                kind: PromptKind::PaneNewTabCmd
+                    | PromptKind::PaneNewTabCwd
+                    | PromptKind::PaneRenameTab,
+                ..
+            })
+        )
     }
 
     /// `^a s` (pane-scroll mode's save key, routed through `Action`): save the

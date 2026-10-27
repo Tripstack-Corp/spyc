@@ -438,6 +438,10 @@ const SECTIONS: &[Section] = &[
                 "[t  ]t",
                 "(in pager) cycle task viewer prev/next by id (chord)",
             ),
+            (
+                ":exec",
+                "run the executable under the cursor, output in the pager",
+            ),
             (":pause / :pause N", "pause a backgrounded task (SIGSTOP)"),
             (":resume / :resume N", "resume a paused task (SIGCONT)"),
             (

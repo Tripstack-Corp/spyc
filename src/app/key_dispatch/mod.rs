@@ -282,7 +282,9 @@ impl App {
                 // `^a-x` still closes a suspended tab.
                 let (is_shell, suspended) = self.active_tab_shell_and_suspended();
                 match pane_suspend_key_action(key, is_shell, suspended) {
-                    PaneKeyAction::Toggle => return Ok(self.toggle_pane_suspend()),
+                    PaneKeyAction::Toggle => {
+                        return self.update(UiMsg::Action(Action::PaneToggleSuspend));
+                    }
                     PaneKeyAction::EatSuspended => {
                         self.state.flash_info("pane suspended — ^z to resume");
                         return Ok(Vec::new());

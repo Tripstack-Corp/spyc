@@ -27,7 +27,7 @@ pub const fn refusal(action: &Action) -> Option<&'static str> {
 
         // A shell inherits the process cwd, which stays *outside* the archive —
         // running one here would silently operate on the archive's directory.
-        A::StartShell | A::ShellCapturedPrompt | A::ShellForegroundPrompt => {
+        A::StartShell | A::ShellCapturedPrompt | A::ShellForegroundPrompt | A::ExecuteEntry => {
             "archive: shell commands run outside the archive"
         }
 
@@ -87,6 +87,19 @@ mod tests {
         for action in [
             Action::Project(crate::keymap::ProjectAction::SetHomeHere),
             Action::SetStartDirHere,
+        ] {
+            assert!(refusal(&action).is_some(), "{action:?} must be refused");
+        }
+    }
+
+    /// A program started here runs in the process cwd, outside the archive.
+    #[test]
+    fn running_a_program_is_refused() {
+        for action in [
+            Action::StartShell,
+            Action::ShellCapturedPrompt,
+            Action::ShellForegroundPrompt,
+            Action::ExecuteEntry,
         ] {
             assert!(refusal(&action).is_some(), "{action:?} must be refused");
         }
