@@ -6,6 +6,7 @@ Created: 2026-05-19T06:01:14.553151+00:00
 
 ---
 Entry: Pulse Hook (caleb) 2026-05-19T06:01:14.553151+00:00
+Index: 0
 Role: scribe
 Type: Note
 Title: Session: watercooler-mcp, hmac-authentication, nextjs-route-handlers
@@ -56,6 +57,7 @@ Title: Session: watercooler-mcp, hmac-authentication, nextjs-route-handlers
 
 ---
 Entry: Pulse Hook (caleb) 2026-05-20T01:56:45.594863+00:00
+Index: 1
 Role: scribe
 Type: Note
 Title: Session: spyc-session-save, watercooler-pitching, markdown-rendering
@@ -100,6 +102,7 @@ Title: Session: spyc-session-save, watercooler-pitching, markdown-rendering
 
 ---
 Entry: Pulse Hook (caleb) 2026-05-21T00:11:27.115450+00:00
+Index: 2
 Role: scribe
 Type: Note
 Title: Session: parallel-sprint-skill, sync-repair-audit, mcp-tool-consolidation
@@ -166,6 +169,7 @@ Title: Session: parallel-sprint-skill, sync-repair-audit, mcp-tool-consolidation
 
 ---
 Entry: Pulse Hook (caleb) 2026-05-21T06:00:37.210466+00:00
+Index: 3
 Role: scribe
 Type: Note
 Title: Session: parallel-sprint-c03, mcp-tool-refactor, health-endpoint-auth
@@ -206,6 +210,7 @@ Title: Session: parallel-sprint-c03, mcp-tool-refactor, health-endpoint-auth
 
 ---
 Entry: Pulse Hook (caleb) 2026-05-22T08:02:51.598888+00:00
+Index: 4
 Role: scribe
 Type: Note
 Title: Session: github-workflow-removal, mcp-tool-surface-consolidation, pull-request-optimization
@@ -268,6 +273,7 @@ Title: Session: github-workflow-removal, mcp-tool-surface-consolidation, pull-re
 
 ---
 Entry: Pulse Hook (caleb) 2026-05-22T12:46:57.893185+00:00
+Index: 5
 Role: scribe
 Type: Note
 Title: Session: mcp-tool-surface-consolidation, watercooler-cloud, graph_trace-collapse
@@ -330,6 +336,7 @@ Title: Session: mcp-tool-surface-consolidation, watercooler-cloud, graph_trace-c
 
 ---
 Entry: Pulse Hook (caleb) 2026-05-23T05:31:35.566641+00:00
+Index: 6
 Role: scribe
 Type: Note
 Title: Session: mcp-tools-list, copybara-promotion, hybrid-remote-mount
@@ -375,3 +382,87 @@ Title: Session: mcp-tools-list, copybara-promotion, hybrid-remote-mount
 }
 
 <!-- Entry-ID: 01KS9N2H7CKVM5HVHKEMTZ9PPV -->
+
+---
+Entry: Pulse Hook (caleb) 2026-10-29T06:58:54.727654+00:00
+Index: 7
+Role: scribe
+Type: Note
+Title: Session: spyc-guard-tests, inotify-watch-budget, adversarial-codex-review
+
+{
+  "record_kind": "extracted_theme",
+  "theme_status": "extracted",
+  "author_id": "caleb",
+  "repo_id": "spyc",
+  "branch": "main",
+  "session_id": "1fd474f2-92d4-4611-add4-8f3d3d86d964",
+  "captured_at": "2026-10-29T06:58:46.818869+00:00",
+  "summary_hash": "sha256t16:add7c79f74602c01",
+  "technical_focus": [
+    "spyc-guard-tests",
+    "inotify-watch-budget",
+    "adversarial-codex-review",
+    "watercooler-threads",
+    "mcp-socket-config"
+  ],
+  "session_intent": "Diagnose and fix the 19 failing spyc tests Derek asked about, file the underlying issues, and land a reviewed PR with an explanatory watercooler entry.",
+  "observations": [
+    {
+      "kind": "problem",
+      "text": "Of the 19 local test failures, 18 were inotify ENOSPC from spyc's always-recursive listing watch holding ~443k watches, and 1 was the style guard reading the untracked .serena/ directory."
+    },
+    {
+      "kind": "insight",
+      "text": "The inotify watch leak stems from notify's recursive walk following symlinks with no rollback, plus sync_slot leaving the slot None so the partial watch set is never released."
+    },
+    {
+      "kind": "decision",
+      "text": "Chose to file the inotify watch-budget issue as #888 and fix the style guard to skip untracked files rather than attempt a full watch-subsystem fix."
+    },
+    {
+      "kind": "problem",
+      "text": "create_worktree failed with 'Could not find a git repository' because of a vestigial stub .git in the fleet project home, which was moved aside and filed as #890."
+    },
+    {
+      "kind": "lesson",
+      "text": "The user corrected two wrong claims: the shell was already a spyc project, and the file browser was in /home/caleb/Downloads/ rather than ~."
+    },
+    {
+      "kind": "lesson",
+      "text": "Internal jargon like 'column a' was rejected; plain names such as 'the file browser' are required."
+    },
+    {
+      "kind": "procedure",
+      "text": "Every follow-up fix commit on the PR received its own adversarial Codex review posted to the PR comments, with each finding fixed and watched failing before resolution."
+    },
+    {
+      "kind": "resolved_loop",
+      "text": "PR #889 went through 5 Codex reviews with all 6 prior findings resolved and a final review reporting no findings."
+    },
+    {
+      "kind": "insight",
+      "text": "The PR fully fixes only the 1 guard failure; the 18 inotify failures remain until #888 is fixed, and a spyc restart only frees watches temporarily."
+    },
+    {
+      "kind": "decision",
+      "text": "Removed the pinned SPYC_MCP_SOCK env block from the gitignored .mcp.json and ran make install to install spyc 2.4.0-CURRENT (af870977)."
+    },
+    {
+      "kind": "opened_loops",
+      "text": "PR #889 awaits Caleb's explicit merge approval, with post-merge remove_worktree cleanup and claim release pending."
+    },
+    {
+      "kind": "opened_loops",
+      "text": "A redrafted reply to Derek covering #888, #889 and #890 was offered but not sent."
+    },
+    {
+      "kind": "closure",
+      "text": "Posted an explanatory entry on the feature-scrollback-line-numbers-config watercooler thread (entry 01M6343DJ5FKZN62FT20EKRY0X) explaining the 19 failures, the fixes, and the reviews."
+    }
+  ],
+  "confidence": 0.92,
+  "extractor_version": "pulse-extractor-v1"
+}
+
+<!-- Entry-ID: 01M6378PKHMAGS89AFERBE0CS7 -->
