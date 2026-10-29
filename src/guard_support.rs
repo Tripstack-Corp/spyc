@@ -125,13 +125,17 @@ pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     };
     // `try_index`, not `index_or_empty`: a repo with no index file must take
     // the walk, not yield an empty list.
-    let index = if root.join(".git").exists() {
+    // `symlink_metadata`, not `exists`: a dangling `.git` symlink is broken
+    // metadata to report, not an absent one to walk past.
+    let no_git = std::fs::symlink_metadata(root.join(".git"))
+        .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+    let index = if no_git {
+        None
+    } else {
         gix::open(root)
             .unwrap_or_else(|e| panic!("{}: the git repo can't be opened: {e:#}", root.display()))
             .try_index()
             .unwrap_or_else(|e| panic!("{}: the git index can't be read: {e:#}", root.display()))
-    } else {
-        None
     };
     let mut out: Vec<std::path::PathBuf> = match index {
         Some(index) => index
@@ -376,6 +380,19 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         std::fs::write(root.join(".git"), "gitdir: /nonexistent/spyc-guard-test\n").unwrap();
+        std::fs::write(root.join("a.md"), "x\n").unwrap();
+        tracked_files(root);
+    }
+
+    /// A `.git` symlink whose target is gone is broken metadata, not absent:
+    /// the guard stops rather than walking.
+    #[cfg(unix)]
+    #[test]
+    #[should_panic(expected = "the git repo can't be opened")]
+    fn a_dangling_git_symlink_panics() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::os::unix::fs::symlink(root.join("gone"), root.join(".git")).unwrap();
         std::fs::write(root.join("a.md"), "x\n").unwrap();
         tracked_files(root);
     }
