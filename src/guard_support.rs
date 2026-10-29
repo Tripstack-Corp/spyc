@@ -110,12 +110,13 @@ pub fn repo_files(root: &std::path::Path, extensions: &[&str]) -> Vec<String> {
 /// entries that exist on disk, so a staged new file counts and an untracked one
 /// doesn't. An untracked file belongs to a tool or to the user (an agent's
 /// memory directory, an editor's workspace file), and checking it fails a guard
-/// on one machine that passes on every clean clone. Without an index to read
-/// (a source tarball, or one later `git init`ed) it is every file a walk
-/// finds, build output and VCS metadata skipped, so a guard there still checks
-/// everything. An index that is there but can't be read panics, as does
-/// finding nothing at all: the walk would let untracked files through, and a
-/// guard handed an empty list would pass while checking nothing.
+/// on one machine that passes on every clean clone. With no `.git` at `root`
+/// (a source tarball), or a repo with no index yet (one later `git init`ed),
+/// it is every file a walk finds, build output and VCS metadata skipped, so a
+/// guard there still checks everything. A `.git` that can't be opened, or an
+/// index that can't be read, panics, as does finding nothing at all: the walk
+/// would let untracked files through, and a guard handed an empty list would
+/// pass while checking nothing.
 pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let walk = || {
         let mut found = Vec::new();
@@ -124,11 +125,13 @@ pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     };
     // `try_index`, not `index_or_empty`: a repo with no index file must take
     // the walk, not yield an empty list.
-    let index = match gix::open(root) {
-        Ok(repo) => repo
+    let index = if root.join(".git").exists() {
+        gix::open(root)
+            .unwrap_or_else(|e| panic!("{}: the git repo can't be opened: {e:#}", root.display()))
             .try_index()
-            .unwrap_or_else(|e| panic!("{}: the git index can't be read: {e:#}", root.display())),
-        Err(_) => None,
+            .unwrap_or_else(|e| panic!("{}: the git index can't be read: {e:#}", root.display()))
+    } else {
+        None
     };
     let mut out: Vec<std::path::PathBuf> = match index {
         Some(index) => index
@@ -362,6 +365,18 @@ mod tests {
         std::fs::write(root.join("a.md"), "x\n").unwrap();
         // Longer than a hash, so gix reads it and reports the mismatch.
         std::fs::write(root.join(".git/index"), "not an index ".repeat(8)).unwrap();
+        tracked_files(root);
+    }
+
+    /// A `.git` that is there but won't open stops the guard too: walking
+    /// would let untracked files count as the repo's.
+    #[test]
+    #[should_panic(expected = "the git repo can't be opened")]
+    fn a_git_dir_that_wont_open_panics() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join(".git"), "gitdir: /nonexistent/spyc-guard-test\n").unwrap();
+        std::fs::write(root.join("a.md"), "x\n").unwrap();
         tracked_files(root);
     }
 }
