@@ -1,6 +1,7 @@
-//! Every relative link in the repo's markdown resolves: the file it names
-//! exists inside the repo, and a `#fragment` into a markdown file names one of
-//! its headings or anchors.
+//! Every relative link in the repo's markdown resolves: the file it names is
+//! one the repo holds (tracked or staged, so a link into a file not yet added
+//! fails as it would in a clean clone), and a `#fragment` into a markdown file
+//! names one of its headings or anchors.
 //!
 //! Moving or splitting a doc strands the links into it, and nothing else in
 //! the gate reads a link. A prose reference to a section, in a doc or in code,
@@ -506,7 +507,10 @@ fn every_relative_markdown_link_resolves() {
             (f, text)
         })
         .collect();
-    let r = check(&docs, |p| root.join(p).exists());
+    // A target counts only if the repo holds it, as in a clean clone: a link
+    // into a file not yet staged fails here too.
+    let tracked = crate::guard_support::tracked_paths(root);
+    let r = check(&docs, |p| tracked.contains(p.trim_end_matches('/')));
     // A walk or a reader that stops matching checks nothing and passes.
     assert!(
         r.files > 40,
@@ -638,4 +642,37 @@ fn percent_encoded_paths_resolve() {
         |_| false,
     );
     assert!(r.broken.is_empty(), "{:#?}", r.broken);
+}
+
+/// A link into a file the repo doesn't hold yet fails, fragment or not, as it
+/// would in a clean clone, though the file is on disk.
+#[test]
+fn a_link_into_an_untracked_file_fails() {
+    use crate::git::test_support::run_git;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    run_git(root, &["init", "-q", "--initial-branch=main"]);
+    std::fs::write(
+        root.join("README.md"),
+        "[g](new-guide.md#missing-heading) [h](new-guide.md)\n",
+    )
+    .unwrap();
+    run_git(root, &["add", "README.md"]);
+    std::fs::write(root.join("new-guide.md"), "# Other\n").unwrap();
+
+    let docs: BTreeMap<String, String> = crate::guard_support::markdown_files(root)
+        .into_iter()
+        .map(|f| {
+            let text = std::fs::read_to_string(root.join(&f)).unwrap();
+            (f, text)
+        })
+        .collect();
+    let tracked = crate::guard_support::tracked_paths(root);
+    let r = check(&docs, |p| tracked.contains(p.trim_end_matches('/')));
+    assert_eq!(r.broken.len(), 2, "{:#?}", r.broken);
+    assert!(
+        r.broken.iter().all(|b| b.contains("names no file")),
+        "{:#?}",
+        r.broken
+    );
 }

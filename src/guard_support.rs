@@ -110,13 +110,17 @@ pub fn repo_files(root: &std::path::Path, extensions: &[&str]) -> Vec<String> {
 /// entries that exist on disk, so a staged new file counts and an untracked one
 /// doesn't. An untracked file belongs to a tool or to the user (an agent's
 /// memory directory, an editor's workspace file), and checking it fails a guard
-/// on one machine that passes on every clean clone. Outside a git checkout (a
-/// source tarball) it is every file a walk finds, build output and VCS
-/// metadata skipped, so a guard there still checks everything.
+/// on one machine that passes on every clean clone. Without an index to read
+/// (a source tarball, or one later `git init`ed) it is every file a walk
+/// finds, build output and VCS metadata skipped, so a guard there still checks
+/// everything. Finding nothing at all panics: a guard handed an empty list
+/// would pass while checking nothing.
 pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    // `try_index`, not `index_or_empty`: a repo with no index file must take
+    // the walk, not yield an empty list.
     let index = gix::open(root)
         .ok()
-        .and_then(|repo| repo.index_or_empty().ok());
+        .and_then(|repo| repo.try_index().ok().flatten());
     let mut out: Vec<std::path::PathBuf> = if let Some(index) = index {
         index
             .entries()
@@ -131,6 +135,34 @@ pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     };
     out.sort();
     out.dedup();
+    assert!(
+        !out.is_empty(),
+        "no files under {} — a guard would check nothing",
+        root.display()
+    );
+    out
+}
+
+/// Every repo-relative, `/`-separated path a link may point at: each of
+/// [`tracked_files`] and each directory holding one, so a link into an
+/// untracked file fails here as it does in a clean clone.
+pub fn tracked_paths(root: &std::path::Path) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for file in tracked_files(root) {
+        let Ok(rel) = file.strip_prefix(root) else {
+            continue;
+        };
+        let mut path = rel.display().to_string().replace('\\', "/");
+        loop {
+            if !out.insert(path.clone()) {
+                break;
+            }
+            match path.rfind('/') {
+                Some(i) => path.truncate(i),
+                None => break,
+            }
+        }
+    }
     out
 }
 
@@ -154,7 +186,7 @@ fn walk_all(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{production_half, repo_files, tracked_files};
+    use super::{production_half, repo_files, tracked_files, tracked_paths};
     use crate::git::test_support::run_git;
 
     #[test]
@@ -272,5 +304,44 @@ mod tests {
         std::fs::write(root.join("b.rs"), "x\n").unwrap();
 
         assert_eq!(tracked_files(root), [root.join("a.md"), root.join("b.rs")]);
+    }
+
+    /// A repo with no index yet (a source tree `git init`ed, nothing added)
+    /// has nothing to go by, so every file counts, as outside a checkout.
+    #[test]
+    fn a_repo_with_no_index_is_walked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        run_git(root, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(root.join("a.md"), "x\n").unwrap();
+
+        assert_eq!(tracked_files(root), [root.join("a.md")]);
+    }
+
+    /// Nothing to check is a broken walk, not a pass.
+    #[test]
+    #[should_panic(expected = "a guard would check nothing")]
+    fn finding_no_files_panics() {
+        let tmp = tempfile::tempdir().unwrap();
+        tracked_files(tmp.path());
+    }
+
+    /// A link may point at a tracked file or a directory holding one, never at
+    /// a file the repo doesn't hold.
+    #[test]
+    fn a_link_target_counts_once_it_is_tracked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        run_git(root, &["init", "-q", "--initial-branch=main"]);
+        std::fs::create_dir_all(root.join("docs/features")).unwrap();
+        std::fs::write(root.join("docs/features/pane.md"), "x\n").unwrap();
+        run_git(root, &["add", "docs/features/pane.md"]);
+        std::fs::write(root.join("untracked.md"), "x\n").unwrap();
+
+        let paths = tracked_paths(root);
+        for want in ["docs/features/pane.md", "docs/features", "docs"] {
+            assert!(paths.contains(want), "{want} missing from {paths:?}");
+        }
+        assert!(!paths.contains("untracked.md"));
     }
 }
