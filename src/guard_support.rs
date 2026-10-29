@@ -85,8 +85,8 @@ pub fn production_half(src: &str) -> String {
 }
 
 /// Every markdown file under `root`, as sorted repo-relative paths with `/`
-/// separators. Build output and VCS metadata are skipped; each guard drops
-/// whatever its own policy exempts.
+/// separators, drawn from [`tracked_files`]; each guard drops whatever its own
+/// policy exempts.
 pub fn markdown_files(root: &std::path::Path) -> Vec<String> {
     repo_files(root, &["md"])
 }
@@ -94,41 +94,68 @@ pub fn markdown_files(root: &std::path::Path) -> Vec<String> {
 /// Every file under `root` with one of `extensions`, as [`markdown_files`]
 /// lists markdown.
 pub fn repo_files(root: &std::path::Path, extensions: &[&str]) -> Vec<String> {
-    const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache"];
-    fn walk(dir: &std::path::Path, extensions: &[&str], out: &mut Vec<std::path::PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let p = e.path();
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if p.is_dir() {
-                if !SKIP_DIRS.contains(&name) {
-                    walk(&p, extensions, out);
-                }
-            } else if p
-                .extension()
+    tracked_files(root)
+        .iter()
+        .filter(|p| {
+            p.extension()
                 .and_then(|x| x.to_str())
                 .is_some_and(|x| extensions.contains(&x))
-            {
-                out.push(p);
-            }
-        }
-    }
-    let mut found = Vec::new();
-    walk(root, extensions, &mut found);
-    let mut out: Vec<String> = found
-        .iter()
+        })
         .filter_map(|p| p.strip_prefix(root).ok())
         .map(|p| p.display().to_string().replace('\\', "/"))
-        .collect();
+        .collect()
+}
+
+/// Every file the repo at `root` holds, as sorted absolute paths: the index's
+/// entries that exist on disk, so a staged new file counts and an untracked one
+/// doesn't. An untracked file belongs to a tool or to the user (an agent's
+/// memory directory, an editor's workspace file), and checking it fails a guard
+/// on one machine that passes on every clean clone. Outside a git checkout (a
+/// source tarball) it is every file a walk finds, build output and VCS
+/// metadata skipped, so a guard there still checks everything.
+pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let index = gix::open(root)
+        .ok()
+        .and_then(|repo| repo.index_or_empty().ok());
+    let mut out: Vec<std::path::PathBuf> = if let Some(index) = index {
+        index
+            .entries()
+            .iter()
+            .map(|e| root.join(gix::path::from_bstr(e.path(&index))))
+            .filter(|p| p.is_file())
+            .collect()
+    } else {
+        let mut found = Vec::new();
+        walk_all(root, &mut found);
+        found
+    };
     out.sort();
+    out.dedup();
     out
+}
+
+fn walk_all(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache"];
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if p.is_dir() {
+            if !SKIP_DIRS.contains(&name) {
+                walk_all(&p, out);
+            }
+        } else {
+            out.push(p);
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::production_half;
+    use super::{production_half, repo_files, tracked_files};
+    use crate::git::test_support::run_git;
 
     #[test]
     fn a_comment_mentioning_the_attribute_does_not_truncate() {
@@ -196,5 +223,54 @@ mod tests {
             prod.contains("OFFENDER"),
             "brace matching must find the real end of the module"
         );
+    }
+
+    /// A guard reads what the repo holds: a committed file and a staged new
+    /// one, never an untracked file a tool left in the checkout.
+    #[test]
+    fn a_guard_reads_tracked_and_staged_files_but_not_untracked_ones() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        run_git(root, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(root.join("committed.md"), "x\n").unwrap();
+        run_git(root, &["add", "committed.md"]);
+        run_git(
+            root,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "c",
+            ],
+        );
+        std::fs::create_dir(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs/staged.md"), "x\n").unwrap();
+        run_git(root, &["add", "docs/staged.md"]);
+        std::fs::create_dir(root.join(".serena")).unwrap();
+        std::fs::write(root.join(".serena/notes.md"), "x\n").unwrap();
+        std::fs::write(root.join("untracked.md"), "x\n").unwrap();
+
+        assert_eq!(
+            repo_files(root, &["md"]),
+            ["committed.md", "docs/staged.md"]
+        );
+    }
+
+    /// Outside a git checkout there is no index to go by, so every file
+    /// counts: the guard checks everything rather than nothing.
+    #[test]
+    fn outside_a_checkout_every_file_is_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir(root.join("target")).unwrap();
+        std::fs::write(root.join("target/built.md"), "x\n").unwrap();
+        std::fs::write(root.join("a.md"), "x\n").unwrap();
+        std::fs::write(root.join("b.rs"), "x\n").unwrap();
+
+        assert_eq!(tracked_files(root), [root.join("a.md"), root.join("b.rs")]);
     }
 }
