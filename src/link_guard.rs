@@ -496,9 +496,10 @@ fn every_feature_and_config_page_is_linked_from_its_hub() {
     );
 }
 
-#[test]
-fn every_relative_markdown_link_resolves() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+/// [`check`] over the markdown of the repo at `root`. A target counts only if
+/// the repo holds it, as in a clean clone: a link into a file not yet staged
+/// fails here too.
+fn check_repo(root: &Path) -> Report {
     let docs: BTreeMap<String, String> = crate::guard_support::markdown_files(root)
         .into_iter()
         .map(|f| {
@@ -507,10 +508,13 @@ fn every_relative_markdown_link_resolves() {
             (f, text)
         })
         .collect();
-    // A target counts only if the repo holds it, as in a clean clone: a link
-    // into a file not yet staged fails here too.
     let tracked = crate::guard_support::tracked_paths(root);
-    let r = check(&docs, |p| tracked.contains(p.trim_end_matches('/')));
+    check(&docs, |p| tracked.contains(p.trim_end_matches('/')))
+}
+
+#[test]
+fn every_relative_markdown_link_resolves() {
+    let r = check_repo(Path::new(env!("CARGO_MANIFEST_DIR")));
     // A walk or a reader that stops matching checks nothing and passes.
     assert!(
         r.files > 40,
@@ -660,18 +664,32 @@ fn a_link_into_an_untracked_file_fails() {
     run_git(root, &["add", "README.md"]);
     std::fs::write(root.join("new-guide.md"), "# Other\n").unwrap();
 
-    let docs: BTreeMap<String, String> = crate::guard_support::markdown_files(root)
-        .into_iter()
-        .map(|f| {
-            let text = std::fs::read_to_string(root.join(&f)).unwrap();
-            (f, text)
-        })
-        .collect();
-    let tracked = crate::guard_support::tracked_paths(root);
-    let r = check(&docs, |p| tracked.contains(p.trim_end_matches('/')));
+    let r = check_repo(root);
     assert_eq!(r.broken.len(), 2, "{:#?}", r.broken);
     assert!(
         r.broken.iter().all(|b| b.contains("names no file")),
+        "{:#?}",
+        r.broken
+    );
+}
+
+/// A link to the repo root, from the top or from a nested doc, resolves; one
+/// that climbs out of the repo still doesn't.
+#[test]
+fn a_link_to_the_repo_root_resolves() {
+    use crate::git::test_support::run_git;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    run_git(root, &["init", "-q", "--initial-branch=main"]);
+    std::fs::create_dir(root.join("docs")).unwrap();
+    std::fs::write(root.join("README.md"), "[a](.) [b](./)\n").unwrap();
+    std::fs::write(root.join("docs/guide.md"), "[c](../) [d](../../out)\n").unwrap();
+    run_git(root, &["add", "."]);
+
+    let r = check_repo(root);
+    assert_eq!(r.broken.len(), 1, "{:#?}", r.broken);
+    assert!(
+        r.broken[0].contains("`../../out` leaves the repo"),
         "{:#?}",
         r.broken
     );

@@ -113,25 +113,31 @@ pub fn repo_files(root: &std::path::Path, extensions: &[&str]) -> Vec<String> {
 /// on one machine that passes on every clean clone. Without an index to read
 /// (a source tarball, or one later `git init`ed) it is every file a walk
 /// finds, build output and VCS metadata skipped, so a guard there still checks
-/// everything. Finding nothing at all panics: a guard handed an empty list
-/// would pass while checking nothing.
+/// everything. An index that is there but can't be read panics, as does
+/// finding nothing at all: the walk would let untracked files through, and a
+/// guard handed an empty list would pass while checking nothing.
 pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let walk = || {
+        let mut found = Vec::new();
+        walk_all(root, &mut found);
+        found
+    };
     // `try_index`, not `index_or_empty`: a repo with no index file must take
     // the walk, not yield an empty list.
-    let index = gix::open(root)
-        .ok()
-        .and_then(|repo| repo.try_index().ok().flatten());
-    let mut out: Vec<std::path::PathBuf> = if let Some(index) = index {
-        index
+    let index = match gix::open(root) {
+        Ok(repo) => repo
+            .try_index()
+            .unwrap_or_else(|e| panic!("{}: the git index can't be read: {e:#}", root.display())),
+        Err(_) => None,
+    };
+    let mut out: Vec<std::path::PathBuf> = match index {
+        Some(index) => index
             .entries()
             .iter()
             .map(|e| root.join(gix::path::from_bstr(e.path(&index))))
             .filter(|p| p.is_file())
-            .collect()
-    } else {
-        let mut found = Vec::new();
-        walk_all(root, &mut found);
-        found
+            .collect(),
+        None => walk(),
     };
     out.sort();
     out.dedup();
@@ -144,10 +150,10 @@ pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
 }
 
 /// Every repo-relative, `/`-separated path a link may point at: each of
-/// [`tracked_files`] and each directory holding one, so a link into an
-/// untracked file fails here as it does in a clean clone.
+/// [`tracked_files`], each directory holding one, and the root itself (`""`),
+/// so a link into an untracked file fails here as it does in a clean clone.
 pub fn tracked_paths(root: &std::path::Path) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
+    let mut out = std::collections::HashSet::from([String::new()]);
     for file in tracked_files(root) {
         let Ok(rel) = file.strip_prefix(root) else {
             continue;
@@ -343,5 +349,19 @@ mod tests {
             assert!(paths.contains(want), "{want} missing from {paths:?}");
         }
         assert!(!paths.contains("untracked.md"));
+    }
+
+    /// An index that is there but can't be read stops the guard: walking would
+    /// let untracked files count as the repo's.
+    #[test]
+    #[should_panic(expected = "the git index can't be read")]
+    fn an_unreadable_index_panics() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        run_git(root, &["init", "-q", "--initial-branch=main"]);
+        std::fs::write(root.join("a.md"), "x\n").unwrap();
+        // Longer than a hash, so gix reads it and reports the mismatch.
+        std::fs::write(root.join(".git/index"), "not an index ".repeat(8)).unwrap();
+        tracked_files(root);
     }
 }
