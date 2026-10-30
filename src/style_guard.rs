@@ -276,23 +276,15 @@ mod tests {
         "docs/changelog/",
     ];
 
-    const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", ".cache"];
-
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let p = e.path();
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if p.is_dir() {
-                if !SKIP_DIRS.contains(&name) {
-                    walk(&p, out);
-                }
-            } else if !SKIP_FILES.contains(&name) {
-                out.push(p);
-            }
-        }
+    fn walk(root: &Path, out: &mut Vec<PathBuf>) {
+        out.extend(
+            crate::guard_support::tracked_files(root)
+                .into_iter()
+                .filter(|p| {
+                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    !SKIP_FILES.contains(&name)
+                }),
+        );
     }
 
     /// Prose in this repo is Canadian English, and this is what makes that a
