@@ -873,15 +873,15 @@ mod tests {
         assert_eq!(route_mouse(s, Gesture::Left), MouseSink::SelectChrome);
     }
 
-    /// Tab activation is LEFT only. Middle stays paste and right stays the
-    /// leader menu everywhere — a tab label is not an exception to that, and
-    /// making it one would remove the only way to reach those over the divider.
+    /// Middle stays paste everywhere — a tab label is not an exception to
+    /// that, and making it one would remove the only way to reach it over the
+    /// divider. A right-click on a tab label opens that tab's menu
+    /// (`menu_tests.rs`).
     #[test]
-    fn middle_and_right_are_unaffected_over_a_tab() {
+    fn middle_click_over_a_tab_still_pastes() {
         let mut s = snap(Some(Region::Divider));
         s.tab_under_pointer = Some(0);
         assert_eq!(route_mouse(s, Gesture::Middle), MouseSink::Paste);
-        assert_eq!(route_mouse(s, Gesture::Right), MouseSink::LeaderMenu);
     }
 
     /// A modal or an open prompt still wins: tab activation must not become a
@@ -1211,7 +1211,7 @@ mod tests {
     /// Middle and right are spyc's from EVERY region, including over a
     /// mouse-aware child. Forwarding them would make the gesture unavailable in
     /// exactly the region where the pane holds focus — which is where a user
-    /// would reach for it.
+    /// would reach for it. Which menu a right-click opens is `menu_tests.rs`'s.
     #[test]
     fn middle_and_right_are_never_forwarded_even_to_a_mouse_aware_child() {
         for region in [Region::List, Region::Pane, Region::RightColumn] {
@@ -1224,10 +1224,13 @@ mod tests {
                 MouseSink::Paste,
                 "{region:?}: middle-click pastes"
             );
-            assert_eq!(
-                route_mouse(s, Gesture::Right),
-                MouseSink::LeaderMenu,
-                "{region:?}: right-click opens the leader menu"
+            let right = route_mouse(s, Gesture::Right);
+            assert!(
+                !matches!(
+                    right,
+                    MouseSink::PaneForward | MouseSink::FocusAndForward | MouseSink::Swallow
+                ),
+                "{region:?}: right-click opens a menu, never reaching the child: {right:?}"
             );
         }
     }
