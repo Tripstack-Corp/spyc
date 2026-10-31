@@ -194,6 +194,7 @@ impl App {
                         title,
                         entries,
                         rows,
+                        menu: None,
                     });
                     ctx.draw.mark(3);
                 }

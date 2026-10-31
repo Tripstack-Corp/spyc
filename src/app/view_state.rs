@@ -99,7 +99,8 @@ pub struct ImageView {
 /// The which-key chord-hint popup's render data — a chord prefix's title and
 /// its continuation rows (`keys → label`). Built in `settle_chord_hint` from
 /// `Resolver::continuations` once the hint delay elapses while a chord is still
-/// pending; read (never mutated) by `render_chord_hint`.
+/// pending, or by `open_menu` for the menu of an object (`menus.rs`); read
+/// (never mutated) by `render_chord_hint`.
 pub struct ChordHint {
     /// The armed prefix, e.g. `"^a"` or `"g"`.
     pub(super) title: String,
@@ -109,6 +110,16 @@ pub struct ChordHint {
     /// `(keys, label)` per entry, e.g. `("z", "zoom pane (toggle fullscreen)")`:
     /// what is drawn and hit-tested.
     pub(super) rows: Vec<(&'static str, &'static str)>,
+    /// An object's menu, which no chord armed and which takes its own keys;
+    /// `None` for a chord's popup.
+    pub(super) menu: Option<MenuState>,
+}
+
+/// What an object's menu holds beside a chord popup's rows.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MenuState {
+    /// The entry `↑`/`↓` highlighted, which `Enter` fires: none until an arrow.
+    pub(super) selected: Option<usize>,
 }
 
 /// A brief spice-heat border-pulse flash — the P3-1 visual bell. `start` times

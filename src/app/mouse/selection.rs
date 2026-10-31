@@ -456,7 +456,11 @@ impl super::super::App {
     /// The rect a column's list is drawn into, and a `ListView` over its cached
     /// rows — the same pair the renderer builds, so a hit-test can't disagree with
     /// what's on screen.
-    fn list_row_at(&self, side: crate::app::state::Side, ev: MouseEvent) -> Option<usize> {
+    pub(super) fn list_row_at(
+        &self,
+        side: crate::app::state::Side,
+        ev: MouseEvent,
+    ) -> Option<usize> {
         use crate::app::state::Side;
         let (cols, rows) = self.view.term_size;
         let layout = self.frame_layout(Rect::new(0, 0, cols, rows));

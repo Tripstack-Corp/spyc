@@ -133,6 +133,7 @@ impl Resolver {
                 Act("P", A::PanePipeContent),
                 Act("i", A::PanePipeInventory),
                 Act("u", A::QuickSelectOpen),
+                Act(".", A::PaneContextMenu),
                 Act("g", A::OpenImageGallery),
                 Act("\\ C", A::TogglePane),
                 Act("!", A::Project(ProjectAction::Attention)),

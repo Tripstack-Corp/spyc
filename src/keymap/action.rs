@@ -224,6 +224,10 @@ pub enum Action {
     /// to the matched file's parent and places the cursor on it.
     FindFile,
 
+    // The menu of the object under the cursor.
+    ContextMenu,     // . — the menu for the entry under the cursor
+    PaneContextMenu, // ^a . — the menu for the active pane tab
+
     // Placeholder for keys we reserve but haven't implemented yet.
     #[allow(dead_code)]
     Noop,
@@ -310,6 +314,7 @@ impl Action {
             | Self::PaneForkTab
             | Self::PaneToggleSuspend
             | Self::PaneToTask
+            | Self::PaneContextMenu
             | Self::PanePipeContent
             | Self::PanePipeInventory
             | Self::VsplitToggle
@@ -433,7 +438,7 @@ impl Action {
             Self::HarpoonJump(_) => "jump to harpoon slot N",
             Self::HarpoonAppend => "harpoon — append cursor file",
             Self::HarpoonRemove => "harpoon — remove cursor file",
-            Self::HarpoonOpenMenu => "harpoon — open menu",
+            Self::HarpoonOpenMenu | Self::ContextMenu | Self::PaneContextMenu => self.menu_label(),
             Self::WorktreeList => "list git worktrees",
             Self::WorktreeNew => "new git worktree",
             Self::WorktreeDelete => "delete git worktree",
@@ -603,7 +608,7 @@ impl Action {
             Self::HarpoonJump(_) => "harpoon_jump",
             Self::HarpoonAppend => "harpoon_append",
             Self::HarpoonRemove => "harpoon_remove",
-            Self::HarpoonOpenMenu => "harpoon_open_menu",
+            Self::HarpoonOpenMenu | Self::ContextMenu | Self::PaneContextMenu => self.menu_name(),
             // Git worktree.
             Self::WorktreeList => "worktree_list",
             Self::WorktreeNew => "worktree_new",
@@ -659,6 +664,15 @@ impl Action {
         }
     }
 
+    /// The menus' arm of [`Self::describe`], which is at its length pin.
+    const fn menu_label(&self) -> &'static str {
+        match self {
+            Self::ContextMenu => "menu for the entry under the cursor",
+            Self::PaneContextMenu => "menu for the active pane tab",
+            _ => "harpoon — open menu",
+        }
+    }
+
     /// The pick jumps' arm of [`Self::describe`], which is at its length pin.
     const fn describe_pick_jump(&self) -> &'static str {
         match self {
@@ -681,6 +695,15 @@ impl Action {
         match self {
             Self::PaneToggleSuspend => "pane_toggle_suspend",
             _ => "pane_to_task",
+        }
+    }
+
+    /// The menus' arm of [`Self::canonical_name`], which is at its length pin.
+    const fn menu_name(&self) -> &'static str {
+        match self {
+            Self::ContextMenu => "context_menu",
+            Self::PaneContextMenu => "pane_context_menu",
+            _ => "harpoon_open_menu",
         }
     }
 
@@ -843,9 +866,12 @@ pub fn action_from_name(name: &str) -> Option<Action> {
     })
 }
 
-/// The `pane_*` names of [`action_from_name`], which is at its length pin.
+/// The `pane_*` names and the menus' of [`action_from_name`], which is at its
+/// length pin.
 fn pane_action_from_name(name: &str) -> Option<Action> {
     Some(match name {
+        "context_menu" => Action::ContextMenu,
+        "pane_context_menu" => Action::PaneContextMenu,
         "pane_focus_down" => Action::PaneFocusDown,
         "pane_focus_up" => Action::PaneFocusUp,
         "pane_send_selection" => Action::PaneSendSelection,

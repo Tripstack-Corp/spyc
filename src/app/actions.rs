@@ -160,40 +160,8 @@ impl App {
             self.state.cur().rows.len(),
         );
 
-        // In dir view, `p` (Drop) means "put inventory to cwd".
-        if *action == Action::Drop && self.state.cur().view == View::Dir {
-            return Ok(self.put_inventory_to_cwd());
-        }
-
-        // yp — yank visible pane output to system clipboard. MVU Phase 5:
-        // emit a `ReadPaneText` effect so the live-pane read + guards run in
-        // `run_effects` (handler stays pure-Model, no Runtime read).
-        if *action == Action::YankPrompt {
-            return Ok(vec![Effect::ReadPaneText {
-                kind: PaneTextKind::Visible,
-                then: PaneTextSink::Clipboard {
-                    ok: ClipMsg::PaneLines,
-                },
-            }]);
-        }
-        // yP — yank last typed pane prompt to system clipboard.
-        if *action == Action::YankLastPrompt {
-            return Ok(self.yank_last_prompt_to_clipboard());
-        }
-        // ya — yank full pane scrollback to system clipboard. MVU Phase 5:
-        // emits `ReadPaneText` (see `yp`).
-        if *action == Action::YankScrollback {
-            return Ok(vec![Effect::ReadPaneText {
-                kind: PaneTextKind::Scrollback(10_000),
-                then: PaneTextSink::Clipboard {
-                    ok: ClipMsg::Scrollback,
-                },
-            }]);
-        }
-        // yf — yank cursor file's absolute path (or all picks,
-        // newline-separated) to system clipboard.
-        if *action == Action::YankPaths {
-            return Ok(self.yank_paths_to_clipboard());
+        if let Some(effects) = self.apply_before_the_model(action) {
+            return Ok(effects);
         }
 
         // Try pure-domain dispatch first, normalized to the unified `Update`
@@ -495,6 +463,41 @@ impl App {
         let row_count = self.state.cur().rows.len();
         self.state.cur_mut().cursor.clamp(row_count);
         Ok(effects)
+    }
+
+    /// The actions answered before the pure-domain dispatch: `p` in the
+    /// directory view, the yanks, and the menus of an object. `None` for the
+    /// rest, which go on to `AppState::apply`.
+    fn apply_before_the_model(&mut self, action: &Action) -> Option<Vec<Effect>> {
+        Some(match action {
+            // In dir view, `p` (Drop) means "put inventory to cwd".
+            Action::Drop if self.state.cur().view == View::Dir => self.put_inventory_to_cwd(),
+            // yp — yank visible pane output to system clipboard. MVU Phase 5:
+            // emit a `ReadPaneText` effect so the live-pane read + guards run in
+            // `run_effects` (handler stays pure-Model, no Runtime read).
+            Action::YankPrompt => vec![Effect::ReadPaneText {
+                kind: PaneTextKind::Visible,
+                then: PaneTextSink::Clipboard {
+                    ok: ClipMsg::PaneLines,
+                },
+            }],
+            // yP — yank last typed pane prompt to system clipboard.
+            Action::YankLastPrompt => self.yank_last_prompt_to_clipboard(),
+            // ya — yank full pane scrollback to system clipboard. MVU Phase 5:
+            // emits `ReadPaneText` (see `yp`).
+            Action::YankScrollback => vec![Effect::ReadPaneText {
+                kind: PaneTextKind::Scrollback(10_000),
+                then: PaneTextSink::Clipboard {
+                    ok: ClipMsg::Scrollback,
+                },
+            }],
+            // yf — yank cursor file's absolute path (or all picks,
+            // newline-separated) to system clipboard.
+            Action::YankPaths => self.yank_paths_to_clipboard(),
+            Action::ContextMenu => self.open_entry_menu(),
+            Action::PaneContextMenu => self.open_tab_menu(),
+            _ => return None,
+        })
     }
 
     /// A pane action while a pane-tab prompt (new tab, its cwd, a rename) is

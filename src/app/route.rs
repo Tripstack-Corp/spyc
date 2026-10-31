@@ -65,6 +65,10 @@ pub(super) enum InputSink {
     ImageGallery,
     /// Full-screen image overlay is up.
     ImageView,
+    // ── the menu of an object, over whichever region owns the input ──
+    /// An object's menu is open: it takes its arrows, `Enter` and `Esc`, and
+    /// closes for any other key, which then routes as if it had not been open.
+    Menu,
     // ── content sinks: the focused region owns the input ──
     /// In-app prompt is active (`Mode::Prompting`); the key feeds
     /// the prompt's line editor.
@@ -133,6 +137,9 @@ pub(super) struct RouteSnapshot {
     /// leaves this `false` — its keys fall through to the resolver / file-list
     /// nav, which operate on the focused column via `cur()`.
     pub right_preview_focused: bool,
+    /// An object's menu is open (`.`, `^a .`, a right-click). No chord is
+    /// armed for it, so it is its own layer rather than `resolver_pending`.
+    pub menu_open: bool,
 }
 
 /// Decide where an input event goes. **Pure**, no mutation, no I/O.
@@ -173,6 +180,13 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         Some(Modal::Harpoon) => return InputSink::Harpoon,
         Some(Modal::ImageGallery) => return InputSink::ImageGallery,
         Some(Modal::OverlayDismiss) | None => {}
+    }
+
+    // An object's menu is drawn over every region, so it hears the keys before
+    // the region that owns them; the keys it doesn't take go on to that region
+    // once it has closed.
+    if snap.menu_open {
+        return InputSink::Menu;
     }
 
     // Content layer.
@@ -310,6 +324,7 @@ impl App {
             // through the resolver/file-list nav instead (driving `cur()`).
             right_preview_focused: self.right_column_focused()
                 && self.view.project().right_pager.is_some(),
+            menu_open: self.menu_is_open(),
         }
     }
 }
@@ -333,6 +348,7 @@ mod tests {
             pane_closed: false,
             resolver_pending: false,
             right_preview_focused: false,
+            menu_open: false,
         }
     }
 
@@ -1029,6 +1045,7 @@ mod tests {
                             pane_closed: on(bits, 4),
                             resolver_pending: false,
                             right_preview_focused: on(bits, 5),
+                            menu_open: false,
                         };
                         assert_eq!(
                             route_input(snap, InputKind::Paste),

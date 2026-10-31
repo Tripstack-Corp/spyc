@@ -33,7 +33,7 @@ pub(super) mod tab_hit;
 // Re-exported so the impure half and its callers keep referring to
 // `mouse::route_mouse` / `mouse::Region` exactly as before this split.
 pub(super) use route::{
-    Gesture, MouseSink, MouseSnapshot, PendingViewIntent, region_at, route_mouse,
+    Gesture, MenuAt, MouseSink, MouseSnapshot, PendingViewIntent, region_at, route_mouse,
 };
 
 /// Apply `[mouse] invert_scroll` to a raw event, at the boundary, before anything
@@ -371,21 +371,7 @@ impl super::App {
             }
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
             MouseSink::StderrLog => self.open_stderr_log(),
-            MouseSink::PaneTab(index) => {
-                // Reuse the keyboard's own tab switch rather than calling
-                // `tabs.switch_to`: it also stashes/restores the per-tab
-                // scrollback pager, pulls focus into the pane, and handles the
-                // `^a z` fullscreen-list case. A hand-rolled switch here would
-                // start out subtly different and drift further.
-                let n = u8::try_from(index.saturating_add(1)).unwrap_or(u8::MAX);
-                match self.apply(&crate::keymap::Action::PaneTabByIndex(n)) {
-                    Ok(effects) => effects,
-                    Err(e) => {
-                        self.state.flash_error(format!("tab switch: {e:#}"));
-                        Vec::new()
-                    }
-                }
-            }
+            MouseSink::PaneTab(index) => self.switch_to_clicked_tab(index),
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
             MouseSink::ChordRow(index) => self.fire_chord_row(index),
             MouseSink::DismissChord => {
@@ -393,6 +379,7 @@ impl super::App {
                 self.clear_chord_hint();
                 Vec::new()
             }
+            MouseSink::ContextMenu(at) => self.open_menu_at(at, region),
             MouseSink::LeaderMenu => {
                 self.state.resolver.enter_leader();
                 // Show the which-key popup NOW rather than after
@@ -467,9 +454,71 @@ impl super::App {
             // this is a lookup rather than a second hit-test — one source for
             // "what got drawn" and "what a click can select".
             over_chrome_row: self.chrome_col_at(ev).is_some(),
-            chord_armed: self.state.resolver.is_pending(),
+            chord_armed: self.state.resolver.is_pending() || self.menu_is_open(),
+            menu_open: self.menu_is_open(),
+            list_row: self.list_row_under_right_click(gesture, region, ev),
             over_chord_hint,
             chord_row,
+        }
+    }
+
+    /// The file row a right-click is on, in a column listing a directory. Only
+    /// resolved for a right-click, the one gesture that asks.
+    fn list_row_under_right_click(
+        &self,
+        gesture: Gesture,
+        region: Option<route::Region>,
+        ev: MouseEvent,
+    ) -> Option<(super::state::Side, usize)> {
+        let side = match (gesture, region) {
+            (Gesture::Right, Some(route::Region::List)) => super::state::Side::Left,
+            (Gesture::Right, Some(route::Region::RightColumn)) => super::state::Side::Right,
+            _ => return None,
+        };
+        if self.state.get_col(side)?.view != super::View::Dir {
+            return None;
+        }
+        Some((side, self.list_row_at(side, ev)?))
+    }
+
+    /// A click on the label of the 0-based tab `index`: the tab it names
+    /// becomes the active one.
+    ///
+    /// Reuse the keyboard's own tab switch rather than calling
+    /// `tabs.switch_to`: it also stashes/restores the per-tab scrollback pager,
+    /// pulls focus into the pane, and handles the `^a z` fullscreen-list case.
+    /// A hand-rolled switch here would start out subtly different and drift
+    /// further.
+    fn switch_to_clicked_tab(&mut self, index: usize) -> Vec<Effect> {
+        let n = u8::try_from(index.saturating_add(1)).unwrap_or(u8::MAX);
+        match self.apply(&crate::keymap::Action::PaneTabByIndex(n)) {
+            Ok(effects) => effects,
+            Err(e) => {
+                self.state.flash_error(format!("tab switch: {e:#}"));
+                Vec::new()
+            }
+        }
+    }
+
+    /// A right-click on an object: the keyboard goes where a left click would
+    /// send it, so the keys the rows show are the ones that work next, and the
+    /// object's menu opens.
+    fn open_menu_at(&mut self, at: MenuAt, region: Option<route::Region>) -> Vec<Effect> {
+        match at {
+            MenuAt::Row(side, row) => {
+                self.focus_region(region);
+                self.state.col_mut(side).cursor.index = row;
+                self.open_entry_menu()
+            }
+            MenuAt::PaneBody => {
+                self.set_pane_focus(true);
+                self.open_tab_menu()
+            }
+            MenuAt::Tab(index) => {
+                let mut effects = self.switch_to_clicked_tab(index);
+                effects.extend(self.open_tab_menu());
+                effects
+            }
         }
     }
 
@@ -500,7 +549,7 @@ impl super::App {
     /// A click on entry `index` of the open which-key popup: what the row's key
     /// would do, through the key's own path. A range row (`1-9`) can't say
     /// which member, so it names its keys and leaves the menu open for them.
-    fn fire_chord_row(&mut self, index: usize) -> Vec<Effect> {
+    pub(super) fn fire_chord_row(&mut self, index: usize) -> Vec<Effect> {
         use crate::keymap::ChordEntry;
         let Some(entry) = self
             .view

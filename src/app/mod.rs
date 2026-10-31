@@ -142,6 +142,7 @@ mod lua_events;
 mod matcher;
 mod mcp;
 mod mcp_routing;
+mod menus;
 mod mermaid_ops;
 mod message;
 #[cfg(test)]

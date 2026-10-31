@@ -146,7 +146,6 @@ fn sent_to_pane(fx: &[Effect], c: char) -> bool {
 /// each row shows the key that does the same: `e` edits it, and a plain file
 /// can be made executable but not run.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn a_dot_opens_the_menu_of_the_file_under_the_cursor() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -168,7 +167,6 @@ fn a_dot_opens_the_menu_of_the_file_under_the_cursor() {
 
 /// A directory has nothing to edit or view in a pane.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn a_directorys_menu_has_no_file_rows() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -189,7 +187,6 @@ fn a_directorys_menu_has_no_file_rows() {
 
 /// An executable can be run, and is executable already.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn an_executables_menu_runs_it_and_offers_no_chmod() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -205,7 +202,6 @@ fn an_executables_menu_runs_it_and_offers_no_chmod() {
 /// A row's key, typed with the menu open, does what the row says, and the
 /// menu closes: the menu teaches the key rather than replacing it.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn a_rows_key_typed_in_the_menu_does_what_the_row_says() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -224,7 +220,6 @@ fn a_rows_key_typed_in_the_menu_does_what_the_row_says() {
 /// `↓` moves a highlight down the rows from the first, the highlighted row is
 /// drawn reversed, and `Enter` fires it.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn arrows_highlight_a_row_and_enter_fires_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -259,7 +254,6 @@ fn arrows_highlight_a_row_and_enter_fires_it() {
 
 /// `Esc` closes the menu and does nothing else.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn esc_closes_the_menu_without_acting() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -303,7 +297,6 @@ fn a_dot_typed_in_the_pane_reaches_the_child() {
 /// `^z` for its own job control, so its menu offers no suspend; any other
 /// tab's does.
 #[test]
-#[ignore = "red: `^a .` is bound to nothing"]
 fn ctrl_a_dot_opens_the_tab_menu_with_suspend_only_off_a_shell() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -331,7 +324,6 @@ fn ctrl_a_dot_opens_the_tab_menu_with_suspend_only_off_a_shell() {
 /// A key that isn't the menu's closes it and goes where it would have gone
 /// with no menu open: from the pane, `j` is typed into the child.
 #[test]
-#[ignore = "red: `^a .` is bound to nothing"]
 fn a_key_the_menu_does_not_take_reaches_its_usual_target() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -354,7 +346,6 @@ fn a_key_the_menu_does_not_take_reaches_its_usual_target() {
 /// A right-click on a file row puts the cursor there and opens that file's
 /// menu, as `.` would on it.
 #[test]
-#[ignore = "red: a right-click opens the leader everywhere"]
 fn a_right_click_on_a_row_opens_that_entrys_menu() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -402,7 +393,6 @@ fn a_right_click_below_the_last_entry_opens_the_leader() {
 /// A right-click on the pane body gives it the keyboard and opens the active
 /// tab's menu, and a click on a row fires it: "zoom pane" zooms the pane.
 #[test]
-#[ignore = "red: a right-click opens the leader everywhere"]
 fn a_right_click_on_the_pane_opens_its_tab_menu_and_a_row_fires() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -431,7 +421,6 @@ fn a_right_click_on_the_pane_opens_its_tab_menu_and_a_row_fires() {
 /// A right-click on a tab's label switches to that tab, as a left click does,
 /// and opens its menu.
 #[test]
-#[ignore = "red: a right-click opens the leader everywhere"]
 fn a_right_click_on_a_tab_label_switches_to_it_and_opens_its_menu() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -462,7 +451,6 @@ fn a_right_click_on_a_tab_label_switches_to_it_and_opens_its_menu() {
 /// A left click beside an open entry menu closes it and does nothing else,
 /// as beside every menu.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn a_left_click_outside_an_entry_menu_closes_it_and_does_nothing_else() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -490,7 +478,6 @@ fn a_left_click_outside_an_entry_menu_closes_it_and_does_nothing_else() {
 /// menu names, and a row fired after that would act on another file. So the
 /// wheel closes the menu, and moves nothing.
 #[test]
-#[ignore = "red: `.` is bound to nothing"]
 fn the_wheel_beside_an_entry_menu_closes_it_rather_than_moving_the_cursor() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();

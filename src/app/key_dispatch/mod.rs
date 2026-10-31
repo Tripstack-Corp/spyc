@@ -53,7 +53,7 @@ pub(super) fn paste_bytes_for_pane(text: &str, child_bracketed: bool) -> Vec<u8>
 
 /// What a key destined for the bottom pane should do, w.r.t. `^z` job control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PaneKeyAction {
+pub(super) enum PaneKeyAction {
     /// `^z` on a tab whose child has no job control of its own — toggle
     /// spyc-managed suspend/resume.
     Toggle,
@@ -75,7 +75,11 @@ enum PaneKeyAction {
 /// full-screen TUI (`htop`, `rmatrix`, `vim`) runs with `ISIG` off, so the
 /// forwarded `^z` reached it as a literal byte it discards — the key read as
 /// dead on every non-agent tab.
-const fn pane_suspend_key_action(key: KeyEvent, is_shell: bool, suspended: bool) -> PaneKeyAction {
+pub(super) const fn pane_suspend_key_action(
+    key: KeyEvent,
+    is_shell: bool,
+    suspended: bool,
+) -> PaneKeyAction {
     let is_ctrl_z =
         matches!(key.code, KeyCode::Char('z')) && key.modifiers.contains(KeyModifiers::CONTROL);
     if is_ctrl_z && !is_shell {
@@ -248,6 +252,7 @@ impl App {
             route::InputSink::Harpoon => return Ok(self.handle_harpoon_menu_key(key)),
             route::InputSink::ImageGallery => return Ok(self.handle_image_gallery_key(key)),
             route::InputSink::ImageView => return Ok(self.handle_image_view_key(key)),
+            route::InputSink::Menu => return self.handle_menu_key(key),
             // ── content sinks ──
             route::InputSink::OverlayPty => {
                 // Forward the keystroke to the overlay pty via the sole
@@ -259,12 +264,8 @@ impl App {
                     err_prefix: None,
                 }]);
             }
-            route::InputSink::PagerKey => {
-                return Ok(self.handle_pager_key(key));
-            }
-            route::InputSink::PaneScroll => {
-                return Ok(self.handle_pane_scroll_key(key));
-            }
+            route::InputSink::PagerKey => return Ok(self.handle_pager_key(key)),
+            route::InputSink::PaneScroll => return Ok(self.handle_pane_scroll_key(key)),
             route::InputSink::PaneExitedFlash => {
                 self.state
                     .flash_info("pane exited — `^a-R` to restart, `^a-x` to close");
@@ -521,17 +522,7 @@ impl App {
         match route::route_input(snap, route::InputKind::Paste) {
             // ── modal sinks ──
             route::InputSink::FindPicker => {
-                // A paste while the F-finder is open is a filename to filter
-                // by, not input for the bottom pane. Strip newlines: the query
-                // is a single-line fuzzy filter over paths.
-                if let Some(picker) = self.runtime.find_picker.as_mut() {
-                    let clean = text.replace(['\n', '\r'], "");
-                    if !clean.is_empty() {
-                        picker.query.push_str(&clean);
-                        picker.refilter();
-                        self.render_find_picker();
-                    }
-                }
+                self.paste_into_find_picker(&text);
                 Vec::new()
             }
             route::InputSink::Capture => {
@@ -553,6 +544,12 @@ impl App {
                 // Any input dismisses a held, exited overlay — a paste too.
                 self.dismiss_overlay();
                 Vec::new()
+            }
+            // A paste is no key of the menu's, so it closes the menu and lands
+            // where it would have with none open.
+            route::InputSink::Menu => {
+                self.clear_chord_hint();
+                self.handle_paste(text)
             }
             // No text sink — swallow (don't leak to the bottom pane). Quick-
             // select / harpoon / the image gallery are single-key menus;
@@ -639,6 +636,20 @@ impl App {
                     "paste ignored ({n} chars) — open `:` or `^\\` to paste"
                 ));
                 Vec::new()
+            }
+        }
+    }
+
+    /// A paste while the F-finder is open is a filename to filter by, not input
+    /// for the bottom pane. Newlines are stripped: the query is a single-line
+    /// fuzzy filter over paths.
+    fn paste_into_find_picker(&mut self, text: &str) {
+        if let Some(picker) = self.runtime.find_picker.as_mut() {
+            let clean = text.replace(['\n', '\r'], "");
+            if !clean.is_empty() {
+                picker.query.push_str(&clean);
+                picker.refilter();
+                self.render_find_picker();
             }
         }
     }
