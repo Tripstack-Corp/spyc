@@ -50,6 +50,28 @@ fn bracket_rows(next: bool) -> Vec<ChordEntry> {
 }
 
 impl Resolver {
+    /// The keys that armed the pending chord, as they are typed (`g`, `^a`,
+    /// `Space`): what a row's key follows when a menu names it. `None` when
+    /// nothing is pending; a count typed first is not part of it.
+    pub const fn prefix_keys(&self) -> Option<&'static str> {
+        Some(match self.pending {
+            PendingSeq::Normal => return None,
+            PendingSeq::G => "g",
+            PendingSeq::Mark => "m",
+            PendingSeq::JumpMark => "'",
+            PendingSeq::W => "^a",
+            PendingSeq::Worktree => "W",
+            PendingSeq::Yank => "y",
+            PendingSeq::Harpoon => "H",
+            PendingSeq::NextBracket => "]",
+            PendingSeq::PrevBracket => "[",
+            PendingSeq::D => "d",
+            PendingSeq::Z => "Z",
+            PendingSeq::CtrlS => "^s",
+            PendingSeq::Leader => "Space",
+        })
+    }
+
     /// The built-in keys that complete the current pending chord, each paired
     /// with the `Action` it fires. This is the data behind the which-key hint
     /// popup (rendered as `keys → action.describe()`); user-keymap bindings

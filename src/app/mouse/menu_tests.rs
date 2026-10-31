@@ -509,7 +509,6 @@ fn flash(app: &App) -> Option<String> {
 /// A click on a which-key row names the key that does the same, so it can be
 /// typed next time: `g`'s "top of column" is `gg`.
 #[test]
-#[ignore = "red: a click on a menu row fires it but names no key"]
 fn a_click_on_a_which_key_row_names_its_key() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -533,7 +532,6 @@ fn a_click_on_a_which_key_row_names_its_key() {
 /// `Enter` on a highlighted row names the row's key too: the menu was the way
 /// in, and the key is the way next time.
 #[test]
-#[ignore = "red: `Enter` on a menu row fires it but names no key"]
 fn enter_on_a_highlighted_row_names_its_key() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -601,7 +599,6 @@ fn an_actions_own_flash_is_not_covered_by_the_hint() {
 /// `?` in an object's menu opens the key reference, from the pane too, where it
 /// would otherwise be typed into the agent.
 #[test]
-#[ignore = "red: `?` in the pane's menu closes it and is typed into the agent"]
 fn a_question_mark_in_a_menu_opens_the_key_reference() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -622,7 +619,6 @@ fn a_question_mark_in_a_menu_opens_the_key_reference() {
 
 /// An object's menu says in its title that `?` lists every key.
 #[test]
-#[ignore = "red: a menu's title doesn't mention `?`"]
 fn a_menus_title_offers_the_key_reference() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
