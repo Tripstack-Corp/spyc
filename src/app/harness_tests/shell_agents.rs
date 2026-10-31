@@ -83,16 +83,25 @@ fn a_report_to_a_shell_tab_is_recorded_not_applied() {
     });
 }
 
-/// Fake agents for a shell to launch: `<dir>/bin/<name>`, links to `sleep`,
-/// so each runs as a process whose argv[0] is the agent's name without being
-/// a new executable for macOS to scan on first run.
-fn fake_agents(dir: &std::path::Path) -> std::path::PathBuf {
+/// Fake agents for a shell to launch: `<dir>/bin/<name>`, links to `bash`, so
+/// each runs as a process whose argv[0] is the agent's name without being a
+/// new executable for macOS to scan on first run. Not links to `sleep`: where
+/// coreutils is one multicall binary (uutils, as on Ubuntu 26.04), it picks the
+/// utility by argv[0], so a `sleep` reached as `claude` exits at once.
+pub(super) fn fake_agents(dir: &std::path::Path) -> std::path::PathBuf {
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     for name in ["claude", "agy"] {
-        std::os::unix::fs::symlink("/bin/sleep", bin.join(name)).unwrap();
+        std::os::unix::fs::symlink("/bin/bash", bin.join(name)).unwrap();
     }
     bin
+}
+
+/// The line that runs the fake agent at `path` in a shell tab, in the
+/// foreground for a minute. The trailing `:` keeps bash from replacing itself
+/// with `sleep`, which would rename the process.
+pub(super) fn run_fake_agent(path: &std::path::Path) -> String {
+    format!("{} -c 'sleep 60; :'\r", path.display())
 }
 
 /// Type `text` into the tab, then drain output and settle until `done` holds.
@@ -138,7 +147,7 @@ fn a_shell_tab_follows_the_agent_it_runs_and_returns_to_a_shell() {
             kind_of(info) == AgentKind::Other
         });
 
-        let claude = format!("{} 60\r", bin.join("claude").display());
+        let claude = run_fake_agent(&bin.join("claude"));
         type_until(&mut app, &claude, "claude", |info| {
             kind_of(info) == AgentKind::Claude
         });
@@ -179,7 +188,7 @@ fn a_shell_tab_follows_the_agent_it_runs_and_returns_to_a_shell() {
         );
         assert!(info.live_session_id.is_none(), "stale session binding");
 
-        let agy = format!("{} 60\r", bin.join("agy").display());
+        let agy = run_fake_agent(&bin.join("agy"));
         type_until(&mut app, &agy, "agy", |info| {
             kind_of(info) == AgentKind::Agy
         });
@@ -200,7 +209,7 @@ fn a_stopped_agent_leaves_the_tab_a_shell_until_it_is_brought_back() {
         let bin = fake_agents(&dir);
         let mut app = App::test_app(dir.clone());
         assert!(app.open_pane_tab_in("sh", &dir));
-        let claude = format!("{} 60\r", bin.join("claude").display());
+        let claude = run_fake_agent(&bin.join("claude"));
         type_until(&mut app, &claude, "claude", |info| {
             kind_of(info) == AgentKind::Claude
         });
@@ -239,7 +248,7 @@ fn a_shell_tab_running_an_agent_is_saved_as_its_shell() {
         let bin = fake_agents(&dir);
         let mut app = App::test_app(dir.clone());
         assert!(app.open_pane_tab_in("sh", &dir));
-        let claude = format!("{} 60\r", bin.join("claude").display());
+        let claude = run_fake_agent(&bin.join("claude"));
         type_until(&mut app, &claude, "claude", |info| {
             kind_of(info) == AgentKind::Claude
         });
