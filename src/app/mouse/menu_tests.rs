@@ -499,3 +499,142 @@ fn the_wheel_beside_an_entry_menu_closes_it_rather_than_moving_the_cursor() {
         crate::set_mouse_capture_for_test(false);
     });
 }
+
+// ── naming the key a row stands for ──
+
+fn flash(app: &App) -> Option<String> {
+    app.state.flash.as_ref().map(|f| f.text.clone())
+}
+
+/// A click on a which-key row names the key that does the same, so it can be
+/// typed next time: `g`'s "top of column" is `gg`.
+#[test]
+#[ignore = "red: a click on a menu row fires it but names no key"]
+fn a_click_on_a_which_key_row_names_its_key() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_over_entries(tmp.path());
+        crate::set_mouse_capture_for_test(true);
+        press(&mut app, 'g');
+        app.settle_chord_hint(
+            std::time::Instant::now() + std::time::Duration::from_secs(60),
+            &mut crate::app::RunCtx::for_test(),
+        );
+        let row = drawn_row(&mut app, "g", "top of column");
+
+        click(&mut app, row);
+
+        assert_eq!(flash(&app).as_deref(), Some("gg  top of column"));
+        crate::set_mouse_capture_for_test(false);
+    });
+}
+
+/// `Enter` on a highlighted row names the row's key too: the menu was the way
+/// in, and the key is the way next time.
+#[test]
+#[ignore = "red: `Enter` on a menu row fires it but names no key"]
+fn enter_on_a_highlighted_row_names_its_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_over_entries(tmp.path());
+        cursor_on(&mut app, "sub");
+        press(&mut app, '.');
+        special(&mut app, KeyCode::Down);
+
+        special(&mut app, KeyCode::Enter);
+
+        assert!(
+            app.state.cur().listing.dir.ends_with("sub"),
+            "premise: the first row entered the directory"
+        );
+        assert_eq!(
+            flash(&app).as_deref(),
+            Some("Enter  enter dir / pager on text file")
+        );
+    });
+}
+
+/// A row fired by its own key names nothing: the user already knows it.
+#[test]
+fn a_rows_own_key_names_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_over_entries(tmp.path());
+        cursor_on(&mut app, "notes.txt");
+        press(&mut app, '.');
+
+        press(&mut app, 't');
+
+        assert!(
+            !flash(&app).is_some_and(|f| f.starts_with("t  ")),
+            "no hint for a key just typed: {:?}",
+            flash(&app)
+        );
+    });
+}
+
+/// An action's own message wins: harpoon's refusal outside a repo stays on
+/// screen rather than being covered by the row's key.
+#[test]
+fn an_actions_own_flash_is_not_covered_by_the_hint() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_over_entries(tmp.path());
+        crate::set_mouse_capture_for_test(true);
+        cursor_on(&mut app, "notes.txt");
+        press(&mut app, '.');
+        let row = drawn_row(&mut app, "notes.txt", "harpoon");
+
+        click(&mut app, row);
+
+        let shown = flash(&app).unwrap_or_default();
+        assert!(
+            shown.starts_with("harpoon:"),
+            "harpoon's own word: {shown:?}"
+        );
+        crate::set_mouse_capture_for_test(false);
+    });
+}
+
+/// `?` in an object's menu opens the key reference, from the pane too, where it
+/// would otherwise be typed into the agent.
+#[test]
+#[ignore = "red: `?` in the pane's menu closes it and is typed into the agent"]
+fn a_question_mark_in_a_menu_opens_the_key_reference() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_with_tab(tmp.path(), "cat");
+        ctrl_a(&mut app);
+        press(&mut app, '.');
+        assert!(app.view.chord_hint.is_some(), "premise: the menu is open");
+
+        let fx = app
+            .handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE))
+            .unwrap();
+
+        assert!(app.help_is_open(), "the key reference is open");
+        assert!(app.view.chord_hint.is_none(), "and the menu closed");
+        assert!(!sent_to_pane(&fx, '?'), "nothing reached the child: {fx:?}");
+    });
+}
+
+/// An object's menu says in its title that `?` lists every key.
+#[test]
+#[ignore = "red: a menu's title doesn't mention `?`"]
+fn a_menus_title_offers_the_key_reference() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_over_entries(tmp.path());
+        cursor_on(&mut app, "notes.txt");
+        press(&mut app, '.');
+
+        let buf = drawn(&mut app);
+        let menu = menu_in(&buf, "notes.txt");
+        let top: String = (menu.x..menu.right())
+            .map(|x| buf[(x, menu.y)].symbol().to_string())
+            .collect();
+        assert!(top.contains("? all keys"), "the title: {top:?}");
+    });
+}
