@@ -473,16 +473,15 @@ fn an_agent_started_in_a_shell_tab_in_another_project_is_seen() {
     with_two(|t| {
         let (app, x, y) = (&mut t.app, t.x, t.y);
         let (x_home, y_home) = (t.x_home.clone(), t.y_home.clone());
-        let bin = x_home.with_file_name("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        std::os::unix::fs::symlink("/bin/sleep", bin.join("claude")).unwrap();
+        let bin =
+            super::shell_agents::fake_agents(x_home.parent().expect("a project home has a parent"));
         app.as_project(x, |app| assert!(app.open_pane_tab_in("sh", &x_home)));
         app.as_project(y, |app| assert!(app.open_pane_tab_in("sh", &y_home)));
         app.make_active(y);
         type_into(
             app,
             x,
-            format!("{} 60\r", bin.join("claude").display()).as_bytes(),
+            super::shell_agents::run_fake_agent(&bin.join("claude")).as_bytes(),
         );
         let deadline = Instant::now() + Duration::from_secs(15);
         while first_tab(app, x, |tab| tab.info.agent().kind()) != AgentKind::Claude {
