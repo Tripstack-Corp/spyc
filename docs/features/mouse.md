@@ -58,8 +58,9 @@ as it would the key.
 
 Once a row fires by a click or by `Enter`, the prompt row names its key, such
 as `gg  top of column` or `^a z  zoom pane (toggle fullscreen)`, so it can be
-typed next time. A row fired by its own key names nothing, and an action's own
-message, such as an error, is never covered by the hint.
+typed next time. A row fired by its own key names nothing, and when the action
+says something itself, its key goes in front of the message, which keeps its
+place: `^a z · zoom: pane (^a z to exit)`, or an error as an error.
 
 The hint fades as you learn the key: once you have fired an action by its key
 three times, a click on its row no longer names it. Only the key counts, a key
