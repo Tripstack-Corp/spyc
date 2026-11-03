@@ -257,14 +257,18 @@ impl super::App {
         layout: &super::FrameLayout,
         ev: MouseEvent,
     ) -> Option<usize> {
-        if !matches!(region, Some(route::Region::Divider))
-            || self.displaced_prompt_row(layout) == layout.divider
-        {
+        if !matches!(region, Some(route::Region::Divider)) || self.prompt_has_the_divider(layout) {
             return None;
         }
         let bar_width = layout.divider.map_or(0, |d| d.width);
         let widths = self.divider_tab_widths(bar_width);
         tab_hit::tab_at_point(layout.divider, &widths, ev.column, ev.row)
+    }
+
+    /// Whether the prompt row has taken the divider's place, so the row shows
+    /// no tabs.
+    fn prompt_has_the_divider(&self, layout: &super::FrameLayout) -> bool {
+        layout.divider.is_some() && self.displaced_prompt_row(layout) == layout.divider
     }
 
     /// Whether the pointer is on the `⚠N` of unread stderr, asked of the row the
@@ -453,6 +457,8 @@ impl super::App {
             pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
             tab_under_pointer: self.tab_under_pointer(region, layout, ev),
+            prompt_on_divider: matches!(region, Some(route::Region::Divider))
+                && self.prompt_has_the_divider(layout),
             over_stderr_notice: self.stderr_notice_under(ev),
             // The renderer records every selectable chrome row each frame, so
             // this is a lookup rather than a second hit-test — one source for
@@ -504,9 +510,11 @@ impl super::App {
         }
     }
 
-    /// A right-click on an object: the keyboard goes where a left click would
-    /// send it, so the keys the rows show are the ones that work next, and the
-    /// object's menu opens.
+    /// A right-click on an object: the keyboard goes where the keys the rows
+    /// show act, so they are the ones that work next, and the object's menu
+    /// opens. A row or the pane takes it as a left click would; the divider
+    /// sends it to the pane its menu is about, and the split's `^a` keys work
+    /// from anywhere, so its menu leaves it where it is.
     fn open_menu_at(&mut self, at: MenuAt, region: Option<route::Region>) -> Vec<Effect> {
         match at {
             MenuAt::Row(side, row) => {
@@ -523,6 +531,11 @@ impl super::App {
                 effects.extend(self.open_tab_menu());
                 effects
             }
+            MenuAt::Divider => {
+                self.set_pane_focus(true);
+                self.open_divider_menu()
+            }
+            MenuAt::VDivider => self.open_split_menu(),
         }
     }
 

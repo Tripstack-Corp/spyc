@@ -76,7 +76,7 @@ Full reference: [Agents and MCP](docs/features/agents.md).
 
 ## Mouse
 
-Mouse reporting is on by default: the wheel scrolls whatever is under the pointer, a click focuses it, middle-click pastes, and right-click opens the menu of what it lands on (a file row, the pane, a tab label), or the leader menu anywhere else. A drag selects and copies text in a pane, the pager or any chrome row, or file names in the list, and a double-click takes a whole chrome line. `:mouse off` gives the terminal its own selection back.
+Mouse reporting is on by default: the wheel scrolls whatever is under the pointer, a click focuses it, middle-click pastes, and right-click opens the menu of what it lands on (a file row, the pane, a tab label, the pane divider, the split's divider), or the leader menu anywhere else. A drag selects and copies text in a pane, the pager or any chrome row, or file names in the list, and a double-click takes a whole chrome line. `:mouse off` gives the terminal its own selection back.
 
 Full reference: [Mouse](docs/features/mouse.md).
 

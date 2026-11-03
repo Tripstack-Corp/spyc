@@ -143,6 +143,10 @@ pub enum MenuAt {
     PaneBody,
     /// The label of the 0-based pane tab.
     Tab(usize),
+    /// The pane divider off its tab labels: the tabs as a whole.
+    Divider,
+    /// The split's vertical divider.
+    VDivider,
 }
 
 /// What the user did, reduced to the axis routing cares about.
@@ -219,6 +223,10 @@ pub struct MouseSnapshot {
     /// layout it needs is a `Vec` of spans, and the router is a `const fn` over
     /// a `Copy` snapshot.
     pub tab_under_pointer: Option<usize>,
+    /// The prompt row has taken the divider's place
+    /// ([`super::App::displaced_prompt_row`]): the row shows a prompt, a flash
+    /// or an armed chord, and no tabs.
+    pub prompt_on_divider: bool,
     /// The pointer is on the status bar's `⚠N` of unread stderr, as drawn.
     pub over_stderr_notice: bool,
     /// A chord is armed: the resolver takes the next key as its continuation,
@@ -279,16 +287,27 @@ impl MouseSnapshot {
         !self.is_prompting && !matches!(self.pager_mount, Some(Mount::Overlay))
     }
 
-    /// The object a right-click opens a menu for: a tab label, a file row, or
-    /// the body of a live pane. A pager or chrome painted over the layout hides
-    /// the row or pane beneath it, and blank space is no object.
+    /// The object a right-click opens a menu for: a tab label, the pane
+    /// divider or the split's, a file row, or the body of a live pane. A pager
+    /// or chrome painted over the layout hides what is beneath it, and blank
+    /// space is no object.
     const fn menu_at(self) -> Option<MenuAt> {
         // A tab label is drawn through the chrome funnel, so it is read first.
         if let Some(index) = self.tab_under_pointer {
             return Some(MenuAt::Tab(index));
         }
-        if self.covering_pager.is_some() || self.over_chrome_row {
+        if self.covering_pager.is_some() {
             return None;
+        }
+        // So is the rest of the divider, unless the prompt row has taken it.
+        if matches!(self.region, Some(Region::Divider)) && !self.prompt_on_divider {
+            return Some(MenuAt::Divider);
+        }
+        if self.over_chrome_row {
+            return None;
+        }
+        if matches!(self.region, Some(Region::VDivider)) {
+            return Some(MenuAt::VDivider);
         }
         if let Some((side, row)) = self.list_row {
             return Some(MenuAt::Row(side, row));
@@ -766,6 +785,7 @@ mod tests {
             pane_closed: false,
             pane_scroll_keys: false,
             tab_under_pointer: None,
+            prompt_on_divider: false,
             over_chrome_row: false,
             over_stderr_notice: false,
             chord_armed: false,

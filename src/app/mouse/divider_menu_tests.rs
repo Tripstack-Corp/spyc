@@ -128,7 +128,6 @@ fn app_with_split(tmp: &Path) -> App {
 /// gives the pane the keyboard, so the `^a` keys it shows act on the pane.
 /// With one tab there is no other tab to step to.
 #[test]
-#[ignore = "red: slice 5, the divider's menu"]
 fn a_right_click_past_the_last_tab_opens_the_pane_tabs_menu() {
     with_mouse(|tmp| {
         let mut app = app_with_tabs(tmp, 1);
@@ -158,7 +157,6 @@ fn a_right_click_past_the_last_tab_opens_the_pane_tabs_menu() {
 
 /// With two tabs the menu steps between them.
 #[test]
-#[ignore = "red: slice 5, the divider's menu"]
 fn with_two_tabs_the_divider_menu_steps_between_them() {
     with_mouse(|tmp| {
         let mut app = app_with_tabs(tmp, 2);
@@ -175,7 +173,6 @@ fn with_two_tabs_the_divider_menu_steps_between_them() {
 /// A click on the menu's zoom row zooms the pane, not the list the keyboard
 /// was in before the right-click.
 #[test]
-#[ignore = "red: slice 5, the divider's menu"]
 fn a_click_on_the_divider_menus_zoom_row_zooms_the_pane() {
     with_mouse(|tmp| {
         let mut app = app_with_tabs(tmp, 1);
@@ -197,7 +194,6 @@ fn a_click_on_the_divider_menus_zoom_row_zooms_the_pane() {
 /// The active tab's cwd, drawn on the divider after the tabs, is no tab label:
 /// a right-click there opens the tabs' menu too.
 #[test]
-#[ignore = "red: slice 5, the divider's menu"]
 fn a_right_click_on_the_dividers_cwd_opens_the_pane_tabs_menu() {
     with_mouse(|tmp| {
         let mut app = app_with_tabs(tmp, 1);
@@ -220,7 +216,6 @@ fn a_right_click_on_the_dividers_cwd_opens_the_pane_tabs_menu() {
 /// A row clicked in the tabs' menu names its key, as a which-key row does:
 /// `^a n` steps to the next tab and says so.
 #[test]
-#[ignore = "red: slice 5, the divider's menu"]
 fn a_divider_menu_row_names_its_key() {
     with_mouse(|tmp| {
         let mut app = app_with_tabs(tmp, 2);
@@ -242,7 +237,6 @@ fn a_divider_menu_row_names_its_key() {
 /// keyboard where it was; a click on its height row flips the split. A preview
 /// has no second commander to close, so the menu offers no `^s x`.
 #[test]
-#[ignore = "red: slice 5, the split divider's menu"]
 fn a_right_click_on_the_split_opens_its_menu_and_f_flips_its_height() {
     with_mouse(|tmp| {
         let mut app = app_with_split(tmp);
@@ -280,7 +274,6 @@ fn a_right_click_on_the_split_opens_its_menu_and_f_flips_its_height() {
 /// With a second commander in the right column, the menu's `^s x` row closes
 /// it, and the menu offers no `^a |`, which refuses while a commander is open.
 #[test]
-#[ignore = "red: slice 5, the split divider's menu"]
 fn the_split_menu_closes_a_second_commander() {
     with_mouse(|tmp| {
         let mut app = app_with_tabs(tmp, 1);
@@ -317,7 +310,6 @@ fn the_split_menu_closes_a_second_commander() {
 /// split menu leaves the keyboard there, where `^a h` moves nothing and so
 /// says nothing of its own.
 #[test]
-#[ignore = "red: slice 5, the split divider's menu"]
 fn a_split_menu_row_names_its_key() {
     with_mouse(|tmp| {
         let mut app = app_with_split(tmp);

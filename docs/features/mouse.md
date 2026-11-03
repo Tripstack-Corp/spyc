@@ -23,8 +23,16 @@ quick-select and `y` in the pager are the mouse-free yank paths.
   rest, as `^a .` opens it.
 - **On a pane tab's label**, spyc switches to that tab, as a left click does,
   and opens its menu.
-- **Anywhere else** (blank list space, the divider past the tabs, the status
-  bar, the prompt row, the agent strip), the leader menu opens.
+- **On the pane divider, off the tab labels** (past the last tab, or on the
+  cwd), the pane takes the keyboard and the `pane tabs` menu opens: new tab,
+  next and previous tab once there are two, zoom, grow and shrink.
+- **On the split's divider**, the `split` menu opens: flip its height, focus
+  the left or right column, and dim the inactive one, then close the split
+  beside a preview, or close the second commander beside one. The keyboard
+  stays where it was.
+- **Anywhere else** (blank list space, the status bar, the prompt row, the
+  agent strip, or the divider while the prompt row has its place), the leader
+  menu opens.
 
 Each row shows the key that does the same, so the menu teaches it. A row
 shown with `(list)` works from the file list, since in the pane the key
@@ -57,7 +65,7 @@ you to type one. A count typed first (`3`, then `d`) reaches the row you click,
 as it would the key.
 
 Once a row fires by a click or by `Enter`, the prompt row names its key, such
-as `gg  top of column` or `^a z  zoom pane (toggle fullscreen)`, so it can be
+as `gg  top of column` or `^a n  next pane tab`, so it can be
 typed next time. A row fired by its own key names nothing, and when the action
 says something itself, its key goes in front of the message, which keeps its
 place: `^a z · zoom: pane (^a z to exit)`, or an error as an error.
