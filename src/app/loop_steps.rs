@@ -194,6 +194,7 @@ impl App {
                         title,
                         entries,
                         rows,
+                        prefix: self.state.resolver.prefix_keys().unwrap_or(""),
                         menu: None,
                     });
                     ctx.draw.mark(3);

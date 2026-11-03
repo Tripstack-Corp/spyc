@@ -475,6 +475,39 @@ fn a_click_on_a_menu_row_does_what_its_key_does() {
     assert!(checked > 40, "the walk reached only {checked} rows");
 }
 
+/// The prefix a menu names a row's key after is the key that arms the chord:
+/// fed back to a fresh resolver, it reaches the same chord. Every state the
+/// popup draws is checked, so a new chord can't name its prefix wrongly.
+#[test]
+fn a_chords_prefix_keys_arm_that_chord() {
+    let mut checked = 0;
+    for (label, entry) in chord_states() {
+        let mut armed = Resolver::new();
+        for ev in &entry {
+            feed(&mut armed, *ev);
+        }
+        let prefix = armed
+            .prefix_keys()
+            .unwrap_or_else(|| panic!("{label}: a pending chord names its prefix"));
+        let ev = match prefix.strip_prefix('^') {
+            Some(c) => ctrl(c.chars().next().expect("a ctrl key names its letter")),
+            None => hint_key(prefix).unwrap_or_else(|| panic!("{label}: {prefix:?} is no key")),
+        };
+        let mut fresh = Resolver::new();
+        assert_eq!(
+            feed(&mut fresh, ev),
+            ResolverOutcome::Pending,
+            "{label}: {prefix}"
+        );
+        assert_eq!(
+            fresh.pending, armed.pending,
+            "{label}: {prefix} arms another chord"
+        );
+        checked += 1;
+    }
+    assert!(checked > 10, "the walk reached only {checked} chords");
+}
+
 /// The single key a `ChordEntry` label stands for, when it names exactly one.
 fn hint_key(label: &str) -> Option<crossterm::event::KeyEvent> {
     match label {

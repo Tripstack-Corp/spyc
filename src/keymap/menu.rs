@@ -42,6 +42,22 @@ pub struct TabFacts {
     pub exited: bool,
 }
 
+/// The key a menu row stands for, as it is typed: the chord's `prefix` and the
+/// row's first key, joined the way they are written (`gg`, `Wl`, `^a z`,
+/// `Space p`). An object's menu has no prefix, and its rows' keys are already
+/// whole (`^a R`, `:exec`).
+pub fn key_hint(prefix: &str, keys: &str) -> String {
+    if prefix.is_empty() {
+        return keys.to_string();
+    }
+    let key = keys.split_whitespace().next().unwrap_or(keys);
+    if prefix.chars().count() == 1 {
+        format!("{prefix}{key}")
+    } else {
+        format!("{prefix} {key}")
+    }
+}
+
 /// The rows of `target`'s menu, in the order they are drawn.
 pub fn menu_for(target: Target) -> Vec<ChordEntry> {
     match target {
@@ -145,7 +161,21 @@ pub fn every_target() -> Vec<Target> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Target, every_target, menu_for};
+    use super::{Target, every_target, key_hint, menu_for};
+
+    /// A one-character prefix joins its row's key as typed; a longer one takes
+    /// a space; an object menu's whole keys pass through; of several keys on a
+    /// row, the first is named.
+    #[test]
+    fn a_rows_key_is_named_as_it_is_typed() {
+        assert_eq!(key_hint("g", "g"), "gg");
+        assert_eq!(key_hint("W", "l"), "Wl");
+        assert_eq!(key_hint("^a", "z"), "^a z");
+        assert_eq!(key_hint("Space", "p"), "Space p");
+        assert_eq!(key_hint("^a", "n ]"), "^a n");
+        assert_eq!(key_hint("", "^a R"), "^a R");
+        assert_eq!(key_hint("", "yp (list)"), "yp (list)");
+    }
     use crate::keymap::action::{Action, ProjectAction, every_action};
     use crate::keymap::resolver::tests::prefixes::chord_states;
     use crate::keymap::{ChordEntry, Resolver, Tier, UserKeymap};
