@@ -530,21 +530,25 @@ fn a_click_on_a_which_key_row_names_its_key() {
 }
 
 /// `Enter` on a highlighted row names the row's key too: the menu was the way
-/// in, and the key is the way next time.
+/// in, and the key is the way next time. A file's first row opens it in the
+/// pager; entering a directory instead would move the test process's cwd
+/// (`AppState::chdir` follows the focused column), and once this test's temp
+/// dir is gone every later test needing a cwd, the guards' git open among
+/// them, would fail.
 #[test]
 fn enter_on_a_highlighted_row_names_its_key() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = app_over_entries(tmp.path());
-        cursor_on(&mut app, "sub");
+        cursor_on(&mut app, "notes.txt");
         press(&mut app, '.');
         special(&mut app, KeyCode::Down);
 
         special(&mut app, KeyCode::Enter);
 
         assert!(
-            app.state.cur().listing.dir.ends_with("sub"),
-            "premise: the first row entered the directory"
+            app.view.project().pager.is_some(),
+            "premise: the first row opened the file in the pager"
         );
         assert_eq!(
             flash(&app).as_deref(),
