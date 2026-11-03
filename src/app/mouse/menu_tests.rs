@@ -22,7 +22,7 @@ fn ctrl_a(app: &mut App) {
 }
 
 /// An App over `work/`, holding a plain file, an executable and a directory.
-fn app_over_entries(tmp: &Path) -> App {
+pub(super) fn app_over_entries(tmp: &Path) -> App {
     let dir = tmp.join("work");
     std::fs::create_dir(&dir).unwrap();
     std::fs::write(dir.join("notes.txt"), "x").unwrap();
@@ -37,7 +37,7 @@ fn app_over_entries(tmp: &Path) -> App {
 }
 
 /// Put the cursor on the entry called `name`, and return its path.
-fn cursor_on(app: &mut App, name: &str) -> PathBuf {
+pub(super) fn cursor_on(app: &mut App, name: &str) -> PathBuf {
     let at = app
         .state
         .cur()
@@ -502,7 +502,7 @@ fn the_wheel_beside_an_entry_menu_closes_it_rather_than_moving_the_cursor() {
 
 // ── naming the key a row stands for ──
 
-fn flash(app: &App) -> Option<String> {
+pub(super) fn flash(app: &App) -> Option<String> {
     app.state.flash.as_ref().map(|f| f.text.clone())
 }
 

@@ -22,6 +22,8 @@ use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 pub(super) mod chord_hit;
 mod forward;
 #[cfg(test)]
+mod hint_tests;
+#[cfg(test)]
 mod menu_tests;
 #[cfg(test)]
 mod pane_copy_tests;
