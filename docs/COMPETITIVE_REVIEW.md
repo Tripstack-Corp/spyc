@@ -10,6 +10,7 @@ review; the raw original is archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md
 and whose minimalist counterweight lf is covered in §1e. §1f records a third
 thing — the **session layer** beneath both lanes (Superlogical, zmx), added
 2026-09-04 on a stated-facts basis rather than the mine-and-verify standard.
+§1g covers tuios, a Go multiplexer that grew an agent inbox, added 2026-11-03.
 
 > **Method.** Two deep-research passes. The first (v1) drew only on vendor
 > primary sources (GitHub READMEs, changelogs, marketing pages) and produced a
@@ -28,6 +29,10 @@ thing — the **session layer** beneath both lanes (Superlogical, zmx), added
 > and timestamp, because a search-engine snippet is not attribution. Two stale
 > spyc-side rows in §1d were corrected in the same pass (mouse support, Yazi's
 > star count).
+>
+> **Fourth pass (2026-11-03)** added §1g (tuios) on the same standard, and
+> corrected the claims it made stale: needs 2 and 3 in §3, the first two moves
+> in §6, and herdr's star count in §1.
 
 ---
 
@@ -68,7 +73,8 @@ lane** is where spyc lives — and it already has occupants.
 | Tool | Lane | What it is · signal |
 |------|------|---------------------|
 | **Claude Squad** | TUI · cross-plat | 7.9k★ · Go · tmux+worktrees, AGPL. The terminal incumbent; "works like you'd expect," but dinged for clunky UX and no uninstall script. |
-| **herdr** | TUI · cross-plat | ~7.4k★ · **Rust** · AGPL+commercial, single maintainer. The closest twin — live agent-status sidebar (blocked/working/done/idle), detach/reattach daemon + live binary handoff, a Unix-socket orchestration API with **wait/subscribe** verbs, 15+ agents. But **no file manager, no diff/review, no MCP** — and its two headline features (hook-free status detection, persistence) are exactly where its bug reports cluster. See §1a. |
+| **herdr** | TUI · cross-plat | ~47.8k★ (2026-11-03; ~7.4k in June) · **Rust** · AGPL+commercial, single maintainer. The closest twin — live agent-status sidebar (blocked/working/done/idle), detach/reattach daemon + live binary handoff, a Unix-socket orchestration API with **wait/subscribe** verbs, 15+ agents. But **no file manager, no diff/review, no MCP** — and its two headline features (hook-free status detection, persistence) are exactly where its bug reports cluster. See §1a. |
+| **tuios** | TUI · cross-plat | 6.3k★ · **Go** · MIT, one maintainer behind ~90% of commits, ~1M lines in 14 months. A client/daemon window manager with an agent **Inbox** that answers approvals, review with notes sent back to the agent, fan-out and checkpoints, plus a browser client and phone pairing; it answers herdr's socket API. No file manager. See §1g. |
 | **cmux** | GUI · macOS | Swift/libghostty. Vertical tabs + notifications are loved; plagued by an 80 GB OOM leak, session loss, crash windows, and an agent-wrapper trust crisis. |
 | **supacode** | GUI · macOS 26 | Worktree command-center; beta, single-maintainer (~1,574 commits by one person), "Other" license, macOS-26-only floor, ~1k Homebrew installs/qtr. |
 | **Conductor** | GUI · macOS | Cloud/GitHub-OAuth model triggered a trust backlash ("keys for the kingdom"); "silicon only." |
@@ -751,6 +757,155 @@ which would move it out of the session layer and into this category.
 
 ---
 
+## 1g. tuios — a multiplexer that grew an agent inbox (2026-11-03)
+
+[tuios](https://github.com/Gaurav-Gosain/tuios) — *"a terminal window manager
+that knows what your agents are doing."* Go on Bubble Tea v2, **MIT**, created
+2025-09-06, **6,322★ / 294 forks** (2026-11-03), v0.12.1 (2026-10-31). A
+**client/daemon** multiplexer: floating windows plus BSP, master-stack and
+scrolling-column tiling, nine workspaces, a session rail, a command palette, a
+browser client (`tuios-web`), an embedded SSH server (`tuios ssh`) and phone
+pairing. Its terminal engine is its own pure-Go `vt`, with libghostty-vt behind a
+build tag. It names herdr as its closest twin and has absorbed it: tuios answers
+herdr's socket API and runs herdr plugins unchanged.
+
+**Scale is the story.** About 5,900 commits, 5,200 of them by its maintainer and
+**2,685 in October 2026 alone**; 77 contributors; 16 releases between 27 September
+and 31 October, none of them a release candidate. The tree holds about 650k
+lines of Go plus 390k of tests (`wc -l`, 2026-10-31): a million lines in fourteen
+months, which reads as agent throughput.
+
+> **Provenance.** The document's standard, applied to a project that publishes
+> its docs as Markdown: every tuios.dev docs page fetched as `.md` and read whole,
+> the source read at `b06b404` (2026-10-31), counts from the GitHub API
+> (2026-10-31 and 2026-11-03), issue text from `gh issue view`, and HN items from
+> the Firebase item API for author and timestamp. Mechanisms below are as the
+> source implements them, not as the marketing states them.
+
+### What users actually say (verified)
+
+Outside GitHub the footprint is almost nil, the shape herdr had in June. Its
+Show HN scored **5 points, 0 comments**
+([45641331](https://news.ycombinator.com/item?id=45641331), 2025-10-20), and the
+one substantive HN mention dismisses its mouse-first windows:
+
+> "Looking at tuios, using a mouse in a TUI completely defeats its purpose, for
+> me personally." — the_gipsy, [HN](https://news.ycombinator.com/item?id=49972214)
+
+The real voice is its issue tracker, and it sorts into the breadth-versus-depth
+trade this review keeps predicting:
+
+- **Regressions on first contact.** "This is my onboarding experience so I am
+  immediately put off. … Didn't have this issue in herdr" — Soleone, on rapid
+  cursor blinking while idle,
+  [#1140](https://github.com/Gaurav-Gosain/tuios/issues/1140).
+- **Noise shipped as a feature.** "I find the notifications distracting and
+  annoying in most cases. Unless there's a problem, I don't really want a
+  popup." — adamcstephens,
+  [#1361](https://github.com/Gaurav-Gosain/tuios/issues/1361). The maintainer's
+  reply: "notifications and logs are kind of a development artifact that stuck
+  around as it let me iterate extremely fast".
+- **Shelled git costs data.** `tuios review` ran `git add --all` on a temporary
+  index; git-lfs's clean filter copied untracked LFS-pattern files on every
+  review, and a killed run kept its partial copies until they "filled 258 GB"
+  ([#1078](https://github.com/Gaurav-Gosain/tuios/issues/1078)). spyc's
+  in-process gix (`no_subprocess_git_in_production`) has no such path.
+- **Scrape rules still break.** An `AskUserQuestion` form went unread when Claude
+  Code drew a titled rule under it
+  ([#1272](https://github.com/Gaurav-Gosain/tuios/issues/1272)): herdr's #671
+  class, in a tool that ranks scraping near last.
+- **Many-agent users are real.** "I run 8–12 Claude Code panes in one session" —
+  zoneblaze, asking for agent rows labelled by the pane's own title
+  ([#1384](https://github.com/Gaurav-Gosain/tuios/issues/1384)).
+
+### What it ships for agents, and how
+
+- **Status ranked by source, self-report first.** One claim per pane, and a
+  source may overwrite only a claim ranked at or below its own: the agent's own
+  report (hooks, `set-agent-state`), then the program's OSC 7501 report, Claude's
+  transcript, other escape sequences (OSC 9;4 progress, the title), screen rules,
+  the foreground process (polled every two seconds), and last a 30-second stall
+  timer. A blocking screen match may borrow over a stale `working` claim. This
+  is the design §1a told spyc to build, and tuios built it too.
+- **One Inbox that answers prompts.** It presses the answer keys into the pane
+  from per-agent manifests, re-reading the prompt first. Opt-in per harness, it
+  instead **holds** a permission request inside Claude Code's (or opencode's,
+  Kilo's, Qwen Code's) hook until you answer. Only a request that fits on one
+  line is held, such as a shell command or a file read; risky ones (`rm -rf`, a
+  force push, a write outside the worktree) take a second press, and the answer
+  keys do nothing until the item has been on screen, unchanged, for 0.4 seconds.
+- **Review that talks back.** A diff of the worktree against its base, with hunk
+  staging and notes on lines or hunks; the notes go to the agent as one message,
+  typed when it is at rest.
+- **Fan-out, checkpoints, ship.** One prompt to several agents in their own
+  worktrees, with `fan compare` and `fan verify`; per-turn checkpoints committed
+  to `refs/tuios/checkpoints/…`; `ship` commits, merges, pushes and opens a pull
+  request from an agent's worktree under your own git identity.
+- **Agents and scripts drive it.** A JSON control protocol of 115 verbs with
+  blocking `wait-for` and an event stream; `tuios mcp`, read-only and scoped to
+  its own session unless started with `--write`; a tmux shim that gives Claude
+  Code's agent teams real panes; and herdr's socket API.
+- **It paid for the surface.**
+  [GHSA-78rj-pghh-vh42](https://github.com/Gaurav-Gosain/tuios/security/advisories/GHSA-78rj-pghh-vh42),
+  fixed in v0.11.0: `set-agent-state` let one pane answer another agent's prompt.
+  Typing into agents brought grants, nonces and an advisory. spyc's MCP has no
+  tool that types into a pane or answers a prompt.
+
+### The daemon, measured against `-r`
+
+The daemon owns every PTY, so detaching costs nothing, several clients can
+attach, and an SSH drop loses nothing. But any daemon stop (an upgrade, a crash,
+a reboot, `restart-server`) ends every program. What comes back is the layout,
+each pane's working directory, the last 1,000 styled lines of each pane's
+scrollback under a "restored" divider, and by default an Inbox row offering to
+resume each agent's conversation (`daemon.resume_agents = "ask"`). That is
+`spyc -r` plus scrollback. §1a's "structural advantage we cannot claim parity
+on" stands for herdr's live handoff; against tuios, the daemon's lead is detach
+and SSH drops, not upgrades.
+
+### Strategic read
+
+**What tuios changes in this document:**
+
+- **Reliable status is no longer spyc's alone.** Need 2 in §3 framed the
+  differentiator as "spyc does it reliably"; tuios converged on the same
+  self-report-first ranking. spyc's edge there is now execution (a held
+  `waiting` that outlives a Stop, no polling at idle), not the approach.
+- **The review loop is contested.** Need 3 in §3 and the first move in §6 call
+  spyc's diff review the only in-process review loop in the TUI lane; tuios ships
+  review with line notes sent back to the agent. What stays spyc's is git done
+  in-process through gix, and review inside the file manager the user already
+  lives in.
+- **herdr is no longer small.** It moved to `herdrdev/herdr` and stands at
+  **47.8k★** (2026-11-03), up from ~7.4k in June; tuios's own comparison page
+  calls it "more widely used". §1a's numbers are from June and owe a refresh.
+
+**Where tuios beats spyc (be honest):** one Inbox that answers approvals across
+sessions; review notes that go back to the agent; detach, reattach and remote
+sessions; scrollback that survives a restart; and breadth: a browser client,
+phones, push notifications, plugins, and a tutor (`tuios tutor`).
+
+**Where spyc wins:** the file manager (tuios's rail lists files; it is not a file
+commander); git in-process; MCP that carries the user's working set (cursor,
+picks, inventory, worktrees) rather than panes and keystrokes; nothing awake at
+idle; and discipline: file- and function-size ratchets against tuios's 86
+non-test files over 1,000 lines, and guards that keep the docs true.
+
+**Take, don't chase.** The ideas worth taking are small and agent-pane-shaped:
+the libghostty status callbacks spyc doesn't read yet, naming what a blocked
+agent asks, a failed turn's state, resuming agents from shell tabs, shell-tab
+history across `-r`, and review notes delivered through the user. Not worth
+chasing: the two-mode window manager (tuios needed four more modes to patch it),
+answering prompts by pressing keys into another program's interface, agents
+typing to each other, project files that run on `cd`, and a browser client with
+no login.
+
+**Watch conditions.** tuios growing a working-set surface (a real file view, or
+MCP tools for what the user has selected) would move it onto spyc's ground.
+herdr's tenfold growth since June deserves a fresh pass of §1a.
+
+---
+
 ## 2. What users love — validated
 
 These features are actively praised and are now table stakes; spyc should match
@@ -832,6 +987,12 @@ build it on the **MCP/hook channel** (cooperative agents *self-report* via the
 MCP config spyc already writes) with a tunable scrape *fallback* — dodging
 herdr's entire fragility class. This is the spine of `docs/archive/AGENT_AWARENESS_PLAN.md`.
 
+**tuios update (2026-11-03):** tuios built the same thing: the agent's own
+report first, then the program's escape sequences and the transcript, screen
+rules near last (§1g). "Reliably" is no longer a differentiator by itself; what
+remains is execution, such as a held `waiting` that outlives a Stop and nothing
+polled at idle (tuios polls each pane's foreground process every two seconds).
+
 ### 3. The review loop — diff & merge across worktrees *(demand: high · effort: low, already built · asset: in-house gix diff/show/blame)*
 
 The real ceiling isn't running agents — it's reviewing them. Users sit on 5–10
@@ -856,6 +1017,12 @@ of the wedge, not sit at #3. (Bonus: because spyc reviews in its own pager, it
 sidesteps herdr's "`less`/`man`/git-pager unusable inside panes" OSC-leak bug,
 [#816](https://github.com/ogulcancelik/herdr/issues/816) — a whole bug category
 spyc structurally doesn't have.)
+
+**tuios update (2026-11-03): contested again.** tuios ships diff review with hunk
+staging and notes on lines that go back to the agent as one message (§1g), so
+spyc's is no longer the only review loop in the TUI lane. What stays spyc's is
+review in-process through gix, inside the file manager, with no shelled git to
+fill a disk ([tuios #1078](https://github.com/Gaurav-Gosain/tuios/issues/1078)).
 
 ### 4. Session persistence that survives a hard kill *(demand: high · effort: medium · asset: existing session save / `-r`)*
 
@@ -1074,6 +1241,11 @@ Reordered after the herdr deep dive (§1a): the **review loop is now the single
 uncontested wedge**, and **agent-status is competitively urgent but must be done
 the reliable (MCP/hook) way**, not herdr's fragile scrape.
 
+> **2026-11-03:** tuios (§1g) now ships both a review loop and self-report-first
+> status, so moves 1 and 2 are no longer uncontested. They still lead, on
+> execution (in-process git, the file manager, nothing awake at idle) rather than
+> on being the only ones.
+
 1. **Make per-worktree diff review a headline workflow** *(now THE wedge; mostly
    built).* No other TUI-lane tool has an in-process review loop — herdr concedes
    it outright. spyc has in-house diff/show/blame (`gd`/`gD`/`gu`); surface it as
@@ -1126,6 +1298,20 @@ Primary sources, all fetched and verified:
   [48220211](https://news.ycombinator.com/item?id=48220211),
   [48424303](https://news.ycombinator.com/item?id=48424303),
   [48247248](https://news.ycombinator.com/item?id=48247248) (its flat Show HN).
+- **tuios (§1g, added 2026-11-03):** [repo](https://github.com/Gaurav-Gosain/tuios) +
+  [docs](https://tuios.dev/docs) (every page fetched as Markdown and read whole) ·
+  source read at `b06b404` (`docs/AGENT_STATE.md`, `internal/session/agent_source.go`,
+  `internal/session/daemon.go`, `internal/lint/git_test.go`) · counts via the GitHub
+  API (`/contributors?anon=true`, `/commits` page counts, `/releases`) · issues
+  [#1078](https://github.com/Gaurav-Gosain/tuios/issues/1078),
+  [#1140](https://github.com/Gaurav-Gosain/tuios/issues/1140),
+  [#1272](https://github.com/Gaurav-Gosain/tuios/issues/1272),
+  [#1361](https://github.com/Gaurav-Gosain/tuios/issues/1361),
+  [#1384](https://github.com/Gaurav-Gosain/tuios/issues/1384) and advisory
+  GHSA-78rj-pghh-vh42 via `gh` — **MIT; ideas only, no code reused.** HN via the
+  Firebase item API: [45641331](https://news.ycombinator.com/item?id=45641331)
+  (its Show HN), [49972214](https://news.ycombinator.com/item?id=49972214)
+  (the_gipsy, 2026-10-05). herdr's 2026-11-03 star count from `repos/herdrdev/herdr`.
 - **GTM:** [lazygit "5 Years On"](https://jesseduffield.com/Lazygit-5-Years-On/) ·
   [Atuin / Changelog #579](https://changelog.com/podcast/579) ·
   [Why Zellij?](https://poor.dev/blog/why-zellij/) ·
