@@ -70,9 +70,10 @@ impl App {
             .collect();
         let rows = entries.iter().map(|e| (e.keys(), e.label())).collect();
         self.view.chord_hint = Some(ChordHint {
-            title,
+            title: format!("{title} · ? all keys"),
             entries,
             rows,
+            prefix: "",
             menu: Some(MenuState::default()),
         });
         self.view.chord_hint_due = None;
@@ -132,6 +133,12 @@ impl App {
                 Ok(Vec::new())
             }
             (KeyCode::Enter, Some(i)) if plain => Ok(self.fire_chord_row(i)),
+            // The key reference, from the pane too, where `?` would otherwise
+            // be typed into the agent.
+            (KeyCode::Char('?'), _) if plain => {
+                self.clear_chord_hint();
+                self.update(super::update::UiMsg::Action(crate::keymap::Action::Help))
+            }
             (KeyCode::Esc, _) => {
                 self.clear_chord_hint();
                 Ok(Vec::new())

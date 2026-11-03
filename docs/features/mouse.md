@@ -31,7 +31,8 @@ shown with `(list)` works from the file list, since in the pane the key
 would be typed into the agent. `↑` and `↓` highlight a row and `Enter` fires
 it; `Esc` closes the menu. Any other key closes the menu and then does what it
 always does, so typing a row's key does what the row says, and from the pane
-a letter still reaches the agent. A row appears only where its action applies:
+a letter still reaches the agent, while `?` opens the list of every key, as the
+title says. A row appears only where its action applies:
 no `e` on a directory, no suspend on a shell tab, and inside an archive no row
 the archive refuses.
 
@@ -54,6 +55,11 @@ a submenu row, such as the leader's `worktree`, opens that menu; a range row,
 such as `1-9`, stands for several keys, so it names them and stays open for
 you to type one. A count typed first (`3`, then `d`) reaches the row you click,
 as it would the key.
+
+Once a row fires by a click or by `Enter`, the prompt row names its key, such
+as `gg  top of column` or `^a z  zoom pane (toggle fullscreen)`, so it can be
+typed next time. A row fired by its own key names nothing, and an action's own
+message, such as an error, is never covered by the hint.
 
 ## Selecting and copying
 

@@ -110,6 +110,10 @@ pub struct ChordHint {
     /// `(keys, label)` per entry, e.g. `("z", "zoom pane (toggle fullscreen)")`:
     /// what is drawn and hit-tested.
     pub(super) rows: Vec<(&'static str, &'static str)>,
+    /// The keys that armed the chord (`g`, `^a`, `Space`), which a row's key
+    /// follows when the hint names it; empty for an object's menu, whose rows
+    /// carry whole keys.
+    pub(super) prefix: &'static str,
     /// An object's menu, which no chord armed and which takes its own keys;
     /// `None` for a chord's popup.
     pub(super) menu: Option<MenuState>,

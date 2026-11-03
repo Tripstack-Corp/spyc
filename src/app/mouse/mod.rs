@@ -549,6 +549,17 @@ impl super::App {
     /// A click on entry `index` of the open which-key popup: what the row's key
     /// would do, through the key's own path. A range row (`1-9`) can't say
     /// which member, so it names its keys and leaves the menu open for them.
+    /// Flash `hint`, the key a fired row stands for, unless the action put up
+    /// a message of its own, which matters more than the lesson.
+    fn name_the_key(&mut self, hint: Option<String>, before: Option<String>) {
+        let after = self.state.flash.as_ref().map(|f| f.text.clone());
+        if let Some(hint) = hint
+            && (after.is_none() || after == before)
+        {
+            self.state.flash_info(hint);
+        }
+    }
+
     pub(super) fn fire_chord_row(&mut self, index: usize) -> Vec<Effect> {
         use crate::keymap::ChordEntry;
         let Some(entry) = self
@@ -561,14 +572,24 @@ impl super::App {
             return Vec::new();
         };
         match entry {
-            ChordEntry::Act(_, action) => {
+            ChordEntry::Act(keys, action) => {
+                // The key that does the same, named once the row has fired, so
+                // it can be typed next time.
+                let hint = self.view.chord_hint.as_ref().map(|h| {
+                    let key = crate::keymap::menu::key_hint(h.prefix, keys);
+                    format!("{key}  {}", action.describe())
+                });
                 let action = self.state.resolver.take_menu_action(action);
                 self.clear_chord_hint();
-                self.update(super::update::UiMsg::Action(action))
+                let before = self.state.flash.as_ref().map(|f| f.text.clone());
+                let fx = self
+                    .update(super::update::UiMsg::Action(action))
                     .unwrap_or_else(|e| {
                         self.state.flash_error(format!("{e:#}"));
                         Vec::new()
-                    })
+                    });
+                self.name_the_key(hint, before);
+                fx
             }
             ChordEntry::Sub(_, _, seq) => {
                 self.state.resolver.enter(seq);
