@@ -576,10 +576,12 @@ fn a_rows_own_key_names_nothing() {
     });
 }
 
-/// An action's own message wins: harpoon's refusal outside a repo stays on
-/// screen rather than being covered by the row's key.
+/// An action's own message keeps its place, with the row's key in front of it:
+/// harpoon's refusal outside a repo still shows, as an error, and still names
+/// the key that would have done the same.
 #[test]
-fn an_actions_own_flash_is_not_covered_by_the_hint() {
+#[ignore = "red: an action's own message shows without the row's key"]
+fn an_actions_own_message_gets_the_key_in_front() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -591,10 +593,75 @@ fn an_actions_own_flash_is_not_covered_by_the_hint() {
 
         click(&mut app, row);
 
+        assert_eq!(
+            flash(&app).as_deref(),
+            Some("Ha · harpoon: open a repo or set PROJECT_HOME (gP)")
+        );
+        assert!(
+            app.state
+                .flash
+                .as_ref()
+                .is_some_and(|f| matches!(f.kind, crate::app::FlashKind::Error)),
+            "still an error"
+        );
+        crate::set_mouse_capture_for_test(false);
+    });
+}
+
+/// A which-key row whose action says something gets its key in front too:
+/// `^a z` from the `^a` menu.
+#[test]
+#[ignore = "red: zoom's own message shows without `^a z`"]
+fn a_which_key_rows_message_gets_its_key_in_front() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_with_tab(tmp.path(), "cat");
+        crate::set_mouse_capture_for_test(true);
+        ctrl_a(&mut app);
+        app.settle_chord_hint(
+            std::time::Instant::now() + std::time::Duration::from_secs(60),
+            &mut crate::app::RunCtx::for_test(),
+        );
+        let row = drawn_row(&mut app, "^a", "zoom pane");
+
+        click(&mut app, row);
+
         let shown = flash(&app).unwrap_or_default();
         assert!(
-            shown.starts_with("harpoon:"),
-            "harpoon's own word: {shown:?}"
+            shown.starts_with("^a z · "),
+            "the key, then zoom's own word: {shown:?}"
+        );
+        assert!(
+            shown.len() > "^a z · ".len(),
+            "and zoom's word follows: {shown:?}"
+        );
+        crate::set_mouse_capture_for_test(false);
+    });
+}
+
+/// Once the key is learned (typed `menu_hints_fade_after` times), the action's
+/// message shows as it is: the lesson is over.
+#[test]
+fn a_learned_keys_message_shows_as_it_is() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_over_entries(tmp.path());
+        crate::set_mouse_capture_for_test(true);
+        cursor_on(&mut app, "notes.txt");
+        for _ in 0..3 {
+            press(&mut app, 'H');
+            press(&mut app, 'a');
+        }
+        press(&mut app, '.');
+        let row = drawn_row(&mut app, "notes.txt", "harpoon");
+
+        click(&mut app, row);
+
+        assert_eq!(
+            flash(&app).as_deref(),
+            Some("harpoon: open a repo or set PROJECT_HOME (gP)")
         );
         crate::set_mouse_capture_for_test(false);
     });
