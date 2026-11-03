@@ -1462,6 +1462,57 @@ fn the_prompt_row_borrows_the_tab_bar_and_gives_it_back() {
     });
 }
 
+/// While the prompt row has the tab bar's place, the row is no divider to
+/// open the tabs' menu from: a right-click on the flash shown there, or past
+/// it, opens the leader, as on any other text.
+#[test]
+fn a_right_click_on_the_borrowed_tab_bar_opens_the_leader() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = tmp.path().join("work");
+        std::fs::create_dir(&dir).unwrap();
+        let mut app = App::test_app(dir.clone());
+        app.view.term_size = (80, 24);
+        app.open_pane_tab("cat");
+        open_v_editor(&mut app, &dir);
+        app.apply(&Action::PaneFocusDown).unwrap();
+        app.state.flash_info("from the pane");
+        let layout = app.frame_layout(ratatui::layout::Rect::new(0, 0, 80, 24));
+        let divider = layout.divider.expect("a pane is open");
+        assert_eq!(
+            app.displaced_prompt_row(&layout),
+            Some(divider),
+            "premise: the flash has the tab bar's place"
+        );
+        crate::set_mouse_capture_for_test(true);
+        for column in [divider.x + 2, divider.right() - 2] {
+            let row = screen_rows(&mut app, 80, 24)[usize::from(divider.y)].clone();
+            assert!(row.starts_with("from the pane"), "premise: {row:?}");
+            for kind in [
+                crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right),
+                crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Right),
+            ] {
+                app.handle_mouse(crossterm::event::MouseEvent {
+                    kind,
+                    column,
+                    row: divider.y,
+                    modifiers: KeyModifiers::NONE,
+                });
+            }
+            let menu = app.menu_is_open();
+            let leader = app.state.resolver.pending_display();
+            app.state.resolver.cancel();
+            app.clear_chord_hint();
+            if menu || leader.as_deref() != Some("leader-") {
+                crate::set_mouse_capture_for_test(false);
+                panic!("column {column}: a menu opened ({menu}), leader {leader:?}");
+            }
+        }
+        crate::set_mouse_capture_for_test(false);
+    });
+}
+
 /// A `D` pager covers the prompt row the same way, and nothing pauses `^a c`
 /// under it.
 #[test]
