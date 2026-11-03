@@ -318,7 +318,6 @@ fn agy_hook_reporter_forwards_event_metadata_and_remaps_stop_states() {
 /// A Claude `Stop` whose only in-flight entry is the page watch a published
 /// artifact keeps open is a finished turn, not one waiting on work.
 #[test]
-#[ignore = "red: a page watch makes the Stop `waiting`"]
 fn a_claude_stop_with_only_a_page_watch_reports_done() {
     let watch = json!({
         "id": "s4k2m9x0q", "type": "monitor", "status": "running",

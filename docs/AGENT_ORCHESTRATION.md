@@ -81,7 +81,9 @@ sources set it:
   scheduled jobs remain in flight, so the reporter turns that turn end's `done`
   into `waiting` when work is pending. For Claude, the reporter keeps only how
   many entries each list had, never their descriptions or commands, and the note
-  reads "1 background task"; for agy, the note reads "background work". When
+  reads "1 background task"; for agy, the note reads "background work". The
+  page watch Claude keeps open after publishing or watching an artifact doesn't
+  count: it wakes the agent only when someone comments. When
   the work finishes, the agent starts a turn by itself, its turn-start hook
   (`UserPromptSubmit` or `PreInvocation`) reports `working`, and the next `Stop`
   decides again.
