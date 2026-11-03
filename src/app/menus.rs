@@ -1,8 +1,9 @@
 //! The menu of an object: `.` opens the entry under the cursor's, `^a .` the
-//! active pane tab's, and a right-click the menu of the row, pane or tab label
-//! it lands on (`mouse/`). The rows come from [`crate::keymap::menu::menu_for`];
-//! this module gathers the facts it decides from and opens the menu as a
-//! which-key popup that no chord armed.
+//! active pane tab's, and a right-click the menu of the row, pane, tab label or
+//! divider it lands on (`mouse/`): off the pane divider's labels, the tabs'
+//! menu, and on the split's divider, the split's. The rows come from
+//! [`crate::keymap::menu::menu_for`]; this module gathers the facts it decides
+//! from and opens the menu as a which-key popup that no chord armed.
 //!
 //! While a menu is open it takes the keys first (`InputSink::Menu`): `↑`/`↓`
 //! move a highlight, `Enter` fires it as a click on the row would, and `Esc`
@@ -15,7 +16,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use super::view_state::MenuState;
 use super::{App, ChordHint, Effect, View};
 use crate::keymap::ChordEntry;
-use crate::keymap::menu::{EntryFacts, TabFacts, Target, menu_for};
+use crate::keymap::menu::{DividerFacts, EntryFacts, SplitFacts, TabFacts, Target, menu_for};
 
 impl App {
     /// The focused column's cursor entry as a menu target, with its name for
@@ -100,6 +101,31 @@ impl App {
             None => self.state.flash_info("menu: no pane tab is open"),
         }
         Vec::new()
+    }
+
+    /// A right-click on the pane divider, off its tab labels: the menu of the
+    /// tabs as a whole.
+    pub(super) fn open_divider_menu(&mut self) -> Vec<Effect> {
+        let tabs = self
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or(0, crate::pane::tabs::PaneTabs::len);
+        let target = Target::Divider(DividerFacts { tabs });
+        self.open_menu(target, "pane tabs".to_string())
+            .into_iter()
+            .collect()
+    }
+
+    /// A right-click on the split's vertical divider: the split's menu, as
+    /// it applies to a preview or to a second commander.
+    pub(super) fn open_split_menu(&mut self) -> Vec<Effect> {
+        let commander = self.state.has_col(super::state::Side::Right);
+        let target = Target::VDivider(SplitFacts { commander });
+        self.open_menu(target, "split".to_string())
+            .into_iter()
+            .collect()
     }
 
     /// Whether the open popup is an object's menu rather than a chord's.

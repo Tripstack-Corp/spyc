@@ -378,6 +378,8 @@ focus.
 | Right click on a file row | Move the cursor there and open that entry's menu, as `.` does |
 | Right click on the pane | While its program runs: focus it and open the active tab's menu, as `^a .` does |
 | Right click on a pane tab | Switch to that tab and open its menu |
+| Right click on the pane divider, off the tabs | Focus the pane and open the `pane tabs` menu: new, next and previous tab, zoom, grow, shrink |
+| Right click on the split's divider | Open the `split` menu: flip height, focus a column, dim, and close the preview or the second commander |
 | Right click anywhere else | Open the leader menu |
 | Any click outside an open menu | Close it, and nothing else |
 | Left click on a menu row | Do what its key does; a range row (`1-9`) names its keys |

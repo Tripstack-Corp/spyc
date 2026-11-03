@@ -14,6 +14,10 @@ pub enum Target {
     Entry(EntryFacts),
     /// A pane tab: the active one, or the label right-clicked.
     PaneTab(TabFacts),
+    /// The pane's tabs as a whole: the divider, right-clicked off its labels.
+    Divider(DividerFacts),
+    /// The vertical split: its divider, right-clicked.
+    VDivider(SplitFacts),
 }
 
 /// What an entry's menu depends on.
@@ -42,6 +46,21 @@ pub struct TabFacts {
     pub exited: bool,
 }
 
+/// What the pane divider's menu depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DividerFacts {
+    /// How many pane tabs are open: stepping between them takes two.
+    pub tabs: usize,
+}
+
+/// What the split's menu depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SplitFacts {
+    /// The right column holds a second commander, not a preview: `^s x`
+    /// closes it, and `^a |` refuses.
+    pub commander: bool,
+}
+
 /// The key a menu row stands for, as it is typed: the chord's `prefix` and the
 /// row's first key, joined the way they are written (`gg`, `Wl`, `^a z`,
 /// `Space p`). An object's menu has no prefix, and its rows' keys are already
@@ -63,6 +82,8 @@ pub fn menu_for(target: Target) -> Vec<ChordEntry> {
     match target {
         Target::Entry(facts) => entry_rows(facts),
         Target::PaneTab(facts) => tab_rows(facts),
+        Target::Divider(facts) => divider_rows(facts),
+        Target::VDivider(facts) => split_rows(facts),
     }
 }
 
@@ -125,6 +146,33 @@ fn tab_rows(t: TabFacts) -> Vec<ChordEntry> {
     ])
 }
 
+fn divider_rows(d: DividerFacts) -> Vec<ChordEntry> {
+    use Action as A;
+    let several = d.tabs > 1;
+    shown([
+        (true, "^a c", A::PaneNewTab),
+        (several, "^a n", A::PaneNextTab),
+        (several, "^a p", A::PanePrevTab),
+        (true, "^a z", A::TogglePaneZoom),
+        (true, "^a +", A::PaneGrow),
+        (true, "^a -", A::PaneShrink),
+    ])
+}
+
+/// The `^a` keys work from the pane and the list alike; `^s` typed in the
+/// pane reaches the child.
+fn split_rows(s: SplitFacts) -> Vec<ChordEntry> {
+    use Action as A;
+    shown([
+        (!s.commander, "^a |", A::VsplitToggle),
+        (true, "^a f", A::VsplitToggleHeight),
+        (true, "^a h", A::VsplitFocusLeft),
+        (true, "^a l", A::VsplitFocusRight),
+        (true, "^a d", A::ToggleDim),
+        (s.commander, "^s x (list)", A::CloseSecondCommander),
+    ])
+}
+
 /// One target for every combination of the facts a row depends on: what the
 /// guards walk.
 #[cfg(test)]
@@ -155,6 +203,12 @@ pub fn every_target() -> Vec<Target> {
             can_fork: bit(1),
             exited: bit(2),
         }));
+    }
+    for tabs in 0..3 {
+        out.push(Target::Divider(DividerFacts { tabs }));
+    }
+    for commander in [false, true] {
+        out.push(Target::VDivider(SplitFacts { commander }));
     }
     out
 }
