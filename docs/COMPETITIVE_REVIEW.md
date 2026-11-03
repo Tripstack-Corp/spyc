@@ -9,7 +9,9 @@ incumbent Yazi is covered in §1d (folded in 2026-07-01 from the standalone Yazi
 review; the raw original is archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`)
 and whose minimalist counterweight lf is covered in §1e. §1f records a third
 thing — the **session layer** beneath both lanes (Superlogical, zmx), added
-2026-09-04 on a stated-facts basis rather than the mine-and-verify standard.
+2026-09-04 on a stated-facts basis rather than the mine-and-verify standard, and
+brought to that standard on 2026-11-03.
+§1g covers tuios, a Go multiplexer that grew an agent inbox, added 2026-11-03.
 
 > **Method.** Two deep-research passes. The first (v1) drew only on vendor
 > primary sources (GitHub READMEs, changelogs, marketing pages) and produced a
@@ -28,6 +30,12 @@ thing — the **session layer** beneath both lanes (Superlogical, zmx), added
 > and timestamp, because a search-engine snippet is not attribution. Two stale
 > spyc-side rows in §1d were corrected in the same pass (mouse support, Yazi's
 > star count).
+>
+> **Fourth pass (2026-11-03)** added §1g (tuios) on the same standard, and
+> corrected the claims it made stale: needs 2 and 3 in §3, the first two moves
+> in §6, and herdr's star count in §1. The same pass appended dated updates to
+> §1a (herdr's relicence, funding and desktop app) and §1f (Rex's beta and OSC
+> 7501), bringing §1f to the mine-and-verify standard.
 
 ---
 
@@ -50,7 +58,7 @@ daemon (unmet need #4). It is fresh, sharp proof that **"a cross-platform Rust
 TUI" cannot itself be spyc's differentiator.**
 
 The differentiator therefore has to be **what spyc is that herdr and Claude Squad
-are not** — and the deep dive in §1a confirms herdr has *none* of these: a real
+are not** — and the deep dive in §1a confirmed (June 2026) herdr had *none* of these: a real
 vi-driven **file manager** you already live in (navigation, git-status gutter,
 marks, harpoon, picks), an **in-process diff/review loop** (herdr's own marketing
 concedes worktree-diff-review to others), and the **MCP bridge** that grounds the
@@ -68,7 +76,8 @@ lane** is where spyc lives — and it already has occupants.
 | Tool | Lane | What it is · signal |
 |------|------|---------------------|
 | **Claude Squad** | TUI · cross-plat | 7.9k★ · Go · tmux+worktrees, AGPL. The terminal incumbent; "works like you'd expect," but dinged for clunky UX and no uninstall script. |
-| **herdr** | TUI · cross-plat | ~7.4k★ · **Rust** · AGPL+commercial, single maintainer. The closest twin — live agent-status sidebar (blocked/working/done/idle), detach/reattach daemon + live binary handoff, a Unix-socket orchestration API with **wait/subscribe** verbs, 15+ agents. But **no file manager, no diff/review, no MCP** — and its two headline features (hook-free status detection, persistence) are exactly where its bug reports cluster. See §1a. |
+| **herdr** | TUI · cross-plat | ~47.8k★ (2026-11-03; ~7.4k in June) · **Rust** · Apache-2.0 (AGPL until July) · YC F26, $6M seed. The closest twin — live agent-status sidebar (blocked/working/done/idle), detach/reattach daemon + live binary handoff, a Unix-socket orchestration API with **wait/subscribe** verbs, 15+ agents. But **no MCP**, and its terminal UI has **no file manager or diff/review** (its desktop app, 2026-10-16, adds both) — and its two headline features (hook-free status detection, persistence) are exactly where its bug reports cluster. See §1a. |
+| **tuios** | TUI · cross-plat | 6.3k★ · **Go** · MIT, one maintainer behind ~90% of commits, ~1M lines in 14 months. A client/daemon window manager with an agent **Inbox** that answers approvals, review with notes sent back to the agent, fan-out and checkpoints, plus a browser client and phone pairing; it answers herdr's socket API. No file manager. See §1g. |
 | **cmux** | GUI · macOS | Swift/libghostty. Vertical tabs + notifications are loved; plagued by an 80 GB OOM leak, session loss, crash windows, and an agent-wrapper trust crisis. |
 | **supacode** | GUI · macOS 26 | Worktree command-center; beta, single-maintainer (~1,574 commits by one person), "Other" license, macOS-26-only floor, ~1k Homebrew installs/qtr. |
 | **Conductor** | GUI · macOS | Cloud/GitHub-OAuth model triggered a trust backlash ("keys for the kingdom"); "silicon only." |
@@ -78,7 +87,7 @@ lane** is where spyc lives — and it already has occupants.
 | **claude-code-ide.el** | editor plugin | 1.6k★ · 109 forks · Emacs. The closest **architectural** twin outside the TUI-manager space: Claude Code runs in a hosted terminal pane (vterm/eat/ghostty) behind a **bidirectional MCP bridge** that pushes live editor context (file, selection, diagnostics, project) to Claude automatically. Different host (a 40-year-old editor, not a file commander) and different center of gravity — the buffer/editor is the noun, dired is a visited mode, not the driving UI. See §1c. |
 | **Yazi** | TUI · cross-plat · **file manager** | ~41.3k★ (2026-08-12) · Rust · the gold-standard TUI file commander (image preview, plugins + package manager, async scheduler). A *different lane* — no agent concept, no MCP; it sets the bar for the file-manager half of spyc's identity, not the agent half. See §1d. |
 | **lf** | TUI · cross-plat · **file manager** | 9.5k★ · Go · MIT · ranger-inspired minimalist, now **community-maintained** (founder's last commit 2024-03-31). Ships the lane's only external **read+write** control surface (`lf -remote send`/`query`) — yet zero agent framing, and its README *Non-Features* (no tabs, no builtin pager/editor, no builtin file ops) are the precise inverse of spyc's integration bet. See §1e. |
-| **Superlogical** | session layer | Launched 2026-07-29 · Hashimoto, Pearkes, Monk, Simpson · Notable Capital + Amplify Partners. Server-side terminal multiplexer on MIT libghostty — "the multiplexer for all work." **Waitlist only, nothing shipped** as of 2026-09-04. A *layer beneath* spyc, not a manager. See §1f. |
+| **Superlogical** | session layer | Launched 2026-07-29 · Hashimoto, Pearkes, Monk, Simpson · Notable Capital + Amplify Partners. Server-side terminal multiplexer on MIT libghostty — "the multiplexer for all work." Its terminal, **Rex**, has been in **public beta since 2026-10-05**: closed source, a native client plus servers. It authored **OSC 7501**, the status escape Claude Code and Codex now emit. A *layer beneath* spyc, not a manager. See §1f. |
 | **zmx** | session layer | Zig · the unbundled form of tmux persistence: daemon per session over a unix socket, passthrough to the PTY, libghostty-vt as a shadow state machine for rehydrating a client on reattach. Deliberately **no windows, tabs or splits**. See §1f. |
 | **long tail** | mixed | Chorus · Vibetunnel · VibeKanban · Mux · Happy · AutoClaude · Codirigent · Centurion · AgentWire · Baton … |
 | **spyc** | TUI · cross-plat | Rust/ratatui · in-process gix worktrees · MCP bridge · vi-keyboard **file+process+agent manager** (not just a multiplexer). |
@@ -106,6 +115,10 @@ disappears into this list.
 ---
 
 ## 1a. herdr — the closest twin (deep dive, June 2026)
+
+*The deep dive below is as of June 2026. herdr has since relicensed, raised a
+seed round and shipped a desktop app: see the update at the end of this
+section.*
 
 [herdr](https://github.com/ogulcancelik/herdr) — *"agent multiplexer that lives
 in your terminal."* Rust TUI, ~7.4k★ / 457 forks, v0.7.1 (2026-06-24, ~935
@@ -210,6 +223,71 @@ Building agent-status on the **MCP/hook channel** — a cooperative agent
 *self-reporting* working/blocked, plus a tunable scrape *fallback* — dodges the
 entire #671/#803 fragility class. That is how spyc wins a feature herdr struggles
 to keep working. The implementation plan is **`docs/archive/AGENT_AWARENESS_PLAN.md`**.
+
+### Update (2026-11-03): herdr became a funded company
+
+This update is on the same standard as the rest of the section: `gh` for
+repository facts, herdr's CHANGELOG and docs at v0.9.5, its blog, and HN items
+re-fetched from the Firebase item API.
+
+- **Scale and money.** **47.8k★ / 3.8k forks**, up from ~7.4k in June. herdr
+  moved to the `herdrdev` organization at the end of July, joined **Y
+  Combinator's F26 batch** on 2026-08-06 ("a solo project reached 25k stars and
+  340k downloads, and it became more than one person can carry"), and raised a
+  **$6M seed led by Bessemer Venture Partners** on 2026-09-08. Its founder still
+  writes most of the code (506 of the 951 commits since June), among 91
+  contributors.
+- **Apache-2.0, not AGPL.** It was relicensed on 2026-07-22 and shipped in 0.8.0,
+  because "I want everyone to use Herdr freely". The licence noted above no
+  longer describes herdr.
+- **Releases.** v0.9.5 (2026-10-14), with 12 stable releases and 23 previews
+  since 2026-06-24. They add a plugin ecosystem (2,030 repositories carry the
+  `herdr-plugin` topic), several machines in one window and clients on
+  different tabs (0.9.0), and agents that report their own state and resume
+  command (`pane report-agent`, 0.9.2).
+- **Status still leans on the screen.** Claude Code's and Codex's state still
+  comes from detection manifests matched against what they draw; six
+  integrations and five agents report for themselves. The detection cluster
+  above has grown with the user base, not shrunk: the `agent-detection` label
+  holds 142 issues since September, 62 open, such as a Claude question dialog
+  reported idle when its footer wraps
+  ([#5721](https://github.com/herdrdev/herdr/issues/5721), 2026-10-31).
+- **Review and files arrived, in a desktop app.** herdr-app (Apache-2.0,
+  2026-10-16; HN [50298436](https://news.ycombinator.com/item?id=50298436), 365
+  points) ships a `changes` mod (each file's diff, and a commit) and a `files`
+  mod (a lazy, read-only file browser). In the terminal, the community
+  [herdr-reviewr](https://github.com/persiyanov/herdr-reviewr) plugin (965★)
+  sends review comments on an agent's diff back to it. The terminal UI itself
+  still has no diff view or file manager, and herdr has **no MCP server**.
+- **Restore** brings back the layout, working directories and focus, and agent
+  conversations through native resume for 18 agents or a self-reported resume
+  command. Screen history needs an experimental opt-in, and live handoff is
+  still experimental.
+
+The review half was what users asked for:
+
+> "Do you plan to support viewing file-diffs for the cwd? Currently I keep zed /
+> vscode open on the side to view diffs. It would be great if we could fold
+> those into herdr as well" — ramnique,
+> [HN](https://news.ycombinator.com/item?id=48835770)
+
+> "And I missed seeing the code diffs and being able to commit changes in VSCode
+> … But Herdr app addresses both issues." — tjansen,
+> [HN](https://news.ycombinator.com/item?id=50301474)
+
+> "I have such mixed feelings about this - YC means VC means commercialization
+> means enshitification." — nlh, [HN](https://news.ycombinator.com/item?id=49201599),
+> on the YC news
+
+**What changes in the strategic read above.** The two things it counted as
+spyc's moat beside the file manager are each half taken. herdr has review and
+file browsing (in a desktop app, not the terminal) and a plugin that returns
+review notes to the agent. Its weakness hasn't changed: Claude and Codex status
+still rests on reading the screen, and the bug cluster grew with its users.
+"Should not chase" a daemon still stands. "Single maintainer" doesn't: herdr is
+a funded company with a desktop product, the category's incumbent more than
+spyc's twin, and what stays spyc's alone is the file manager and review inside
+the terminal, git in-process, and MCP grounded in the user's working set.
 
 ---
 
@@ -724,7 +802,8 @@ Hashimoto's new company, founded with Jack Pearkes, Alasdair Monk and Hector
 Simpson, backed by Notable Capital and Amplify Partners. The stated aim is a
 **server-side terminal multiplexer** built on MIT-licensed **libghostty** — "the
 multiplexer for all work." As of 2026-09-04 it is **waitlist only; nothing has
-shipped**, so there is no surface to evaluate and none is guessed at here.
+shipped**, so there is no surface to evaluate and none is guessed at here. (Rex
+has shipped since: see the update below.)
 
 **[zmx](https://github.com/neurosnap/zmx)** (Zig) shipped the unbundled form of
 what tmux's persistence actually is: a **daemon per session** over a unix
@@ -748,6 +827,209 @@ say so explicitly.
 **Watch conditions.** Superlogical shipping anything at all — the first release
 is the first evaluable fact. zmx growing a context or agent-integration surface,
 which would move it out of the session layer and into this category.
+
+### Update (2026-11-03): Rex is in beta, and its status escape spread
+
+This update is on the document's normal standard: Superlogical's own pages and
+docs fetched, each adoption checked in that project's repository or changelog,
+and quotes re-fetched from HN's Firebase item API.
+
+- **Rex has shipped as a public beta.** Superlogical opened testing on
+  **2026-10-05**, sending invites in waves to its mailing list
+  ([update](https://www.superlogical.com/updates/public-testing-beginning)). Rex
+  is "a drop-in replacement for whichever terminal you use today": a native
+  terminal plus servers it connects to, with persistent sessions, remote
+  connections and program status. Testers get the macOS app and the Linux and
+  FreeBSD servers; the Linux stable channel has no tagged release yet. It needs
+  no account and is **closed source**: the `superlogical` GitHub organization has
+  no public repositories, no licence is published, and pricing is unannounced.
+- **Its agent surface is screen-level.** `rex skill setup` installs a skill for
+  Claude Code, Codex, OpenCode and Pi, plus a session-start hook. Through them an
+  agent opens tabs, splits panes, reads a terminal's screen and drives connected
+  Rex apps
+  ([docs](https://www.superlogical.com/rex/docs/automate/agent-skill.md)).
+- **OSC 7501 is the part that reaches spyc.** Superlogical's Program Status
+  Protocol ([spec](https://www.superlogical.com/rex/docs/build/program-status),
+  revision 0.4, 2026-10-10) is one escape sequence by which a program says it is
+  idle, working, blocked, done or failed. Within a week it was in libghostty-vt
+  ([ghostty#14560](https://github.com/ghostty-org/ghostty/pull/14560)), in
+  **Claude Code 2.1.295** ("terminals that implement it can show whether Claude
+  Code is working, waiting on you, or done") and in **Codex**
+  ([openai/codex#52725](https://github.com/openai/codex/pull/52725)); bubbletea,
+  libvaxis, psmux and tuios followed. Claude Code reports only to a terminal that
+  answers its `OSC 7501 ; ?` probe. spyc's libghostty-vt pin predates the
+  upstream support, so spyc neither parses the reports nor answers the probe
+  (#927).
+- **zmx is unchanged in kind.** v0.8.1 (2026-09-05), 2.3k★. The forty commits
+  since add OpenBSD, a frozen IPC protocol, `history --screen` and a docs site;
+  none is agent-related, and its README still rules out windows, tabs and splits.
+
+Users are trying it, and comparing it with the agent multiplexers:
+
+> "As a first-party remote solution, I've been playing with the beta version of
+> Rex ( https://www.superlogical.com ) and its remote access is pretty slick!" —
+> benjuntilla, [HN](https://news.ycombinator.com/item?id=50270714)
+
+> "In its current incarnation, superlogical is exactly the same as the new
+> herdr, with the same gaps. A TUI does not appear in their backlog either. They
+> are a native app." — threecheese,
+> [HN](https://news.ycombinator.com/item?id=50310453)
+
+**What it means for spyc.** The first watch condition is met, and the thesis
+holds: Rex shares a screen with the agent, spyc shares the working set. The new
+fact is OSC 7501. The agents now report their own status in-band to any terminal
+that asks, so for spyc it is a second self-report channel beside its hooks, one
+that needs no wiring and also lights shell tabs running any program that speaks
+it. Next to watch: Rex's licence and price at its first stable release.
+
+---
+
+## 1g. tuios — a multiplexer that grew an agent inbox (2026-11-03)
+
+[tuios](https://github.com/Gaurav-Gosain/tuios) — *"a terminal window manager
+that knows what your agents are doing."* Go on Bubble Tea v2, **MIT**, created
+2025-09-06, **6,322★ / 294 forks** (2026-11-03), v0.12.1 (2026-10-31). A
+**client/daemon** multiplexer: floating windows plus BSP, master-stack and
+scrolling-column tiling, nine workspaces, a session rail, a command palette, a
+browser client (`tuios-web`), an embedded SSH server (`tuios ssh`) and phone
+pairing. Its terminal engine is its own pure-Go `vt`, with libghostty-vt behind a
+build tag. It names herdr as its closest twin and has absorbed it: tuios answers
+herdr's socket API and runs herdr plugins unchanged.
+
+**Scale is the story.** About 5,900 commits, 5,200 of them by its maintainer and
+**2,685 in October 2026 alone**; 77 contributors; 16 releases between 27 September
+and 31 October, none of them a release candidate. The tree holds about 650k
+lines of Go plus 390k of tests (`wc -l`, 2026-10-31): a million lines in fourteen
+months, which reads as agent throughput.
+
+> **Provenance.** The document's standard, applied to a project that publishes
+> its docs as Markdown: every tuios.dev docs page fetched as `.md` and read whole,
+> the source read at `b06b404` (2026-10-31), counts from the GitHub API
+> (2026-10-31 and 2026-11-03), issue text from `gh issue view`, and HN items from
+> the Firebase item API for author and timestamp. Mechanisms below are as the
+> source implements them, not as the marketing states them.
+
+### What users actually say (verified)
+
+Outside GitHub the footprint is almost nil, the shape herdr had in June. Its
+Show HN scored **5 points, 0 comments**
+([45641331](https://news.ycombinator.com/item?id=45641331), 2025-10-20), and the
+one substantive HN mention dismisses its mouse-first windows:
+
+> "Looking at tuios, using a mouse in a TUI completely defeats its purpose, for
+> me personally." — the_gipsy, [HN](https://news.ycombinator.com/item?id=49972214)
+
+The real voice is its issue tracker, and it sorts into the breadth-versus-depth
+trade this review keeps predicting:
+
+- **Regressions on first contact.** "This is my onboarding experience so I am
+  immediately put off. … Didn't have this issue in herdr" — Soleone, on rapid
+  cursor blinking while idle,
+  [#1140](https://github.com/Gaurav-Gosain/tuios/issues/1140).
+- **Noise shipped as a feature.** "I find the notifications distracting and
+  annoying in most cases. Unless there's a problem, I don't really want a
+  popup." — adamcstephens,
+  [#1361](https://github.com/Gaurav-Gosain/tuios/issues/1361). The maintainer's
+  reply: "notifications and logs are kind of a development artifact that stuck
+  around as it let me iterate extremely fast".
+- **Shelled git costs data.** `tuios review` ran `git add --all` on a temporary
+  index; git-lfs's clean filter copied untracked LFS-pattern files on every
+  review, and a killed run kept its partial copies until they "filled 258 GB"
+  ([#1078](https://github.com/Gaurav-Gosain/tuios/issues/1078)). spyc's
+  in-process gix (`no_subprocess_git_in_production`) has no such path.
+- **Scrape rules still break.** An `AskUserQuestion` form went unread when Claude
+  Code drew a titled rule under it
+  ([#1272](https://github.com/Gaurav-Gosain/tuios/issues/1272)): herdr's #671
+  class, in a tool that ranks scraping near last.
+- **Many-agent users are real.** "I run 8–12 Claude Code panes in one session" —
+  zoneblaze, asking for agent rows labelled by the pane's own title
+  ([#1384](https://github.com/Gaurav-Gosain/tuios/issues/1384)).
+
+### What it ships for agents, and how
+
+- **Status ranked by source, self-report first.** One claim per pane, and a
+  source may overwrite only a claim ranked at or below its own: the agent's own
+  report (hooks, `set-agent-state`), then the program's OSC 7501 report, Claude's
+  transcript, other escape sequences (OSC 9;4 progress, the title), screen rules,
+  the foreground process (polled every two seconds), and last a 30-second stall
+  timer. A blocking screen match may borrow over a stale `working` claim. This
+  is the design §1a told spyc to build, and tuios built it too.
+- **One Inbox that answers prompts.** It presses the answer keys into the pane
+  from per-agent manifests, re-reading the prompt first. Opt-in per harness, it
+  instead **holds** a permission request inside Claude Code's (or opencode's,
+  Kilo's, Qwen Code's) hook until you answer. Only a request that fits on one
+  line is held, such as a shell command or a file read; risky ones (`rm -rf`, a
+  force push, a write outside the worktree) take a second press, and the answer
+  keys do nothing until the item has been on screen, unchanged, for 0.4 seconds.
+- **Review that talks back.** A diff of the worktree against its base, with hunk
+  staging and notes on lines or hunks; the notes go to the agent as one message,
+  typed when it is at rest.
+- **Fan-out, checkpoints, ship.** One prompt to several agents in their own
+  worktrees, with `fan compare` and `fan verify`; per-turn checkpoints committed
+  to `refs/tuios/checkpoints/…`; `ship` commits, merges, pushes and opens a pull
+  request from an agent's worktree under your own git identity.
+- **Agents and scripts drive it.** A JSON control protocol of 115 verbs with
+  blocking `wait-for` and an event stream; `tuios mcp`, read-only and scoped to
+  its own session unless started with `--write`; a tmux shim that gives Claude
+  Code's agent teams real panes; and herdr's socket API.
+- **It paid for the surface.**
+  [GHSA-78rj-pghh-vh42](https://github.com/Gaurav-Gosain/tuios/security/advisories/GHSA-78rj-pghh-vh42),
+  fixed in v0.11.0: `set-agent-state` let one pane answer another agent's prompt.
+  Typing into agents brought grants, nonces and an advisory. spyc's MCP has no
+  tool that types into a pane or answers a prompt.
+
+### The daemon, measured against `-r`
+
+The daemon owns every PTY, so detaching costs nothing, several clients can
+attach, and an SSH drop loses nothing. But any daemon stop (an upgrade, a crash,
+a reboot, `restart-server`) ends every program. What comes back is the layout,
+each pane's working directory, the last 1,000 styled lines of each pane's
+scrollback under a "restored" divider, and by default an Inbox row offering to
+resume each agent's conversation (`daemon.resume_agents = "ask"`). That is
+`spyc -r` plus scrollback. §1a's "structural advantage we cannot claim parity
+on" stands for herdr's live handoff; against tuios, the daemon's lead is detach
+and SSH drops, not upgrades.
+
+### Strategic read
+
+**What tuios changes in this document:**
+
+- **Reliable status is no longer spyc's alone.** Need 2 in §3 framed the
+  differentiator as "spyc does it reliably"; tuios converged on the same
+  self-report-first ranking. spyc's edge there is now execution (a held
+  `waiting` that outlives a Stop, no polling at idle), not the approach.
+- **The review loop is contested.** Need 3 in §3 and the first move in §6 call
+  spyc's diff review the only in-process review loop in the TUI lane; tuios ships
+  review with line notes sent back to the agent. What stays spyc's is git done
+  in-process through gix, and review inside the file manager the user already
+  lives in.
+- **herdr is no longer small.** It moved to `herdrdev/herdr` and stands at
+  **47.8k★** (2026-11-03), up from ~7.4k in June; tuios's own comparison page
+  calls it "more widely used". §1a's numbers are from June and owe a refresh.
+
+**Where tuios beats spyc (be honest):** one Inbox that answers approvals across
+sessions; review notes that go back to the agent; detach, reattach and remote
+sessions; scrollback that survives a restart; and breadth: a browser client,
+phones, push notifications, plugins, and a tutor (`tuios tutor`).
+
+**Where spyc wins:** the file manager (tuios's rail lists files; it is not a file
+commander); git in-process; MCP that carries the user's working set (cursor,
+picks, inventory, worktrees) rather than panes and keystrokes; nothing awake at
+idle; and discipline: file- and function-size ratchets against tuios's 86
+non-test files over 1,000 lines, and guards that keep the docs true.
+
+**Take, don't chase.** The ideas worth taking are small and agent-pane-shaped:
+the libghostty status callbacks spyc doesn't read yet, naming what a blocked
+agent asks, a failed turn's state, resuming agents from shell tabs, shell-tab
+history across `-r`, and review notes delivered through the user. Not worth
+chasing: the two-mode window manager (tuios needed four more modes to patch it),
+answering prompts by pressing keys into another program's interface, agents
+typing to each other, project files that run on `cd`, and a browser client with
+no login.
+
+**Watch conditions.** tuios growing a working-set surface (a real file view, or
+MCP tools for what the user has selected) would move it onto spyc's ground.
+herdr's tenfold growth since June deserves a fresh pass of §1a.
 
 ---
 
@@ -832,6 +1114,12 @@ build it on the **MCP/hook channel** (cooperative agents *self-report* via the
 MCP config spyc already writes) with a tunable scrape *fallback* — dodging
 herdr's entire fragility class. This is the spine of `docs/archive/AGENT_AWARENESS_PLAN.md`.
 
+**tuios update (2026-11-03):** tuios built the same thing: the agent's own
+report first, then the program's escape sequences and the transcript, screen
+rules near last (§1g). "Reliably" is no longer a differentiator by itself; what
+remains is execution, such as a held `waiting` that outlives a Stop and nothing
+polled at idle (tuios polls each pane's foreground process every two seconds).
+
 ### 3. The review loop — diff & merge across worktrees *(demand: high · effort: low, already built · asset: in-house gix diff/show/blame)*
 
 The real ceiling isn't running agents — it's reviewing them. Users sit on 5–10
@@ -856,6 +1144,14 @@ of the wedge, not sit at #3. (Bonus: because spyc reviews in its own pager, it
 sidesteps herdr's "`less`/`man`/git-pager unusable inside panes" OSC-leak bug,
 [#816](https://github.com/ogulcancelik/herdr/issues/816) — a whole bug category
 spyc structurally doesn't have.)
+
+**tuios and herdr update (2026-11-03): contested again.** tuios ships diff
+review with hunk staging and notes on lines that go back to the agent as one
+message (§1g). herdr's desktop app has a changes view, and its herdr-reviewr
+plugin sends review comments back to the agent (§1a). spyc's is no longer the
+only review loop in the TUI lane. What stays spyc's is
+review in-process through gix, inside the file manager, with no shelled git to
+fill a disk ([tuios #1078](https://github.com/Gaurav-Gosain/tuios/issues/1078)).
 
 ### 4. Session persistence that survives a hard kill *(demand: high · effort: medium · asset: existing session save / `-r`)*
 
@@ -925,6 +1221,10 @@ vi-navigation: **keep pane indices stable.**
 > an *in-process review loop* and an *MCP bridge* — none of which they have. Lead
 > with file-manager + review; "terminal, cross-platform, Rust" is table stakes
 > now, not the wedge.
+>
+> **2026-11-03:** herdr's desktop app now has a changes view and a file browser,
+> and tuios ships review (§1a, §1g). Still spyc's alone: a file manager and
+> review *in the terminal*, and the MCP bridge.
 
 Structural advantages back it — but note which competitor each one beats:
 
@@ -1074,6 +1374,12 @@ Reordered after the herdr deep dive (§1a): the **review loop is now the single
 uncontested wedge**, and **agent-status is competitively urgent but must be done
 the reliable (MCP/hook) way**, not herdr's fragile scrape.
 
+> **2026-11-03:** tuios (§1g) now ships both a review loop and self-report-first
+> status, and herdr (§1a) has review in its desktop app and an API for agents to
+> report themselves, so moves 1 and 2 are no longer uncontested. They still lead, on
+> execution (in-process git, the file manager, nothing awake at idle) rather than
+> on being the only ones.
+
 1. **Make per-worktree diff review a headline workflow** *(now THE wedge; mostly
    built).* No other TUI-lane tool has an in-process review loop — herdr concedes
    it outright. spyc has in-house diff/show/blame (`gd`/`gD`/`gu`); surface it as
@@ -1126,6 +1432,44 @@ Primary sources, all fetched and verified:
   [48220211](https://news.ycombinator.com/item?id=48220211),
   [48424303](https://news.ycombinator.com/item?id=48424303),
   [48247248](https://news.ycombinator.com/item?id=48247248) (its flat Show HN).
+  **Refreshed 2026-11-03** at [herdrdev/herdr](https://github.com/herdrdev/herdr):
+  `gh api repos/herdrdev/herdr` (stars, forks, licence, releases, contributors and
+  commits by author), the CHANGELOG and docs at v0.9.5, the blog posts on
+  [Y Combinator](https://herdr.dev/blog/herdr-is-joining-y-combinator/) and the
+  [seed](https://herdr.dev/blog/herdr-raised-a-seed/),
+  [herdr-app](https://github.com/herdrdev/herdr-app), and `agent-detection`
+  label counts via `gh api search/issues`. HN via the Firebase item API:
+  [48835770](https://news.ycombinator.com/item?id=48835770) (ramnique),
+  [50301474](https://news.ycombinator.com/item?id=50301474) (tjansen),
+  [49201599](https://news.ycombinator.com/item?id=49201599) (nlh),
+  [50298436](https://news.ycombinator.com/item?id=50298436) (the desktop app).
+- **The session layer (§1f update, 2026-11-03):**
+  [public testing](https://www.superlogical.com/updates/public-testing-beginning)
+  and the Rex docs ([installation](https://www.superlogical.com/rex/docs/installation.md),
+  [agent skill](https://www.superlogical.com/rex/docs/automate/agent-skill.md),
+  [program status](https://www.superlogical.com/rex/docs/build/program-status)) ·
+  `gh api orgs/superlogical` (no public repositories) · OSC 7501 adoption in
+  [ghostty#14560](https://github.com/ghostty-org/ghostty/pull/14560),
+  [ghostty#14630](https://github.com/ghostty-org/ghostty/pull/14630),
+  [openai/codex#52725](https://github.com/openai/codex/pull/52725) and Claude
+  Code's CHANGELOG (2.1.295) · zmx via `gh repo view neurosnap/zmx` and its
+  commits · HN via the Firebase item API:
+  [50270714](https://news.ycombinator.com/item?id=50270714) (benjuntilla),
+  [50310453](https://news.ycombinator.com/item?id=50310453) (threecheese).
+- **tuios (§1g, added 2026-11-03):** [repo](https://github.com/Gaurav-Gosain/tuios) +
+  [docs](https://tuios.dev/docs) (every page fetched as Markdown and read whole) ·
+  source read at `b06b404` (`docs/AGENT_STATE.md`, `internal/session/agent_source.go`,
+  `internal/session/daemon.go`, `internal/lint/git_test.go`) · counts via the GitHub
+  API (`/contributors?anon=true`, `/commits` page counts, `/releases`) · issues
+  [#1078](https://github.com/Gaurav-Gosain/tuios/issues/1078),
+  [#1140](https://github.com/Gaurav-Gosain/tuios/issues/1140),
+  [#1272](https://github.com/Gaurav-Gosain/tuios/issues/1272),
+  [#1361](https://github.com/Gaurav-Gosain/tuios/issues/1361),
+  [#1384](https://github.com/Gaurav-Gosain/tuios/issues/1384) and advisory
+  GHSA-78rj-pghh-vh42 via `gh` — **MIT; ideas only, no code reused.** HN via the
+  Firebase item API: [45641331](https://news.ycombinator.com/item?id=45641331)
+  (its Show HN), [49972214](https://news.ycombinator.com/item?id=49972214)
+  (the_gipsy, 2026-10-05). herdr's 2026-11-03 star count from `repos/herdrdev/herdr`.
 - **GTM:** [lazygit "5 Years On"](https://jesseduffield.com/Lazygit-5-Years-On/) ·
   [Atuin / Changelog #579](https://changelog.com/podcast/579) ·
   [Why Zellij?](https://poor.dev/blog/why-zellij/) ·
