@@ -93,6 +93,15 @@ impl IntField {
 /// Root arrays kept as their count of object entries, never their content:
 /// Claude Code's `Stop` lists in-flight background work and scheduled wakeups.
 const COUNTED: [&str; 2] = ["background_tasks", "session_crons"];
+
+/// How Claude Code describes the connections it keeps open on an artifact: the
+/// page watch, requested or armed on publish, and its presence. Neither is work
+/// a turn waits on; `Stop` lists both as a `monitor` without the `ambient` flag
+/// Claude's task events give them (anthropics/claude-code#98816), and a
+/// `Monitor` the model starts is a `monitor` too.
+// SPYC-TRAP(claude-page-watch): Claude Code's wording, not a contract.
+const PAGE_WATCH: [&str; 2] = ["live updates for artifact ", "presence on artifact "];
+
 const TOKEN_LIMIT: usize = 1024; // Includes quotes and up to six bytes per ASCII escape.
 const STRING_LIMIT: usize = 128;
 const DEPTH_LIMIT: usize = 128;
@@ -166,6 +175,34 @@ enum Token {
     Field(Field),
     ToolCallKey,
     ToolCallName,
+    EntryKey,
+    EntryValue(EntryField),
+}
+
+/// The keys of a counted entry read to tell ambient work from work.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EntryField {
+    Label,
+    Description,
+    Ambient,
+}
+
+/// The counted-list entry being read: its `type`, its `ambient` flag and
+/// whether its description names a page watch, never the description itself.
+#[derive(Default)]
+struct Entry {
+    value_next: bool,
+    field: Option<EntryField>,
+    label: Option<String>,
+    page_watch: bool,
+    ambient: bool,
+}
+
+impl Entry {
+    /// Not work a turn waits on.
+    fn is_ambient(&self) -> bool {
+        self.ambient || (self.page_watch && self.label.as_deref() == Some("monitor"))
+    }
 }
 
 struct MetadataReader<R> {
@@ -177,6 +214,7 @@ struct MetadataReader<R> {
     fully_idle: Option<bool>,
     slot: Option<RootSlot>,
     counting: Option<usize>,
+    entry: Option<Entry>,
     int_acc: Option<u32>,
     int_invalid: bool,
     in_tool_call: bool,
@@ -205,6 +243,7 @@ impl<R> MetadataReader<R> {
             fully_idle: None,
             slot: None,
             counting: None,
+            entry: None,
             int_acc: None,
             int_invalid: false,
             in_tool_call: false,
@@ -301,6 +340,40 @@ impl<R> MetadataReader<R> {
                 self.tool_call_name = decoded.filter(|value| value.len() <= STRING_LIMIT);
                 self.nested_name_field = false;
             }
+            Token::EntryKey => {
+                if let Some(entry) = &mut self.entry {
+                    entry.value_next = true;
+                    entry.field = match decoded.as_deref() {
+                        Some("type") => Some(EntryField::Label),
+                        Some("description") => Some(EntryField::Description),
+                        Some("ambient") => Some(EntryField::Ambient),
+                        _ => None,
+                    };
+                    // Last key wins, whatever type its value turns out to be.
+                    match entry.field {
+                        Some(EntryField::Label) => entry.label = None,
+                        Some(EntryField::Description) => entry.page_watch = false,
+                        Some(EntryField::Ambient) => entry.ambient = false,
+                        None => {}
+                    }
+                }
+            }
+            Token::EntryValue(field) => {
+                if let Some(entry) = &mut self.entry {
+                    match field {
+                        EntryField::Label => {
+                            entry.label = decoded.filter(|value| value.len() <= STRING_LIMIT);
+                        }
+                        EntryField::Description => {
+                            entry.page_watch = decoded.is_some_and(|value| {
+                                PAGE_WATCH.iter().any(|prefix| value.starts_with(prefix))
+                            });
+                        }
+                        EntryField::Ambient => {}
+                    }
+                    entry.field = None;
+                }
+            }
             Token::Ignored => {}
         }
         self.in_string = false;
@@ -347,6 +420,19 @@ impl<R> MetadataReader<R> {
         }
     }
 
+    fn observe_entry_scalar(&mut self, byte: u8) {
+        if self.depth != 3 || !matches!(byte, b't' | b'f') {
+            return;
+        }
+        if let Some(entry) = &mut self.entry
+            && entry.value_next
+            && entry.field == Some(EntryField::Ambient)
+        {
+            entry.ambient = byte == b't';
+            entry.field = None;
+        }
+    }
+
     const fn finish_root_value(&mut self) {
         if let Some(RootSlot::Int(field)) = self.slot
             && !self.int_invalid
@@ -377,6 +463,14 @@ impl<R> MetadataReader<R> {
             } else {
                 Token::Ignored
             }
+        } else if self.depth == 3
+            && let Some(entry) = &self.entry
+        {
+            match (entry.value_next, entry.field) {
+                (false, _) => Token::EntryKey,
+                (true, Some(field)) => Token::EntryValue(field),
+                (true, None) => Token::Ignored,
+            }
         } else {
             Token::Ignored
         }
@@ -399,6 +493,7 @@ impl<R> MetadataReader<R> {
             return Ok(());
         }
         self.observe_root_scalar(byte);
+        self.observe_entry_scalar(byte);
         match byte {
             b'"' => {
                 self.token = self.string_token();
@@ -413,6 +508,7 @@ impl<R> MetadataReader<R> {
                     if let Some(RootSlot::Counted(counted)) = self.slot {
                         self.counting = Some(counted);
                         self.counts[counted] = Some(0);
+                        self.entry = None;
                     }
                 } else if byte == b'{'
                     && self.depth == 1
@@ -424,10 +520,8 @@ impl<R> MetadataReader<R> {
                     self.nested_name_field = false;
                 } else if self.depth == 2 {
                     self.nested_name_field = false;
-                    if byte == b'{'
-                        && let Some(counted) = self.counting
-                    {
-                        self.counts[counted] = self.counts[counted].map(|n| n.saturating_add(1));
+                    if byte == b'{' && self.counting.is_some() {
+                        self.entry = Some(Entry::default());
                     }
                 }
                 self.depth += 1;
@@ -442,14 +536,28 @@ impl<R> MetadataReader<R> {
                 if byte == b'}' && self.depth == 1 {
                     self.finish_root_value();
                 }
+                if byte == b'}'
+                    && self.depth == 3
+                    && let (Some(counted), Some(entry)) = (self.counting, self.entry.take())
+                    && !entry.is_ambient()
+                {
+                    self.counts[counted] = self.counts[counted].map(|n| n.saturating_add(1));
+                }
                 self.depth = self.depth.saturating_sub(1);
                 if self.depth <= 1 {
                     self.counting = None;
+                    self.entry = None;
                     self.in_tool_call = false;
                     self.nested_name_field = false;
                 }
             }
             b',' if self.depth == 1 => self.finish_root_value(),
+            b',' if self.depth == 3 => {
+                if let Some(entry) = &mut self.entry {
+                    entry.value_next = false;
+                    entry.field = None;
+                }
+            }
             b',' if self.depth == 2 && self.in_tool_call => {
                 self.nested_key_next = true;
                 self.nested_name_field = false;
@@ -575,7 +683,6 @@ mod tests {
     /// `monitor`s described as such, not work the turn is waiting on; nor is an
     /// entry Claude marks `ambient`.
     #[test]
-    #[ignore = "red: a page watch counts as background work"]
     fn an_artifact_page_watch_is_not_counted_as_background_work() {
         let ambient = r#"{"id":"s4k2m9x0q","type":"monitor","status":"running","description":"live updates for artifact https://claude.ai/artifact/private-page (auto-armed on publish)"},
             {"type":"monitor","status":"running","description":"live updates for artifact https://claude.ai/code/artifact/private-page (requested by you)","id":"s00000z0z"},

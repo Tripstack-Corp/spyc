@@ -174,6 +174,28 @@ the latest live report resumes, and expiry still applies. Unknown/customized or
 clipped footers produce no guess. No question content or answer ids are retained,
 and no new hook, subscription or idle timer is introduced.
 
+## Claude's page watch is told apart by its description
+
+<!-- SPYC-TRAP: claude-page-watch -->
+Claude Code's `Stop` payload lists in-flight work in `background_tasks`, and
+spyc's reporter turns a `Stop` with any of it into `waiting`. Once a session
+publishes or watches an artifact, Claude keeps a page watch open for the rest of
+its life, and `Stop` lists it as an ordinary `monitor`. Claude's own task events
+mark it `ambient` and its idle state skips it, but `Stop` drops the flag
+(anthropics/claude-code#98816). Its presence on the page is a second such
+`monitor`. So `status_hook::input` leaves out a `monitor` described as
+`live updates for artifact …` (Claude Code's one template for every watch) or
+`presence on artifact …`, and any entry marked `ambient`, which is the upstream
+fix that issue asks for.
+
+Load-bearing because the wording is Claude Code's, not a contract, and the
+failure is silent. If it changes, every turn after a publish reads `waiting ·
+1 background task` for up to an hour, and the tab never goes `done` or pings,
+while the agent truthfully says nothing is running. Before treating such a
+report as real background work, check the description Claude now gives its
+watches. The id's prefix (`s`, a WebSocket monitor) can't stand in: a `Monitor`
+the model starts on a WebSocket shares it, and that is work the turn waits on.
+
 ## agy's `working` gives way after 15 seconds of quiet
 
 agy ends a turn only through its `Stop` hook. When that never arrives (agy
