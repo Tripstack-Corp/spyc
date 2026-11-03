@@ -345,6 +345,7 @@ to open them in the current listing dir.
 | `:activity` | Toggle the activity monitor; `:activity transparent\|solid` → overlay style (transparent by default); `:activity dump` → per-pane why-status report, plus each MCP connection and the tab it's bound to |
 | `:archive` | Mounted archives: `info` / `list` / `write` / `discard` / `unmount` / `cancel` (mounting is `Enter` on the archive) |
 | `:hooks` | Each agent's wiring into spyc: `on` / `on!` / `off` / `ask` `[agent]`; bare lists the answers |
+| `:hints` | The menu hints that have faded, in the pager; `:hints reset` brings them all back |
 | `:startup-tabs` | Where launch's pane tabs come from; `forget` re-asks about a project `.spycrc.toml`'s list |
 | `:skill` | Agent skill: `status` / `update` / `remove` / `ask` |
 | `:lua` | Lua engine: `status` / `on` / `off` / `reload` |

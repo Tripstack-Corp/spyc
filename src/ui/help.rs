@@ -250,6 +250,10 @@ const SECTIONS: &[Section] = &[
                 ":stderr",
                 "what spyc's own stderr received, in a pager (the status bar's ⚠N counts unseen lines)",
             ),
+            (
+                ":hints",
+                "the menu hints that have faded; :hints reset brings them back",
+            ),
         ],
     },
     Section {

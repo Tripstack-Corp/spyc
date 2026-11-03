@@ -35,7 +35,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/bootstrap.rs::App::new", 211),
         ("src/app/effect/executor.rs::App::run_effects", 157),
         ("src/app/file_ops.rs::run_file_op", 162),
-        ("src/app/key_dispatch/mod.rs::App::handle_key", 172),
+        ("src/app/key_dispatch/mod.rs::App::handle_key", 157),
         (
             "src/app/key_dispatch/prompts.rs::App::handle_vi_prompt_key",
             133,
@@ -54,7 +54,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/render/overlays.rs::App::render_image_gallery", 129),
         ("src/app/state/apply.rs::AppState::apply", 380),
         ("src/app/state/dispatch.rs::AppState::dispatch_command", 185),
-        ("src/config/load.rs::Config::merge_file", 116),
+        ("src/config/load.rs::Config::merge_file", 101),
         ("src/git/diff_model/build.rs::build_index_change_file", 114),
         ("src/git/diff_model/build.rs::build_tree_change_file", 120),
         ("src/keymap/action.rs::Action::canonical_name", 119),

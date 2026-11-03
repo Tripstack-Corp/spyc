@@ -90,13 +90,7 @@ impl App {
                 // (raw — captures rarely enable bracketed paste). A vanished
                 // `pending_capture` skips silently, matching the former inline
                 // `if let Some(capture)` write in the key/paste handlers.
-                Effect::SendToCapture { bytes } => {
-                    if let Some(capture) = self.runtime.pending_capture.as_mut()
-                        && let Err(e) = capture.host.write_all(&bytes)
-                    {
-                        self.state.flash_error(format!("capture input: {e:#}"));
-                    }
-                }
+                Effect::SendToCapture { bytes } => self.send_to_capture(&bytes),
                 Effect::EditProjectConfig {
                     anchor,
                     label,
@@ -107,6 +101,7 @@ impl App {
                 Effect::SetTerminalTitle { title } => {
                     let _ = crate::term_title::set(&title);
                 }
+                Effect::SaveLearned(learned) => super::super::menu_hints::persist(&learned),
                 // Middle-click paste. The read spawns a helper and waits on it, so
                 // it runs on a detached worker — never here; `spawn_clipboard_read`
                 // documents why. `apply_clipboard_pastes` hands the text to
@@ -373,6 +368,14 @@ impl App {
                     }
                 }
             }
+        }
+    }
+
+    fn send_to_capture(&mut self, bytes: &[u8]) {
+        if let Some(capture) = self.runtime.pending_capture.as_mut()
+            && let Err(e) = capture.host.write_all(bytes)
+        {
+            self.state.flash_error(format!("capture input: {e:#}"));
         }
     }
 

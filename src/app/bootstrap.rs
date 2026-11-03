@@ -176,6 +176,7 @@ impl App {
             session_name,
             session_id,
             frecency: crate::state::Frecency::load(),
+            learned: crate::state::Learned::load(),
             pending_delete_preview: None,
             graveyard: Vec::new(),
             scope_registry: Vec::new(),

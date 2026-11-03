@@ -66,10 +66,15 @@ fn named_gg(app: &App) -> bool {
 }
 
 /// Make the writes to `learned.json` among `fx`, as `run_effects` does, and
-/// count them. No effect writes it yet.
+/// count them.
 fn persist(fx: Vec<Effect>) -> usize {
-    drop(fx);
-    0
+    fx.into_iter()
+        .filter_map(|effect| match effect {
+            Effect::SaveLearned(learned) => Some(learned),
+            _ => None,
+        })
+        .map(|learned| crate::app::menu_hints::persist(&learned))
+        .count()
 }
 
 /// Load `toml` as the user's config, through the config loader, and put it in
@@ -103,7 +108,6 @@ fn status_row(app: &mut App) -> String {
 /// Three `gg`s and the hint is learned: a click on `g`'s "top of column" row
 /// still moves the cursor, and names no key. Two, and it still does.
 #[test]
-#[ignore = "red: a key press counts toward nothing, so the hint never fades"]
 fn the_hint_fades_after_three_key_presses() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -136,7 +140,6 @@ fn menu_clicks_never_count() {
 
 /// A row's key typed while its menu is open is a key, and counts.
 #[test]
-#[ignore = "red: a key typed in a menu counts toward nothing"]
 fn a_rows_key_typed_in_its_menu_counts() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -162,7 +165,6 @@ fn a_rows_key_typed_in_its_menu_counts() {
 /// A key of the user's own that fires the action teaches it as well as the
 /// default does.
 #[test]
-#[ignore = "red: a user binding's action counts toward nothing"]
 fn a_user_bindings_action_counts() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -179,7 +181,6 @@ fn a_user_bindings_action_counts() {
 
 /// `menu_hints = "always"` never fades.
 #[test]
-#[ignore = "red: spyc reads no `[ui]`"]
 fn always_keeps_the_hint() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -194,7 +195,6 @@ fn always_keeps_the_hint() {
 
 /// `menu_hints = "off"` names no key, counts nothing and writes nothing.
 #[test]
-#[ignore = "red: spyc reads no `[ui]`"]
 fn off_names_nothing_and_writes_nothing() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -213,7 +213,6 @@ fn off_names_nothing_and_writes_nothing() {
 
 /// `menu_hints_fade_after` is how many presses it takes.
 #[test]
-#[ignore = "red: spyc reads no `[ui]`"]
 fn fade_after_sets_how_many_presses() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -228,7 +227,6 @@ fn fade_after_sets_how_many_presses() {
 
 /// A setting outside what `[ui]` allows fails the file, as any bad value does.
 #[test]
-#[ignore = "red: `[ui]` is skipped as an unknown key, its values unchecked"]
 fn a_bad_ui_value_is_a_config_error() {
     let tmp = tempfile::tempdir().unwrap();
     for bad in ["menu_hints = \"sometimes\"", "menu_hints_fade_after = 0"] {
@@ -241,12 +239,32 @@ fn a_bad_ui_value_is_a_config_error() {
     }
 }
 
+/// A counted key's write goes before what the action asks for: an action may
+/// end in a `ForegroundExec`, which must be the last effect of its tick.
+#[test]
+fn a_counted_keys_write_goes_before_the_actions_effects() {
+    with_mouse(|tmp| {
+        let mut app = app_over_entries(tmp);
+        cursor_on(&mut app, "notes.txt");
+
+        let fx = crate::shell::with_editor("cat", || key(&mut app, 'e'));
+
+        assert!(
+            matches!(fx.first(), Some(Effect::SaveLearned(_))),
+            "the count's write first: {fx:?}"
+        );
+        assert!(
+            matches!(fx.last(), Some(Effect::ForegroundExec { .. })),
+            "the editor last: {fx:?}"
+        );
+    });
+}
+
 // ── the counts persist ──
 
 /// The counts outlive the run: a new spyc over the same state root has the
 /// hint faded already.
 #[test]
-#[ignore = "red: no count is kept, in memory or in `learned.json`"]
 fn counts_persist_across_a_restart() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -262,7 +280,6 @@ fn counts_persist_across_a_restart() {
 
 /// A name this spyc doesn't know, a newer spyc's action, is kept as it was.
 #[test]
-#[ignore = "red: spyc reads and writes no `learned.json`"]
 fn an_unknown_name_survives_a_write() {
     with_mouse(|tmp| {
         std::fs::write(
@@ -286,7 +303,6 @@ fn an_unknown_name_survives_a_write() {
 /// A `learned.json` that isn't JSON starts over empty: spyc starts, the hint
 /// shows, and the startup check says so.
 #[test]
-#[ignore = "red: the startup check doesn't read `learned.json`"]
 fn a_corrupt_file_loads_as_empty() {
     with_mouse(|tmp| {
         std::fs::write(tmp.join("learned.json"), "{ not json").unwrap();
@@ -306,7 +322,6 @@ fn a_corrupt_file_loads_as_empty() {
 /// A key pressed again and again writes only until its hint fades: the count
 /// stops at the threshold.
 #[test]
-#[ignore = "red: no key press writes `learned.json`"]
 fn writes_stop_at_the_threshold() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -342,7 +357,6 @@ fn hints_pager(app: &mut App) -> String {
 
 /// `:hints` lists what has faded, and `:hints reset` brings every hint back.
 #[test]
-#[ignore = "red: `:hints` is no command"]
 fn hints_lists_the_faded_and_reset_brings_them_back() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -367,7 +381,6 @@ fn hints_lists_the_faded_and_reset_brings_them_back() {
 /// A fresh install's status bar shows `. menu` until `.` opens a menu, and
 /// never again, in a later run too.
 #[test]
-#[ignore = "red: the status bar doesn't show `. menu`"]
 fn the_status_bar_teaches_the_menu_key_until_a_menu_opens() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -386,7 +399,6 @@ fn the_status_bar_teaches_the_menu_key_until_a_menu_opens() {
 
 /// With `menu_hints = "off"` the bar teaches nothing either.
 #[test]
-#[ignore = "red: spyc reads no `[ui]`"]
 fn off_hides_the_status_bars_menu_key() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);

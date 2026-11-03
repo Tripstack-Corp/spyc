@@ -1,6 +1,7 @@
 //! Startup health check for the `~/.local/state/spyc/` persistence layer.
 //!
-//! Validates inventory, marks, sessions, and graveyard on launch.
+//! Validates inventory, marks, sessions, graveyard, frecency and the menu
+//! hints' `learned.json` on launch.
 //! Cleans up orphaned files automatically and returns warnings for
 //! anything the user should know about.
 
@@ -44,6 +45,7 @@ pub fn check(state_dir: &Path) -> HealthReport {
     check_sessions(&state_dir.join("sessions"), &mut warnings);
     warn_on_graveyard_size(gy_bytes, &mut warnings);
     check_frecency(&state_dir.join("frecency.json"), &mut warnings);
+    check_learned(&state_dir.join("learned.json"), &mut warnings);
 
     HealthReport { warnings, cleaned }
 }
@@ -241,6 +243,19 @@ fn check_frecency(path: &Path, warnings: &mut Vec<String>) {
         && serde_json::from_str::<crate::state::frecency::Frecency>(&text).is_err()
     {
         warnings.push(format!("frecency: corrupt {}", path.display()));
+    }
+}
+
+/// Validate `learned.json`: one that doesn't parse loads as empty, so the menu
+/// hints start over, and the user hears why.
+fn check_learned(path: &Path, warnings: &mut Vec<String>) {
+    if let Ok(text) = std::fs::read_to_string(path)
+        && crate::state::Learned::parse(&text).is_err()
+    {
+        warnings.push(format!(
+            "menu hints: corrupt {} — the menus name every key again",
+            path.display()
+        ));
     }
 }
 

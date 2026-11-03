@@ -56,8 +56,9 @@ impl App {
 
     /// Open `target`'s menu, titled `title`. Inside a mounted archive the rows
     /// whose action the mount refuses are left out, as `apply_inner` would
-    /// refuse them.
-    fn open_menu(&mut self, target: Target, title: String) {
+    /// refuse them. The first menu ever opened retires the status bar's
+    /// `. menu`, and returns the write that records it.
+    fn open_menu(&mut self, target: Target, title: String) -> Option<Effect> {
         let c = self.state.cur();
         let in_mount = self.state.mounts.contains(&c.listing.dir);
         let entries: Vec<ChordEntry> = menu_for(target)
@@ -77,12 +78,13 @@ impl App {
             menu: Some(MenuState::default()),
         });
         self.view.chord_hint_due = None;
+        self.learn_menu()
     }
 
     /// `.`: the menu of the entry under the cursor.
     pub(super) fn open_entry_menu(&mut self) -> Vec<Effect> {
         match self.entry_target() {
-            Some((target, title)) => self.open_menu(target, title),
+            Some((target, title)) => return self.open_menu(target, title).into_iter().collect(),
             None if self.state.cur().view != View::Dir => self
                 .state
                 .flash_info("menu: an entry has a menu in a directory listing only"),
@@ -94,7 +96,7 @@ impl App {
     /// `^a .`: the menu of the active pane tab.
     pub(super) fn open_tab_menu(&mut self) -> Vec<Effect> {
         match self.tab_target() {
-            Some((target, title)) => self.open_menu(target, title),
+            Some((target, title)) => return self.open_menu(target, title).into_iter().collect(),
             None => self.state.flash_info("menu: no pane tab is open"),
         }
         Vec::new()

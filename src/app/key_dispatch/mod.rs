@@ -362,20 +362,8 @@ impl App {
             crate::key_trace::log(&format!("  resolver -> {outcome:?}"));
         }
         match outcome {
-            ResolverOutcome::Action(action) => {
-                self.clear_chord_hint();
-                // Stamp focus-switch chord completions so the next
-                // ~60 ms suppresses a same-key Repeat or bouncy second
-                // Press from leaking into the now-focused pane.
-                if matches!(action, Action::PaneFocusDown | Action::PaneFocusUp) {
-                    self.view.focus_chord_completed = Some((std::time::Instant::now(), key.code));
-                }
-                return self.update(UiMsg::Action(action));
-            }
-            ResolverOutcome::User(bound) => {
-                self.clear_chord_hint();
-                return self.update(UiMsg::Bound(bound));
-            }
+            ResolverOutcome::Action(action) => return self.dispatch_key_action(action, key.code),
+            ResolverOutcome::User(bound) => return self.dispatch_key_binding(bound),
             ResolverOutcome::Pending => {
                 // A chord prefix is armed — schedule the which-key hint popup
                 // (unless disabled, or this is just a count prefix, which is
@@ -394,6 +382,34 @@ impl App {
             ResolverOutcome::Ignored => self.clear_chord_hint(),
         }
         Ok(Vec::new())
+    }
+
+    /// Dispatch the action a key completed, counting it toward its menu hint's
+    /// fade (`menu_hints`). The count's write goes first: an action may end in a
+    /// `ForegroundExec`, which must be the tick's last effect.
+    fn dispatch_key_action(&mut self, action: Action, code: KeyCode) -> Result<Vec<Effect>> {
+        self.clear_chord_hint();
+        // Stamp focus-switch chord completions so the next
+        // ~60 ms suppresses a same-key Repeat or bouncy second
+        // Press from leaking into the now-focused pane.
+        if matches!(action, Action::PaneFocusDown | Action::PaneFocusUp) {
+            self.view.focus_chord_completed = Some((std::time::Instant::now(), code));
+        }
+        let mut effects: Vec<Effect> = self.learn_key(&action).into_iter().collect();
+        effects.extend(self.update(UiMsg::Action(action))?);
+        Ok(effects)
+    }
+
+    /// Dispatch the user's own binding a key completed. A plain action counts
+    /// as [`Self::dispatch_key_action`]'s does: the user's key teaches it too.
+    fn dispatch_key_binding(&mut self, bound: BoundAction) -> Result<Vec<Effect>> {
+        self.clear_chord_hint();
+        let mut effects: Vec<Effect> = match &bound {
+            BoundAction::Plain(action) => self.learn_key(action).into_iter().collect(),
+            _ => Vec::new(),
+        };
+        effects.extend(self.update(UiMsg::Bound(bound))?);
+        Ok(effects)
     }
 
     /// Tear down the which-key chord-hint popup and its pending timer. If a

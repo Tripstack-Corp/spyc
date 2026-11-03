@@ -42,6 +42,21 @@ pub struct StatusBar<'a> {
     /// The `⚠N` of unread stderr lines ([`stderr_notice`]), drawn right after
     /// the logo. `None` draws nothing there.
     pub stderr_notice: Option<&'a str>,
+    /// Draw [`MENU_KEY`] after the suffix: the key that opens an object's menu,
+    /// until the first menu ever opens.
+    pub teach_menu: bool,
+}
+
+/// The status bar's lesson until a menu first opens: `.` opens one.
+const MENU_KEY: &str = ". menu";
+
+/// `suffix` with [`MENU_KEY`] after it.
+fn with_menu_key(suffix: &str) -> String {
+    if suffix.is_empty() {
+        MENU_KEY.to_owned()
+    } else {
+        format!("{suffix} {MENU_KEY}")
+    }
 }
 
 /// Powerline right-pointing triangle (requires a Nerd Font or powerline-patched font).
@@ -116,6 +131,17 @@ impl StatusBar<'_> {
     /// actually rendered: a mouse selection maps screen COLUMNS back to characters,
     /// which only works against the drawn line, not the semantic segments.
     pub fn build_line(&self, area: Rect) -> Line<'static> {
+        if self.teach_menu {
+            let full = with_menu_key(self.suffix);
+            let short = self.suffix_short.map(with_menu_key);
+            let bar = StatusBar {
+                suffix: &full,
+                suffix_short: short.as_deref(),
+                teach_menu: false,
+                ..*self
+            };
+            return bar.build_line(area);
+        }
         if self.theme.mono {
             return self.plain_line(area);
         }
@@ -498,6 +524,7 @@ mod tests {
                     theme: &theme,
                     plain_logo,
                     stderr_notice: None,
+                    teach_menu: false,
                 };
                 f.render_widget(Paragraph::new(bar.build_line(area)), area);
             })
@@ -528,6 +555,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            teach_menu: false,
         };
         bar.build_line(Rect::new(0, 0, width, 1))
             .spans
@@ -558,6 +586,58 @@ mod tests {
         }
     }
 
+    /// The lesson rides the suffix in both styles: after the column's state,
+    /// in the short form too, and alone when the column has none.
+    #[test]
+    fn teach_menu_follows_the_suffix_or_stands_alone() {
+        let theme = Theme::default();
+        let mono = Theme {
+            mono: true,
+            ..Theme::default()
+        };
+        for theme in [&theme, &mono] {
+            let text = |suffix: &str, suffix_short: Option<&str>, width: u16| -> String {
+                let bar = StatusBar {
+                    project_home: Some("spyc"),
+                    session_name: None,
+                    projects: None,
+                    path: PATH,
+                    suffix,
+                    suffix_short,
+                    git_info: None,
+                    agent_info: None,
+                    theme,
+                    plain_logo: true,
+                    stderr_notice: None,
+                    teach_menu: true,
+                };
+                bar.build_line(Rect::new(0, 0, width, 1))
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect()
+            };
+            let mono = theme.mono;
+            let full = text(
+                "[picks:3 hidden:12 sort:mtime]",
+                Some("[p:3 h:12 s:t]"),
+                120,
+            );
+            assert!(
+                full.contains("[picks:3 hidden:12 sort:mtime] . menu"),
+                "mono={mono}: {full}"
+            );
+            let short = text("[picks:3 hidden:12 sort:mtime]", Some("[p:3 h:12 s:t]"), 65);
+            assert!(
+                short.contains("[p:3 h:12 s:t] . menu"),
+                "mono={mono}: {short}"
+            );
+            assert!(short.contains(PATH), "mono={mono}: {short}");
+            let alone = text("", None, 120);
+            assert!(alone.contains(". menu"), "mono={mono}: {alone}");
+        }
+    }
+
     #[test]
     fn with_no_short_form_the_path_truncates_as_before() {
         let theme = Theme::default();
@@ -573,6 +653,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            teach_menu: false,
         };
         let text: String = bar
             .build_line(Rect::new(0, 0, 58, 1))
@@ -694,6 +775,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            teach_menu: false,
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
@@ -753,6 +835,7 @@ mod tests {
                     theme: &theme,
                     plain_logo: true,
                     stderr_notice: None,
+                    teach_menu: false,
                 };
                 let line = bar.build_line(Rect::new(0, 0, w, 1));
                 let mut col = 0;
@@ -813,6 +896,7 @@ mod tests {
                         theme: &theme,
                         plain_logo: true,
                         stderr_notice: None,
+                        teach_menu: false,
                     };
                     let line = bar.build_line(Rect::new(0, 0, w, 1));
                     let path = line
@@ -869,6 +953,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            teach_menu: false,
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
         let parting = line
@@ -938,6 +1023,7 @@ mod tests {
                 theme: &theme,
                 plain_logo,
                 stderr_notice: Some("\u{26a0}3"),
+                teach_menu: false,
             };
             let line = bar.build_line(area);
             let mut terminal = Terminal::new(TestBackend::new(area.width, 1)).unwrap();

@@ -10,7 +10,7 @@
 use std::path::Path;
 
 use super::{
-    Config, FileClipboard, FileConfig, FilePager, FilePane, FilePaneTab, PaneTabConfig,
+    Config, FileClipboard, FileConfig, FileMouse, FilePager, FilePane, FilePaneTab, PaneTabConfig,
     ProjectTabs, ScanPatternFile, dsl, home_dir,
 };
 
@@ -238,6 +238,26 @@ impl Config {
         }
     }
 
+    /// `[mouse]`, per field. `scroll_lines` and `pane_scroll_lines` are clamped
+    /// to at least 1 so a 0 can't make the wheel a no-op on spyc-owned surfaces.
+    fn merge_mouse(&mut self, file: &FileMouse) {
+        if let Some(b) = file.capture {
+            self.mouse.capture = b;
+        }
+        if let Some(n) = file.pane_scroll_lines {
+            self.mouse.pane_scroll_lines = n.max(1);
+        }
+        if let Some(v) = file.pane_scroll_view {
+            self.mouse.pane_scroll_view = v;
+        }
+        if let Some(n) = file.scroll_lines {
+            self.mouse.scroll_lines = n.max(1);
+        }
+        if let Some(b) = file.invert_scroll {
+            self.mouse.invert_scroll = b;
+        }
+    }
+
     fn merge_pane_preferences(&mut self, file: &mut FilePane, trust: Trust) {
         if let Some(cmd) = file.default_command.take() {
             self.pane.default_command = Some(cmd);
@@ -352,24 +372,8 @@ impl Config {
         }
 
         self.merge_pager(&file.pager);
-
-        // Mouse: per-field merge. Clamp scroll_lines to >= 1 so a 0 can't make
-        // the wheel a no-op on spyc-owned surfaces.
-        if let Some(b) = file.mouse.capture {
-            self.mouse.capture = b;
-        }
-        if let Some(n) = file.mouse.pane_scroll_lines {
-            self.mouse.pane_scroll_lines = n.max(1);
-        }
-        if let Some(v) = file.mouse.pane_scroll_view {
-            self.mouse.pane_scroll_view = v;
-        }
-        if let Some(n) = file.mouse.scroll_lines {
-            self.mouse.scroll_lines = n.max(1);
-        }
-        if let Some(b) = file.mouse.invert_scroll {
-            self.mouse.invert_scroll = b;
-        }
+        self.merge_mouse(&file.mouse);
+        self.ui.merge(&file.ui);
 
         // Markdown: per-field merge.
         if let Some(b) = file.markdown.open_as_rendered {

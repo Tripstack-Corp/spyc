@@ -39,8 +39,9 @@ each with a one-line description, flowed into columns. Pressing the next
 key (or `Esc`) dismisses it, and so does a click anywhere outside it, which
 does nothing else. Clicking a row does what its key does, so the popup is a
 menu too, and it still shows the key to learn: once a click fires a row, the
-prompt row names its key. It's spyc's on-demand answer to "what can I
-do from here?", modelled on Neovim's which-key.
+prompt row names its key, until you have typed that key three times
+(`[ui] menu_hints`; `:hints` lists what you have learned). It's spyc's
+on-demand answer to "what can I do from here?", modelled on Neovim's which-key.
 
 - The delay is `[layout] chord_hint_delay_ms` (default **300** ms). Set
   it to **0** to disable the popup entirely.
@@ -52,7 +53,8 @@ do from here?", modelled on Neovim's which-key.
   **`^a .` for the active pane tab**: what you can do to that one thing, each
   row with its key. `↑`/`↓` and `Enter` pick a row, `Esc` closes, and any
   other key closes the menu and does what it always does. A right-click on a
-  file row, the pane or a tab label opens the same menu.
+  file row, the pane or a tab label opens the same menu. Until one first
+  opens, the status bar ends with `. menu`.
 
 ## Browsing files
 

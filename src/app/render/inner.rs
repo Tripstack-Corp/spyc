@@ -401,6 +401,7 @@ impl App {
             // Non-truecolor terminals (GNU screen) mangle the 🌶️ glyph → red block.
             plain_logo: self.view.color_depth != crate::ui::color_depth::ColorDepth::TrueColor,
             stderr_notice: stderr_notice.as_deref(),
+            teach_menu: self.teaches_the_menu_key(),
         }
         .build_line(rect);
         self.draw_chrome_line(frame, rect, line);
