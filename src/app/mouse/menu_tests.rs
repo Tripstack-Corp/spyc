@@ -16,7 +16,7 @@ fn special(app: &mut App, code: KeyCode) -> Vec<Effect> {
         .unwrap()
 }
 
-fn ctrl_a(app: &mut App) {
+pub(super) fn ctrl_a(app: &mut App) {
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
         .unwrap();
 }
@@ -58,7 +58,7 @@ fn dot_menu(app: &mut App, name: &str) -> Vec<String> {
 }
 
 /// The body lines of the menu titled `title`, as drawn.
-fn menu_lines(app: &mut App, title: &str) -> Vec<String> {
+pub(super) fn menu_lines(app: &mut App, title: &str) -> Vec<String> {
     let buf = drawn(app);
     let menu = menu_in(&buf, title);
     (menu.y + 1..menu.bottom() - 1)
@@ -70,7 +70,7 @@ fn menu_lines(app: &mut App, title: &str) -> Vec<String> {
         .collect()
 }
 
-fn offers(lines: &[String], text: &str) -> bool {
+pub(super) fn offers(lines: &[String], text: &str) -> bool {
     lines.iter().any(|l| l.contains(text))
 }
 
@@ -87,7 +87,7 @@ fn tab_label(app: &App) -> String {
 }
 
 /// An App over `work/` with one pane tab running `cmd`, the keyboard in it.
-fn app_with_tab(tmp: &Path, cmd: &str) -> App {
+pub(super) fn app_with_tab(tmp: &Path, cmd: &str) -> App {
     let dir = tmp.join("work");
     std::fs::create_dir(&dir).unwrap();
     std::fs::write(dir.join("notes.txt"), "x").unwrap();
@@ -103,7 +103,7 @@ fn app_with_tab(tmp: &Path, cmd: &str) -> App {
     app
 }
 
-fn right_click(app: &mut App, (col, row): (u16, u16)) {
+pub(super) fn right_click(app: &mut App, (col, row): (u16, u16)) {
     app.handle_mouse(at(MouseEventKind::Down(MouseButton::Right), col, row));
     app.handle_mouse(at(MouseEventKind::Up(MouseButton::Right), col, row));
 }

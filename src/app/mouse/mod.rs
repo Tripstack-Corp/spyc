@@ -20,6 +20,8 @@ use super::{Effect, FrameLayout};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 pub(super) mod chord_hit;
+#[cfg(test)]
+mod divider_menu_tests;
 mod forward;
 #[cfg(test)]
 mod hint_tests;
