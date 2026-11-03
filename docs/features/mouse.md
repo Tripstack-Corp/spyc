@@ -61,6 +61,17 @@ as `gg  top of column` or `^a z  zoom pane (toggle fullscreen)`, so it can be
 typed next time. A row fired by its own key names nothing, and an action's own
 message, such as an error, is never covered by the hint.
 
+The hint fades as you learn the key: once you have fired an action by its key
+three times, a click on its row no longer names it. Only the key counts, a key
+typed while the menu is open included, and a click never does, so clicking a
+row can't silence what it teaches. What you have learned is yours, kept across
+runs and projects: `:hints` lists the actions whose hint has faded, and `:hints
+reset` brings every hint back. The menus themselves never fade; each row keeps
+its key. Until you first open an object's menu, the status bar ends with
+`. menu`, the key that opens one. `[ui] menu_hints` sets how many presses it
+takes, or keeps the hints for good, or turns them off
+([configuration](../../CONFIGURATION.md)).
+
 ## Selecting and copying
 
 - **Drag in a pane whose child ignores the mouse to select its text**; release

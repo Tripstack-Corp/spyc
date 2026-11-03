@@ -561,8 +561,11 @@ mod render_tests {
     /// the snapshot) and seeded rows. Forces the render-side rows cache to
     /// rebuild so the seeded rows actually paint (`seed_rows` sets `rows`
     /// without bumping `list_generation`, which the cache is keyed on).
+    /// A user past their first object's menu, so the status bar's `. menu`
+    /// lesson (`mouse::hint_tests`) doesn't crowd what these frames are about.
     fn demo_app(names: &[&str]) -> App {
         let mut app = App::test_app(std::env::temp_dir());
+        app.state.learned.menu_seen = true;
         app.state.active_project_mut().left.listing.dir = PathBuf::from("/projects/demo");
         app.seed_rows(names);
         app.view.project_mut().cached_rows_gen = app

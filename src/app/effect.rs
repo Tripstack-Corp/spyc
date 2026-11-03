@@ -156,6 +156,12 @@ pub enum Effect {
     /// the write silently (matches the former `if let Some(capture)` guard).
     SendToCapture { bytes: Vec<u8> },
 
+    /// Write `learned.json`, what the user has learned of the keymap
+    /// (`state::learned`). Emitted only when a count or the first-menu flag
+    /// changed, so a key's writes stop once its hint has faded; small and that
+    /// rare, it is written in place, as `frecency.json` is.
+    SaveLearned(crate::state::Learned),
+
     /// A-class. Set the terminal title. The compose + dedup stay loop-side
     /// (`term_title_effect`); only the `term_title::set` IO is the effect.
     SetTerminalTitle { title: String },

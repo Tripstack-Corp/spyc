@@ -400,6 +400,10 @@ pub struct AppState {
     /// (`App::settle_startup_commands`).
     pub startup_commands: Vec<String>,
     pub frecency: Frecency,
+    /// How much of the keymap the user has learned, global like `frecency`: what
+    /// fades a menu's hint and retires the status bar's `. menu`. Written by
+    /// `Effect::SaveLearned` whenever it changes.
+    pub learned: crate::state::Learned,
     /// Every open project, in switcher order; looked up by `active` via
     /// [`Self::active_project`] / [`Self::active_project_mut`]
     /// (`docs/archive/PROJECTS_PLAN.md`, #99). Action handlers reach the active
@@ -937,6 +941,7 @@ impl AppState {
             pending_sessions: None,
             startup_commands: Vec::new(),
             frecency: Frecency::default(),
+            learned: crate::state::Learned::load(),
         }
     }
 }

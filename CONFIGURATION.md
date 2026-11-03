@@ -100,6 +100,10 @@ intraline = "char"             # intra-line highlight granularity: "char" | "wor
 
 [delete]
 confirm = true                 # y/N prompt before R / dd; false = yolo (still recoverable in the graveyard)
+
+[ui]
+menu_hints = "fade"            # a clicked menu row names its key: "fade" (until learned), "always", or "off"
+menu_hints_fade_after = 3      # key presses of an action before its hint stops (min 1)
 ```
 
 All optional; anything unset uses the built-in default. See `spyc --print-config`
@@ -192,6 +196,15 @@ show them) and `[ZOOM]` appear as before.
 
 `:set flags=auto|short|full` changes it for the rest of the run; a config
 reload doesn't undo it.
+
+### Menu hints — `[ui]`
+
+A menu row fired by a click or `Enter` names the key that does the same.
+`menu_hints = "fade"` (the default) stops once you have fired the action by
+that key `menu_hints_fade_after` times, `"always"` never stops, and `"off"`
+names no key, counts nothing and hides the status bar's `. menu`. `:hints`
+lists what has faded and `:hints reset` brings it back. The menus:
+[`docs/features/mouse.md`](docs/features/mouse.md).
 
 ### Startup tabs — `[pane] tabs`
 

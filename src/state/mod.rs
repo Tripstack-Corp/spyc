@@ -17,6 +17,7 @@ pub mod health;
 pub mod history;
 pub mod ignore;
 pub mod inventory;
+pub mod learned;
 pub mod marks;
 pub mod pager_positions;
 pub mod picks;
@@ -34,6 +35,7 @@ pub use harpoon::Harpoon;
 pub use history::History;
 pub use ignore::IgnoreMasks;
 pub use inventory::Inventory;
+pub use learned::Learned;
 pub use marks::{Mark, Marks};
 pub use picks::Picks;
 

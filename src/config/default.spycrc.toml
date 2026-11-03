@@ -201,6 +201,20 @@
 # scroll keys, and the wheel report forwarded to a mouse-aware child.
 # invert_scroll = false
 
+# ── ui ────────────────────────────────────────────────────────────────
+# How the menus teach the keys. Once a menu row fires by a click or Enter,
+# the prompt row names the key that does the same: `gg  top of column`.
+#
+# `menu_hints` (default "fade"): "fade" stops naming an action's key once
+# you have fired the action by that key `menu_hints_fade_after` times (at
+# least 1); "always" never stops; "off" names no key, counts nothing, and
+# hides the status bar's `. menu`, shown until you first open an object's
+# menu. The counts live in learned.json in spyc's state directory: `:hints`
+# lists what has faded and `:hints reset` forgets it all.
+[ui]
+# menu_hints = "fade"
+# menu_hints_fade_after = 3
+
 # ── markdown ──────────────────────────────────────────────────────────
 # Default view for `.md` / `.markdown` files in the pager.
 # `open_as_rendered` (default true) opens them in the rendered view;

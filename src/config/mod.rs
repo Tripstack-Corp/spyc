@@ -22,6 +22,8 @@ pub const DEFAULT_TEMPLATE: &str = include_str!("default.spycrc.toml");
 
 mod agent_hud;
 pub use agent_hud::{AgentHudMode, AgentHudResets, HUD_STALE_AFTER_SECS};
+mod ui;
+pub use ui::{MenuHints, UiConfig};
 
 use std::path::PathBuf;
 
@@ -68,6 +70,9 @@ pub struct Config {
 
     /// Mouse reporting knobs (`[mouse]`).
     pub mouse: MouseConfig,
+
+    /// How the menus teach the keys (`[ui]`).
+    pub ui: UiConfig,
 
     /// Ignore-mask definitions. When non-empty, they replace the
     /// built-in defaults wholesale.
@@ -892,6 +897,8 @@ struct FileConfig {
     pager: FilePager,
     #[serde(default)]
     mouse: FileMouse,
+    #[serde(default)]
+    ui: ui::FileUi,
     #[serde(default)]
     markdown: FileMarkdown,
     #[serde(default)]

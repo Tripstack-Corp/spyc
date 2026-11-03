@@ -552,11 +552,13 @@ impl super::App {
     /// would do, through the key's own path. A range row (`1-9`) can't say
     /// which member, so it names its keys and leaves the menu open for them.
     /// Flash `hint`, the key a fired row stands for, unless the action put up
-    /// a message of its own, which matters more than the lesson.
-    fn name_the_key(&mut self, hint: Option<String>, before: Option<String>) {
+    /// a message of its own, which matters more than the lesson, or the user
+    /// has learned the key of the action named `name` (`menu_hints`).
+    fn name_the_key(&mut self, hint: Option<String>, name: &str, before: Option<String>) {
         let after = self.state.flash.as_ref().map(|f| f.text.clone());
         if let Some(hint) = hint
             && (after.is_none() || after == before)
+            && self.names_the_key(name)
         {
             self.state.flash_info(hint);
         }
@@ -581,6 +583,7 @@ impl super::App {
                     let key = crate::keymap::menu::key_hint(h.prefix, keys);
                     format!("{key}  {}", action.describe())
                 });
+                let name = action.canonical_name();
                 let action = self.state.resolver.take_menu_action(action);
                 self.clear_chord_hint();
                 let before = self.state.flash.as_ref().map(|f| f.text.clone());
@@ -590,7 +593,7 @@ impl super::App {
                         self.state.flash_error(format!("{e:#}"));
                         Vec::new()
                     });
-                self.name_the_key(hint, before);
+                self.name_the_key(hint, name, before);
                 fx
             }
             ChordEntry::Sub(_, _, seq) => {
