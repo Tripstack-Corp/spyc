@@ -315,6 +315,32 @@ fn agy_hook_reporter_forwards_event_metadata_and_remaps_stop_states() {
     );
 }
 
+/// A Claude `Stop` whose only in-flight entry is the page watch a published
+/// artifact keeps open is a finished turn, not one waiting on work.
+#[test]
+#[ignore = "red: a page watch makes the Stop `waiting`"]
+fn a_claude_stop_with_only_a_page_watch_reports_done() {
+    let watch = json!({
+        "id": "s4k2m9x0q", "type": "monitor", "status": "running",
+        "description": "live updates for artifact https://claude.ai/artifact/private-page (auto-armed on publish)"
+    });
+    let shell = json!({
+        "id": "b3n8p1z5w", "type": "shell", "status": "running", "command": "private-cmd"
+    });
+    let stop = |tasks: Value| {
+        json!({
+            "hook_event_name": "Stop", "session_id": "session-1",
+            "background_tasks": tasks, "session_crons": []
+        })
+        .to_string()
+    };
+    let (request, _) = run_reporter_for("done", &stop(json!([watch])));
+    assert_eq!(request["params"]["arguments"]["status"], "done");
+    let (request, _) = run_reporter_for("done", &stop(json!([watch, shell])));
+    assert_eq!(request["params"]["arguments"]["status"], "waiting");
+    assert!(!request.to_string().contains("private-"));
+}
+
 /// Under codex's shared daemon, the reporter's `SPYC_PANE_ID` is whichever tab
 /// started the daemon, not its own session's, so it reports nothing rather
 /// than light that tab. The stand-in daemon's argv is the shared server's, and

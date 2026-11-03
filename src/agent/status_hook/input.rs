@@ -571,6 +571,37 @@ mod tests {
         );
     }
 
+    /// The page watch and presence Claude Code keeps open on an artifact are
+    /// `monitor`s described as such, not work the turn is waiting on; nor is an
+    /// entry Claude marks `ambient`.
+    #[test]
+    #[ignore = "red: a page watch counts as background work"]
+    fn an_artifact_page_watch_is_not_counted_as_background_work() {
+        let ambient = r#"{"id":"s4k2m9x0q","type":"monitor","status":"running","description":"live updates for artifact https://claude.ai/artifact/private-page (auto-armed on publish)"},
+            {"type":"monitor","status":"running","description":"live updates for artifact https://claude.ai/code/artifact/private-page (requested by you)","id":"s00000z0z"},
+            {"id":"s9z9z9z9z","type":"monitor","status":"running","description":"presence on artifact https://claude.ai/artifact/private-page"},
+            {"id":"k1","type":"MCP task","status":"running","ambient":true}"#;
+        assert_eq!(
+            metadata(&format!(
+                r#"{{"hook_event_name":"Stop","background_tasks":[{ambient}],"session_crons":[]}}"#
+            )),
+            serde_json::json!({"hook_event_name":"Stop", "background_tasks":0, "session_crons":0}),
+            "watches, whichever key comes first, presence, and an `ambient` entry"
+        );
+        let work = r#"{"type":"monitor","id":"s7r1c0d2e","status":"running","description":"private feed"},
+            {"id":"b3n8p1z5w","type":"shell","status":"running","description":"live updates for artifact x"},
+            {"id":"a1","type":"subagent","status":"running","ambient":false},
+            {"id":"m1","type":"monitor","description":"live updates for artifact x","description":null},
+            {"id":"b1","type":"shell","meta":{"type":"monitor","description":"live updates for artifact x","ambient":true}}"#;
+        assert_eq!(
+            metadata(&format!(
+                r#"{{"hook_event_name":"Stop","background_tasks":[{ambient},{work}]}}"#
+            )),
+            serde_json::json!({"hook_event_name":"Stop", "background_tasks":5}),
+            "a model's monitor, a shell described as a watch, `ambient: false`, a later null description and a nested look-alike all count"
+        );
+    }
+
     /// Confirmed against `exa.hooks_pb.HookArgs` protojson on agy 1.4.5,
     /// including protojson's variable spacing after colons and commas.
     #[test]
