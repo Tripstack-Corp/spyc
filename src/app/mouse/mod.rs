@@ -551,16 +551,28 @@ impl super::App {
     /// A click on entry `index` of the open which-key popup: what the row's key
     /// would do, through the key's own path. A range row (`1-9`) can't say
     /// which member, so it names its keys and leaves the menu open for them.
-    /// Flash `hint`, the key a fired row stands for, unless the action put up
-    /// a message of its own, which matters more than the lesson, or the user
-    /// has learned the key of the action named `name` (`menu_hints`).
-    fn name_the_key(&mut self, hint: Option<String>, name: &str, before: Option<String>) {
-        let after = self.state.flash.as_ref().map(|f| f.text.clone());
-        if let Some(hint) = hint
-            && (after.is_none() || after == before)
-            && self.names_the_key(name)
-        {
-            self.state.flash_info(hint);
+    /// Name `key`, the key a fired row stands for, unless the user has learned
+    /// it (`menu_hints`): as the flash when the action said nothing, else in
+    /// front of what the action said, so its own message, an error especially,
+    /// still shows.
+    fn name_the_key(
+        &mut self,
+        key: Option<String>,
+        label: &str,
+        name: &str,
+        before: Option<String>,
+    ) {
+        let Some(key) = key else {
+            return;
+        };
+        if !self.names_the_key(name) {
+            return;
+        }
+        match self.state.flash.as_mut() {
+            Some(said) if Some(&said.text) != before.as_ref() => {
+                said.text = format!("{key} · {}", said.text);
+            }
+            _ => self.state.flash_info(format!("{key}  {label}")),
         }
     }
 
@@ -579,10 +591,12 @@ impl super::App {
             ChordEntry::Act(keys, action) => {
                 // The key that does the same, named once the row has fired, so
                 // it can be typed next time.
-                let hint = self.view.chord_hint.as_ref().map(|h| {
-                    let key = crate::keymap::menu::key_hint(h.prefix, keys);
-                    format!("{key}  {}", action.describe())
-                });
+                let key = self
+                    .view
+                    .chord_hint
+                    .as_ref()
+                    .map(|h| crate::keymap::menu::key_hint(h.prefix, keys));
+                let label = action.describe();
                 let name = action.canonical_name();
                 let action = self.state.resolver.take_menu_action(action);
                 self.clear_chord_hint();
@@ -593,7 +607,7 @@ impl super::App {
                         self.state.flash_error(format!("{e:#}"));
                         Vec::new()
                     });
-                self.name_the_key(hint, name, before);
+                self.name_the_key(key, label, name, before);
                 fx
             }
             ChordEntry::Sub(_, _, seq) => {

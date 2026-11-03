@@ -580,7 +580,6 @@ fn a_rows_own_key_names_nothing() {
 /// harpoon's refusal outside a repo still shows, as an error, and still names
 /// the key that would have done the same.
 #[test]
-#[ignore = "red: an action's own message shows without the row's key"]
 fn an_actions_own_message_gets_the_key_in_front() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -611,7 +610,6 @@ fn an_actions_own_message_gets_the_key_in_front() {
 /// A which-key row whose action says something gets its key in front too:
 /// `^a z` from the `^a` menu.
 #[test]
-#[ignore = "red: zoom's own message shows without `^a z`"]
 fn a_which_key_rows_message_gets_its_key_in_front() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
