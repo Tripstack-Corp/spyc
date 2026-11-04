@@ -371,6 +371,25 @@ fn agent_hud_collection_stops_on_a_project_with_no_strip() {
     });
 }
 
+/// A dim rule separates the agent's last row from the strip, so the strip
+/// reads as spyc's text rather than more of the agent's footer.
+#[test]
+#[ignore = "red: no rule above the strip"]
+fn a_rule_separates_the_agent_from_the_strip() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = fixture(tmp.path(), tmp.path());
+        for (mode, rows_below) in [(AgentHudMode::Compact, 2), (AgentHudMode::Full, 4)] {
+            app.state.active_project_mut().config.pane.agent_hud = mode;
+            let (layout, rows) = paint(&mut app, 100, 32);
+            let strip = layout.agent_hud.unwrap();
+            assert_eq!(rows.len(), rows_below + 1, "{mode:?}: {rows:?}");
+            assert_eq!(rows[0], "─".repeat(usize::from(strip.width)), "{mode:?}");
+            assert!(rows[1].contains("56789abc"), "{mode:?}: {rows:?}");
+        }
+    });
+}
+
 #[test]
 fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
     let tmp = tempfile::tempdir().unwrap();
