@@ -1057,4 +1057,35 @@ mod tests {
             }
         }
     }
+
+    /// A live capture's menu is drawn over the capture, so it hears the keys
+    /// before the command does; with no menu open, the command has them all.
+    #[test]
+    #[ignore = "red: a live capture takes every key, an open menu's too"]
+    fn a_menu_over_a_live_capture_hears_the_keys_first() {
+        let capture = RouteSnapshot {
+            modal: Some(Modal::Capture),
+            ..idle()
+        };
+        let menu = RouteSnapshot {
+            menu_open: true,
+            ..capture
+        };
+        for k in [
+            key('j'),
+            ctrl('z'),
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ] {
+            assert_eq!(route_key(capture, k), InputSink::Capture, "{k:?}");
+            assert_eq!(route_key(menu, k), InputSink::Menu, "{k:?}");
+        }
+        for modal in [Modal::FindPicker, Modal::QuickSelect, Modal::Harpoon] {
+            let other = RouteSnapshot {
+                modal: Some(modal),
+                menu_open: true,
+                ..idle()
+            };
+            assert_ne!(route_key(other, key('j')), InputSink::Menu, "{modal:?}");
+        }
+    }
 }
