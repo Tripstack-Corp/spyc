@@ -1,7 +1,7 @@
 # Clickable menus — discoverability that survives the terminal
 
 > **Superseded (2026-10-26) — archived as historical record.** Absorbed
-> unchanged into [`UX_2_0_PLAN.md`](../drafts/UX_2_0_PLAN.md) as its slices
+> unchanged into [`UX_2_0_PLAN.md`](UX_2_0_PLAN.md) as its slices
 > 1–2, which is where the work is tracked. Its §1 finding is narrowed there
 > by a measurement: iTerm2 passes a ⇧-, ⌃- or ⌘-right-click through.
 

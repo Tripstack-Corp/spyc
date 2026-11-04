@@ -17,4 +17,5 @@ roadmap is [`ROADMAP.md`](../../ROADMAP.md) at the repo root.
 | `2.1-release-notes.md` | The human-facing v2.1 notes, as written at tag time. |
 | `2.2-release-notes.md` | The human-facing v2.2 notes, as written at tag time. |
 | `2.3-release-notes.md` | The human-facing v2.3 notes, as written at tag time. |
-| `CLICKABLE_MENUS_PLAN.md` | Not shipped on its own: absorbed into the 2.4 UX plan ([`UX_2_0_PLAN.md`](../drafts/UX_2_0_PLAN.md)) as its slices 1–2 when that plan was approved. |
+| `CLICKABLE_MENUS_PLAN.md` | Not shipped on its own: absorbed into the 2.4 UX plan ([`UX_2_0_PLAN.md`](UX_2_0_PLAN.md)) as its slices 1–2 when that plan was approved. |
+| `UX_2_0_PLAN.md` | UX 2.0, on `main` for 2.4 (PRs #880–#962): a menu for each object spyc draws, opened with `.`, `^a .` or a right-click (⌃-right-click on iTerm2), each row showing its key and a clicked row's hint fading as the key is learned; the pager and a Makefile's targets as objects. |

@@ -36,6 +36,10 @@ const SECTIONS: &[Section] = &[
                 "^a (^w) prefix — the pty pane + split (tabs, focus, zoom, send)",
             ),
             ("(hold a prefix)", "which-key popup lists what completes it"),
+            (
+                "(right-click)",
+                "menu of what it lands on, each row with its key; on iTerm2, ⌃-right-click (keys: . and ^a .)",
+            ),
         ],
     },
     Section {
@@ -547,10 +551,6 @@ const SECTIONS: &[Section] = &[
     },
 ];
 
-/// Floor for the key column: keeps the description stripe visually
-/// consistent even when every visible key is short (default bindings
-/// only). Widens automatically when any row — user binding or built-in —
-/// needs more room.
 /// Every row's key column with its section's title, for the guard that every
 /// default binding is in this overlay (`keymap::resolver::tests::documented`).
 #[cfg(test)]
@@ -560,6 +560,10 @@ pub fn key_column() -> impl Iterator<Item = (&'static str, &'static str)> {
         .flat_map(|s| s.rows.iter().map(|(keys, _)| (s.title, *keys)))
 }
 
+/// Floor for the key column: keeps the description stripe visually
+/// consistent even when every visible key is short (default bindings
+/// only). Widens automatically when any row — user binding or built-in —
+/// needs more room.
 const MIN_KEY_W: usize = 24;
 
 /// Build help content formatted to fit within `col_w` per column.

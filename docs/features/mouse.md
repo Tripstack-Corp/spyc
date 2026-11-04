@@ -79,6 +79,8 @@ and inside an archive no row the archive refuses.
 
 iTerm2 keeps a plain right-click for its own menu, so hold **⌃** while you
 right-click there; spyc reads a right-click with any modifier the same.
+[Which right-click reaches spyc](../config/mouse.md#which-right-click-reaches-spyc)
+has each terminal measured.
 
 ## Open menus
 
