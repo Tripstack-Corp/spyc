@@ -36,6 +36,8 @@ mod pane_copy_tests;
 mod route;
 mod scroll;
 mod selection;
+#[cfg(test)]
+mod status_menu_tests;
 pub(super) mod tab_hit;
 
 // Re-exported so the impure half and its callers keep referring to
@@ -1216,18 +1218,17 @@ mod tests {
     pub(super) fn menu_in(buf: &ratatui::buffer::Buffer, title: &str) -> ratatui::layout::Rect {
         let sym = |x: u16, y: u16| buf[(x, y)].symbol().to_string();
         let heading = format!(" {title} ");
-        for y in 0..FRAME.height {
-            for x in 0..FRAME.width {
-                let follows: String = (x + 1..FRAME.width.min(x + 1 + 16))
-                    .map(|c| sym(c, y))
-                    .collect();
+        let (width, height) = (buf.area.width, buf.area.height);
+        for y in 0..height {
+            for x in 0..width {
+                let follows: String = (x + 1..width.min(x + 1 + 16)).map(|c| sym(c, y)).collect();
                 if sym(x, y) != "┌" || !follows.starts_with(&heading) {
                     continue;
                 }
-                let right = (x + 1..FRAME.width)
+                let right = (x + 1..width)
                     .find(|&c| sym(c, y) == "┐")
                     .expect("the menu's top-right corner");
-                let bottom = (y + 1..FRAME.height)
+                let bottom = (y + 1..height)
                     .find(|&r| sym(x, r) == "└")
                     .expect("the menu's bottom-left corner");
                 return ratatui::layout::Rect::new(x, y, right - x + 1, bottom - y + 1);
