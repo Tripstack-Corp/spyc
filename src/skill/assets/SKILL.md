@@ -93,8 +93,8 @@ file. Full protocol in `references/worktrees.md`.
   `cargo` command fails unexpectedly, run `pwd && ls` before retrying — this is
   the single most common source of confused loops.
 - **`root` is per-call.** Setting it on one tool does not scope the next.
-- **The user's view is shared state.** `navigate_to`, `pick_files`, `set_filter`
-  move what they are looking at. Useful for showing your work; disruptive if you
+- **The user's view is shared state.** `navigate_to`, `pick_files` /
+  `clear_picks`, `set_filter` move what they are looking at. Useful for showing your work; disruptive if you
   do it without saying so.
 - **Picks are a real selection.** If `get_spyc_context` shows picks, the user
   probably means those files. Prefer them over guessing from a description.

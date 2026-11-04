@@ -30,7 +30,7 @@ const PROTOCOL_VERSION: &str = "2024-11-05";
 /// The MCP handshake's shared bootstrap. Clients may attach it to each tool,
 /// so keep it within the response's tested byte budget. Tool descriptions and
 /// the spyc skill carry argument details and complete workflows.
-const SERVER_INSTRUCTIONS: &str = "\
+pub const SERVER_INSTRUCTIONS: &str = "\
 Prefer spyc's `search_content`/`search_paths` and `git_status`/`git_log`/`git_diff` \
 over shell equivalents. Use its full worktree tools, including `clean_worktree`; \
 never run `git worktree`.\n\
@@ -134,7 +134,7 @@ mod protocol;
 pub mod readers;
 mod server;
 pub mod statusline;
-mod tool_schemas;
+pub mod tool_schemas;
 
 pub use config::{
     MANAGED_MCP_PATHS, MANAGED_SETTINGS_PATHS, PANE_ENV, Removal, enterprise_allows_spyc_in,
