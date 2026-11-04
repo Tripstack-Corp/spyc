@@ -41,7 +41,6 @@ fn discovered(dir: &Path, root: &Path) -> Taskfile {
 /// prints, `build` (its first rule) as the default, and nothing that isn't a
 /// target a user can name.
 #[test]
-#[ignore = "red: discover is a stub that reads nothing"]
 fn spycs_own_makefile_lists_its_targets_with_their_labels() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let found = discovered(repo, repo);
@@ -146,7 +145,6 @@ one \\
 /// no rule, both branches of a conditional are listed (nothing is evaluated),
 /// and a line continuation joins two targets.
 #[test]
-#[ignore = "red: targets is a stub that lists nothing"]
 fn only_explicit_targets_are_listed() {
     let listed = targets(EXCLUSIONS);
     assert_eq!(
@@ -165,7 +163,6 @@ fn only_explicit_targets_are_listed() {
 
 /// `.PHONY` targets come first, in source order, then the rest.
 #[test]
-#[ignore = "red: targets is a stub that lists nothing"]
 fn phony_targets_come_first() {
     let listed =
         targets("out.txt:\n\ttouch $@\n.PHONY: test lint\nlint:\n\t@true\ntest:\n\t@true\n");
@@ -176,7 +173,6 @@ fn phony_targets_come_first() {
 /// The default goal is the first target of the first rule, or what
 /// `.DEFAULT_GOAL` names.
 #[test]
-#[ignore = "red: targets is a stub that lists nothing"]
 fn the_default_goal_is_marked() {
     let first = targets(".PHONY: b\na:\n\t@true\nb:\n\t@true\n");
     assert!(find(&first, "a").default && !find(&first, "b").default);
@@ -201,7 +197,6 @@ fn a_makefile_of_pattern_rules_lists_nothing() {
 /// comment above is taken when there is none; a comment parted from the rule
 /// by a blank line is not.
 #[test]
-#[ignore = "red: targets is a stub that lists nothing"]
 fn labels_come_from_the_rules_line_then_the_comment_above() {
     let listed = targets(
         "# Above build.\nbuild: deps ## Build it all\n\t@true\n\n\
@@ -224,7 +219,6 @@ fn labels_come_from_the_rules_line_then_the_comment_above() {
 /// A literal `include` inside the root is followed; one that climbs out of it,
 /// by `..` or by an absolute path, is not; a missing `-include` is silent.
 #[test]
-#[ignore = "red: discover is a stub that reads nothing"]
 fn includes_are_followed_inside_the_root_only() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");
@@ -255,7 +249,6 @@ fn includes_are_followed_inside_the_root_only() {
 /// target name, an include path and a recipe leaves no file behind, and the
 /// plain target beside them is still listed.
 #[test]
-#[ignore = "red: discover is a stub that reads nothing"]
 fn discovery_never_evaluates_the_makefile() {
     let tmp = tempfile::tempdir().unwrap();
     let mark = |what: &str| tmp.path().join(format!("pwned-{what}"));
@@ -285,7 +278,6 @@ fn discovery_never_evaluates_the_makefile() {
 /// make reads `GNUmakefile` before `Makefile`, so a directory holding both is
 /// read through the former, and the latter, named, is not make's pick.
 #[test]
-#[ignore = "red: discover is a stub that reads nothing"]
 fn a_directory_is_read_through_the_file_make_picks() {
     let tmp = tempfile::tempdir().unwrap();
     write(
@@ -309,7 +301,6 @@ fn a_directory_is_read_through_the_file_make_picks() {
 
 /// A directory without a Makefile is an error that says so.
 #[test]
-#[ignore = "red: discover is a stub that reads nothing"]
 fn a_directory_without_a_makefile_says_so() {
     let tmp = tempfile::tempdir().unwrap();
     let err = discover(tmp.path(), tmp.path()).expect_err("no Makefile");
@@ -324,7 +315,6 @@ fn a_directory_without_a_makefile_says_so() {
 /// it at once, naming it.
 #[cfg(unix)]
 #[test]
-#[ignore = "red: discover is a stub that refuses nothing"]
 fn a_fifo_named_makefile_is_refused_without_blocking() {
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = tempfile::tempdir().unwrap();

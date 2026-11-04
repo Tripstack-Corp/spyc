@@ -111,6 +111,11 @@ shlex = { version = "2", default-features = false, features = ["std"] }
 # version-line Cargo.toml/Cargo.lock conflicts without shelling out to `git`
 # (the no_subprocess_git_in_production guard) or reimplementing diff3.
 diffy = "0.5"
+# A Makefile's targets for the make menu (src/taskfile/), parsed and never
+# evaluated: `make -p` would run every `$(shell …)` while reading. Apache-2.0,
+# one dependency (`rowan`); a lossless CST, of which spyc reads only rules,
+# includes, comments and the default goal.
+makefile-lossless = "0.4.8"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order`: spyc edits files users keep (agent settings, MCP configs),
 # and rewriting one must not reorder its keys.

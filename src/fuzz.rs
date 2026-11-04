@@ -377,6 +377,34 @@ pub fn expand_percent(template: &str) {
     );
 }
 
+/// Read a Makefile's targets from arbitrary bytes and discard them.
+///
+/// Asserts each listed name is one a user can type as a goal, none twice, and
+/// at most one the default. A Makefile is someone else's text.
+pub fn taskfile_make(data: &[u8]) {
+    let text = String::from_utf8_lossy(data);
+    let listed = crate::taskfile::make::targets(&text);
+    for target in &listed {
+        assert!(
+            !target.name.is_empty()
+                && !target.name.starts_with(['.', '-'])
+                && !target.name.contains(['%', '$', '='])
+                && !target.name.chars().any(char::is_control),
+            "listed a name no user types as a goal: {:?}",
+            target.name
+        );
+    }
+    assert!(
+        listed.iter().filter(|t| t.default).count() <= 1,
+        "more than one default goal"
+    );
+    let mut names: Vec<&str> = listed.iter().map(|t| t.name.as_str()).collect();
+    names.sort_unstable();
+    let before = names.len();
+    names.dedup();
+    assert_eq!(before, names.len(), "a target listed twice");
+}
+
 #[cfg(test)]
 mod fuzz_target_registration_tests {
     use std::collections::BTreeSet;
