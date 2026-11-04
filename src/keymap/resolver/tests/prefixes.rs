@@ -240,7 +240,8 @@ fn chord_continuations_resolve_to_their_actions() {
     let prefixes: &[(KeyEvent, &str)] = &[
         (key(' '), "leader"),
         (key('g'), "g"),
-        (ctrl('w'), "^a"),
+        (ctrl('a'), "^a"),
+        (ctrl('w'), "^w"),
         (ctrl('s'), "^s"),
         (key('W'), "W"),
         (key('H'), "H"),
@@ -543,8 +544,10 @@ pub(in crate::keymap) fn chord_states() -> Vec<(String, Vec<crossterm::event::Ke
         };
         queue.push((label, vec![ev]));
     }
-    // `^a` and `^s` are ctrl-prefixed, so the depth-1 sweep can't reach them.
-    for (label, ev) in [("^a", ctrl('w')), ("^s", ctrl('s'))] {
+    // `^a`, `^w` and `^s` are ctrl-prefixed, so the depth-1 sweep can't reach
+    // them. `^w`, `^a`'s alias, is walked in its own right, so a row only one of
+    // them shows is still checked.
+    for (label, ev) in [("^a", ctrl('a')), ("^w", ctrl('w')), ("^s", ctrl('s'))] {
         let mut r = Resolver::new();
         if feed(&mut r, ev) == ResolverOutcome::Pending && !r.continuations().is_empty() {
             queue.push((label.to_string(), vec![ev]));
@@ -631,6 +634,9 @@ fn every_action_a_chord_binds_is_offered_in_its_hints() {
             "^a Space",   // pane → leader
             "^a Space w", // pane → leader → worktree
             "^s",         // vertical split
+            "^w",         // pane prefix, `^a`'s alias
+            "^w Space",
+            "^w Space w",
             "d",
             "g",
             "m",
@@ -720,9 +726,10 @@ fn leader_and_pane_namespaces_respect_tiers() {
         );
     }
 
-    // Pane prefixes (`^a`, `^s`) → Pane/Meta only. `^a Space` is the leader
-    // reached from the pane, so its contents are checked as the leader's above.
-    for root in [ctrl('w'), ctrl('s')] {
+    // Pane prefixes (`^a`, `^w`, `^s`) → Pane/Meta only. `^a Space` is the
+    // leader reached from the pane, so its contents are checked as the leader's
+    // above.
+    for root in [ctrl('a'), ctrl('w'), ctrl('s')] {
         let under = actions_under(root);
         assert!(!under.is_empty(), "{root:?} subtree looks empty");
         for (label, a) in under {
