@@ -50,7 +50,10 @@ approval prompt. While a turn runs, agy redraws its spinner about every 100 ms,
 so a live turn is never that quiet ([HARNESS.md](HARNESS.md) records the
 probe). A reported `idle` (codex's `Interrupt` or agy's `USER_CANCELED`
 `Stop`, say) holds through redraws as the others do. Timing-only
-`idle` means quiet, not proof that a turn stopped or finished.
+`idle` means quiet, not proof that a turn stopped or finished. A Claude turn
+that ends on an API error fires `StopFailure` instead of `Stop`; its hook
+reports `blocked`, which pings, with a note naming the error (`stopped: rate
+limit`), since that turn won't resume by itself.
 
 **Glyphs** (shape = liveness, colour = urgency):
 

@@ -67,7 +67,6 @@ fn settle(app: &mut App, at: Instant) -> (AgentActivity, bool) {
 /// A turn that ends on an API error is over and won't resume by itself, so the
 /// dot goes `blocked`, which pings, and its note names the error.
 #[test]
-#[ignore = "red: a failed turn keeps `working`"]
 fn a_turn_that_ends_on_an_api_error_needs_the_user_and_says_why() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

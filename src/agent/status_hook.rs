@@ -27,6 +27,50 @@ pub enum TerminationReason {
     MaxIterations,
 }
 
+/// The API error Claude Code's `StopFailure` says ended the turn, from its
+/// closed set (2.1.302).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopError {
+    AuthenticationFailed,
+    OauthOrgNotAllowed,
+    AccountOnHold,
+    VerificationRequired,
+    BillingError,
+    RateLimit,
+    Overloaded,
+    InvalidRequest,
+    ModelNotFound,
+    ServerError,
+    Unknown,
+    MaxOutputTokens,
+    CloudCredentialError,
+}
+
+impl StopError {
+    pub fn from_wire(name: &str) -> Option<Self> {
+        Self::deserialize(serde_json::Value::from(name)).ok()
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::AuthenticationFailed => "authentication failed",
+            Self::OauthOrgNotAllowed => "organization not allowed",
+            Self::AccountOnHold => "account on hold",
+            Self::VerificationRequired => "verification required",
+            Self::BillingError => "billing error",
+            Self::RateLimit => "rate limit",
+            Self::Overloaded => "API overloaded",
+            Self::InvalidRequest => "invalid request",
+            Self::ModelNotFound => "model not found",
+            Self::ServerError => "API server error",
+            Self::Unknown => "API error",
+            Self::MaxOutputTokens => "output token limit",
+            Self::CloudCredentialError => "cloud credentials",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct StatusHookEvent {
     pub hook_event_name: String,
@@ -55,6 +99,9 @@ pub struct StatusHookEvent {
     /// `/loop`) the same payload listed; `None` when it has no such list.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_crons: Option<u32>,
+    /// The API error a Claude `StopFailure` ended the turn on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<StopError>,
 }
 
 impl StatusHookEvent {
@@ -81,6 +128,22 @@ impl StatusHookEvent {
             fully_idle: value["fully_idle"].as_bool(),
             background_tasks: count("background_tasks"),
             session_crons: count("session_crons"),
+            error: StopError::deserialize(&value["error"]).ok(),
+        })
+    }
+
+    /// Whether this is Claude Code's turn end on an API error.
+    pub fn is_stop_failure(&self) -> bool {
+        self.hook_event_name == "StopFailure"
+    }
+
+    /// Why a turn that ended on an API error stopped: "stopped: rate limit".
+    pub fn failure_note(&self) -> Option<String> {
+        self.is_stop_failure().then(|| {
+            format!(
+                "stopped: {}",
+                self.error.unwrap_or(StopError::Unknown).label()
+            )
         })
     }
 
