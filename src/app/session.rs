@@ -371,6 +371,16 @@ impl App {
                         } else {
                             profile.command_without_resume(&t.info.command)
                         };
+                        // A shell reopens where it is now; an agent finds its
+                        // conversation by the directory it started in.
+                        let cwd = if kind == crate::state::sessions::AgentKind::Other {
+                            t.pane
+                                .process_id()
+                                .and_then(crate::proc_cwd::cwd_for_pid)
+                                .unwrap_or_else(|| t.info.cwd.clone())
+                        } else {
+                            t.info.cwd.clone()
+                        };
                         SavedTab {
                             command: saved_command,
                             // Strip any `[exited N]` suffix — that's
@@ -381,7 +391,7 @@ impl App {
                             // freshly-respawned process tagged with
                             // a stale "exited" suffix.
                             label: crate::pane::tabs::strip_exit_suffix(&t.info.label),
-                            cwd: t.info.cwd.clone(),
+                            cwd,
                             agent_kind: kind,
                             agent_session_id,
                             agent_session_name,
