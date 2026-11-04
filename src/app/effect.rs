@@ -701,6 +701,10 @@ pub mod matchers {
         fn inventory(&self) -> Option<&crate::app::inventory_ops::InventoryOp>;
 
         fn pane_key(&self) -> Option<crossterm::event::KeyEvent>;
+        /// The bytes the one `SendToPane` writes to the active pane, a key
+        /// encoded as `Pane::send_key` encodes it. `None` when no effect, or
+        /// more than one, sends to it.
+        fn pane_bytes(&self) -> Option<Vec<u8>>;
         fn clipboard_capture_tab(&self) -> Option<&str>;
         fn transcript_index(&self) -> Option<&crate::app::image_ops::TranscriptIndexOp>;
     }
@@ -741,6 +745,23 @@ pub mod matchers {
                 } => Some(*key),
                 _ => None,
             })
+        }
+
+        fn pane_bytes(&self) -> Option<Vec<u8>> {
+            let mut sends = self.iter().filter_map(|effect| match effect {
+                Effect::SendToPane {
+                    target: super::PaneTarget::Active,
+                    input,
+                    ..
+                } => Some(input),
+                _ => None,
+            });
+            let bytes = match sends.next()? {
+                super::PaneInput::Key(key) => crate::pane::input::encode_key(*key, false),
+                super::PaneInput::Bytes(bytes) => bytes.clone(),
+                _ => return None,
+            };
+            sends.next().is_none().then_some(bytes)
         }
 
         fn clipboard_capture_tab(&self) -> Option<&str> {

@@ -517,6 +517,7 @@ mod codex_home;
 mod codex_images;
 mod codex_questions;
 mod cwd_file;
+mod esc_guard;
 mod focused_column;
 mod history_editor;
 mod jump_default;
