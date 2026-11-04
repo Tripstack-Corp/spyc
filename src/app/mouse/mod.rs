@@ -37,6 +37,8 @@ mod menu_tests;
 mod pager_menu_tests;
 #[cfg(test)]
 mod pane_copy_tests;
+#[cfg(test)]
+mod pane_to_task_tests;
 mod route;
 mod scroll;
 mod selection;

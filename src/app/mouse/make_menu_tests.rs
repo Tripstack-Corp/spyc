@@ -49,7 +49,7 @@ fn app_over(dir: &Path, files: &[(&str, &str)]) -> App {
     app
 }
 
-fn terminal_and_foreground() -> (crate::Tui, ForegroundExec) {
+pub(super) fn terminal_and_foreground() -> (crate::Tui, ForegroundExec) {
     let terminal = Terminal::with_options(
         CrosstermBackend::new(std::io::stdout()),
         TerminalOptions {
