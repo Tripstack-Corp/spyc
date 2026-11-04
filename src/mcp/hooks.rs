@@ -387,6 +387,19 @@ mod tests {
         serde_json::from_str(text).unwrap()
     }
 
+    /// A turn that ends on an API error (a rate limit, an overload) is over and
+    /// won't resume by itself: the user has to retry or wait.
+    #[test]
+    #[ignore = "red: no StopFailure hook"]
+    fn a_turn_that_ends_on_an_api_error_reports_blocked() {
+        let merged = parse(&merged_status_hooks_json(None, "spyc").expect("fresh merge"));
+        let cmd = merged
+            .pointer("/hooks/StopFailure/0/hooks/0/command")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        assert!(cmd.contains("--report-status blocked"), "got {cmd:?}");
+    }
+
     #[test]
     fn claude_merge_installs_every_hook_and_removal_leaves_nothing() {
         let merged = merged_status_hooks_json(None, "spyc").expect("fresh merge");
