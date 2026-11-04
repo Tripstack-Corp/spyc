@@ -181,7 +181,7 @@ pub struct HudView<'a> {
     /// The tab's activity dot, in its own colour.
     pub dot: Option<Span<'static>>,
     pub attention: Attention,
-    /// What a `waiting` agent waits on.
+    /// What a `waiting` or blocked agent waits on.
     pub note: Option<&'a str>,
     pub repository: Option<&'a str>,
     pub branch: Option<&'a str>,

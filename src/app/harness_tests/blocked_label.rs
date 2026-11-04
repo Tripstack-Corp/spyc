@@ -88,7 +88,6 @@ fn hud_row(app: &mut App) -> String {
 /// A permission request names its tool in the ping, and at the end of the
 /// HUD's activity row.
 #[test]
-#[ignore = "red: the ping and the HUD say only that the agent needs you"]
 fn a_bash_permission_request_says_claude_needs_you_bash() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -106,7 +105,6 @@ fn a_bash_permission_request_says_claude_needs_you_bash() {
 /// The tools that put a question to the user read `question`, in every
 /// agent, and Claude's plan approval reads `plan`.
 #[test]
-#[ignore = "red: a question or a plan pings as a bare `needs you`"]
 fn the_tools_that_ask_read_question_and_plan() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -139,7 +137,6 @@ fn the_tools_that_ask_read_question_and_plan() {
 /// Another MCP server's tool reads `mcp`: a server's name can be private.
 /// spyc's own tools keep theirs, as in the HUD's tools row.
 #[test]
-#[ignore = "red: the ping says nothing of the tool"]
 fn another_servers_tool_reads_mcp() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -167,7 +164,6 @@ fn another_servers_tool_reads_mcp() {
 /// request it is about, so the tab keeps that request's label, and pings
 /// no second time.
 #[test]
-#[ignore = "red: the ping says nothing of the tool"]
 fn a_permission_prompt_keeps_the_label_of_the_request_before_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -191,7 +187,6 @@ fn a_permission_prompt_keeps_the_label_of_the_request_before_it() {
 /// in the pane or in the agent's own prompt, a later block says only what it
 /// names itself.
 #[test]
-#[ignore = "red: the ping says nothing of the tool"]
 fn the_label_goes_with_the_blocked_that_carried_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -229,7 +224,6 @@ fn the_label_goes_with_the_blocked_that_carried_it() {
 
 /// A failed turn shows its failure where a permission shows its tool.
 #[test]
-#[ignore = "red: the ping says nothing of the failure"]
 fn a_failed_turn_says_why_where_a_permission_names_its_tool() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -252,7 +246,6 @@ fn a_failed_turn_says_why_where_a_permission_names_its_tool() {
 
 /// `Space !` says where it landed and what the agent there asks for.
 #[test]
-#[ignore = "red: `Space !` lands without a word"]
 fn space_bang_says_which_tab_and_what_it_asks_for() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

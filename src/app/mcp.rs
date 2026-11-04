@@ -761,14 +761,10 @@ impl App {
         {
             live.turn_end_absorbed = true;
         }
+        let live = entry.info.reported.as_ref();
         let mut received = ReportedStatus::new(activity, now, now + report_ttl(activity, ttl_ms));
-        received.note = waiting::note_for(
-            entry.info.reported.as_ref(),
-            activity,
-            note,
-            hook_event.as_ref(),
-            now,
-        );
+        received.note = waiting::note_for(live, activity, note, hook_event.as_ref(), now);
+        received.blocked_on = waiting::blocked_on(live, activity, hook_event.as_ref());
         entry.info.last_reported = Some(received.clone());
         entry.info.last_report_ignored = decision.err();
         if decision.is_ok() {

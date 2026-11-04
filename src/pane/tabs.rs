@@ -146,6 +146,10 @@ pub struct ReportedStatus {
     /// characters (`mcp_cmd::report_note`). For a hook-inferred `waiting`, what
     /// it waits on.
     pub note: Option<String>,
+    /// What a hook's `blocked` report waits on, from the event's metadata
+    /// alone (`agent::waiting::blocked_on`): the tool, `question`, `plan`, or
+    /// why the turn failed.
+    pub blocked_on: Option<String>,
     /// A `waiting` report has absorbed the hook `done` that ended the turn
     /// which reported it (`agent::waiting::meet`).
     pub turn_end_absorbed: bool,
@@ -165,6 +169,7 @@ impl ReportedStatus {
             overridden_by_approval: false,
             retired_reason: None,
             note: None,
+            blocked_on: None,
             turn_end_absorbed: false,
         }
     }
@@ -441,6 +446,12 @@ impl TabInfo {
         } else {
             self.activity
         }
+    }
+
+    /// What the tab's live `blocked` report waits on
+    /// ([`ReportedStatus::blocked_on`]).
+    pub fn blocked_on(&self) -> Option<&str> {
+        self.reported.as_ref()?.blocked_on.as_deref()
     }
 
     /// The agent this tab runs now: the one detected in a shell tab's

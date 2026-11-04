@@ -125,7 +125,9 @@ impl App {
     }
 
     /// `Space !`: go to the agent that needs you ([`pick`]), switching project
-    /// and tab and giving its pane the keyboard, or say that none does.
+    /// and tab and giving its pane the keyboard, or say that none does. Landing
+    /// on a blocked agent whose hook named its wait, it flashes the tab and
+    /// that: "tab 2: Bash".
     pub(super) fn go_to_attention(&mut self) {
         let ids: Vec<ProjectId> = self.state.open_projects().map(|p| p.id).collect();
         let here = ids.iter().position(|id| *id == self.state.active);
@@ -141,6 +143,9 @@ impl App {
         self.go_to_tab(|tabs| tabs.switch_to(to.tab));
         let pane = self.runtime.project().pane_tabs.as_ref();
         self.view.attention_last = pane.map(|tabs| (tabs.active_info().id.clone(), to.key()));
+        if let Some(on) = pane.and_then(|tabs| tabs.active_info().blocked_on()) {
+            self.state.flash_info(format!("tab {}: {on}", to.tab + 1));
+        }
     }
 
     /// Whether an agent in any project is waiting on the user: whether

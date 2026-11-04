@@ -115,7 +115,7 @@ fn tool_call(block: &Value) -> Option<ToolCall> {
 
 /// An MCP tool's name carries its server's, which can be private: only
 /// spyc's own server keeps its name.
-fn tool_name(name: String) -> String {
+pub fn tool_name(name: String) -> String {
     match name.strip_prefix("mcp__") {
         Some(rest) if !rest.starts_with("spyc__") => "mcp".to_owned(),
         _ => name,

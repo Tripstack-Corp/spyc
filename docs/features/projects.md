@@ -78,8 +78,10 @@ these do nothing at all.
 that needs you, in whichever project it is: the one blocked on you longest,
 then one that finished while you weren't looking. It switches project and tab
 and puts the keyboard in that agent's pane, showing the pane if it was hidden
-or zoomed away. Press it again for the next one; with nothing waiting, it says
-"nothing needs you". It works with one project open too, across its tabs.
+or zoomed away. Landing on a blocked agent whose hook named what it waits on,
+it flashes the tab and that: "tab 2: Bash". Press it again for the next one;
+with nothing waiting, it says "nothing needs you". It works with one project
+open too, across its tabs.
 
 **The status bar shows every open project** while there are several: a chip
 for each, in the order they were opened, the one you're in bold and the others

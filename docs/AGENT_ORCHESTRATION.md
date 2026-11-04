@@ -184,6 +184,8 @@ in `/hooks`; spyc neither approves them nor edits trust records. See the
 pane, oldest first, after status expiry or dismissal. A restart clears them.
 The reporter forwards only event/tool names, notification subtype and available
 turn/call ids; it excludes arguments, prompts, response text and tool output.
+A `blocked` report's label (`claude needs you: Bash`) is drawn from these names
+alone, never from tool input or the agent's own note.
 Control characters, malformed identifiers and oversized fields are discarded.
 `--status-trace` logs this sanitized metadata instead of the raw stdin payload.
 The reporter streams the complete hook JSON and retains only a fixed set of
@@ -353,6 +355,18 @@ alt-tab away and get pulled back to the *right* pane. Configured under `[notify]
 
 - `suppress_focused_tab` mutes the tab you're already watching (off by default —
   spyc-focused ≠ eyes-on-terminal).
+
+**What a blocked agent waits on (#918).** A hook's `blocked` report keeps a
+short label from its event (`ReportedStatus::blocked_on`): the tool a
+`PermissionRequest` names, `question` for `AskUserQuestion`,
+`request_user_input` and `ask_question`, `plan` for `ExitPlanMode`, `mcp` for
+another server's `mcp__<server>__…` tool, or a `StopFailure`'s
+`stopped: rate limit`. A `permission_prompt` `Notification` names no tool and
+keeps the live block's label. The ping reads `claude needs you: Bash`, the HUD's
+activity row ends in it, and `Space !` flashes `tab 2: Bash`. It goes with the
+report that carried it. A screen-scraped wait and the agent's own `blocked`
+carry none; the agent's note stays out because a desktop ping can leave the
+machine.
 
 **Seen and unseen (#99).** A tab is in view when it is the active tab of the
 project in view and its pane is drawn: not hidden, not zoomed away, not under a
