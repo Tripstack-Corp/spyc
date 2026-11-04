@@ -28,7 +28,9 @@ fn fake_loop(live: &'static [&'static str]) -> (Sender<McpRequest>, Receiver<Mcp
                 }
                 McpCommand::CallerContext { pane_id, .. } if is_live(pane_id) => {
                     let pane_id = pane_id.as_deref().unwrap_or_default();
-                    json!({"pane": {"id": pane_id, "cwd": format!("/wt/{pane_id}")}}).to_string()
+                    let tab = live.iter().position(|p| *p == pane_id).map(|i| i + 1);
+                    json!({"pane": {"id": pane_id, "tab": tab, "cwd": format!("/wt/{pane_id}")}})
+                        .to_string()
                 }
                 McpCommand::CallerContext { .. } => "{}".into(),
                 _ => "ok".into(),
@@ -143,23 +145,100 @@ fn a_pane_id_no_live_tab_has_is_dropped() {
     assert_eq!(reports(&seen).0, [(None, None)]);
 }
 
-/// The binding is the default, never an override: a call that names its own
-/// target keeps it.
+/// Each `report_status` the loop received: its target, and whether it carried
+/// the hook-only `session_id` and `hook_event`.
+fn reports_with_hook_fields(seen: &Receiver<McpCommand>) -> Vec<(Target, bool, bool)> {
+    seen.try_iter()
+        .filter_map(|c| match c {
+            McpCommand::ReportStatus {
+                pane_id,
+                pane,
+                session_id,
+                hook_event,
+                ..
+            } => Some(((pane_id, pane), session_id.is_some(), hook_event.is_some())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A `report_status` with the fields spyc's status hook adds.
+fn as_the_hook_reports(mut args: Value) -> Value {
+    args["session_id"] = json!("s-1");
+    args["hook_event"] = json!({"hook_event_name": "Stop"});
+    args
+}
+
+/// A connection bound to a tab acts for that tab alone (#916): a call naming
+/// another, by `pane_id` or by tab number, is refused, saying why, and never
+/// reaches the loop; one naming its own is served as its own.
 #[test]
-fn a_call_that_names_its_target_keeps_it() {
-    let (tx, seen) = fake_loop(&["abc"]);
+#[ignore = "red: a bound call's named target wins over its binding"]
+fn a_bound_call_acts_only_for_its_own_tab() {
+    let (tx, seen) = fake_loop(&["abc", "def"]);
     let (mut conn, _tmp) = open(tx);
     conn.initialize(Some("abc"));
 
-    conn.tool(
-        "report_status",
-        json!({"status": "done", "pane_id": "other"}),
-    );
-    conn.tool("report_status", json!({"status": "done", "pane": 2}));
+    for args in [
+        json!({"status": "done", "pane_id": "def"}),
+        json!({"status": "done", "pane": 2}),
+    ] {
+        let params = json!({"name": "report_status", "arguments": args});
+        let resp = conn.call("tools/call", params);
+        assert_eq!(resp["result"]["isError"], true, "{args} was served: {resp}");
+        let why = resp["result"]["content"][0]["text"].as_str().unwrap_or("");
+        assert!(why.contains("own tab"), "{why}");
+    }
+    conn.tool("report_status", json!({"status": "done", "pane_id": "abc"}));
+    conn.tool("report_status", json!({"status": "done", "pane": 1}));
     assert_eq!(
         reports(&seen).0,
-        [(Some("other".into()), None), (None, Some(2))]
+        [(Some("abc".into()), None), (Some("abc".into()), None)]
     );
+}
+
+/// `session_id` and `hook_event` are the status hook's, which reports over a
+/// one-shot that never initializes: a bound connection's are dropped.
+#[test]
+#[ignore = "red: a bound connection's hook-only fields reach the loop"]
+fn a_bound_report_drops_the_hook_only_fields() {
+    let (tx, seen) = fake_loop(&["abc"]);
+    let (mut conn, _tmp) = open(tx);
+    conn.initialize(Some("abc"));
+    conn.tool(
+        "report_status",
+        as_the_hook_reports(json!({"status": "done"})),
+    );
+    assert_eq!(
+        reports_with_hook_fields(&seen),
+        [((Some("abc".into()), None), false, false)]
+    );
+}
+
+/// A connection bound to no tab keeps the target it names and the hook's
+/// fields: the hook's one-shot, an older proxy's `initialize` naming nothing,
+/// and one bound by its cwd alone, as under codex's shared daemon.
+#[test]
+fn an_unbound_call_keeps_its_target_and_the_hooks_fields() {
+    let meta = [None, Some(Value::Null), Some(json!({CWD_META: "/w/b"}))];
+    for meta in meta {
+        let (tx, seen) = fake_loop(&["abc", "def"]);
+        let (mut conn, _tmp) = open(tx);
+        if let Some(meta) = meta.clone() {
+            conn.initialize_with(meta);
+        }
+        let args = json!({"status": "done", "pane_id": "def"});
+        conn.tool("report_status", as_the_hook_reports(args));
+        conn.tool("report_status", json!({"status": "done", "pane": 2}));
+        assert_eq!(
+            reports_with_hook_fields(&seen),
+            [
+                ((Some("def".into()), None), true, true),
+                ((None, Some(2)), false, false)
+            ],
+            "{meta:?}"
+        );
+    }
 }
 
 /// Bound once: a later `initialize` on the same connection can't move it.
