@@ -315,6 +315,25 @@ fn agy_hook_reporter_forwards_event_metadata_and_remaps_stop_states() {
     );
 }
 
+/// A Claude turn that ends on an API error reports `blocked` with the error's
+/// name, and never its details or the reply.
+#[test]
+fn a_claude_stop_failure_forwards_its_error_type_only() {
+    let payload = json!({
+        "hook_event_name": "StopFailure", "session_id": "session-1", "error": "rate_limit",
+        "error_details": "private-details", "last_assistant_message": "private-reply"
+    });
+    let (request, log) = run_reporter_for("blocked", &payload.to_string());
+    let args = &request["params"]["arguments"];
+    assert_eq!(args["status"], "blocked");
+    assert_eq!(
+        args["hook_event"],
+        json!({"hook_event_name": "StopFailure", "error": "rate_limit"})
+    );
+    assert!(!request.to_string().contains("private-"));
+    assert!(!log.contains("private-"), "trace leaked content: {log}");
+}
+
 /// A Claude `Stop` whose only in-flight entry is the page watch a published
 /// artifact keeps open is a finished turn, not one waiting on work.
 #[test]
