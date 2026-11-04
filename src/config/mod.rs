@@ -273,6 +273,10 @@ pub struct PaneConfig {
     /// disk. Set false to keep spyc's hands off the clipboard entirely.
     /// Default true.
     pub preview_pasted_images: bool,
+    /// When true (the default), a bare `Esc` to a working Claude Code tab whose
+    /// `/vim` prompt isn't in INSERT mode is dropped, since there it interrupts
+    /// the turn (`app::esc_guard`). False sends every `Esc` through.
+    pub claude_esc_guard: bool,
     /// Home-configured opt-in strip below the active Codex pane.
     pub agent_hud: AgentHudMode,
     /// How the strip says when a plan window resets: clock time, or a countdown.
@@ -328,6 +332,7 @@ impl Default for PaneConfig {
             codex_mcp: true,
             codex_daemon: false,
             preview_pasted_images: true,
+            claude_esc_guard: true,
             agent_hud: AgentHudMode::Off,
             agent_hud_resets: AgentHudResets::Clock,
             tabs: Vec::new(),
@@ -369,6 +374,8 @@ struct FilePane {
     codex_daemon: Option<bool>,
     #[serde(default)]
     preview_pasted_images: Option<bool>,
+    #[serde(default)]
+    claude_esc_guard: Option<bool>,
     #[serde(default)]
     agent_hud: Option<AgentHudMode>,
     #[serde(default)]

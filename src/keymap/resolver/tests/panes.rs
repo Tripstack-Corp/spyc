@@ -130,6 +130,17 @@ fn ctrl_a_down_sends_literal_prefix() {
 }
 
 #[test]
+fn ctrl_a_esc_sends_a_plain_esc() {
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, special(KeyCode::Esc)),
+        ResolverOutcome::Action(Action::PaneSendEsc)
+    );
+    assert!(!r.is_pending());
+}
+
+#[test]
 fn ctrl_w_v_enters_scroll() {
     let mut r = Resolver::new();
     feed(&mut r, ctrl('w'));

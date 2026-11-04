@@ -153,6 +153,12 @@ pub fn mouse_capture_is_on() -> bool {
     MOUSE_CAPTURE_ON.load(Ordering::Relaxed)
 }
 
+/// Whether the terminal took the kitty keyboard flag at startup, so a
+/// modified `Esc` (`Shift-Esc`) reaches spyc apart from a bare one.
+pub fn keyboard_enhancement_supported() -> bool {
+    KEYBOARD_ENHANCEMENT_SUPPORTED.load(Ordering::Relaxed)
+}
+
 /// Set the terminal-state flag WITHOUT touching the terminal — tests only.
 ///
 /// Lets a unit test stand in for the executor / panic hook / `suspend_tui`, none

@@ -177,7 +177,8 @@ pub enum McpCommand {
     /// Nothing this version sends; the TUI tells the user who owns the entry.
     Disconnected { new_pid: u32 },
     /// What Claude Code's statusline told `spyc --statusline` in a pane: the
-    /// plan's rate-limit windows and the context window. Fire-and-forget.
+    /// plan's rate-limit windows, the context window and the vim mode.
+    /// Fire-and-forget.
     Statusline {
         pane_id: String,
         statusline: crate::agent::claude_statusline::Statusline,

@@ -265,6 +265,36 @@ The strip always leaves the agent at least six rows, and costs nothing while
 the agent is idle. See [configuration and source semantics](../config/agent-hud.md#agent-hud--pane-agent_hud)
 for the home-only preference and size fallbacks.
 
+## Claude's vim mode and `Esc`
+
+With Claude Code's `/vim` on, `Esc` in INSERT mode only switches the prompt to
+NORMAL mode, and in NORMAL mode the next `Esc` interrupts the running turn. A
+vim user presses `Esc` by reflex, so while a Claude tab is `working` and its
+prompt isn't in INSERT mode, spyc drops a bare `Esc` (or `^[`, the same key to
+Claude) and says what happened:
+
+```
+`Esc` blocked: claude is working in vim NORMAL mode. `Shift-Esc` interrupts it.
+```
+
+To interrupt on purpose:
+
+- **`Shift-Esc`** sends a plain `Esc`, on a terminal that reports Shift with
+  `Esc` (one that speaks the kitty keyboard protocol, such as Ghostty, Kitty or
+  WezTerm). Elsewhere `Shift-Esc` can't be told from `Esc`, and the flash names
+  `^a Esc` instead.
+- **`^a Esc`** sends a plain `Esc` on every terminal, to any tab.
+
+Everywhere else `Esc` goes through as typed: in INSERT mode, with `/vim` off,
+in any state but `working` (`Esc` on a permission question still answers it),
+and in every other agent's tab. Claude Code reports the mode through its
+statusline, so the guard works only while spyc's statusline wrapper is
+installed (it comes with the hooks; see
+[Agent orchestration](../AGENT_ORCHESTRATION.md)); with no report, every `Esc`
+goes through. A mode change reaches spyc a moment after you make it, so an
+`Esc` pressed straight after `i` can still be blocked. Turn the guard off with
+`[pane] claude_esc_guard = false`.
+
 ## Agent image gallery — what you actually pasted
 
 An agent renders a pasted image as an opaque token (`[Image #3]`), so you

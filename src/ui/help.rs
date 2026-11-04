@@ -373,6 +373,10 @@ const SECTIONS: &[Section] = &[
                 "^a ↓",
                 "send a literal ^a to the pane (e.g. so Claude receives it)",
             ),
+            (
+                "^a Esc",
+                "send a plain Esc to the pane, past the Claude vim-mode Esc guard",
+            ),
             ("^a !", "go to the agent that needs you, in any project"),
             ("^a P", "pipe file contents of selection to pane"),
             ("^a i", "pipe inventory file contents to pane"),

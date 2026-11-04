@@ -126,6 +126,13 @@
 #   whichever codex started it, so they can't reach the spyc (or tell apart the
 #   tab) that launched a pane: activity dots go dark or light the wrong tab.
 #   Set true to let codex panes join the shared server anyway.
+# claude_esc_guard = true
+#   With Claude Code's /vim on, Esc in NORMAL mode interrupts the running turn.
+#   While a Claude tab is working and its prompt isn't in INSERT mode, spyc
+#   drops a bare Esc and says so; Shift-Esc (on a terminal that reports Shift)
+#   or ^a Esc sends it through. The mode comes from Claude Code's statusline,
+#   so with spyc's statusline wrapper off the guard never fires. Set false to
+#   send every Esc through.
 
 # ── yank ──────────────────────────────────────────────────────────────
 # Pager yank (`y` / `Y` / visual-mode `y`) behaviour.

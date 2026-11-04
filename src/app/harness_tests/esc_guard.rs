@@ -92,7 +92,6 @@ fn blocked_flash(mode: &str, through: &str) -> String {
 /// A working Claude tab outside INSERT mode: a bare `Esc` would interrupt the
 /// turn, so nothing reaches the pane, and the flash names the key that does.
 #[test]
-#[ignore = "red: no guard drops the `Esc`"]
 fn a_bare_esc_to_a_working_claude_outside_insert_mode_is_dropped_and_flashed() {
     for mode in ["NORMAL", "VISUAL", "VISUAL LINE"] {
         let tmp = tempfile::tempdir().unwrap();
@@ -108,6 +107,22 @@ fn a_bare_esc_to_a_working_claude_outside_insert_mode_is_dropped_and_flashed() {
             );
         });
     }
+}
+
+/// On a terminal that reports Shift, the flash names `Shift-Esc`.
+#[test]
+fn the_flash_names_shift_esc_where_the_terminal_reports_shift() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = claude(tmp.path(), "working");
+        app.set_shift_esc(true);
+        statusline(&mut app, &vim("NORMAL"));
+        assert!(app.handle_key(esc()).unwrap().is_empty());
+        assert_eq!(
+            app.flash_text(),
+            Some(blocked_flash("NORMAL", "Shift-Esc").as_str())
+        );
+    });
 }
 
 /// The guard fails open: in INSERT mode, with vim off or in a mode spyc
@@ -143,7 +158,6 @@ fn esc_goes_through_wherever_it_cannot_interrupt_a_vim_normal_turn() {
 /// The mode is the newest report's: one with vim on sets it, and one without
 /// clears it.
 #[test]
-#[ignore = "red: the statusline's vim mode is not kept"]
 fn the_newest_statusline_report_decides_the_mode() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -163,7 +177,6 @@ fn the_newest_statusline_report_decides_the_mode() {
 
 /// `[pane] claude_esc_guard = false` turns the guard off.
 #[test]
-#[ignore = "red: `[pane] claude_esc_guard` is not a key"]
 fn claude_esc_guard_false_lets_esc_through() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -197,7 +210,6 @@ fn execute(app: &mut App, fx: Vec<Effect>) {
 /// `Shift-Esc` gets past the guard as a plain `Esc`, and spyc counts it as the
 /// interrupt it is: the tab's `working` report is retired.
 #[test]
-#[ignore = "red: `Shift-Esc` goes out as a modified key, not an interrupt"]
 fn shift_esc_sends_a_plain_esc_that_interrupts_the_turn() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -217,7 +229,6 @@ fn shift_esc_sends_a_plain_esc_that_interrupts_the_turn() {
 /// `^a Esc` sends a plain `Esc` on every terminal and to every tab: past the
 /// guard to a working Claude in NORMAL mode, and to a shell.
 #[test]
-#[ignore = "red: `^a Esc` is unbound"]
 fn ctrl_a_esc_sends_a_plain_esc_to_any_tab() {
     for agent in ["claude", "cat"] {
         let tmp = tempfile::tempdir().unwrap();

@@ -1261,6 +1261,7 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
                 }),
                 five_hour: Some(window(10)),
                 seven_day: Some(window(20)),
+                ..Statusline::default()
             },
         );
         app.land_statusline(

@@ -150,6 +150,8 @@ works. Prefix is `^a` (screen-style); `^w` also works.
 | `^a t` | Open the active `agy` tab's thinking history in the in-app pager (`r` reloads) |
 | `Ctrl+J` | Newline in pane (multi-line input) |
 | `^a ↓` | Send a literal `^a` to the pane (e.g. so Claude receives it) |
+| `^a Esc` | Send a plain `Esc` to the pane, on any terminal: interrupts a working Claude past the vim-mode `Esc` guard |
+| `Shift-Esc` | In a Claude tab, a plain `Esc` past the vim-mode `Esc` guard, on a terminal that reports Shift ([details](features/agents.md#claudes-vim-mode-and-esc)) |
 | `^a !` | Go to the agent that needs you, in any project (as `Space !`) |
 | `^a g` | Image-gallery popup: what the agent received + what you've pasted but not sent (`j`/`k` move, `Enter` view, `q` close) |
 | `gf` | Jump to file path in pane output |

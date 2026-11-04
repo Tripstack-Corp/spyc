@@ -143,6 +143,7 @@ verbs above (`down`, `pick`,
 | `pane_focus_up` | focus list (up) |
 | `pane_send_selection` | send selection to pane (your own files only) |
 | `pane_send_prefix` | send literal ^a to pane (your own files only) |
+| `pane_send_esc` | send a plain Esc to pane (your own files only) |
 | `pane_grow` | grow pane |
 | `pane_shrink` | shrink pane |
 | `toggle_pane_zoom` | zoom pane (toggle fullscreen) |

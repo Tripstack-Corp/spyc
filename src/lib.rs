@@ -450,6 +450,7 @@ pub fn run() -> Result<()> {
     // input reader spawns, because `from_query_stdio` reads stdin/cursor
     // responses (the #444 no-live-cursor-read rule). Best-effort.
     app.set_picker(detect_image_picker());
+    app.set_shift_esc(crate::terminal::keyboard_enhancement_supported());
     let result = app.run(&mut terminal);
     mcp::cleanup_socket();
     // Restore the terminal BEFORE teardown so `run_teardown`'s "waiting for …"

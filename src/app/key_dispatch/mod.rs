@@ -273,13 +273,9 @@ impl App {
                 // the key still forwards below, unmodified.
                 let capture = self.plan_clipboard_capture(key);
                 // Commit prompt tracking only after the input queue accepts it.
-                // Clipboard capture rides alongside the key forward.
-                let mut effects = vec![Effect::SendToPane {
-                    target: PaneTarget::Active,
-                    input: PaneInput::Key(key),
-                    on_ok: None,
-                    err_prefix: None,
-                }];
+                // Clipboard capture rides alongside the key forward, which the
+                // Claude vim `Esc` guard may drop (`esc_guard`).
+                let mut effects = self.send_pane_key(key);
                 effects.extend(capture);
                 return Ok(effects);
             }

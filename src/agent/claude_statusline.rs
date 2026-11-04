@@ -1,7 +1,8 @@
 //! What spyc keeps of the input Claude Code gives its `statusLine` command: the
 //! plan's rate-limit windows and the context window, as Claude Code itself
-//! computed them. The cwd, transcript path, cost, model and everything else stay
-//! behind; only this projection travels to spyc.
+//! computed them, and the mode of its `/vim` prompt. The cwd, transcript path,
+//! cost, model and everything else stay behind; only this projection travels to
+//! spyc.
 
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -18,11 +19,18 @@ pub struct Statusline {
     pub context: Option<ContextWindow>,
     pub five_hour: Option<RateWindow>,
     pub seven_day: Option<RateWindow>,
+    /// The prompt's vim mode, while `/vim` is on. A mode this spyc doesn't
+    /// know reads as none, from Claude Code and from the wire alike.
+    #[serde(default, deserialize_with = "known_vim_mode")]
+    pub vim_mode: Option<VimMode>,
 }
 
 impl Statusline {
     pub const fn is_empty(&self) -> bool {
-        self.context.is_none() && self.five_hour.is_none() && self.seven_day.is_none()
+        self.context.is_none()
+            && self.five_hour.is_none()
+            && self.seven_day.is_none()
+            && self.vim_mode.is_none()
     }
 
     /// The bounds [`project`] holds an input to, for one that arrived already
@@ -48,8 +56,47 @@ impl Statusline {
                 }),
             five_hour: window(self.five_hour),
             seven_day: window(self.seven_day),
+            vim_mode: self.vim_mode,
         }
     }
+}
+
+/// The modes of Claude Code's vim prompt, named as its statusline names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VimMode {
+    #[serde(rename = "INSERT")]
+    Insert,
+    #[serde(rename = "NORMAL")]
+    Normal,
+    #[serde(rename = "VISUAL")]
+    Visual,
+    #[serde(rename = "VISUAL LINE")]
+    VisualLine,
+}
+
+impl VimMode {
+    /// The mode as Claude Code names it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Insert => "INSERT",
+            Self::Normal => "NORMAL",
+            Self::Visual => "VISUAL",
+            Self::VisualLine => "VISUAL LINE",
+        }
+    }
+
+    /// The mode `value` names, if it names one this spyc knows.
+    fn known(value: &Value) -> Option<Self> {
+        Self::deserialize(value).ok()
+    }
+}
+
+fn known_vim_mode<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<VimMode>, D::Error> {
+    Ok(Option::<Value>::deserialize(deserializer)?
+        .as_ref()
+        .and_then(VimMode::known))
 }
 
 /// No model's window is bigger than this.
@@ -89,6 +136,7 @@ pub fn project(payload: &Value) -> Statusline {
             }),
         five_hour: window(&limits["five_hour"]),
         seven_day: window(&limits["seven_day"]),
+        vim_mode: VimMode::known(&payload["vim"]["mode"]),
     }
 }
 
@@ -241,6 +289,7 @@ mod tests {
                 used_percent: 7,
                 resets_at: Some(-1),
             }),
+            vim_mode: Some(VimMode::Normal),
         }
         .bounded();
         assert_eq!(wire.session_id, None);
@@ -253,10 +302,52 @@ mod tests {
                 resets_at: None
             })
         );
+        assert_eq!(wire.vim_mode, Some(VimMode::Normal));
         assert_eq!(
             project(&input()).bounded(),
             project(&input()),
             "a real one survives"
         );
+    }
+
+    /// `vim.mode` is there only while `/vim` is on. Each mode Claude Code
+    /// names is kept; any other value, or none, is no mode.
+    #[test]
+    fn the_vim_mode_is_kept_while_vim_is_on() {
+        let with = |mode: Value| {
+            let mut payload = input();
+            payload["vim"] = json!({ "mode": mode });
+            project(&payload).vim_mode
+        };
+        assert_eq!(with(json!("INSERT")), Some(VimMode::Insert));
+        assert_eq!(with(json!("NORMAL")), Some(VimMode::Normal));
+        assert_eq!(with(json!("VISUAL")), Some(VimMode::Visual));
+        assert_eq!(with(json!("VISUAL LINE")), Some(VimMode::VisualLine));
+        for unknown in [json!("REPLACE"), json!("normal"), json!(1), Value::Null] {
+            assert_eq!(with(unknown.clone()), None, "{unknown}");
+        }
+        assert_eq!(project(&input()).vim_mode, None, "vim off");
+        let only_vim = json!({"vim": {"mode": "NORMAL"}});
+        assert!(
+            !project(&only_vim).is_empty(),
+            "a mode alone is worth forwarding"
+        );
+    }
+
+    /// A mode a newer forwarder names, which this spyc doesn't know, costs only
+    /// the mode: the rest of the report still lands.
+    #[test]
+    fn an_unknown_mode_on_the_wire_drops_only_the_mode() {
+        let mut wire = serde_json::to_value(project(&input())).unwrap();
+        wire["vim_mode"] = json!("NORMAL");
+        let read: Statusline = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(read.vim_mode, Some(VimMode::Normal));
+        wire["vim_mode"] = json!("REPLACE");
+        let read: Statusline = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(read.vim_mode, None);
+        assert_eq!(read.context, project(&input()).context);
+        wire.as_object_mut().unwrap().remove("vim_mode");
+        let read: Statusline = serde_json::from_value(wire).unwrap();
+        assert_eq!(read.vim_mode, None, "an older forwarder sends none");
     }
 }
