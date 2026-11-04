@@ -549,6 +549,7 @@ mod send_selection;
 mod tab_completion;
 mod tab_cwd;
 mod thinking_history;
+mod view_chords;
 mod vsplit;
 mod why_status;
 
