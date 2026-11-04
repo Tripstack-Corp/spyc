@@ -374,7 +374,6 @@ fn agent_hud_collection_stops_on_a_project_with_no_strip() {
 /// A dim rule separates the agent's last row from the strip, so the strip
 /// reads as spyc's text rather than more of the agent's footer.
 #[test]
-#[ignore = "red: no rule above the strip"]
 fn a_rule_separates_the_agent_from_the_strip() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -396,9 +395,9 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
     crate::state::with_state_root(tmp.path(), || {
         let mut app = fixture(tmp.path(), tmp.path());
         app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Compact;
-        assert_eq!(paint(&mut app, 100, 32).1.len(), 2);
+        assert_eq!(paint(&mut app, 100, 32).1.len(), 3);
         app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Full;
-        assert_eq!(paint(&mut app, 100, 32).1.len(), 4);
+        assert_eq!(paint(&mut app, 100, 32).1.len(), 5);
         for status in [
             crate::config::StatusPosition::Top,
             crate::config::StatusPosition::Bottom,
@@ -463,10 +462,10 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
                                         .with_screen(TerminalScreen::size),
                                     (child.height, child.width)
                                 );
-                                assert!(rows[0].contains("56789abc") || width < 22);
+                                assert!(rows[1].contains("56789abc") || width < 22);
                                 if strip.width >= 40 {
-                                    assert!(rows[1].starts_with("│ context"));
-                                    assert!(rows[1].ends_with("awaiting metrics"));
+                                    assert!(rows[2].starts_with("│ context"));
+                                    assert!(rows[2].ends_with("awaiting metrics"));
                                 }
                             } else {
                                 assert_eq!(on.pane, off.pane);
@@ -485,9 +484,9 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
         pager.mount = crate::ui::pager::Mount::LowerPane;
         app.view.project_mut().scroll_pager = Some(pager);
         let (layout, rows) = paint(&mut app, 100, 32);
-        assert_eq!(rows.len(), 4);
-        assert!(rows[3].starts_with("│ mode") && rows[3].contains("hooks off"));
-        assert!(rows[2].starts_with("│ recent") && rows[2].ends_with("--"));
+        assert_eq!(rows.len(), 5);
+        assert!(rows[4].starts_with("│ mode") && rows[4].contains("hooks off"));
+        assert!(rows[3].starts_with("│ recent") && rows[3].ends_with("--"));
         assert!(
             app.agent_hud_lines(layout.agent_hud.unwrap())
                 .iter()
@@ -500,7 +499,7 @@ fn agent_hud_real_frame_resizes_child_and_preserves_chrome_across_modes() {
         ));
         assert_eq!(
             paint(&mut app, 100, 32).1.len(),
-            4,
+            5,
             "top pager must retain the strip below"
         );
     });
