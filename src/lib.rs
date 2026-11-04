@@ -48,6 +48,7 @@ mod skill;
 mod state;
 mod stderr_capture;
 mod sysinfo;
+mod taskfile;
 mod term_title;
 mod terminal;
 mod ui;
