@@ -19,7 +19,7 @@ pub fn tools() -> Value {
             },
             {
                 "name": "report_status",
-                "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'waiting' when you end your turn while background work you started (a CI run, a build, a monitor) will wake you — with a short `note` saying what you wait on — and 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Targets your own tab by default (the focused tab if your connection named none); pass `pane` for a specific tab. Cheap and idempotent — call it freely.",
+                "description": "Report YOUR current activity so spyc shows it as a live dot on your pane tab — the 'which agent needs me' signal. Call it as your turn changes: 'working' when you start a non-trivial task, 'blocked' when you stop to ask the user a question or for permission (this is the one that earns attention), 'done' when you finish, 'waiting' when you end your turn while background work you started (a CI run, a build, a monitor) will wake you — with a short `note` saying what you wait on — and 'idle' when waiting with nothing pending. Overrides spyc's output-timing guess and keeps your dot accurate through silent thinking. Reports for your own tab and no other (the focused tab if your connection named none). Cheap and idempotent — call it freely.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -35,11 +35,11 @@ pub fn tools() -> Value {
                         },
                         "pane_id": {
                             "type": "string",
-                            "description": "Optional stable pane id (the `SPYC_PANE_ID` env var spyc set for your pane). The auto-hook passes this; you normally don't need it."
+                            "description": "Optional: your own pane's stable id (the `SPYC_PANE_ID` env var spyc set for your pane). The status hook passes it; omit it. Another tab's id is refused."
                         },
                         "pane": {
                             "type": "integer",
-                            "description": "Optional 1-based tab number (the `[N]` in the divider) to report for. Defaults to the focused tab — normally omit it."
+                            "description": "Optional 1-based tab number (the `[N]` in the divider); it must be your own tab's. Omit it."
                         },
                         "ttl_ms": {
                             "type": "integer",
@@ -60,8 +60,8 @@ pub fn tools() -> Value {
                         "intent": {"type": "string", "enum": ["editing", "merging"], "description": "editing = informational; merging = blocks another agent's wait_for_scope_clear on overlapping paths."},
                         "pr": {"type": "string", "description": "Optional PR identifier this claim is for (e.g. '#661')."},
                         "note": {"type": "string", "description": "Optional free-text note shown in list_scopes / the orchestration screen."},
-                        "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your own tab."},
-                        "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
+                        "pane_id": {"type": "string", "description": "Optional: your own pane's stable id (SPYC_PANE_ID); another tab's is refused. Omit it."},
+                        "pane": {"type": "integer", "description": "Optional 1-based tab number; it must be your own tab's. Omit it."}
                     },
                     "required": ["paths", "intent"]
                 }
@@ -88,8 +88,8 @@ pub fn tools() -> Value {
                     "properties": {
                         "paths": {"type": "array", "items": {"type": "string"}, "description": "File paths/globs to wait on (usually the same set you register_scope'd)."},
                         "timeout_ms": {"type": "integer", "description": "Max wait in ms (default 300000, capped 600000). Returns outcome='timed_out' if it elapses."},
-                        "pane_id": {"type": "string", "description": "Optional stable pane id (SPYC_PANE_ID); defaults to your own tab."},
-                        "pane": {"type": "integer", "description": "Optional 1-based tab number; defaults to the focused tab."}
+                        "pane_id": {"type": "string", "description": "Optional: your own pane's stable id (SPYC_PANE_ID); another tab's is refused. Omit it."},
+                        "pane": {"type": "integer", "description": "Optional 1-based tab number; it must be your own tab's. Omit it."}
                     },
                     "required": ["paths"]
                 }

@@ -102,10 +102,10 @@ pub enum McpCommand {
     /// Agent self-reports its activity for the per-tab dot (P1 semantic
     /// channel). `status` is an activity name or a correlated Codex question signal. Targeting, in
     /// priority order: `pane_id` (the stable `SPYC_PANE_ID` uuid — what the
-    /// auto-hook sends, and what the socket thread fills in from an attributed
-    /// connection when the call names no target), else `pane` (a 1-based
-    /// divider `[N]`), else the focused tab. `ttl_ms` overrides the backstop
-    /// expiry. Overrides output timing.
+    /// auto-hook sends, and the only target the socket thread sends for a
+    /// connection bound to a tab, which acts for that tab alone), else `pane`
+    /// (a 1-based divider `[N]`), else the focused tab. `ttl_ms` overrides the
+    /// backstop expiry. Overrides output timing.
     ReportStatus {
         pane_id: Option<String>,
         pane: Option<usize>,
@@ -116,7 +116,8 @@ pub enum McpCommand {
         /// The agent's live session UUID, piggybacked from the status hook's
         /// stdin (Claude includes `session_id` in every hook payload). `Some`
         /// only on hook-driven reports; a direct agent `report_status` call (or
-        /// the Lua binding) omits it. Lets `save_session` prefer the *live*
+        /// the Lua binding) omits it, and the socket thread drops it from a
+        /// connection bound to a tab. Lets `save_session` prefer the *live*
         /// conversation over the spawn-proximity resolver (P1-3).
         session_id: Option<String>,
         hook_event: Option<crate::agent::status_hook::StatusHookEvent>,

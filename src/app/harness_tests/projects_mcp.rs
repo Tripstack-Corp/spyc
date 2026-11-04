@@ -415,7 +415,6 @@ fn wait_for_scope_clear_from_another_project_waits_on_others_claims() {
 /// tab, in its project or another, by id or by number, is refused and changes
 /// no tab, while naming its own is served.
 #[test]
-#[ignore = "red: a bound call naming another tab reports for that tab"]
 fn a_bound_agent_reports_for_no_other_tab() {
     with_projects(|p| {
         let a2 = p.second_tab_in_a();
@@ -447,7 +446,6 @@ fn a_bound_agent_reports_for_no_other_tab() {
 /// The scope tools follow the same rule: an agent's connection claims, and
 /// waits, as its own tab only (#916).
 #[test]
-#[ignore = "red: a bound scope call naming another tab acts as that tab"]
 fn a_bound_agent_claims_and_waits_as_no_other_tab() {
     with_projects(|p| {
         let a2 = p.second_tab_in_a();
@@ -473,7 +471,6 @@ fn a_bound_agent_claims_and_waits_as_no_other_tab() {
 /// an agent's connection can't re-pin its tab's conversation for `-r` and the
 /// HUD, while the hook still does (#916).
 #[test]
-#[ignore = "red: a bound report's session_id pins the tab's conversation"]
 fn only_the_hook_pins_a_tabs_conversation() {
     fn tab<'a>(app: &'a mut App, pane: &str) -> &'a mut crate::pane::tabs::TabInfo {
         let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();

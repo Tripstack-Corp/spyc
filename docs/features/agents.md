@@ -80,8 +80,10 @@ Claude can query and control the workspace through these tools:
 - **`report_status(status, [pane], [ttl_ms], [note])`** -- self-report activity
   for your pane's dot: `working` / `blocked` (the "needs me" hot-red dot) /
   `done` / `waiting` (turn over, background work will wake you; `note` says on
-  what) / `idle`. Overrides spyc's output-timing guess and targets the caller's
-  own tab by default. A report lapses after a while unless renewed, except
+  what) / `idle`. Overrides spyc's output-timing guess and reports for the
+  caller's own tab alone: an agent's call naming another tab, by `pane_id` or
+  `pane`, is refused, as is a scope claim or wait naming one. A report lapses
+  after a while unless renewed, except
   `blocked`, which stays until the user answers or a newer report replaces it.
   How reports, hooks and interrupts combine:
   [`docs/AGENT_ORCHESTRATION.md`](../AGENT_ORCHESTRATION.md).

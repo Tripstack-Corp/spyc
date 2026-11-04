@@ -214,7 +214,11 @@ fn create_worktree_command(args: &Value, caller: &Caller) -> Result<McpCommand, 
 
 /// `report_status`'s arguments. A status hook adds the agent's `session_id`
 /// and its event's metadata; a direct agent call carries neither.
-fn report_status_command(args: &Value, caller: &Caller) -> Result<McpCommand, &'static str> {
+fn report_status_command(
+    args: &Value,
+    caller: &Caller,
+    tx: &std::sync::mpsc::Sender<McpRequest>,
+) -> Result<McpCommand, String> {
     let status = args["status"].as_str().unwrap_or("").to_string();
     if crate::pane::AgentActivity::reportable(&status).is_none()
         && !matches!(
@@ -223,28 +227,127 @@ fn report_status_command(args: &Value, caller: &Caller) -> Result<McpCommand, &'
                 | crate::agent::codex_recovery::QUESTION_END
         )
     {
-        return Err("status must be one of: working, blocked, idle, done, waiting");
+        return Err("status must be one of: working, blocked, idle, done, waiting".into());
     }
+    let (pane_id, pane) = call_target("report_status", args, caller, tx)?;
+    // The hook-only fields, which a connection bound to a tab never carries:
+    // the status hook reports over a one-shot that never initializes.
+    let hook = if caller.pane_id.is_some() {
+        &Value::Null
+    } else {
+        args
+    };
     Ok(McpCommand::ReportStatus {
-        pane_id: target_pane_id(args, caller),
-        pane: args["pane"].as_u64().and_then(|n| usize::try_from(n).ok()),
+        pane_id,
+        pane,
         status,
         ttl_ms: args["ttl_ms"].as_u64(),
         note: args["note"].as_str().and_then(crate::mcp_cmd::report_note),
-        session_id: args["session_id"].as_str().map(String::from),
-        hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&args["hook_event"]),
+        session_id: hook["session_id"].as_str().map(String::from),
+        hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&hook["hook_event"]),
     })
 }
 
-/// The tab a targeting call (`report_status`, the scope tools) means by
-/// `pane_id`: the one it names, else this connection's own unless it named a
-/// `pane` index instead. `None` leaves the loop's fallback, the focused tab.
-fn target_pane_id(args: &Value, caller: &Caller) -> Option<String> {
-    match args["pane_id"].as_str() {
-        Some(p) => Some(p.to_string()),
-        None if args["pane"].is_null() => caller.pane_id.clone(),
-        None => None,
+/// `register_scope`'s arguments; its claim is the target tab's.
+fn register_scope_command(
+    args: &Value,
+    caller: &Caller,
+    tx: &std::sync::mpsc::Sender<McpRequest>,
+) -> Result<McpCommand, String> {
+    let paths = strings(&args["paths"]);
+    if paths.is_empty() {
+        return Err("missing required parameter: paths".into());
     }
+    let intent = args["intent"].as_str().unwrap_or("").to_string();
+    if !matches!(intent.as_str(), "editing" | "merging") {
+        return Err("intent must be 'editing' or 'merging'".into());
+    }
+    let (pane_id, pane) = call_target("register_scope", args, caller, tx)?;
+    Ok(McpCommand::RegisterScope {
+        pane_id,
+        pane,
+        paths,
+        intent,
+        pr: args["pr"].as_str().map(String::from),
+        note: args["note"].as_str().map(String::from),
+    })
+}
+
+/// `wait_for_scope_clear`'s arguments; the target tab's own claims never
+/// block it.
+fn wait_for_scope_clear_command(
+    args: &Value,
+    caller: &Caller,
+    tx: &std::sync::mpsc::Sender<McpRequest>,
+) -> Result<McpCommand, String> {
+    let paths = strings(&args["paths"]);
+    if paths.is_empty() {
+        return Err("missing required parameter: paths".into());
+    }
+    let (pane_id, pane) = call_target("wait_for_scope_clear", args, caller, tx)?;
+    Ok(McpCommand::WaitForScopeClear {
+        pane_id,
+        pane,
+        paths,
+        timeout_ms: scope_wait_ms(args),
+    })
+}
+
+/// The strings in `value`, a JSON array; none when it isn't one.
+fn strings(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The tab a targeting call (`report_status`, the scope tools) acts for, as
+/// the `pane_id` and `pane` number the loop resolves. A connection bound to a
+/// tab acts for that tab alone (#916): naming another, by id or by number, is
+/// refused, and naming its own is served as its own. Any other connection
+/// keeps what it names, and naming nothing leaves the loop's fallback, the
+/// focused tab.
+fn call_target(
+    tool: &str,
+    args: &Value,
+    caller: &Caller,
+    tx: &std::sync::mpsc::Sender<McpRequest>,
+) -> Result<(Option<String>, Option<usize>), String> {
+    let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
+    let Some(own) = caller.pane_id.as_deref() else {
+        return Ok((args["pane_id"].as_str().map(String::from), pane));
+    };
+    let refuse = |why: String| {
+        format!("{tool} acts only for your own tab: {why}. Omit `pane_id` and `pane`.")
+    };
+    if let Some(named) = args["pane_id"].as_str().filter(|p| *p != own) {
+        return Err(refuse(format!("pane_id {named} is another tab")));
+    }
+    if let Some(n) = pane {
+        match own_tab_number(tx, caller) {
+            Some(tab) if tab == n => {}
+            Some(tab) => return Err(refuse(format!("yours is [{tab}], not [{n}]"))),
+            None => return Err(refuse(format!("spyc couldn't confirm [{n}] is yours"))),
+        }
+    }
+    Ok((Some(own.to_string()), None))
+}
+
+/// The number (`[N]`) the tab `caller` is bound to has now, as the loop
+/// reads it.
+fn own_tab_number(tx: &std::sync::mpsc::Sender<McpRequest>, caller: &Caller) -> Option<usize> {
+    let command = McpCommand::CallerContext {
+        pane_id: caller.pane_id.clone(),
+        project: caller.project?,
+    };
+    let about = ask(tx, command)?;
+    about["pane"]["tab"]
+        .as_u64()
+        .and_then(|n| usize::try_from(n).ok())
 }
 
 /// [`dispatch_for`] an unattributed caller.
@@ -690,9 +793,9 @@ fn handle_tools_call(
                 return send_tool_error(w, id, "writable actions not available in stdio mode");
             };
             let command = match name {
-                "report_status" => match report_status_command(args, caller) {
+                "report_status" => match report_status_command(args, caller, tx) {
                     Ok(cmd) => cmd,
-                    Err(message) => return send_tool_error(w, id, message),
+                    Err(message) => return send_tool_error(w, id, &message),
                 },
                 "navigate_to" => {
                     let path = args["path"].as_str().unwrap_or("").to_string();
@@ -745,35 +848,10 @@ fn handle_tools_call(
                     }
                     McpCommand::OpenWorktree { path }
                 }
-                "register_scope" => {
-                    let paths: Vec<String> = args["paths"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if paths.is_empty() {
-                        return send_tool_error(w, id, "missing required parameter: paths");
-                    }
-                    let intent = args["intent"].as_str().unwrap_or("").to_string();
-                    if !matches!(intent.as_str(), "editing" | "merging") {
-                        return send_tool_error(w, id, "intent must be 'editing' or 'merging'");
-                    }
-                    let pane_id = target_pane_id(args, caller);
-                    let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
-                    let pr = args["pr"].as_str().map(String::from);
-                    let note = args["note"].as_str().map(String::from);
-                    McpCommand::RegisterScope {
-                        pane_id,
-                        pane,
-                        paths,
-                        intent,
-                        pr,
-                        note,
-                    }
-                }
+                "register_scope" => match register_scope_command(args, caller, tx) {
+                    Ok(cmd) => cmd,
+                    Err(message) => return send_tool_error(w, id, &message),
+                },
                 "list_scopes" => McpCommand::ListScopes,
                 "release_scope" => {
                     let Some(claim_id) = args["id"].as_u64() else {
@@ -781,28 +859,10 @@ fn handle_tools_call(
                     };
                     McpCommand::ReleaseScope { id: claim_id }
                 }
-                "wait_for_scope_clear" => {
-                    let paths: Vec<String> = args["paths"]
-                        .as_array()
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    if paths.is_empty() {
-                        return send_tool_error(w, id, "missing required parameter: paths");
-                    }
-                    let pane_id = target_pane_id(args, caller);
-                    let pane = args["pane"].as_u64().and_then(|n| usize::try_from(n).ok());
-                    let timeout_ms = scope_wait_ms(args);
-                    McpCommand::WaitForScopeClear {
-                        pane_id,
-                        pane,
-                        paths,
-                        timeout_ms,
-                    }
-                }
+                "wait_for_scope_clear" => match wait_for_scope_clear_command(args, caller, tx) {
+                    Ok(cmd) => cmd,
+                    Err(message) => return send_tool_error(w, id, &message),
+                },
                 _ => unreachable!(),
             };
 

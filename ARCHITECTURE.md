@@ -1020,8 +1020,13 @@ binds in every project's keymap. `get_spyc_context` adds `project` (its id,
 label, home, and whether
 the user is in it) and `pane`, that tab's live cwd, worktree root and branch,
 beside the fields that describe the user's view. `report_status`,
-`register_scope` and `wait_for_scope_clear` default to that tab instead of the
-focused one, and a report naming a pane finds it in whichever project holds it.
+`register_scope` and `wait_for_scope_clear` act for that tab alone, never the
+focused one: naming another tab, by `pane_id` or `pane`, is refused before the
+call reaches the loop (`protocol::call_target`), and a bound report's hook-only
+`session_id` and `hook_event` are dropped, since the status hook reports over a
+one-shot that never initializes (#916). A connection bound to no tab keeps the
+target it names, and a report naming a pane finds it in whichever project holds
+it.
 An `initialize` naming neither a pane nor a cwd (an older proxy) and a
 connection that never initializes (the status hook) are served exactly as
 before. A proxy or status hook that codex's shared
