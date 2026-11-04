@@ -513,6 +513,7 @@ mod agent_spawn;
 mod agent_waiting;
 mod agy_live;
 mod archive;
+mod blocked_label;
 mod codex_home;
 mod codex_images;
 mod codex_questions;
