@@ -28,6 +28,8 @@ mod hint_tests;
 #[cfg(test)]
 mod menu_tests;
 #[cfg(test)]
+mod pager_menu_tests;
+#[cfg(test)]
 mod pane_copy_tests;
 mod route;
 mod scroll;
