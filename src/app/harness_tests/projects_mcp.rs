@@ -782,6 +782,39 @@ fn list_worktrees_falls_back_to_the_agents_cwd() {
     });
 }
 
+/// A project home holding a stray `.git` that isn't a repo (#890): neither
+/// tool takes it for one. Both fall back to the repo the agent's tab is in,
+/// and agree on it: the worktree `create_worktree` makes there is one
+/// `list_worktrees` lists.
+#[test]
+#[ignore = "red: create_worktree takes the stray .git for a repo and fails to open it"]
+fn a_stray_git_at_the_project_home_falls_back_to_the_agents_repo() {
+    with_projects(|p| {
+        std::fs::create_dir_all(p.a_home.join(".git/info")).unwrap();
+        std::fs::write(p.a_home.join(".git/info/exclude"), "").unwrap();
+        let agent = p.base.join("agent");
+        std::fs::create_dir(&agent).unwrap();
+        std::fs::write(agent.join("in_b.rs"), "").unwrap();
+        init_repo(&agent);
+        let a = p.app.state.active;
+        let pane = p.app.open_tab_in_project(a, &agent);
+        let meta = json!({"spyc/paneId": pane, "spyc/cwd": agent});
+        let (created, listed) = p.wire(move |c| {
+            c.initialize_with(meta);
+            let created = c.tool("create_worktree", json!({"branch": "agent-wt"}));
+            (created, c.tool("list_worktrees", json!({})))
+        });
+        let wt = p.base.join("agent.worktrees/agent-wt");
+        assert_eq!(created["path"], wt.to_str().unwrap(), "{created}");
+        let paths: Vec<&str> = listed
+            .as_array()
+            .map(|a| a.iter().filter_map(|e| e["path"].as_str()).collect())
+            .unwrap_or_default();
+        let want = [agent.to_str().unwrap(), wt.to_str().unwrap()];
+        assert_eq!(paths, want, "{listed}");
+    });
+}
+
 #[test]
 fn teardown_removes_every_projects_context_file() {
     with_projects(|p| {
