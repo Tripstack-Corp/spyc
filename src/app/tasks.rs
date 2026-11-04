@@ -566,7 +566,9 @@ impl App {
             finished_at: None,
             has_unread_output: false,
             viewed_in_task_viewer: false,
-            paused: false,
+            // A `^z`-suspended tab is still stopped: it stays so, as a paused
+            // task that `C` / `:resume` continues.
+            paused: info.suspended,
         };
         self.runtime.background_tasks.tasks.push(task);
         self.view.needs_full_repaint = true;

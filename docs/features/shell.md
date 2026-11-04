@@ -242,7 +242,9 @@ to lock you out of spyc.
   pane tab into the background-task list without killing the
   child, which carries on as the same process. The task's buffer
   starts empty, as after vim's `^z`: what was on screen isn't
-  carried over. Bring it back via `:fg` or `:task-to-pane`.
+  carried over. A tab suspended with `^z` stays stopped and becomes a
+  paused task (`[N⏸]`), which `C` or `:resume` continues. Bring it
+  back via `:fg` or `:task-to-pane`.
 - **Right-click** on a running capture opens its menu: background,
   interrupt and kill, each with its key. On the task viewer it offers
   what applies to the task on screen (foreground, pause or continue,
