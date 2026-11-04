@@ -81,6 +81,16 @@ impl App {
                 let Some(capture) = self.runtime.pending_capture.take() else {
                     return;
                 };
+                // A menu open over the capture offers what only a running
+                // capture has.
+                if self
+                    .view
+                    .chord_hint
+                    .as_ref()
+                    .is_some_and(super::ChordHint::is_pager_menu)
+                {
+                    self.clear_chord_hint();
+                }
                 // Status glyph mirrors the bottom-status-bar conventions
                 // (✓ for exit 0, ✗ for everything else) so the pager title
                 // tells the user at a glance whether their command succeeded.

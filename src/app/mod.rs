@@ -211,7 +211,7 @@ pub use run::RunCtx;
 // defined here.
 use runtime::{PendingScopeWait, Runtime};
 pub use view_state::{ChordHint, ImageGallery, ImageView, ViewState, VisualBell};
-use view_state::{HarpoonMenu, PagerReturn, TabState};
+use view_state::{HarpoonMenu, HintEntry, PagerReturn, TabState};
 
 use capture::PendingCapture;
 #[cfg(unix)]

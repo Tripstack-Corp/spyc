@@ -147,6 +147,9 @@ pub enum MenuAt {
     Divider,
     /// The split's vertical divider.
     VDivider,
+    /// The open pager in this slot: a live capture's, the task viewer, a
+    /// scrollback or a `D` pager.
+    Pager(PagerSlot),
 }
 
 /// What the user did, reduced to the axis routing cares about.
@@ -287,17 +290,17 @@ impl MouseSnapshot {
         !self.is_prompting && !matches!(self.pager_mount, Some(Mount::Overlay))
     }
 
-    /// The object a right-click opens a menu for: a tab label, the pane
-    /// divider or the split's, a file row, or the body of a live pane. A pager
-    /// or chrome painted over the layout hides what is beneath it, and blank
-    /// space is no object.
+    /// The object a right-click opens a menu for: a tab label, a pager, the
+    /// pane divider or the split's, a file row, or the body of a live pane. A
+    /// pager or chrome painted over the layout hides what is beneath it, and
+    /// blank space is no object.
     const fn menu_at(self) -> Option<MenuAt> {
         // A tab label is drawn through the chrome funnel, so it is read first.
         if let Some(index) = self.tab_under_pointer {
             return Some(MenuAt::Tab(index));
         }
-        if self.covering_pager.is_some() {
-            return None;
+        if let Some(slot) = self.covering_pager {
+            return Some(MenuAt::Pager(slot));
         }
         // So is the rest of the divider, unless the prompt row has taken it.
         if matches!(self.region, Some(Region::Divider)) && !self.prompt_on_divider {
@@ -495,8 +498,11 @@ pub const fn decide_agent_view_action(
 /// the region decides. A pager mounted as an overlay covers the list, so it takes
 /// events aimed at the list region.
 pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
-    // A modal owns the whole screen; the pointer's region is irrelevant.
-    if snap.modal.is_some() {
+    // A modal owns the whole screen; the pointer's region is irrelevant. A live
+    // `!` capture is the one with a menu: its pager is the screen, and the
+    // menu's own popup takes clicks over it, as `route_input` gives it keys.
+    let capture = matches!(snap.modal, Some(Modal::Capture));
+    if snap.modal.is_some() && !capture {
         return MouseSink::Swallow;
     }
     // The which-key popup is drawn over everything below it, so the pointer on
@@ -517,6 +523,12 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     if snap.chord_armed && (snap.menu_open || !matches!(gesture, Gesture::Wheel)) {
         return MouseSink::DismissChord;
     }
+    if capture {
+        return match gesture {
+            Gesture::Right => MouseSink::ContextMenu(MenuAt::Pager(PagerSlot::Modal)),
+            Gesture::Left | Gesture::Middle | Gesture::Wheel => MouseSink::Swallow,
+        };
+    }
     let Some(region) = snap.region else {
         return MouseSink::Swallow;
     };
@@ -529,12 +541,7 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // the pager's own search/jump prompt), and the wheel/left arms below still route
     // to it when the pointer is actually over its content.
     if matches!(snap.pager_mount, Some(Mount::Overlay)) && !matches!(gesture, Gesture::Middle) {
-        return match (gesture, snap.covering_pager) {
-            (Gesture::Wheel, Some(slot)) => MouseSink::Pager(slot),
-            (Gesture::Left, Some(slot)) => MouseSink::FocusAndSelect(slot),
-            // Over the modal's frame but not its content: it still owns the event.
-            _ => MouseSink::Swallow,
-        };
+        return modal_pager_sink(gesture, snap.covering_pager);
     }
 
     // A prompt owns the keyboard, so the only gesture that can mean anything is a
@@ -550,16 +557,7 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // prompt at all, via a focused full-frame pager, which is why this is a
     // snapshot field rather than a check on `Mode` at one call site.
     if snap.is_prompting {
-        return match gesture {
-            Gesture::Middle => MouseSink::Paste,
-            // Selecting the prompt row's own text is the exception, and safe:
-            // the latch this arm guards against is a *chord* one — right-click
-            // arms a pending sequence the prompt's key handler never consumes.
-            // A left drag arms nothing and never reaches the resolver, so
-            // copying the command you just typed costs the guard nothing.
-            Gesture::Left if snap.over_chrome_row => MouseSink::SelectChrome,
-            Gesture::Left | Gesture::Right | Gesture::Wheel => MouseSink::Swallow,
-        };
+        return prompt_sink(gesture, snap.over_chrome_row);
     }
 
     // Middle and right are spyc's everywhere, never forwarded — otherwise the
@@ -685,6 +683,37 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
         Region::Divider | Region::Prompt | Region::Status | Region::VDivider | Region::AgentHud => {
             MouseSink::Swallow
         }
+    }
+}
+
+/// A gesture while a full-frame modal pager is open, over its content when
+/// `covering` names the slot there.
+const fn modal_pager_sink(gesture: Gesture, covering: Option<PagerSlot>) -> MouseSink {
+    match (gesture, covering) {
+        (Gesture::Wheel, Some(slot)) => MouseSink::Pager(slot),
+        (Gesture::Left, Some(slot)) => MouseSink::FocusAndSelect(slot),
+        // Its menu, which arms no chord: an open menu hears the keys before the
+        // pager does.
+        (Gesture::Right, Some(PagerSlot::Modal)) => {
+            MouseSink::ContextMenu(MenuAt::Pager(PagerSlot::Modal))
+        }
+        // Over the modal's frame but not its content: it still owns the event.
+        _ => MouseSink::Swallow,
+    }
+}
+
+/// A gesture while a prompt is open: a paste, or a selection of the prompt
+/// row's own text (`over_chrome_row`).
+const fn prompt_sink(gesture: Gesture, over_chrome_row: bool) -> MouseSink {
+    match gesture {
+        Gesture::Middle => MouseSink::Paste,
+        // Selecting the prompt row's own text is the exception, and safe:
+        // the latch this arm guards against is a *chord* one — right-click
+        // arms a pending sequence the prompt's key handler never consumes.
+        // A left drag arms nothing and never reaches the resolver, so
+        // copying the command you just typed costs the guard nothing.
+        Gesture::Left if over_chrome_row => MouseSink::SelectChrome,
+        Gesture::Left | Gesture::Right | Gesture::Wheel => MouseSink::Swallow,
     }
 }
 

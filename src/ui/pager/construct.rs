@@ -244,7 +244,7 @@ const PAGER_HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
                 "p",
                 "open in $PAGER (less, full-screen takeover — for huge files)",
             ),
-            ("s", "save to file (command output only)"),
+            ("s", "save to file (command output, a task, a scrollback)"),
         ],
     ),
     (

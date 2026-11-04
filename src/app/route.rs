@@ -170,7 +170,9 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     match snap.modal {
         Some(Modal::ImageView) => return InputSink::ImageView,
         Some(Modal::FindPicker) => return InputSink::FindPicker,
-        Some(Modal::Capture) => return InputSink::Capture,
+        // A live capture's menu is drawn over it, so the menu hears the keys
+        // first; the ones it doesn't take reach the capture once it closes.
+        Some(Modal::Capture) if !snap.menu_open => return InputSink::Capture,
         Some(Modal::OverlayDismiss)
             if !snap.is_prompting && !matches!(snap.pager_mount, Some(Mount::Overlay)) =>
         {
@@ -179,7 +181,7 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
         Some(Modal::QuickSelect) => return InputSink::QuickSelect,
         Some(Modal::Harpoon) => return InputSink::Harpoon,
         Some(Modal::ImageGallery) => return InputSink::ImageGallery,
-        Some(Modal::OverlayDismiss) | None => {}
+        Some(Modal::Capture | Modal::OverlayDismiss) | None => {}
     }
 
     // An object's menu is drawn over every region, so it hears the keys before
@@ -1061,7 +1063,6 @@ mod tests {
     /// A live capture's menu is drawn over the capture, so it hears the keys
     /// before the command does; with no menu open, the command has them all.
     #[test]
-    #[ignore = "red: a live capture takes every key, an open menu's too"]
     fn a_menu_over_a_live_capture_hears_the_keys_first() {
         let capture = RouteSnapshot {
             modal: Some(Modal::Capture),

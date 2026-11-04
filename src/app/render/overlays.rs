@@ -481,7 +481,7 @@ impl App {
         // The mouse hit-tests this same layout, so a click on the box lands on
         // the box drawn here.
         let Some(layout) = crate::app::mouse::chord_hit::chord_hint_layout(
-            &hint.rows,
+            &hint.row_refs(),
             area,
             h_divider_row,
             v_divider_col,
@@ -525,7 +525,7 @@ impl App {
                     continue;
                 };
                 let key_cell = if line.first {
-                    let keys = hint.rows.get(line.entry).map_or("", |(k, _)| k);
+                    let keys = hint.rows.get(line.entry).map_or("", |(k, _)| k.as_str());
                     format!(" {keys:>key_w$}  ")
                 } else {
                     " ".repeat(key_w + 3)
