@@ -413,7 +413,7 @@ impl super::App {
             }
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
             MouseSink::StderrLog => self.open_stderr_log(),
-            MouseSink::Project(action) => self.press_project_key(action),
+            MouseSink::Project(action) => self.click_project(action),
             MouseSink::FocusPane => {
                 self.set_pane_focus(true);
                 Vec::new()
@@ -560,6 +560,18 @@ impl super::App {
                 Vec::new()
             }
         }
+    }
+
+    /// A left click on a status-bar project: what its key does, then that key
+    /// named, as a menu row's click names its own, until it is learned.
+    fn click_project(&mut self, action: ProjectAction) -> Vec<Effect> {
+        let before = self.state.flash.as_ref().map(|f| f.text.clone());
+        let effects = self.press_project_key(action);
+        if let Some((key, label)) = route::project_click_hint(action) {
+            let name = crate::keymap::Action::Project(action).canonical_name();
+            self.name_the_key(Some(key), &label, name, before);
+        }
+        effects
     }
 
     /// A right-click on the status bar's `segment`. A project's label goes to
