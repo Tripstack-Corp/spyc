@@ -64,7 +64,6 @@ fn linked_worktree(base: &Path) -> PathBuf {
 /// A worktree another session has claimed is locked, and `Space w d` refuses
 /// to remove it, so the git segment's menu offers no delete there.
 #[test]
-#[ignore = "red: the git menu offers `Space w d` on a locked worktree"]
 fn a_claimed_worktrees_git_menu_offers_no_delete() {
     with_mouse(|base| {
         let wt = linked_worktree(base);
@@ -93,7 +92,6 @@ fn a_claimed_worktrees_git_menu_offers_no_delete() {
 /// the next git poll: before it the menu offers delete, after it not, and
 /// once released, delete again.
 #[test]
-#[ignore = "red: the git cache holds no lock, so the menu offers delete on a claimed tree"]
 fn a_claim_taken_after_the_column_arrived_is_read_by_the_git_poll() {
     with_mouse(|base| {
         let wt = linked_worktree(base);
@@ -128,7 +126,6 @@ fn a_claim_taken_after_the_column_arrived_is_read_by_the_git_poll() {
 /// before any git poll: from the split's other column, the move and the
 /// focus change read nothing else.
 #[test]
-#[ignore = "red: the git cache holds no lock, so the menu offers delete on a claimed tree"]
 fn a_column_moving_to_a_claimed_worktree_reads_the_claim_on_arrival() {
     with_mouse(|base| {
         let wt = linked_worktree(base);
@@ -169,7 +166,6 @@ fn notes_menu(app: &mut App) -> Vec<String> {
 /// home gives it. Outside a repo with no home there is none, `Ha` refuses, and
 /// the entry's menu offers no harpoon; with a home it does.
 #[test]
-#[ignore = "red: the entry menu offers `Ha` with no harpoon list to append to"]
 fn an_entrys_menu_offers_harpoon_only_with_a_list_to_append_to() {
     with_mouse(|base| {
         let mut app = app_over_entries(base);
@@ -283,7 +279,6 @@ const FORK: &str = "^a F  fork pane tab's conversation";
 /// branch, so its menu offers no fork; once its hook has reported the
 /// session, it does.
 #[test]
-#[ignore = "red: the tab menu offers `^a F` with no conversation pinned to the tab"]
 fn a_claude_tabs_menu_offers_fork_only_with_a_conversation() {
     with_mouse(|base| {
         let mut app = app_with_agent_tab(base, "claude");
@@ -304,7 +299,6 @@ fn a_claude_tabs_menu_offers_fork_only_with_a_conversation() {
 /// no rollout `^a F` refuses, and so does the menu; with one but no home it
 /// still refuses; with both it forks.
 #[test]
-#[ignore = "red: the tab menu offers `^a F` with no rollout claimed or no launch home"]
 fn a_codex_tabs_menu_offers_fork_only_with_a_rollout_and_its_home() {
     with_mouse(|base| {
         let mut app = app_with_agent_tab(base, "codex");

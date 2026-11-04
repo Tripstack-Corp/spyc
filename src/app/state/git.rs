@@ -73,6 +73,7 @@ impl AppState {
     /// move file mtimes but NOT `.git/index`/`HEAD`, so a hit there would miss
     /// the ` M filename` markers refresh exists to surface).
     pub(super) fn refresh_git_state_for(&mut self, side: Side) -> bool {
+        self.read_worktree_lock(side);
         let key = self.compute_git_mtime_key_fast(side);
         // A throttled working-tree change (refresh_listing deferred its
         // invalidation) forces a re-walk: the mtime key can't see an unstaged
@@ -284,6 +285,21 @@ impl AppState {
         c.git_cache.current_config_path = config_path;
         c.git_cache.current_gitdir = gitdir;
         c.git_cache.current_repo_root = repo_root;
+        self.read_worktree_lock(side);
+    }
+
+    /// Read whether `side`'s worktree is locked into its git cache, where the
+    /// git segment's menu looks. A lock is a file beside the gitdir's `HEAD`,
+    /// so the poll's mtime key can't see one come or go: it is read on every
+    /// poll, one `stat`, before the key short-circuits.
+    fn read_worktree_lock(&mut self, side: Side) {
+        let locked = self
+            .col(side)
+            .git_cache
+            .current_gitdir
+            .as_deref()
+            .is_some_and(crate::git::worktree::is_locked);
+        self.col_mut(side).git_cache.worktree_locked = locked;
     }
 
     /// Resolve + cache `side`'s active repo root (and gitdir) for `canonical`,

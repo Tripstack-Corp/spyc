@@ -617,11 +617,10 @@ fn remove_inner_with(
 /// spyc's `claim_worktree` lease writes the lock with an owner reason, so
 /// surface it — a cooperating session sees WHO claimed it and why.
 fn refuse_if_locked(admin_dir: &Path) -> std::io::Result<()> {
-    let locked = admin_dir.join("locked");
-    if !locked.is_file() {
+    if !is_locked(admin_dir) {
         return Ok(());
     }
-    let reason = std::fs::read_to_string(&locked).unwrap_or_default();
+    let reason = std::fs::read_to_string(admin_dir.join("locked")).unwrap_or_default();
     let reason = reason.trim();
     Err(std::io::Error::other(if reason.is_empty() {
         "worktree is locked (claimed) — release it to remove".to_string()
@@ -767,6 +766,13 @@ pub fn admin_branch(admin_dir: &Path) -> Option<String> {
 /// `path` canonicalized, or when it no longer exists, its parent canonicalized
 /// with the name rejoined, so a deleted worktree still compares equal to the
 /// path its admin dir recorded (macOS `/var` vs `/private/var`).
+/// Whether the worktree whose admin dir (its resolved gitdir) is `admin_dir`
+/// is locked: what [`remove`] refuses, and what the git segment's menu reads
+/// to leave out `Space w d`.
+pub fn is_locked(admin_dir: &Path) -> bool {
+    admin_dir.join("locked").is_file()
+}
+
 fn canonical_even_if_missing(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| match (path.parent(), path.file_name()) {
         (Some(parent), Some(name)) => {

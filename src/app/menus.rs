@@ -45,6 +45,7 @@ impl App {
             deleted: row.deleted,
             pane_open: self.runtime.project().pane_tabs.is_some(),
             makefile: crate::taskfile::is_makefile(&row.path),
+            harpoon: c.harpoon.is_some(),
         };
         let name = row
             .path
@@ -60,6 +61,7 @@ impl App {
         let facts = TabFacts {
             is_shell: crate::shell::command_is_shell(&info.command),
             can_fork: super::pane_fork::forks(info),
+            fork_source: super::pane_fork::fork_source_known(info),
             exited: tabs.active().is_closed(),
         };
         Some((Target::PaneTab(facts), info.label.clone()))
@@ -217,7 +219,7 @@ impl App {
 
     /// The focused column's repo as a menu target. Its changes are the ones
     /// the bar's `*` counts; a worktree is removable as `Space w d` removes
-    /// it, from its root, clean, with the other column outside it.
+    /// it, from its root, clean, unclaimed, with the other column outside it.
     fn git_target(&self) -> Target {
         let c = self.state.cur();
         let root = c.git_cache.current_repo_root.as_deref();
@@ -240,7 +242,7 @@ impl App {
             .is_some_and(|o| o.listing.dir.starts_with(&c.listing.dir));
         Target::Git(GitFacts {
             changes,
-            removable: linked_root && !changes && !other_inside,
+            removable: linked_root && !changes && !other_inside && !c.git_cache.worktree_locked,
         })
     }
 

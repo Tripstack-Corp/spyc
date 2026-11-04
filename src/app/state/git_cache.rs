@@ -147,6 +147,10 @@ pub struct GitCache {
     /// bare reports clean with no worktree, and nothing about that moves
     /// `index` or `HEAD`.
     pub current_config_path: Option<std::path::PathBuf>,
+    /// The worktree at `current_gitdir` is locked, as `claim_worktree` and
+    /// `git worktree lock` leave it, so `Space w d` would refuse it. Read with
+    /// the gitdir and again on every git poll, so a menu opening reads no disk.
+    pub worktree_locked: bool,
     /// Cached structured repo-status (`Vec<StatusEntry>`). On a huge
     /// working tree the gix status walk traverses every tracked file in
     /// the index — 200-500 ms on a ~110k-file repo. After the first

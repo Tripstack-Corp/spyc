@@ -44,6 +44,9 @@ pub struct EntryFacts {
     pub pane_open: bool,
     /// A file named as make names a Makefile, whose targets `Space m` lists.
     pub makefile: bool,
+    /// The column has a harpoon list for `Ha` to append to: its repo's, or
+    /// the project home's.
+    pub harpoon: bool,
 }
 
 /// What a pane tab's menu depends on.
@@ -53,6 +56,9 @@ pub struct TabFacts {
     pub is_shell: bool,
     /// `^a F` forks this kind of tab (`src/app/pane_fork.rs`).
     pub can_fork: bool,
+    /// What `^a F` forks from is known: a claude or codex tab has a
+    /// conversation pinned to it, codex's with its launch home.
+    pub fork_source: bool,
     /// The child has exited: nothing to suspend or move to the tasks.
     pub exited: bool,
 }
@@ -172,7 +178,7 @@ fn entry_rows(e: EntryFacts) -> Vec<ChordEntry> {
         (e.git_changed, "gd", A::GitDiff),
         (e.git_tracked && file, "gb", A::GitBlame),
         (e.kind == EntryKind::File, ":chmod", A::ChmodAdd('x')),
-        (true, "Ha", A::HarpoonAppend),
+        (e.harpoon, "Ha", A::HarpoonAppend),
         (e.pane_open, "^a s", A::PaneSendSelection),
         (file && e.pane_open, "^a P", A::PanePipeContent),
         (true, "O", A::NewFilePrompt),
@@ -187,7 +193,7 @@ fn tab_rows(t: TabFacts) -> Vec<ChordEntry> {
     shown([
         (true, "^a R", A::PaneRestartTab),
         (!t.is_shell && !t.exited, "^z", A::PaneToggleSuspend),
-        (t.can_fork, "^a F", A::PaneForkTab),
+        (t.can_fork && t.fork_source, "^a F", A::PaneForkTab),
         (true, "^a r", A::PaneRenameTab),
         (true, "^a x", A::PaneCloseTab),
         (true, "^a z", A::TogglePaneZoom),
@@ -278,7 +284,7 @@ pub fn every_target() -> Vec<Target> {
         EntryKind::Symlink,
         EntryKind::Other,
     ] {
-        for bits in 0..32u8 {
+        for bits in 0..64u8 {
             let bit = |n: u8| bits & (1 << n) != 0;
             out.push(Target::Entry(EntryFacts {
                 kind,
@@ -287,14 +293,16 @@ pub fn every_target() -> Vec<Target> {
                 deleted: bit(2),
                 pane_open: bit(3),
                 makefile: bit(4),
+                harpoon: bit(5),
             }));
         }
     }
-    for bits in 0..8u8 {
+    for bits in 0..16u8 {
         let bit = |n: u8| bits & (1 << n) != 0;
         out.push(Target::PaneTab(TabFacts {
             is_shell: bit(0),
             can_fork: bit(1),
+            fork_source: bit(3),
             exited: bit(2),
         }));
     }

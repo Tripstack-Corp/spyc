@@ -57,8 +57,8 @@ quick-select and `y` in the pager are the mouse-free yank paths.
   - **The collapsed count** (`2/4`, where the bar is too short for every
     project) opens the open projects' rows alone.
   - **The git segment** offers the worktree list, a new worktree and, at the
-    root of a clean linked worktree, deleting it (`Space w l`, `n`, `d`), and
-    `gd` while the repo has changes.
+    root of a clean linked worktree no session has claimed, deleting it
+    (`Space w l`, `n`, `d`), and `gd` while the repo has changes.
   - **The agent segment** gives the pane the keyboard and opens its active
     tab's menu, as `^a .` does.
   - **The session segment** offers the session's info (`Space s`).
@@ -74,8 +74,9 @@ always does, so typing a row's key does what the row says, and from the pane
 a letter still reaches the agent, while `?` opens the list of every key, as the
 title says. In a pager's menu every key is the pager's, `?` too: in a running
 capture it is typed into the command. A row appears only where its action applies:
-no `e` on a directory, no suspend on a shell tab, no pause on a paused task,
-and inside an archive no row the archive refuses.
+no `e` on a directory, no harpoon outside a repo or a project home, no suspend
+on a shell tab, no fork before an agent tab has a conversation, no pause on a
+paused task, and inside an archive no row the archive refuses.
 
 iTerm2 keeps a plain right-click for its own menu, so hold **⌃** while you
 right-click there; spyc reads a right-click with any modifier the same.
