@@ -37,6 +37,12 @@ fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
     run_reporter_traced(state, payload, Trace::Arg)
 }
 
+/// [`run_reporter_for`], with the hook's `CLAUDE_CONFIG_DIR` set to `home`
+/// (`None` unsets it).
+fn run_reporter_in(state: &str, payload: &str, home: Option<&str>) -> (Value, String) {
+    run_reporter_with(state, payload, Trace::Arg, home)
+}
+
 /// How a reporter run is told to trace.
 enum Trace {
     /// The `--status-trace` argument hooks installed by older spycs carry.
@@ -47,6 +53,17 @@ enum Trace {
 }
 
 fn run_reporter_traced(state: &str, payload: &str, trace: Trace) -> (Value, String) {
+    run_reporter_with(state, payload, trace, None)
+}
+
+/// Every run names the hook's `CLAUDE_CONFIG_DIR`, so none inherits the
+/// developer's.
+fn run_reporter_with(
+    state: &str,
+    payload: &str,
+    trace: Trace,
+    claude_home: Option<&str>,
+) -> (Value, String) {
     warm_binary();
     let temp = tempfile::Builder::new()
         .prefix("spyc-hook-")
@@ -103,13 +120,19 @@ fn run_reporter_traced(state: &str, payload: &str, trace: Trace) -> (Value, Stri
         reader.get_mut().write_all(b"{}\n").unwrap();
         serde_json::from_slice::<Value>(&body).unwrap()
     });
-    let mut child = Command::new(env!("CARGO_BIN_EXE_spyc"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_spyc"));
+    command
         .args(&args)
         .env("SPYC_MCP_SOCK", &socket)
         .env("SPYC_PANE_ID", "pane-1")
         .env("XDG_STATE_HOME", temp.path().join("state"))
         .env("HOME", temp.path())
         .env_remove("SPYC_MCP_DEBUG")
+        .env_remove("CLAUDE_CONFIG_DIR");
+    if let Some(home) = claude_home {
+        command.env("CLAUDE_CONFIG_DIR", home);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -176,6 +199,35 @@ fn status_hook_reporter_forwards_only_metadata_and_redacts_trace_at_the_call_sit
     assert!(log.contains("PermissionRequest"), "{log}");
     assert!(!log.contains("private-"), "trace leaked content: {log}");
     assert!(!request.to_string().contains("private-"));
+}
+
+/// The hook runs in Claude Code's own environment, a wrapper's included, so the
+/// `CLAUDE_CONFIG_DIR` it sees is where this conversation is filed. It travels
+/// beside `session_id`, and the trace says only that it was set.
+#[test]
+#[ignore = "red: the reporter sends no `claude_home`"]
+fn the_reporter_sends_the_claude_home_it_runs_in_beside_the_session() {
+    let payload = json!({"hook_event_name": "UserPromptSubmit", "session_id": "session-1"});
+    let home = "/tmp/spyc-profile-b/claude";
+    let (request, log) = run_reporter_in("working", &payload.to_string(), Some(home));
+    let args = &request["params"]["arguments"];
+    assert_eq!(args["session_id"], "session-1");
+    assert_eq!(args["claude_home"], home, "{args}");
+    assert!(log.contains("claude_home=set"), "{log}");
+    assert!(!log.contains(home), "the trace names the home: {log}");
+}
+
+/// Only an absolute `CLAUDE_CONFIG_DIR` names a place: a relative one depends on
+/// a directory spyc can't see, and an empty or missing one names nothing.
+#[test]
+fn the_reporter_sends_no_claude_home_it_cannot_place() {
+    let payload = json!({"hook_event_name": "Stop", "session_id": "session-1"}).to_string();
+    for home in [Some("profile-b/claude"), Some(""), None] {
+        let (request, _) = run_reporter_in("done", &payload, home);
+        let args = &request["params"]["arguments"];
+        assert_eq!(args["session_id"], "session-1");
+        assert!(args["claude_home"].is_null(), "{home:?}: {args}");
+    }
 }
 
 #[test]
@@ -386,6 +438,7 @@ fn status_hook_reporter_under_codex_shared_daemon_reports_nothing() {
         .env("XDG_STATE_HOME", temp.path().join("state"))
         .env("HOME", temp.path())
         .env_remove("SPYC_MCP_DEBUG")
+        .env_remove("CLAUDE_CONFIG_DIR")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .spawn()
