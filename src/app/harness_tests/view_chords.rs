@@ -72,7 +72,6 @@ fn inventory_open(dir: &Path) -> App {
 /// `^a x` asks to close the running tab and `^a p` steps to the previous tab,
 /// rather than dropping the cursor's item or putting the inventory here.
 #[test]
-#[ignore = "red: the inventory's `x` and `p` take a pane chord's second key"]
 fn pane_chords_close_and_step_tabs_with_the_inventory_open() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -98,7 +97,6 @@ fn pane_chords_close_and_step_tabs_with_the_inventory_open() {
 
 /// `^a Esc` sends a plain `Esc` to the pane and leaves the inventory open.
 #[test]
-#[ignore = "red: the inventory's `Esc` takes `^a Esc` and closes the view"]
 fn ctrl_a_esc_sends_esc_with_the_inventory_open() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -121,7 +119,6 @@ fn ctrl_a_esc_sends_esc_with_the_inventory_open() {
 
 /// `^a d` and `^a t` are pane chords too: neither drops nor tags an item.
 #[test]
-#[ignore = "red: the inventory's `d` and `t` take a pane chord's second key"]
 fn ctrl_a_d_and_t_never_drop_or_tag_an_item() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -144,7 +141,6 @@ fn ctrl_a_d_and_t_never_drop_or_tag_an_item() {
 /// inventory's keys finishes as the chord: `yp` yanks the pane, it doesn't put
 /// the inventory.
 #[test]
-#[ignore = "red: the inventory's `p` takes the second key of `yp`"]
 fn a_file_chord_finishes_with_the_inventory_open() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -181,7 +177,6 @@ fn the_inventorys_own_keys_still_act_on_it() {
 /// reaches spyc: `^a` arms it, so `^a p` steps tabs and `^a x` asks to close
 /// one, and neither key reaches the program.
 #[test]
-#[ignore = "red: the graveyard view swallows `^a`, so `p` and `x` go to the program"]
 fn pane_chords_finish_while_the_graveyard_is_open() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

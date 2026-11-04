@@ -35,7 +35,7 @@ const FUNCTION: Rule = Rule {
         ("src/app/bootstrap.rs::App::new", 211),
         ("src/app/effect/executor.rs::App::run_effects", 157),
         ("src/app/file_ops.rs::run_file_op", 162),
-        ("src/app/key_dispatch/mod.rs::App::handle_key", 157),
+        ("src/app/key_dispatch/mod.rs::App::handle_key", 123),
         (
             "src/app/key_dispatch/prompts.rs::App::handle_vi_prompt_key",
             133,
