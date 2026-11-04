@@ -21,6 +21,8 @@ use crate::keymap::ProjectAction;
 use crate::ui::status_segments::{StatusSegment, segment_at};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
+#[cfg(test)]
+mod applicability_tests;
 pub(super) mod chord_hit;
 #[cfg(test)]
 mod divider_menu_tests;
