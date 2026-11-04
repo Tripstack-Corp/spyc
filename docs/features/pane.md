@@ -30,6 +30,12 @@ image protocols or OSC 52 clipboard writes. How it answers:
 - **^a ↓** send a literal `^a` to the pane — the prefix is otherwise
   unreachable by the child, but Claude binds `^a` (e.g. to expand notes),
   so this is the tmux-style "send-prefix" escape hatch
+- **^w ^w** or **^w ↓** send a literal `^w` to the pane: a shell's word
+  erase, or an agent's delete-word. To type `^w` straight through instead,
+  set `ctrl_w_prefix = false` under `[pane]`: while the pane has the
+  keyboard `^w` is then an ordinary key and `^a` the only prefix. From the
+  file view `^w` still arms the prefix, since no program there could receive
+  it
 - **^a Esc** send a plain `Esc` to the pane, on any terminal: the way to
   interrupt a working Claude whose vim-mode `Esc` spyc blocked (see
   [Claude's vim mode and `Esc`](agents.md#claudes-vim-mode-and-esc))

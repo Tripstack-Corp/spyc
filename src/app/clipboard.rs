@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{App, ClipMsg, Effect, PaneInput, PaneTarget, Wake};
+use crate::keymap::PanePrefix;
 
 impl App {
     /// yf — yank the cursor file's absolute path to the system
@@ -92,18 +93,19 @@ impl App {
         }]
     }
 
-    /// `^a ↓` — send a single literal Ctrl-A (0x01) to the active pane.
-    /// `^a` is spyc's pane prefix, so the child can never receive the byte
-    /// through normal input; this is the tmux `send-prefix` escape hatch
-    /// (Claude binds ^a, e.g. to expand notes).
-    pub fn send_prefix_to_pane(&mut self) -> Vec<Effect> {
+    /// `^a ↓`, `^w ↓` and `^w ^w` — send one literal `prefix` key (Ctrl-A
+    /// 0x01, Ctrl-W 0x17) to the active pane. Both are spyc's pane prefix, so
+    /// the child never receives them through normal input; this is the tmux
+    /// `send-prefix` escape hatch (Claude binds ^a, e.g. to expand notes, and
+    /// a shell's ^w erases a word).
+    pub fn send_prefix_to_pane(&mut self, prefix: PanePrefix) -> Vec<Effect> {
         if self.runtime.project().pane_tabs.is_none() {
             self.state.flash_error("no pane open (Ctrl-\\ to open one)");
             return Vec::new();
         }
         vec![Effect::SendToPane {
             target: PaneTarget::Active,
-            input: PaneInput::Bytes(vec![0x01]),
+            input: PaneInput::Bytes(vec![prefix.byte()]),
             on_ok: None,
             err_prefix: Some("send failed"),
         }]

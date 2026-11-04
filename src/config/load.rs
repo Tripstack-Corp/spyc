@@ -277,6 +277,9 @@ impl Config {
         if let Some(b) = file.claude_esc_guard {
             self.pane.claude_esc_guard = b;
         }
+        if let Some(b) = file.ctrl_w_prefix {
+            self.pane.ctrl_w_prefix = b;
+        }
         if let Some(b) = file.codex_mcp {
             self.pane.codex_mcp = b;
         }

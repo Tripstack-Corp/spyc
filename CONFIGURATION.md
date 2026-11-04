@@ -83,6 +83,7 @@ codex_mcp = true               # register spyc's MCP server in codex's user conf
 codex_daemon = false           # false: codex panes run `--no-daemon`, so their hooks + MCP reach the spyc that launched them
 preview_pasted_images = true   # keep a copy of images you paste into an agent pane, for `^a g`
 claude_esc_guard = true        # drop a bare Esc that would interrupt a working Claude in vim NORMAL mode
+ctrl_w_prefix = true           # ^w is a pane prefix like ^a; false sends a focused pane's ^w to its program
 agent_hud = "off"             # "off", "compact", or "full"; only your own files decide
 agent_hud_resets = "clock"    # when a plan window resets: "clock" (3:40pm, Thu 9am) or "countdown" (2h05m)
 

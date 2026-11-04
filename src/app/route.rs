@@ -140,6 +140,10 @@ pub(super) struct RouteSnapshot {
     /// An object's menu is open (`.`, `^a .`, a right-click). No chord is
     /// armed for it, so it is its own layer rather than `resolver_pending`.
     pub menu_open: bool,
+    /// `[pane] ctrl_w_prefix`: whether `^w` is a pane prefix while the pane has
+    /// the keyboard. False sends it to the pane's program; from any other
+    /// region it arms the prefix regardless.
+    pub ctrl_w_prefix: bool,
 }
 
 /// Decide where an input event goes. **Pure**, no mutation, no I/O.
@@ -192,13 +196,15 @@ pub(super) const fn route_input(snap: RouteSnapshot, kind: InputKind) -> InputSi
     }
 
     // Content layer.
+    let pane_focused = matches!(snap.focus, Focus::Pane);
     let is_meta = match kind {
-        InputKind::Key(key) => {
-            super::util::is_spyc_meta_when_pane_focused(key, snap.resolver_pending)
-        }
+        InputKind::Key(key) => super::util::is_spyc_meta_when_pane_focused(
+            key,
+            snap.resolver_pending,
+            snap.ctrl_w_prefix || !pane_focused,
+        ),
         InputKind::Paste => false,
     };
-    let pane_focused = matches!(snap.focus, Focus::Pane);
     let bottom_owns = snap.has_pane_tabs && pane_focused;
 
     // 1. Top-overlay pty (V editor, ; command). `Focus::Overlay` already means
@@ -327,6 +333,7 @@ impl App {
             right_preview_focused: self.right_column_focused()
                 && self.view.project().right_pager.is_some(),
             menu_open: self.menu_is_open(),
+            ctrl_w_prefix: self.state.active_project().config.pane.ctrl_w_prefix,
         }
     }
 }
@@ -351,6 +358,7 @@ mod tests {
             resolver_pending: false,
             right_preview_focused: false,
             menu_open: false,
+            ctrl_w_prefix: true,
         }
     }
 
@@ -418,6 +426,53 @@ mod tests {
             ..idle()
         };
         assert_eq!(route_key(snap, key('j')), InputSink::Resolver);
+    }
+
+    /// `[pane] ctrl_w_prefix = false` frees `^w` only where the pane has the
+    /// keyboard: there it is the program's, and everywhere else it arms the
+    /// pane prefix, as `^a` does everywhere. On, `^w` is the prefix in the pane
+    /// too.
+    #[test]
+    fn ctrl_w_prefix_off_frees_ctrl_w_only_in_the_focused_pane() {
+        let with = |ctrl_w_prefix, focus, pager_mount| RouteSnapshot {
+            has_pane_tabs: true,
+            focus,
+            pager_mount,
+            ctrl_w_prefix,
+            ..idle()
+        };
+        assert_eq!(
+            route_key(with(false, Focus::Pane, None), ctrl('w')),
+            InputSink::BottomPane
+        );
+        assert_eq!(
+            route_key(with(true, Focus::Pane, None), ctrl('w')),
+            InputSink::Resolver
+        );
+        assert_eq!(
+            route_key(with(false, Focus::Pane, None), ctrl('a')),
+            InputSink::Resolver
+        );
+        let armed = RouteSnapshot {
+            resolver_pending: true,
+            ..with(false, Focus::Pane, None)
+        };
+        assert_eq!(
+            route_key(armed, ctrl('w')),
+            InputSink::Resolver,
+            "`^a ^w` is still the chord's"
+        );
+        for (focus, mount) in [
+            (Focus::FileList, None),
+            (Focus::Overlay, None),
+            (Focus::Pager(Mount::TopPane), Some(Mount::TopPane)),
+        ] {
+            assert_eq!(
+                route_key(with(false, focus, mount), ctrl('w')),
+                InputSink::Resolver,
+                "{focus:?}"
+            );
+        }
     }
 
     // ── pager: overlay mount eats everything ──────────────────────
@@ -1048,6 +1103,7 @@ mod tests {
                             resolver_pending: false,
                             right_preview_focused: on(bits, 5),
                             menu_open: false,
+                            ctrl_w_prefix: true,
                         };
                         assert_eq!(
                             route_input(snap, InputKind::Paste),

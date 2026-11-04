@@ -28,9 +28,9 @@ pub enum PendingSeq {
     Mark,
     /// Seen `'`, waiting for a letter `a-z` to jump to that mark.
     JumpMark,
-    /// Seen `Ctrl-W`, waiting for a pane-command letter
-    /// (`j`/`k`/`s`/`+`/`-`/`\\`/`c`).
-    W,
+    /// Seen the pane prefix, `^a` or `^w` (the payload says which), waiting for
+    /// a pane-command letter (`j`/`k`/`s`/`+`/`-`/`\\`/`c`).
+    W(PanePrefix),
     /// Seen uppercase `W`, waiting for a worktree sub-command (l/n/d).
     Worktree,
     /// Seen `y`, waiting for: `y` = take (inventory yank), `p` = yank pane.
@@ -56,6 +56,41 @@ pub enum PendingSeq {
     /// waiting for a global/workspace sub-command: `w` worktree submenu,
     /// `p`/`P` project-home jump/set, `s` session info, `?` help, `a` about.
     Leader,
+}
+
+/// The key that armed the pane prefix. The two arm the same chord, but each
+/// sends itself on `↓`, and only `^w` sends itself on a second `^w`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanePrefix {
+    CtrlA,
+    CtrlW,
+}
+
+impl PanePrefix {
+    /// The prefix Ctrl and `c` arm, `c` being `a` or `w` in either case.
+    const fn armed_by(c: char) -> Self {
+        if matches!(c, 'w' | 'W') {
+            Self::CtrlW
+        } else {
+            Self::CtrlA
+        }
+    }
+
+    /// The byte the key sends a terminal program.
+    pub const fn byte(self) -> u8 {
+        match self {
+            Self::CtrlA => 0x01,
+            Self::CtrlW => 0x17,
+        }
+    }
+
+    /// The action that sends the key to the pane.
+    const fn send(self) -> Action {
+        match self {
+            Self::CtrlA => Action::PaneSendPrefix,
+            Self::CtrlW => Action::PaneSendCtrlW,
+        }
+    }
 }
 
 /// What the resolver produced from the latest keystroke.
@@ -155,7 +190,8 @@ impl Resolver {
             PendingSeq::G => "g-",
             PendingSeq::Mark => "m-",
             PendingSeq::JumpMark => "'-",
-            PendingSeq::W => "^a-",
+            PendingSeq::W(PanePrefix::CtrlA) => "^a-",
+            PendingSeq::W(PanePrefix::CtrlW) => "^w-",
             PendingSeq::Worktree => "W-",
             PendingSeq::Yank => "y-",
             PendingSeq::Harpoon => "H-",
@@ -204,8 +240,9 @@ impl Resolver {
     /// kill) with vim-style (`j`/`k` focus, `+`/`-` resize). Matches on the
     /// key *code* whatever the Ctrl modifier: holding Ctrl through the second
     /// key (`^a ^n`) is the natural way to fire the chord fast, and screen
-    /// treats it the same as `^a n`.
-    const fn feed_pane_prefix(&mut self, ev: KeyEvent) -> ResolverOutcome {
+    /// treats it the same as `^a n`. The exceptions are a held-Ctrl `a` and
+    /// `w`, below.
+    const fn feed_pane_prefix(&mut self, prefix: PanePrefix, ev: KeyEvent) -> ResolverOutcome {
         // `^a Space` → the global leader menu. This is the pane-focus path
         // into it: bare Space can't be intercepted while typing in the pane
         // (it's literal text), so `^a` wakes spyc and Space enters the menu.
@@ -213,7 +250,16 @@ impl Resolver {
             self.pending = PendingSeq::Leader;
             return ResolverOutcome::Pending;
         }
+        let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
         let out = match ev.code {
+            // `^a ^a` (prefix prefix) — screen/tmux "last window": jump back to
+            // the previously-active tab. Plain `^a a` focuses the left column.
+            KeyCode::Char('a' | 'A') if ctrl => ResolverOutcome::Action(Action::PaneLastTab),
+            // `^w ^w` — a literal `^w`, a shell's word erase: a key used often,
+            // so Ctrl held and `w` tapped twice.
+            KeyCode::Char('w' | 'W') if ctrl && matches!(prefix, PanePrefix::CtrlW) => {
+                ResolverOutcome::Action(Action::PaneSendCtrlW)
+            }
             // Vertical focus — j/J down (to pane), k up (to list/spyc row).
             // `a`/`A` used to alias `j` here; reclaimed below for the
             // a/b file-pane axis (numbers = PTY tabs, letters = file panes).
@@ -255,10 +301,10 @@ impl Resolver {
             KeyCode::Char('u' | 'U') => ResolverOutcome::Action(Action::QuickSelectOpen),
             KeyCode::Char('g' | 'G') => ResolverOutcome::Action(Action::OpenImageGallery),
             KeyCode::Char('.') => ResolverOutcome::Action(Action::PaneContextMenu),
-            // `^a ↓` — send a literal Ctrl-A to the pane (tmux send-prefix):
-            // the prefix is otherwise unreachable by the child, but Claude
-            // binds ^a (e.g. expand notes), so this is the escape hatch.
-            KeyCode::Down => ResolverOutcome::Action(Action::PaneSendPrefix),
+            // `^a ↓` / `^w ↓` — send the prefix that armed the chord to the pane
+            // (tmux send-prefix): the child otherwise never receives it, but
+            // Claude binds ^a (e.g. expand notes) and a shell ^w.
+            KeyCode::Down => ResolverOutcome::Action(prefix.send()),
             // `^a Esc` — a plain `Esc`, past the Claude vim guard (`app::esc_guard`).
             KeyCode::Esc => ResolverOutcome::Action(Action::PaneSendEsc),
             // The one project key reached from inside an agent: two keys, not
@@ -289,25 +335,13 @@ impl Resolver {
         }
         let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
 
-        // `^a ^a` (prefix prefix) — screen/tmux "last window": jump back
-        // to the previously-active tab. Handled here, before the generic
-        // ctrl block below, which would otherwise treat the second `^a`
-        // as a fresh prefix and just re-arm `PendingSeq::W`. Plain `^a a`
-        // (no ctrl on the second key) still falls through to focus-down
-        // in the `W` chord block.
-        if self.pending == PendingSeq::W && ctrl && matches!(ev.code, KeyCode::Char('a' | 'A')) {
-            self.reset();
-            return ResolverOutcome::Action(Action::PaneLastTab);
-        }
-
         // Mid-sequence: Ctrl-A / Ctrl-W prefix waiting for a pane command.
         // Runs BEFORE the generic Ctrl block below, which would otherwise eat
         // a held-Ctrl second key (`^a ^n`) as an unknown control code and
-        // reset the chord — the "rapid `^a-n` eats the command" regression.
-        // (`^a ^a` is already intercepted just above as PaneLastTab, so it
-        // never reaches the `'a' | 'A'` focus arm there.)
-        if self.pending == PendingSeq::W {
-            return self.feed_pane_prefix(ev);
+        // reset the chord — the "rapid `^a-n` eats the command" regression —
+        // and would take a second `^a` or `^w` for a fresh prefix.
+        if let PendingSeq::W(prefix) = self.pending {
+            return self.feed_pane_prefix(prefix, ev);
         }
 
         // Mid-sequence: `^s` (vertical-split) prefix waiting for a sub-command —
@@ -348,8 +382,8 @@ impl Resolver {
                 // it to `chmod +w`; that went to `!chmod +w %` to free the
                 // key for split-nav. Note the match arm below starts the
                 // pending sequence and falls through after resetting.
-                KeyCode::Char('w' | 'W' | 'a' | 'A') => {
-                    self.pending = PendingSeq::W;
+                KeyCode::Char(c @ ('w' | 'W' | 'a' | 'A')) => {
+                    self.pending = PendingSeq::W(PanePrefix::armed_by(c));
                     return ResolverOutcome::Pending;
                 }
                 // Ctrl-s starts the second-commander prefix (^s n open, ^s x

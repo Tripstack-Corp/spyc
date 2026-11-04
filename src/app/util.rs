@@ -90,8 +90,14 @@ pub(super) fn should_fire_refresh(
     (trailing_quiet || max_wait_exceeded) && rate_ok
 }
 
-/// Keys we intercept even when the pane is focused.
-pub(super) const fn is_spyc_meta_when_pane_focused(key: KeyEvent, resolver_pending: bool) -> bool {
+/// Keys we intercept even when the pane is focused. `ctrl_w_prefix` is false
+/// where `^w` is an ordinary key (`[pane] ctrl_w_prefix = false`, the pane
+/// focused).
+pub(super) const fn is_spyc_meta_when_pane_focused(
+    key: KeyEvent,
+    resolver_pending: bool,
+    ctrl_w_prefix: bool,
+) -> bool {
     use crossterm::event::KeyModifiers;
     // Continuation of a multi-key spyc sequence must stay with spyc.
     if resolver_pending {
@@ -101,9 +107,13 @@ pub(super) const fn is_spyc_meta_when_pane_focused(key: KeyEvent, resolver_pendi
     if matches!(key.code, KeyCode::F(10) | KeyCode::Char('\x1c')) {
         return true;
     }
-    // Ctrl-\ (toggle), Ctrl-W (vim pane prefix), Ctrl-A (screen prefix).
+    // Ctrl-\ (toggle), Ctrl-A (screen prefix), Ctrl-W (vim pane prefix).
     key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('\\' | 'w' | 'W' | 'a' | 'A'))
+        && match key.code {
+            KeyCode::Char('\\' | 'a' | 'A') => true,
+            KeyCode::Char('w' | 'W') => ctrl_w_prefix,
+            _ => false,
+        }
 }
 
 /// Format a `Duration` in seconds as a compact human string for

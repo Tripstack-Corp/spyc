@@ -3,7 +3,7 @@
 //! its rows, and by the guards that feed every listed key back through the
 //! resolver.
 
-use super::{BRACKET_JUMPS, PendingSeq, Resolver};
+use super::{BRACKET_JUMPS, PanePrefix, PendingSeq, Resolver};
 use crate::keymap::action::{Action, ProjectAction};
 
 /// One row of the which-key chord-hint popup for a pending chord: a key that
@@ -65,6 +65,50 @@ fn leader_rows() -> Vec<ChordEntry> {
     ]
 }
 
+/// The pane prefix's rows, `^a`'s or `^w`'s: the pane, its tabs and the split.
+/// The two differ only in the keys that send the prefix itself to the pane.
+fn pane_rows(prefix: PanePrefix) -> Vec<ChordEntry> {
+    use Action as A;
+    use ChordEntry::{Act, Range, Sub};
+    let send_prefix = match prefix {
+        PanePrefix::CtrlA => Act("↓", A::PaneSendPrefix),
+        PanePrefix::CtrlW => Act("↓ ^w", A::PaneSendCtrlW),
+    };
+    vec![
+        Act("j", A::PaneFocusDown),
+        Act("k", A::PaneFocusUp),
+        Act("a h", A::VsplitFocusLeft),
+        Act("b l", A::VsplitFocusRight),
+        Act("|", A::VsplitToggle),
+        Act("f", A::VsplitToggleHeight),
+        Act("d", A::ToggleDim),
+        Act("n ]", A::PaneNextTab),
+        Act("p [", A::PanePrevTab),
+        Act("c", A::PaneNewTab),
+        Range("1-9", A::PaneTabByIndex(1)),
+        Act("x", A::PaneCloseTab),
+        Act("r", A::PaneRenameTab),
+        Act("R", A::PaneRestartTab),
+        Act("F", A::PaneForkTab),
+        Act("z", A::TogglePaneZoom),
+        Act("v", A::PaneScrollEnter),
+        Act("t", A::OpenThinkingHistory),
+        Act("+", A::PaneGrow),
+        Act("-", A::PaneShrink),
+        Act("s", A::PaneSendSelection),
+        send_prefix,
+        Act("Esc", A::PaneSendEsc),
+        Act("P", A::PanePipeContent),
+        Act("i", A::PanePipeInventory),
+        Act("u", A::QuickSelectOpen),
+        Act(".", A::PaneContextMenu),
+        Act("g", A::OpenImageGallery),
+        Act("\\ C", A::TogglePane),
+        Act("!", A::Project(ProjectAction::Attention)),
+        Sub("Space", "global menu", PendingSeq::Leader),
+    ]
+}
+
 /// The chord hint's rows for a pending `]` (`next`) or `[`.
 fn bracket_rows(next: bool) -> Vec<ChordEntry> {
     BRACKET_JUMPS
@@ -83,7 +127,8 @@ impl Resolver {
             PendingSeq::G => "g",
             PendingSeq::Mark => "m",
             PendingSeq::JumpMark => "'",
-            PendingSeq::W => "^a",
+            PendingSeq::W(PanePrefix::CtrlA) => "^a",
+            PendingSeq::W(PanePrefix::CtrlW) => "^w",
             PendingSeq::Worktree => "W",
             PendingSeq::Yank => "y",
             PendingSeq::Harpoon => "H",
@@ -116,7 +161,7 @@ impl Resolver {
     /// firing an action.
     pub fn continuations(&self) -> Vec<ChordEntry> {
         use Action as A;
-        use ChordEntry::{Act, Range, Sub};
+        use ChordEntry::{Act, Range};
         match self.pending {
             PendingSeq::Normal => Vec::new(),
             // Leader (global / workspace): `Space` in list focus, `^a Space`
@@ -138,39 +183,7 @@ impl Resolver {
                 Act("B", A::OpenTaskViewer),
                 Act("V", A::Version),
             ],
-            PendingSeq::W => vec![
-                Act("j", A::PaneFocusDown),
-                Act("k", A::PaneFocusUp),
-                Act("a h", A::VsplitFocusLeft),
-                Act("b l", A::VsplitFocusRight),
-                Act("|", A::VsplitToggle),
-                Act("f", A::VsplitToggleHeight),
-                Act("d", A::ToggleDim),
-                Act("n ]", A::PaneNextTab),
-                Act("p [", A::PanePrevTab),
-                Act("c", A::PaneNewTab),
-                Range("1-9", A::PaneTabByIndex(1)),
-                Act("x", A::PaneCloseTab),
-                Act("r", A::PaneRenameTab),
-                Act("R", A::PaneRestartTab),
-                Act("F", A::PaneForkTab),
-                Act("z", A::TogglePaneZoom),
-                Act("v", A::PaneScrollEnter),
-                Act("t", A::OpenThinkingHistory),
-                Act("+", A::PaneGrow),
-                Act("-", A::PaneShrink),
-                Act("s", A::PaneSendSelection),
-                Act("↓", A::PaneSendPrefix),
-                Act("Esc", A::PaneSendEsc),
-                Act("P", A::PanePipeContent),
-                Act("i", A::PanePipeInventory),
-                Act("u", A::QuickSelectOpen),
-                Act(".", A::PaneContextMenu),
-                Act("g", A::OpenImageGallery),
-                Act("\\ C", A::TogglePane),
-                Act("!", A::Project(ProjectAction::Attention)),
-                Sub("Space", "global menu", PendingSeq::Leader),
-            ],
+            PendingSeq::W(prefix) => pane_rows(prefix),
             PendingSeq::CtrlS => vec![
                 Act("|", A::VsplitToggle),
                 Act("f", A::VsplitToggleHeight),

@@ -134,6 +134,7 @@ pub enum Action {
     PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
     PaneSendPrefix,     // ^a ↓ — send literal Ctrl-A (0x01) to the active pane (send-prefix)
     PaneSendEsc,        // ^a Esc — send a plain Esc (0x1b) to the active pane, past the vim guard
+    PaneSendCtrlW,      // ^w ↓ / ^w ^w — send literal Ctrl-W (0x17) to the active pane
     PaneGrow,           // ^W + — bottom pane takes more height
     PaneShrink,         // ^W - — bottom pane takes less height
     TogglePaneZoom,     // ^W z — zoom (fullscreen) the pane / restore split
@@ -271,6 +272,7 @@ impl Action {
             Self::PaneSendSelection
                 | Self::PaneSendPrefix
                 | Self::PaneSendEsc
+                | Self::PaneSendCtrlW
                 | Self::PanePipeContent
                 | Self::PanePipeInventory
         )
@@ -309,6 +311,7 @@ impl Action {
             | Self::PaneSendSelection
             | Self::PaneSendPrefix
             | Self::PaneSendEsc
+            | Self::PaneSendCtrlW
             | Self::PaneGrow
             | Self::PaneShrink
             | Self::TogglePaneZoom
@@ -419,7 +422,7 @@ impl Action {
             Self::PaneFocusDown => "focus pane (down)",
             Self::PaneFocusUp => "focus list (up)",
             Self::PaneSendSelection => "send selection to pane",
-            Self::PaneSendPrefix | Self::PaneSendEsc => self.describe_pane_send(),
+            Self::PaneSendPrefix | Self::PaneSendEsc | Self::PaneSendCtrlW => self.describe_send(),
             Self::PaneGrow => "grow pane",
             Self::PaneShrink => "shrink pane",
             Self::TogglePaneZoom => "zoom pane (toggle fullscreen)",
@@ -585,7 +588,7 @@ impl Action {
             Self::PaneFocusDown => "pane_focus_down",
             Self::PaneFocusUp => "pane_focus_up",
             Self::PaneSendSelection => "pane_send_selection",
-            Self::PaneSendPrefix | Self::PaneSendEsc => self.pane_send_name(),
+            Self::PaneSendPrefix | Self::PaneSendEsc | Self::PaneSendCtrlW => self.pane_send_name(),
             Self::PaneGrow => "pane_grow",
             Self::PaneShrink => "pane_shrink",
             Self::TogglePaneZoom => "toggle_pane_zoom",
@@ -659,9 +662,10 @@ impl Action {
 
     /// The single-key sends' arm of [`Self::describe`], which is at its length
     /// pin.
-    const fn describe_pane_send(&self) -> &'static str {
+    const fn describe_send(&self) -> &'static str {
         match self {
             Self::PaneSendEsc => "send a plain Esc to pane",
+            Self::PaneSendCtrlW => "send literal ^w to pane",
             _ => "send literal ^a to pane",
         }
     }
@@ -717,6 +721,7 @@ impl Action {
     const fn pane_send_name(&self) -> &'static str {
         match self {
             Self::PaneSendEsc => "pane_send_esc",
+            Self::PaneSendCtrlW => "pane_send_ctrl_w",
             _ => "pane_send_prefix",
         }
     }
@@ -929,6 +934,7 @@ fn pane_action_from_name(name: &str) -> Option<Action> {
         "pane_send_selection" => Action::PaneSendSelection,
         "pane_send_prefix" => Action::PaneSendPrefix,
         "pane_send_esc" => Action::PaneSendEsc,
+        "pane_send_ctrl_w" => Action::PaneSendCtrlW,
         "pane_grow" => Action::PaneGrow,
         "pane_shrink" => Action::PaneShrink,
         "pane_scroll_enter" => Action::PaneScrollEnter,

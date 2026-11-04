@@ -133,6 +133,11 @@
 #   or ^a Esc sends it through. The mode comes from Claude Code's statusline,
 #   so with spyc's statusline wrapper off the guard never fires. Set false to
 #   send every Esc through.
+# ctrl_w_prefix = true
+#   ^w is a pane prefix, ^a's alias, so a shell or agent in the pane gets it
+#   only as ^w ^w or ^w Down. Set false to make ^w an ordinary key while the
+#   pane has the keyboard: it reaches the pane's program (a shell's word
+#   erase), and ^a stays the prefix. From the file view ^w still arms it.
 
 # ── yank ──────────────────────────────────────────────────────────────
 # Pager yank (`y` / `Y` / visual-mode `y`) behaviour.
