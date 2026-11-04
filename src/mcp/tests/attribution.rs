@@ -173,7 +173,6 @@ fn as_the_hook_reports(mut args: Value) -> Value {
 /// another, by `pane_id` or by tab number, is refused, saying why, and never
 /// reaches the loop; one naming its own is served as its own.
 #[test]
-#[ignore = "red: a bound call's named target wins over its binding"]
 fn a_bound_call_acts_only_for_its_own_tab() {
     let (tx, seen) = fake_loop(&["abc", "def"]);
     let (mut conn, _tmp) = open(tx);
@@ -200,7 +199,6 @@ fn a_bound_call_acts_only_for_its_own_tab() {
 /// `session_id` and `hook_event` are the status hook's, which reports over a
 /// one-shot that never initializes: a bound connection's are dropped.
 #[test]
-#[ignore = "red: a bound connection's hook-only fields reach the loop"]
 fn a_bound_report_drops_the_hook_only_fields() {
     let (tx, seen) = fake_loop(&["abc"]);
     let (mut conn, _tmp) = open(tx);

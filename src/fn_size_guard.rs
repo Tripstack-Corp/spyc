@@ -62,7 +62,7 @@ const FUNCTION: Rule = Rule {
         ("src/keymap/action.rs::action_from_name", 103),
         ("src/keymap/resolver/mod.rs::Resolver::feed", 386),
         ("src/lua/api.rs::install", 170),
-        ("src/mcp/protocol.rs::handle_tools_call", 364),
+        ("src/mcp/protocol.rs::handle_tools_call", 321),
         (
             "src/pane/engine_ghostty/mod.rs::GhosttyScreen::fill_from_render_state",
             111,

@@ -116,8 +116,16 @@ already find, since the sockets are listable. The `spyc --mcp` proxy sends its `
 if a live one carries the id. That lets `get_spyc_context` describe the
 caller's own tab, lets `report_status` and a scope claim land on the
 caller's tab rather than whichever one has focus, and puts the binding in
-`mcp.log`. Those are ergonomics and auditability. The id is exactly as
-forgeable as the list above says. With several projects open in one spyc
+`mcp.log`. Those are ergonomics and auditability. A bound connection also
+acts for its own tab alone: a `report_status`, `register_scope` or
+`wait_for_scope_clear` naming another tab is refused, so an agent that names
+the wrong tab, by mistake or on injected instructions, can't clear that
+tab's `blocked` or raise a false notification for it. The hook-only
+`session_id` and `hook_event` are dropped from a bound connection's report,
+since the status hook reports over its own one-shot connection, which never
+initializes and so is never bound. That narrows the MCP tool, not the agent:
+a process that sets `SPYC_PANE_ID` itself can still report through the hook
+path, and the id is exactly as forgeable as the list above says. With several projects open in one spyc
 (#99), the binding also picks the project a connection's read tools
 answer from, and with it their allowed set. That is routing, not a
 boundary: a forged id reaches another of the same user's open projects,
