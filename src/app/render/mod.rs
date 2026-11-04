@@ -187,6 +187,7 @@ impl App {
         // with the pane — leaves no stale rect behind for the mouse to hit-test
         // against, which is the trap `pager_slot_at` documents for pager rects.
         self.view.chrome_rows.borrow_mut().clear();
+        self.view.status_row.borrow_mut().take();
         // The two structural rules a centred popup border could land on (and so
         // visually merge with): the horizontal pane divider and the vertical
         // split separator. Captured before `layout` is consumed by render_inner.
@@ -1100,14 +1101,22 @@ mod purity_guard {
     /// making the draw pass write. Every such write is a place "render is pure"
     /// stops being enforced by the type system, so each one is named here with
     /// its justification rather than discovered later.
-    const DRAW_TIME_CACHES: &[(&str, &str)] = &[(
-        "chrome_rows",
-        "Where each chrome row was painted, for the mouse hit-test. Genuinely \
-         draw-time knowledge — the spans come from the lines actually laid out, \
-         so computing it in `prepare_*` would mean running the same layout twice \
-         and keeping the two in step. Cleared at the top of every frame \
-         (`render/mod.rs`), so it is a per-frame record, never accumulated state.",
-    )];
+    const DRAW_TIME_CACHES: &[(&str, &str)] = &[
+        (
+            "chrome_rows",
+            "Where each chrome row was painted, for the mouse hit-test. Genuinely \
+             draw-time knowledge — the spans come from the lines actually laid out, \
+             so computing it in `prepare_*` would mean running the same layout twice \
+             and keeping the two in step. Cleared at the top of every frame \
+             (`render/mod.rs`), so it is a per-frame record, never accumulated state.",
+        ),
+        (
+            "status_row",
+            "Where the status bar's segments were drawn, for a click on a project's \
+             label or another segment: the spans come from the pass that laid the bar \
+             out, for `chrome_rows`'s reason, and are cleared with it every frame.",
+        ),
+    ];
 
     /// Tokens that mean "this `&self` function mutates".
     ///

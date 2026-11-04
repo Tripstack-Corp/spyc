@@ -2,6 +2,8 @@
 //! path, git, agent and the column's state), cutting the path in the middle
 //! when the row is too short. While several projects are open, their chips
 //! (`ui::project_chips`) take the place of `PROJECT_HOME` and the session.
+//! The pass that draws the bar marks where each segment lands
+//! (`ui::status_segments`), for a click to find.
 
 use ratatui::{
     layout::Rect,
@@ -9,7 +11,8 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::ui::project_chips::{self, ProjectChips};
+use crate::ui::project_chips::{self, ChipSpans, ProjectChips};
+use crate::ui::status_segments::{SegmentSpan, StatusSegment};
 use crate::ui::theme::Theme;
 
 pub struct StatusBar<'a> {
@@ -45,6 +48,58 @@ pub struct StatusBar<'a> {
     /// Draw [`MENU_KEY`] after the suffix: the key that opens an object's menu,
     /// until the first menu ever opens.
     pub teach_menu: bool,
+}
+
+/// The bar as drawn, and where each of its segments is.
+pub struct StatusLine {
+    pub line: Line<'static>,
+    pub segments: Vec<SegmentSpan>,
+}
+
+/// The bar's spans as they are pushed, the columns they take, and the
+/// segments marked on them.
+#[derive(Default)]
+struct Bar {
+    spans: Vec<Span<'static>>,
+    segments: Vec<SegmentSpan>,
+    width: usize,
+}
+
+impl Bar {
+    fn push(&mut self, span: Span<'static>) {
+        self.width += dw(&span.content);
+        self.spans.push(span);
+    }
+
+    /// Mark what was pushed since column `from` as `segment`.
+    fn mark(&mut self, segment: StatusSegment, from: usize) {
+        if self.width > from {
+            self.segments.push(SegmentSpan {
+                segment,
+                start: from,
+                end: self.width,
+            });
+        }
+    }
+
+    /// Push `chips`, each in `style` patched with its own, marking the labels
+    /// and the count.
+    fn push_chips(&mut self, chips: ChipSpans, style: Style) {
+        for (span, part) in chips.spans.into_iter().zip(chips.parts) {
+            let from = self.width;
+            self.push(Span::styled(span.content, style.patch(span.style)));
+            if let Some(part) = part {
+                self.mark(part, from);
+            }
+        }
+    }
+
+    fn finish(self) -> StatusLine {
+        StatusLine {
+            line: Line::from(self.spans),
+            segments: self.segments,
+        }
+    }
 }
 
 /// The status bar's lesson until a menu first opens: `.` opens one.
@@ -89,30 +144,39 @@ pub fn notice_at(line: &Line<'_>, col: usize, notice: &str) -> bool {
     false
 }
 
-fn push_segment(spans: &mut Vec<Span>, text: &str, fg: Color, bg: Color, next_bg: Color) {
-    spans.push(Span::styled(
+/// Segment `segment`: `text` in `fg` on `bg`, then the separator into
+/// `next_bg`, which is part of it.
+fn push_segment(
+    bar: &mut Bar,
+    segment: StatusSegment,
+    text: &str,
+    fg: Color,
+    bg: Color,
+    next_bg: Color,
+) {
+    let from = bar.width;
+    bar.push(Span::styled(
         text.to_string(),
         Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
     ));
-    spans.push(Span::styled(PL_SEP, Style::default().fg(bg).bg(next_bg)));
+    bar.push(Span::styled(PL_SEP, Style::default().fg(bg).bg(next_bg)));
+    bar.mark(segment, from);
 }
 
 /// [`push_segment`] for a segment of styled spans: each drawn on `bg`, in `fg`
 /// unless it has a colour of its own.
 fn push_spans(
-    spans: &mut Vec<Span<'static>>,
-    segment: Vec<Span<'static>>,
+    bar: &mut Bar,
+    segment: StatusSegment,
+    spans: ChipSpans,
     fg: Color,
     bg: Color,
     next_bg: Color,
 ) {
-    let base = Style::default().fg(fg).bg(bg);
-    spans.extend(
-        segment
-            .into_iter()
-            .map(|s| Span::styled(s.content, base.patch(s.style))),
-    );
-    spans.push(Span::styled(PL_SEP, Style::default().fg(bg).bg(next_bg)));
+    let from = bar.width;
+    bar.push_chips(spans, Style::default().fg(fg).bg(bg));
+    bar.push(Span::styled(PL_SEP, Style::default().fg(bg).bg(next_bg)));
+    bar.mark(segment, from);
 }
 
 impl StatusBar<'_> {
@@ -126,11 +190,18 @@ impl StatusBar<'_> {
         }
     }
 
-    /// The bar as a styled [`Line`], exactly as it will be drawn — including the
-    /// width-driven truncation. Split out so the app layer can record what was
-    /// actually rendered: a mouse selection maps screen COLUMNS back to characters,
-    /// which only works against the drawn line, not the semantic segments.
+    /// [`Self::build`]'s line alone.
+    #[cfg(test)]
     pub fn build_line(&self, area: Rect) -> Line<'static> {
+        self.build(area).line
+    }
+
+    /// The bar as a styled [`Line`], exactly as it will be drawn — including the
+    /// width-driven truncation — and where each segment of it is. Split out so
+    /// the app layer can record what was actually rendered: a mouse selection
+    /// maps screen COLUMNS back to characters, and a click a column to a
+    /// segment, which only works against the drawn line.
+    pub fn build(&self, area: Rect) -> StatusLine {
         if self.teach_menu {
             let full = with_menu_key(self.suffix);
             let short = self.suffix_short.map(with_menu_key);
@@ -140,7 +211,7 @@ impl StatusBar<'_> {
                 teach_menu: false,
                 ..*self
             };
-            return bar.build_line(area);
+            return bar.build(area);
         }
         if self.theme.mono {
             return self.plain_line(area);
@@ -152,17 +223,17 @@ impl StatusBar<'_> {
     /// emoji; degraded ones (GNU screen, non-truecolor) mangle the 2-cell astral
     /// glyph into junk, so paint a spice-red block instead — same 4-col
     /// footprint, reads as intentional.
-    fn push_logo(&self, spans: &mut Vec<Span<'static>>, term_bg: Color) {
-        self.push_pepper(spans, term_bg);
+    fn push_logo(&self, bar: &mut Bar, term_bg: Color) {
+        self.push_pepper(bar, term_bg);
         if let Some(notice) = self.stderr_notice {
-            spans.push(Span::styled(
+            bar.push(Span::styled(
                 notice.to_string(),
                 Style::default()
                     .fg(self.theme.prompt_prefix)
                     .bg(term_bg)
                     .add_modifier(Modifier::BOLD),
             ));
-            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+            bar.push(Span::styled(" ", Style::default().bg(term_bg)));
         }
     }
 
@@ -172,22 +243,22 @@ impl StatusBar<'_> {
         4 + self.stderr_notice.map_or(0, |notice| dw(notice) + 1)
     }
 
-    fn push_pepper(&self, spans: &mut Vec<Span<'static>>, term_bg: Color) {
+    fn push_pepper(&self, bar: &mut Bar, term_bg: Color) {
         // Pepper emoji gets its own span with terminal-default bg so the
         // emoji colour rendering isn't clipped by the segment background.
         let emoji_text = " \u{1f336}\u{fe0f} ";
         if self.plain_logo {
             let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
-            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
-            spans.push(Span::styled("  ", Style::default().bg(pepper_red)));
-            spans.push(Span::styled(" ", Style::default().bg(term_bg)));
+            bar.push(Span::styled(" ", Style::default().bg(term_bg)));
+            bar.push(Span::styled("  ", Style::default().bg(pepper_red)));
+            bar.push(Span::styled(" ", Style::default().bg(term_bg)));
         } else {
-            spans.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
+            bar.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
         }
     }
 
     #[allow(clippy::similar_names)]
-    fn powerline(&self, area: Rect) -> Line<'static> {
+    fn powerline(&self, area: Rect) -> StatusLine {
         let avail = area.width as usize;
 
         // Segment background/foreground colours.
@@ -227,7 +298,7 @@ impl StatusBar<'_> {
         let width_of = |t: &Option<String>| t.as_deref().map_or(0, |s| dw(s) + 1);
         let project_w = project_spans
             .as_ref()
-            .map_or(0, |s| project_chips::width(s) + 1);
+            .map_or(0, |(_, s)| project_chips::width(s) + 1);
         let session_w = width_of(&session_text);
         let git_w = width_of(&git_text);
         let agent_w = width_of(&agent_text);
@@ -258,26 +329,29 @@ impl StatusBar<'_> {
             term_bg
         };
 
-        let mut spans: Vec<Span> = Vec::new();
-        self.push_logo(&mut spans, term_bg);
+        let mut bar = Bar::default();
+        self.push_logo(&mut bar, term_bg);
 
-        if let Some(project) = project_spans {
+        if let Some((segment, project)) = project_spans {
             let next_bg = session_text.as_ref().map_or(path_bg, |_| sess_bg);
-            push_spans(&mut spans, project, proj_fg, proj_bg, next_bg);
+            push_spans(&mut bar, segment, project, proj_fg, proj_bg, next_bg);
         }
         if let Some(ref text) = session_text {
-            push_segment(&mut spans, text, sess_fg, sess_bg, path_bg);
+            let session = StatusSegment::Session;
+            push_segment(&mut bar, session, text, sess_fg, sess_bg, path_bg);
         }
 
         // Path (always present).
-        spans.push(Span::styled(
+        let from = bar.width;
+        bar.push(Span::styled(
             path_text.clone(),
             Style::default().fg(path_fg).bg(path_bg),
         ));
-        spans.push(Span::styled(
+        bar.push(Span::styled(
             PL_SEP,
             Style::default().fg(path_bg).bg(path_next_bg),
         ));
+        bar.mark(StatusSegment::Path, from);
 
         if let Some(ref text) = git_text {
             let next_bg = if agent_text.is_some() {
@@ -287,86 +361,73 @@ impl StatusBar<'_> {
             } else {
                 term_bg
             };
-            push_segment(&mut spans, text, git_fg, git_bg, next_bg);
+            push_segment(&mut bar, StatusSegment::Git, text, git_fg, git_bg, next_bg);
         }
         if let Some(ref text) = agent_text {
             let next_bg = suffix_text.as_ref().map_or(term_bg, |_| suffix_bg);
-            push_segment(&mut spans, text, agent_fg, agent_bg, next_bg);
+            let agent = StatusSegment::Agent;
+            push_segment(&mut bar, agent, text, agent_fg, agent_bg, next_bg);
         }
         if let Some(ref text) = suffix_text {
-            push_segment(&mut spans, text, suffix_fg, suffix_bg, term_bg);
+            let segment = StatusSegment::Suffix;
+            push_segment(&mut bar, segment, text, suffix_fg, suffix_bg, term_bg);
         }
 
         // Fill remaining width.
         let used: usize =
             emoji_w + project_w + session_w + dw(&path_text) + 1 + git_w + agent_w + suffix_w;
         if used < avail {
-            spans.push(Span::styled(
+            bar.push(Span::styled(
                 " ".repeat(avail - used),
                 Style::default().bg(term_bg),
             ));
         }
 
-        Line::from(spans)
+        bar.finish()
     }
 
     /// The project segment, padded, before the bar's colours: `PROJECT_HOME`'s
     /// basename with one project open, else the chips, in a third of the bar
     /// with the padding and the separator.
-    fn project_spans(&self, avail: usize) -> Option<Vec<Span<'static>>> {
+    fn project_spans(&self, avail: usize) -> Option<(StatusSegment, ChipSpans)> {
+        let mut spans = ChipSpans::default();
         let Some(chips) = self.projects else {
-            return self.project_home.map(|p| {
-                vec![Span::styled(
-                    format!(" {p} "),
-                    Style::default().add_modifier(Modifier::BOLD),
-                )]
-            });
+            let home = self.project_home?;
+            let bold = Style::default().add_modifier(Modifier::BOLD);
+            spans.push(Span::styled(format!(" {home} "), bold), None);
+            return Some((StatusSegment::Project, spans));
         };
-        let mut spans = vec![Span::raw(" ")];
+        spans.push(Span::raw(" "), None);
         // The logo, the padding and the separator.
         let most = avail.saturating_sub(4 + 3);
-        spans.extend(chips.spans(chip_room(avail), most, self.theme));
-        spans.push(Span::raw(" "));
-        Some(spans)
+        spans.append(chips.spans(chip_room(avail), most, self.theme));
+        spans.push(Span::raw(" "), None);
+        Some((StatusSegment::Projects, spans))
     }
 
     /// Fallback plain rendering for mono mode.
-    fn plain_line(&self, area: Rect) -> Line<'static> {
+    fn plain_line(&self, area: Rect) -> StatusLine {
         let avail = area.width as usize;
 
-        let mut spans = if let Some(chips) = self.projects {
-            let most = avail.saturating_sub(2);
-            let mut spans = chips.spans(chip_room(avail), most, self.theme);
-            spans.push(Span::raw(": "));
-            spans
-        } else {
-            let parts: Vec<&str> = [self.project_home, self.session_name]
-                .into_iter()
-                .flatten()
-                .collect();
-            let prefix = if parts.is_empty() {
-                String::new()
-            } else {
-                format!("{}: ", parts.join(" "))
-            };
-            vec![Span::styled(
-                prefix,
-                Style::default().add_modifier(Modifier::BOLD),
-            )]
-        };
+        let bold = Style::default().add_modifier(Modifier::BOLD);
+        let mut bar = Bar::default();
         if let Some(notice) = self.stderr_notice {
-            spans.splice(
-                0..0,
-                [
-                    Span::styled(
-                        notice.to_string(),
-                        Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(" "),
-                ],
-            );
+            bar.push(Span::styled(notice.to_string(), bold));
+            bar.push(Span::raw(" "));
         }
-        let pre_w = project_chips::width(&spans);
+        if let Some(chips) = self.projects {
+            let from = bar.width;
+            let most = avail.saturating_sub(2);
+            bar.push_chips(
+                chips.spans(chip_room(avail), most, self.theme),
+                Style::default(),
+            );
+            bar.push(Span::raw(": "));
+            bar.mark(StatusSegment::Projects, from);
+        } else {
+            self.push_plain_prefix(&mut bar, bold);
+        }
+        let pre_w = bar.width;
         let cost = |s: &str| if s.is_empty() { 0 } else { 2 + dw(s) };
         let suffix = self.fitting_suffix(avail.saturating_sub(pre_w), cost, dw(self.path));
         let suffix_w = cost(suffix);
@@ -379,15 +440,42 @@ impl StatusBar<'_> {
             (truncate_middle(self.path, budget), String::new())
         };
 
-        spans.push(Span::raw(path_disp));
+        let from = bar.width;
+        bar.push(Span::raw(path_disp));
+        bar.mark(StatusSegment::Path, from);
         if !suffix_disp.is_empty() {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
+            bar.push(Span::raw("  "));
+            let from = bar.width;
+            bar.push(Span::styled(
                 suffix_disp,
                 Style::default().add_modifier(Modifier::DIM),
             ));
+            bar.mark(StatusSegment::Suffix, from);
         }
-        Line::from(spans)
+        bar.finish()
+    }
+
+    /// Mono's `spyc SAFFRON_CUMIN: `: the project and the session, each a
+    /// segment of its own, and nothing when neither is set.
+    fn push_plain_prefix(&self, bar: &mut Bar, bold: Style) {
+        let parts = [
+            (self.project_home, StatusSegment::Project),
+            (self.session_name, StatusSegment::Session),
+        ];
+        let mut any = false;
+        for (text, segment) in parts {
+            let Some(text) = text else { continue };
+            if any {
+                bar.push(Span::styled(" ", bold));
+            }
+            let from = bar.width;
+            bar.push(Span::styled(text.to_string(), bold));
+            bar.mark(segment, from);
+            any = true;
+        }
+        if any {
+            bar.push(Span::styled(": ", bold));
+        }
     }
 }
 

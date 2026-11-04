@@ -1,11 +1,13 @@
 //! The status bar's `projects` segment while several projects are open: a
 //! chip for each, its label and the glyph of what its agents most need, and
-//! the steps the segment narrows by when the bar is short. The `Space j` rows
-//! show the same glyphs.
+//! the steps the segment narrows by when the bar is short. Each label, and
+//! the collapsed segment's count, is marked on the spans drawn for it, for a
+//! click to find. The `Space j` rows show the same glyphs.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 
+use crate::ui::status_segments::StatusSegment;
 use crate::ui::theme::Theme;
 
 /// A blocked agent's red, on its tab's dot and on its project's chip.
@@ -56,6 +58,37 @@ pub fn glyph(attention: ProjectAttention, pulse: Color, theme: &Theme) -> Span<'
 /// The narrowest a label is cut to, its ellipsis included.
 const MIN_CUT: usize = 4;
 
+/// The segment's spans, each with the part of it a click lands on: a
+/// project's label, or the collapsed count.
+#[derive(Default)]
+pub struct ChipSpans {
+    pub spans: Vec<Span<'static>>,
+    /// One per span: [`StatusSegment::ProjectLabel`] or
+    /// [`StatusSegment::ProjectCount`], else `None`.
+    pub parts: Vec<Option<StatusSegment>>,
+}
+
+impl ChipSpans {
+    pub fn push(&mut self, span: Span<'static>, part: Option<StatusSegment>) {
+        self.spans.push(span);
+        self.parts.push(part);
+    }
+
+    /// `other`'s spans after these, with their parts.
+    pub fn append(&mut self, other: Self) {
+        self.spans.extend(other.spans);
+        self.parts.extend(other.parts);
+    }
+}
+
+impl std::ops::Deref for ChipSpans {
+    type Target = [Span<'static>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.spans
+    }
+}
+
 /// What parts the chips: powerline's thin chevron, or a `|` in mono, where the
 /// status bar draws no powerline glyphs. Both are as wide.
 const PARTING: &str = " \u{e0b1} ";
@@ -76,7 +109,7 @@ impl ProjectChips {
     /// the segment never moves as they work, block and finish: each glyph has
     /// its cell, blank while there is nothing to show, and which step is
     /// drawn doesn't depend on them.
-    pub fn spans(&self, room: usize, most: usize, theme: &Theme) -> Vec<Span<'static>> {
+    pub fn spans(&self, room: usize, most: usize, theme: &Theme) -> ChipSpans {
         if let Some(cap) = self.label_cap(room, theme) {
             return self.every_chip(cap, theme);
         }
@@ -106,45 +139,47 @@ impl ProjectChips {
     /// Every chip as `label glyph`, each label in at most `cap` columns,
     /// [`PARTING`]s between them: the one in view bold, the others dim, and
     /// the parting neither, to stand out from both.
-    fn every_chip(&self, cap: usize, theme: &Theme) -> Vec<Span<'static>> {
-        let mut spans = Vec::new();
+    fn every_chip(&self, cap: usize, theme: &Theme) -> ChipSpans {
+        let mut spans = ChipSpans::default();
         for (i, chip) in self.chips.iter().enumerate() {
             if i > 0 {
-                spans.push(Span::raw(parting(theme)));
+                spans.push(Span::raw(parting(theme)), None);
             }
-            spans.push(label(chip, cap));
-            spans.push(Span::raw(" "));
-            spans.push(cell(chip.attention, self.pulse, theme));
+            spans.push(label(chip, cap), Some(StatusSegment::ProjectLabel(i)));
+            spans.push(Span::raw(" "), None);
+            spans.push(cell(chip.attention, self.pulse, theme), None);
         }
         spans
     }
 
     /// `label 2/4 ■` in `room`, the label cut to fit, or `None` when that
     /// would cut it shorter than [`MIN_CUT`].
-    fn collapsed(&self, room: usize, theme: &Theme) -> Option<Vec<Span<'static>>> {
+    fn collapsed(&self, room: usize, theme: &Theme) -> Option<ChipSpans> {
         // The project in view is always one of the open ones.
         let at = self.chips.iter().position(|c| c.active).unwrap_or(0);
-        let place = format!(" {}/{} ", at + 1, self.chips.len());
-        let cap = room.checked_sub(super::display_width(&place) + 1)?;
+        let place = format!("{}/{}", at + 1, self.chips.len());
+        let cap = room.checked_sub(super::display_width(&place) + 3)?;
         if cap < self.active_width().min(MIN_CUT) {
             return None;
         }
         let mut spans = self.active_label(cap);
-        spans.push(Span::raw(place));
+        spans.push(Span::raw(" "), None);
+        spans.push(Span::raw(place), Some(StatusSegment::ProjectCount));
+        spans.push(Span::raw(" "), None);
         let others = self.others().filter_map(|c| c.attention).max();
-        spans.push(cell(others, self.pulse, theme));
+        spans.push(cell(others, self.pulse, theme), None);
         Some(spans)
     }
 
-    fn alone(&self, room: usize, most: usize, theme: &Theme) -> Vec<Span<'static>> {
+    fn alone(&self, room: usize, most: usize, theme: &Theme) -> ChipSpans {
         let cap = room.max(MIN_CUT + 2).min(most).saturating_sub(2);
         let mut spans = self.active_label(cap);
         let blocked = self
             .others()
             .any(|c| c.attention == Some(ProjectAttention::Blocked));
-        spans.push(Span::raw(" "));
+        spans.push(Span::raw(" "), None);
         let blocked = blocked.then_some(ProjectAttention::Blocked);
-        spans.push(cell(blocked, self.pulse, theme));
+        spans.push(cell(blocked, self.pulse, theme), None);
         spans
     }
 
@@ -157,13 +192,13 @@ impl ProjectChips {
     }
 
     /// The project in view's label, in at most `cap` columns.
-    fn active_label(&self, cap: usize) -> Vec<Span<'static>> {
-        self.chips
-            .iter()
-            .find(|c| c.active)
-            .map(|c| label(c, cap))
-            .into_iter()
-            .collect()
+    fn active_label(&self, cap: usize) -> ChipSpans {
+        let mut spans = ChipSpans::default();
+        if let Some(at) = self.chips.iter().position(|c| c.active) {
+            let part = Some(StatusSegment::ProjectLabel(at));
+            spans.push(label(&self.chips[at], cap), part);
+        }
+        spans
     }
 
     fn others(&self) -> impl Iterator<Item = &ProjectChip> {

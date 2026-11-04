@@ -25,6 +25,7 @@ pub mod prompt;
 pub mod scrollback;
 pub mod status;
 pub mod status_flags;
+pub mod status_segments;
 pub mod syntax;
 pub mod theme;
 pub mod wrap;

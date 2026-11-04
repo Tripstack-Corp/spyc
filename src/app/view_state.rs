@@ -487,6 +487,10 @@ pub struct ViewState {
     /// semantic segments: a selection maps screen COLUMNS back to characters, and
     /// only the drawn line has the width-driven truncation the user is looking at.
     pub(super) chrome_rows: std::cell::RefCell<Vec<mouse::ChromeRow>>,
+    /// Where the status bar's segments were drawn this frame, for a click on
+    /// one: recorded by the renderer as `chrome_rows` is, from the pass that
+    /// laid the bar out. `None` while the bar isn't drawn.
+    pub(super) status_row: std::cell::RefCell<Option<mouse::StatusRow>>,
     /// A sustained same-direction wheel-scroll gesture over an agent's own view
     /// (today: codex's `^T`), tracked so a long one can escalate to a page-sized
     /// step and so a short one can't open the view by accident — see
@@ -601,6 +605,7 @@ impl ViewState {
             pane_selection_snapshot: None,
             chrome_selection: None,
             chrome_rows: std::cell::RefCell::new(Vec::new()),
+            status_row: std::cell::RefCell::new(None),
             last_chrome_click: None,
             pane_scroll_streak: None,
             pane_view_sent: None,

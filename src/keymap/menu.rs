@@ -3,7 +3,7 @@
 //! action a click fires. Pure, and decided from facts the app layer gathers,
 //! so a row appears only where its action applies.
 
-use super::action::Action;
+use super::action::{Action, ProjectAction};
 use super::resolver::ChordEntry;
 use crate::fs::EntryKind;
 
@@ -18,6 +18,15 @@ pub enum Target {
     Divider(DividerFacts),
     /// The vertical split: its divider, right-clicked.
     VDivider(SplitFacts),
+    /// The project in view: its label on the status bar, or the lone
+    /// project's segment, right-clicked.
+    Project(ProjectFacts),
+    /// The open projects as a whole: the status bar's collapsed count.
+    Projects(ProjectsFacts),
+    /// The focused column's repo: the status bar's git segment.
+    Git(GitFacts),
+    /// The session: the status bar's session segment.
+    Session,
 }
 
 /// What an entry's menu depends on.
@@ -63,6 +72,40 @@ pub struct SplitFacts {
     pub commander: bool,
 }
 
+/// What the open projects' rows depend on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectsFacts {
+    /// Another project is open to step to: with one, `Space ]` and `Space [`
+    /// do nothing.
+    pub several: bool,
+    /// An agent in some project is waiting on the user, for `Space !`.
+    pub waiting: bool,
+}
+
+/// What the project in view's menu depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectFacts {
+    pub projects: ProjectsFacts,
+    /// `Space x` closes it: another project is open, and no editor runs in
+    /// its view.
+    pub closable: bool,
+    /// It has a home for `Space p` to jump to.
+    pub home: bool,
+    /// The focused column's directory is no other open project's home or
+    /// anchor, so `Space P` can make it this one's.
+    pub rehome: bool,
+}
+
+/// What the git segment's menu depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GitFacts {
+    /// The repo has changes for `gd` to show.
+    pub changes: bool,
+    /// The focused column is at the root of a clean linked worktree that the
+    /// other column isn't inside: `Space w d` can remove it.
+    pub removable: bool,
+}
+
 /// The key a menu row stands for, as it is typed: the chord's `prefix` and the
 /// row's first key, joined the way they are written (`gg`, `Wl`, `^a z`,
 /// `Space p`). An object's menu has no prefix, and its rows' keys are already
@@ -86,6 +129,10 @@ pub fn menu_for(target: Target) -> Vec<ChordEntry> {
         Target::PaneTab(facts) => tab_rows(facts),
         Target::Divider(facts) => divider_rows(facts),
         Target::VDivider(facts) => split_rows(facts),
+        Target::Project(facts) => project_rows(facts),
+        Target::Projects(facts) => projects_rows(facts),
+        Target::Git(facts) => git_rows(facts),
+        Target::Session => shown([(true, "Space s", Action::ShowMemory)]),
     }
 }
 
@@ -181,6 +228,44 @@ fn split_rows(s: SplitFacts) -> Vec<ChordEntry> {
     ])
 }
 
+/// The project in view's own rows, then the open projects'. No row goes to
+/// it: its menu opens once it is in view.
+fn project_rows(p: ProjectFacts) -> Vec<ChordEntry> {
+    use Action as A;
+    use ProjectAction as P;
+    let mut rows = shown([
+        (p.closable, "Space x", A::Project(P::Close)),
+        (p.home, "Space p", A::Project(P::JumpHome)),
+        (p.rehome, "Space P", A::Project(P::SetHomeHere)),
+    ]);
+    rows.extend(projects_rows(p.projects));
+    rows
+}
+
+fn projects_rows(p: ProjectsFacts) -> Vec<ChordEntry> {
+    use Action as A;
+    use ProjectAction as P;
+    shown([
+        (true, "Space j", A::Project(P::List)),
+        (true, "Space n", A::Project(P::Open)),
+        (p.several, "Space ]", A::Project(P::Next)),
+        (p.several, "Space [", A::Project(P::Prev)),
+        (p.waiting, "Space !", A::Project(P::Attention)),
+    ])
+}
+
+/// The worktree keys are named on the leader, where the workspace's keys
+/// live; `W` is the file list's alias for them.
+fn git_rows(g: GitFacts) -> Vec<ChordEntry> {
+    use Action as A;
+    shown([
+        (true, "Space w l", A::WorktreeList),
+        (true, "Space w n", A::WorktreeNew),
+        (g.removable, "Space w d", A::WorktreeDelete),
+        (g.changes, "gd", A::GitDiff),
+    ])
+}
+
 /// One target for every combination of the facts a row depends on: what the
 /// guards walk.
 #[cfg(test)]
@@ -219,6 +304,27 @@ pub fn every_target() -> Vec<Target> {
     for commander in [false, true] {
         out.push(Target::VDivider(SplitFacts { commander }));
     }
+    for bits in 0..32u8 {
+        let bit = |n: u8| bits & (1 << n) != 0;
+        let projects = ProjectsFacts {
+            several: bit(0),
+            waiting: bit(1),
+        };
+        if bits < 4 {
+            out.push(Target::Projects(projects));
+            out.push(Target::Git(GitFacts {
+                changes: bit(0),
+                removable: bit(1),
+            }));
+        }
+        out.push(Target::Project(ProjectFacts {
+            projects,
+            closable: bit(2),
+            home: bit(3),
+            rehome: bit(4),
+        }));
+    }
+    out.push(Target::Session);
     out
 }
 
