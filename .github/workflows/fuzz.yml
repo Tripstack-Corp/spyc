@@ -59,6 +59,7 @@ jobs:
           - highlight
           - pane_engine
           - render_markdown
+          - taskfile_make
           - word_wrap
     steps:
       - uses: actions/checkout@v7

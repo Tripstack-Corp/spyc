@@ -51,3 +51,23 @@ corpus does not have to rediscover them.
 | `charset_switch` | SCS charset selection (DEC special graphics) |
 | `mode_churn` | alt screen, bracketed paste, mouse and cursor-key modes toggled densely |
 | `zwj_glyph_one_column` | the three bytes that aborted the first version of this target. A ZWJ glyph in a one-column grid panics vt100, and `libfuzzer-sys`'s hook aborted before `catch_unwind` could recover it. Kept because it is the shape that proves the hook scoping is still in place — if that regresses, this seed aborts on the first run rather than after someone rediscovers it |
+
+## taskfile_make
+
+The whole input is a Makefile's text, lossily decoded. The target asserts the
+parser never panics and lists only names a user can type as a goal: none empty,
+`.`-led or `-`-led, none holding `%`, `$`, `=` or a control character, none
+twice, and at most one default.
+
+| seed | shape |
+|---|---|
+| `spyc_makefile.mk` | spyc's own `Makefile`: `.PHONY` before each rule, `##` labels, a `$(shell …)` variable, recipes with `$$` |
+| `shell_everywhere.mk` | `$(shell touch …)` in a variable, a target name, an include path and a recipe: the never-evaluate fixture |
+| `hostile_names.mk` | names a shell or make would misread: `;`, a backtick, `-rf`, `x=y`, quotes, escaped spaces, `\#` and `\:` |
+| `conditionals.mk` | nested `ifeq` / `ifdef` / `ifndef` / `else ifeq`, rules in every branch |
+| `continuations.mk` | backslash continuations across targets, prerequisites and a `##` label, and a CRLF rule |
+| `define_and_eval.mk` | a `define` body shaped like a rule, `$(eval $(call …))`, an empty `define`, a double-colon rule twice |
+| `patterns.mk` | a pattern rule, a static pattern, an archive member, a target-specific variable, a `.DEFAULT_GOAL` reference, suffix rules |
+| `bsd.mk` | BSD make's `.if` / `.elif` / `.for` / `.include <…>` / `.MAIN` |
+| `nul_and_controls.mk` | a NUL, a bell and an escape sequence inside target names |
+| `unterminated.mk` | an unclosed `ifeq (`, `define`, `$(shell` and `${`, and bare `:` / `::` / `:=` lines |

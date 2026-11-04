@@ -88,3 +88,10 @@ path = "fuzz_targets/pane_engine.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "taskfile_make"
+path = "fuzz_targets/taskfile_make.rs"
+test = false
+doc = false
+bench = false
