@@ -387,10 +387,17 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     // P1-3: piggyback the agent's live session id (from the same hook stdin) so
     // spyc can pin this pane's exact conversation for `-r` restore.
     let session_id = session_id_from_hook_payload(&payload);
+    // #917: the hook runs in claude's own environment, a wrapper's included,
+    // so this is the Claude home its conversation is filed under.
+    let claude_home = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .and_then(|dir| crate::agent::claude_home::from_config_dir(&dir));
     if trace {
         trace_log(&format!("report-status: effective state={state}"));
         if session_id.is_some() {
             trace_log("report-status: session_id=set");
+        }
+        if claude_home.is_some() {
+            trace_log("report-status: claude_home=set");
         }
     }
     if pane_id.is_some() {
@@ -418,7 +425,10 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
         "method": "tools/call",
         "params": {
             "name": "report_status",
-            "arguments": { "status": state, "pane_id": pane_id, "session_id": session_id, "hook_event": hook_event },
+            "arguments": {
+                "status": state, "pane_id": pane_id, "session_id": session_id,
+                "claude_home": claude_home, "hook_event": hook_event,
+            },
         },
     })
     .to_string();

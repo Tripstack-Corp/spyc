@@ -279,6 +279,7 @@ impl App {
                 command: info.command.clone(),
                 session_id: info.pinned_session_id().map(str::to_owned),
                 codex_home: info.codex_home.clone(),
+                claude_home: self.active_claude_home_lookup(),
             }),
         })
     }

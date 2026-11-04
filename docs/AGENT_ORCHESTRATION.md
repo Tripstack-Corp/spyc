@@ -188,6 +188,16 @@ A `blocked` report's label (`claude needs you: Bash`) is drawn from these names
 alone, never from tool input or the agent's own note.
 Control characters, malformed identifiers and oversized fields are discarded.
 `--status-trace` logs this sanitized metadata instead of the raw stdin payload.
+
+Beside the metadata, the reporter sends the conversation id (claude's
+`session_id`, agy's `conversationId`) and, for a hook whose environment names an
+absolute `CLAUDE_CONFIG_DIR`, that directory as `claude_home`; the trace says
+only that it was set. A Claude tab's conversations are filed under its Claude
+home, so the HUD, `^a v`, `^a g`, saves and `-r` read the one its claude runs
+with, a wrapper's included. Until its first report, a tab reads the
+`CLAUDE_CONFIG_DIR` its pane shell exported at launch, else spyc's own (its
+`CLAUDE_CONFIG_DIR`, else `~/.claude`). A save records a tab's own home, so `-r`
+resumes the conversation from it.
 The reporter streams the complete hook JSON and retains only a fixed set of
 root metadata fields; a large patch, heredoc or answer does not erase later ids.
 The 8 KiB limit applies to normalized metadata, not raw stdin. String capture is

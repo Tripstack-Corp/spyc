@@ -62,6 +62,7 @@ fn forget_agent(info: &mut TabInfo) {
     info.claude_statusline = None;
     info.codex_session_id = None;
     info.codex_home = None;
+    info.claude_home = None;
     info.pending_resume_send = None;
     info.status_hooks_restart_needed = false;
 }

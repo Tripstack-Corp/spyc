@@ -20,6 +20,7 @@ fn hook(app: &mut App, status: &str, event: &serde_json::Value) -> McpResponse {
         ttl_ms: None,
         note: None,
         session_id: Some("session-1".into()),
+        claude_home: None,
         hook_event: StatusHookEvent::from_value(event),
     })
 }
@@ -33,6 +34,7 @@ fn agent(app: &mut App, status: &str, note: Option<&str>, ttl_ms: Option<u64>) {
         ttl_ms,
         note: note.map(String::from),
         session_id: None,
+        claude_home: None,
         hook_event: None,
     });
     assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");

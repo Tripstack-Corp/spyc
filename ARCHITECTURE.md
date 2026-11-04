@@ -620,8 +620,8 @@ in a pane that works fine outside spyc. Restoring `-i` for a shell command
 reintroduces it. The symptom is always third-party (spyc logs nothing), so
 "pane-only rc weirdness + pid-keyed temp files" is the signature.
 
-Agent panes capture only `HOME` and `CODEX_HOME` immediately before the original
-`exec`, after that single rc pass. Explicit per-pane home overrides are reapplied
+Agent panes capture only `HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR` immediately
+before the original `exec`, after that single rc pass. Explicit per-pane home overrides are reapplied
 at the same point so restore, restart and fork retain their recorded identity.
 `pane::launch_env` bounds reads to 64 KiB and owns a 0600 record inside a 0700
 private directory for the pane's lifetime; dropping the directory also prevents
@@ -630,6 +630,15 @@ worker reads this metadata and scopes claims by home plus stable pane id. Missin
 metadata stays unbound. New saves record unresolved homes explicitly and refuse
 those tabs on restore; legacy saves without home fields retain their old launch
 behaviour. No second interactive shell or environment dump is introduced.
+
+A Claude tab's home is decided later and per tab (#917): its status hook runs in
+claude's own environment, so the `CLAUDE_CONFIG_DIR` it reports wins, a wrapper
+that sets one without `exec`-ing included; the launch record only covers the
+time before the first report, and spyc's own home covers a tab that names
+neither. Reading the agent process's environment from the OS is not needed and
+would miss a wrapper. The record is read only where session files are read
+anyway (`agent::claude_home::Lookup`), never on the draw path, so the HUD binds
+the reported home or spyc's own.
 
 <!-- SPYC-TRAP: signal-teardown-precomputed -->
 `signal_terminate` (SIGTERM / SIGHUP) restores the terminal from a string built

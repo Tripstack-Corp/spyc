@@ -198,7 +198,9 @@ image protocols or OSC 52 clipboard writes. How it answers:
     the verbatim terminal capture works, so which one `^a v`
     opens first is a per-agent choice:
     `[pane] claude_transcript_scrollback` (off by default —
-    inline claude captures fine from the terminal) and
+    inline claude captures fine from the terminal; a Claude tab's
+    transcript comes from the `CLAUDE_CONFIG_DIR` that tab's
+    claude runs with) and
     `[pane] agy_transcript_scrollback` (on by default). Codex
     transcripts are always on — there is no config gate.
   - **`t` toggles tool calls.** In a transcript scrollback, `t`

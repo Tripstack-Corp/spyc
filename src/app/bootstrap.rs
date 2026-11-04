@@ -153,7 +153,7 @@ impl App {
             cwd.clone(),
             config,
             user_keymap,
-            initial_pane(),
+            initial_pane(startup_claude_home(), startup_agy_home()),
         );
         project.config_key = Some((cwd.clone(), cwd));
         let active = project.id;
@@ -373,13 +373,24 @@ fn launch_config(cwd: &std::path::Path) -> (Config, Option<String>) {
     }
 }
 
-/// spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`.
-pub(super) fn initial_pane() -> state::PaneLayout {
-    let claude_home = crate::agent::claude_metrics::home(
+/// spyc's own Claude Code home: its `CLAUDE_CONFIG_DIR`, else `~/.claude`.
+fn startup_claude_home() -> Option<std::path::PathBuf> {
+    crate::agent::claude_metrics::home(
         std::env::var_os("CLAUDE_CONFIG_DIR"),
         std::env::var_os("HOME"),
-    );
-    let agy_home = crate::agent::agy_metrics::home(std::env::var_os("HOME"));
+    )
+}
+
+fn startup_agy_home() -> Option<std::path::PathBuf> {
+    crate::agent::agy_metrics::home(std::env::var_os("HOME"))
+}
+
+/// spyc (top) = 30%, pane (bottom) = 70%. Resize with `^W +/-`. The homes are
+/// spyc's own, read once at startup; a project opened later shares them.
+pub(super) fn initial_pane(
+    claude_home: Option<std::path::PathBuf>,
+    agy_home: Option<std::path::PathBuf>,
+) -> state::PaneLayout {
     state::PaneLayout {
         pane_height_pct: 70,
         agent_hud: state::agent_hud::AgentHudState::new(claude_home, agy_home),

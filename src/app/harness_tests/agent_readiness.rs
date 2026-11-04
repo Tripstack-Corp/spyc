@@ -34,6 +34,7 @@ fn report(app: &mut App, status: &str) {
             ttl_ms: Some(120_000),
             note: None,
             session_id: None,
+            claude_home: None,
             hook_event: None,
         }),
         McpResponse::Ok { .. }
@@ -569,6 +570,7 @@ fn codex_report_history_is_pane_local_and_not_carried_into_a_restart() {
             ttl_ms: Some(1),
             note: None,
             session_id: None,
+            claude_home: None,
             hook_event: None,
         });
         let at = app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
@@ -636,6 +638,7 @@ fn status_hook_event_history_is_bounded_pane_local_and_cleared_on_restart() {
                     ttl_ms: Some(1),
                     note: None,
                     session_id: None,
+                    claude_home: None,
                     hook_event: Some(event),
                 }),
                 McpResponse::Ok { .. }
@@ -692,6 +695,7 @@ fn status_hook_event_metadata_does_not_infer_permission_answers_or_hook_trust() 
                 ttl_ms: Some(1),
                 note: None,
                 session_id: None,
+                claude_home: None,
                 hook_event: Some(event),
             }),
             McpResponse::Ok { .. }
@@ -747,6 +751,7 @@ fn question_report(app: &mut App, signal: &str, event: &str, call: &str) {
     let result = app.execute_mcp_command(McpCommand::ReportStatus {
         pane_id: None, pane: None, status: signal.into(), ttl_ms: Some(120_000), note: None,
         session_id: Some("session-1".into()),
+        claude_home: None,
         hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&serde_json::json!({
             "hook_event_name":event, "tool_name":"request_user_input", "turn_id":"turn-1", "tool_use_id":call
         }))
@@ -847,6 +852,7 @@ fn codex_question_recovery_ignores_old_reporters_and_other_panes() {
                 ttl_ms: None,
                 note: None,
                 session_id: Some("session-1".into()),
+                claude_home: None,
                 hook_event: None,
             }),
             McpResponse::Ok { .. }
@@ -1022,6 +1028,7 @@ fn invalid_question_start_cannot_supersede_a_generic_block() {
                     ttl_ms: None,
                     note: None,
                     session_id: Some("session-1".into()),
+                    claude_home: None,
                     hook_event: event,
                 }),
                 McpResponse::Ok { .. }
@@ -1136,6 +1143,7 @@ fn report_ttl_is_bounded_at_dispatch_even_for_the_largest_u64() {
                 ttl_ms: Some(ttl),
                 note: None,
                 session_id: None,
+                claude_home: None,
                 hook_event: None,
             });
             assert!(matches!(result, McpResponse::Ok { .. }), "{result:?}");
@@ -1207,6 +1215,7 @@ fn a_closed_agent_pane_retires_reports_and_rejects_late_reports() {
             ttl_ms: None,
             note: None,
             session_id: None,
+            claude_home: None,
             hook_event: None,
         });
         assert!(

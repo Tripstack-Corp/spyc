@@ -187,6 +187,7 @@ fn effective_kind_passes_through_explicit_value() {
         agent_session_name: None,
         codex_home: None,
         codex_home_unresolved: false,
+        claude_home: None,
         claim_owner: String::new(),
         pane_id: String::new(),
         agent_hint: None,
@@ -514,6 +515,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 agent_session_name: None,
                 codex_home: None,
                 codex_home_unresolved: false,
+                claude_home: None,
                 claim_owner: String::new(),
                 pane_id: String::new(),
                 agent_hint: None,
@@ -549,6 +551,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     agent_session_name: None,
                     codex_home: None,
                     codex_home_unresolved: false,
+                    claude_home: None,
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
@@ -580,6 +583,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     agent_session_name: None,
                     codex_home: None,
                     codex_home_unresolved: false,
+                    claude_home: None,
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
@@ -680,6 +684,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     agent_session_name: Some("AROMA".into()),
                     codex_home: None,
                     codex_home_unresolved: false,
+                    claude_home: None,
                     claim_owner: "owner-A".into(),
                     pane_id: String::new(),
                     agent_hint: None,
@@ -694,6 +699,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     agent_session_name: None,
                     codex_home: None,
                     codex_home_unresolved: false,
+                    claude_home: None,
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
@@ -812,6 +818,7 @@ fn tab_omits_absent_session_id_in_json() {
         agent_session_name: None,
         codex_home: None,
         codex_home_unresolved: false,
+        claude_home: None,
         claim_owner: String::new(),
         pane_id: String::new(),
         agent_hint: None,
@@ -888,16 +895,21 @@ fn title_from_tail_survives_midcodepoint_seek_boundary() {
     );
 }
 
-/// No test reads the developer's own `~/.claude`: without a pinned dir there
-/// is none, and claude lookups find nothing.
+/// The Claude lookups read only the home their caller names: this module never
+/// makes one up, so no test reads the developer's own `~/.claude`, and no tab
+/// reads another's home.
 #[test]
-fn unit_tests_see_no_claude_dir_unless_they_pin_one() {
-    assert_eq!(claude_dir(), None);
-    let tmp = tempdir().unwrap();
-    with_claude_dir(tmp.path(), || {
-        assert_eq!(claude_dir().as_deref(), Some(tmp.path()));
-    });
-    assert_eq!(claude_dir(), None);
+fn claude_lookups_never_choose_their_own_home() {
+    let src = crate::guard_support::production_half(include_str!("mod.rs"));
+    assert!(
+        src.contains("pub fn find_claude_sessions("),
+        "the lookups moved"
+    );
+    assert!(
+        !src.contains(".claude"),
+        "a default Claude home crept back in"
+    );
+    assert!(!src.contains("CLAUDE_CONFIG_DIR"));
 }
 
 #[test]

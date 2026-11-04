@@ -47,21 +47,21 @@ impl App {
         self.frame_layout(Rect::new(0, 0, cols, rows)).agent_hud?;
         let info = self.runtime.project().pane_tabs.as_ref()?.active_info();
         let feed = feed(info.agent().kind())?;
+        let hud = &self.state.active_project().pane.agent_hud;
         let (session, home) = match feed {
-            Feed::Codex => (&info.codex_session_id, &info.codex_home),
+            Feed::Codex => (&info.codex_session_id, info.codex_home.as_ref()),
+            // The tab's own home, else spyc's; its launch record isn't read
+            // here, and only a report or a restore pins a session to show.
             Feed::Claude => (
                 &info.live_session_id,
-                &self.state.active_project().pane.agent_hud.claude_home,
+                info.claude_home.as_ref().or(hud.claude_home.as_ref()),
             ),
-            Feed::Agy => (
-                &info.live_session_id,
-                &self.state.active_project().pane.agent_hud.agy_home,
-            ),
+            Feed::Agy => (&info.live_session_id, hud.agy_home.as_ref()),
         };
         let session = session
             .as_deref()
             .filter(|id| crate::state::sessions::is_uuid(id))?;
-        let home = home.as_ref().filter(|home| home.is_absolute())?;
+        let home = home.filter(|home| home.is_absolute())?;
         Some(Target {
             feed,
             pane_id: info.id.clone(),

@@ -194,7 +194,6 @@ fn wait_hud_reads(app: &mut App, home: &Path) {
 /// decoy conversation in the tab's directory, and the tab's hook reports that
 /// Claude runs from profile `b`. The HUD and `^a v` both read `b`'s.
 #[test]
-#[ignore = "red: the hook's Claude home is ignored, so the HUD binds spyc's own home and `^a v` finds no transcript"]
 fn a_claude_tab_reads_the_home_its_hook_reports_not_the_default() {
     // The loop's settle sets the process-wide mouse mode.
     let _lock = crate::mouse_test_lock();
@@ -230,7 +229,6 @@ fn a_claude_tab_reads_the_home_its_hook_reports_not_the_default() {
 /// as a profile's rc sets it, never the default's decoy; a relative home the
 /// hook reports names no place and changes nothing, and an absolute one wins.
 #[test]
-#[ignore = "red: the launch record has no `CLAUDE_CONFIG_DIR` and the hook's home is ignored"]
 fn a_claude_tab_reads_its_launch_home_until_its_hook_reports_one() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -269,7 +267,6 @@ fn a_claude_tab_reads_its_launch_home_until_its_hook_reports_one() {
 /// spyc started with `CLAUDE_CONFIG_DIR` reads that home for a tab that names
 /// none of its own: its `^a v`, and the conversation a save records.
 #[test]
-#[ignore = "red: session lookups read only `~/.claude`, never spyc's own `CLAUDE_CONFIG_DIR`"]
 fn a_claude_tab_that_names_no_home_reads_spycs_own() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -290,7 +287,6 @@ fn a_claude_tab_that_names_no_home_reads_spycs_own() {
 /// conversation from it and reads it for `^a v`, though spyc's own home holds
 /// no such conversation.
 #[test]
-#[ignore = "red: a save records no Claude home, so restore checks spyc's own and resumes nothing"]
 fn a_restored_claude_tab_resumes_from_the_home_it_was_saved_with() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -342,7 +338,6 @@ fn a_restored_claude_tab_resumes_from_the_home_it_was_saved_with() {
 /// same home: the new tab reads it before its own first report, never the
 /// default's decoy.
 #[test]
-#[ignore = "red: the hook's Claude home is ignored, so a restarted or forked tab reads spyc's own"]
 fn a_restarted_or_forked_claude_tab_keeps_its_reported_home() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {

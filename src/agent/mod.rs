@@ -15,7 +15,9 @@
 pub mod agy_approval;
 pub mod agy_metrics;
 pub mod chrome;
+pub mod claude_home;
 pub mod claude_metrics;
+mod claude_profile;
 pub mod claude_statusline;
 pub mod codex_approval;
 pub mod codex_command;
@@ -41,6 +43,8 @@ use crate::pane::Pane;
 use crate::state::sessions::{AgentKind, SessionCandidate};
 use crate::ui::theme::Theme;
 use detect_rules::DetectionRule;
+
+pub use claude_profile::ClaudeProfile;
 
 /// How a restored pane re-establishes its conversation.
 pub enum ResumeAction {
@@ -102,6 +106,9 @@ pub struct TranscriptQuery<'a> {
     /// Codex home captured from this pane's launch environment, never the
     /// current spyc environment. Other agents ignore this field.
     pub codex_home: Option<&'a Path>,
+    /// The tab's Claude Code configuration directory, where claude files its
+    /// transcripts. Other agents ignore this field.
+    pub claude_home: Option<&'a Path>,
 }
 
 /// Describes an agent's on-disk transcript view for `^a v`.
@@ -168,13 +175,16 @@ pub trait AgentProfile: Sync {
     }
 
     /// SAVE: resolve `(session_id, session_name)` to persist. Default:
-    /// nothing to resume.
+    /// nothing to resume. `claude_home`, here and below, is the tab's Claude
+    /// Code configuration directory, where claude keeps its sessions; the
+    /// other agents find their own.
     fn resolve_resume_target(
         &self,
         _pane: &Pane,
         _cwd: &Path,
         _spawn_epoch_secs: u64,
         _claimed: &HashSet<String>,
+        _claude_home: Option<&Path>,
     ) -> (Option<String>, Option<String>) {
         (None, None)
     }
@@ -185,7 +195,12 @@ pub trait AgentProfile: Sync {
     /// conversation, so save can prefer it over the spawn-proximity resolver.
     /// `Some((id, name))` when it checks out; `None` when it's stale or the agent
     /// has no history to check it against.
-    fn validate_live_session_id(&self, _cwd: &Path, _id: &str) -> Option<(String, Option<String>)> {
+    fn validate_live_session_id(
+        &self,
+        _cwd: &Path,
+        _id: &str,
+        _claude_home: Option<&Path>,
+    ) -> Option<(String, Option<String>)> {
         None
     }
 
@@ -197,7 +212,13 @@ pub trait AgentProfile: Sync {
 
     /// RESTORE: reconstruct the spawn command and how to resume.
     /// Default: spawn the saved command verbatim, nothing to resume.
-    fn reconstruct_restore(&self, cmd: &str, _sid: Option<&str>, _cwd: &Path) -> RestorePlan {
+    fn reconstruct_restore(
+        &self,
+        cmd: &str,
+        _sid: Option<&str>,
+        _cwd: &Path,
+        _claude_home: Option<&Path>,
+    ) -> RestorePlan {
         RestorePlan {
             command: cmd.to_string(),
             resume: ResumeAction::None,
@@ -210,7 +231,12 @@ pub trait AgentProfile: Sync {
     }
 
     /// Status-bar short id for the active pane. Default: none.
-    fn resolve_short_id(&self, _cwd: &Path, _spawn_epoch_secs: u64) -> Option<String> {
+    fn resolve_short_id(
+        &self,
+        _cwd: &Path,
+        _spawn_epoch_secs: u64,
+        _claude_home: Option<&Path>,
+    ) -> Option<String> {
         None
     }
 
@@ -389,110 +415,6 @@ fn closest_short_id<T: SessionCandidate>(
 
 // ── Profiles ──────────────────────────────────────────────────────────
 
-pub struct ClaudeProfile;
-impl AgentProfile for ClaudeProfile {
-    fn kind(&self) -> AgentKind {
-        AgentKind::Claude
-    }
-    fn name(&self) -> &'static str {
-        "claude"
-    }
-    fn binary(&self) -> &'static str {
-        "claude"
-    }
-    fn resolve_resume_target(
-        &self,
-        pane: &Pane,
-        cwd: &Path,
-        spawn_epoch_secs: u64,
-        claimed: &HashSet<String>,
-    ) -> (Option<String>, Option<String>) {
-        resume::resolve_claude_resume_target(pane, cwd, spawn_epoch_secs, claimed)
-    }
-    /// Claude's pin is taken as-is. The hook names the conversation this tab
-    /// runs from claude's startup, but the transcript appears only with the
-    /// first message: requiring it here sent an unwritten pin to the resolver,
-    /// which saved another tab's conversation (#584). Restore checks for the
-    /// transcript instead, before typing `/resume`.
-    fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
-        Some((
-            id.to_string(),
-            crate::state::sessions::find_claude_session_name(id),
-        ))
-    }
-    fn command_without_resume(&self, cmd: &str) -> String {
-        resume::command_without_resume(cmd)
-    }
-    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, cwd: &Path) -> RestorePlan {
-        // Claude always spawns fresh; the `/resume <sid>` stdin dance is
-        // armed by the event loop when a session id is present.
-        RestorePlan {
-            command: resume::command_without_resume(cmd),
-            resume: match sid {
-                // Saved before its first message, so there is nothing to
-                // resume. A name can't be checked; claude resolves it.
-                Some(s)
-                    if crate::state::sessions::is_uuid(s)
-                        && !crate::state::sessions::claude_jsonl_exists(cwd, s) =>
-                {
-                    ResumeAction::None
-                }
-                Some(s) => ResumeAction::ClaudeStdin {
-                    session_id: s.to_string(),
-                },
-                None => ResumeAction::None,
-            },
-        }
-    }
-    fn fork_mode(&self) -> ForkMode {
-        ForkMode::Branch(|cmd, sid| Ok(resume::claude_fork_command(cmd, sid)))
-    }
-    fn resolve_short_id(&self, cwd: &Path, spawn_epoch_secs: u64) -> Option<String> {
-        closest_short_id(
-            crate::state::sessions::find_claude_sessions(cwd),
-            spawn_epoch_secs,
-        )
-    }
-    fn picker_label(&self, short_id: &str, session_name: Option<&str>) -> String {
-        match session_name {
-            Some(name) => format!("claude:{name} ({short_id})"),
-            None => format!("claude:{short_id}"),
-        }
-    }
-    fn exit_summary_mode(&self) -> ExitSummaryMode {
-        ExitSummaryMode::Names
-    }
-    fn transcript(&self) -> Option<TranscriptSpec> {
-        Some(TranscriptSpec {
-            resolve: crate::state::claude_transcript::resolve_active_jsonl,
-            render: crate::state::claude_transcript::render_transcript,
-            config_key: Some("claude_transcript_scrollback"),
-            default_enabled: false,
-            miss_message: None,
-        })
-    }
-    fn transcript_images(&self) -> Option<TranscriptImageSpec> {
-        Some(TranscriptImageSpec {
-            resolve: crate::state::claude_transcript::resolve_active_jsonl,
-            format: crate::state::transcript_images::Format::Claude,
-        })
-    }
-    /// Claude Code pastes an image with `^v`, not the terminal's own paste
-    /// (`Cmd+V`/`Ctrl+Shift+V` go through the terminal, which can only carry
-    /// text). Same key on macOS and Linux.
-    fn image_paste_keys(&self) -> &'static [crossterm::event::KeyEvent] {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        const KEYS: &[KeyEvent] = &[KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL)];
-        KEYS
-    }
-    fn status_hooks(&self) -> Option<StatusHookSupport> {
-        Some(StatusHookSupport { live_reload: true })
-    }
-    fn output_len(&self, lines: &[String]) -> usize {
-        chrome::claude_output_len(lines)
-    }
-}
-
 /// `cmd` with `--no-daemon` after its program, so codex runs this session
 /// itself instead of on its shared background server. That server spawns every
 /// session's hooks and MCP servers with the environment of whichever codex
@@ -642,6 +564,7 @@ impl AgentProfile for CodexProfile {
         _cwd: &Path,
         _spawn_epoch_secs: u64,
         claimed: &HashSet<String>,
+        _claude_home: Option<&Path>,
     ) -> (Option<String>, Option<String>) {
         let lines = pane.recent_lines(200);
         let id = crate::state::sessions::extract_codex_resume_token(&lines)
@@ -655,13 +578,24 @@ impl AgentProfile for CodexProfile {
     /// `--last` silently attaching to whichever rollout in the cwd was written
     /// last (the #230 shape). Claude's pin is taken as-is too, and its restore
     /// skips a conversation with no transcript.
-    fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
+    fn validate_live_session_id(
+        &self,
+        _cwd: &Path,
+        id: &str,
+        _claude_home: Option<&Path>,
+    ) -> Option<(String, Option<String>)> {
         Some((id.to_string(), None))
     }
     fn command_without_resume(&self, cmd: &str) -> String {
         resume::command_without_codex_resume(cmd)
     }
-    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, _cwd: &Path) -> RestorePlan {
+    fn reconstruct_restore(
+        &self,
+        cmd: &str,
+        sid: Option<&str>,
+        _cwd: &Path,
+        _claude_home: Option<&Path>,
+    ) -> RestorePlan {
         match codex_command::restore(cmd, sid) {
             Ok(command) => RestorePlan {
                 command,
@@ -771,6 +705,7 @@ impl AgentProfile for AgyProfile {
         _cwd: &Path,
         _spawn_epoch_secs: u64,
         claimed: &HashSet<String>,
+        _claude_home: Option<&Path>,
     ) -> (Option<String>, Option<String>) {
         let lines = pane.recent_lines(200);
         let id = crate::state::sessions::extract_agy_resume_token(&lines)
@@ -780,7 +715,12 @@ impl AgentProfile for AgyProfile {
     /// Agy's pin is taken as-is: the status hook reports it, or the tab was
     /// spawned on it with `--conversation`. Restore checks the transcript, the
     /// way claude's does.
-    fn validate_live_session_id(&self, _cwd: &Path, id: &str) -> Option<(String, Option<String>)> {
+    fn validate_live_session_id(
+        &self,
+        _cwd: &Path,
+        id: &str,
+        _claude_home: Option<&Path>,
+    ) -> Option<(String, Option<String>)> {
         Some((id.to_string(), None))
     }
     fn command_without_resume(&self, cmd: &str) -> String {
@@ -789,7 +729,13 @@ impl AgentProfile for AgyProfile {
     /// A conversation agy never wrote, or none at all, starts a fresh agy.
     /// `--continue` would resume agy's newest conversation in the workspace,
     /// which another tab may own.
-    fn reconstruct_restore(&self, cmd: &str, sid: Option<&str>, cwd: &Path) -> RestorePlan {
+    fn reconstruct_restore(
+        &self,
+        cmd: &str,
+        sid: Option<&str>,
+        cwd: &Path,
+        _claude_home: Option<&Path>,
+    ) -> RestorePlan {
         let base = resume::command_without_agy_resume(cmd);
         let command = match sid {
             Some(s) if crate::state::sessions::agy_jsonl_exists(cwd, s) => {
@@ -802,7 +748,12 @@ impl AgentProfile for AgyProfile {
             resume: ResumeAction::None,
         }
     }
-    fn resolve_short_id(&self, cwd: &Path, spawn_epoch_secs: u64) -> Option<String> {
+    fn resolve_short_id(
+        &self,
+        cwd: &Path,
+        spawn_epoch_secs: u64,
+        _claude_home: Option<&Path>,
+    ) -> Option<String> {
         closest_short_id(
             crate::state::sessions::find_agy_sessions(cwd),
             spawn_epoch_secs,
@@ -913,7 +864,13 @@ impl AgentProfile for ZotProfile {
     fn command_without_resume(&self, cmd: &str) -> String {
         command_without_zot_resume(cmd)
     }
-    fn reconstruct_restore(&self, cmd: &str, _sid: Option<&str>, _cwd: &Path) -> RestorePlan {
+    fn reconstruct_restore(
+        &self,
+        cmd: &str,
+        _sid: Option<&str>,
+        _cwd: &Path,
+        _claude_home: Option<&Path>,
+    ) -> RestorePlan {
         // zot sessions are files under `$ZOT_HOME/sessions/<cwd-hash>/`;
         // `--continue` resumes the most recent one for this cwd (zot's
         // own resume-latest). We don't capture a specific session path
@@ -1264,8 +1221,12 @@ mod tests {
 
     #[test]
     fn zot_restore_continues_most_recent() {
-        let plan =
-            ZotProfile.reconstruct_restore("zot --session /tmp/x.jsonl", None, Path::new("/tmp"));
+        let plan = ZotProfile.reconstruct_restore(
+            "zot --session /tmp/x.jsonl",
+            None,
+            Path::new("/tmp"),
+            None,
+        );
         assert_eq!(plan.command, "zot --continue");
         assert!(matches!(plan.resume, ResumeAction::None));
     }
@@ -1277,15 +1238,19 @@ mod tests {
     #[test]
     fn claude_restore_strips_resume_and_arms_stdin() {
         let cwd = Path::new("/tmp");
-        let with_sid =
-            ClaudeProfile.reconstruct_restore("claude --resume old-sid", Some("new-sid"), cwd);
+        let with_sid = ClaudeProfile.reconstruct_restore(
+            "claude --resume old-sid",
+            Some("new-sid"),
+            cwd,
+            None,
+        );
         assert_eq!(with_sid.command, "claude");
         assert!(matches!(
             with_sid.resume,
             ResumeAction::ClaudeStdin { session_id } if session_id == "new-sid"
         ));
 
-        let fresh = ClaudeProfile.reconstruct_restore("claude", None, cwd);
+        let fresh = ClaudeProfile.reconstruct_restore("claude", None, cwd, None);
         assert_eq!(fresh.command, "claude");
         assert!(matches!(fresh.resume, ResumeAction::None));
     }
@@ -1298,11 +1263,14 @@ mod tests {
     fn restoring_a_claude_conversation_that_was_never_written_starts_fresh() {
         const SID: &str = "11111111-1111-4111-8111-111111111111";
         let tmp = tempfile::tempdir().unwrap();
-        crate::state::sessions::with_claude_dir(tmp.path(), || {
-            let plan = ClaudeProfile.reconstruct_restore("claude", Some(SID), Path::new("/tmp/p"));
-            assert_eq!(plan.command, "claude");
-            assert!(matches!(plan.resume, ResumeAction::None));
-        });
+        let plan = ClaudeProfile.reconstruct_restore(
+            "claude",
+            Some(SID),
+            Path::new("/tmp/p"),
+            Some(tmp.path()),
+        );
+        assert_eq!(plan.command, "claude");
+        assert!(matches!(plan.resume, ResumeAction::None));
     }
 
     /// The other side: a written conversation is resumed.
@@ -1317,13 +1285,11 @@ mod tests {
             .join(crate::state::sessions::project_slug(cwd));
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join(format!("{SID}.jsonl")), "{}\n").unwrap();
-        crate::state::sessions::with_claude_dir(tmp.path(), || {
-            let plan = ClaudeProfile.reconstruct_restore("claude", Some(SID), cwd);
-            assert!(matches!(
-                plan.resume,
-                ResumeAction::ClaudeStdin { session_id } if session_id == SID
-            ));
-        });
+        let plan = ClaudeProfile.reconstruct_restore("claude", Some(SID), cwd, Some(tmp.path()));
+        assert!(matches!(
+            plan.resume,
+            ResumeAction::ClaudeStdin { session_id } if session_id == SID
+        ));
     }
 
     /// Codex bakes resume into the command: `resume <UUID>` with an id,
@@ -1331,12 +1297,12 @@ mod tests {
     #[test]
     fn codex_restore_bakes_resume_into_command() {
         let cwd = Path::new("/tmp");
-        let with_sid = CodexProfile.reconstruct_restore("codex", Some("UUID-123"), cwd);
+        let with_sid = CodexProfile.reconstruct_restore("codex", Some("UUID-123"), cwd, None);
         assert_eq!(with_sid.command, "codex resume UUID-123");
         assert!(matches!(with_sid.resume, ResumeAction::None));
 
         // A stale baked `resume <old>` is stripped before re-baking.
-        let none = CodexProfile.reconstruct_restore("codex resume old-uuid", None, cwd);
+        let none = CodexProfile.reconstruct_restore("codex resume old-uuid", None, cwd, None);
         assert_eq!(none.command, "codex resume --last");
     }
 
@@ -1346,7 +1312,8 @@ mod tests {
         let saved = CodexProfile.command_without_resume(command);
         let expected = r#"codex -m old --profile team --sandbox read-only -a never -c 'model="new model"' --add-dir "$HOME/shared dir""#;
         assert_eq!(saved, expected);
-        let restored = CodexProfile.reconstruct_restore(&saved, Some("CURRENT"), Path::new("/tmp"));
+        let restored =
+            CodexProfile.reconstruct_restore(&saved, Some("CURRENT"), Path::new("/tmp"), None);
         assert_eq!(restored.command, format!("{expected} resume CURRENT"));
     }
 
@@ -1406,23 +1373,23 @@ mod tests {
             .join(crate::state::sessions::project_slug(cwd));
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join(format!("{SID}.jsonl")), "{}\n").unwrap();
-        crate::state::sessions::with_claude_dir(tmp.path(), || {
-            let plan = resume::reconstruct_saved_tab(
-                &saved("./claude-dev.sh -c", "claude", Some("claude"), Some(SID)),
-                cwd,
-            );
-            assert_eq!(plan.command, "./claude-dev.sh -c");
-            assert!(
-                matches!(plan.resume, ResumeAction::ClaudeStdin { ref session_id } if session_id == SID)
-            );
+        let plan = resume::reconstruct_saved_tab(
+            &saved("./claude-dev.sh -c", "claude", Some("claude"), Some(SID)),
+            cwd,
+            Some(tmp.path()),
+        );
+        assert_eq!(plan.command, "./claude-dev.sh -c");
+        assert!(
+            matches!(plan.resume, ResumeAction::ClaudeStdin { ref session_id } if session_id == SID)
+        );
 
-            let plan = resume::reconstruct_saved_tab(
-                &saved("npx @openai/codex", "codex", Some("codex"), Some(SID)),
-                cwd,
-            );
-            assert_eq!(plan.command, "npx @openai/codex");
-            assert!(matches!(plan.resume, ResumeAction::None));
-        });
+        let plan = resume::reconstruct_saved_tab(
+            &saved("npx @openai/codex", "codex", Some("codex"), Some(SID)),
+            cwd,
+            Some(tmp.path()),
+        );
+        assert_eq!(plan.command, "npx @openai/codex");
+        assert!(matches!(plan.resume, ResumeAction::None));
     }
 
     /// A hint that names the command's own agent changes nothing: the command
@@ -1433,6 +1400,7 @@ mod tests {
         let plan = resume::reconstruct_saved_tab(
             &saved("codex -m o3", "codex", Some("codex"), Some(SID)),
             Path::new("/tmp/p"),
+            None,
         );
         assert_eq!(plan.command, format!("codex -m o3 resume {SID}"));
     }
@@ -1446,7 +1414,11 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let cwd = Path::new("/tmp");
         crate::state::sessions::with_agy_home(home.path(), || {
-            let restore = |sid| AgyProfile.reconstruct_restore("agy -m x", sid, cwd).command;
+            let restore = |sid| {
+                AgyProfile
+                    .reconstruct_restore("agy -m x", sid, cwd, None)
+                    .command
+            };
             assert_eq!(restore(Some(SID)), "agy -m x", "never written");
             assert_eq!(restore(None), "agy -m x", "no id");
 
@@ -1462,7 +1434,7 @@ mod tests {
     #[test]
     fn other_restore_runs_verbatim_ignoring_sid() {
         let cwd = Path::new("/tmp");
-        let plan = OtherProfile.reconstruct_restore("bash -lc 'make'", Some("ignored"), cwd);
+        let plan = OtherProfile.reconstruct_restore("bash -lc 'make'", Some("ignored"), cwd, None);
         assert_eq!(plan.command, "bash -lc 'make'");
         assert!(matches!(plan.resume, ResumeAction::None));
     }
@@ -1529,7 +1501,7 @@ mod tests {
         assert_eq!(saved, "codex --model o3");
         assert_eq!(
             CodexProfile
-                .reconstruct_restore(&saved, Some("FORK"), cwd)
+                .reconstruct_restore(&saved, Some("FORK"), cwd, None)
                 .command,
             "codex --model o3 resume FORK"
         );
@@ -1585,8 +1557,12 @@ mod tests {
             assert_eq!(profile_for(k).kind(), k);
         }
         assert_eq!(profile_for(AgentKind::Other).kind(), AgentKind::Other);
-        let plan =
-            profile_for(AgentKind::Other).reconstruct_restore("vim", Some("x"), Path::new("/tmp"));
+        let plan = profile_for(AgentKind::Other).reconstruct_restore(
+            "vim",
+            Some("x"),
+            Path::new("/tmp"),
+            None,
+        );
         assert_eq!(plan.command, "vim");
         assert!(matches!(plan.resume, ResumeAction::None));
     }
@@ -1607,6 +1583,7 @@ mod tests {
             agent_session_name: Some("OLD".into()),
             codex_home: None,
             codex_home_unresolved: false,
+            claude_home: None,
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,
@@ -1618,6 +1595,7 @@ mod tests {
             &tab.command,
             tab.agent_session_id.as_deref(),
             Path::new("/tmp"),
+            None,
         );
         assert_eq!(plan.command, "claude");
         assert!(matches!(
@@ -1639,6 +1617,7 @@ mod tests {
             agent_session_name: None,
             codex_home: None,
             codex_home_unresolved: false,
+            claude_home: None,
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,
@@ -1649,6 +1628,7 @@ mod tests {
             &tab.command,
             None,
             Path::new("/tmp"),
+            None,
         );
         assert_eq!(plan.command, "claude");
         assert!(matches!(plan.resume, ResumeAction::None));
