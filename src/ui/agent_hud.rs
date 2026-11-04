@@ -1113,6 +1113,18 @@ mod tests {
         }
     }
 
+    /// The rule costs a row, and the agent keeps its six: full gives way to
+    /// compact, then the strip and its rule hide together.
+    #[test]
+    #[ignore = "red: no rule above the strip"]
+    fn the_rule_costs_a_row_and_the_agent_keeps_six() {
+        let strip = |height, mode| partition(Rect::new(0, 0, 80, height), mode).strip;
+        assert_eq!(strip(8, AgentHudMode::Compact), None);
+        assert_eq!(strip(9, AgentHudMode::Compact).map(|r| r.height), Some(3));
+        assert_eq!(strip(10, AgentHudMode::Full).map(|r| r.height), Some(3));
+        assert_eq!(strip(11, AgentHudMode::Full).map(|r| r.height), Some(5));
+    }
+
     #[test]
     fn every_height_keeps_six_child_rows_or_hides_the_strip() {
         for height in 0..40 {
