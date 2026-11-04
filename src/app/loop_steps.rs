@@ -187,9 +187,9 @@ impl App {
                     .map(|s| s.trim_end_matches('-').to_string())
                     .unwrap_or_default();
                 let entries = self.state.resolver.continuations();
-                let rows: Vec<(String, &'static str)> = entries
+                let rows: Vec<(String, String)> = entries
                     .iter()
-                    .map(|e| (e.keys().to_string(), e.label()))
+                    .map(|e| (e.keys().to_string(), e.label().to_string()))
                     .collect();
                 if !rows.is_empty() {
                     self.view.chord_hint = Some(ChordHint {

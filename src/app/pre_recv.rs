@@ -121,6 +121,10 @@ impl App {
         if self.apply_closed_rows() {
             ctx.draw.mark(3);
         }
+        // A make menu's Makefile was read (woke via `Wake::Makefile`).
+        if self.apply_makefile_reads(terminal, foreground_exec) {
+            ctx.draw.mark(3);
+        }
 
         // Drain finished Lua runs (woke via `Message::Wake(Wake::Lua)`): apply the
         // requests the script produced, running any effects they translate to.

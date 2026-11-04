@@ -37,6 +37,7 @@ impl App {
             git_tracked: c.git.info.is_some() && !git.untracked,
             deleted: row.deleted,
             pane_open: self.runtime.project().pane_tabs.is_some(),
+            makefile: crate::taskfile::is_makefile(&row.path),
         };
         let name = row
             .path
@@ -70,7 +71,10 @@ impl App {
                     && matches!(row, ChordEntry::Act(_, a)
                         if super::state::archive::refusal(a).is_some()))
             })
-            .map(|e| (e.keys().to_string(), e.label(), HintEntry::Chord(e)))
+            .map(|e| {
+                let label = e.label().to_string();
+                (e.keys().to_string(), label, HintEntry::Chord(e))
+            })
             .collect();
         self.show_menu(format!("{title} · ? all keys"), rows)
     }
@@ -78,10 +82,10 @@ impl App {
     /// Show a menu of `rows`, each `(keys, label, entry)`, titled `title`.
     /// The first menu ever opened retires the status bar's `. menu`, and
     /// returns the write that records it.
-    fn show_menu(
+    pub(super) fn show_menu(
         &mut self,
         title: String,
-        rows: Vec<(String, &'static str, HintEntry)>,
+        rows: Vec<(String, String, HintEntry)>,
     ) -> Option<Effect> {
         let (rows, entries) = rows
             .into_iter()
@@ -107,7 +111,7 @@ impl App {
         let task = facts.task.map(|t| t.id);
         let rows = pager_menu(facts)
             .into_iter()
-            .map(|a| (a.key(task), a.describe(), HintEntry::Pager(a)))
+            .map(|a| (a.key(task), a.describe().to_string(), HintEntry::Pager(a)))
             .collect();
         self.show_menu(title, rows).into_iter().collect()
     }

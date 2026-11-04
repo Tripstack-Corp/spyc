@@ -8,10 +8,6 @@
 //! a Makefile is someone else's text, and `include ../../.ssh/config` must not
 //! become a read. A relative path is taken from the top Makefile's directory,
 //! where make runs. A file is read once, so an include cycle ends.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "`discover` has no caller outside the tests")
-)]
 
 pub mod make;
 
@@ -29,6 +25,13 @@ const MAX_BYTES: u64 = 4 << 20;
 
 /// How many files one discovery reads, the Makefile and its includes.
 const MAX_FILES: usize = 64;
+
+/// Whether `path` is named as make names a Makefile.
+pub fn is_makefile(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| MAKEFILE_NAMES.contains(&n))
+}
 
 /// A Makefile and the targets it declares.
 #[derive(Debug, Clone, PartialEq, Eq)]

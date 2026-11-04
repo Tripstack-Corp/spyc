@@ -194,6 +194,10 @@ pub enum Wake {
     /// on `runtime.closed_rows_results`. Payloadless, same shape as
     /// `JumpDefault`; `apply_closed_rows` drains it in the pre-recv scan.
     ClosedRows,
+    /// A make menu's Makefile was read (`Effect::ReadMakefile`) and landed on
+    /// `runtime.make_results`. Payloadless, same shape as `ClosedRows`;
+    /// `apply_makefile_reads` drains it in the pre-recv scan.
+    Makefile,
     /// An off-thread inventory op (`Effect::Inventory`) finished.
     Inventory,
     /// An off-thread MCP worktree op (create/remove/clean) finished and landed

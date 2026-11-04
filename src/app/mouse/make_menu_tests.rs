@@ -213,7 +213,6 @@ fn finish_capture(app: &mut App) {
 /// menu, and a click on that row opens `make · Makefile`, once the read lands,
 /// with the targets, their labels and the default goal.
 #[test]
-#[ignore = "red: no Makefile row or make menu exists"]
 fn a_right_click_on_a_makefile_offers_its_targets_first() {
     with_mouse(|tmp| {
         let mut app = app_over(&tmp.join("work"), &[("Makefile", MAKEFILE)]);
@@ -259,7 +258,6 @@ fn a_plain_files_menu_has_no_make_row() {
 /// `! make <target>`, and names `:make <target>`; the open capture's menu then
 /// offers to background it.
 #[test]
-#[ignore = "red: no make menu exists"]
 fn a_click_on_a_target_runs_it_as_a_capture() {
     with_mouse(|tmp| {
         let mut app = app_over(&tmp.join("work"), &[("Makefile", MAKEFILE)]);
@@ -292,7 +290,6 @@ fn a_click_on_a_target_runs_it_as_a_capture() {
 
 /// `Enter` on a row highlighted with the arrows runs it too.
 #[test]
-#[ignore = "red: no make menu exists"]
 fn arrows_and_enter_run_a_target() {
     with_mouse(|tmp| {
         let mut app = app_over(&tmp.join("work"), &[("Makefile", MAKEFILE)]);
@@ -313,7 +310,6 @@ fn arrows_and_enter_run_a_target() {
 /// `Space m` opens the menu for the focused column's Makefile; where there is
 /// none, it says so.
 #[test]
-#[ignore = "red: Space m is unbound"]
 fn space_m_opens_the_menu_or_says_there_is_no_makefile() {
     with_mouse(|tmp| {
         let mut app = app_over(&tmp.join("work"), &[("Makefile", MAKEFILE)]);
@@ -335,7 +331,6 @@ fn space_m_opens_the_menu_or_says_there_is_no_makefile() {
 
 /// `:make build` runs `build`; a bare `:make` opens the menu.
 #[test]
-#[ignore = "red: :make is not a command"]
 fn make_runs_a_target_and_bare_make_opens_the_menu() {
     with_mouse(|tmp| {
         let mut app = app_over(&tmp.join("work"), &[("Makefile", MAKEFILE)]);
@@ -354,7 +349,6 @@ fn make_runs_a_target_and_bare_make_opens_the_menu() {
 /// or a backtick, listed from the Makefile or typed after `:make`, runs make
 /// and nothing else.
 #[test]
-#[ignore = "red: no make menu exists"]
 fn a_hostile_target_runs_as_one_quoted_word() {
     with_mouse(|tmp| {
         let dir = tmp.join("work");
@@ -411,7 +405,6 @@ fn a_read_that_lands_after_another_menu_opened_is_dropped() {
 /// Inside a mounted archive a Makefile is a member, not a file make can read:
 /// `Space m` and `:make` are refused, and the member's menu has no make row.
 #[test]
-#[ignore = "red: Space m is unbound"]
 fn the_make_menu_is_refused_inside_a_mounted_archive() {
     use crate::app::archive_ops::{ArchiveOp, ArchiveOutcome, run_archive_op};
     use std::io::Write as _;
@@ -506,7 +499,6 @@ fn a_fifo_named_makefile_has_no_make_row() {
 /// Makefile, rather than the FIFO.
 #[cfg(unix)]
 #[test]
-#[ignore = "red: Space m is unbound"]
 fn space_m_on_a_fifo_named_makefile_reads_the_directory() {
     with_mouse(|tmp| {
         let dir = tmp.join("work");
@@ -530,7 +522,6 @@ fn space_m_on_a_fifo_named_makefile_reads_the_directory() {
 /// A Makefile of pattern rules alone names no target: the menu says so in a
 /// row that runs nothing.
 #[test]
-#[ignore = "red: no make menu exists"]
 fn a_makefile_without_explicit_targets_says_so() {
     with_mouse(|tmp| {
         let patterns = "%.o: %.c\n\tcc -c $<\n";
@@ -552,7 +543,6 @@ fn a_makefile_without_explicit_targets_says_so() {
 /// Beside a `GNUmakefile`, make would read that, so the `Makefile` the menu
 /// listed runs with `-f`.
 #[test]
-#[ignore = "red: no Makefile row or make menu exists"]
 fn a_makefile_make_would_not_pick_runs_with_f() {
     with_mouse(|tmp| {
         let mut app = app_over(
@@ -585,7 +575,6 @@ fn a_makefile_make_would_not_pick_runs_with_f() {
 /// draw, every one of them clickable, and ends in a row naming how many more
 /// `:make <target>` reaches. The arrows wrap onto that last drawn row.
 #[test]
-#[ignore = "red: no make menu exists"]
 fn a_long_target_list_ends_in_a_row_naming_the_rest() {
     use std::fmt::Write as _;
     with_mouse(|tmp| {
@@ -627,7 +616,6 @@ fn a_long_target_list_ends_in_a_row_naming_the_rest() {
 /// the target the row does: the menu teaches a command that works. Walks a
 /// Makefile of assorted names, each row fired and each command typed.
 #[test]
-#[ignore = "red: no make menu exists"]
 fn every_make_rows_key_runs_its_target() {
     with_mouse(|tmp| {
         let dir = tmp.join("work");

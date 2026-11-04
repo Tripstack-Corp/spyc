@@ -497,6 +497,7 @@ impl App {
             Action::ContextMenu => self.open_entry_menu(),
             Action::PaneContextMenu => self.open_tab_menu(),
             Action::PaneSendEsc => self.send_esc_to_pane(),
+            Action::MakeMenu => self.open_make_menu(),
             _ => return None,
         })
     }

@@ -33,6 +33,8 @@ pub struct EntryFacts {
     pub deleted: bool,
     /// A pane tab is open to send the entry to.
     pub pane_open: bool,
+    /// A file named as make names a Makefile, whose targets `Space m` lists.
+    pub makefile: bool,
 }
 
 /// What a pane tab's menu depends on.
@@ -102,7 +104,13 @@ fn entry_rows(e: EntryFacts) -> Vec<ChordEntry> {
         return shown([(true, "gd", A::GitDiff), (true, "gr", A::GitRestore)]);
     }
     let file = e.kind != EntryKind::Dir;
+    // A FIFO or a device named `Makefile` is no Makefile.
+    let regular = matches!(
+        e.kind,
+        EntryKind::File | EntryKind::Executable | EntryKind::Symlink
+    );
     shown([
+        (e.makefile && regular, "Space m", A::MakeMenu),
         (true, "Enter", A::EnterOrDisplay),
         (file, "e", A::EnterOrEdit),
         (file, "V", A::EditInPane),
@@ -185,7 +193,7 @@ pub fn every_target() -> Vec<Target> {
         EntryKind::Symlink,
         EntryKind::Other,
     ] {
-        for bits in 0..16u8 {
+        for bits in 0..32u8 {
             let bit = |n: u8| bits & (1 << n) != 0;
             out.push(Target::Entry(EntryFacts {
                 kind,
@@ -193,6 +201,7 @@ pub fn every_target() -> Vec<Target> {
                 git_tracked: bit(1),
                 deleted: bit(2),
                 pane_open: bit(3),
+                makefile: bit(4),
             }));
         }
     }

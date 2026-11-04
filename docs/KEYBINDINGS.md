@@ -230,6 +230,8 @@ rectangular selection.
 | `!?` | History editor (vi-editable, searchable) |
 | `;` | Foreground command (top, vim, etc.) |
 | `$` | Drop into `$SHELL` |
+| `Space m` | The make menu: the targets of the Makefile under the cursor, or in the column's directory; a row runs one as a `!` capture (`^a Space m` from the pane) |
+| `:make [target]` | Run a Makefile target as a `!` capture from the column's directory; bare, open the make menu |
 | `:` | Command line (`:cd`, `:sort`, `:limit`, `:grep`, `:fg`, `:task`, `:q`) |
 
 `%` in any command expands to the current selection, relative to the directory the command runs in (`./%` runs the selected script); anything outside it stays absolute. `%%` is a literal `%`: `!printf '%%s\n' %` prints each selected name.
@@ -324,7 +326,7 @@ appear on the top bar and persist across `spyc -r`.
 
 The **leader** (`Space`, or `^a Space` from the agent pane) opens a
 global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
-`Space p` (project home), `Space n` / `Space x` / `Space j` /
+`Space m` (the make menu), `Space p` (project home), `Space n` / `Space x` / `Space j` /
 `Space Space` / `Space 1-9` / `Space ]` `Space [` (projects), `Space !` (the agent that needs you),
 `Space s` (session info), `Space ?` (help),
 `Space a` (about). Hold it to see the which-key popup. `W l` / `W n` /

@@ -292,6 +292,7 @@ impl App {
                     worktree_ops::WorktreeCompletion::InteractiveCreate,
                 ),
                 Effect::Inventory(op) => self.spawn_inventory_op(op),
+                Effect::ReadMakefile(read) => self.spawn_makefile_read(read),
             }
         }
     }
