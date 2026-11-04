@@ -205,7 +205,6 @@ fn status_hook_reporter_forwards_only_metadata_and_redacts_trace_at_the_call_sit
 /// `CLAUDE_CONFIG_DIR` it sees is where this conversation is filed. It travels
 /// beside `session_id`, and the trace says only that it was set.
 #[test]
-#[ignore = "red: the reporter sends no `claude_home`"]
 fn the_reporter_sends_the_claude_home_it_runs_in_beside_the_session() {
     let payload = json!({"hook_event_name": "UserPromptSubmit", "session_id": "session-1"});
     let home = "/tmp/spyc-profile-b/claude";

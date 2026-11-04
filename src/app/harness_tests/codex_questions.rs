@@ -64,6 +64,7 @@ fn report(app: &mut App, status: &str) {
         ttl_ms: Some(120_000),
         note: None,
         session_id: None,
+        claude_home: None,
         hook_event: None,
     });
     assert!(matches!(result, McpResponse::Ok { .. }), "{result:?}");

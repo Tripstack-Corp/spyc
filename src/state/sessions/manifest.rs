@@ -475,6 +475,7 @@ mod tests {
                     agent_session_name: None,
                     codex_home: None,
                     codex_home_unresolved: false,
+                    claude_home: None,
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,

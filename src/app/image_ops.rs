@@ -130,16 +130,22 @@ pub struct TranscriptImageQuery {
     pub command: String,
     pub session_id: Option<String>,
     pub codex_home: Option<PathBuf>,
+    /// Resolved on the worker, which may read the pane's launch record.
+    pub claude_home: crate::agent::claude_home::Lookup,
 }
 
 impl TranscriptImageQuery {
-    fn borrowed(&self) -> crate::agent::TranscriptQuery<'_> {
+    fn borrowed<'a>(
+        &'a self,
+        claude_home: Option<&'a std::path::Path>,
+    ) -> crate::agent::TranscriptQuery<'a> {
         crate::agent::TranscriptQuery {
             cwd: &self.cwd,
             spawn_epoch_secs: self.spawn_epoch_secs,
             command: &self.command,
             session_id: self.session_id.as_deref(),
             codex_home: self.codex_home.as_deref(),
+            claude_home,
         }
     }
 }
@@ -294,7 +300,8 @@ pub fn capture_clipboard_image(op: ClipboardCaptureOp) -> ImageOutcome {
 
 /// Index a transcript's images. Runs on the detached worker.
 pub fn index_transcript(op: TranscriptIndexOp) -> ImageOutcome {
-    let path = (op.spec.resolve)(op.query.borrowed())
+    let claude_home = op.query.claude_home.resolve();
+    let path = (op.spec.resolve)(op.query.borrowed(claude_home.as_deref()))
         .ok_or_else(|| format!("{}: no transcript found for this session", op.agent_name));
     let images = path.as_ref().map_or_else(
         |_| Vec::new(),

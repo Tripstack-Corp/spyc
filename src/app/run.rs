@@ -204,7 +204,7 @@ impl App {
             let mtx = msg_tx.clone();
             std::thread::spawn(move || {
                 while let Ok(req) = mcp_rx.recv() {
-                    if mtx.send(Message::Mcp(req)).is_err() {
+                    if mtx.send(Message::Mcp(Box::new(req))).is_err() {
                         break;
                     }
                 }

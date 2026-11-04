@@ -350,6 +350,7 @@ impl App {
         let command = active_info.command.clone();
         let cwd = active_info.cwd.clone();
         let codex_home = active_info.codex_home.clone();
+        let claude_home = self.active_claude_home_lookup();
         let spawn = active_info.agent_epoch_secs();
         // The session uuid pinned to this pane — the codex rollout claim, or the
         // claude session id lifted from its status hook. The resolver's strongest
@@ -399,12 +400,14 @@ impl App {
                 self.spawn_pager_stream(
                     PagerStreamMount::LowerPane { title },
                     move |tx| {
+                        let claude_home = claude_home.resolve();
                         let query = crate::agent::TranscriptQuery {
                             cwd: &cwd,
                             spawn_epoch_secs: spawn,
                             command: &command,
                             session_id: session_id.as_deref(),
                             codex_home: codex_home.as_deref(),
+                            claude_home: claude_home.as_deref(),
                         };
                         let lines = match resolve(query) {
                             Some(path) => render(&path, &theme, width, show_tool_calls),
@@ -606,6 +609,7 @@ impl App {
                     command: &command,
                     session_id: session_id.as_deref(),
                     codex_home: None,
+                    claude_home: None,
                 };
                 let lines = crate::state::agy_transcript::resolve_active_jsonl(query)
                     .map(|path| {

@@ -36,6 +36,7 @@ fn hook_to(app: &mut App, pane: Option<usize>, status: &str, payload: &serde_jso
         ttl_ms: None,
         note: None,
         session_id: Some("session-1".into()),
+        claude_home: None,
         hook_event: StatusHookEvent::from_payload(&kept),
     });
     assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");
@@ -300,6 +301,7 @@ fn the_agents_own_note_stays_out_of_the_ping() {
             ttl_ms: None,
             note: Some("private-note".into()),
             session_id: None,
+            claude_home: None,
             hook_event: None,
         });
         assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");

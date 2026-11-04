@@ -25,18 +25,27 @@ pub fn fresh_command(tab: &crate::state::sessions::SavedTab) -> String {
 }
 
 /// Modern saves with an unresolved Codex home cannot adopt a new launch home.
-/// Legacy saves retain their inherited-home compatibility.
+/// Legacy saves retain their inherited-home compatibility. A claude tab's
+/// conversation is looked for in the home it was saved with, else in
+/// `claude_home`, spyc's own.
 pub fn reconstruct_saved_tab(
     tab: &crate::state::sessions::SavedTab,
     cwd: &std::path::Path,
+    claude_home: Option<&std::path::Path>,
 ) -> super::RestorePlan {
+    let claude_home = tab.claude_home.as_deref().or(claude_home);
     // A wrapper's command is relaunched as written (#610): only claude, which
     // resumes by typing `/resume` rather than by a flag, gets its conversation
     // back; the others start fresh.
     if is_wrapper(tab) {
         let resume = if tab.effective_kind() == crate::state::sessions::AgentKind::Claude {
             super::profile_for(crate::state::sessions::AgentKind::Claude)
-                .reconstruct_restore(&tab.command, tab.agent_session_id.as_deref(), cwd)
+                .reconstruct_restore(
+                    &tab.command,
+                    tab.agent_session_id.as_deref(),
+                    cwd,
+                    claude_home,
+                )
                 .resume
         } else {
             super::ResumeAction::None
@@ -61,6 +70,7 @@ pub fn reconstruct_saved_tab(
         &tab.command,
         tab.agent_session_id.as_deref(),
         cwd,
+        claude_home,
     )
 }
 
@@ -204,12 +214,12 @@ const fn started_with_pane(started: u64, spawn: u64) -> bool {
 /// Strategy, in order:
 /// 1. Read the exit-banner token from pane scrollback. If it's a
 ///    UUID, verify a JSONL exists for it under
-///    `~/.claude/projects/<slug>/`. Claude sometimes prints the
+///    `<home>/projects/<slug>/`, `home` being the tab's Claude home. Claude sometimes prints the
 ///    banner with a session ID it never persisted (e.g. user
 ///    `/clear`'d or `/resume`'d before exit), so an unconditional
 ///    trust leads to "No conversation found …" on restore. The
 ///    banner is unambiguously this pane, so it bypasses `claimed`.
-/// 2. Walk `~/.claude/sessions/` records matching the cwd and started
+/// 2. Walk `<home>/sessions/` records matching the cwd and started
 ///    around this pane's spawn, skip any already in `claimed`, and take
 ///    the one whose `startedAt` is closest: this pane's own claude. Its
 ///    conversation is the answer, or none if claude hasn't written it yet.
@@ -225,6 +235,7 @@ pub fn resolve_claude_resume_target(
     cwd: &std::path::Path,
     pane_spawn_epoch_secs: u64,
     claimed: &std::collections::HashSet<String>,
+    home: &std::path::Path,
 ) -> (Option<String>, Option<String>) {
     use crate::state::sessions as s;
 
@@ -232,8 +243,8 @@ pub fn resolve_claude_resume_target(
         let banner_lines = pane.recent_lines(200);
         if let Some(tok) = s::extract_claude_resume_token(&banner_lines) {
             if s::is_uuid(&tok) {
-                if s::claude_jsonl_exists(cwd, &tok) {
-                    let name = s::find_claude_session_name(&tok);
+                if s::claude_jsonl_exists(home, cwd, &tok) {
+                    let name = s::find_claude_session_name(home, &tok);
                     return (Some(tok), name);
                 }
                 // Banner UUID has no JSONL — fall through.
@@ -249,7 +260,7 @@ pub fn resolve_claude_resume_target(
         }
 
         // Step 2: this pane's own claude process, by spawn-time proximity.
-        let records = s::find_claude_sessions(cwd);
+        let records = s::find_claude_sessions(home, cwd);
         let running: std::collections::HashSet<String> =
             records.iter().map(|c| c.session_id.clone()).collect();
         let candidates: Vec<_> = records
@@ -259,7 +270,7 @@ pub fn resolve_claude_resume_target(
         if let Some(own) =
             s::pick_closest_unclaimed_session(candidates, pane_spawn_epoch_secs, claimed)
         {
-            return if s::claude_jsonl_exists(cwd, &own.session_id) {
+            return if s::claude_jsonl_exists(home, cwd, &own.session_id) {
                 (Some(own.session_id), own.name)
             } else {
                 (None, None)
@@ -270,11 +281,11 @@ pub fn resolve_claude_resume_target(
         // onto another pane's conversation; written since it started; and not
         // a running claude's, which step 2 would have matched were it ours.
         let since = pane_spawn_epoch_secs.saturating_sub(PANE_CLOCK_SKEW_SECS);
-        if let Some(id) = s::most_recent_jsonl_for_cwd_since(cwd, since)
+        if let Some(id) = s::most_recent_jsonl_for_cwd_since(home, cwd, since)
             && !claimed.contains(&id)
             && !running.contains(&id)
         {
-            let name = s::find_claude_session_name(&id);
+            let name = s::find_claude_session_name(home, &id);
             return (Some(id), name);
         }
         (None, None)
@@ -282,7 +293,7 @@ pub fn resolve_claude_resume_target(
 
     if let (Some(id), _) = &resolved
         && s::is_uuid(id)
-        && !s::claude_jsonl_exists(cwd, id)
+        && !s::claude_jsonl_exists(home, cwd, id)
     {
         crate::spyc_debug!(
             "resolve_claude_resume_target: dropping ghost id {} (no JSONL under {})",

@@ -955,6 +955,7 @@ mod tests {
             command: "agy",
             session_id: sid,
             codex_home: None,
+            claude_home: None,
         };
 
         assert_eq!(

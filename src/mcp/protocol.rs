@@ -212,8 +212,9 @@ fn create_worktree_command(args: &Value, caller: &Caller) -> Result<McpCommand, 
     })
 }
 
-/// `report_status`'s arguments. A status hook adds the agent's `session_id`
-/// and its event's metadata; a direct agent call carries neither.
+/// `report_status`'s arguments. A status hook adds the agent's `session_id`,
+/// the Claude home it ran in and its event's metadata; a direct agent call
+/// carries none of them.
 fn report_status_command(
     args: &Value,
     caller: &Caller,
@@ -244,6 +245,9 @@ fn report_status_command(
         ttl_ms: args["ttl_ms"].as_u64(),
         note: args["note"].as_str().and_then(crate::mcp_cmd::report_note),
         session_id: hook["session_id"].as_str().map(String::from),
+        claude_home: hook["claude_home"]
+            .as_str()
+            .and_then(|dir| crate::agent::claude_home::from_config_dir(dir.as_ref())),
         hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&hook["hook_event"]),
     })
 }

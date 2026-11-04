@@ -516,10 +516,12 @@ impl App {
             .agent_status_pending
             .sender(self.runtime.pane_wake_tx.clone(), Wake::AgentStatus);
         let stopped_cwd = cwd.clone();
+        let claude_home = self.active_claude_home_lookup();
         super::landing::spawn_worker(
             pending,
             move || {
-                let short_id = profile.resolve_short_id(&cwd, spawn);
+                let claude_home = claude_home.resolve();
+                let short_id = profile.resolve_short_id(&cwd, spawn, claude_home.as_deref());
                 let status = Some(match short_id {
                     Some(id) => format!("{label}:{id}"),
                     None => label.to_string(),

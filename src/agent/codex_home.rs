@@ -48,6 +48,7 @@ mod tests {
         let mut env = LaunchEnvironment {
             home: Some(cwd.clone().into_os_string()),
             codex_home: None,
+            claude_config_dir: None,
         };
         assert_eq!(from_launch(&env, &cwd), Some(cwd.join(".codex")));
         env.codex_home = Some("".into());
@@ -65,6 +66,7 @@ mod tests {
         let env = LaunchEnvironment {
             home: Some(tmp.path().into()),
             codex_home: Some(tmp.path().join("missing").into_os_string()),
+            claude_config_dir: None,
         };
         assert_eq!(
             from_launch(&env, tmp.path()),
@@ -85,6 +87,7 @@ mod tests {
         let env = LaunchEnvironment {
             home: None,
             codex_home: Some(alias.clone().into_os_string()),
+            claude_config_dir: None,
         };
         let frozen = from_launch(&env, tmp.path()).unwrap();
         std::fs::remove_file(&alias).unwrap();

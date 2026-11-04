@@ -112,6 +112,7 @@ mod archive_route;
 mod attention;
 mod bootstrap;
 mod capture;
+mod claude_home;
 mod clipboard;
 mod codex_pin;
 pub mod command_table;

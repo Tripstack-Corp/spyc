@@ -351,6 +351,10 @@ pub struct TabInfo {
     pub codex_session_id: Option<String>,
     /// Effective Codex home frozen at launch and retained across restore/fork.
     pub codex_home: Option<PathBuf>,
+    /// The Claude Code home this tab's claude reported through its status hook,
+    /// or the one its saved session recorded (`agent::claude_home`). `None`
+    /// until either, when its launch record and then spyc's own apply.
+    pub claude_home: Option<PathBuf>,
     /// The latest statusline report from this tab's Claude Code (`spyc
     /// --statusline`), with when it arrived.
     pub claude_statusline: Option<(crate::agent::claude_statusline::Statusline, jiff::Timestamp)>,
@@ -534,6 +538,7 @@ impl TabInfo {
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
             codex_session_id: None,
             codex_home: None,
+            claude_home: None,
             claude_statusline: None,
             live_session_id: None,
             scrape_status: None,
@@ -1070,6 +1075,7 @@ mod tests {
             agent_session_name: None,
             codex_home: None,
             codex_home_unresolved: false,
+            claude_home: None,
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,

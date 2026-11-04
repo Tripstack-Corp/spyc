@@ -46,8 +46,9 @@ pub enum Message {
     /// drain (`execute_mcp_command` writes the context file synchronously,
     /// then `reply.send` — preserving single-connection read-after-write).
     /// MUST NOT be dropped in coalesce (the reply Sender would strand the
-    /// client). Never surfaced as `Input`.
-    Mcp(crate::mcp_cmd::McpRequest),
+    /// client). Never surfaced as `Input`. Boxed: a request is several times
+    /// the size of every other message, and each one would pay for it.
+    Mcp(Box<crate::mcp_cmd::McpRequest>),
     /// MVU Phase 2: a timer/deadline elapsed. Derived by the loop's own
     /// `Scheduler`, NOT a thread. The loop never actually sends itself a
     /// `Tick` — `recv_timeout` returning `Err(Timeout)` IS the tick handler

@@ -208,19 +208,36 @@ impl App {
         cwd: &std::path::Path,
         slot: TabSlot,
     ) -> bool {
-        let (home, hint) = match slot {
-            TabSlot::Append => (None, None),
+        let (home, hint, claude_home) = match slot {
+            TabSlot::Append => (None, None, None),
             TabSlot::Replace(idx) => self
                 .runtime
                 .project()
                 .pane_tabs
                 .as_ref()
                 .and_then(|tabs| tabs.tabs().get(idx))
-                .map_or((None, None), |entry| {
-                    (entry.info.codex_home.clone(), entry.info.agent_hint)
+                .map_or((None, None, None), |entry| {
+                    (
+                        entry.info.codex_home.clone(),
+                        entry.info.agent_hint,
+                        entry.info.claude_home.clone(),
+                    )
                 }),
         };
-        self.spawn_pane_tab(cmd, cwd, slot, home.as_deref(), None, hint)
+        let spawned = self.spawn_pane_tab(cmd, cwd, slot, home.as_deref(), None, hint);
+        // The same command again, so the same Claude home until it reports.
+        if spawned
+            && let TabSlot::Replace(idx) = slot
+            && let Some(entry) = self
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .and_then(|tabs| tabs.tabs_mut().get_mut(idx))
+        {
+            entry.info.claude_home = claude_home;
+        }
+        spawned
     }
 
     /// A startup tab: [`Self::open_pane_tab_in`], as the agent `hint` names
@@ -401,13 +418,16 @@ impl App {
         );
         let wake = self.make_pane_wake();
         let mut info = TabInfo::new(cmd, cwd);
-        info.agent_hint = self
+        if let Some(entry) = self
             .runtime
             .project()
             .pane_tabs
             .as_ref()
             .and_then(|tabs| tabs.tabs().get(tab_idx))
-            .and_then(|entry| entry.info.agent_hint);
+        {
+            info.agent_hint = entry.info.agent_hint;
+            info.claude_home.clone_from(&entry.info.claude_home);
+        }
         if let Some(sid) = resume_sid {
             info.pending_resume_send = Some(crate::pane::tabs::PendingResumeSend::Text {
                 sid,
@@ -485,7 +505,7 @@ impl App {
         else {
             return;
         };
-        let Some((cmd, cwd, kind, in_shell, wraps)) = self
+        let Some((cmd, cwd, kind, in_shell, wraps, claude)) = self
             .runtime
             .project()
             .pane_tabs
@@ -499,6 +519,7 @@ impl App {
                     info.agent().kind(),
                     info.launched_agent().kind() != info.agent().kind(),
                     info.wraps_agent(),
+                    self.claude_home_lookup(entry),
                 )
             })
         else {
@@ -520,7 +541,9 @@ impl App {
         // can auto-`/resume`. Strip any `--resume` from the command so we
         // relaunch clean and drive the recovery via the stdin dance (claude's
         // `--resume` flag crashes at mount — same reason restore avoids it).
-        let sid = crate::state::sessions::most_recent_jsonl_for_cwd(&cwd);
+        let sid = claude
+            .resolve()
+            .and_then(|home| crate::state::sessions::most_recent_jsonl_for_cwd(&home, &cwd));
         let resumed = sid.is_some();
         let cmd_fresh = if wraps {
             cmd

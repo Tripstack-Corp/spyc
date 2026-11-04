@@ -146,17 +146,23 @@ fn a_pane_id_no_live_tab_has_is_dropped() {
 }
 
 /// Each `report_status` the loop received: its target, and whether it carried
-/// the hook-only `session_id` and `hook_event`.
-fn reports_with_hook_fields(seen: &Receiver<McpCommand>) -> Vec<(Target, bool, bool)> {
+/// the hook-only `session_id`, `claude_home` and `hook_event`.
+fn reports_with_hook_fields(seen: &Receiver<McpCommand>) -> Vec<(Target, bool, bool, bool)> {
     seen.try_iter()
         .filter_map(|c| match c {
             McpCommand::ReportStatus {
                 pane_id,
                 pane,
                 session_id,
+                claude_home,
                 hook_event,
                 ..
-            } => Some(((pane_id, pane), session_id.is_some(), hook_event.is_some())),
+            } => Some((
+                (pane_id, pane),
+                session_id.is_some(),
+                claude_home.is_some(),
+                hook_event.is_some(),
+            )),
             _ => None,
         })
         .collect()
@@ -165,6 +171,7 @@ fn reports_with_hook_fields(seen: &Receiver<McpCommand>) -> Vec<(Target, bool, b
 /// A `report_status` with the fields spyc's status hook adds.
 fn as_the_hook_reports(mut args: Value) -> Value {
     args["session_id"] = json!("s-1");
+    args["claude_home"] = json!("/profiles/b/claude");
     args["hook_event"] = json!({"hook_event_name": "Stop"});
     args
 }
@@ -209,7 +216,7 @@ fn a_bound_report_drops_the_hook_only_fields() {
     );
     assert_eq!(
         reports_with_hook_fields(&seen),
-        [((Some("abc".into()), None), false, false)]
+        [((Some("abc".into()), None), false, false, false)]
     );
 }
 
@@ -231,8 +238,8 @@ fn an_unbound_call_keeps_its_target_and_the_hooks_fields() {
         assert_eq!(
             reports_with_hook_fields(&seen),
             [
-                ((Some("def".into()), None), true, true),
-                ((None, Some(2)), false, false)
+                ((Some("def".into()), None), true, true, true),
+                ((None, Some(2)), false, false, false)
             ],
             "{meta:?}"
         );
