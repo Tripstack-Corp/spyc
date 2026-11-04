@@ -223,9 +223,9 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     /// The keystrokes a row's keys name, from the file list: `^a X` is `^a`
-    /// then `X`, as `^s X` is `^s` then `X`, `Space X` is the leader then `X`,
-    /// a ` (list)` note is the focus the keys work from, and each other
-    /// character is one key.
+    /// then `X`, as `^s X` is `^s` then `X`, `Space X` is the leader then `X`
+    /// (`Space w l` the leader, `w`, then `l`), a ` (list)` note is the focus
+    /// the keys work from, and each other character is one key.
     fn keystrokes(keys: &str) -> Vec<KeyEvent> {
         let keys = keys.trim_end_matches(" (list)");
         if keys == "Enter" {
@@ -233,7 +233,7 @@ mod tests {
         }
         if let Some(rest) = keys.strip_prefix("Space ") {
             return std::iter::once(' ')
-                .chain(rest.chars())
+                .chain(rest.split_whitespace().flat_map(str::chars))
                 .map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
                 .collect();
         }
