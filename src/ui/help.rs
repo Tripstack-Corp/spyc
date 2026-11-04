@@ -379,6 +379,10 @@ const SECTIONS: &[Section] = &[
                 "send a literal ^a to the pane (e.g. so Claude receives it)",
             ),
             (
+                "^w ^w  ^w ↓",
+                "send a literal ^w to the pane (a shell's word erase); [pane] ctrl_w_prefix = false sends a focused pane every ^w",
+            ),
+            (
                 "^a Esc",
                 "send a plain Esc to the pane, past the Claude vim-mode Esc guard",
             ),

@@ -23,11 +23,20 @@ Later lines win, so a `map` after an `unmap` of the same key binds it again.
 binding for any other key leaves the chords that end in it alone:
 `map f unix file %` doesn't change `gf`.
 
-> **`^a` and `^w` are reserved.** spyc intercepts both as chord prefixes, so a
-> shell (or tmux) running inside the pane never sees readline's
-> `beginning-of-line` / `unix-word-rubout`. If you run an interactive shell as the
-> pane child, rebind the prefixes here; inside tmux, keep spyc's `^a` distinct
-> from tmux's own prefix (and `set -s escape-time 0` for snappy input).
+> **`^a` and `^w` are reserved.** spyc takes both as the pane prefix, and the
+> DSL can't hand them over: `unmap ^W`, or a `map` of it, changes what spyc
+> does with `^w`, not whether a pane's program gets it. To type one into a
+> shell or an agent in the pane:
+>
+> - `^a ↓` sends a literal `^a` (readline's `beginning-of-line`);
+> - `^w ^w` or `^w ↓` sends a literal `^w` (readline's `unix-word-rubout`);
+> - `ctrl_w_prefix = false` under `[pane]` makes `^w` an ordinary key while the
+>   pane has the keyboard, so it reaches the program as typed and `^a` stays the
+>   prefix. From the file view `^w` still arms the prefix, since no program there
+>   could receive it.
+>
+> Inside tmux, keep spyc's `^a` distinct from tmux's own prefix (and
+> `set -s escape-time 0` for snappy input).
 
 Several low-frequency features ship as `:` commands **without** a default key so
 the keymap stays uncluttered (the graveyard, the activity monitor, `:longlist`,
@@ -144,6 +153,7 @@ verbs above (`down`, `pick`,
 | `pane_send_selection` | send selection to pane (your own files only) |
 | `pane_send_prefix` | send literal ^a to pane (your own files only) |
 | `pane_send_esc` | send a plain Esc to pane (your own files only) |
+| `pane_send_ctrl_w` | send literal ^w to pane (your own files only) |
 | `pane_grow` | grow pane |
 | `pane_shrink` | shrink pane |
 | `toggle_pane_zoom` | zoom pane (toggle fullscreen) |

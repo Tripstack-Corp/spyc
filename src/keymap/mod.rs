@@ -12,5 +12,5 @@ pub mod user;
 
 pub use action::Tier;
 pub use action::{Action, ProjectAction};
-pub use resolver::{ChordEntry, Resolver, ResolverOutcome};
+pub use resolver::{ChordEntry, PanePrefix, Resolver, ResolverOutcome};
 pub use user::{BoundAction, UserKeymap};

@@ -277,6 +277,10 @@ pub struct PaneConfig {
     /// `/vim` prompt isn't in INSERT mode is dropped, since there it interrupts
     /// the turn (`app::esc_guard`). False sends every `Esc` through.
     pub claude_esc_guard: bool,
+    /// When true (the default), `^w` is a pane prefix, `^a`'s alias, even while
+    /// a pane has the keyboard. False makes it an ordinary key there, which
+    /// reaches the pane's program; from the file view it still arms the prefix.
+    pub ctrl_w_prefix: bool,
     /// Home-configured opt-in strip below the active Codex pane.
     pub agent_hud: AgentHudMode,
     /// How the strip says when a plan window resets: clock time, or a countdown.
@@ -333,6 +337,7 @@ impl Default for PaneConfig {
             codex_daemon: false,
             preview_pasted_images: true,
             claude_esc_guard: true,
+            ctrl_w_prefix: true,
             agent_hud: AgentHudMode::Off,
             agent_hud_resets: AgentHudResets::Clock,
             tabs: Vec::new(),
@@ -376,6 +381,8 @@ struct FilePane {
     preview_pasted_images: Option<bool>,
     #[serde(default)]
     claude_esc_guard: Option<bool>,
+    #[serde(default)]
+    ctrl_w_prefix: Option<bool>,
     #[serde(default)]
     agent_hud: Option<AgentHudMode>,
     #[serde(default)]
