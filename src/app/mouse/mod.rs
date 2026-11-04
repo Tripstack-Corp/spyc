@@ -514,9 +514,9 @@ impl super::App {
 
     /// A right-click on an object: the keyboard goes where the keys the rows
     /// show act, so they are the ones that work next, and the object's menu
-    /// opens. A row or the pane takes it as a left click would; the divider
-    /// sends it to the pane its menu is about, and the split's `^a` keys work
-    /// from anywhere, so its menu leaves it where it is.
+    /// opens. A row, the pane or a pager takes it as a left click would; the
+    /// divider sends it to the pane its menu is about, and the split's `^a`
+    /// keys work from anywhere, so its menu leaves it where it is.
     fn open_menu_at(&mut self, at: MenuAt, region: Option<route::Region>) -> Vec<Effect> {
         match at {
             MenuAt::Row(side, row) => {
@@ -538,7 +538,28 @@ impl super::App {
                 self.open_divider_menu()
             }
             MenuAt::VDivider => self.open_split_menu(),
+            MenuAt::Pager(slot) => {
+                self.focus_pager_slot(slot);
+                self.open_pager_menu()
+            }
         }
+    }
+
+    /// A pager's row: what its key does in the pager, through the same
+    /// [`PagerAction`](super::pager_handler::PagerAction), its key named after.
+    /// The pager covers the status bar, so while it stays open the hint goes
+    /// into it, where the key's own message would.
+    fn fire_pager_row(
+        &mut self,
+        action: super::pager_handler::PagerAction,
+        key: Option<String>,
+    ) -> Vec<Effect> {
+        self.clear_chord_hint();
+        let before = self.state.flash.as_ref().map(|f| f.text.clone());
+        let fx = self.apply_pager_action(action);
+        self.name_the_key(key, action.describe(), action.name(), before);
+        self.relocate_flash_into_pager();
+        fx
     }
 
     /// Whether `ev` is on the open which-key popup, laid out exactly as the
@@ -551,7 +572,7 @@ impl super::App {
     ) -> (bool, Option<usize>) {
         let Some(menu) = self.view.chord_hint.as_ref().and_then(|hint| {
             chord_hit::chord_hint_layout(
-                &hint.rows,
+                &hint.row_refs(),
                 frame,
                 layout.divider.map(|r| r.y),
                 layout.vdivider.map(|r| r.x),
@@ -594,25 +615,23 @@ impl super::App {
     }
 
     pub(super) fn fire_chord_row(&mut self, index: usize) -> Vec<Effect> {
+        use super::HintEntry;
         use crate::keymap::ChordEntry;
-        let Some(entry) = self
-            .view
-            .chord_hint
-            .as_ref()
-            .and_then(|hint| hint.entries.get(index))
-            .cloned()
-        else {
+        // The entry, and the key that does the same, named once the row has
+        // fired, so it can be typed next time.
+        let Some((entry, key)) = self.view.chord_hint.as_ref().and_then(|hint| {
+            let (keys, _) = hint.rows.get(index)?;
+            let key = crate::keymap::menu::key_hint(hint.prefix, keys);
+            Some((hint.entries.get(index)?.clone(), Some(key)))
+        }) else {
             return Vec::new();
         };
+        let entry = match entry {
+            HintEntry::Pager(action) => return self.fire_pager_row(action, key),
+            HintEntry::Chord(entry) => entry,
+        };
         match entry {
-            ChordEntry::Act(keys, action) => {
-                // The key that does the same, named once the row has fired, so
-                // it can be typed next time.
-                let key = self
-                    .view
-                    .chord_hint
-                    .as_ref()
-                    .map(|h| crate::keymap::menu::key_hint(h.prefix, keys));
+            ChordEntry::Act(_, action) => {
                 let label = action.describe();
                 let name = action.canonical_name();
                 let action = self.state.resolver.take_menu_action(action);

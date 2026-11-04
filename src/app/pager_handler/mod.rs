@@ -52,9 +52,11 @@ mod file_view;
 mod image;
 mod modes;
 mod motion;
+mod pager_action;
 mod pickers;
 
 pub(super) use file_view::build_pager_view;
+pub(super) use pager_action::{PagerAction, pager_menu};
 
 /// Which pager slot currently owns input. Decided once by
 /// [`App::active_pager_slot`]; [`App::active_pager_ref`] and the

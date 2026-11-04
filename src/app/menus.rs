@@ -1,9 +1,10 @@
 //! The menu of an object: `.` opens the entry under the cursor's, `^a .` the
-//! active pane tab's, and a right-click the menu of the row, pane, tab label or
-//! divider it lands on (`mouse/`): off the pane divider's labels, the tabs'
-//! menu, and on the split's divider, the split's. The rows come from
-//! [`crate::keymap::menu::menu_for`]; this module gathers the facts it decides
-//! from and opens the menu as a which-key popup that no chord armed.
+//! active pane tab's, and a right-click the menu of the row, pane, tab label,
+//! divider or open pager it lands on (`mouse/`): off the pane divider's labels,
+//! the tabs' menu, and on the split's divider, the split's. The rows come from
+//! [`crate::keymap::menu::menu_for`], or for a pager from
+//! `pager_handler::pager_menu`; this module gathers the facts they decide from
+//! and opens the menu as a which-key popup that no chord armed.
 //!
 //! While a menu is open it takes the keys first (`InputSink::Menu`): `↑`/`↓`
 //! move a highlight, `Enter` fires it as a click on the row would, and `Esc`
@@ -13,8 +14,9 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::pager_handler::pager_menu;
 use super::view_state::MenuState;
-use super::{App, ChordHint, Effect, View};
+use super::{App, ChordHint, Effect, HintEntry, View};
 use crate::keymap::ChordEntry;
 use crate::keymap::menu::{DividerFacts, EntryFacts, SplitFacts, TabFacts, Target, menu_for};
 
@@ -57,22 +59,36 @@ impl App {
 
     /// Open `target`'s menu, titled `title`. Inside a mounted archive the rows
     /// whose action the mount refuses are left out, as `apply_inner` would
-    /// refuse them. The first menu ever opened retires the status bar's
-    /// `. menu`, and returns the write that records it.
+    /// refuse them.
     fn open_menu(&mut self, target: Target, title: String) -> Option<Effect> {
         let c = self.state.cur();
         let in_mount = self.state.mounts.contains(&c.listing.dir);
-        let entries: Vec<ChordEntry> = menu_for(target)
+        let rows = menu_for(target)
             .into_iter()
             .filter(|row| {
                 !(in_mount
                     && matches!(row, ChordEntry::Act(_, a)
                         if super::state::archive::refusal(a).is_some()))
             })
+            .map(|e| (e.keys().to_string(), e.label(), HintEntry::Chord(e)))
             .collect();
-        let rows = entries.iter().map(|e| (e.keys(), e.label())).collect();
+        self.show_menu(format!("{title} · ? all keys"), rows)
+    }
+
+    /// Show a menu of `rows`, each `(keys, label, entry)`, titled `title`.
+    /// The first menu ever opened retires the status bar's `. menu`, and
+    /// returns the write that records it.
+    fn show_menu(
+        &mut self,
+        title: String,
+        rows: Vec<(String, &'static str, HintEntry)>,
+    ) -> Option<Effect> {
+        let (rows, entries) = rows
+            .into_iter()
+            .map(|(keys, label, entry)| ((keys, label), entry))
+            .unzip();
         self.view.chord_hint = Some(ChordHint {
-            title: format!("{title} · ? all keys"),
+            title,
             entries,
             rows,
             prefix: "",
@@ -80,6 +96,20 @@ impl App {
         });
         self.view.chord_hint_due = None;
         self.learn_menu()
+    }
+
+    /// A right-click on an open pager: its menu, titled with its title. Its
+    /// keys are the pager's, so `?` is too, and the title doesn't offer it.
+    pub(super) fn open_pager_menu(&mut self) -> Vec<Effect> {
+        let Some((facts, title)) = self.pager_facts() else {
+            return Vec::new();
+        };
+        let task = facts.task.map(|t| t.id);
+        let rows = pager_menu(facts)
+            .into_iter()
+            .map(|a| (a.key(task), a.describe(), HintEntry::Pager(a)))
+            .collect();
+        self.show_menu(title, rows).into_iter().collect()
     }
 
     /// `.`: the menu of the entry under the cursor.
@@ -147,6 +177,7 @@ impl App {
         };
         let len = hint.entries.len();
         let selected = hint.menu.and_then(|m| m.selected);
+        let pager = hint.is_pager_menu();
         match (key.code, selected) {
             (KeyCode::Down | KeyCode::Up, _) if plain && len > 0 => {
                 let next = match (key.code, selected) {
@@ -162,8 +193,8 @@ impl App {
             }
             (KeyCode::Enter, Some(i)) if plain => Ok(self.fire_chord_row(i)),
             // The key reference, from the pane too, where `?` would otherwise
-            // be typed into the agent.
-            (KeyCode::Char('?'), _) if plain => {
+            // be typed into the agent. A pager's `?` is its own.
+            (KeyCode::Char('?'), _) if plain && !pager => {
                 self.clear_chord_hint();
                 self.update(super::update::UiMsg::Action(crate::keymap::Action::Help))
             }
