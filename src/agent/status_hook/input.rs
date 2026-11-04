@@ -656,6 +656,25 @@ mod tests {
         );
     }
 
+    /// Claude Code's `StopFailure` names the API error that ended the turn from a
+    /// closed set; that name is kept, its details and the reply never are, and
+    /// an `error` that isn't one of the names (agy's message) is dropped.
+    #[test]
+    #[ignore = "red: StopFailure's error type is dropped"]
+    fn a_stop_failure_keeps_only_its_error_type() {
+        assert_eq!(
+            metadata(
+                r#"{"hook_event_name":"StopFailure","error":"rate_limit","error_details":"private-details","last_assistant_message":"private-reply"}"#
+            ),
+            serde_json::json!({"hook_event_name":"StopFailure", "error":"rate_limit"})
+        );
+        assert_eq!(
+            metadata(r#"{"hook_event_name":"StopFailure","error":"private failure"}"#),
+            serde_json::json!({"hook_event_name":"StopFailure"}),
+            "not one of Claude's error names"
+        );
+    }
+
     /// An absent list stays absent: "no list" and "an empty list" mean
     /// different things to `waiting` (`StatusHookEvent::wakes_pending`).
     #[test]
