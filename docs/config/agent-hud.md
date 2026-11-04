@@ -11,11 +11,12 @@ reload keeps it unless the reload changes `agent_hud` itself. `:agent hud info`
 (or `dump`, or a double-click on the strip) names which one is in force and
 opens saveable source diagnostics, with every tool's tally.
 
-Compact uses two rows below the child: the activity row and the usage row. Full
-adds the tools row and the mode row, for four. Every agent shares one layout in
-aligned columns, described in [`DESIGN.md`](../../DESIGN.md) under "Native agent
-strip". The child keeps at least six rows: full collapses to compact below ten
-available pane rows, and the strip hides below eight. It follows the active live
+Compact uses two rows below the child, under a dim rule: the activity row and
+the usage row. Full adds the tools row and the mode row, for four. Every agent
+shares one layout in aligned columns, described in [`DESIGN.md`](../../DESIGN.md)
+under "Native agent strip". The child keeps at least six rows: full collapses to
+compact below eleven available pane rows, and the strip and its rule hide below
+nine. It follows the active live
 Codex, Claude Code, or Antigravity tab, including pane zoom, vertical splits and
 scrollback. Hidden panes, closed tabs, other agents and a fullscreen image have
 no strip or metric subscription. The native composer and status line stay inside

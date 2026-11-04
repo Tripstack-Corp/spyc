@@ -241,8 +241,9 @@ Manage it in-app with `:skill`:
 
 ## Native agent HUD
 
-`:agent hud compact` enables a two-row strip below the active Codex, Claude
-Code, or Antigravity pane; `:agent hud full` adds a tools row and a mode row.
+`:agent hud compact` enables a two-row strip, under a dim rule, below the active
+Codex, Claude Code, or Antigravity pane; `:agent hud full` adds a tools row and a
+mode row.
 Every agent shares one layout of aligned, coloured columns, led by the tab's
 own activity dot, its session and model, with a `waiting` agent's note at the
 end of the row. The tools row is a summary: every call, every failure, what is
