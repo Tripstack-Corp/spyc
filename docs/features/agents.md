@@ -103,8 +103,9 @@ Claude can query and control the workspace through these tools:
   default branch) in a sibling `<repo>.worktrees/<branch>/` dir;
   returns `{branch, path}`. The repo is `PROJECT_HOME`'s (a project with
   no home: its start directory's), else the calling agent's own pane's
-  for a project outside any repo — never the directory the user happens
-  to be browsing, which could be anything on their system.
+  for a project outside any repo, a stray `.git` that isn't one included —
+  never the directory the user happens to be browsing, which could be
+  anything on their system.
   `list_worktrees` lists the same repo, and a relative path given to the
   other worktree tools resolves against `PROJECT_HOME` (a project with no
   home: its start directory).

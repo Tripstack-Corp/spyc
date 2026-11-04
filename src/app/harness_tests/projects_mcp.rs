@@ -787,7 +787,6 @@ fn list_worktrees_falls_back_to_the_agents_cwd() {
 /// and agree on it: the worktree `create_worktree` makes there is one
 /// `list_worktrees` lists.
 #[test]
-#[ignore = "red: create_worktree takes the stray .git for a repo and fails to open it"]
 fn a_stray_git_at_the_project_home_falls_back_to_the_agents_repo() {
     with_projects(|p| {
         std::fs::create_dir_all(p.a_home.join(".git/info")).unwrap();
