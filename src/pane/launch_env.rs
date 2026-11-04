@@ -96,12 +96,17 @@ pub fn prepare(args: &mut [String], env: &[(&str, &str)]) -> anyhow::Result<Reco
 mod tests {
     use super::*;
 
+    /// A complete record is `HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`, each
+    /// ended by a NUL.
     #[test]
+    #[ignore = "red: a launch record holds no `CLAUDE_CONFIG_DIR`, so a complete one has two fields"]
     fn incomplete_and_oversized_launch_records_never_supply_a_home() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         for body in [
             b"/home\0unfinished".to_vec(),
+            b"/home\0/custom\0".to_vec(),
             b"/home\0/custom\0extra".to_vec(),
+            b"/home\0/custom\0/claude\0extra".to_vec(),
             {
                 let mut bytes = b"/home\0".to_vec();
                 bytes.extend(vec![b'x'; MAX_RECORD_BYTES as usize]);
@@ -112,7 +117,7 @@ mod tests {
             std::fs::write(tmp.path(), body).unwrap();
             assert!(LaunchEnvironment::read(tmp.path()).is_none());
         }
-        std::fs::write(tmp.path(), b"/home\0/custom\0").unwrap();
+        std::fs::write(tmp.path(), b"/home\0/custom\0/claude\0").unwrap();
         let env = LaunchEnvironment::read(tmp.path()).unwrap();
         assert_eq!(env.home.as_deref(), Some(std::ffi::OsStr::new("/home")));
         assert_eq!(
