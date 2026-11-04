@@ -172,17 +172,20 @@ fn notification_for_transition(
 }
 
 /// Who a notification is about: the tab's label and its number in its
-/// project, and the project, named only while several are open.
+/// project, the project, named only while several are open, and what a
+/// blocked one waits on ([`TabInfo::blocked_on`]).
 struct Subject<'a> {
     label: &'a str,
     tab_number: usize,
     project: Option<&'a str>,
+    blocked_on: Option<&'a str>,
 }
 
 /// Compose the `(summary, body)` for a transition notification: a glanceable
 /// "which agent + what" summary plus the tab locator in the body, each naming
-/// the project when [`Subject::project`] does. Only `Blocked` / `Done` reach
-/// here (see [`notification_for_transition`]); the fallback arm is a sane
+/// the project when [`Subject::project`] does, and a `Blocked` summary what
+/// it waits on ("claude needs you: Bash"). Only `Blocked` / `Done` reach here
+/// (see [`notification_for_transition`]); the fallback arm is a sane
 /// non-panicking default.
 fn notification_text(who: &Subject, new: AgentActivity) -> (String, String) {
     let (label, tab) = (who.label, who.tab_number);
@@ -196,7 +199,15 @@ fn notification_text(who: &Subject, new: AgentActivity) -> (String, String) {
         },
     );
     match new {
-        AgentActivity::Blocked => (format!("{agent} needs you"), format!("{place} is blocked")),
+        AgentActivity::Blocked => {
+            let on = who
+                .blocked_on
+                .map_or_else(String::new, |on| format!(": {on}"));
+            (
+                format!("{agent} needs you{on}"),
+                format!("{place} is blocked"),
+            )
+        }
         AgentActivity::Done => (format!("{agent} finished"), format!("{place} — done")),
         _ => (agent, place),
     }
@@ -363,6 +374,7 @@ impl ActivityScan<'_> {
                 label: &entry.info.label,
                 tab_number: index + 1,
                 project: project.named.as_deref(),
+                blocked_on: entry.info.blocked_on(),
             };
             let plan = notification_for_transition(
                 entry.info.notified,
@@ -925,6 +937,7 @@ mod tests {
             label,
             tab_number,
             project: None,
+            blocked_on: None,
         }
     }
 

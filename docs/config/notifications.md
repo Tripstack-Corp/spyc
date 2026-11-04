@@ -19,6 +19,30 @@ By default the **intrusive** channels (bell + flash) stay **Blocked-only**, whil
 the **quiet** desktop ping also fires on `Done`. That keeps a per-turn ring/strobe
 from being annoying while you still get a "finished" ping.
 
+## What a blocked agent waits on
+
+A `Blocked` ping says what the agent waits on when its status hook names it:
+
+- the tool a permission request is for, as the agent names it:
+  `claude needs you: Bash`;
+- `question` for a question (Claude's `AskUserQuestion`, Codex's
+  `request_user_input`, agy's `ask_question`), and `plan` for Claude's plan
+  approval (`ExitPlanMode`);
+- `mcp` for another MCP server's tool, since a server's name can be private;
+  spyc's own tools keep theirs;
+- why a turn that failed stopped: `claude needs you: stopped: rate limit`.
+
+Claude's "needs your permission" notice names no tool, so the wait keeps the
+label of the request before it. The same label ends the agent HUD's activity
+row, and `Space !` flashes it where it lands: `tab 2: Bash`. It goes when you
+answer.
+
+The label comes from the hook's metadata alone: never what the tool would act
+on, and never the agent's own note, since a desktop notification can leave the
+machine. A wait spyc reads off the screen (agy's approval prompts, Codex's
+approval forms), or one the agent reports itself, pings without one:
+`claude needs you`.
+
 ```toml
 [notify]
 desktop = true            # notify on Blocked (and Done, if desktop_done) — on by default
