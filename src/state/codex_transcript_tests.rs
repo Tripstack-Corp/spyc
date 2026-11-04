@@ -219,6 +219,7 @@ fn home_query<'a>(
         command,
         session_id: id,
         codex_home: home,
+        claude_home: None,
     }
 }
 

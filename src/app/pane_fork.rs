@@ -48,6 +48,7 @@ impl App {
         let entry = &tabs.tabs()[active];
         let profile = entry.info.agent();
         let home = entry.info.codex_home.clone();
+        let claude = self.claude_home_lookup(entry);
         if profile.kind() == crate::state::sessions::AgentKind::Codex && home.is_none() {
             self.state
                 .flash_info("fork: Codex launch home is not identified yet");
@@ -74,7 +75,10 @@ impl App {
                     .filter(|&id| Some(id) != own)
                     .map(str::to_owned)
                     .collect();
-                let (Some(sid), _) = super::session::tab_conversation(entry, &claimed) else {
+                let claude_home = claude.resolve();
+                let (Some(sid), _) =
+                    super::session::tab_conversation(entry, &claimed, claude_home.as_deref())
+                else {
                     self.state.flash_info(format!(
                         "fork: nothing to branch yet — this {} tab has no saved conversation",
                         profile.name()
@@ -101,6 +105,16 @@ impl App {
             }
         };
         if self.open_pane_tab_in_home(&command, &cwd, home.as_deref()) {
+            // The fork runs the same command, so the same Claude home.
+            if let Some(fork) = self
+                .runtime
+                .project_mut()
+                .pane_tabs
+                .as_mut()
+                .and_then(|tabs| tabs.tabs_mut().last_mut())
+            {
+                fork.info.claude_home = claude.reported;
+            }
             let forked = self
                 .runtime
                 .project()

@@ -398,6 +398,7 @@ impl App {
                     ttl_ms: None,
                     note: None,
                     session_id: None,
+                    claude_home: None,
                     hook_event: None,
                 });
                 Vec::new()

@@ -1381,6 +1381,7 @@ fn agent_hud_retries_missing_agy_transcript_on_status_report() {
             ttl_ms: None,
             note: None,
             session_id: Some(AGY_SESSION.into()),
+            claude_home: None,
             hook_event: None,
         });
         assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
@@ -1538,6 +1539,7 @@ fn agent_hud_retries_missing_claude_transcript_on_status_report() {
             ttl_ms: None,
             note: None,
             session_id: Some(SESSION.into()),
+            claude_home: None,
             hook_event: None,
         });
         assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));

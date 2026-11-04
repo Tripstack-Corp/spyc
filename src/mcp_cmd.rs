@@ -120,6 +120,10 @@ pub enum McpCommand {
         /// connection bound to a tab. Lets `save_session` prefer the *live*
         /// conversation over the spawn-proximity resolver (P1-3).
         session_id: Option<String>,
+        /// The Claude Code home the status hook ran in, its absolute
+        /// `CLAUDE_CONFIG_DIR`, sent beside `session_id`: where a Claude tab's
+        /// conversations are filed (#917). A direct agent call omits it.
+        claude_home: Option<std::path::PathBuf>,
         hook_event: Option<crate::agent::status_hook::StatusHookEvent>,
     },
     /// P2 merge/scope coordination (`docs/archive/AGENT_AWARENESS_PLAN.md`): declare

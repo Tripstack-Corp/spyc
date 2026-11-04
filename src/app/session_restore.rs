@@ -155,7 +155,7 @@ impl App {
             tabs: saved_tabs,
             plans,
             held: held_here,
-        } = restore_plans(project, running, &held);
+        } = restore_plans(project, running, &held, self.own_claude_home().as_deref());
         // A wholly refused tab set leaves the current session intact. Mixed
         // sessions proceed, without ever spawning a refused command.
         if !plans.is_empty()
@@ -279,7 +279,7 @@ impl App {
             return None;
         }
         let (id, config_problem) = self.create_project(&at, saved.anchor());
-        let tabs = restore_plans(saved, running, held);
+        let tabs = restore_plans(saved, running, held, self.own_claude_home().as_deref());
         let column_problem = self.in_project(id, |app| {
             let landed = app.restore_column_a(saved, false).is_some();
             app.reconcile_harpoon();
@@ -414,6 +414,7 @@ impl App {
             if !tab.claim_owner.is_empty() {
                 entry.info.claim_owner.clone_from(&tab.claim_owner);
             }
+            entry.info.claude_home.clone_from(&tab.claude_home);
             if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
                 // Pin the exact session this pane is resuming so the next
                 // save persists it directly, never re-deriving it from the
@@ -692,7 +693,13 @@ pub(super) fn saved_label(project: &SavedProject) -> String {
 /// SPYC-TRAP(restore-skips-held-conversations): a resumed tab whose
 /// conversation another spyc runs splits it silently, so the check reads the
 /// plan, not the id alone: an id-less codex or zot resumes the newest.
-fn restore_plans(project: &SavedProject, running: bool, held: &Held) -> TabPlans {
+/// `claude_home` is spyc's own, where a claude tab's conversation is looked for.
+fn restore_plans(
+    project: &SavedProject,
+    running: bool,
+    held: &Held,
+    claude_home: Option<&std::path::Path>,
+) -> TabPlans {
     let mut out = TabPlans::default();
     for tab in &project.tabs {
         let cwd = if tab.cwd.is_dir() {
@@ -700,7 +707,7 @@ fn restore_plans(project: &SavedProject, running: bool, held: &Held) -> TabPlans
         } else {
             project.anchor()
         };
-        let plan = crate::agent::resume::reconstruct_saved_tab(tab, cwd);
+        let plan = crate::agent::resume::reconstruct_saved_tab(tab, cwd, claude_home);
         let refused = matches!(plan.resume, ResumeAction::Refuse { .. });
         let is_held = !running && !refused && resumes(&plan, tab) && held.holds(tab, cwd);
         if is_held {
@@ -765,11 +772,11 @@ mod tests {
         let at = std::path::Path::new("/tmp");
         for command in ["codex", &format!("codex resume {UUID}")] {
             let saved = tab(command, None);
-            let plan = crate::agent::resume::reconstruct_saved_tab(&saved, at);
+            let plan = crate::agent::resume::reconstruct_saved_tab(&saved, at, None);
             assert!(resumes(&plan, &saved), "{command}: {}", plan.command);
         }
         let wrapper = tab("my-codex", Some("codex"));
-        let plan = crate::agent::resume::reconstruct_saved_tab(&wrapper, at);
+        let plan = crate::agent::resume::reconstruct_saved_tab(&wrapper, at, None);
         assert!(!resumes(&plan, &wrapper), "{}", plan.command);
     }
 }

@@ -46,7 +46,7 @@ pub fn coalesce_pending(
             // MVU Phase 3d: an MCP request carries its reply Sender — it MUST
             // be buffered (dropping it strands the client on its 5s timeout),
             // never join the no-op drop arm below.
-            Message::Mcp(req) => mcp_pending.push(req),
+            Message::Mcp(req) => mcp_pending.push(*req),
             // Every wake collapses to nothing here: the outcome rides a
             // `runtime.*` slot (or the producer's own channel) and the pre-recv
             // drains pick it up on re-entry, so a burst of them becomes a single
@@ -109,7 +109,7 @@ pub fn coalesce_recv(
         // Sender), collapse companions, synthesize Timeout so the
         // pre-recv MCP drain executes it + replies.
         Ok(Message::Mcp(req)) => {
-            ctx.mcp_pending.push(req);
+            ctx.mcp_pending.push(*req);
             coalesce_tail(rx, ctx)
         }
         // Any wake: nothing to buffer, so collapse companions and synthesize a
@@ -504,11 +504,11 @@ mod tests {
         // MVU Phase 3d: an MCP request carries its reply Sender — it MUST be
         // buffered into mcp_pending, NEVER dropped (else the client strands).
         let (reply, _reply_rx) = mpsc::channel();
-        tx.send(Message::Mcp(crate::mcp_cmd::McpRequest {
+        tx.send(Message::Mcp(Box::new(crate::mcp_cmd::McpRequest {
             command: crate::mcp_cmd::McpCommand::ClearPicks,
             reply,
             project: None,
-        }))
+        })))
         .unwrap();
 
         let mut fs_pending = Vec::new();

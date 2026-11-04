@@ -28,6 +28,7 @@ struct StatusReport {
     ttl_ms: Option<u64>,
     note: Option<String>,
     session_id: Option<String>,
+    claude_home: Option<std::path::PathBuf>,
     hook_event: Option<crate::agent::status_hook::StatusHookEvent>,
 }
 
@@ -331,6 +332,7 @@ impl App {
                 ttl_ms,
                 note,
                 session_id,
+                claude_home,
                 hook_event,
             } => self.apply_status_report(
                 pane_id.as_deref(),
@@ -340,6 +342,7 @@ impl App {
                     ttl_ms,
                     note,
                     session_id,
+                    claude_home,
                     hook_event,
                 },
             ),
@@ -704,6 +707,7 @@ impl App {
             ttl_ms,
             note,
             session_id,
+            claude_home,
             hook_event,
         } = report;
         let Some(activity) = report_activity(&status) else {
@@ -780,8 +784,8 @@ impl App {
         } else if promoted && let Some(live) = &entry.info.reported {
             entry.info.activity = live.status;
         }
-        if let Some(sid) = session_id.filter(|_| decision.is_ok()) {
-            pin_live_session(&mut entry.info, kind, sid);
+        if decision.is_ok() {
+            pin_live_session(&mut entry.info, kind, session_id, claude_home);
         }
         let pane_id = entry.info.id.clone();
         let label = entry.info.label.clone();
@@ -881,16 +885,21 @@ fn report_activity(status: &str) -> Option<crate::pane::AgentActivity> {
 /// spawn-proximity resolver at save time — route it to the id field for this
 /// tab's agent. claude reports `session_id` and agy `conversationId` (both
 /// land in `live_session_id`); codex has its own spawn-ordered rollout claim.
+/// A claude tab also pins the Claude home its hook ran in (#917).
 fn pin_live_session(
     info: &mut crate::pane::tabs::TabInfo,
     kind: crate::state::sessions::AgentKind,
-    sid: String,
+    sid: Option<String>,
+    claude_home: Option<std::path::PathBuf>,
 ) {
     use crate::state::sessions::AgentKind;
-    match kind {
-        AgentKind::Claude | AgentKind::Agy => info.live_session_id = Some(sid),
-        AgentKind::Codex => info.codex_session_id = Some(sid),
+    match (kind, sid) {
+        (AgentKind::Claude | AgentKind::Agy, Some(sid)) => info.live_session_id = Some(sid),
+        (AgentKind::Codex, Some(sid)) => info.codex_session_id = Some(sid),
         _ => {}
+    }
+    if kind == AgentKind::Claude && claude_home.is_some() {
+        info.claude_home = claude_home;
     }
 }
 

@@ -91,6 +91,11 @@ pub struct SavedTab {
     /// Older saves default false and inherit the new launch home.
     #[serde(default, skip_serializing_if = "is_false")]
     pub codex_home_unresolved: bool,
+    /// The Claude Code home a claude tab named for itself, through its status
+    /// hook or its launch record (`agent::claude_home`). Absent when it named
+    /// none, and on older saves: their restore reads spyc's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_home: Option<PathBuf>,
     /// P2 scope-coordination owner key (`TabInfo::claim_owner`) — persisted so
     /// a restored tab can reclaim its pre-crash `ScopeClaim`s. Absent on older
     /// saves (`#[serde(default)]`); an empty string means "no claim owner was
@@ -152,8 +157,6 @@ pub struct SavedVsplit {
 }
 
 thread_local! {
-    static CLAUDE_DIR_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
-        const { std::cell::RefCell::new(None) };
     static AGY_HOME_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -182,35 +185,6 @@ pub fn with_agy_home<R>(home: &std::path::Path, body: impl FnOnce() -> R) -> R {
         }
     }
     AGY_HOME_OVERRIDE.with(|c| *c.borrow_mut() = Some(home.to_path_buf()));
-    let _guard = Guard;
-    body()
-}
-
-/// `~/.claude`, where claude keeps its per-process session records and its
-/// conversation transcripts. Every read of either goes through here. A unit
-/// test sees none unless it pins one with [`with_claude_dir`], so no test
-/// depends on the developer's own conversations.
-fn claude_dir() -> Option<PathBuf> {
-    if let Some(dir) = CLAUDE_DIR_OVERRIDE.with(|c| c.borrow().clone()) {
-        return Some(dir);
-    }
-    if cfg!(test) {
-        return None;
-    }
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".claude"))
-}
-
-/// Test-only: run `body` with [`claude_dir`] pinned to `dir`, unwound when
-/// `body` returns or panics.
-#[cfg(test)]
-pub fn with_claude_dir<R>(dir: &std::path::Path, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            CLAUDE_DIR_OVERRIDE.with(|c| *c.borrow_mut() = None);
-        }
-    }
-    CLAUDE_DIR_OVERRIDE.with(|c| *c.borrow_mut() = Some(dir.to_path_buf()));
     let _guard = Guard;
     body()
 }
@@ -318,16 +292,17 @@ pub struct ClaudeSessionInfo {
     pub started_at_secs: u64,
 }
 
-/// Find every Claude Code session record whose `cwd` matches the
-/// given path. Returned sorted by `startedAt` descending (most recent
-/// first). Useful when multiple Claude panes share a cwd and need to
-/// be matched 1:1 against their session records by spawn time —
-/// otherwise they all collapse onto the most-recent record.
-pub fn find_claude_sessions(cwd: &std::path::Path) -> Vec<ClaudeSessionInfo> {
-    let Some(dir) = claude_dir().map(|d| d.join("sessions")) else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+/// Find every Claude Code session record under `home` (Claude's configuration
+/// directory, which keeps them in `sessions/`) whose `cwd` matches the given
+/// path. Returned sorted by `startedAt` descending (most recent first). Useful
+/// when multiple Claude panes share a cwd and need to be matched 1:1 against
+/// their session records by spawn time — otherwise they all collapse onto the
+/// most-recent record.
+pub fn find_claude_sessions(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Vec<ClaudeSessionInfo> {
+    let Ok(entries) = std::fs::read_dir(home.join("sessions")) else {
         return Vec::new();
     };
 
@@ -368,7 +343,7 @@ pub fn find_claude_sessions(cwd: &std::path::Path) -> Vec<ClaudeSessionInfo> {
         .map(|(started_at_ms, id, name)| {
             // Session name may live in the conversation JSONL as a
             // `custom-title` entry rather than in the session file.
-            let name = name.or_else(|| find_claude_session_name(&id));
+            let name = name.or_else(|| find_claude_session_name(home, &id));
             ClaudeSessionInfo {
                 session_id: id,
                 name,
@@ -403,7 +378,7 @@ impl SessionCandidate for ClaudeSessionInfo {
 /// broken by input order.
 ///
 /// Extracted so the multi-pane disambiguation has a unit test that
-/// doesn't depend on filesystem state under `~/.claude/` or
+/// doesn't depend on filesystem state under a Claude home or
 /// `~/.gemini/`.
 pub fn pick_closest_unclaimed_session<T: SessionCandidate>(
     candidates: Vec<T>,
@@ -437,16 +412,18 @@ pub fn project_slug(cwd: &std::path::Path) -> String {
         .collect()
 }
 
-/// True if a JSONL exists for `session_id` under the project slug for `cwd`.
-/// This is the file `claude --resume <id>` actually reads.
+/// True if a JSONL exists for `session_id` under `home`'s project slug for
+/// `cwd`. This is the file `claude --resume <id>` actually reads.
 ///
 /// Checks both `cwd` and its canonical (symlink-resolved) form, since
 /// macOS's `/var` → `/private/var` symlink means `getcwd()` inside Claude
 /// may produce a different slug than what spyc passes in.
-pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
-    let Some(projects) = claude_dir().map(|d| d.join("projects")) else {
-        return false;
-    };
+pub fn claude_jsonl_exists(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    session_id: &str,
+) -> bool {
+    let projects = home.join("projects");
     let file = format!("{session_id}.jsonl");
     if projects.join(project_slug(cwd)).join(&file).exists() {
         return true;
@@ -461,12 +438,16 @@ pub fn claude_jsonl_exists(cwd: &std::path::Path, session_id: &str) -> bool {
 }
 
 /// Resolve the on-disk conversation JSONL path for `session_id` under
-/// the project slug for `cwd` (the file `claude --resume <id>` reads,
+/// `home`'s project slug for `cwd` (the file `claude --resume <id>` reads,
 /// and what the transcript scrollback view renders). Checks both `cwd`
 /// and its canonical form for the macOS symlink-slug mismatch. Returns
 /// the first existing path, or `None`.
-pub fn claude_jsonl_path(cwd: &std::path::Path, session_id: &str) -> Option<PathBuf> {
-    let projects = claude_dir()?.join("projects");
+pub fn claude_jsonl_path(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    session_id: &str,
+) -> Option<PathBuf> {
+    let projects = home.join("projects");
     let file = format!("{session_id}.jsonl");
     let direct = projects.join(project_slug(cwd)).join(&file);
     if direct.exists() {
@@ -481,24 +462,31 @@ pub fn claude_jsonl_path(cwd: &std::path::Path, session_id: &str) -> Option<Path
     None
 }
 
-/// Find the most-recently-modified JSONL under `~/.claude/projects/<slug>/`.
+/// Find the most-recently-modified JSONL under `<home>/projects/<slug>/`.
 /// Returns the session ID (filename stem). This is the same conversation
 /// the no-arg `claude --resume` picker would surface first for this cwd.
-pub fn most_recent_jsonl_for_cwd(cwd: &std::path::Path) -> Option<String> {
-    newest_jsonl_for_cwd(cwd).map(|(_, id)| id)
+pub fn most_recent_jsonl_for_cwd(home: &std::path::Path, cwd: &std::path::Path) -> Option<String> {
+    newest_jsonl_for_cwd(home, cwd).map(|(_, id)| id)
 }
 
 /// [`most_recent_jsonl_for_cwd`], if that transcript was last written at or
 /// after `since` (epoch secs).
-pub fn most_recent_jsonl_for_cwd_since(cwd: &std::path::Path, since: u64) -> Option<String> {
+pub fn most_recent_jsonl_for_cwd_since(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    since: u64,
+) -> Option<String> {
     let since = std::time::UNIX_EPOCH + std::time::Duration::from_secs(since);
-    newest_jsonl_for_cwd(cwd)
+    newest_jsonl_for_cwd(home, cwd)
         .filter(|(written, _)| *written >= since)
         .map(|(_, id)| id)
 }
 
-fn newest_jsonl_for_cwd(cwd: &std::path::Path) -> Option<(std::time::SystemTime, String)> {
-    let dir = claude_dir()?.join("projects").join(project_slug(cwd));
+fn newest_jsonl_for_cwd(
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Option<(std::time::SystemTime, String)> {
+    let dir = home.join("projects").join(project_slug(cwd));
     let entries = std::fs::read_dir(&dir).ok()?;
     let mut best: Option<(std::time::SystemTime, String)> = None;
     for entry in entries.filter_map(Result::ok) {
@@ -682,11 +670,11 @@ pub fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
 }
 
 /// Look up a Claude session's custom title from its conversation JSONL.
-/// Searches `~/.claude/projects/*/\<sessionId\>.jsonl` for `custom-title` entries.
+/// Searches `<home>/projects/*/\<sessionId\>.jsonl` for `custom-title` entries.
 /// (`pub`, not `pub(crate)`: the enclosing `sessions` module is private, so
 /// clippy's `redundant_pub_crate` rejects `pub(crate)` here.)
-pub fn find_claude_session_name(session_id: &str) -> Option<String> {
-    let projects_dir = claude_dir()?.join("projects");
+pub fn find_claude_session_name(home: &std::path::Path, session_id: &str) -> Option<String> {
+    let projects_dir = home.join("projects");
     let entries = std::fs::read_dir(&projects_dir).ok()?;
 
     for project in entries.filter_map(Result::ok) {

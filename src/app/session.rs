@@ -114,16 +114,18 @@ fn autosave_action(dirty: bool, due: Option<Instant>, now: Instant) -> AutosaveA
 /// Never returns an id in `claimed`. Two tabs pinned to one conversation would
 /// otherwise both save it and both restore into it, which is the collapse this
 /// exists to prevent; `^a F` passes the other tabs' ids for the same reason.
+/// `claude_home` is where a claude tab's conversations are.
 pub(super) fn tab_conversation(
     tab: &crate::pane::tabs::TabEntry,
     claimed: &std::collections::HashSet<String>,
+    claude_home: Option<&std::path::Path>,
 ) -> (Option<String>, Option<String>) {
     let profile = tab.info.agent();
     match tab
         .info
         .pinned_session_id()
         .filter(|id| !claimed.contains(*id))
-        .and_then(|id| profile.validate_live_session_id(&tab.info.cwd, id))
+        .and_then(|id| profile.validate_live_session_id(&tab.info.cwd, id, claude_home))
     {
         Some((id, name)) => (Some(id), name),
         None => profile.resolve_resume_target(
@@ -131,6 +133,7 @@ pub(super) fn tab_conversation(
             &tab.info.cwd,
             tab.info.agent_epoch_secs(),
             claimed,
+            claude_home,
         ),
     }
 }
@@ -339,6 +342,7 @@ impl App {
     /// pane the same ID and they all collapsed onto one
     /// conversation at restore.
     fn saved_tabs(&mut self, claims: &mut ConversationClaims) -> Vec<SavedTab> {
+        let own_claude_home = self.own_claude_home();
         self.runtime
             .project_mut()
             .pane_tabs
@@ -353,9 +357,15 @@ impl App {
                         let profile = t.info.launched_agent();
                         let kind = profile.kind();
                         let claimed = claims.entry(t.info.codex_home.clone()).or_default();
+                        // Read only for claude, the one agent that files under it.
+                        let tab_claude_home = (kind == crate::state::sessions::AgentKind::Claude)
+                            .then(|| super::claude_home::lookup_for(t, None).tab_own())
+                            .flatten();
+                        let claude_home =
+                            tab_claude_home.clone().or_else(|| own_claude_home.clone());
                         let (agent_session_id, agent_session_name) =
                             if kind == t.info.agent().kind() {
-                                tab_conversation(t, claimed)
+                                tab_conversation(t, claimed, claude_home.as_deref())
                             } else {
                                 (None, None)
                             };
@@ -398,6 +408,7 @@ impl App {
                             codex_home: t.info.codex_home.clone(),
                             codex_home_unresolved: kind == crate::state::sessions::AgentKind::Codex
                                 && t.info.codex_home.is_none(),
+                            claude_home: tab_claude_home,
                             claim_owner: t.info.claim_owner.clone(),
                             pane_id: t.info.id.clone(),
                             agent_hint: t.info.agent_hint,
@@ -530,6 +541,7 @@ impl App {
                 // recorded no conversation, or a guessed one (#584).
                 t.info.pinned_session_id().hash(h);
                 t.info.codex_home.hash(h);
+                t.info.claude_home.hash(h);
                 // `^a R` respawns in place with the same command and a new id.
                 t.info.id.hash(h);
             }
@@ -911,7 +923,8 @@ mod tests {
                     .reconstruct_restore(
                         &saved.command,
                         saved.agent_session_id.as_deref(),
-                        tmp.path()
+                        tmp.path(),
+                        None
                     )
                     .command,
                 format!("codex --model test --sandbox read-only resume {UUID}"),
@@ -1176,6 +1189,7 @@ mod tests {
                     agent_session_name: None,
                     codex_home: None,
                     codex_home_unresolved: false,
+                    claude_home: None,
                     claim_owner: String::new(),
                     pane_id: String::new(),
                     agent_hint: None,
@@ -1339,16 +1353,21 @@ mod tests {
             .expect("set mtime");
     }
 
-    /// Runs `body` with the state root and `~/.claude` pinned under a temp dir,
-    /// handing it the dir claude would run in and the fake `~/.claude`.
+    /// Runs `body` with the state root pinned under a temp dir, handing it the
+    /// dir claude would run in and a fake Claude home for [`claude_app`].
     fn with_claude_home(body: impl FnOnce(&std::path::Path, &std::path::Path)) {
         let tmp = tempfile::tempdir().expect("tempdir");
         let root = std::fs::canonicalize(tmp.path()).expect("canonical tempdir");
         let (project, claude) = (root.join("project"), root.join("claude"));
         std::fs::create_dir_all(&project).expect("project");
-        crate::state::with_state_root(&root.join("state"), || {
-            crate::state::sessions::with_claude_dir(&claude, || body(&project, &claude));
-        });
+        crate::state::with_state_root(&root.join("state"), || body(&project, &claude));
+    }
+
+    /// A test app in `project` whose own Claude home is `claude`.
+    fn claude_app(project: &std::path::Path, claude: &std::path::Path) -> App {
+        let mut app = App::test_app(project.to_path_buf());
+        app.state.active_project_mut().pane.agent_hud.claude_home = Some(claude.to_path_buf());
+        app
     }
 
     fn saved_conversation(app: &mut App) -> Option<String> {
@@ -1365,7 +1384,7 @@ mod tests {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, OTHER, SPAWN - 60);
             claude_record(claude, 4242, MINE, project, SPAWN + 1);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, Some(MINE));
             assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
         });
@@ -1379,7 +1398,7 @@ mod tests {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, OTHER, SPAWN - 60);
             claude_record(claude, 4242, MINE, project, SPAWN + 1);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             assert_eq!(saved_conversation(&mut app), None);
         });
@@ -1394,7 +1413,7 @@ mod tests {
             claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
             claude_transcript(claude, project, OTHER, SPAWN + 50);
             claude_record(claude, 4242, MINE, project, SPAWN + 1);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             assert_eq!(saved_conversation(&mut app), None);
         });
@@ -1409,7 +1428,7 @@ mod tests {
             claude_record(claude, 4242, MINE, project, SPAWN + 1);
             claude_record(claude, 4343, OTHER, project, SPAWN + 3);
             claude_transcript(claude, project, OTHER, SPAWN + 20);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             assert_eq!(saved_conversation(&mut app), None);
         });
@@ -1422,7 +1441,7 @@ mod tests {
         with_claude_home(|project, claude| {
             claude_record(claude, 1111, OTHER, project, SPAWN - 3_600);
             claude_transcript(claude, project, OTHER, SPAWN + 50);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             assert_eq!(saved_conversation(&mut app), None);
         });
@@ -1434,7 +1453,7 @@ mod tests {
     fn a_transcript_older_than_the_tab_is_not_its_conversation() {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, OTHER, SPAWN - 60);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             assert_eq!(saved_conversation(&mut app), None);
         });
@@ -1446,7 +1465,7 @@ mod tests {
     fn with_no_record_a_conversation_written_since_the_tab_started_is_saved() {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, MINE, SPAWN + 30);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
         });
@@ -1459,7 +1478,7 @@ mod tests {
     fn a_closing_projects_snapshot_leaves_another_tabs_matched_conversation() {
         with_claude_home(|project, claude| {
             claude_transcript(claude, project, MINE, SPAWN + 30);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             let other = project.parent().expect("the temp root").join("other");
             std::fs::create_dir_all(&other).expect("other");
@@ -1515,7 +1534,7 @@ mod tests {
             claude_transcript(claude, project, OTHER, SPAWN + 50);
             claude_record(claude, 4242, MINE, project, SPAWN + 1);
             claude_transcript(claude, project, MINE, SPAWN + 40);
-            let mut app = App::test_app(project.to_path_buf());
+            let mut app = claude_app(project, claude);
             claude_tab(&mut app, project, None);
             assert_eq!(saved_conversation(&mut app).as_deref(), Some(MINE));
         });
@@ -1742,6 +1761,7 @@ mod tests {
             agent_session_name: None,
             codex_home: None,
             codex_home_unresolved: false,
+            claude_home: None,
             claim_owner: String::new(),
             pane_id: String::new(),
             agent_hint: None,

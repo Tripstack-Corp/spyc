@@ -156,7 +156,10 @@ Inside either view:
   instead of parking you at `[EOF]`
 
 Transcript sources per agent live under `src/state/` (`claude_transcript.rs`,
-`codex_transcript.rs`, `agy_transcript.rs`). When an Antigravity step in
+`codex_transcript.rs`, `agy_transcript.rs`). Claude's are read from each tab's
+own Claude home, the `CLAUDE_CONFIG_DIR` its status hook reports, else the one
+its pane shell exported at launch, else spyc's own (`src/app/claude_home.rs`),
+so two profiles in one folder never show each other's conversation. When an Antigravity step in
 `transcript.jsonl` marks `content` or `tool_calls` in `truncated_fields`, spyc
 hydrates the newest truncated steps from sibling `transcript_full.jsonl` within
 a bounded scan and byte budget; any step left unhydrated renders its compact

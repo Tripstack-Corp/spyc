@@ -14,6 +14,8 @@ const MAX_RECORD_BYTES: u64 = 64 * 1024;
 pub struct LaunchEnvironment {
     pub home: Option<OsString>,
     pub codex_home: Option<OsString>,
+    /// `None` when the shell left it unset or empty.
+    pub claude_config_dir: Option<OsString>,
 }
 
 impl LaunchEnvironment {
@@ -29,7 +31,7 @@ impl LaunchEnvironment {
             return None;
         }
         let fields: Vec<_> = bytes.split(|&byte| byte == 0).collect();
-        let [home, codex_home, end] = fields.as_slice() else {
+        let [home, codex_home, claude_config_dir, end] = fields.as_slice() else {
             return None;
         };
         if !end.is_empty() {
@@ -38,6 +40,8 @@ impl LaunchEnvironment {
         Some(Self {
             home: (!home.is_empty()).then(|| OsString::from_vec(home.to_vec())),
             codex_home: Some(OsString::from_vec(codex_home.to_vec())),
+            claude_config_dir: (!claude_config_dir.is_empty())
+                .then(|| OsString::from_vec(claude_config_dir.to_vec())),
         })
     }
 }
@@ -79,7 +83,7 @@ pub fn prepare(args: &mut [String], env: &[(&str, &str)]) -> anyhow::Result<Reco
     }
     let _ = write!(
         prefix,
-        "command printf '%s\\0%s\\0' \"${{HOME-}}\" \"${{CODEX_HOME-}}\" > {}; ",
+        "command printf '%s\\0%s\\0%s\\0' \"${{HOME-}}\" \"${{CODEX_HOME-}}\" \"${{CLAUDE_CONFIG_DIR-}}\" > {}; ",
         crate::shell::shell_quote(path)
     );
     let command = args
@@ -99,7 +103,6 @@ mod tests {
     /// A complete record is `HOME`, `CODEX_HOME` and `CLAUDE_CONFIG_DIR`, each
     /// ended by a NUL.
     #[test]
-    #[ignore = "red: a launch record holds no `CLAUDE_CONFIG_DIR`, so a complete one has two fields"]
     fn incomplete_and_oversized_launch_records_never_supply_a_home() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         for body in [

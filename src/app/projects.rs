@@ -433,13 +433,16 @@ impl App {
         let mut user_keymap = UserKeymap::from_bindings(config.bindings.clone());
         self.install_lua_maps(&mut user_keymap);
         let left = state::Commander::unread_at(dir, &config);
+        let homes = &self.state.active_project().pane.agent_hud;
+        let pane =
+            super::bootstrap::initial_pane(homes.claude_home.clone(), homes.agy_home.clone());
         let mut project = state::Project::new(
             Some(dir.to_path_buf()),
             left,
             dir.to_path_buf(),
             config,
             user_keymap,
-            super::bootstrap::initial_pane(),
+            pane,
         );
         project.config_key = Some((dir.to_path_buf(), anchor.to_path_buf()));
         let id = project.id;

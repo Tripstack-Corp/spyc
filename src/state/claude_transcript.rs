@@ -12,7 +12,7 @@
 //!
 //! ## Claude JSONL shape (Claude Code 2.1)
 //!
-//! `~/.claude/projects/<slug>/<session-id>.jsonl`, one JSON object
+//! `<claude home>/projects/<slug>/<session-id>.jsonl`, one JSON object
 //! per line. The lines we render:
 //! - `type: "user"` with `message.content` a *string* → the user's
 //!   typed prompt.
@@ -48,19 +48,21 @@ use crate::ui::theme::Theme;
 /// start time is closest to the pane's spawn. The proximity guess alone
 /// collapses two Claude tabs sharing a cwd onto one transcript (both `^a v`
 /// views showed the same conversation); the pin is the reliable discriminator.
-/// The `command` field of the query is unused.
+/// Both look only in the pane's Claude home (`q.claude_home`); without one
+/// there is nothing to read. The `command` field of the query is unused.
 pub fn resolve_active_jsonl(q: crate::agent::TranscriptQuery) -> Option<PathBuf> {
-    let sessions: Vec<(u64, String)> = crate::state::sessions::find_claude_sessions(q.cwd)
+    let home = q.claude_home?;
+    let sessions: Vec<(u64, String)> = crate::state::sessions::find_claude_sessions(home, q.cwd)
         .into_iter()
         .map(|s| (s.started_at_secs, s.session_id))
         .collect();
     let chosen = choose_session(
         q.session_id,
-        |sid| crate::state::sessions::claude_jsonl_path(q.cwd, sid).is_some(),
+        |sid| crate::state::sessions::claude_jsonl_path(home, q.cwd, sid).is_some(),
         &sessions,
         q.spawn_epoch_secs,
     )?;
-    crate::state::sessions::claude_jsonl_path(q.cwd, &chosen)
+    crate::state::sessions::claude_jsonl_path(home, q.cwd, &chosen)
 }
 
 /// Choose the Claude session id for a pane: the pinned live id when it names an

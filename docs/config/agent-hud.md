@@ -86,10 +86,13 @@ set later is wrapped at the next startup. Each run costs a few milliseconds and
 happens only when Claude Code redraws its line, never at idle unless your
 `statusLine` sets a `refreshInterval`.
 
-The strip reads `projects/*/<session>.jsonl` in Claude Code's configuration
-directory, `$CLAUDE_CONFIG_DIR` or else `~/.claude`, as spyc's own environment
-names it at startup. The session is the one the tab's status hooks reported, so
-the strip waits for the first report. Claude Code files a session under the
+The strip reads `projects/*/<session>.jsonl` in the tab's own Claude Code
+configuration directory: the `$CLAUDE_CONFIG_DIR` its claude runs with, as its
+status hooks report it, so a wrapper that picks a profile per folder is
+followed; for a restored tab, the one it was saved with; else spyc's own,
+`$CLAUDE_CONFIG_DIR` or else `~/.claude`, as spyc's environment names it at
+startup. Only an absolute directory counts. The session is the one the tab's
+status hooks reported, so the strip waits for the first report. Claude Code files a session under the
 directory it started in, so every project is asked for that exact name, and a
 session found in two projects is not guessed between. Claude Code reports its
 session at startup but writes the transcript only with the first prompt, so a
