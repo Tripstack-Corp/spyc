@@ -25,7 +25,7 @@ body:
     attributes:
       label: spyc version
       description: "`spyc --version`, or the version shown in the status bar."
-      placeholder: "1.97.3"
+      placeholder: "<x.y.z> (<git-sha>)"
     validations:
       required: true
   - type: input
@@ -41,7 +41,8 @@ body:
     attributes:
       label: Debug log
       description: >
-        Reproduce with `spyc --debug`, then paste the relevant lines from
-        `/tmp/spyc-debug-*.log`. For pane/agent issues, `--status-trace` adds
-        the status-hook payloads to `mcp.log`.
+        Reproduce with `spyc --debug`, then paste the relevant lines from the
+        `spyc-debug-<timestamp>.log` whose path it prints at startup (in spyc's
+        state directory). For pane/agent issues, `--status-trace` adds the
+        status-hook payloads to `mcp.log`.
       render: text
