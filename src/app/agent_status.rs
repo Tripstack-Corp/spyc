@@ -1460,9 +1460,8 @@ mod tests {
     fn notification_text_names_the_project_when_given() {
         use crate::pane::AgentActivity::{Blocked, Done};
         let named = super::Subject {
-            label: "claude",
-            tab_number: 2,
             project: Some("web"),
+            ..who("claude", 2)
         };
         assert_eq!(
             super::notification_text(&named, Blocked),
