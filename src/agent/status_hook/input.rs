@@ -22,10 +22,11 @@ enum Field {
     SessionId,
     ConversationId,
     TerminationReason,
+    Error,
 }
 
 impl Field {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::HookEventName,
         Self::ToolName,
         Self::TurnId,
@@ -34,6 +35,7 @@ impl Field {
         Self::SessionId,
         Self::ConversationId,
         Self::TerminationReason,
+        Self::Error,
     ];
 
     fn from_key(key: &str) -> Option<Self> {
@@ -46,6 +48,7 @@ impl Field {
             "session_id" => Some(Self::SessionId),
             "conversationId" => Some(Self::ConversationId),
             "terminationReason" => Some(Self::TerminationReason),
+            "error" => Some(Self::Error),
             _ => None,
         }
     }
@@ -60,6 +63,7 @@ impl Field {
             Self::SessionId => "session_id",
             Self::ConversationId => "conversationId",
             Self::TerminationReason => "termination_reason",
+            Self::Error => "error",
         }
     }
 }
@@ -327,7 +331,11 @@ impl<R> MetadataReader<R> {
         match self.token {
             Token::Key => self.select_root_key(decoded.as_deref()),
             Token::Field(field) => {
-                *self.field_mut(field) = decoded.filter(|value| value.len() <= STRING_LIMIT);
+                *self.field_mut(field) = decoded.filter(|value| {
+                    value.len() <= STRING_LIMIT
+                        // Only Claude's error names: agy's `error` is its message.
+                        && (!matches!(field, Field::Error) || super::StopError::from_wire(value).is_some())
+                });
             }
             Token::ToolCallKey => {
                 self.nested_key_next = false;
@@ -660,7 +668,6 @@ mod tests {
     /// closed set; that name is kept, its details and the reply never are, and
     /// an `error` that isn't one of the names (agy's message) is dropped.
     #[test]
-    #[ignore = "red: StopFailure's error type is dropped"]
     fn a_stop_failure_keeps_only_its_error_type() {
         assert_eq!(
             metadata(

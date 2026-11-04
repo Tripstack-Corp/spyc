@@ -318,7 +318,6 @@ fn agy_hook_reporter_forwards_event_metadata_and_remaps_stop_states() {
 /// A Claude turn that ends on an API error reports `blocked` with the error's
 /// name, and never its details or the reply.
 #[test]
-#[ignore = "red: StopFailure's error type is dropped"]
 fn a_claude_stop_failure_forwards_its_error_type_only() {
     let payload = json!({
         "hook_event_name": "StopFailure", "session_id": "session-1", "error": "rate_limit",

@@ -43,6 +43,9 @@
 //!   mid-turn tools that fire none of the above, so without this the dot keeps
 //!   pulsing `working` while the agent actually waits on the user.)
 //! * `Stop`              → `done`    (the agent finished its turn)
+//! * `StopFailure`       → `blocked` (the turn ended on an API error, which
+//!   Claude fires instead of `Stop`; it won't resume by itself, and the note
+//!   names the error from the payload's closed set)
 //!
 //! A merge splices our entries into an existing file without disturbing the
 //! user's other hooks or settings; a removal takes out only the entries we
@@ -134,16 +137,18 @@ fn reporter_command(exe: &str, state: &str) -> String {
 }
 
 /// The (event, matcher, reported-state) hooks spyc installs. `matcher` is the
-/// tool-name pattern for per-tool events (`""` = all / not-a-tool event). Three
+/// tool-name pattern for per-tool events (`""` = all / not-a-tool event). Four
 /// events map to `blocked`: `PermissionRequest`, `Notification` (idle backstop),
-/// and `PreToolUse` for `AskUserQuestion`/`ExitPlanMode` (mid-turn tools that
-/// fire none of the other events). See the module doc for the full mapping.
-const STATUS_HOOKS: [(&str, &str, &str); 5] = [
+/// `PreToolUse` for `AskUserQuestion`/`ExitPlanMode` (mid-turn tools that fire
+/// none of the other events), and `StopFailure`. See the module doc for the
+/// full mapping.
+const STATUS_HOOKS: [(&str, &str, &str); 6] = [
     ("UserPromptSubmit", "", "working"),
     ("PermissionRequest", "", "blocked"),
     ("Notification", "", "blocked"),
     ("PreToolUse", "AskUserQuestion|ExitPlanMode", "blocked"),
     ("Stop", "", "done"),
+    ("StopFailure", "", "blocked"),
 ];
 
 /// True if `group` (a matcher-group `{matcher, hooks:[...]}`) holds a command
@@ -390,7 +395,6 @@ mod tests {
     /// A turn that ends on an API error (a rate limit, an overload) is over and
     /// won't resume by itself: the user has to retry or wait.
     #[test]
-    #[ignore = "red: no StopFailure hook"]
     fn a_turn_that_ends_on_an_api_error_reports_blocked() {
         let merged = parse(&merged_status_hooks_json(None, "spyc").expect("fresh merge"));
         let cmd = merged
