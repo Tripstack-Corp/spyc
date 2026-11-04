@@ -59,6 +59,13 @@ fn head_branch_label(repo: &gix::Repository) -> String {
     }
 }
 
+/// Whether `dir` is inside a repository [`list`] and [`add`] can open: the
+/// upward `gix::discover` both make, so a `.git` gix can't open as a repo
+/// doesn't count.
+pub fn in_repo(dir: &Path) -> bool {
+    gix::discover(dir).is_ok()
+}
+
 /// List the repo's worktrees, MAIN first then linked ones (matching
 /// `git worktree list --porcelain` ordering so the "← current" marker in
 /// `git_state.rs` lines up). `None` if `dir` isn't inside a repository.

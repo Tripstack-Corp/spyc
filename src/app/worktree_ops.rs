@@ -174,20 +174,22 @@ pub fn run_worktree_job(job: WorktreeJob) -> WorktreeJobResult {
     }
 }
 
-/// Build the human/agent-facing message for a safe-remove outcome: what was
-/// archived, and whether the branch was deleted (merged) or kept (unmerged).
-/// The first of `anchors` inside a git repo, else the first, whose discovery
-/// error is then the one the caller sees. Stats the filesystem, so it runs on
-/// the worker rather than in `plan_worktree_job`.
+/// The first of `anchors` inside a repo `worktree::add` can open, else the
+/// first, whose discovery error is then the one the caller sees. A `.git` that
+/// isn't a repo (a stub holding only `info/exclude`) doesn't count, as it
+/// doesn't for `list_worktrees` (#890). Opens each anchor's repo, so it runs
+/// on the worker rather than in `plan_worktree_job`.
 fn create_anchor(anchors: &[std::path::PathBuf]) -> &std::path::Path {
     anchors
         .iter()
-        .find(|dir| super::state::find_repo_root(dir).is_some())
+        .find(|dir| crate::git::worktree::in_repo(dir))
         .or_else(|| anchors.first())
         // Invariant: `create_anchors` always starts with the project's anchor.
         .expect("create_worktree has at least one anchor")
 }
 
+/// Build the human/agent-facing message for a safe-remove outcome: what was
+/// archived, and whether the branch was deleted (merged) or kept (unmerged).
 fn safe_remove_message(
     target: &std::path::Path,
     report: &crate::app::worktree_clean::SafeRemoveReport,
