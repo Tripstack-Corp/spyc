@@ -147,6 +147,20 @@ impl StatusHookEvent {
         })
     }
 
+    /// What a `blocked` report from this event waits on: why the turn failed,
+    /// else the tool it names. `question` and `plan` stand for the tools that
+    /// ask, and `mcp` for another server's tool, as in the HUD's tools row.
+    pub fn blocked_on(&self) -> Option<String> {
+        self.failure_note().or_else(|| {
+            let tool = self.tool_name.as_deref()?;
+            Some(match tool {
+                "AskUserQuestion" | "request_user_input" | "ask_question" => "question".into(),
+                "ExitPlanMode" => "plan".into(),
+                _ => crate::agent::claude_metrics::records::tool_name(tool.to_owned()),
+            })
+        })
+    }
+
     /// Whether agy's `Stop` ended because the user cancelled the turn.
     pub fn user_cancelled(&self) -> bool {
         self.termination_reason == Some(TerminationReason::UserCancelled)

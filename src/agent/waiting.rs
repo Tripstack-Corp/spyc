@@ -148,6 +148,20 @@ pub fn note_for(
     }
 }
 
+/// What a hook's `blocked` report waits on, from the event's metadata alone:
+/// a desktop ping can leave the machine, so the agent's own note never names
+/// it. An event that names nothing, as Claude's `permission_prompt`
+/// notification, follows the request it is about, so it keeps the live
+/// block's label. Only a `blocked` report has one.
+pub fn blocked_on(
+    live: Option<&ReportedStatus>,
+    incoming: AgentActivity,
+    event: Option<&StatusHookEvent>,
+) -> Option<String> {
+    let event = event.filter(|_| incoming == AgentActivity::Blocked)?;
+    event.blocked_on().or_else(|| live?.blocked_on.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AgentActivity, Origin, ReportedStatus, StatusHookEvent, Verdict, meet, note_for};

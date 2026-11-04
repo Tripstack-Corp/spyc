@@ -59,12 +59,7 @@ impl App {
                 AgentActivity::Unknown => Attention::Unknown,
             }
         };
-        // What a `waiting` agent waits on, as it or its `Stop` hook said.
-        let note = (!info.suspended && info.activity == AgentActivity::Waiting)
-            .then_some(info.reported.as_ref())
-            .flatten()
-            .filter(|r| r.status == AgentActivity::Waiting)
-            .and_then(|r| r.note.as_deref());
+        let note = activity_note(info);
         let hooks = if !info.recent_hook_events.is_empty() {
             Hooks::Reported
         } else if info.status_hooks_restart_needed {
@@ -129,6 +124,21 @@ impl App {
             Metrics::Claude { reported, .. } => reported.plan,
             _ => None,
         }
+    }
+}
+
+/// What ends the activity row: what a `waiting` agent waits on, as it or its
+/// `Stop` hook said, or what a blocked one does, as its hook said.
+fn activity_note(info: &crate::pane::tabs::TabInfo) -> Option<&str> {
+    match info.activity {
+        _ if info.suspended => None,
+        AgentActivity::Waiting => info
+            .reported
+            .as_ref()
+            .filter(|r| r.status == AgentActivity::Waiting)
+            .and_then(|r| r.note.as_deref()),
+        AgentActivity::Blocked => info.blocked_on(),
+        _ => None,
     }
 }
 
