@@ -53,7 +53,7 @@ One line per module: its `//!` doc has the rest, ARCHITECTURE.md the decisions b
 - **`src/skill/`** — the installable agent skill (`spyc --install-skill`); staleness keyed on a content hash, and a manifest tells spyc's update from the user's edit, which is never overwritten unprompted.
 - **`src/lua/`** — embedded Lua 5.4 on its own thread, with an instruction-budget kill switch and a hard ceiling.
 - **`src/pane/`** — the pty-hosted subprocess: `pty_host.rs`; `engine.rs`, the terminal-engine seam, which carries only what spyc calls; `engine_ghostty/`, the engine behind the `PaneEngine` alias; `input.rs` (key → bytes), `widget.rs`, `pathref.rs` (`gf`/`gF`).
-- **`src/ui/`** — pure renderers, `model + &Theme → Vec<Line>`, and the per-frame `color_depth.rs` and `emoji_diff.rs` passes; `status_segments.rs` is the one source of the status bar's segment spans, which the mouse reads.
+- **`src/ui/`** — pure renderers, `model + &Theme → Vec<Line>`, and the per-frame `color_depth.rs` and `emoji_diff.rs` passes.
 - **`src/fs/`** — listing, entries, file ops, `F`, `:grep`. **`src/git/`** — 100% in-process via gix, no subprocess in production (`no_subprocess_git_in_production`).
 - **`src/mcp/`** — the MCP server. A connection binds at `initialize` to its agent's pane and project; `tool_schemas` is the catalogue; `SERVER_INSTRUCTIONS` stays short.
 - **`src/state/`** — persisted state: marks, picks, inventory, history, sessions, harpoon, graveyard, frecency, transcript readers, the scope registry, consent records.
