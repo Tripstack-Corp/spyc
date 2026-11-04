@@ -686,6 +686,50 @@ fn a_question_mark_in_a_menu_opens_the_key_reference() {
     });
 }
 
+/// The key reference's rows, each with its wrapped description joined back on.
+fn key_reference_rows(app: &App) -> Vec<String> {
+    let view = app.view.project().pager.as_ref().expect("a pager is open");
+    let mut rows: Vec<String> = Vec::new();
+    for line in &view.lines {
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        let continues = text.starts_with("   ");
+        match rows.last_mut() {
+            Some(row) if continues => {
+                row.push(' ');
+                row.push_str(text.trim());
+            }
+            _ => rows.push(text.trim().to_string()),
+        }
+    }
+    rows
+}
+
+/// iTerm2 keeps a plain right-click for its own menu, so an iTerm2 user learns
+/// from `?`, without the docs, to hold ⌃ for an object's menu.
+#[test]
+#[ignore = "red: no row of the `?` overlay names the ⌃-right-click rule for iTerm2"]
+fn the_key_reference_teaches_iterm2s_control_right_click() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = app_over_entries(tmp.path());
+        press(&mut app, '?');
+        assert!(app.help_is_open(), "premise: `?` opened the key reference");
+
+        let rows = key_reference_rows(&app);
+        let rule = rows.iter().find(|row| {
+            let row = row.to_lowercase();
+            row.contains("iterm2")
+                && (row.contains("right-click") || row.contains("right click"))
+                && (row.contains('⌃') || row.contains("ctrl"))
+        });
+
+        assert!(
+            rule.is_some(),
+            "no row names the ⌃-right-click rule for iTerm2: {rows:#?}"
+        );
+    });
+}
+
 /// An object's menu says in its title that `?` lists every key.
 #[test]
 fn a_menus_title_offers_the_key_reference() {
