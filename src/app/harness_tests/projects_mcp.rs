@@ -1,4 +1,5 @@
-//! #99 step 3: an MCP connection answers for, and acts on, its own project.
+//! #99 step 3: an MCP connection answers for, and acts on, its own project,
+//! and an agent's acts for its own tab alone (#916).
 //!
 //! Two projects in one `App`: `a` is active, the one the user sees, and `b` is
 //! another, whose agent must neither read `a` nor move it. Most tests speak the
@@ -113,6 +114,21 @@ impl Projects {
         })
     }
 
+    /// [`Self::call_from`]'s whole JSON-RPC reply, a tool error included.
+    fn reply_from(&mut self, pane: &str, tool: &'static str, args: Value) -> Value {
+        let pane = pane.to_string();
+        self.wire(move |c| {
+            c.initialize(Some(&pane));
+            c.call("tools/call", json!({"name": tool, "arguments": args}))
+        })
+    }
+
+    /// A second tab in the active project, `[2]` beside `a_pane`'s `[1]`.
+    fn second_tab_in_a(&mut self) -> String {
+        let (a, home) = (self.app.state.active, self.a_home.clone());
+        self.app.open_tab_in_project(a, &home)
+    }
+
     fn in_b<R>(&mut self, f: impl FnOnce(&mut App) -> R) -> R {
         let b = self.b;
         self.app.as_project(b, f)
@@ -135,6 +151,11 @@ impl Projects {
         let tab = tabs.tabs().iter().find(|t| t.info.id == pane)?;
         tab.info.last_reported.as_ref().map(|r| r.status)
     }
+}
+
+/// Whether a tool call's reply is a tool error.
+fn refused(reply: &Value) -> bool {
+    reply["result"]["isError"] == true
 }
 
 /// Puts the process cwd back on drop, for a test whose failure would move it.
@@ -387,6 +408,90 @@ fn wait_for_scope_clear_from_another_project_waits_on_others_claims() {
             json!({"paths": ["src/x.rs"], "timeout_ms": 300}),
         );
         assert_eq!(out["outcome"], "timed_out", "{out}");
+    });
+}
+
+/// An agent's connection reports for its own tab alone (#916): naming another
+/// tab, in its project or another, by id or by number, is refused and changes
+/// no tab, while naming its own is served.
+#[test]
+#[ignore = "red: a bound call naming another tab reports for that tab"]
+fn a_bound_agent_reports_for_no_other_tab() {
+    with_projects(|p| {
+        let a2 = p.second_tab_in_a();
+        let (a_pane, b_pane) = (p.a_pane.clone(), p.b_pane.clone());
+        for args in [
+            json!({"status": "blocked", "pane_id": a2}),
+            json!({"status": "blocked", "pane": 2}),
+            json!({"status": "blocked", "pane_id": b_pane}),
+        ] {
+            let reply = p.reply_from(&a_pane, "report_status", args.clone());
+            assert!(refused(&reply), "{args} was served: {reply}");
+        }
+        assert_eq!(Projects::reported(&p.app, &a2), None, "a's second tab");
+        assert_eq!(Projects::reported(&p.app, &a_pane), None, "the caller's");
+        assert_eq!(p.in_b(|app| Projects::reported(app, &b_pane)), None, "b's");
+
+        let own = json!({"status": "done", "pane": 1});
+        p.call_from(&a_pane, "report_status", own);
+        let reported = Projects::reported(&p.app, &a_pane);
+        assert_eq!(reported, Some(AgentActivity::Done), "its own number");
+        let own = json!({"status": "working", "pane_id": a_pane});
+        p.call_from(&a_pane, "report_status", own);
+        let reported = Projects::reported(&p.app, &a_pane);
+        assert_eq!(reported, Some(AgentActivity::Working), "its own id");
+        assert_eq!(Projects::reported(&p.app, &a2), None, "a's second tab");
+    });
+}
+
+/// The scope tools follow the same rule: an agent's connection claims, and
+/// waits, as its own tab only (#916).
+#[test]
+#[ignore = "red: a bound scope call naming another tab acts as that tab"]
+fn a_bound_agent_claims_and_waits_as_no_other_tab() {
+    with_projects(|p| {
+        let a2 = p.second_tab_in_a();
+        let a_pane = p.a_pane.clone();
+        for args in [
+            json!({"paths": ["src/x.rs"], "intent": "editing", "pane_id": a2}),
+            json!({"paths": ["src/x.rs"], "intent": "editing", "pane": 2}),
+        ] {
+            let reply = p.reply_from(&a_pane, "register_scope", args.clone());
+            assert!(refused(&reply), "{args} was served: {reply}");
+        }
+        assert!(p.app.state.scope_registry.is_empty(), "a claim was made");
+
+        let merging = json!({"paths": ["src/x.rs"], "intent": "merging"});
+        p.call_from(&a2, "register_scope", merging);
+        let wait = json!({"paths": ["src/x.rs"], "timeout_ms": 300, "pane_id": a2});
+        let reply = p.reply_from(&a_pane, "wait_for_scope_clear", wait);
+        assert!(refused(&reply), "waited as a's second tab: {reply}");
+    });
+}
+
+/// A conversation id is the status hook's to report, over its own one-shot:
+/// an agent's connection can't re-pin its tab's conversation for `-r` and the
+/// HUD, while the hook still does (#916).
+#[test]
+#[ignore = "red: a bound report's session_id pins the tab's conversation"]
+fn only_the_hook_pins_a_tabs_conversation() {
+    fn tab<'a>(app: &'a mut App, pane: &str) -> &'a mut crate::pane::tabs::TabInfo {
+        let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
+        let tab = tabs.tabs_mut().iter_mut().find(|t| t.info.id == pane);
+        &mut tab.unwrap().info
+    }
+    with_projects(|p| {
+        let a_pane = p.a_pane.clone();
+        tab(&mut p.app, &a_pane).agent_hint = Some(crate::state::sessions::AgentKind::Claude);
+        let forged = json!({"status": "working", "session_id": "forged"});
+        p.call_from(&a_pane, "report_status", forged);
+        let pinned = tab(&mut p.app, &a_pane).live_session_id.clone();
+        assert_eq!(pinned, None, "the agent's own report pinned it");
+
+        let hook = json!({"status": "working", "pane_id": a_pane, "session_id": "hooked"});
+        p.wire(move |c| c.tool("report_status", hook));
+        let pinned = tab(&mut p.app, &a_pane).live_session_id.clone();
+        assert_eq!(pinned.as_deref(), Some("hooked"), "the hook's report");
     });
 }
 
