@@ -46,12 +46,15 @@ pub struct HudLayout {
     pub strip: Option<Rect>,
 }
 
+/// The strip's first row: the rule between the agent and the strip.
+const RULE: u16 = 1;
+
 pub fn partition(rect: Rect, requested: AgentHudMode) -> HudLayout {
     let rows = match requested {
         AgentHudMode::Off => 0,
-        _ if rect.width == 0 || rect.height < 8 => 0,
-        AgentHudMode::Full if rect.height >= 10 => 4,
-        _ => 2,
+        _ if rect.width == 0 || rect.height < 8 + RULE => 0,
+        AgentHudMode::Full if rect.height >= 10 + RULE => 4 + RULE,
+        _ => 2 + RULE,
     };
     let child = Rect {
         height: rect.height.saturating_sub(rows),
@@ -63,6 +66,25 @@ pub fn partition(rect: Rect, requested: AgentHudMode) -> HudLayout {
         ..rect
     });
     HudLayout { child, strip }
+}
+
+/// Which rows a strip `partition` made shows: compact unless it has room for full.
+pub const fn shown_mode(strip: Rect) -> AgentHudMode {
+    if strip.height < 4 + RULE {
+        AgentHudMode::Compact
+    } else {
+        AgentHudMode::Full
+    }
+}
+
+/// The dim rule that heads the strip, so it reads as spyc's text rather than
+/// more of the agent's footer.
+pub fn rule(width: u16, theme: &Theme) -> Line<'static> {
+    let mut span = Palette::of(theme).label(&"─".repeat(usize::from(width)));
+    if theme.mono {
+        span.style.fg = Some(Color::Reset);
+    }
+    Line::from(span)
 }
 
 /// The agent's own metrics, `None` until its source is available.
@@ -1116,7 +1138,6 @@ mod tests {
     /// The rule costs a row, and the agent keeps its six: full gives way to
     /// compact, then the strip and its rule hide together.
     #[test]
-    #[ignore = "red: no rule above the strip"]
     fn the_rule_costs_a_row_and_the_agent_keeps_six() {
         let strip = |height, mode| partition(Rect::new(0, 0, 80, height), mode).strip;
         assert_eq!(strip(8, AgentHudMode::Compact), None);
@@ -1146,7 +1167,7 @@ mod tests {
                 .strip
                 .unwrap()
                 .height,
-            2
+            3
         );
         assert!(
             partition(Rect::new(0, 0, 0, 20), AgentHudMode::Full)
