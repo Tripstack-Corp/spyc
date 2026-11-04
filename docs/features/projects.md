@@ -150,7 +150,8 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   seconds rather than everything since launch. It only writes when
   something actually changed, so an idle spyc does no disk work.
 - **Auto-save** — on quit, spyc saves column `a`'s directory, all pane
-  tabs (command, label, cwd), active tab, pane height, focus state,
+  tabs (command, label, directory: a shell tab's where its shell is, an
+  agent tab's where the agent started), active tab, pane height, focus state,
   the spice-themed session name, `PROJECT_HOME`, the start directory, and
   the vertical split (its shape plus the second commander's cwd, or the
   preview file) — restored on `-r`, reopening columns `a` and `b` where you

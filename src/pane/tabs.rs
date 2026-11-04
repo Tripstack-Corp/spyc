@@ -648,11 +648,9 @@ impl TabEntry {
 
     /// `&mut` settle step (called from `prepare_panes`, NOT the draw): pick up
     /// any cwd a background refresh has landed, then kick a fresh lookup when
-    /// the cached value is stale and none is in flight. `cwd_for_pid` is a
-    /// `lsof` fork-exec on macOS (~5–17 ms) — it runs on a detached thread, so
-    /// this never blocks the loop; the result is picked up here on a later
-    /// frame. The render path used to do all this inline behind `&self`,
-    /// stalling the event loop ~once per `LIVE_CWD_TTL`.
+    /// the cached value is stale and none is in flight. The lookup runs on a
+    /// detached thread and is picked up here on a later frame, so no frame
+    /// waits on another process's state.
     pub fn refresh_live_cwd(&mut self) {
         // Pick up the lookup that finished, if one did. One whose thread died
         // without an answer ends too, so the next can start.

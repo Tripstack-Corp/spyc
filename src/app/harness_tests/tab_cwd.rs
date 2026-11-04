@@ -70,7 +70,6 @@ fn wait_until_moved(app: &App, to: &Path) {
 /// A shell tab saves the directory its shell moved to, background or not; an
 /// agent tab saves the one it started in.
 #[test]
-#[ignore = "red: a shell tab saves its spawn cwd"]
 fn a_shell_tab_saves_where_its_shell_is_and_an_agent_tab_where_it_started() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
