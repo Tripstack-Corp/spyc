@@ -69,6 +69,9 @@ pub fn turn_open_after(
     if event.is_some_and(|e| e.hook_event_name == "Notification") {
         return open;
     }
+    if event.is_some_and(StatusHookEvent::is_stop_failure) {
+        return false;
+    }
     match incoming {
         AgentActivity::Working => true,
         AgentActivity::Done | AgentActivity::Waiting | AgentActivity::Idle => false,
@@ -123,8 +126,9 @@ pub fn meet(
 }
 
 /// The note an applied report keeps: its own, else, for a `waiting` that
-/// follows a live `waiting`, that report's, else what the hook said is pending.
-/// The agent's words outrank the hook's count.
+/// follows a live `waiting`, that report's, else what the hook said is pending;
+/// for a turn that ended on an API error, which error. The agent's words
+/// outrank the hook's.
 pub fn note_for(
     live: Option<&ReportedStatus>,
     incoming: AgentActivity,
@@ -132,12 +136,16 @@ pub fn note_for(
     event: Option<&StatusHookEvent>,
     now: Instant,
 ) -> Option<String> {
-    if incoming != AgentActivity::Waiting || note.is_some() {
+    if note.is_some() {
         return note;
     }
-    live_waiting(live, now)
-        .and_then(|r| r.note.clone())
-        .or_else(|| event.and_then(StatusHookEvent::wakes_summary))
+    match incoming {
+        AgentActivity::Waiting => live_waiting(live, now)
+            .and_then(|r| r.note.clone())
+            .or_else(|| event.and_then(StatusHookEvent::wakes_summary)),
+        AgentActivity::Blocked => event.and_then(StatusHookEvent::failure_note),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -163,6 +171,7 @@ mod tests {
             fully_idle: None,
             background_tasks: tasks,
             session_crons: crons,
+            error: None,
         }
     }
 
@@ -188,6 +197,43 @@ mod tests {
             );
             assert_eq!(turn_open_after(open, Blocked, Some(&nudge)), open);
         }
+    }
+
+    /// A turn that ends on an API error is over, though it reports `blocked`;
+    /// its note names the error, or says only that one ended it.
+    #[test]
+    fn a_failed_turn_ends_the_turn_and_its_note_names_the_error() {
+        let failed = |error: Option<&str>| {
+            StatusHookEvent::from_value(&serde_json::json!({
+                "hook_event_name": "StopFailure", "error": error
+            }))
+            .unwrap()
+        };
+        let rate_limit = failed(Some("rate_limit"));
+        assert!(!super::turn_open_after(true, Blocked, Some(&rate_limit)));
+        let now = Instant::now();
+        assert_eq!(
+            note_for(None, Blocked, None, Some(&rate_limit), now).as_deref(),
+            Some("stopped: rate limit")
+        );
+        assert_eq!(
+            note_for(None, Blocked, None, Some(&failed(None)), now).as_deref(),
+            Some("stopped: API error")
+        );
+        assert_eq!(
+            note_for(
+                None,
+                Blocked,
+                Some("my words".into()),
+                Some(&rate_limit),
+                now
+            )
+            .as_deref(),
+            Some("my words"),
+            "the agent's own note outranks the hook's"
+        );
+        let question = event("PreToolUse", None, None);
+        assert_eq!(note_for(None, Blocked, None, Some(&question), now), None);
     }
 
     fn agy_cancel(fully_idle: Option<bool>) -> StatusHookEvent {

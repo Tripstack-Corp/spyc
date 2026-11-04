@@ -64,6 +64,37 @@ fn settle(app: &mut App, at: Instant) -> (AgentActivity, bool) {
     (activity, pinged)
 }
 
+/// A turn that ends on an API error is over and won't resume by itself, so the
+/// dot goes `blocked`, which pings, and its note names the error.
+#[test]
+fn a_turn_that_ends_on_an_api_error_needs_the_user_and_says_why() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "claude");
+        hook(
+            &mut app,
+            "working",
+            &json!({"hook_event_name":"UserPromptSubmit"}),
+        );
+        assert_eq!(settle(&mut app, Instant::now()).0, AgentActivity::Working);
+
+        let response = hook(
+            &mut app,
+            "blocked",
+            &json!({"hook_event_name":"StopFailure", "error":"rate_limit"}),
+        );
+        assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");
+        assert_eq!(
+            settle(&mut app, Instant::now()),
+            (AgentActivity::Blocked, true)
+        );
+        assert_eq!(
+            reported(&app).unwrap().note.as_deref(),
+            Some("stopped: rate limit")
+        );
+    });
+}
+
 /// Claude Code's `Stop` lists the work still running; the reporter turns that
 /// turn end into `waiting`. The dot holds through the idle nudge, follows the
 /// turn the finished work starts, and pings only when the agent is done.
