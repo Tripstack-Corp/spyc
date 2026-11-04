@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::{App, ChordHint, Deadline, RunCtx, arm_resume_deadlines, state};
+use super::{App, ChordHint, Deadline, HintEntry, RunCtx, arm_resume_deadlines, state};
 
 impl App {
     /// One-shot full-repaint bookkeeping at the top of each iteration.
@@ -187,12 +187,14 @@ impl App {
                     .map(|s| s.trim_end_matches('-').to_string())
                     .unwrap_or_default();
                 let entries = self.state.resolver.continuations();
-                let rows: Vec<(&'static str, &'static str)> =
-                    entries.iter().map(|e| (e.keys(), e.label())).collect();
+                let rows: Vec<(String, &'static str)> = entries
+                    .iter()
+                    .map(|e| (e.keys().to_string(), e.label()))
+                    .collect();
                 if !rows.is_empty() {
                     self.view.chord_hint = Some(ChordHint {
                         title,
-                        entries,
+                        entries: entries.into_iter().map(HintEntry::Chord).collect(),
                         rows,
                         prefix: self.state.resolver.prefix_keys().unwrap_or(""),
                         menu: None,

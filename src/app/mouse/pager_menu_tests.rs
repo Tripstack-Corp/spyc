@@ -140,7 +140,6 @@ fn right_click_the_pager(app: &mut App) {
 /// would be typed into the command while it runs, so neither close nor save is
 /// offered.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_right_click_on_a_live_capture_offers_background_interrupt_and_kill() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -164,7 +163,6 @@ fn a_right_click_on_a_live_capture_offers_background_interrupt_and_kill() {
 /// A click on "background" does what `^Z` does: the capture becomes a
 /// background task and its pager closes.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_background_sends_the_capture_to_the_background() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -187,7 +185,6 @@ fn a_click_on_background_sends_the_capture_to_the_background() {
 /// A click on "kill" does what `^\` does: the capture is torn down and its
 /// pager stays, marked interrupted.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_kill_tears_the_capture_down() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -206,7 +203,6 @@ fn a_click_on_kill_tears_the_capture_down() {
 /// process group, and the capture runs on until its command exits.
 #[cfg(unix)]
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_interrupt_signals_the_capture() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -229,7 +225,6 @@ fn a_click_on_interrupt_signals_the_capture() {
 /// The capture's menu offers what only a running capture has, so it closes
 /// when the command exits.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn the_capture_menu_closes_when_the_command_exits() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -254,7 +249,6 @@ fn the_capture_menu_closes_when_the_command_exits() {
 /// The menu takes its own keys over the capture: `↓` highlights its first
 /// row and `Enter` fires it, and neither reaches the command.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn arrows_and_enter_drive_the_capture_menu_not_the_command() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -279,7 +273,6 @@ fn arrows_and_enter_drive_the_capture_menu_not_the_command() {
 /// `?` in the capture's menu is the command's like any other key: it closes the
 /// menu and reaches the command, and the capture keeps its pager.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_question_mark_in_the_capture_menu_reaches_the_command() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -309,7 +302,6 @@ fn a_question_mark_in_the_capture_menu_reaches_the_command() {
 /// bring it to the foreground, as `:fg N` would from the list, and to pause it,
 /// and has no capture to background.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn the_task_viewers_menu_offers_foreground_and_pause_and_no_background() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);
@@ -328,7 +320,6 @@ fn the_task_viewers_menu_offers_foreground_and_pause_and_no_background() {
 /// group, which marks it paused once delivered. Its menu then offers to
 /// continue it, and a click there sends the SIGCONT `C` would.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_pause_pauses_the_task_and_its_menu_then_offers_continue() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);
@@ -368,7 +359,6 @@ fn a_click_on_pause_pauses_the_task_and_its_menu_then_offers_continue() {
 /// A click on "foreground" does what `:fg 1` does: the task streams into the
 /// live pager again.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_foreground_resumes_the_task_as_fg_does() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);
@@ -393,7 +383,6 @@ fn a_click_on_foreground_resumes_the_task_as_fg_does() {
 /// A click on "to pane tab" does what `:task-to-pane 1` does: the task becomes
 /// a pane tab.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_to_pane_moves_the_task_to_a_tab() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);
@@ -423,7 +412,6 @@ fn a_click_on_to_pane_moves_the_task_to_a_tab() {
 /// With two tasks, the viewer's menu steps between them: "next task" does what
 /// `]t` does, wrapping from the newest to the oldest.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_next_task_steps_the_viewer_as_bracket_t_does() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 2);
@@ -441,7 +429,6 @@ fn a_click_on_next_task_steps_the_viewer_as_bracket_t_does() {
 
 /// With one task there is no other to step to.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_lone_tasks_menu_has_no_task_to_step_to() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);
@@ -459,7 +446,6 @@ fn a_lone_tasks_menu_has_no_task_to_step_to() {
 /// A `^a v` scrollback's menu has save and close, and none of a task's rows.
 /// A click on "save" does what `s` does in it: writes what it holds to a file.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn the_scrollbacks_menu_offers_save_and_close_and_no_task_rows() {
     with_mouse(|tmp| {
         let mut app = app_with_tab(tmp, "cat");
@@ -504,7 +490,6 @@ fn the_scrollbacks_menu_offers_save_and_close_and_no_task_rows() {
 /// A `D` pager's menu closes it. The file is on disk already, so there is
 /// nothing to save.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_file_pagers_menu_closes_it() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -532,7 +517,6 @@ fn a_file_pagers_menu_closes_it() {
 /// A pager row fired by a click names its key, as every menu's row does: in
 /// front of the action's own message when it has one.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_background_names_its_key_before_the_message() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);
@@ -552,7 +536,6 @@ fn a_click_on_background_names_its_key_before_the_message() {
 /// open covers the status bar, so the hint shows in the pager, where its key's
 /// own message would.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_pause_names_its_key_in_the_pager() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);
@@ -574,7 +557,6 @@ fn a_click_on_pause_names_its_key_in_the_pager() {
 
 /// A closed pager's hint stays on the status bar: nothing covers it.
 #[test]
-#[ignore = "red: a right-click on an open pager opens no menu"]
 fn a_click_on_close_names_its_key() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);

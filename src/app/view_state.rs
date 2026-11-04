@@ -104,12 +104,12 @@ pub struct ImageView {
 pub struct ChordHint {
     /// The armed prefix, e.g. `"^a"` or `"g"`.
     pub(super) title: String,
-    /// The continuations as the resolver offers them, so a click on a row
-    /// fires what the row's key fires.
-    pub(super) entries: Vec<crate::keymap::ChordEntry>,
+    /// The continuations as the resolver offers them, or an object's rows, so
+    /// a click on a row fires what the row's key fires.
+    pub(super) entries: Vec<HintEntry>,
     /// `(keys, label)` per entry, e.g. `("z", "zoom pane (toggle fullscreen)")`:
-    /// what is drawn and hit-tested.
-    pub(super) rows: Vec<(&'static str, &'static str)>,
+    /// what is drawn and hit-tested. Owned, as a task's row names its number.
+    pub(super) rows: Vec<(String, &'static str)>,
     /// The keys that armed the chord (`g`, `^a`, `Space`), which a row's key
     /// follows when the hint names it; empty for an object's menu, whose rows
     /// carry whole keys.
@@ -117,6 +117,28 @@ pub struct ChordHint {
     /// An object's menu, which no chord armed and which takes its own keys;
     /// `None` for a chord's popup.
     pub(super) menu: Option<MenuState>,
+}
+
+impl ChordHint {
+    /// The rows as `chord_hit::chord_hint_layout` lays them out.
+    pub(super) fn row_refs(&self) -> Vec<(&str, &str)> {
+        self.rows.iter().map(|(k, l)| (k.as_str(), *l)).collect()
+    }
+
+    /// Whether this is an open pager's menu, whose keys are the pager's.
+    pub(super) fn is_pager_menu(&self) -> bool {
+        matches!(self.entries.first(), Some(HintEntry::Pager(_)))
+    }
+}
+
+/// One entry of the which-key popup: what a click on its row, or `Enter` on
+/// its highlight, fires.
+#[derive(Debug, Clone)]
+pub enum HintEntry {
+    /// A chord's continuation, or a row of an object's menu: an `Action`.
+    Chord(crate::keymap::ChordEntry),
+    /// A row of an open pager's menu, fired as the pager's key for it is.
+    Pager(super::pager_handler::PagerAction),
 }
 
 /// What an object's menu holds beside a chord popup's rows.

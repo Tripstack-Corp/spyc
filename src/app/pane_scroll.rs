@@ -676,6 +676,8 @@ impl App {
         view.show_line_numbers = pager_config.scrollback_line_numbers;
         view.no_history = true;
         view.wrap = true;
+        // `s` writes the history to a file, as scroll mode's `s` does.
+        view.saveable = true;
         view.pending_scroll_to_bottom.set(true);
         if let Some(id) = stream_id {
             view.stream_id = Some(id);

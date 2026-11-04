@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::shell;
 
+use super::PagerAction;
 use crate::app::{App, Effect, PagerReturn, TaskStatus, sh_c};
 
 impl App {
@@ -33,129 +34,12 @@ impl App {
         let Some(view) = active_pager_mut!(self) else {
             return Vec::new();
         };
+        // Close, save, and the task viewer's pause and continue: what the
+        // pager's menu offers too.
+        if let Some(action) = PagerAction::of_key(key, view.task_id.is_some(), view.saveable) {
+            return self.apply_pager_action(action);
+        }
         match key.code {
-            KeyCode::Char('q' | 'Q') | KeyCode::Esc => {
-                // A focused right-split preview: q/Esc closes the whole split
-                // (drop the preview + clear the shape), not just the pager.
-                if self.right_column_focused() {
-                    self.close_vsplit();
-                    return Vec::new();
-                }
-                // Scrollback / transcript help (shown in the bottom scroll_pager
-                // slot over the stashed scrollback): Esc/q restores the
-                // scrollback rather than snapping the pty to live. `H` toggles
-                // the help variant; this is the way back to the transcript.
-                // Checked before the pane-scroll snap below because the help view
-                // intentionally carries `pane_scroll = false`.
-                if self.view.project().scroll_pager_help_stash.is_some()
-                    && self.active_pager_ref().is_some_and(|v| {
-                        v.title == crate::ui::pager::SCROLLBACK_HELP_TITLE
-                            || v.title == crate::ui::pager::PAGER_HELP_TITLE
-                    })
-                {
-                    self.view.project_mut().scroll_pager =
-                        self.view.project_mut().scroll_pager_help_stash.take();
-                    self.view.pager_pending_bracket = None;
-                    self.view.needs_full_repaint = true;
-                    return Vec::new();
-                }
-                // v1.5 pane-scroll pager: snap the underlying pty
-                // back to live and clear the divider's [SCROLL]
-                // indicator. The pager is closed in the regular
-                // path below. (`active_pager_ref` so a focused bottom
-                // scrollback in `view.scroll_pager` is what's checked,
-                // not the top pager.)
-                if self.active_pager_ref().is_some_and(|v| v.pane_scroll) {
-                    self.close_pane_scroll_pager();
-                    return Vec::new();
-                }
-                // Pager-help overlay: dismiss just the help, restore
-                // whatever pager was active when help was opened.
-                // Restore from the dedicated `pager_help_stash` slot
-                // so the original mount (Overlay / TopPane /
-                // LowerPane) and `pane_scroll` flag come back intact
-                // — going through `pager_history` here would lose
-                // the v1.5 mount mounts (filtered by `no_history`)
-                // and pop a stale file-viewer instead.
-                if self
-                    .view
-                    .project()
-                    .pager
-                    .as_ref()
-                    .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
-                {
-                    self.view.project_mut().pager = self.view.project_mut().pager_help_stash.take();
-                    self.view.pager_pending_bracket = None;
-                    self.view.needs_full_repaint = true;
-                    return Vec::new();
-                }
-                // Task viewer special close: if the viewed task has
-                // exited (and the user has seen it), promote -- snapshot
-                // its rendered view into buffer history and drop the
-                // task from the bg list. Running tasks stay in bg.
-                // Reads the ACTIVE pager (the focused column's), not a hardcoded
-                // `view.pager` — else closing `b`'s pager would promote `a`'s task.
-                let promote_task: Option<u32> = self.active_pager_ref().and_then(|v| {
-                    let id = v.task_id?;
-                    let task = self
-                        .runtime
-                        .background_tasks
-                        .tasks
-                        .iter()
-                        .find(|t| t.id == id)?;
-                    if task.viewed_in_task_viewer && !matches!(task.status, TaskStatus::Running) {
-                        Some(id)
-                    } else {
-                        None
-                    }
-                });
-                if let Some(id) = promote_task {
-                    if let Some(task) = self.runtime.background_tasks.take(id) {
-                        let mut snapshot = Self::build_task_viewer_for(id, &task);
-                        snapshot.task_id = None; // not a live viewer anymore
-                        snapshot.no_history = false; // must be eligible for history
-                        self.view.project_mut().pager_history.push(snapshot);
-                        // Reap the child handle if still around (already
-                        // wait()'d when EOF arrived; this is just to drop
-                        // the writer/rx). Implicit via task drop.
-                        drop(task);
-                    }
-                    // Don't double-push the original viewer.
-                    self.clear_pager();
-                } else {
-                    // Save eligible pagers to history before closing. Operates
-                    // on the ACTIVE pager (the focused column's slot), so closing
-                    // `b`'s pager doesn't evict `a`'s — a hardcoded
-                    // `view.pager.take()` here closed both columns at once.
-                    let eligible = self.active_pager_ref().is_some_and(|v| {
-                        v.picker.is_none() && v.picker_cursor.is_none() && !v.streaming
-                    });
-                    if eligible {
-                        // Persist scroll BEFORE the take — otherwise the take
-                        // leaves the slot None and `remember_pager_position`'s
-                        // save is a no-op (file pagers closed via Esc/q would
-                        // never get their scroll saved to disk).
-                        let slot = self.active_pager_slot();
-                        self.remember_pager_position();
-                        if let Some(v) = self.take_active_pager() {
-                            self.view.project_mut().pager_history.push(v);
-                        }
-                        // The rest of `clear_pager`'s teardown (the slot is
-                        // already empty after the take). Only the left/single
-                        // slot uses `overlay_column`; closing `b`'s pager must
-                        // NOT unpin a still-open pager in `a`.
-                        if !matches!(slot, crate::app::pager_handler::PagerSlot::Right) {
-                            self.unpin_overlay_column();
-                        }
-                        self.recompute_focus();
-                    } else {
-                        self.clear_pager();
-                    }
-                }
-                self.clear_pending_pickers();
-                self.view.pager_pending_bracket = None;
-                self.view.needs_full_repaint = true;
-            }
             KeyCode::Char('/') => view.begin_search(),
             KeyCode::Char('?') => view.begin_search_backward(),
             KeyCode::Char('n') => view.search_repeat(viewport),
@@ -272,22 +156,6 @@ impl App {
                     "placement: hjkl/w/b/0/$/gG to move · ^v block · V line · Esc cancel".into(),
                 );
             }
-            KeyCode::Char('S') if view.task_id.is_some() => {
-                // Task viewer: S (Stop) pauses the underlying task
-                // via SIGSTOP to its process group. Mirrors the
-                // :pause command for hand-on-keyboard control. The
-                // pause/flash runs via run_effects (status-bar flash,
-                // never the pager footer); no post-match code follows,
-                // so returning the effect here is byte-identical.
-                let id = view.task_id.expect("guarded by the arm's is_some");
-                return self.pause_task(Some(id));
-            }
-            KeyCode::Char('C') if view.task_id.is_some() => {
-                // Task viewer: C (Continue) resumes a paused task
-                // via SIGCONT. Mirrors the :resume command.
-                let id = view.task_id.expect("guarded by the arm's is_some");
-                return self.resume_task(Some(id));
-            }
             KeyCode::Char('p') => {
                 // Hand the file off to $PAGER (default less) via full
                 // TTY takeover. Same suspend_tui / resume_tui dance as
@@ -304,10 +172,6 @@ impl App {
                 self.clear_pager();
                 self.view.needs_full_repaint = true;
                 return sh_c(&format!("{pager_cmd} {path_quoted}"), false);
-            }
-            KeyCode::Char('s') if view.saveable => {
-                let content = view.save_content();
-                return vec![Effect::SavePagerOutput { content }];
             }
             KeyCode::Char('v') => {
                 let argv = shell::resolve_editor();
@@ -463,6 +327,132 @@ impl App {
             _ => {}
         }
         Vec::new()
+    }
+
+    /// `q`, `Q` or `Esc`: close the pager that owns input, restoring what it
+    /// covered where it covered something (a split's preview closes the
+    /// split, a help view gives back what it was opened over).
+    pub(super) fn close_pager_by_key(&mut self) {
+        // A focused right-split preview: q/Esc closes the whole split
+        // (drop the preview + clear the shape), not just the pager.
+        if self.right_column_focused() {
+            self.close_vsplit();
+            return;
+        }
+        // Scrollback / transcript help (shown in the bottom scroll_pager
+        // slot over the stashed scrollback): Esc/q restores the
+        // scrollback rather than snapping the pty to live. `H` toggles
+        // the help variant; this is the way back to the transcript.
+        // Checked before the pane-scroll snap below because the help view
+        // intentionally carries `pane_scroll = false`.
+        if self.view.project().scroll_pager_help_stash.is_some()
+            && self.active_pager_ref().is_some_and(|v| {
+                v.title == crate::ui::pager::SCROLLBACK_HELP_TITLE
+                    || v.title == crate::ui::pager::PAGER_HELP_TITLE
+            })
+        {
+            self.view.project_mut().scroll_pager =
+                self.view.project_mut().scroll_pager_help_stash.take();
+            self.view.pager_pending_bracket = None;
+            self.view.needs_full_repaint = true;
+            return;
+        }
+        // v1.5 pane-scroll pager: snap the underlying pty
+        // back to live and clear the divider's [SCROLL]
+        // indicator. The pager is closed in the regular
+        // path below. (`active_pager_ref` so a focused bottom
+        // scrollback in `view.scroll_pager` is what's checked,
+        // not the top pager.)
+        if self.active_pager_ref().is_some_and(|v| v.pane_scroll) {
+            self.close_pane_scroll_pager();
+            return;
+        }
+        // Pager-help overlay: dismiss just the help, restore
+        // whatever pager was active when help was opened.
+        // Restore from the dedicated `pager_help_stash` slot
+        // so the original mount (Overlay / TopPane /
+        // LowerPane) and `pane_scroll` flag come back intact
+        // — going through `pager_history` here would lose
+        // the v1.5 mount mounts (filtered by `no_history`)
+        // and pop a stale file-viewer instead.
+        if self
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .is_some_and(|v| v.title == crate::ui::pager::PAGER_HELP_TITLE)
+        {
+            self.view.project_mut().pager = self.view.project_mut().pager_help_stash.take();
+            self.view.pager_pending_bracket = None;
+            self.view.needs_full_repaint = true;
+            return;
+        }
+        // Task viewer special close: if the viewed task has
+        // exited (and the user has seen it), promote -- snapshot
+        // its rendered view into buffer history and drop the
+        // task from the bg list. Running tasks stay in bg.
+        // Reads the ACTIVE pager (the focused column's), not a hardcoded
+        // `view.pager` — else closing `b`'s pager would promote `a`'s task.
+        let promote_task: Option<u32> = self.active_pager_ref().and_then(|v| {
+            let id = v.task_id?;
+            let task = self
+                .runtime
+                .background_tasks
+                .tasks
+                .iter()
+                .find(|t| t.id == id)?;
+            if task.viewed_in_task_viewer && !matches!(task.status, TaskStatus::Running) {
+                Some(id)
+            } else {
+                None
+            }
+        });
+        if let Some(id) = promote_task {
+            if let Some(task) = self.runtime.background_tasks.take(id) {
+                let mut snapshot = Self::build_task_viewer_for(id, &task);
+                snapshot.task_id = None; // not a live viewer anymore
+                snapshot.no_history = false; // must be eligible for history
+                self.view.project_mut().pager_history.push(snapshot);
+                // Reap the child handle if still around (already
+                // wait()'d when EOF arrived; this is just to drop
+                // the writer/rx). Implicit via task drop.
+                drop(task);
+            }
+            // Don't double-push the original viewer.
+            self.clear_pager();
+        } else {
+            // Save eligible pagers to history before closing. Operates
+            // on the ACTIVE pager (the focused column's slot), so closing
+            // `b`'s pager doesn't evict `a`'s — a hardcoded
+            // `view.pager.take()` here closed both columns at once.
+            let eligible = self
+                .active_pager_ref()
+                .is_some_and(|v| v.picker.is_none() && v.picker_cursor.is_none() && !v.streaming);
+            if eligible {
+                // Persist scroll BEFORE the take — otherwise the take
+                // leaves the slot None and `remember_pager_position`'s
+                // save is a no-op (file pagers closed via Esc/q would
+                // never get their scroll saved to disk).
+                let slot = self.active_pager_slot();
+                self.remember_pager_position();
+                if let Some(v) = self.take_active_pager() {
+                    self.view.project_mut().pager_history.push(v);
+                }
+                // The rest of `clear_pager`'s teardown (the slot is
+                // already empty after the take). Only the left/single
+                // slot uses `overlay_column`; closing `b`'s pager must
+                // NOT unpin a still-open pager in `a`.
+                if !matches!(slot, crate::app::pager_handler::PagerSlot::Right) {
+                    self.unpin_overlay_column();
+                }
+                self.recompute_focus();
+            } else {
+                self.clear_pager();
+            }
+        }
+        self.clear_pending_pickers();
+        self.view.pager_pending_bracket = None;
+        self.view.needs_full_repaint = true;
     }
 
     /// `H` / F1: the help for the focused pager, stashing what it covers so

@@ -30,6 +30,18 @@ quick-select and `y` in the pager are the mouse-free yank paths.
   the left or right column, and dim the inactive one, then close the split
   beside a preview, or close the second commander beside one. The keyboard
   stays where it was.
+- **On an open pager**, the pager takes the keyboard and its menu opens,
+  titled with the pager's title. A running `!` capture's menu, opened
+  anywhere on screen, offers background (`^Z`), interrupt (`^C`) and kill
+  (`^\`). The task viewer (`gB`) offers what applies to its task: interrupt,
+  bring it to the foreground or move it to a pane tab (`:fg N` and
+  `:task-to-pane N`, typed from the file list once the pager is closed,
+  since in a pager `:` jumps to a line), pause or continue (`S`, `C`), and
+  step to the next or previous task (`]t`, `[t`). Any other pager, a
+  `^a v` scrollback or a `D` file among them, offers save (`s`) where its
+  text can be saved, and close (`q`). Other full-screen views (the finder,
+  quick select, harpoon, the image views) keep the right-click to
+  themselves.
 - **Anywhere else** (blank list space, the status bar, the prompt row, the
   agent strip, or the divider while the prompt row has its place), the leader
   menu opens.
@@ -40,9 +52,10 @@ would be typed into the agent. `↑` and `↓` highlight a row and `Enter` fires
 it; `Esc` closes the menu. Any other key closes the menu and then does what it
 always does, so typing a row's key does what the row says, and from the pane
 a letter still reaches the agent, while `?` opens the list of every key, as the
-title says. A row appears only where its action applies:
-no `e` on a directory, no suspend on a shell tab, and inside an archive no row
-the archive refuses.
+title says. In a pager's menu every key is the pager's, `?` too: in a running
+capture it is typed into the command. A row appears only where its action applies:
+no `e` on a directory, no suspend on a shell tab, no pause on a paused task,
+and inside an archive no row the archive refuses.
 
 iTerm2 keeps a plain right-click for its own menu, so hold **⌃** while you
 right-click there; spyc reads a right-click with any modifier the same.

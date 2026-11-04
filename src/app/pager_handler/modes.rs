@@ -6,6 +6,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::PagerAction;
 use crate::app::{App, Effect};
 use crate::ui::pager::PickerKind;
 
@@ -26,18 +27,11 @@ impl App {
         //     "press Esc or q to close" inside the pager, since
         //     ^C-as-quit is muscle memory from `less` and the user
         //     expects feedback in the active screen.
+        if let Some(action) = PagerAction::of_ctrl_c(key, view.task_id.is_some()) {
+            return Some(self.apply_pager_action(action));
+        }
         if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let Some(id) = view.task_id {
-                match self.interrupt_task(Some(id)) {
-                    Ok(msg) | Err(msg) => {
-                        if let Some(v) = active_pager_mut!(self) {
-                            v.flash = Some(msg);
-                        }
-                    }
-                }
-            } else if let Some(v) = active_pager_mut!(self) {
-                v.flash = Some("press Esc or q to close pager".into());
-            }
+            view.flash = Some("press Esc or q to close pager".into());
             return Some(Vec::new());
         }
 
@@ -255,10 +249,8 @@ impl App {
                 }
                 return Some(Vec::new());
             }
-            if key.code == KeyCode::Char('t') {
-                let direction = if bracket == '[' { -1 } else { 1 };
-                self.cycle_task_viewer(direction);
-                return Some(Vec::new());
+            if let Some(action) = PagerAction::of_bracket(bracket, key) {
+                return Some(self.apply_pager_action(action));
             }
             // [[ / ]] — previous / next Markdown heading, vim's section motion.
             if matches!(key.code, KeyCode::Char('[' | ']')) {

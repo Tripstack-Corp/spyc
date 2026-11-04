@@ -18,6 +18,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::keymap::{Action, BoundAction, ResolverOutcome};
 
+use super::pager_handler::PagerAction;
 use super::route;
 use super::update::UiMsg;
 use super::{App, Effect, Mode, PaneInput, PaneTarget, View, sh_c};
@@ -88,32 +89,6 @@ pub(super) const fn pane_suspend_key_action(
         PaneKeyAction::EatSuspended
     } else {
         PaneKeyAction::Forward
-    }
-}
-
-/// What a key does to a running `!` capture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CaptureKeyAction {
-    /// `^C` — interrupt the capture (SIGINT to its foreground process group).
-    Interrupt,
-    /// `^\` — hard-kill the capture (SIGKILL) and tear it down.
-    Kill,
-    /// `^Z` — send it to the background.
-    Background,
-    /// Anything else — forward the keystroke to the child as bytes, so the
-    /// user can answer prompts (a sudo/ssh password, a `y`/`n`).
-    Forward,
-}
-
-/// Classify a key for a live `!` capture. **Pure** (route.rs template): the
-/// three control keys are spyc-managed, everything else forwards to the child.
-const fn capture_key_action(key: KeyEvent) -> CaptureKeyAction {
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    match key.code {
-        KeyCode::Char('c') if ctrl => CaptureKeyAction::Interrupt,
-        KeyCode::Char('\\') if ctrl => CaptureKeyAction::Kill,
-        KeyCode::Char('z') if ctrl => CaptureKeyAction::Background,
-        _ => CaptureKeyAction::Forward,
     }
 }
 
@@ -424,81 +399,24 @@ impl App {
 
     /// Handle a key for a live `!` capture: `^C` → SIGINT, `^\` → SIGKILL +
     /// teardown, `^Z` → background, else forward the bytes so prompts get
-    /// answered. Classification is the pure [`capture_key_action`]; reached via
-    /// the `InputSink::Capture` arm, which guarantees `pending_capture` is set.
+    /// answered. Classification is the pure [`PagerAction::of_capture_key`],
+    /// whose three are the capture's menu too; reached via the
+    /// `InputSink::Capture` arm, which guarantees `pending_capture` is set.
     fn handle_capture_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        let Some(capture) = self.runtime.pending_capture.as_mut() else {
+        if self.runtime.pending_capture.is_none() {
             return Vec::new();
-        };
-        let forward = |key| {
-            // A capture is a bare `PtyHost` with no terminal engine, so no DECCKM
-            // state exists to honour — the CSI form is what a terminal that never
-            // negotiated the mode sends.
-            let bytes = crate::pane::input::encode_key(key, false);
-            if bytes.is_empty() {
-                Vec::new()
-            } else {
-                vec![Effect::SendToCapture { bytes }]
-            }
-        };
-        match capture_key_action(key) {
-            CaptureKeyAction::Interrupt => {
-                #[cfg(unix)]
-                {
-                    capture
-                        .host
-                        .foreground_pgrp()
-                        .or_else(|| capture.host.process_id())
-                        .map(|pgrp| {
-                            vec![Effect::SignalCapture {
-                                pgrp,
-                                sig: rustix::process::Signal::INT,
-                            }]
-                        })
-                        .unwrap_or_default()
-                }
-                // No signal path off-unix; forward the 0x03 byte as before.
-                #[cfg(not(unix))]
-                {
-                    forward(key)
-                }
-            }
-            CaptureKeyAction::Kill => {
-                // Also kill the command's own foreground group: job control
-                // under `zsh -i -c` runs it apart from the wrapper shell that
-                // Drop/`child.kill()` target, which would otherwise orphan it.
-                #[cfg(unix)]
-                let fg_pgrp = capture
-                    .host
-                    .foreground_pgrp()
-                    .filter(|&fg| Some(fg) != capture.host.process_id());
-                let _ = capture.host.child.kill();
-                let _ = capture.host.child.wait();
-                // ✗ — same non-clean-termination glyph the status bar uses.
-                let title = format!("\u{2717} {} — interrupted", capture.title);
-                if let Some(view) = self.view.project_mut().pager.as_mut() {
-                    view.title = title;
-                    view.saveable = true;
-                    view.streaming = false;
-                }
-                // Clear the wake slot before dropping the host so the EOF
-                // close-wake fires through a None slot.
-                capture.host.clear_wake_slot();
-                self.runtime.pending_capture = None;
-                #[cfg(unix)]
-                if let Some(pgrp) = fg_pgrp {
-                    return vec![Effect::SignalCapture {
-                        pgrp,
-                        sig: rustix::process::Signal::KILL,
-                    }];
-                }
-                Vec::new()
-            }
-            CaptureKeyAction::Background => {
-                self.background_capture();
-                Vec::new()
-            }
-            CaptureKeyAction::Forward => forward(key),
+        }
+        if let Some(action) = PagerAction::of_capture_key(key) {
+            return self.apply_pager_action(action);
+        }
+        // A capture is a bare `PtyHost` with no terminal engine, so no DECCKM
+        // state exists to honour — the CSI form is what a terminal that never
+        // negotiated the mode sends.
+        let bytes = crate::pane::input::encode_key(key, false);
+        if bytes.is_empty() {
+            Vec::new()
+        } else {
+            vec![Effect::SendToCapture { bytes }]
         }
     }
 
@@ -910,8 +828,12 @@ mod suspend_key_tests {
 
 #[cfg(test)]
 mod capture_key_tests {
-    use super::{CaptureKeyAction, capture_key_action};
+    use super::PagerAction;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn capture_key_action(key: KeyEvent) -> Option<PagerAction> {
+        PagerAction::of_capture_key(key)
+    }
 
     fn ctrl(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
@@ -922,19 +844,19 @@ mod capture_key_tests {
 
     #[test]
     fn control_keys_are_spyc_managed() {
-        assert_eq!(capture_key_action(ctrl('c')), CaptureKeyAction::Interrupt);
-        assert_eq!(capture_key_action(ctrl('\\')), CaptureKeyAction::Kill);
-        assert_eq!(capture_key_action(ctrl('z')), CaptureKeyAction::Background);
+        assert_eq!(capture_key_action(ctrl('c')), Some(PagerAction::Interrupt));
+        assert_eq!(capture_key_action(ctrl('\\')), Some(PagerAction::Kill));
+        assert_eq!(capture_key_action(ctrl('z')), Some(PagerAction::Background));
     }
 
     #[test]
     fn everything_else_forwards_so_prompts_can_be_answered() {
         // A plain `c` is a password character, not an interrupt.
-        assert_eq!(capture_key_action(plain('c')), CaptureKeyAction::Forward);
-        assert_eq!(capture_key_action(plain('y')), CaptureKeyAction::Forward);
+        assert_eq!(capture_key_action(plain('c')), None);
+        assert_eq!(capture_key_action(plain('y')), None);
         assert_eq!(
             capture_key_action(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
-            CaptureKeyAction::Forward
+            None
         );
     }
 }
