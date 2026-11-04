@@ -38,7 +38,7 @@ fn with_mouse(body: impl FnOnce(&Path)) {
 
 /// An App `width` columns wide with a project homed at each of `names`
 /// under `base`, open in that order, the first in view.
-fn projects(base: &Path, names: &[&str], width: u16) -> (App, Vec<ProjectId>) {
+pub(super) fn projects(base: &Path, names: &[&str], width: u16) -> (App, Vec<ProjectId>) {
     let homes: Vec<PathBuf> = names
         .iter()
         .map(|name| {
@@ -145,7 +145,7 @@ pub(super) fn esc(app: &mut App) {
 }
 
 /// The project list `Space j` opens is in view.
-fn project_list_open(app: &App) -> bool {
+pub(super) fn project_list_open(app: &App) -> bool {
     app.view
         .project()
         .pager
