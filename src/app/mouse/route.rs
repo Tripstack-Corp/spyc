@@ -14,7 +14,9 @@ use super::super::FrameLayout;
 use super::super::modal::Modal;
 use super::super::pager_handler::PagerSlot;
 use super::PaneScrollStreak;
+use crate::keymap::ProjectAction;
 use crate::ui::pager::Mount;
+use crate::ui::status_segments::StatusSegment;
 
 /// Which frame region the pointer is over. Resolved from the pointer's
 /// column/row against the live [`FrameLayout`], so it follows the cursor rather
@@ -118,6 +120,13 @@ pub enum MouseSink {
     /// Open the `:stderr` log: the pointer was on the status bar's `⚠N`.
     /// Beats [`Self::SelectChrome`] for the reason [`Self::PaneTab`] does.
     StderrLog,
+    /// Do what a project's key does: `Space N` for a project's label on the
+    /// status bar, `Space j` for the collapsed count. Beats
+    /// [`Self::SelectChrome`] for the reason [`Self::PaneTab`] does.
+    Project(ProjectAction),
+    /// Give the pane the keyboard: the pointer was on the status bar's agent
+    /// segment, which names the pane's active tab.
+    FocusPane,
     /// Give the keyboard to the pane AND anchor a spyc-side text selection over its
     /// visible grid — for a child that ignores mouse reports, so nothing else can
     /// do the selecting (codex's `^T` transcript, a plain shell).
@@ -150,6 +159,10 @@ pub enum MenuAt {
     /// The open pager in this slot: a live capture's, the task viewer, a
     /// scrollback or a `D` pager.
     Pager(PagerSlot),
+    /// A status-bar segment with a menu: a project's label or the lone
+    /// project's segment, the collapsed count, the git, agent or session
+    /// segment.
+    Status(StatusSegment),
 }
 
 /// What the user did, reduced to the axis routing cares about.
@@ -232,6 +245,10 @@ pub struct MouseSnapshot {
     pub prompt_on_divider: bool,
     /// The pointer is on the status bar's `⚠N` of unread stderr, as drawn.
     pub over_stderr_notice: bool,
+    /// The status-bar segment the pointer is on, from the spans the renderer
+    /// recorded with the bar ([`super::StatusRow`]): a project's label rather
+    /// than the segment holding it. `None` off the bar.
+    pub status_segment: Option<StatusSegment>,
     /// A chord is armed: the resolver takes the next key as its continuation,
     /// whether or not the which-key popup is drawn yet. An object's menu
     /// counts, though no chord opened it: a click beside it closes it too.
@@ -306,6 +323,12 @@ impl MouseSnapshot {
         if matches!(self.region, Some(Region::Divider)) && !self.prompt_on_divider {
             return Some(MenuAt::Divider);
         }
+        // And the status bar.
+        if let Some(segment) = self.status_segment
+            && has_a_menu(segment)
+        {
+            return Some(MenuAt::Status(segment));
+        }
         if self.over_chrome_row {
             return None;
         }
@@ -320,6 +343,38 @@ impl MouseSnapshot {
             return Some(MenuAt::PaneBody);
         }
         None
+    }
+}
+
+/// Whether a status-bar segment has a menu: the path, the column's state and
+/// the chips' cells around their labels have none.
+const fn has_a_menu(segment: StatusSegment) -> bool {
+    !matches!(
+        segment,
+        StatusSegment::Projects | StatusSegment::Path | StatusSegment::Suffix
+    )
+}
+
+/// The key a click on open project `index`'s label stands for: `Space N`,
+/// counted from 1.
+pub const fn project_key(index: usize) -> ProjectAction {
+    let n = if index < u8::MAX as usize {
+        index as u8 + 1
+    } else {
+        u8::MAX
+    };
+    ProjectAction::ByIndex(n)
+}
+
+/// What a left click on a status-bar `segment` does beyond selecting its
+/// text: a project's label goes to that project and the collapsed count lists
+/// them, as their keys do, and the agent segment gives the pane the keyboard.
+const fn status_click(segment: Option<StatusSegment>) -> Option<MouseSink> {
+    match segment {
+        Some(StatusSegment::ProjectLabel(index)) => Some(MouseSink::Project(project_key(index))),
+        Some(StatusSegment::ProjectCount) => Some(MouseSink::Project(ProjectAction::List)),
+        Some(StatusSegment::Agent) => Some(MouseSink::FocusPane),
+        _ => None,
     }
 }
 
@@ -567,17 +622,7 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // right-click menu back.
     match gesture {
         Gesture::Middle => return MouseSink::Paste,
-        Gesture::Right => {
-            return if !snap.resolver_will_see_the_next_key() {
-                // Arming a chord nothing will consume latches it — see
-                // `resolver_will_see_the_next_key`.
-                MouseSink::Swallow
-            } else if let Some(at) = snap.menu_at() {
-                MouseSink::ContextMenu(at)
-            } else {
-                MouseSink::LeaderMenu
-            };
-        }
+        Gesture::Right => return right_click_sink(snap),
         Gesture::Left => {
             // An open pager owns the pointer wherever it is painted — checked
             // BEFORE the pane, which `region_at` would otherwise win for a pager
@@ -595,6 +640,9 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             }
             if snap.over_stderr_notice {
                 return MouseSink::StderrLog;
+            }
+            if let Some(sink) = status_click(snap.status_segment) {
+                return sink;
             }
             // Recorded chrome outranks the layout beneath it, for the same
             // reason `covering_pager` does: it is painted on top. This is what
@@ -683,6 +731,20 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
         Region::Divider | Region::Prompt | Region::Status | Region::VDivider | Region::AgentHud => {
             MouseSink::Swallow
         }
+    }
+}
+
+/// A right-click, outside a modal and a prompt: the menu of the object under
+/// it, else the leader's.
+const fn right_click_sink(snap: MouseSnapshot) -> MouseSink {
+    if !snap.resolver_will_see_the_next_key() {
+        // Arming a chord nothing will consume latches it — see
+        // `resolver_will_see_the_next_key`.
+        MouseSink::Swallow
+    } else if let Some(at) = snap.menu_at() {
+        MouseSink::ContextMenu(at)
+    } else {
+        MouseSink::LeaderMenu
     }
 }
 
@@ -817,6 +879,7 @@ mod tests {
             prompt_on_divider: false,
             over_chrome_row: false,
             over_stderr_notice: false,
+            status_segment: None,
             chord_armed: false,
             menu_open: false,
             list_row: None,

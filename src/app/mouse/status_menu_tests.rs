@@ -167,7 +167,6 @@ const PROJECTS_ROWS: [&str; 4] = [
 /// With two projects open, a click on the second's label goes to it, as
 /// `Space 2` does.
 #[test]
-#[ignore = "red: a click on the status bar only selects its text"]
 fn a_click_on_a_project_label_goes_to_that_project() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo"], 120);
@@ -183,7 +182,6 @@ fn a_click_on_a_project_label_goes_to_that_project() {
 /// would, then opens its menu: no switch, since it is in view now, but close,
 /// and the projects rows. Its close closes the project the label named.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_right_click_on_a_label_goes_there_and_its_close_closes_that_project() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo"], 120);
@@ -214,7 +212,6 @@ fn a_right_click_on_a_label_goes_there_and_its_close_closes_that_project() {
 
 /// While an agent is waiting on the user, the menu offers going to it.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_projects_menu_offers_the_agent_that_needs_you_while_one_waits() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo"], 120);
@@ -240,7 +237,6 @@ fn a_projects_menu_offers_the_agent_that_needs_you_while_one_waits() {
 /// right-click on it is refused as `Space N` would be, and opens no menu, so
 /// no row acts on the project in view instead.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_label_for_a_project_closed_since_it_was_drawn_opens_nothing() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo", "charlie"], 160);
@@ -263,7 +259,6 @@ fn a_label_for_a_project_closed_since_it_was_drawn_opens_nothing() {
 /// While an editor runs in a project's view `Space x` refuses to close it,
 /// so its menu doesn't offer close.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_project_with_an_editor_open_is_not_offered_close() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo"], 120);
@@ -285,7 +280,6 @@ fn a_project_with_an_editor_open_is_not_offered_close() {
 /// column is in another open project's home can't be re-homed there by
 /// `Space P`, so its menu offers neither.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_project_is_offered_only_the_homes_its_keys_would_take() {
     with_mouse(|base| {
         let (mut app, _) = projects(base, &["alpha", "bravo"], 120);
@@ -308,7 +302,6 @@ fn a_project_is_offered_only_the_homes_its_keys_would_take() {
 /// With one project open, its segment's menu has neither switch nor close,
 /// and a click on it still selects its text.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn the_lone_projects_menu_has_no_switch_or_close() {
     with_mouse(|base| {
         let (mut app, _) = projects(base, &["alpha"], 120);
@@ -347,7 +340,6 @@ fn the_lone_projects_menu_has_no_switch_or_close() {
 /// Inside a mounted archive a project can't be re-homed, so its menu doesn't
 /// offer it.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_project_is_not_offered_a_home_inside_an_archive() {
     use crate::app::archive_ops::{ArchiveOp, ArchiveOutcome, run_archive_op};
     use std::io::Write as _;
@@ -394,7 +386,6 @@ fn a_project_is_not_offered_a_home_inside_an_archive() {
 /// project in view and its place among them: a click on the place opens the
 /// project list, and a right-click the projects menu.
 #[test]
-#[ignore = "red: a click on the status bar only selects its text"]
 fn the_collapsed_count_opens_the_project_list_and_the_projects_menu() {
     with_mouse(|base| {
         let names = ["alpha", "bravo", "charlie", "delta"];
@@ -444,7 +435,6 @@ fn read_git(app: &mut App, dir: &Path) {
 /// The git segment's menu offers the worktrees, and `gd` only while the
 /// repo has changes. In the main checkout there is no worktree to delete.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn the_git_segments_menu_offers_gd_only_with_changes() {
     with_mouse(|base| {
         let clean = base.join("clean");
@@ -500,7 +490,6 @@ fn git_menu(dir: &Path, split: bool) -> Vec<String> {
 /// which the key refuses, nor while it has changes, which the removal
 /// refuses.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn the_git_segments_menu_offers_delete_at_a_clean_linked_worktree() {
     use crate::git::test_support::run_git;
     with_mouse(|base| {
@@ -557,7 +546,6 @@ fn app_with_agent(base: &Path) -> App {
 /// A right-click on the agent segment gives the pane the keyboard and opens
 /// its active tab's menu: the rows `^a .` opens.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_right_click_on_the_agent_segment_opens_the_active_tabs_menu() {
     with_mouse(|base| {
         let mut app = app_with_agent(base);
@@ -586,7 +574,6 @@ fn a_right_click_on_the_agent_segment_opens_the_active_tabs_menu() {
 
 /// A click on the agent segment gives the pane the keyboard.
 #[test]
-#[ignore = "red: a click on the status bar only selects its text"]
 fn a_click_on_the_agent_segment_focuses_the_pane() {
     with_mouse(|base| {
         let mut app = app_with_agent(base);
@@ -600,7 +587,6 @@ fn a_click_on_the_agent_segment_focuses_the_pane() {
 
 /// A right-click on the session segment opens its menu: the session's info.
 #[test]
-#[ignore = "red: a right-click on the status bar opens the leader"]
 fn a_right_click_on_the_session_segment_offers_its_info() {
     with_mouse(|base| {
         let dir = base.join("work");
@@ -716,7 +702,6 @@ fn drawn_labels(cells: &[Cell]) -> (usize, Vec<(usize, usize)>) {
 /// selection: where a click lands and what is drawn there agree, cell for
 /// cell.
 #[test]
-#[ignore = "red: a click on the status bar only selects its text"]
 fn every_cell_of_a_drawn_label_goes_to_its_project_and_no_other_does() {
     with_mouse(|base| {
         let names = ["alpha", "bravo", "charlie", "delta"];

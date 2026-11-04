@@ -1220,6 +1220,15 @@ the hit-test. Derive them in two places and a click lands on the neighbouring
 tab — but only after whichever tab drifted, so it reads as "clicks are off by
 one sometimes" rather than as a width bug.
 
+**`ui::status_segments`** is the status bar's. The pass that lays the bar out
+(`StatusBar::build`) marks each segment's columns, and within the `projects`
+segment each label's and the collapsed count's; the renderer records them with
+the drawn row (`view.status_row`, beside `chrome_rows`), and the hit-test reads
+that record. Recorded rather than recomputed because the bar's inputs (the
+agent's status, the stderr count, the menu lesson) would each have to be
+gathered a second time and kept in step. A label is found by its index in
+switcher order, never by its text: two projects can share a name.
+
 **`mod.rs`** holds the selection/streak data types and `handle_mouse`, the one
 dispatch entry. Every button rides the same pure fn via a `Gesture`:
 

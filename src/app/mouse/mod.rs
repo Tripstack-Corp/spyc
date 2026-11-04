@@ -17,6 +17,8 @@
 
 use super::modal::{ModalSnapshot, active_modal};
 use super::{Effect, FrameLayout};
+use crate::keymap::ProjectAction;
+use crate::ui::status_segments::{StatusSegment, segment_at};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 pub(super) mod chord_hit;
@@ -227,6 +229,16 @@ pub struct ChromeRow {
     pub line: ratatui::text::Line<'static>,
 }
 
+/// Where the status bar's segments were drawn, recorded by the renderer with
+/// the row they are on: what a click on the bar reads.
+#[derive(Debug, Clone)]
+pub struct StatusRow {
+    pub y: u16,
+    pub x: u16,
+    pub width: u16,
+    pub segments: Vec<crate::ui::status_segments::SegmentSpan>,
+}
+
 impl super::App {
     /// Whether the active tab's child asked for mouse reporting of its own.
     fn active_pane_wants_mouse(&self) -> bool {
@@ -291,6 +303,16 @@ impl super::App {
             .is_some_and(|r| {
                 crate::ui::status::notice_at(&r.line, usize::from(ev.column - r.x), &notice)
             })
+    }
+
+    /// The status-bar segment the pointer is on, read from the spans the
+    /// renderer recorded with the bar, so only a drawn segment answers.
+    fn status_segment_under(&self, ev: MouseEvent) -> Option<StatusSegment> {
+        let row = self.view.status_row.borrow();
+        let row = row
+            .as_ref()
+            .filter(|r| r.y == ev.row && (r.x..r.x.saturating_add(r.width)).contains(&ev.column))?;
+        segment_at(&row.segments, usize::from(ev.column - row.x))
     }
 
     /// Handle one mouse event: hit-test the pointer, route it, dispatch the sink.
@@ -385,6 +407,11 @@ impl super::App {
             }
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
             MouseSink::StderrLog => self.open_stderr_log(),
+            MouseSink::Project(action) => self.press_project_key(action),
+            MouseSink::FocusPane => {
+                self.set_pane_focus(true);
+                Vec::new()
+            }
             MouseSink::PaneTab(index) => self.switch_to_clicked_tab(index),
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
             MouseSink::ChordRow(index) => self.fire_chord_row(index),
@@ -466,6 +493,7 @@ impl super::App {
             prompt_on_divider: matches!(region, Some(route::Region::Divider))
                 && self.prompt_has_the_divider(layout),
             over_stderr_notice: self.stderr_notice_under(ev),
+            status_segment: self.status_segment_under(ev),
             // The renderer records every selectable chrome row each frame, so
             // this is a lookup rather than a second hit-test — one source for
             // "what got drawn" and "what a click can select".
@@ -516,11 +544,45 @@ impl super::App {
         }
     }
 
+    /// A click on a status-bar project: what its key does, `Space N` or
+    /// `Space j`, with the same refusals.
+    fn press_project_key(&mut self, action: ProjectAction) -> Vec<Effect> {
+        match self.apply(&crate::keymap::Action::Project(action)) {
+            Ok(effects) => effects,
+            Err(e) => {
+                self.state.flash_error(format!("project: {e:#}"));
+                Vec::new()
+            }
+        }
+    }
+
+    /// A right-click on the status bar's `segment`. A project's label goes to
+    /// that project first, as a click on it does, so the rows act on the
+    /// project it names, and opens no menu if it couldn't be gone to; the
+    /// agent segment gives the pane the keyboard, as a click on it does.
+    fn open_status_menu_at(&mut self, segment: StatusSegment) -> Vec<Effect> {
+        let mut effects = Vec::new();
+        match segment {
+            StatusSegment::ProjectLabel(index) => {
+                effects = self.press_project_key(route::project_key(index));
+                let id = self.state.active;
+                if self.state.open_projects().position(|p| p.id == id) != Some(index) {
+                    return effects;
+                }
+            }
+            StatusSegment::Agent => self.set_pane_focus(true),
+            _ => {}
+        }
+        effects.extend(self.open_status_menu(segment));
+        effects
+    }
+
     /// A right-click on an object: the keyboard goes where the keys the rows
     /// show act, so they are the ones that work next, and the object's menu
     /// opens. A row, the pane or a pager takes it as a left click would; the
     /// divider sends it to the pane its menu is about, and the split's `^a`
-    /// keys work from anywhere, so its menu leaves it where it is.
+    /// keys work from anywhere, so its menu leaves it where it is. A status-bar
+    /// segment takes it as [`Self::open_status_menu_at`] says.
     fn open_menu_at(&mut self, at: MenuAt, region: Option<route::Region>) -> Vec<Effect> {
         match at {
             MenuAt::Row(side, row) => {
@@ -546,6 +608,7 @@ impl super::App {
                 self.focus_pager_slot(slot);
                 self.open_pager_menu()
             }
+            MenuAt::Status(segment) => self.open_status_menu_at(segment),
         }
     }
 

@@ -106,6 +106,14 @@ with any closed lately under it. The coordination dumps
 (`:activity dump`, `:agent list`, `:agent registry`) cover every open project
 too, each project's agents under its name.
 
+**Click a project's label on the status bar to go to it**, as `Space N`
+does, and the collapsed count (`2/4`) to list them all, as `Space j` does. A
+right-click on a label goes to that project and opens its menu: close it,
+jump home, re-home it here, list, open, step between and go to the agent
+that needs you; one on the count opens the list, open and step rows alone.
+With one project open, a right-click on its segment opens its menu, less
+close and stepping ([Mouse](mouse.md)).
+
 ## Project home & session name
 
 Each project has a **`PROJECT_HOME`** (a sticky project root), and each

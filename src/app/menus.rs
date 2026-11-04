@@ -1,7 +1,10 @@
 //! The menu of an object: `.` opens the entry under the cursor's, `^a .` the
 //! active pane tab's, and a right-click the menu of the row, pane, tab label,
-//! divider or open pager it lands on (`mouse/`): off the pane divider's labels,
-//! the tabs' menu, and on the split's divider, the split's. The rows come from
+//! divider, open pager or status-bar segment it lands on (`mouse/`): off the
+//! pane divider's labels, the tabs' menu; on the split's divider, the split's;
+//! on a project's label, that project's; on the collapsed count, the open
+//! projects'; and on the git, agent or session segment, the repo's, the
+//! active tab's or the session's. The rows come from
 //! [`crate::keymap::menu::menu_for`], or for a pager from
 //! `pager_handler::pager_menu`; this module gathers the facts they decide from
 //! and opens the menu as a which-key popup that no chord armed.
@@ -18,7 +21,11 @@ use super::pager_handler::pager_menu;
 use super::view_state::MenuState;
 use super::{App, ChordHint, Effect, HintEntry, View};
 use crate::keymap::ChordEntry;
-use crate::keymap::menu::{DividerFacts, EntryFacts, SplitFacts, TabFacts, Target, menu_for};
+use crate::keymap::menu::{
+    DividerFacts, EntryFacts, GitFacts, ProjectFacts, ProjectsFacts, SplitFacts, TabFacts, Target,
+    menu_for,
+};
+use crate::ui::status_segments::StatusSegment;
 
 impl App {
     /// The focused column's cursor entry as a menu target, with its name for
@@ -160,6 +167,81 @@ impl App {
         self.open_menu(target, "split".to_string())
             .into_iter()
             .collect()
+    }
+
+    /// The menu of the status bar's `segment`, as the app stands: a project's
+    /// label's is the project in view's, since a right-click has gone there.
+    pub(super) fn open_status_menu(&mut self, segment: StatusSegment) -> Vec<Effect> {
+        let (target, title) = match segment {
+            StatusSegment::Project | StatusSegment::ProjectLabel(_) => {
+                (self.project_target(), self.state.active_project().label())
+            }
+            StatusSegment::ProjectCount => {
+                let projects = Target::Projects(self.projects_facts());
+                (projects, "projects".to_string())
+            }
+            StatusSegment::Git => (self.git_target(), "git".to_string()),
+            StatusSegment::Session => {
+                let name = self.state.session_name.as_deref().unwrap_or("session");
+                (Target::Session, name.to_string())
+            }
+            StatusSegment::Agent => return self.open_tab_menu(),
+            StatusSegment::Projects | StatusSegment::Path | StatusSegment::Suffix => {
+                return Vec::new();
+            }
+        };
+        self.open_menu(target, title).into_iter().collect()
+    }
+
+    /// What the open projects' rows depend on.
+    fn projects_facts(&self) -> ProjectsFacts {
+        ProjectsFacts {
+            several: self.state.open_projects().nth(1).is_some(),
+            waiting: self.someone_waits(),
+        }
+    }
+
+    /// The project in view as a menu target, with what `Space x` and
+    /// `Space P` would refuse.
+    fn project_target(&self) -> Target {
+        let projects = self.projects_facts();
+        let project = self.state.active_project();
+        let here = &self.state.cur().listing.dir;
+        Target::Project(ProjectFacts {
+            projects,
+            closable: projects.several && !matches!(project.focus, super::state::Focus::Overlay),
+            home: project.home.is_some(),
+            rehome: self.state.home_taken(here, self.state.active).is_none(),
+        })
+    }
+
+    /// The focused column's repo as a menu target. Its changes are the ones
+    /// the bar's `*` counts; a worktree is removable as `Space w d` removes
+    /// it, from its root, clean, with the other column outside it.
+    fn git_target(&self) -> Target {
+        let c = self.state.cur();
+        let root = c.git_cache.current_repo_root.as_deref();
+        let changes = c
+            .git_cache
+            .git_status_cache
+            .as_ref()
+            .is_some_and(|s| Some(s.repo_root.as_path()) == root && !s.entries.is_empty());
+        // A linked worktree's gitdir lives in the main repo's, outside it.
+        let linked_root = root.is_some_and(|root| {
+            c.listing.dir == root
+                && c.git_cache
+                    .current_gitdir
+                    .as_deref()
+                    .is_some_and(|gitdir| !gitdir.starts_with(root))
+        });
+        let other_inside = self
+            .state
+            .get_col(self.state.focused_side().other())
+            .is_some_and(|o| o.listing.dir.starts_with(&c.listing.dir));
+        Target::Git(GitFacts {
+            changes,
+            removable: linked_root && !changes && !other_inside,
+        })
     }
 
     /// Whether the open popup is an object's menu rather than a chord's.

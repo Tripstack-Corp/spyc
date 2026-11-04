@@ -45,9 +45,26 @@ quick-select and `y` in the pager are the mouse-free yank paths.
   text can be saved, and close (`q`). Other full-screen views (the finder,
   quick select, harpoon, the image views) keep the right-click to
   themselves.
-- **Anywhere else** (blank list space, the status bar, the prompt row, the
-  agent strip, or the divider while the prompt row has its place), the leader
-  menu opens.
+- **On the status bar:**
+  - **A project's label** goes to that project, as a left click does, and
+    opens its menu: close it (`Space x`, while another is open), jump to its
+    home (`Space p`, once it has one), make the current directory its home
+    (`Space P`), then the open projects' rows: the list (`Space j`), a new
+    project (`Space n`), the next and previous (`Space ]`, `Space [`, while
+    several are open) and the agent that needs you (`Space !`, while one
+    waits). With one project open, its segment opens the same menu, less
+    close and stepping.
+  - **The collapsed count** (`2/4`, where the bar is too short for every
+    project) opens the open projects' rows alone.
+  - **The git segment** offers the worktree list, a new worktree and, at the
+    root of a clean linked worktree, deleting it (`Space w l`, `n`, `d`), and
+    `gd` while the repo has changes.
+  - **The agent segment** gives the pane the keyboard and opens its active
+    tab's menu, as `^a .` does.
+  - **The session segment** offers the session's info (`Space s`).
+- **Anywhere else** (blank list space, the rest of the status bar, the prompt
+  row, the agent strip, or the divider while the prompt row has its place),
+  the leader menu opens.
 
 Each row shows the key that does the same, so the menu teaches it. A row
 shown with `(list)` works from the file list, since in the pane the key
@@ -134,6 +151,10 @@ takes, or keeps the hints for good, or turns them off
 ## Clicking and scrolling
 
 - **Click a pane tab to switch to it.**
+- **Click a project's label on the status bar to go to that project**, as
+  `Space N` does, or the collapsed count (`2/4`) to list the projects, as
+  `Space j` does. A click on the agent segment gives the pane the keyboard.
+  The rest of the bar is text to select.
 - **Click the status bar's `⚠N` to open `:stderr`**, the log of what spyc's
   stderr received.
 - Over an agent pane the wheel scrolls in whatever way that agent can:

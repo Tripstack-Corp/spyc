@@ -143,6 +143,13 @@ impl App {
         self.view.attention_last = pane.map(|tabs| (tabs.active_info().id.clone(), to.key()));
     }
 
+    /// Whether an agent in any project is waiting on the user: whether
+    /// `Space !` has one to go to.
+    pub(super) fn someone_waits(&self) -> bool {
+        let ids: Vec<ProjectId> = self.state.open_projects().map(|p| p.id).collect();
+        !self.waiting_agents(&ids).is_empty()
+    }
+
     /// Where the walk goes on from: the agent in view if it is waiting, else
     /// the last one `Space !` went to while the user is still at it, though it
     /// may have stopped waiting; else nowhere, so the walk starts at the top.

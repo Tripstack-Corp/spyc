@@ -403,8 +403,14 @@ impl App {
             stderr_notice: stderr_notice.as_deref(),
             teach_menu: self.teaches_the_menu_key(),
         }
-        .build_line(rect);
-        self.draw_chrome_line(frame, rect, line);
+        .build(rect);
+        *self.view.status_row.borrow_mut() = Some(crate::app::mouse::StatusRow {
+            y: rect.y,
+            x: rect.x,
+            width: rect.width,
+            segments: line.segments,
+        });
+        self.draw_chrome_line(frame, rect, line.line);
     }
 
     /// Draw a single-line chrome surface, recording what was drawn and painting any
