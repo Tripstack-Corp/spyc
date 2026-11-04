@@ -287,46 +287,8 @@ impl App {
                 // special cases and the resolver invocation below.
             }
         }
-        // Inventory view: special key handling. The verb arms require a
-        // *bare* key (no Ctrl/Alt) — matching `key.code` alone let `^d`/`^x`
-        // (common half-page-scroll chords) hit the `Char('x'|'d')` arm and
-        // destructively drop the cursor item. A modified key falls through to
-        // the resolver instead.
-        if self.state.cur().view == View::Inventory {
-            let bare = !key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-            match key.code {
-                KeyCode::Esc => {
-                    self.state.toggle_inventory_view();
-                    return Ok(Vec::new());
-                }
-                KeyCode::Char('x' | 'd') if bare => {
-                    return Ok(self.state.drop_cursor());
-                }
-                KeyCode::Char(' ' | 't') if bare => {
-                    self.state
-                        .inventory
-                        .toggle_pick(self.state.cur().cursor.index);
-                    self.state.cur_mut().list_generation =
-                        self.state.cur().list_generation.wrapping_add(1);
-                    let rpc = self.state.cur().grid_dims.rows_per_col as usize;
-                    self.state
-                        .cursor_move_vertical(1, rpc, self.state.cur().rows.len());
-                    return Ok(Vec::new());
-                }
-                KeyCode::Char('p') if bare => {
-                    return Ok(self.put_inventory_to_cwd());
-                }
-                _ => {}
-            }
-        }
-        // Graveyard view: special key handling. Same shape as
-        // inventory; verbs are restore/purge instead of put/tag.
-        // `dd` (vim-style two-key delete) is implemented via the
-        // pager's `d` already being free here — second `d` confirms.
-        if self.state.cur().view == View::Graveyard {
-            return Ok(self.handle_graveyard_view_key(key));
+        if let Some(effects) = self.view_key(key) {
+            return Ok(effects);
         }
         let outcome = self.state.feed_resolver(key);
         if crate::key_trace::is_enabled() {
@@ -353,6 +315,65 @@ impl App {
             ResolverOutcome::Ignored => self.clear_chord_hint(),
         }
         Ok(Vec::new())
+    }
+
+    /// A key the inventory or graveyard view in the column takes itself: `Some`
+    /// with its effects, `None` for the resolver. A chord's next key, and a
+    /// prefix that arms one from the pane, are the resolver's, never a view's:
+    /// the inventory's `x`, `p` and `Esc` also end `^a x`, `^a p` and `^a Esc`
+    /// (#963).
+    fn view_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let views_own = !super::util::is_spyc_meta_when_pane_focused(
+            key,
+            self.state.resolver.is_pending(),
+            true,
+        );
+        if views_own && self.state.cur().view == View::Inventory {
+            return self.inventory_view_key(key);
+        }
+        // Graveyard view: same shape as inventory; verbs are restore/purge
+        // instead of put/tag. `dd` (vim-style two-key delete) is implemented
+        // via the pager's `d` already being free here — second `d` confirms.
+        if self.state.cur().view == View::Graveyard {
+            if views_own {
+                return Some(self.handle_graveyard_view_key(key));
+            }
+            // Any other key clears a half-typed `dd` or `gg`.
+            self.view.graveyard_pending_d = false;
+            self.view.graveyard_pending_g = false;
+        }
+        None
+    }
+
+    /// The inventory view's own keys. The verb arms require a *bare* key (no
+    /// Ctrl/Alt) — matching `key.code` alone let `^d`/`^x` (common
+    /// half-page-scroll chords) hit the `Char('x'|'d')` arm and destructively
+    /// drop the cursor item. A modified key falls through to the resolver
+    /// instead.
+    fn inventory_view_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let bare = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        match key.code {
+            KeyCode::Esc => {
+                self.state.toggle_inventory_view();
+                Some(Vec::new())
+            }
+            KeyCode::Char('x' | 'd') if bare => Some(self.state.drop_cursor()),
+            KeyCode::Char(' ' | 't') if bare => {
+                self.state
+                    .inventory
+                    .toggle_pick(self.state.cur().cursor.index);
+                self.state.cur_mut().list_generation =
+                    self.state.cur().list_generation.wrapping_add(1);
+                let rpc = self.state.cur().grid_dims.rows_per_col as usize;
+                self.state
+                    .cursor_move_vertical(1, rpc, self.state.cur().rows.len());
+                Some(Vec::new())
+            }
+            KeyCode::Char('p') if bare => Some(self.put_inventory_to_cwd()),
+            _ => None,
+        }
     }
 
     /// Dispatch the action a key completed, counting it toward its menu hint's
