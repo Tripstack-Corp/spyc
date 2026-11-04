@@ -103,8 +103,26 @@ fn token_event(token: &str) -> Option<KeyEvent> {
     }
 }
 
+/// The prefix whose spelling also documents `row` under `prefix`. `^w` is
+/// `^a`'s alias, and the reference writes a chord the two share once, as
+/// `^a`'s; a row only `^w`'s popup shows has no alias, so it is written as
+/// `^w`'s.
+fn alias_of(prefix: &str, row: &ChordEntry) -> Option<&'static str> {
+    if prefix != "^w" {
+        return None;
+    }
+    let mut ctrl_a = Resolver::new();
+    feed(&mut ctrl_a, ctrl('a'));
+    let row = format!("{row:?}");
+    ctrl_a
+        .continuations()
+        .iter()
+        .any(|r| format!("{r:?}") == row)
+        .then_some("^a")
+}
+
 /// Every chord under `r`, already armed by `prefix`. A table already walked
-/// (`^w` is `^a`; `^a Space` is the leader) is not walked again.
+/// (`^a Space` is the leader's) is not walked again.
 fn walk(r: &Resolver, prefix: &str, seen: &mut Vec<String>, out: &mut Vec<Binding>) {
     let rows = r.continuations();
     let table = format!("{rows:?}");
@@ -114,9 +132,16 @@ fn walk(r: &Resolver, prefix: &str, seen: &mut Vec<String>, out: &mut Vec<Bindin
     }
     seen.push(table);
     for row in rows {
+        let alias = alias_of(prefix, &row);
         match row {
             ChordEntry::Act(keys, _) | ChordEntry::Range(keys, _) => {
-                out.extend(keys.split_whitespace().map(|t| binding(prefix, t)));
+                out.extend(keys.split_whitespace().map(|t| {
+                    let mut documented = binding(prefix, t);
+                    if let Some(alias) = alias {
+                        documented.accepted.extend(binding(alias, t).accepted);
+                    }
+                    documented
+                }));
             }
             ChordEntry::Sub(keys, _, _) => {
                 for token in keys.split_whitespace() {
