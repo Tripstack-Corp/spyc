@@ -58,8 +58,16 @@ The two questions this draft left open are recorded as
 
 ---
 
-**Status: approved (owner, 2026-10-26).** Re-anchored against `c6f616c7`
-(`main` after #864); first written against `d62909e` (`main` after #602).
+**Status: shipped on `main` for 2.4 (2026-11-04), and archived.** Approved by
+the owner on 2026-10-26, then built as §7 lays out, each slice's red tests
+landing before its change: slice 0 in #880–#881, 1 in #882–#883, 2 in
+#884–#885, 3 in #886–#887, #891, #893 and #897–#898, 4 in #935–#937 and
+#939–#940, 5 in #942–#943, 6 in #947 and #951, 7 in #957–#960, 8 in
+#961–#962, and 9, the docs sweep that moved this file to `docs/archive/`.
+The text below is the plan as approved, kept as the record of what was
+proposed; the user pages describe what shipped. Re-anchored against
+`c6f616c7` (`main` after #864); first written against `d62909e` (`main`
+after #602).
 Origin: onboarding a new user, who could not tell which shortcuts existed and
 asked that if menus were added they carry the shortcut so the keys could be
 learned at their own pace. The second input is the finding in

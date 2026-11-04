@@ -69,11 +69,34 @@ beside it the other.
 |---|---|
 | **Left** | Focus the region under the pointer. Over a mouse-aware child (claude, vim, htop) the click also reaches it — the pane is live, so swallowing the first click just to focus would read as broken. **Dragging** is forwarded too, so the child's own text selection works. |
 | **Middle** | Paste the system clipboard wherever a paste would land (pane, `:` line, shell prompt). |
-| **Right** | Open the leader menu, from any region, with no chord-hint delay. |
+| **Right** | Open the menu of what it lands on (a file row, the pane, a tab label, a divider, an open pager, a status-bar segment), else the leader menu. `.` opens the entry's menu from the keyboard, and `^a .` the active tab's from the pane. On iTerm2, hold ⌃: see [which right-click reaches spyc](#which-right-click-reaches-spyc). |
 
 Middle and right are **always spyc's** — never forwarded, even over a mouse-aware
 child, since otherwise the gesture would be unavailable in exactly the region where
 the pane holds focus. If you need a child's own right-click menu, `:mouse off`.
+What each menu offers: [Mouse](../features/mouse.md#right-click-the-menu-of-whats-under-it).
+
+## Which right-click reaches spyc
+
+spyc reads a right-click the same with any modifier held, but some terminals
+keep a right-click for their own menu, so it never reaches spyc. The rule:
+**⌃-right-click on iTerm2, a plain right-click elsewhere.** ⌃ is the one
+modifier that reached spyc in every terminal measured, so it is the one to try
+in a terminal not listed here.
+
+Measured on macOS 26.7.1, with the mouse modes spyc turns on, by
+`scripts/rightclick-probe.py` (2026-10-26). ✓ means the click reached spyc:
+
+| Terminal | Plain | ⇧ | ⌥ | ⌃ | ⌘ |
+|---|---|---|---|---|---|
+| iTerm2 3.7.6 | its own menu | ✓ | its own menu | ✓ | ✓ |
+| Terminal.app 470.2 | ✓ | ✓ | ✓ | ✓ | a middle click (pastes) |
+| Ghostty 1.3.1 | ✓ | its selection bypass | ✓ | ✓ | ✓ |
+| kitty, WezTerm | not measured | | | | |
+| Windows Terminal (WSL) | not measured | | | | |
+
+Where no right-click reaches spyc, `.` opens the entry's menu and `^a .` the
+active tab's, and every menu row names the key or command that does the same.
 
 ## Selecting text
 
@@ -104,10 +127,12 @@ If your terminal opens a menu instead of starting a selection, spyc never receiv
 the gesture. Use `:mouse off` with the terminal's own drag selection, or a terminal
 that forwards Ctrl+left events.
 
-Clicking a *row* in the file list is deliberately not a thing: clicking a region is
-coarse and hard to get wrong, while aiming at a one-cell-tall line invites
-near-misses that silently move the cursor. `j`/`k`, `F`, and frecency jumps are all
-faster and more precise.
+A left click on a *row* in the file list deliberately doesn't move the cursor:
+clicking a region is coarse and hard to get wrong, while aiming at a one-cell-tall
+line invites near-misses that silently move the cursor. `j`/`k`, `F`, and frecency
+jumps are all faster and more precise. A right-click on a row does move the cursor
+there, since the menu it opens is titled with that entry, so a near-miss shows
+before anything acts.
 
 `scroll_lines` defaults to **1** because trackpads and most modern terminals
 already emit one wheel event per notional line — a multiplier there makes the list

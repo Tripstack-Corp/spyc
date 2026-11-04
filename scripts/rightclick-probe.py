@@ -5,7 +5,8 @@ Turns on the mouse modes spyc uses (?1000h ?1002h ?1006h, plus bracketed
 paste), then walks through plain / Shift / Option(Alt) / Control / Command
 right-clicks and records what reached the application for each: a right
 press (with the modifier bits the terminal encoded), a paste, or nothing.
-docs/drafts/UX_2_0_PLAN.md section 0 holds the results so far.
+docs/config/mouse.md → "Which right-click reaches spyc" holds the results so
+far, first recorded in docs/archive/UX_2_0_PLAN.md section 0.
 
 Run it directly in the terminal under test, not inside a spyc pane or tmux,
 which would intercept the clicks.

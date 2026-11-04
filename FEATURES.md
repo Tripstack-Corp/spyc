@@ -52,9 +52,9 @@ on-demand answer to "what can I do from here?", modelled on Neovim's which-key.
 - **`.` opens the same kind of menu for the entry under the cursor**, and
   **`^a .` for the active pane tab**: what you can do to that one thing, each
   row with its key. `↑`/`↓` and `Enter` pick a row, `Esc` closes, and any
-  other key closes the menu and does what it always does. A right-click on a
-  file row, the pane or a tab label opens the same menu. Until one first
-  opens, the status bar ends with `. menu`.
+  other key closes the menu and does what it always does. A right-click opens
+  the menu of what it lands on ([Mouse](#mouse) lists them; hold ⌃ on
+  iTerm2). Until one first opens, the status bar ends with `. menu`.
 
 ## Browsing files
 
@@ -76,7 +76,7 @@ Full reference: [Agents and MCP](docs/features/agents.md).
 
 ## Mouse
 
-Mouse reporting is on by default: the wheel scrolls whatever is under the pointer, a click focuses it (on a project's label in the status bar, goes to that project), middle-click pastes, and right-click opens the menu of what it lands on (a file row, the pane, a tab label, the pane divider, the split's divider, an open pager, a running `!` capture, or a project, git, agent or session segment of the status bar), or the leader menu anywhere else. A drag selects and copies text in a pane, the pager or any chrome row, or file names in the list, and a double-click takes a whole chrome line. `:mouse off` gives the terminal its own selection back.
+Mouse reporting is on by default: the wheel scrolls whatever is under the pointer, a click focuses it (on a project's label in the status bar, goes to that project), middle-click pastes, and right-click opens the menu of what it lands on (a file row, the pane, a tab label, the pane divider, the split's divider, an open pager, a running `!` capture, or a project, git, agent or session segment of the status bar), or the leader menu anywhere else; on iTerm2, hold ⌃ as you right-click. A drag selects and copies text in a pane, the pager or any chrome row, or file names in the list, and a double-click takes a whole chrome line. `:mouse off` gives the terminal its own selection back.
 
 Full reference: [Mouse](docs/features/mouse.md).
 

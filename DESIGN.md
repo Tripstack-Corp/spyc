@@ -125,6 +125,28 @@ rather than create a new modal type.
   ragged left edge; `:activity solid` restores the opaque colour
   bands. Engineering tool; features should not depend on it.
 
+### Menus
+
+- **Menu** — an object's actions, each with its key. It is the which-key
+  popup with no chord armed: the same box and row format, titled with the
+  object (the entry's name, the tab's label, `pane tabs`, `split`, a
+  project's label, the pager's title, `make · Makefile`). Its rows come from
+  `menu_for`, or `pager_menu` for a pager, or a Makefile's targets for the
+  make menu, and a row appears only where spyc would carry out its action.
+  A key that works only from the file list says so: `yp (list)`. `.` opens
+  the cursor entry's menu, `^a .` the active tab's, and a right-click the
+  menu of what it lands on, or the leader where nothing there has one.
+  `↑`/`↓` highlight a row, `Enter` or a click fires it, `Esc` closes, and any
+  other key closes the menu and does what it always does. A click outside
+  dismisses it and does nothing else; nothing beneath the popup hears a
+  click on it.
+- **Menu hint** — once a row fires by a click or `Enter`, the prompt row
+  names its key (`^a n  next pane tab`), in front of the action's own
+  message when it has one. The hint fades for an action once the user has
+  fired it by its key three times (`[ui] menu_hints`); a click never counts,
+  and the menus themselves never fade. Until the first menu opens, the
+  status bar ends with `. menu`.
+
 ### Native agent strip
 
 The opt-in agent HUD occupies rows below an Antigravity, Codex or Claude Code child, under a
@@ -231,13 +253,21 @@ resolver, and a help-table row.
 
 The mouse is **fully bound and on by default** (`[mouse] capture`) —
 the wheel scrolls whatever is under the *pointer*, buttons focus /
-paste / open the leader popup, and drag selects text in the pager, a
+paste / open the menu of what they land on, and drag selects text in the pager, a
 non-mouse pane, chrome rows, or the file list. That does not soften
 this rule: nothing is reachable by pointer alone, so the keyboard
 remains sufficient for everything. One consequence to keep in mind
 when documenting: with capture on, the terminal's *own* text
 selection needs the Shift bypass (Option/Fn on iTerm2) or
 `:mouse off` — it is no longer simply "native selection works."
+
+Every gesture is a shortcut for a key, so the mouse teaches the keyboard. A
+click on a tab label or a project's label does what that tab's or project's
+key does, and a menu row is a key with its words beside it: the row shows the
+key, and once a click fires it the prompt row names the key, until the user
+has typed it often enough not to need telling. A pointer route with no key
+behind it would be one the keyboard user can't reach and the pointer user
+never outgrows, so a new gesture comes with the key it stands for.
 
 ### Binding taxonomy — global / frame / pane
 
@@ -340,6 +370,7 @@ the `I` info overlay or a flash.
 | **tab** | one PTY child within the pane |
 | **overlay** | a modal surface drawn over the list/pane area |
 | **flash** | one-line transient message at the prompt row |
+| **menu** | an object's actions, each row showing its key: the which-key popup opened by `.`, `^a .` or a right-click |
 | **prompt** | single-row text input; prefix character indicates mode |
 | **resolver** | the FSM that turns keys (with chord state) into `Action`s |
 

@@ -707,7 +707,6 @@ fn key_reference_rows(app: &App) -> Vec<String> {
 /// iTerm2 keeps a plain right-click for its own menu, so an iTerm2 user learns
 /// from `?`, without the docs, to hold ⌃ for an object's menu.
 #[test]
-#[ignore = "red: no row of the `?` overlay names the ⌃-right-click rule for iTerm2"]
 fn the_key_reference_teaches_iterm2s_control_right_click() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

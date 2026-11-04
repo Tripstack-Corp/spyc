@@ -391,7 +391,7 @@ focus.
 | Right click on the pane divider, off the tabs | Focus the pane and open the `pane tabs` menu: new, next and previous tab, zoom, grow, shrink |
 | Right click on the split's divider | Open the `split` menu: flip height, focus a column, dim, and close the preview or the second commander |
 | Right click on a project's label (status bar) | Go to that project and open its menu: close, jump home, re-home here, then the projects' list, new, next, previous and the agent that needs you. With one project open, its segment opens the same menu, less close and stepping |
-| Right click on the status bar's count, git, agent or session | The projects' rows; the worktree list, new and delete, and `gd` while the repo has changes; the active tab's menu, as `^a .`; the session's info |
+| Right click on the status bar's count, git, agent or session | The projects' rows; the worktree list and new, delete at the root of a clean linked worktree, and `gd` while the repo has changes; the active tab's menu, as `^a .`; the session's info |
 | Right click on an open pager | Focus it and open its menu: a running `!` capture's background, interrupt and kill (anywhere on screen); the task viewer's foreground, pause or continue, interrupt, move to a pane tab, next and previous task; save and close |
 | Right click anywhere else | Open the leader menu |
 | Any click outside an open menu | Close it, and nothing else |
@@ -399,7 +399,8 @@ focus.
 | `Shift` + drag | Your terminal's own selection, bypassing spyc (Option/Fn on iTerm2) |
 
 iTerm2 keeps a plain right click for its own menu: hold `⌃` to send it to
-spyc. `.` and `^a .` open the same menus from the keyboard.
+spyc ([each terminal, measured](config/mouse.md#which-right-click-reaches-spyc)).
+`.` and `^a .` open the entry's and the active tab's menus from the keyboard.
 
 **Capture costs your terminal's native click-drag selection while it's on** —
 inherent, not a spyc choice: the terminal can't both report the drag and handle
