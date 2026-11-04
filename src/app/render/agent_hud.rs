@@ -4,7 +4,6 @@ use ratatui::{Frame, layout::Rect};
 
 use crate::agent::claude_statusline::Statusline;
 use crate::agent::tail::Availability;
-use crate::config::AgentHudMode;
 use crate::pane::AgentActivity;
 use crate::ui::agent_hud::{self, Attention, Hooks, HudView, Metrics, Reported};
 
@@ -15,7 +14,9 @@ use super::super::App;
 impl App {
     pub(super) fn render_agent_hud_strip(&self, frame: &mut Frame, rect: Option<Rect>) {
         let Some(rect) = rect else { return };
-        self.draw_chrome_rows(frame, rect, self.agent_hud_lines(rect));
+        let mut lines = vec![agent_hud::rule(rect.width, &self.view.theme)];
+        lines.extend(self.agent_hud_lines(rect));
+        self.draw_chrome_rows(frame, rect, lines);
     }
 
     /// Shared visible projection for drawing and wake-driven dirty-frame decisions.
@@ -110,12 +111,12 @@ impl App {
                 .filter(|c| c.pane_id.as_deref() == Some(info.id.as_str()))
                 .count(),
         };
-        let mode = if rect.height == 2 {
-            AgentHudMode::Compact
-        } else {
-            AgentHudMode::Full
-        };
-        agent_hud::lines(&view, mode, rect.width, &self.view.theme)
+        agent_hud::lines(
+            &view,
+            agent_hud::shown_mode(rect),
+            rect.width,
+            &self.view.theme,
+        )
     }
 }
 
