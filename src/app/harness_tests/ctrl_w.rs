@@ -109,7 +109,6 @@ fn sent(app: &mut App, dir: &Path, keys: &[KeyEvent]) -> Vec<u8> {
 /// `↓` after a prefix sends the prefix that armed it, and `^w ^w` sends one
 /// `^w`: the program gets `^w` (`0x17`) and `^a` (`0x01`) as typed.
 #[test]
-#[ignore = "red: `^w ↓` sends `^a`, and `^w ^w` sends nothing"]
 fn each_prefix_sends_itself_to_the_program() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -130,7 +129,6 @@ fn each_prefix_sends_itself_to_the_program() {
 /// the terminal's own, which `cat` reads through, and it erases the word
 /// before the cursor as a shell's does.
 #[test]
-#[ignore = "red: `^w ^w` sends nothing"]
 fn ctrl_w_ctrl_w_deletes_the_word_before_the_cursor() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -155,7 +153,6 @@ fn ctrl_w_ctrl_w_deletes_the_word_before_the_cursor() {
 /// the keyboard, so the program gets it as typed. Set `true`, `^w` is the
 /// prefix it always was.
 #[test]
-#[ignore = "red: `[pane] ctrl_w_prefix` is no setting, and `^w` always arms the prefix"]
 fn with_ctrl_w_prefix_off_ctrl_w_reaches_the_program() {
     for (on, want) in [(false, vec![0x17]), (true, vec![])] {
         let tmp = tempfile::tempdir().unwrap();
@@ -208,7 +205,6 @@ fn ctrl_a_chords_work_as_before_by_default() {
 
 /// With `[pane] ctrl_w_prefix = false`, every `^a` chord works as before.
 #[test]
-#[ignore = "red: `[pane] ctrl_w_prefix` is no setting"]
 fn with_ctrl_w_prefix_off_ctrl_a_chords_work_as_before() {
     ctrl_a_chords_work_as_before("[pane]\nctrl_w_prefix = false\n");
 }
@@ -217,7 +213,6 @@ fn with_ctrl_w_prefix_off_ctrl_a_chords_work_as_before() {
 /// that prefix: `^w`'s sends a literal `^w` on `↓` or `^w`, `^a`'s a literal
 /// `^a` on `↓`.
 #[test]
-#[ignore = "red: `^w`'s popup is titled `^a`, and its `↓` row sends `^a`"]
 fn the_which_key_popup_names_what_each_prefix_sends() {
     let cases = [
         (ctrl('w'), "^w", ("↓ ^w", "send literal ^w to pane")),

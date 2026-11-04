@@ -17,7 +17,7 @@
 use anyhow::Result;
 
 use crate::fs;
-use crate::keymap::{Action, Tier};
+use crate::keymap::{Action, PanePrefix, Tier};
 use crate::pane::PaneTabs;
 use crate::spyc_debug;
 use crate::state::Harpoon;
@@ -296,7 +296,7 @@ impl App {
             Action::PaneFocusDown => self.set_pane_focus(true),
             Action::PaneFocusUp => self.set_pane_focus(false),
             Action::PaneSendSelection => effects = self.send_selection_to_pane(),
-            Action::PaneSendPrefix => effects = self.send_prefix_to_pane(),
+            Action::PaneSendPrefix => effects = self.send_prefix_to_pane(PanePrefix::CtrlA),
             // Context-sensitive: resize the split the focused pane belongs to
             // — the vertical split's width when a column is focused, else the
             // bottom pane's height.
@@ -466,8 +466,8 @@ impl App {
     }
 
     /// The actions answered before the pure-domain dispatch: `p` in the
-    /// directory view, the yanks, the menus of an object and `^a Esc`. `None`
-    /// for the rest, which go on to `AppState::apply`.
+    /// directory view, the yanks, the menus of an object, `^a Esc` and the
+    /// literal `^w`. `None` for the rest, which go on to `AppState::apply`.
     fn apply_before_the_model(&mut self, action: &Action) -> Option<Vec<Effect>> {
         Some(match action {
             // In dir view, `p` (Drop) means "put inventory to cwd".
@@ -497,6 +497,7 @@ impl App {
             Action::ContextMenu => self.open_entry_menu(),
             Action::PaneContextMenu => self.open_tab_menu(),
             Action::PaneSendEsc => self.send_esc_to_pane(),
+            Action::PaneSendCtrlW => self.send_prefix_to_pane(PanePrefix::CtrlW),
             Action::MakeMenu => self.open_make_menu(),
             _ => return None,
         })
@@ -514,6 +515,7 @@ impl App {
                 | Action::PaneSendSelection
                 | Action::PaneSendPrefix
                 | Action::PaneSendEsc
+                | Action::PaneSendCtrlW
                 | Action::PaneGrow
                 | Action::PaneShrink
                 | Action::TogglePaneZoom
