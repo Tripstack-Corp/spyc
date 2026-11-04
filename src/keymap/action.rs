@@ -187,6 +187,9 @@ pub enum Action {
     WorktreeNew,    // W n — prompt for branch, create worktree
     WorktreeDelete, // W d — confirm, remove current worktree
 
+    // Make.
+    MakeMenu, // Space m — the make menu: the targets of a Makefile, to run one
+
     // Git diff (M12).
     GitDiff,       // g d — diff-vs-HEAD for cursor file / selection (staged + unstaged + new)
     GitDiffCached, // g D — staged (cached) diff
@@ -285,6 +288,7 @@ impl Action {
             Self::WorktreeList
             | Self::WorktreeNew
             | Self::WorktreeDelete
+            | Self::MakeMenu
             | Self::Project(
                 ProjectAction::JumpHome
                 | ProjectAction::SetHomeHere
@@ -446,9 +450,9 @@ impl Action {
             Self::HarpoonAppend => "harpoon — append cursor file",
             Self::HarpoonRemove => "harpoon — remove cursor file",
             Self::HarpoonOpenMenu | Self::ContextMenu | Self::PaneContextMenu => self.menu_label(),
-            Self::WorktreeList => "list git worktrees",
-            Self::WorktreeNew => "new git worktree",
-            Self::WorktreeDelete => "delete git worktree",
+            Self::WorktreeList | Self::WorktreeNew | Self::WorktreeDelete | Self::MakeMenu => {
+                self.describe_workspace()
+            }
             Self::GitDiff => "git diff HEAD (staged + unstaged + new)",
             Self::GitDiffCached => "git diff --cached (staged)",
             Self::GitDiffUnstaged => "git diff (unstaged — since you staged)",
@@ -616,10 +620,10 @@ impl Action {
             Self::HarpoonAppend => "harpoon_append",
             Self::HarpoonRemove => "harpoon_remove",
             Self::HarpoonOpenMenu | Self::ContextMenu | Self::PaneContextMenu => self.menu_name(),
-            // Git worktree.
-            Self::WorktreeList => "worktree_list",
-            Self::WorktreeNew => "worktree_new",
-            Self::WorktreeDelete => "worktree_delete",
+            // Git worktree, and make.
+            Self::WorktreeList | Self::WorktreeNew | Self::WorktreeDelete | Self::MakeMenu => {
+                self.workspace_name()
+            }
             // Git diff / blame / restore.
             Self::GitDiff => "git_diff",
             Self::GitDiffCached => "git_diff_cached",
@@ -689,6 +693,17 @@ impl Action {
         }
     }
 
+    /// The worktree and make arm of [`Self::describe`], which is at its length
+    /// pin.
+    const fn describe_workspace(&self) -> &'static str {
+        match self {
+            Self::WorktreeList => "list git worktrees",
+            Self::WorktreeNew => "new git worktree",
+            Self::WorktreeDelete => "delete git worktree",
+            _ => "make target …",
+        }
+    }
+
     /// The pick jumps' arm of [`Self::describe`], which is at its length pin.
     const fn describe_pick_jump(&self) -> &'static str {
         match self {
@@ -729,6 +744,17 @@ impl Action {
             Self::ContextMenu => "context_menu",
             Self::PaneContextMenu => "pane_context_menu",
             _ => "harpoon_open_menu",
+        }
+    }
+
+    /// The worktree and make arm of [`Self::canonical_name`], which is at its
+    /// length pin.
+    const fn workspace_name(&self) -> &'static str {
+        match self {
+            Self::WorktreeList => "worktree_list",
+            Self::WorktreeNew => "worktree_new",
+            Self::WorktreeDelete => "worktree_delete",
+            _ => "make_menu",
         }
     }
 
@@ -896,6 +922,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
 fn pane_action_from_name(name: &str) -> Option<Action> {
     Some(match name {
         "context_menu" => Action::ContextMenu,
+        "make_menu" => Action::MakeMenu,
         "pane_context_menu" => Action::PaneContextMenu,
         "pane_focus_down" => Action::PaneFocusDown,
         "pane_focus_up" => Action::PaneFocusUp,

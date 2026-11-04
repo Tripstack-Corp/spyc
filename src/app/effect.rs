@@ -288,6 +288,10 @@ pub enum Effect {
     /// `Message::Wake(Wake::Inventory)`.
     Inventory(inventory_ops::InventoryOp),
 
+    /// Read a Makefile for the make menu on a detached worker; it lands on
+    /// `runtime.make_results` and wakes with `Message::Wake(Wake::Makefile)`.
+    ReadMakefile(super::make_menu::MakefileRead),
+
     /// Tier 5. Interactive `W n`: create a worktree for `branch` off `base`,
     /// discovering the repo from `dir`. The `gix` full-tree checkout runs on the
     /// shared worktree worker (running it inline froze the input thread — the

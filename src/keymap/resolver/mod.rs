@@ -192,6 +192,7 @@ impl Resolver {
             KeyCode::Char('s' | 'S') => ResolverOutcome::Action(Action::ShowMemory),
             KeyCode::Char('?') => ResolverOutcome::Action(Action::Help),
             KeyCode::Char('a') => ResolverOutcome::Action(Action::About),
+            KeyCode::Char('m') => ResolverOutcome::Action(Action::MakeMenu),
             _ => ResolverOutcome::Ignored,
         };
         self.reset();

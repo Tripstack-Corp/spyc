@@ -564,6 +564,31 @@ impl super::App {
         fx
     }
 
+    /// A make menu row, clicked or `Enter`ed: run its target as `:make <target>`
+    /// does, then name that command over the capture it started. A row with
+    /// nothing to run leaves the menu open.
+    fn fire_make_row(
+        &mut self,
+        run: Option<super::make_menu::MakeRun>,
+        key: Option<String>,
+        label: &str,
+    ) -> Vec<Effect> {
+        let Some(run) = run else {
+            return Vec::new();
+        };
+        self.clear_chord_hint();
+        let before = self.state.flash.as_ref().map(|f| f.text.clone());
+        self.run_make(&run);
+        let label = if label.is_empty() {
+            "make target"
+        } else {
+            label
+        };
+        self.name_the_key(key, label, "make", before);
+        self.relocate_flash_into_pager();
+        Vec::new()
+    }
+
     /// Whether `ev` is on the open which-key popup, laid out exactly as the
     /// renderer lays it out, and the entry under the pointer there, if any.
     fn chord_menu_at(
@@ -621,15 +646,16 @@ impl super::App {
         use crate::keymap::ChordEntry;
         // The entry, and the key that does the same, named once the row has
         // fired, so it can be typed next time.
-        let Some((entry, key)) = self.view.chord_hint.as_ref().and_then(|hint| {
-            let (keys, _) = hint.rows.get(index)?;
+        let Some((entry, key, label)) = self.view.chord_hint.as_ref().and_then(|hint| {
+            let (keys, label) = hint.rows.get(index)?;
             let key = crate::keymap::menu::key_hint(hint.prefix, keys);
-            Some((hint.entries.get(index)?.clone(), Some(key)))
+            Some((hint.entries.get(index)?.clone(), Some(key), label.clone()))
         }) else {
             return Vec::new();
         };
         let entry = match entry {
             HintEntry::Pager(action) => return self.fire_pager_row(action, key),
+            HintEntry::Make(run) => return self.fire_make_row(run, key, &label),
             HintEntry::Chord(entry) => entry,
         };
         match entry {

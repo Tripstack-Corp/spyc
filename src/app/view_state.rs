@@ -108,8 +108,9 @@ pub struct ChordHint {
     /// a click on a row fires what the row's key fires.
     pub(super) entries: Vec<HintEntry>,
     /// `(keys, label)` per entry, e.g. `("z", "zoom pane (toggle fullscreen)")`:
-    /// what is drawn and hit-tested. Owned, as a task's row names its number.
-    pub(super) rows: Vec<(String, &'static str)>,
+    /// what is drawn and hit-tested. Owned, as a task's row names its number
+    /// and a make target's row its target and label.
+    pub(super) rows: Vec<(String, String)>,
     /// The keys that armed the chord (`g`, `^a`, `Space`), which a row's key
     /// follows when the hint names it; empty for an object's menu, whose rows
     /// carry whole keys.
@@ -122,7 +123,10 @@ pub struct ChordHint {
 impl ChordHint {
     /// The rows as `chord_hit::chord_hint_layout` lays them out.
     pub(super) fn row_refs(&self) -> Vec<(&str, &str)> {
-        self.rows.iter().map(|(k, l)| (k.as_str(), *l)).collect()
+        self.rows
+            .iter()
+            .map(|(k, l)| (k.as_str(), l.as_str()))
+            .collect()
     }
 
     /// Whether this is an open pager's menu, whose keys are the pager's.
@@ -139,6 +143,9 @@ pub enum HintEntry {
     Chord(crate::keymap::ChordEntry),
     /// A row of an open pager's menu, fired as the pager's key for it is.
     Pager(super::pager_handler::PagerAction),
+    /// A row of the make menu, which runs its target as `:make <target>`
+    /// does; `None` for a row that says something and runs nothing.
+    Make(Option<super::make_menu::MakeRun>),
 }
 
 /// What an object's menu holds beside a chord popup's rows.

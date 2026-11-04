@@ -140,6 +140,7 @@ mod landing;
 mod loop_steps;
 mod lua;
 mod lua_events;
+mod make_menu;
 mod matcher;
 mod mcp;
 mod mcp_routing;

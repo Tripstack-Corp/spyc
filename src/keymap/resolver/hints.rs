@@ -41,6 +41,30 @@ impl ChordEntry {
     }
 }
 
+/// The leader's rows, `Space` from the list and `^a Space` from the pane: the
+/// workspace, its projects, and spyc itself.
+fn leader_rows() -> Vec<ChordEntry> {
+    use Action as A;
+    use ChordEntry::{Act, Range, Sub};
+    vec![
+        Sub("w", "worktree", PendingSeq::Worktree),
+        Act("p", A::Project(ProjectAction::JumpHome)),
+        Act("P", A::Project(ProjectAction::SetHomeHere)),
+        Act("n", A::Project(ProjectAction::Open)),
+        Act("x", A::Project(ProjectAction::Close)),
+        Act("j", A::Project(ProjectAction::List)),
+        Act("Space", A::Project(ProjectAction::Last)),
+        Range("1-9", A::Project(ProjectAction::ByIndex(1))),
+        Act("]", A::Project(ProjectAction::Next)),
+        Act("[", A::Project(ProjectAction::Prev)),
+        Act("!", A::Project(ProjectAction::Attention)),
+        Act("m", A::MakeMenu),
+        Act("s", A::ShowMemory),
+        Act("?", A::Help),
+        Act("a", A::About),
+    ]
+}
+
 /// The chord hint's rows for a pending `]` (`next`) or `[`.
 fn bracket_rows(next: bool) -> Vec<ChordEntry> {
     BRACKET_JUMPS
@@ -97,22 +121,7 @@ impl Resolver {
             PendingSeq::Normal => Vec::new(),
             // Leader (global / workspace): `Space` in list focus, `^a Space`
             // from pane focus.
-            PendingSeq::Leader => vec![
-                Sub("w", "worktree", PendingSeq::Worktree),
-                Act("p", A::Project(ProjectAction::JumpHome)),
-                Act("P", A::Project(ProjectAction::SetHomeHere)),
-                Act("n", A::Project(ProjectAction::Open)),
-                Act("x", A::Project(ProjectAction::Close)),
-                Act("j", A::Project(ProjectAction::List)),
-                Act("Space", A::Project(ProjectAction::Last)),
-                Range("1-9", A::Project(ProjectAction::ByIndex(1))),
-                Act("]", A::Project(ProjectAction::Next)),
-                Act("[", A::Project(ProjectAction::Prev)),
-                Act("!", A::Project(ProjectAction::Attention)),
-                Act("s", A::ShowMemory),
-                Act("?", A::Help),
-                Act("a", A::About),
-            ],
+            PendingSeq::Leader => leader_rows(),
             PendingSeq::G => vec![
                 Act("g", A::GotoFirst),
                 Act("d", A::GitDiff),

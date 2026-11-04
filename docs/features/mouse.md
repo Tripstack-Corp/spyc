@@ -17,7 +17,10 @@ quick-select and `y` in the pager are the mouse-free yank paths.
 
 - **On a file row**, the cursor moves there and that entry's menu opens: open,
   edit, pick, copy, move, remove, its git views, send it to the pane, and the
-  rest, as `.` opens it from the keyboard.
+  rest, as `.` opens it from the keyboard. A Makefile's menu (`GNUmakefile`,
+  `makefile` or `Makefile`) starts with `make target …`, which opens the make
+  menu of its targets; a click on a target runs it ([Make
+  targets](shell.md#make-targets)).
 - **On the pane**, while its program runs, the pane takes the keyboard and
   the active tab's menu opens: restart, suspend, fork, rename, close, zoom, scroll back, and the
   rest, as `^a .` opens it.

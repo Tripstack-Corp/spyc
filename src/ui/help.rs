@@ -54,6 +54,7 @@ const SECTIONS: &[Section] = &[
                 "Space !",
                 "go to the agent that needs you (^a ! from the pane)",
             ),
+            ("Space m", "make: a Makefile's targets, to run one"),
             ("Space s", "session info"),
             ("Space ?", "this help"),
             ("Space a", "about spyc (:about)"),
@@ -457,6 +458,10 @@ const SECTIONS: &[Section] = &[
             (
                 ":exec",
                 "run the executable under the cursor, output in the pager",
+            ),
+            (
+                ":make [target]",
+                "run a Makefile target in the pager; bare, the make menu",
             ),
             (":pause / :pause N", "pause a backgrounded task (SIGSTOP)"),
             (":resume / :resume N", "resume a paused task (SIGCONT)"),

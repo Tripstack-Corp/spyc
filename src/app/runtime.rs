@@ -255,6 +255,11 @@ pub(super) struct Runtime {
     pub(super) closed_rows_results: Landing<super::recently_closed::ClosedRows>,
     /// The switcher opened last; rows read for any other are stale.
     pub(super) closed_rows_seq: u64,
+    /// Where a make menu's Makefile read lands (`Effect::ReadMakefile`),
+    /// drained by `apply_makefile_reads`, which keeps only `make_request`'s.
+    pub(super) make_results: Landing<super::make_menu::MakefileLanded>,
+    /// The newest Makefile read asked for; a read for any other is stale.
+    pub(super) make_request: u64,
     /// Where off-thread clipboard *writes* land. One value per dispatched
     /// write: `None` succeeded, `Some(msg)` is what to flash.
     ///
@@ -361,6 +366,8 @@ impl Runtime {
             jump_default_results: Landing::default(),
             jump_default_seq: 0,
             closed_rows_results: Landing::default(),
+            make_results: Landing::default(),
+            make_request: 0,
             closed_rows_seq: 0,
             clipboard_copy_results: Landing::default(),
             listing_refresh_inflight: false,

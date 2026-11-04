@@ -180,6 +180,7 @@ verbs above (`down`, `pick`,
 | `worktree_list` | list git worktrees |
 | `worktree_new` | new git worktree |
 | `worktree_delete` | delete git worktree |
+| `make_menu` | make target … (`Space m`: a Makefile's targets, to run one) |
 | `git_diff` | git diff HEAD (staged + unstaged + new) |
 | `git_diff_cached` | git diff --cached (staged) |
 | `git_diff_unstaged` | git diff (unstaged — since you staged) |

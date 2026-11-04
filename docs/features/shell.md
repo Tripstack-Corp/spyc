@@ -1,6 +1,6 @@
 # Shell and the command line
 
-Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, the `:` command line, taking your shell to where you quit, commands left running in the background, and where spyc's own stderr goes.
+Part of spyc's [feature reference](../../FEATURES.md). Running commands from spyc, a Makefile's targets, the `:` command line, taking your shell to where you quit, commands left running in the background, and where spyc's own stderr goes.
 
 ## Shell integration
 
@@ -73,6 +73,40 @@ prompt keeps a *separate* history again, so Up/Down there recalls
 previously-used working directories without mixing them into the
 command list. History is de-duplicated (most recent use moves to the
 end).
+
+## Make targets
+
+**`Space m`** opens the make menu: the targets of the Makefile under the
+cursor, or else of the one in the column's directory (`GNUmakefile`,
+`makefile`, `Makefile`, in the order make looks). A right-click on a
+Makefile, or `.` on it, offers the same as its menu's first row,
+`make target …`. Each row shows the command that runs it, `:make <target>`,
+and the label the Makefile gives it: the `## text` at the end of the rule's
+line (the `make help` idiom), or else the comment line directly above the
+rule. The default goal's label ends in `(default)`, and `.PHONY` targets come
+first.
+
+Click a row, or pick it with `↑`/`↓` and `Enter`, and the target runs as a
+`!` capture from the Makefile's directory: the live pager, `^C`, `^Z` to the
+background, `:fg` and the task viewer all work as they do for `!`, and the
+prompt row names the `:make <target>` that does the same. A Makefile that
+make wouldn't pick on its own (a `Makefile` beside a `GNUmakefile`) runs with
+`-f`. A target name is the Makefile's text, so it is quoted for the shell as
+one word.
+
+- **`:make <target>`** runs a target of the column's directory's Makefile
+  directly; a bare **`:make`** opens the menu.
+- The menu lists targets a user can type: no pattern rules (`%`), no names
+  holding a `$(…)` reference, no `.`-led special targets. A Makefile that
+  names none shows `make: no explicit targets`.
+- Reading the Makefile runs nothing. spyc parses it rather than asking
+  `make -p`, which would run every `$(shell …)` it holds, and follows an
+  `include` only when its path is written out, exists, and stays inside the
+  repository (or the Makefile's directory outside one).
+- A list taller than the screen ends in `… N more: :make <target>`: the
+  rest are a typed `:make` away.
+- Inside an archive (`Enter` on a zip or tarball) a Makefile is a member,
+  not something make can run, so `Space m` and `:make` are refused there.
 
 ## Command line
 
