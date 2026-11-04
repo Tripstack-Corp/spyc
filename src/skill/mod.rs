@@ -655,6 +655,86 @@ mod tests {
         );
     }
 
+    /// The snake_case name a code span gives, bare (`git_diff`) or called
+    /// (`register_scope(paths, …)`).
+    fn snake_name(span: &str) -> Option<&str> {
+        let name = span.split_once('(').map_or(span, |(name, _)| name);
+        (name.contains('_')
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'))
+        .then_some(name)
+    }
+
+    /// The snake_case names `text` gives as code: every inline code span, and
+    /// in a fenced block each call form (`claim_worktree(path, reason)`), not
+    /// the bare words of a shell snippet.
+    fn code_names(text: &str) -> Vec<&str> {
+        let mut fenced = false;
+        let mut spans = Vec::new();
+        for line in text.lines() {
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
+            } else if fenced {
+                spans.extend(
+                    line.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '('))
+                        .filter(|word| word.contains('(')),
+                );
+            } else {
+                spans.extend(line.split('`').skip(1).step_by(2));
+            }
+        }
+        spans.into_iter().filter_map(snake_name).collect()
+    }
+
+    /// The skill and the MCP handshake's instructions are an agent's map of
+    /// spyc's tools: every tool name they give must be one spyc serves, and the
+    /// skill must name every tool, or an agent is sent to a tool that isn't
+    /// there or never told of one that is.
+    #[test]
+    fn the_skill_and_server_instructions_name_exactly_the_served_tools() {
+        let catalogue = crate::mcp::tool_schemas::tools();
+        let served = catalogue["tools"].as_array().expect("tools/list has tools");
+        let tools: Vec<&str> = served.iter().filter_map(|t| t["name"].as_str()).collect();
+        let parameters: std::collections::HashSet<&str> = served
+            .iter()
+            .filter_map(|t| t["inputSchema"]["properties"].as_object())
+            .flat_map(|props| props.keys().map(String::as_str))
+            .collect();
+        // Fields of tool results the docs explain.
+        const RESULT_FIELDS: [&str; 2] = ["conflicting_merges", "project_home"];
+        let docs = ASSETS
+            .iter()
+            .map(|asset| (asset.rel, asset.body))
+            .chain([("SERVER_INSTRUCTIONS", crate::mcp::SERVER_INSTRUCTIONS)]);
+        let mut found = 0;
+        let mut unknown = Vec::new();
+        for (doc, text) in docs {
+            for name in code_names(text) {
+                found += 1;
+                if !tools.contains(&name)
+                    && !parameters.contains(name)
+                    && !RESULT_FIELDS.contains(&name)
+                {
+                    unknown.push(format!("{doc}: `{name}`"));
+                }
+            }
+        }
+        assert!(found > 40, "found only {found} names: the reader is broken");
+        assert!(unknown.is_empty(), "names no tool spyc serves: {unknown:?}");
+        let unnamed: Vec<&str> = tools
+            .iter()
+            .copied()
+            .filter(|tool| {
+                !ASSETS
+                    .iter()
+                    .any(|asset| code_names(asset.body).contains(tool))
+            })
+            .collect();
+        assert!(unnamed.is_empty(), "the skill never names {unnamed:?}");
+    }
+
     #[test]
     fn referenced_files_all_exist_as_assets() {
         // A pointer to a reference file we don't ship is a dead end for the
