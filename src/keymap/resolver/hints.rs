@@ -152,6 +152,7 @@ impl Resolver {
                 Act("-", A::PaneShrink),
                 Act("s", A::PaneSendSelection),
                 Act("↓", A::PaneSendPrefix),
+                Act("Esc", A::PaneSendEsc),
                 Act("P", A::PanePipeContent),
                 Act("i", A::PanePipeInventory),
                 Act("u", A::QuickSelectOpen),

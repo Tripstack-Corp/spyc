@@ -258,6 +258,8 @@ impl Resolver {
             // the prefix is otherwise unreachable by the child, but Claude
             // binds ^a (e.g. expand notes), so this is the escape hatch.
             KeyCode::Down => ResolverOutcome::Action(Action::PaneSendPrefix),
+            // `^a Esc` — a plain `Esc`, past the Claude vim guard (`app::esc_guard`).
+            KeyCode::Esc => ResolverOutcome::Action(Action::PaneSendEsc),
             // The one project key reached from inside an agent: two keys, not
             // `^a Space !`'s three.
             KeyCode::Char('!') => {

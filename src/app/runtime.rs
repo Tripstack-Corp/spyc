@@ -291,6 +291,9 @@ pub(super) struct Runtime {
     /// `None` ⇒ detection failed / no graphics; the mermaid `View` mode then
     /// reports "no image protocol". Cloned into the render worker by `run_effects`.
     pub(super) picker: Option<ratatui_image::picker::Picker>,
+    /// The terminal took the kitty keyboard flag at startup, so `Shift-Esc`
+    /// reaches spyc apart from `Esc` (`esc_guard`).
+    pub(super) shift_esc: bool,
     /// Where a confirmed quit writes the browsed directory (`--cwd-file`,
     /// `App::write_cwd_file`).
     pub(super) cwd_file: Option<std::path::PathBuf>,
@@ -367,6 +370,7 @@ impl Runtime {
             preview_results: Landing::default(),
             preview_reloading: false,
             picker: None,
+            shift_esc: false,
             cwd_file: None,
             stderr_log: None,
             stderr_follow: None,

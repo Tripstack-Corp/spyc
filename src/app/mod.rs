@@ -119,6 +119,7 @@ mod commands;
 mod config;
 mod cwd_file;
 mod effect;
+mod esc_guard;
 mod file_ops;
 mod find_picker;
 mod focus;

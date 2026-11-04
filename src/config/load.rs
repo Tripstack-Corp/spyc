@@ -274,6 +274,9 @@ impl Config {
         if let Some(b) = file.preview_pasted_images {
             self.pane.preview_pasted_images = b;
         }
+        if let Some(b) = file.claude_esc_guard {
+            self.pane.claude_esc_guard = b;
+        }
         if let Some(b) = file.codex_mcp {
             self.pane.codex_mcp = b;
         }

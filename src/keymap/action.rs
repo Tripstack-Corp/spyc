@@ -133,6 +133,7 @@ pub enum Action {
     PaneFocusUp,        // ^W k — move focus up (to list)
     PaneSendSelection,  // ^W s — send shell-quoted selection to pane stdin
     PaneSendPrefix,     // ^a ↓ — send literal Ctrl-A (0x01) to the active pane (send-prefix)
+    PaneSendEsc,        // ^a Esc — send a plain Esc (0x1b) to the active pane, past the vim guard
     PaneGrow,           // ^W + — bottom pane takes more height
     PaneShrink,         // ^W - — bottom pane takes less height
     TogglePaneZoom,     // ^W z — zoom (fullscreen) the pane / restore split
@@ -258,14 +259,15 @@ pub enum Tier {
 }
 
 impl Action {
-    /// Writes to the active pane's input: a path list, a file's contents or the
-    /// prefix byte. A project `.spycrc.toml` may not bind these
-    /// ([`super::BoundAction::is_executing`]), since they type text at an agent.
+    /// Writes to the active pane's input: a path list, a file's contents, the
+    /// prefix byte or an `Esc`. A project `.spycrc.toml` may not bind these
+    /// ([`super::BoundAction::is_executing`]), since they type at an agent.
     pub const fn writes_to_pane(&self) -> bool {
         matches!(
             self,
             Self::PaneSendSelection
                 | Self::PaneSendPrefix
+                | Self::PaneSendEsc
                 | Self::PanePipeContent
                 | Self::PanePipeInventory
         )
@@ -302,6 +304,7 @@ impl Action {
             | Self::PaneFocusUp
             | Self::PaneSendSelection
             | Self::PaneSendPrefix
+            | Self::PaneSendEsc
             | Self::PaneGrow
             | Self::PaneShrink
             | Self::TogglePaneZoom
@@ -412,7 +415,7 @@ impl Action {
             Self::PaneFocusDown => "focus pane (down)",
             Self::PaneFocusUp => "focus list (up)",
             Self::PaneSendSelection => "send selection to pane",
-            Self::PaneSendPrefix => "send literal ^a to pane",
+            Self::PaneSendPrefix | Self::PaneSendEsc => self.describe_pane_send(),
             Self::PaneGrow => "grow pane",
             Self::PaneShrink => "shrink pane",
             Self::TogglePaneZoom => "zoom pane (toggle fullscreen)",
@@ -578,7 +581,7 @@ impl Action {
             Self::PaneFocusDown => "pane_focus_down",
             Self::PaneFocusUp => "pane_focus_up",
             Self::PaneSendSelection => "pane_send_selection",
-            Self::PaneSendPrefix => "pane_send_prefix",
+            Self::PaneSendPrefix | Self::PaneSendEsc => self.pane_send_name(),
             Self::PaneGrow => "pane_grow",
             Self::PaneShrink => "pane_shrink",
             Self::TogglePaneZoom => "toggle_pane_zoom",
@@ -650,6 +653,15 @@ impl Action {
         }
     }
 
+    /// The single-key sends' arm of [`Self::describe`], which is at its length
+    /// pin.
+    const fn describe_pane_send(&self) -> &'static str {
+        match self {
+            Self::PaneSendEsc => "send a plain Esc to pane",
+            _ => "send literal ^a to pane",
+        }
+    }
+
     /// The tab steps' arm of [`Self::describe`], which is at its length pin.
     const fn describe_tab_step(&self) -> &'static str {
         match self {
@@ -682,6 +694,15 @@ impl Action {
         match self {
             Self::JumpPrevPick => "jump to prev picked entry",
             _ => "jump to next picked entry",
+        }
+    }
+
+    /// The single-key sends' arm of [`Self::canonical_name`], which is at its
+    /// length pin.
+    const fn pane_send_name(&self) -> &'static str {
+        match self {
+            Self::PaneSendEsc => "pane_send_esc",
+            _ => "pane_send_prefix",
         }
     }
 
@@ -880,6 +901,7 @@ fn pane_action_from_name(name: &str) -> Option<Action> {
         "pane_focus_up" => Action::PaneFocusUp,
         "pane_send_selection" => Action::PaneSendSelection,
         "pane_send_prefix" => Action::PaneSendPrefix,
+        "pane_send_esc" => Action::PaneSendEsc,
         "pane_grow" => Action::PaneGrow,
         "pane_shrink" => Action::PaneShrink,
         "pane_scroll_enter" => Action::PaneScrollEnter,

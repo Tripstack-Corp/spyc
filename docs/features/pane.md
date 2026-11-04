@@ -30,6 +30,9 @@ image protocols or OSC 52 clipboard writes. How it answers:
 - **^a ↓** send a literal `^a` to the pane — the prefix is otherwise
   unreachable by the child, but Claude binds `^a` (e.g. to expand notes),
   so this is the tmux-style "send-prefix" escape hatch
+- **^a Esc** send a plain `Esc` to the pane, on any terminal: the way to
+  interrupt a working Claude whose vim-mode `Esc` spyc blocked (see
+  [Claude's vim mode and `Esc`](agents.md#claudes-vim-mode-and-esc))
 - **^a P** pipe file contents of the selection to the pane
 - **^a i** pipe inventory file contents to the pane
 - **^z** suspend/resume the pane's program — an agent (claude/codex/…) or any

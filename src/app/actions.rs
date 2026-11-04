@@ -466,8 +466,8 @@ impl App {
     }
 
     /// The actions answered before the pure-domain dispatch: `p` in the
-    /// directory view, the yanks, and the menus of an object. `None` for the
-    /// rest, which go on to `AppState::apply`.
+    /// directory view, the yanks, the menus of an object and `^a Esc`. `None`
+    /// for the rest, which go on to `AppState::apply`.
     fn apply_before_the_model(&mut self, action: &Action) -> Option<Vec<Effect>> {
         Some(match action {
             // In dir view, `p` (Drop) means "put inventory to cwd".
@@ -496,6 +496,7 @@ impl App {
             Action::YankPaths => self.yank_paths_to_clipboard(),
             Action::ContextMenu => self.open_entry_menu(),
             Action::PaneContextMenu => self.open_tab_menu(),
+            Action::PaneSendEsc => self.send_esc_to_pane(),
             _ => return None,
         })
     }
@@ -511,6 +512,7 @@ impl App {
                 | Action::PaneFocusUp
                 | Action::PaneSendSelection
                 | Action::PaneSendPrefix
+                | Action::PaneSendEsc
                 | Action::PaneGrow
                 | Action::PaneShrink
                 | Action::TogglePaneZoom

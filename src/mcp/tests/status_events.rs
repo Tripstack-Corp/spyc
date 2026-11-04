@@ -254,9 +254,19 @@ fn a_statusline_report_reaches_the_loop_bounded_and_unlisted() {
         json!({"pane_id":"pane-1", "statusline":{}}),
         json!({"statusline":{"context":{"size":5, "used_percent":1}}}),
         json!({"pane_id":"pane-1", "statusline":"not an object"}),
+        json!({"pane_id":"pane-1", "statusline":{"vim_mode":"REPLACE"}}),
     ] {
         assert_eq!(send(params.clone())["result"], json!({}), "{params}");
         assert!(receiver.try_recv().is_err(), "{params} is never queued");
+    }
+    send(json!({"pane_id":"pane-1", "statusline":{"vim_mode":"NORMAL"}}));
+    match receiver.try_recv().unwrap().command {
+        McpCommand::Statusline { statusline, .. } => assert_eq!(
+            statusline.vim_mode,
+            Some(crate::agent::claude_statusline::VimMode::Normal),
+            "a mode alone is a report"
+        ),
+        other => panic!("{other:?}"),
     }
     let mut output = Vec::new();
     let list = json!({"jsonrpc":"2.0", "id":8, "method":"tools/list"});

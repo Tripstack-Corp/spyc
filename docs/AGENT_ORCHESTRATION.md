@@ -312,8 +312,9 @@ the user says yes to that agent's first-launch `[Y/n]` (or runs `:hooks on
 
 For claude the same consent also wraps its `statusLine`, the only place Claude
 Code shows its plan's rate limits and context window: `spyc --statusline`
-forwards those numbers to the pane's spyc for the agent HUD, then runs the
-command the user had, on the same input, so their line is unchanged. With no
+forwards those numbers to the pane's spyc for the agent HUD, and the `/vim`
+prompt's mode for the `Esc` guard, then runs the command the user had, on the
+same input, so their line is unchanged. With no
 statusline configured, spyc's prints nothing. `:hooks off claude` puts the
 user's command back exactly; a later `/claude-hud:setup` or similar is wrapped
 again at the next startup refresh.
