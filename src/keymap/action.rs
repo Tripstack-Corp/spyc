@@ -266,6 +266,8 @@ impl Action {
     /// Writes to the active pane's input: a path list, a file's contents, the
     /// prefix byte or an `Esc`. A project `.spycrc.toml` may not bind these
     /// ([`super::BoundAction::is_executing`]), since they type at an agent.
+    /// `every_action_that_types_at_a_pane_is_on_writes_to_pane` presses every
+    /// action and fails on one that types at a pane but isn't listed here.
     pub const fn writes_to_pane(&self) -> bool {
         matches!(
             self,
