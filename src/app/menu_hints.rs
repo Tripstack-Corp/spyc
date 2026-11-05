@@ -1,12 +1,17 @@
 //! A menu's hint fades as the key is learned. A row fired by a click or `Enter`
 //! names the key that does the same (`mouse::name_the_key`) until the action
-//! has been fired by its own key `[ui] menu_hints_fade_after` times. Only a key
-//! counts, so clicking a row can't silence the lesson it is there to give. The
-//! counts and the first-menu flag are the Model's `state.learned`; each change
-//! returns an `Effect::SaveLearned` for the executor to write `learned.json`.
+//! has been fired by its own key `[ui] menu_hints_fade_after` times: an
+//! `Action` counted under its `canonical_name`, a pager's row under its
+//! `PagerAction::name`. Only a key counts, so clicking a row can't silence the
+//! lesson it is there to give. The counts and the first-menu flag are the
+//! Model's `state.learned`; each change returns an `Effect::SaveLearned` for the
+//! executor to write `learned.json`.
 //!
 //! Also `:hints`, which lists what has faded, or with `reset` forgets it all.
 
+use strum::IntoEnumIterator;
+
+use super::pager_handler::PagerAction;
 use super::{App, Effect};
 use crate::config::{MenuHints, UiConfig};
 use crate::keymap::Action;
@@ -16,10 +21,21 @@ impl App {
     /// Count `action` as fired by its key, toward its menu hint's fade, and
     /// return the write the count needs if it moved.
     pub(super) fn learn_key(&mut self, action: &Action) -> Option<Effect> {
+        self.learn(action.canonical_name())
+    }
+
+    /// Count a pager's `action` as fired by its key, under its row's name.
+    pub(super) fn learn_pager_key(&mut self, action: PagerAction) -> Option<Effect> {
+        self.learn(action.name())
+    }
+
+    /// Count one key-fired dispatch of what `name` names, and return the write
+    /// the count needs if it moved.
+    fn learn(&mut self, name: &str) -> Option<Effect> {
         let cap = self.state.active_project().config.ui.count_cap()?;
         self.state
             .learned
-            .record(action.canonical_name(), cap)
+            .record(name, cap)
             .then(|| Effect::SaveLearned(self.state.learned.clone()))
     }
 
@@ -79,8 +95,8 @@ pub(super) fn cmd_hints(app: &mut App, args: &str) -> Vec<Effect> {
     }
 }
 
-/// `:hints`'s pager: each faded action as its label and its `.spycrc.toml`
-/// name, sorted by label. A name this spyc doesn't know is left out: it has no
+/// `:hints`'s pager: each faded action as its label and the name it is counted
+/// under, sorted by label. A name this spyc doesn't know is left out: it has no
 /// row in this spyc's menus.
 fn hints_lines(learned: &Learned, ui: UiConfig) -> Vec<String> {
     let threshold = ui.menu_hints_fade_after;
@@ -93,12 +109,7 @@ fn hints_lines(learned: &Learned, ui: UiConfig) -> Vec<String> {
     }
     let mut rows: Vec<(&str, &str)> = learned
         .faded(threshold)
-        .filter_map(|name| {
-            Some((
-                crate::keymap::action::action_from_name(name)?.describe(),
-                name,
-            ))
-        })
+        .filter_map(|name| Some((label_of(name)?, name)))
         .collect();
     if rows.is_empty() {
         return vec![format!(
@@ -122,6 +133,18 @@ fn hints_lines(learned: &Learned, ui: UiConfig) -> Vec<String> {
             .map(|(label, name)| format!("{label:<width$}  {name}")),
     );
     lines
+}
+
+/// The label of the row whose count is kept under `name`: an `Action`'s, or a
+/// pager's. `None` for a name this spyc doesn't know.
+fn label_of(name: &str) -> Option<&'static str> {
+    crate::keymap::action::action_from_name(name)
+        .map(|action| action.describe())
+        .or_else(|| {
+            PagerAction::iter()
+                .find(|action| action.name() == name)
+                .map(PagerAction::describe)
+        })
 }
 
 #[cfg(test)]

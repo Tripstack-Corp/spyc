@@ -436,7 +436,6 @@ fn hints_lists_the_faded_and_reset_brings_them_back() {
 /// A pager's row fades as an action's does, and `:hints` lists it: by its
 /// label, and the name its key is counted under.
 #[test]
-#[ignore = "red: a pager's keys never count, and `:hints` knows only an `Action`'s name"]
 fn hints_lists_a_faded_pager_row() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);

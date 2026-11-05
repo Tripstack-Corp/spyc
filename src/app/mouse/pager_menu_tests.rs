@@ -632,7 +632,6 @@ fn pauses_task_one(fx: &[Effect]) -> bool {
 /// Three `S`s in the task viewer and the pause row's key is learned: a click
 /// on the row still pauses the task, and names no key. Two, and it still does.
 #[test]
-#[ignore = "red: a pager's keys never call `learn_key`, so the pause row names `S` forever"]
 fn the_pause_rows_hint_fades_after_three_s_presses() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);
@@ -686,7 +685,6 @@ fn capture_menu_clicks_never_count() {
 /// `q` closing a pager is its close row's key, and counts: `learned.json`
 /// holds it under `pager_close`.
 #[test]
-#[ignore = "red: a pager's keys never call `learn_key`, so `q` writes no count"]
 fn q_closing_a_pager_counts_as_pager_close() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -740,7 +738,6 @@ fn written_count(fx: &[Effect], name: &str) -> Option<u32> {
 /// pager reads it: a live capture's three, the task viewer's `^C`, `S`, `C`,
 /// `]t` and `[t`, and `s` and `q`.
 #[test]
-#[ignore = "red: a pager's keys never call `learn_key`, so none writes a count"]
 fn each_pager_rows_key_counts_under_its_name() {
     type Open = fn(&Path) -> App;
     with_mouse(|tmp| {

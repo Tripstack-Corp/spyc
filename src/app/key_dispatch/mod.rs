@@ -424,7 +424,7 @@ impl App {
             return Vec::new();
         }
         if let Some(action) = PagerAction::of_capture_key(key) {
-            return self.apply_pager_action(action);
+            return self.apply_pager_key(action);
         }
         // A capture is a bare `PtyHost` with no terminal engine, so no DECCKM
         // state exists to honour — the CSI form is what a terminal that never

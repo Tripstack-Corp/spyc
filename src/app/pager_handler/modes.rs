@@ -28,7 +28,7 @@ impl App {
         //     ^C-as-quit is muscle memory from `less` and the user
         //     expects feedback in the active screen.
         if let Some(action) = PagerAction::of_ctrl_c(key, view.task_id.is_some()) {
-            return Some(self.apply_pager_action(action));
+            return Some(self.apply_pager_key(action));
         }
         if matches!(key.code, KeyCode::Char('c')) && key.modifiers.contains(KeyModifiers::CONTROL) {
             view.flash = Some("press Esc or q to close pager".into());
@@ -250,7 +250,7 @@ impl App {
                 return Some(Vec::new());
             }
             if let Some(action) = PagerAction::of_bracket(bracket, key) {
-                return Some(self.apply_pager_action(action));
+                return Some(self.apply_pager_key(action));
             }
             // [[ / ]] — previous / next Markdown heading, vim's section motion.
             if matches!(key.code, KeyCode::Char('[' | ']')) {
