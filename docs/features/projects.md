@@ -36,8 +36,9 @@ anywhere; commands that act on the file view (git, picks, sort) stay on the
 
 One spyc holds several projects, each with its own columns, pane tabs, config
 and `PROJECT_HOME`. **`Space n`** asks for a directory (pre-filled with the
-focused column's worktree root; `Tab` completes, `~` and `$VAR` expand, and a
-relative path is read against the column) and opens it as a project: its `.spycrc.toml` is read as a launch there would read it, and its
+focused column's worktree root, or inside an archive the directory holding it;
+`Tab` completes, `~` and `$VAR` expand, and a relative path is read against the
+column) and opens it as a project: its `.spycrc.toml` is read as a launch there would read it, and its
 `[pane] tabs` start the same way, a repo's own list asking first. Your own
 settings for a project go in a file under `~/.config/spyc/projects/` whose
 `home` names it: it wins over the repo's file, its tabs open unasked, and its

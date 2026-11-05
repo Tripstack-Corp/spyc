@@ -276,7 +276,6 @@ fn restart_the_tab(app: &mut App) {
 /// A `!` task started beside an archive and promoted to a tab from inside it
 /// records the directory holding the archive, which `^a R` restarts it in.
 #[test]
-#[ignore = "red: the tab records the archive's own path, and `^a R` starts the child in $HOME"]
 fn a_task_promoted_inside_an_archive_restarts_beside_it() {
     inside_a_mount(|root, app| {
         climb_out_of_the_archive(app, root);
@@ -334,16 +333,13 @@ fn edit_with_e(app: &mut App) -> String {
 /// The directory the executor starts a foreground child in
 /// (`a_foreground_child_is_given_the_focused_columns_directory`).
 fn foreground_dir(app: &App) -> PathBuf {
-    app.desired_process_cwd()
-        .expect("the editor is given no directory, so it runs wherever spyc is")
-        .to_path_buf()
+    app.desired_process_cwd().to_path_buf()
 }
 
 /// `e` on a member hands the terminal to the editor on its extracted copy,
 /// started in the directory holding the archive, as `V`'s is: not in whatever
 /// directory spyc was left in, another column's or the one it was launched in.
 #[test]
-#[ignore = "red: inside an archive the editor is given no directory and runs wherever spyc is"]
 fn an_editor_e_opens_on_a_member_starts_beside_the_archive() {
     inside_a_mount(|root, app| {
         app.state.focus_on_path(&root.join("pkg.zip/src/main.rs"));

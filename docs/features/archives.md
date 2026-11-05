@@ -129,8 +129,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   tarball.
 - **Pane tabs and editors** — one opened in here starts in the directory holding
   the archive (the outer one, when archives nest), since no program can start
-  inside one: `^a c` offers that directory, and `V` opens your editor there on
-  the member's extracted copy.
+  inside one: `^a c` offers that directory, `e` and `V` open your editor there
+  on the member's extracted copy, and a task moved to a tab with
+  `:task-to-pane` records it as the tab's directory, where `^a R` restarts it.
+  `Space n` offers it too, as a project is a real directory.
 - **`:archive`** — `info` (this mount, or what's mounted when you're outside one),
   `list` (every mounted archive, dirty ones marked), `write` / `discard`,
   `unmount` (drop it and its staged bytes), `cancel`. `write` and `discard` work

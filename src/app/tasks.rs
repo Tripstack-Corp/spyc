@@ -442,12 +442,11 @@ impl App {
         }
 
         let cmd = task.cmd_display.clone();
-        // BackgroundTask doesn't track the original cwd (capture
-        // was spawned in `state.listing.dir` at the time but we
-        // didn't save it); use current listing dir as a best-effort
-        // tab-info field. The child is already running at its own
-        // cwd regardless.
-        let cwd = self.state.cur().listing.dir.clone();
+        // A `BackgroundTask` keeps no cwd, so the tab records the focused
+        // column's, a best effort for `^a R` and `-r`; inside an archive, the
+        // directory holding it, as a path in there names none. The child
+        // already runs in its own cwd regardless.
+        let cwd = self.state.cur_real_dir().to_path_buf();
         let label = task.title.clone();
         let wake = self.make_pane_wake();
         // MVU Phase 3c: clear the task's reader-thread sink wake BEFORE adopt

@@ -9,7 +9,9 @@
 //! `chdir` in the executor. The same compare covers a column focused or
 //! installed without a navigation — an agent's `open_worktree` into `b`, a
 //! restore, a focus switch — where a worktree removed from under a stale cwd
-//! once broke every in-process git call after it (#495).
+//! once broke every in-process git call after it (#495). A column inside a
+//! mounted archive has no directory on disk, so the process goes to the one
+//! holding the archive, where a child started from there runs.
 //!
 //! The loop settles before a Lua event fires, since a handler reads the cwd on
 //! its own thread, and again last before it waits. Between a navigation and the
@@ -21,22 +23,18 @@ use std::path::{Path, PathBuf};
 
 use super::{App, Effect};
 
-/// The `chdir` that brings `actual` to `desired`, if one is owed. `desired` is
-/// `None` when the focused column has no directory to be in (a virtual path
-/// inside an archive mount), so the process stays put. `actual` is `None` when
-/// the cwd can't be read, typically because it was deleted, which always owes
-/// a move.
-pub(super) fn owed_chdir(desired: Option<&Path>, actual: Option<&Path>) -> Option<PathBuf> {
-    let desired = desired?;
+/// The `chdir` that brings `actual` to `desired`, if one is owed. `actual` is
+/// `None` when the cwd can't be read, typically because it was deleted, which
+/// always owes a move.
+pub(super) fn owed_chdir(desired: &Path, actual: Option<&Path>) -> Option<PathBuf> {
     (actual != Some(desired)).then(|| desired.to_path_buf())
 }
 
 impl App {
-    /// Where the process cwd belongs: the focused column's directory, unless
-    /// that is a virtual path inside a mounted archive.
-    pub(super) fn desired_process_cwd(&self) -> Option<&Path> {
-        let dir = self.state.cur().listing.dir.as_path();
-        self.state.mounts.resolve(dir).is_none().then_some(dir)
+    /// Where the process cwd belongs: the focused column's directory, or
+    /// inside a mounted archive the one holding it.
+    pub(super) fn desired_process_cwd(&self) -> &Path {
+        self.state.cur_real_dir()
     }
 
     /// Reconcile the process cwd against the focused column. One `getcwd` on an
@@ -60,13 +58,10 @@ mod tests {
     fn a_chdir_is_owed_only_on_divergence() {
         let a = Path::new("/w/a");
         let b = Path::new("/w/b");
-        assert_eq!(owed_chdir(Some(a), Some(a)), None, "agreement");
-        assert_eq!(owed_chdir(Some(b), Some(a)).as_deref(), Some(b));
+        assert_eq!(owed_chdir(a, Some(a)), None, "agreement");
+        assert_eq!(owed_chdir(b, Some(a)).as_deref(), Some(b));
         // A cwd that can't be read (deleted under the process) always moves.
-        assert_eq!(owed_chdir(Some(a), None).as_deref(), Some(a));
-        // A mount has no directory to be in: stay wherever the process is.
-        assert_eq!(owed_chdir(None, Some(a)), None);
-        assert_eq!(owed_chdir(None, None), None);
+        assert_eq!(owed_chdir(a, None).as_deref(), Some(a));
     }
 
     /// The reconcile only works if the loop runs it: pin the call site, not just
@@ -205,13 +200,13 @@ mod tests {
                 .listing
                 .dir
                 .clone_from(&a);
-            assert_eq!(app.desired_process_cwd(), Some(a.as_path()));
+            assert_eq!(app.desired_process_cwd(), a.as_path());
             app.open_second_commander_at_background(&w1)
                 .expect("b opens");
-            assert_eq!(app.desired_process_cwd(), Some(w1.as_path()));
+            assert_eq!(app.desired_process_cwd(), w1.as_path());
             app.open_second_commander_at_background(&w2)
                 .expect("b opens");
-            assert_eq!(app.desired_process_cwd(), Some(w2.as_path()));
+            assert_eq!(app.desired_process_cwd(), w2.as_path());
             // And the settle owes the move from wherever the process was left.
             assert_eq!(
                 owed_chdir(app.desired_process_cwd(), Some(&w1)).as_deref(),

@@ -96,9 +96,11 @@ impl AppState {
     }
 
     /// `Space n`: ask for a directory to open as a project, pre-filled with
-    /// the focused column's worktree root.
+    /// the focused column's worktree root; inside an archive, where that falls
+    /// back to the column's path, the directory holding it.
     pub fn open_project_prompt(&mut self) {
-        let dir = self.tool_root(self.focused_side()).display().to_string();
+        let root = self.tool_root(self.focused_side());
+        let dir = self.mounts.real_dir(&root).display().to_string();
         let mut prompt = Prompt::shell(PromptKind::ProjectOpen, "open project: ");
         prompt.buffer.clone_from(&dir);
         if let Some(editor) = prompt.editor.as_mut() {

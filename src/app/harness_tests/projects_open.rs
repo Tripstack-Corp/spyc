@@ -349,7 +349,6 @@ fn space_n_offers(app: &mut App) -> String {
 /// project is a real directory, and `Enter` opens it: a project with no home
 /// and no repository offers the column's directory.
 #[test]
-#[ignore = "red: it offers the archive's own path, which flashes an error when accepted"]
 fn space_n_inside_an_archive_offers_the_directory_holding_it() {
     with_three(|t| {
         inside_an_archive(t, None);

@@ -289,8 +289,9 @@ impl App {
     }
 
     /// Hand the terminal to `program` (`$`, `$EDITOR`, a `unix` binding), then
-    /// put the TUI back. The child runs in the focused column's directory: a
-    /// navigation earlier in this tick has moved the column but not the process.
+    /// put the TUI back. The child runs in the focused column's directory, or
+    /// inside an archive the one holding it: a navigation earlier in this tick
+    /// has moved the column but not the process.
     fn run_foreground(
         &mut self,
         terminal: &mut Tui,
@@ -312,7 +313,7 @@ impl App {
             args,
             pause_after,
             subshell,
-            self.desired_process_cwd(),
+            Some(self.desired_process_cwd()),
         );
         // `suspend_tui` handed mouse reporting to the child; record that so the
         // loop-bottom `settle_mouse_mode` re-enables it if the user wants it.
