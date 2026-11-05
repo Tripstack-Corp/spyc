@@ -42,6 +42,10 @@ impl App {
         confirmed: bool,
         then: Option<Box<Effect>>,
     ) -> Vec<Effect> {
+        // SPYC-TRAP(mount-path-canonical): the key a mount is stored by is the
+        // canonical path its row has; another spelling mounts it twice.
+        let canonical = crate::paths::canonical_mount_path(path);
+        let path = canonical.as_path();
         // Already mounted: step back in rather than reading it again. A re-mount
         // installs a fresh journal, so it would silently discard changes the user
         // hasn't written back — and for a compressed tar it would re-stream the

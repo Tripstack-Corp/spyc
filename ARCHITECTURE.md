@@ -1271,6 +1271,17 @@ outcome lands in the project that started it, as other background work does
 too. Anything guarding the table (eviction, `:archive unmount`) counts every
 open project's columns.
 
+<!-- SPYC-TRAP: mount-path-canonical -->
+**A mount path has one form**, `paths::canonical_mount_path`'s: the deepest
+existing directory canonicalized, the archive file and what follows it
+normalized lexically. `Mounts` compares paths literally, and a listing row's
+path is already in that form, because `chdir` canonicalizes. So the key is
+formed in it (`request_mount_then`), and so is the path a `chdir` looks a
+mount up by (`chdir_side`). An archive mounted under another spelling, a
+symlinked directory or a `..`, failed silently: the climb out lost the
+cursor, the row lost its `~`, and `Enter` mounted the archive a second time
+with a clean journal while the first held the user's changes out of sight.
+
 **Containment is decided against the filesystem, never against the name.**
 Names are only half the problem — `index` normalization makes a zip-slip *name*
 structurally impossible by rejecting unsafe names on the way in, but a member is
