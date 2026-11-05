@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use super::App;
 use crate::agent::ForkMode;
 use crate::pane::TabInfo;
+use crate::state::sessions::AgentKind;
 
 /// The command a fork is built from, and the directory it starts in: the tab's
 /// own command and cwd when it launched the agent it runs, or the agent's own
@@ -36,6 +37,22 @@ pub(super) fn forks(info: &TabInfo) -> bool {
         ForkMode::Branch(_) => !info.wraps_agent(),
         ForkMode::Duplicate => true,
         ForkMode::Unsupported => false,
+    }
+}
+
+/// Whether the app holds what `^a F` forks `info`'s tab from, read without
+/// the agent's files: a tab that branches a conversation needs one pinned to
+/// it, and codex its launch home too, or [`App::fork_active_tab`] refuses.
+/// Without a pin, the fork itself may still find one in the agent's own
+/// records; the menu, which reads no files, leaves the row out.
+pub(super) fn fork_source_known(info: &TabInfo) -> bool {
+    let agent = info.agent();
+    match agent.fork_mode() {
+        ForkMode::Branch(_) => {
+            info.pinned_session_id().is_some()
+                && (agent.kind() != AgentKind::Codex || info.codex_home.is_some())
+        }
+        ForkMode::Duplicate | ForkMode::Unsupported => true,
     }
 }
 
