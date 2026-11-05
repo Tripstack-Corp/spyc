@@ -1,7 +1,7 @@
-//! A pane tab or an editor overlay opened inside a mounted archive. A path in
-//! there names no directory, and a pty handed one starts its child in `$HOME`;
-//! each starts in the directory holding the archive instead, and outside the
-//! archive each still starts where it did.
+//! A pane tab, an editor or a promoted `!` task opened inside a mounted
+//! archive. A path in there names no directory, and a pty handed one starts its
+//! child in `$HOME`; each starts in the directory holding the archive instead,
+//! and outside the archive each still starts where it did.
 
 use super::*;
 
@@ -92,14 +92,20 @@ fn inside_a_mount(test: impl FnOnce(&Path, &mut App)) {
     });
 }
 
+/// From `pkg.zip/src/` out to `root`, the directory holding the archive.
+fn climb_out_of_the_archive(app: &mut App, root: &Path) {
+    for _ in 0..2 {
+        let fx = app.apply(&Action::Climb).unwrap();
+        apply_effects(app, fx);
+    }
+    assert_eq!(app.state.cur().listing.dir, root);
+}
+
 /// From inside the archive to `work/`, beside it, with the archive still
 /// mounted.
 fn beside_a_mount(test: impl FnOnce(&Path, &mut App)) {
     inside_a_mount(|root, app| {
-        for _ in 0..2 {
-            let fx = app.apply(&Action::Climb).unwrap();
-            apply_effects(app, fx);
-        }
+        climb_out_of_the_archive(app, root);
         app.state.focus_on_path(&root.join("work"));
         app.apply(&Action::EnterOrDisplay).unwrap();
         assert_eq!(app.state.cur().listing.dir, root.join("work"));
@@ -236,5 +242,130 @@ fn an_editor_beside_a_mounted_archive_starts_in_the_column() {
         crate::shell::with_editor("tail -f", || press(app, KeyCode::Char('V')));
 
         wait_until_in(overlay_pid(app), &work);
+    });
+}
+
+/// `:` then `cmd`, then `Enter`.
+fn colon(app: &mut App, cmd: &str) {
+    press(app, KeyCode::Char(':'));
+    submit(app, cmd);
+}
+
+/// `:!` with [`TAB`] in the column, then `^Z`: a running background task.
+fn background_a_task(app: &mut App) {
+    colon(app, &format!("!{TAB}"));
+    assert!(
+        app.runtime.pending_capture.is_some(),
+        "no capture started: {:?}",
+        app.flash_text()
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL))
+        .unwrap();
+    assert_eq!(app.runtime.background_tasks.running_count(), 1);
+}
+
+/// `^a R` on the active tab, confirmed: the running tab restarts in the cwd it
+/// records.
+fn restart_the_tab(app: &mut App) {
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
+        .unwrap();
+    press(app, KeyCode::Char('R'));
+    press(app, KeyCode::Char('y'));
+}
+
+/// A `!` task started beside an archive and promoted to a tab from inside it
+/// records the directory holding the archive, which `^a R` restarts it in.
+#[test]
+#[ignore = "red: the tab records the archive's own path, and `^a R` starts the child in $HOME"]
+fn a_task_promoted_inside_an_archive_restarts_beside_it() {
+    inside_a_mount(|root, app| {
+        climb_out_of_the_archive(app, root);
+        background_a_task(app);
+        app.state.focus_on_path(&root.join("pkg.zip"));
+        let fx = press(app, KeyCode::Enter);
+        settle(app, fx);
+        assert_eq!(app.state.cur().listing.dir, root.join("pkg.zip"));
+
+        colon(app, "task-to-pane");
+
+        let (_, recorded) = newest_tab(app);
+        assert_eq!(recorded, root, "the tab records");
+        restart_the_tab(app);
+        let (pid, _) = newest_tab(app);
+        wait_until_in(pid, root);
+    });
+}
+
+/// Beside a mounted archive, a promoted task records the column's directory,
+/// as it does anywhere.
+#[test]
+fn a_task_promoted_beside_a_mounted_archive_records_the_column() {
+    beside_a_mount(|root, app| {
+        let work = root.join("work");
+        background_a_task(app);
+
+        colon(app, "task-to-pane");
+
+        let (_, recorded) = newest_tab(app);
+        assert_eq!(recorded, work, "the tab records");
+        restart_the_tab(app);
+        let (pid, _) = newest_tab(app);
+        wait_until_in(pid, &work);
+    });
+}
+
+/// `e` on the file under the cursor, with any extraction run inline: the
+/// program the executor hands the terminal to.
+fn edit_with_e(app: &mut App) -> String {
+    let mut queue = press(app, KeyCode::Char('e'));
+    for _ in 0..4 {
+        for effect in std::mem::take(&mut queue) {
+            match app.screen_archive_effect(effect) {
+                Some(Effect::ForegroundExec { program, .. }) => return program,
+                Some(Effect::Archive(op)) => app.file_archive_outcome(run_archive_op(op)),
+                _ => {}
+            }
+        }
+        queue = app.apply_archive_outcomes().1;
+    }
+    panic!("`e` started no editor: {:?}", app.flash_text())
+}
+
+/// The directory the executor starts a foreground child in
+/// (`a_foreground_child_is_given_the_focused_columns_directory`).
+fn foreground_dir(app: &App) -> PathBuf {
+    app.desired_process_cwd()
+        .expect("the editor is given no directory, so it runs wherever spyc is")
+        .to_path_buf()
+}
+
+/// `e` on a member hands the terminal to the editor on its extracted copy,
+/// started in the directory holding the archive, as `V`'s is: not in whatever
+/// directory spyc was left in, another column's or the one it was launched in.
+#[test]
+#[ignore = "red: inside an archive the editor is given no directory and runs wherever spyc is"]
+fn an_editor_e_opens_on_a_member_starts_beside_the_archive() {
+    inside_a_mount(|root, app| {
+        app.state.focus_on_path(&root.join("pkg.zip/src/main.rs"));
+
+        let program = crate::shell::with_editor("vi", || edit_with_e(app));
+
+        assert_eq!(program, "vi");
+        assert_eq!(foreground_dir(app), root);
+    });
+}
+
+/// Beside a mounted archive, `e` starts the editor in the column, as it does
+/// anywhere.
+#[test]
+fn an_editor_e_opens_beside_a_mounted_archive_starts_in_the_column() {
+    beside_a_mount(|root, app| {
+        let work = root.join("work");
+        app.state.focus_on_path(&work.join("notes.txt"));
+
+        let program = crate::shell::with_editor("vi", || edit_with_e(app));
+
+        assert_eq!(program, "vi");
+        assert_eq!(foreground_dir(app), work);
     });
 }
