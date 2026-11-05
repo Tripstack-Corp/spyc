@@ -860,19 +860,6 @@ fn display_name(path: &Path) -> String {
     )
 }
 
-/// The directory a rewritten write-in op will put files in, so it can be created
-/// first — the inventory and copy workers write into a directory, they don't make
-/// one.
-fn staging_target(effect: &Effect) -> Option<PathBuf> {
-    match effect {
-        Effect::Inventory(super::inventory_ops::InventoryOp::Put { dest_dir, .. }) => {
-            Some(dest_dir.clone())
-        }
-        Effect::FileOp(super::file_ops::FileOp::Copy { dest, .. }) => Some(dest.clone()),
-        _ => None,
-    }
-}
-
 /// Stat every staged file a mount knows about, keyed the same way the recorded
 /// stats are. The difference between the two is the only signal that an edit spyc
 /// didn't perform has happened.

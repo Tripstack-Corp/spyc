@@ -453,7 +453,6 @@ fn copying_files_into_a_directory_of_a_mount_keeps_their_names() {
 /// `new.txt/brought.txt`. On disk it's a copy named `new.txt`, and a `%` name
 /// on one file is that same copy.
 #[test]
-#[ignore = "red: the file is staged inside a new directory named after the destination"]
 fn copying_one_file_into_a_mount_under_a_new_name_names_it_so() {
     for (dest, landed) in [
         ("new.txt", "new.txt"),
@@ -472,7 +471,6 @@ fn copying_one_file_into_a_mount_under_a_new_name_names_it_so() {
 /// Only a directory takes several files: on disk, several to one new name is
 /// refused. In a mount it staged a directory of that name nobody asked for.
 #[test]
-#[ignore = "red: the files are staged inside a new directory named after the destination"]
 fn copying_several_files_into_a_mount_under_one_new_name_is_refused() {
     let both = copied_as_on_disk(&["a.txt", "b.txt"], "new");
     assert_refused(&both, "several to one name", "copy into a directory");
@@ -482,7 +480,6 @@ fn copying_several_files_into_a_mount_under_one_new_name_is_refused() {
 /// archive holds, which a copy on disk doesn't overwrite, and a directory it
 /// doesn't hold, which a copy on disk doesn't make.
 #[test]
-#[ignore = "red: each is staged as a new directory named after the destination"]
 fn copying_into_a_mount_where_a_copy_on_disk_fails_is_refused() {
     for (dest, because) in [
         ("notes.txt", "one file to a new name"),
@@ -500,7 +497,6 @@ fn copying_into_a_mount_where_a_copy_on_disk_fails_is_refused() {
 /// is refused with the way round it, and the archive keeps only the change
 /// already made.
 #[test]
-#[ignore = "red: the file is staged inside a new directory named after the destination"]
 fn copying_in_under_a_name_a_pending_change_claims_is_refused() {
     type Setup = fn(&mut crate::archive::Journal);
     let cases: [(&str, Setup, Change, Tree); 2] = [

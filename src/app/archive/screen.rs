@@ -5,8 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{archive_ancestor_of, display_name, staging_target};
+use super::{archive_ancestor_of, display_name};
 use crate::app::archive_ops::{ArchiveOp, MaterializeThen};
+use crate::app::archive_route::PendingChange;
 use crate::app::{App, Effect};
 
 impl App {
@@ -119,12 +120,12 @@ impl App {
                 if self.refuse_changes_while_written(&changes) {
                     return None;
                 }
-                if let Some(dir) = staging_target(&effect)
-                    && let Err(e) = std::fs::create_dir_all(&dir)
-                {
-                    self.state
-                        .flash_error(format!("archive: staging {}: {e:#}", dir.display()));
-                    return None;
+                for dir in self.addition_dirs(&changes) {
+                    if let Err(e) = std::fs::create_dir_all(&dir) {
+                        self.state
+                            .flash_error(format!("archive: staging {}: {e:#}", dir.display()));
+                        return None;
+                    }
                 }
                 self.record_pending(changes);
                 Some(*effect)
@@ -158,9 +159,29 @@ impl App {
         }))
     }
 
+    /// The directories the additions among `changes` are staged in, to create
+    /// before the op that writes them runs: the copy and inventory workers write
+    /// into a directory, they don't make one. An addition's bytes live at its
+    /// journal path under the staging root, so its directory is that path's
+    /// parent.
+    fn addition_dirs(&self, changes: &[PendingChange]) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = changes
+            .iter()
+            .filter_map(|change| match change {
+                PendingChange::Add { archive, inner } => {
+                    let bytes = self.state.mounts.get(archive)?.staging_root.join(inner);
+                    bytes.parent().map(Path::to_path_buf)
+                }
+                PendingChange::Delete { .. } | PendingChange::Rename { .. } => None,
+            })
+            .collect();
+        dirs.sort_unstable();
+        dirs.dedup();
+        dirs
+    }
+
     /// Fold recorded changes into the mounts' journals.
-    fn record_pending(&mut self, changes: Vec<crate::app::archive_route::PendingChange>) {
-        use crate::app::archive_route::PendingChange;
+    fn record_pending(&mut self, changes: Vec<PendingChange>) {
         let mut deleted = 0usize;
         let mut renamed = 0usize;
         let mut added = 0usize;

@@ -18,7 +18,8 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::archive::Mounts;
+use crate::archive::{ArchiveMount, Mounts};
+use crate::fs::EntryKind;
 
 use super::Effect;
 use super::file_ops::FileOp;
@@ -326,6 +327,14 @@ fn classify(
 /// dressed as a copy, with the source's bytes not yet on disk.
 const COPY_WITHIN: &str = "archive: copy out first, then in";
 
+/// The refusal for a copy in where a copy on disk fails: several files to one
+/// name, or one to a name already taken.
+const INTO_A_DIR_OR_A_NEW_NAME: &str = "archive: copy into a directory, or one file to a new name";
+
+/// The refusal for a copy in to a name the journal can't record an addition
+/// under.
+const UNDER_OWN_NAMES: &str = "archive: copy files in under their own names, then rename";
+
 /// A `%` copy fan-out, answered pair by pair as [`FileOp::Copy`] is. Its
 /// sources stay where they are, so no pair is ever journaled as a rename, and a
 /// mounted archive among them is a file to read, not one being taken away.
@@ -339,9 +348,9 @@ fn copy_each(
         if sources.iter().any(|src| mounts.holds_member(src)) {
             return Verdict::Refuse(COPY_WITHIN);
         }
-        // `bring_in` names each addition after its source, so a per-file
-        // target name has nowhere to be recorded.
-        return Verdict::Refuse("archive: copy files in under their own names, then rename");
+        // One file to a new name goes through `bring_in`; a fan-out of them
+        // is refused whole rather than staged pair by pair.
+        return Verdict::Refuse(UNDER_OWN_NAMES);
     }
     need(&sources, mounts, is_staged)
 }
@@ -375,7 +384,9 @@ fn move_each(pairs: &[(PathBuf, PathBuf)], mounts: &Mounts) -> Verdict {
 }
 
 /// Copying real files into a container: point the op at the staging tree and
-/// record what it will have added.
+/// record what it will have added. It lands as a copy on disk does — into a
+/// directory under each file's own name, or one file to a new name — and is
+/// refused wherever a copy on disk fails.
 fn bring_in(
     paths: &[PathBuf],
     dest: &Path,
@@ -392,15 +403,26 @@ fn bring_in(
             "archive: copy files in, not directories — the contents would be lost",
         );
     }
-    let Some((mount, inner_dir)) = mounts.resolve(dest) else {
+    let Some((mount, shown)) = mounts.resolve(dest) else {
         return Verdict::Pass;
     };
+    if shown_kind(mount, &shown) == Some(EntryKind::Dir) {
+        return into_dir(paths, mount, &shown);
+    }
+    match paths {
+        [path] => to_new_name(path, dest, mount, shown),
+        _ => Verdict::Refuse(INTO_A_DIR_OR_A_NEW_NAME),
+    }
+}
+
+/// Each file into the directory the mount shows at `shown`, under its own name.
+fn into_dir(paths: &[PathBuf], mount: &ArchiveMount, shown: &str) -> Verdict {
     let changes: Vec<PendingChange> = paths
         .iter()
         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .map(|name| PendingChange::Add {
             archive: mount.archive().to_path_buf(),
-            inner: join_inner(&inner_dir, &name),
+            inner: join_inner(shown, &name),
         })
         .collect();
     if changes.is_empty() {
@@ -409,10 +431,60 @@ fn bring_in(
     Verdict::RewriteAndRecord {
         effect: Box::new(Effect::FileOp(FileOp::Copy {
             paths: paths.to_vec(),
-            dest: mount.staging_root.join(&inner_dir),
+            dest: mount.staging_root.join(shown),
         })),
         changes,
     }
+}
+
+/// One file to `shown`, where the mount shows nothing: an addition under that
+/// name, its bytes copied to that path in the staging tree.
+fn to_new_name(path: &Path, dest: &Path, mount: &ArchiveMount, shown: String) -> Verdict {
+    if shown_kind(mount, &shown).is_some() {
+        return Verdict::Refuse(INTO_A_DIR_OR_A_NEW_NAME);
+    }
+    // A trailing `/` names a directory, and a copy doesn't make one.
+    let parent = shown.rsplit_once('/').map_or("", |(parent, _)| parent);
+    if dest.as_os_str().as_encoded_bytes().ends_with(b"/")
+        || shown_kind(mount, parent) != Some(EntryKind::Dir)
+    {
+        return Verdict::Refuse("archive: no such directory");
+    }
+    if claimed(mount, &shown) {
+        return Verdict::Refuse(UNDER_OWN_NAMES);
+    }
+    Verdict::RewriteAndRecord {
+        effect: Box::new(Effect::FileOp(FileOp::Copy {
+            paths: vec![path.to_path_buf()],
+            dest: mount.staging_root.join(&shown),
+        })),
+        changes: vec![PendingChange::Add {
+            archive: mount.archive().to_path_buf(),
+            inner: shown,
+        }],
+    }
+}
+
+/// What the mount's listing shows at the displayed path `shown`, or `None`
+/// where it shows nothing, as for a path on disk that doesn't exist.
+fn shown_kind(mount: &ArchiveMount, shown: &str) -> Option<EntryKind> {
+    if shown.is_empty() {
+        return Some(EntryKind::Dir);
+    }
+    let (parent, name) = shown.rsplit_once('/').unwrap_or(("", shown));
+    mount
+        .listing_for(parent)
+        .entries
+        .into_iter()
+        .find(|entry| entry.name == name)
+        .map(|entry| entry.kind)
+}
+
+/// Whether a pending change still holds `shown`, a name the listing doesn't
+/// show: a delete of it would hide an addition there, and a rename away from it
+/// would carry one along, from the staging path the renamed member still uses.
+fn claimed(mount: &ArchiveMount, shown: &str) -> bool {
+    mount.journal.is_deleted(shown) || mount.journal.effective(shown) != shown
 }
 
 /// Moving members inside one container is a rename — no bytes move, which is why
