@@ -47,6 +47,8 @@ mod selection;
 #[cfg(test)]
 mod status_menu_tests;
 pub(super) mod tab_hit;
+#[cfg(test)]
+mod task_indicator_tests;
 
 // Re-exported so the impure half and its callers keep referring to
 // `mouse::route_mouse` / `mouse::Region` exactly as before this split.
