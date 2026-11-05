@@ -704,6 +704,10 @@ pub mod matchers {
         /// The sole `InventoryOp`, iff the slice is exactly one `Effect::Inventory`.
         fn inventory(&self) -> Option<&crate::app::inventory_ops::InventoryOp>;
 
+        /// The text the one `CopyToClipboard` copies and the flash it lands.
+        /// `None` when no effect, or more than one, copies to the clipboard.
+        fn clipboard(&self) -> Option<(&str, String)>;
+
         fn pane_key(&self) -> Option<crossterm::event::KeyEvent>;
         /// The bytes the one `SendToPane` writes to the active pane, a key
         /// encoded as `Pane::send_key` encodes it. `None` when no effect, or
@@ -860,6 +864,15 @@ pub mod matchers {
                 [Effect::Inventory(op, ..)] => Some(op),
                 _ => None,
             }
+        }
+
+        fn clipboard(&self) -> Option<(&str, String)> {
+            let mut copies = self.iter().filter_map(|effect| match effect {
+                Effect::CopyToClipboard { text, ok } => Some((text.as_str(), ok.success(text))),
+                _ => None,
+            });
+            let copy = copies.next()?;
+            copies.next().is_none().then_some(copy)
         }
 
         fn typed_input(&self) -> Option<&Effect> {

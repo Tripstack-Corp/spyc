@@ -23,7 +23,8 @@ const SKIPPED: &[(Action, &str)] = &[
     ),
 ];
 
-/// Fewer pressed than this means the walk lost actions: 133 are pressed.
+/// Fewer pressed than this means the walk lost actions: it presses every one
+/// but [`SKIPPED`].
 const MIN_CHECKED: usize = 130;
 
 /// The key every action is bound to in turn: no built-in chord starts with it.
