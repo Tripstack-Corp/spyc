@@ -382,6 +382,59 @@ y`touch>pwned-tick`: ## Backtick
     });
 }
 
+/// `:make fmt lint` builds both targets, as `make fmt lint` does.
+#[test]
+#[ignore = "red: `:make fmt lint` runs `make 'fmt lint'`, one target"]
+fn make_with_two_words_builds_both_targets() {
+    with_mouse(|tmp| {
+        let dir = tmp.join("work");
+        let text = "fmt:\n\t@touch fmt.done\nlint:\n\t@touch lint.done\n";
+        let mut app = app_over(&dir, &[("Makefile", text)]);
+
+        app.dispatch_command("make fmt lint");
+        let title = pager_title(&app).unwrap_or_default();
+        finish_capture(&mut app);
+
+        assert!(title.contains("! make fmt lint"), "{title}");
+        assert!(dir.join("fmt.done").exists(), "fmt ran");
+        assert!(dir.join("lint.done").exists(), "lint ran");
+    });
+}
+
+/// `:make check V=1` passes the variable to make, as `make check V=1` does.
+#[test]
+#[ignore = "red: `:make check V=1` runs `make 'check V=1'`, one target"]
+fn make_passes_a_variable() {
+    with_mouse(|tmp| {
+        let dir = tmp.join("work");
+        let text = "check:\n\t@echo \"$(V)\" > v.out\n";
+        let mut app = app_over(&dir, &[("Makefile", text)]);
+
+        app.dispatch_command("make check V=1");
+        finish_capture(&mut app);
+
+        let out = std::fs::read_to_string(dir.join("v.out")).unwrap_or_default();
+        assert_eq!(out.trim(), "1", "the recipe saw V");
+    });
+}
+
+/// Several typed words a shell would misread each run as one quoted word: a
+/// `;`, a backtick and a `$(` run make and nothing else.
+#[test]
+fn typed_words_a_shell_would_misread_run_nothing_else() {
+    with_mouse(|tmp| {
+        let dir = tmp.join("work");
+        let mut app = app_over(&dir, &[("Makefile", "ok:\n\t@true\n")]);
+
+        app.dispatch_command("make ok x;touch>pwned-semi `touch pwned-tick` $(touch pwned-sub)");
+        finish_capture(&mut app);
+
+        for marker in ["pwned-semi", "pwned-tick", "pwned-sub"] {
+            assert!(!dir.join(marker).exists(), "{marker}: the shell ran more");
+        }
+    });
+}
+
 /// A read that lands once the user has opened another menu is dropped: the
 /// menu they opened stays.
 #[test]
