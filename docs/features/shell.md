@@ -95,7 +95,11 @@ make wouldn't pick on its own (a `Makefile` beside a `GNUmakefile`) runs with
 one word.
 
 - **`:make <target>`** runs a target of the column's directory's Makefile
-  directly; a bare **`:make`** opens the menu.
+  directly; a bare **`:make`** opens the menu. Each word after `:make` is
+  its own argument, as at a shell: `:make fmt lint` runs both targets, and
+  `:make check V=1` passes `V` to make. Every word is quoted for the shell,
+  so one holding `;`, a backtick or `$(` reaches make as it is, and nothing
+  else runs.
 - The menu lists targets a user can type: no pattern rules (`%`), no names
   holding a `$(…)` reference, no `.`-led special targets. A Makefile that
   names none shows `make: no explicit targets`.
