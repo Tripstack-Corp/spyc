@@ -197,8 +197,9 @@ impl App {
                 dest_dir,
             } => {
                 if count > 0 {
+                    let dest = self.shown_dest(&dest_dir);
                     self.state
-                        .flash_info(format!("put {count} file(s) to {}", dest_dir.display()));
+                        .flash_info(format!("put {count} file(s) to {}", dest.display()));
                 }
                 if let Some(e) = err {
                     self.state.flash_error(e);

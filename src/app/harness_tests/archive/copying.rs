@@ -630,7 +630,6 @@ fn copying_in_under_a_name_a_pending_change_claims_is_refused() {
 /// `:archive write` failed with `Duplicate filename`. On disk the copy
 /// replaces that file's bytes.
 #[test]
-#[ignore = "red: the copy is added beside the file of its name, and the write fails with Duplicate filename"]
 fn copying_a_file_into_a_mount_over_one_of_that_name_replaces_it() {
     for (sources, dest) in [
         (&["notes.txt"][..], ""),
@@ -652,7 +651,6 @@ fn copying_a_file_into_a_mount_over_one_of_that_name_replaces_it() {
 /// before and over a file the archive held: one pending change each, and the
 /// archive takes the second copy, as the directory does.
 #[test]
-#[ignore = "red: the second copy is added again beside the first"]
 fn copying_a_file_into_a_mount_twice_keeps_the_second_copy() {
     for name in ["brought.txt", "notes.txt"] {
         let again = [(name, "changed in between\n")];
@@ -683,7 +681,6 @@ fn copying_a_file_into_a_mount_twice_keeps_the_second_copy() {
 /// A member read before the copy has its bytes staged already, and the copy
 /// has to land on them rather than beside them.
 #[test]
-#[ignore = "red: the copy is added beside the member whose staged bytes it overwrote"]
 fn copying_a_file_over_a_member_already_extracted_replaces_it() {
     mounted(|mut fx| {
         let _cwd = CwdGuard;
@@ -731,7 +728,6 @@ fn copying_a_file_over_a_member_already_extracted_replaces_it() {
 /// A file copied over a directory fails on disk, and is refused in the mount
 /// before anything is staged.
 #[test]
-#[ignore = "red: the file is added beside the directory of its name"]
 fn copying_a_file_into_a_mount_over_a_directory_of_that_name_is_refused() {
     let both = copied_as_on_disk(&["src"], "");
     assert_refused(
@@ -745,7 +741,6 @@ fn copying_a_file_into_a_mount_over_a_directory_of_that_name_is_refused() {
 /// in a mount is another member's staged bytes. Refused before anything is
 /// staged.
 #[test]
-#[ignore = "red: the file is added beside the link of its name"]
 fn copying_a_file_into_a_mount_over_a_link_of_that_name_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -781,7 +776,6 @@ fn copying_a_file_into_a_mount_over_a_link_of_that_name_is_refused() {
 /// from its name, so a copy writing at that name would land on the first.
 /// Refused before anything is staged.
 #[test]
-#[ignore = "red: the file is added beside the member of its name"]
 fn copying_a_file_into_a_mount_over_a_member_named_but_for_case_is_refused() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -821,7 +815,6 @@ fn copying_a_file_into_a_mount_over_a_member_named_but_for_case_is_refused() {
 /// the name the archive stores. The copy is refused with the way round it, and
 /// the archive keeps only the change already made.
 #[test]
-#[ignore = "red: a copy into a directory never checks the names pending changes hold"]
 fn copying_into_a_directory_of_a_mount_over_a_name_a_pending_change_holds_is_refused() {
     type Setup = fn(&mut crate::archive::Journal);
     let renamed = |from: &str, to: &str| Change::Renamed {
@@ -912,7 +905,6 @@ fn copying_into_a_directory_of_a_mount_over_a_name_a_pending_change_holds_is_ref
 /// spyc copied the bytes to. It names the place in the archive, as the copy
 /// on disk names the directory.
 #[test]
-#[ignore = "red: the flash names the staging directory"]
 fn copying_into_a_mount_says_where_in_the_archive_it_went() {
     for (sources, dest) in [
         (&["brought.txt"][..], ""),
@@ -1001,7 +993,6 @@ fn put_into(fx: &mut Fixture, name: &str, root: &Path) {
 /// A put doesn't overwrite on disk; in the mount it was added beside the file
 /// of its name, and the write failed with `Duplicate filename`.
 #[test]
-#[ignore = "red: the put is added beside the file of its name"]
 fn putting_a_file_into_a_mount_over_one_of_that_name_is_refused() {
     let both = put_both_ways("notes.txt");
     assert_eq!(both.on_disk, both.on_disk_before, "{}", both.told_on_disk);
@@ -1021,7 +1012,6 @@ fn putting_a_file_into_a_mount_over_one_of_that_name_is_refused() {
 /// A deleted member's name: the delete hid the put file, and the write
 /// dropped it.
 #[test]
-#[ignore = "red: a put never checks the names pending changes hold"]
 fn putting_a_file_into_a_mount_under_a_deleted_members_name_is_refused() {
     mounted(|mut fx| {
         let archive = fx.archive.clone();
@@ -1047,7 +1037,6 @@ fn putting_a_file_into_a_mount_under_a_deleted_members_name_is_refused() {
 /// taken by then. In a mount both were added under it; the put is refused
 /// whole, as every change to an archive is.
 #[test]
-#[ignore = "red: both are added under the one name"]
 fn putting_two_files_of_one_name_into_a_mount_is_refused() {
     mounted(|mut fx| {
         let archive = fx.archive.clone();
@@ -1080,7 +1069,6 @@ fn putting_two_files_of_one_name_into_a_mount_is_refused() {
 
 /// The put flash named the staging directory, as the copy's did.
 #[test]
-#[ignore = "red: the flash names the staging directory"]
 fn putting_into_a_mount_says_where_in_the_archive_it_went() {
     let both = put_both_ways("brought.txt");
     assert!(

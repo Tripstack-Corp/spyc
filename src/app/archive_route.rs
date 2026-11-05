@@ -18,6 +18,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::archive::mount::MemberRef;
 use crate::archive::{ArchiveMount, Mounts};
 use crate::fs::EntryKind;
 
@@ -52,8 +53,8 @@ pub enum ArchiveSink {
     /// is an index edit, which is why either costs nothing however large it is.
     Record(Vec<PendingChange>),
     /// Both: run `effect` — already pointed at the staging tree — and record what
-    /// it will have added. Bringing a file *in* genuinely needs its bytes copied
-    /// somewhere, and staging is where the repack reads them from.
+    /// it will have added or replaced. Bringing a file *in* genuinely needs its
+    /// bytes copied somewhere, and staging is where the repack reads them from.
     RewriteAndRecord {
         effect: Box<Effect>,
         changes: Vec<PendingChange>,
@@ -76,6 +77,11 @@ pub enum PendingChange {
         archive: PathBuf,
         inner: String,
     },
+    /// A member whose staged bytes a copy in overwrites.
+    Replace {
+        archive: PathBuf,
+        inner: String,
+    },
 }
 
 impl PendingChange {
@@ -84,7 +90,8 @@ impl PendingChange {
         match self {
             Self::Delete { archive, .. }
             | Self::Rename { archive, .. }
-            | Self::Add { archive, .. } => archive,
+            | Self::Add { archive, .. }
+            | Self::Replace { archive, .. } => archive,
         }
     }
 }
@@ -226,33 +233,7 @@ fn classify(
             }
         }
         Effect::Inventory(InventoryOp::Put { dest_dir, ids }) => {
-            if !mounts.contains(dest_dir) {
-                return Verdict::Pass;
-            }
-            let Some((mount, inner_dir)) = mounts.resolve(dest_dir) else {
-                return Verdict::Pass;
-            };
-            // The inventory worker copies from its own cache into a directory, so
-            // pointing it at the staging tree is all it takes; the names it will
-            // write are the yanked files' own.
-            let names = inventory_names(ids);
-            let changes: Vec<PendingChange> = names
-                .iter()
-                .map(|name| PendingChange::Add {
-                    archive: mount.archive().to_path_buf(),
-                    inner: join_inner(&inner_dir, name),
-                })
-                .collect();
-            if changes.is_empty() {
-                return Verdict::Refuse("archive: nothing to put");
-            }
-            Verdict::RewriteAndRecord {
-                effect: Box::new(Effect::Inventory(InventoryOp::Put {
-                    dest_dir: mount.staging_root.join(&inner_dir),
-                    ids: ids.clone(),
-                })),
-                changes,
-            }
+            put_in(dest_dir, ids, mounts, inventory_names)
         }
         // Deleting a member is an edit to the container's index, not a file
         // removal — recorded now, applied by the next write-back. A mixed
@@ -334,6 +315,25 @@ const INTO_A_DIR_OR_A_NEW_NAME: &str = "archive: copy into a directory, or one f
 /// The refusal for a copy in to a name the journal can't record an addition
 /// under.
 const UNDER_OWN_NAMES: &str = "archive: copy files in under their own names, then rename";
+
+/// The refusal for a copy into a directory over a name a pending change holds:
+/// a delete would hide the copy, and a rename keeps the bytes of the member it
+/// shows under the name the archive stores.
+const HELD: &str = "archive: a pending change holds that name — :archive write first";
+
+/// The refusal for a file copied over a directory, which fails on disk too.
+const OVER_A_DIRECTORY: &str = "archive: a directory has that name";
+
+/// The refusal for a file copied over a link, which on disk writes wherever the
+/// link points.
+const OVER_A_LINK: &str = "archive: a link has that name";
+
+/// The refusal for a copy over a member staged apart from its name, as one of
+/// two whose names differ only in case is: the copy would write the other's.
+const BUT_FOR_CASE: &str = "archive: two members share that name but for case — rename one first";
+
+/// The refusal for a put to a name already listed, as a put on disk refuses.
+const TAKEN: &str = "archive: that name is taken — a put doesn't overwrite";
 
 /// A `%` copy fan-out, answered pair by pair as [`FileOp::Copy`] is. Its
 /// sources stay where they are, so no pair is ever journaled as a rename, and a
@@ -417,16 +417,22 @@ fn bring_in(
 
 /// Each file into the directory the mount shows at `shown`, under its own name.
 fn into_dir(paths: &[PathBuf], mount: &ArchiveMount, shown: &str) -> Verdict {
-    let changes: Vec<PendingChange> = paths
+    let landings: Vec<String> = paths
         .iter()
-        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .map(|name| PendingChange::Add {
-            archive: mount.archive().to_path_buf(),
-            inner: join_inner(shown, &name),
+        .filter_map(|p| {
+            p.file_name()
+                .map(|n| join_inner(shown, &n.to_string_lossy()))
         })
         .collect();
-    if changes.is_empty() {
+    if landings.is_empty() {
         return Verdict::Refuse("archive: nothing to copy in");
+    }
+    let mut changes = Vec::new();
+    for landing in landings {
+        match land(mount, landing) {
+            Ok(change) => changes.push(change),
+            Err(why) => return Verdict::Refuse(why),
+        }
     }
     Verdict::RewriteAndRecord {
         effect: Box::new(Effect::FileOp(FileOp::Copy {
@@ -434,6 +440,100 @@ fn into_dir(paths: &[PathBuf], mount: &ArchiveMount, shown: &str) -> Verdict {
             dest: mount.staging_root.join(shown),
         })),
         changes,
+    }
+}
+
+/// What a file copied to `landing`, a path the mount shows in a directory,
+/// does there, as a copy on disk does: a free name takes an addition, and a
+/// file's name a replacement of its bytes, a file copied in before staying the
+/// one addition it is. The copy writes the bytes at `landing` under the
+/// staging root, so a name whose bytes live anywhere else is refused.
+fn land(mount: &ArchiveMount, landing: String) -> Result<PendingChange, &'static str> {
+    let archive = mount.archive().to_path_buf();
+    match shown_kind(mount, &landing) {
+        None if claimed(mount, &landing) => Err(HELD),
+        None => Ok(PendingChange::Add {
+            archive,
+            inner: landing,
+        }),
+        Some(EntryKind::Dir) => Err(OVER_A_DIRECTORY),
+        Some(EntryKind::Symlink | EntryKind::Other) => Err(OVER_A_LINK),
+        Some(EntryKind::File | EntryKind::Executable) => {
+            match mount.member_at(&mount.index.mount_path(&landing)) {
+                // Shown under a name a pending rename gave it.
+                Some(member) if member.inner() != landing => Err(HELD),
+                Some(member) if member.staging_rel() != Path::new(&landing) => Err(BUT_FOR_CASE),
+                Some(MemberRef::Archived(_)) => Ok(PendingChange::Replace {
+                    archive,
+                    inner: landing,
+                }),
+                Some(MemberRef::Added { .. }) => Ok(PendingChange::Add {
+                    archive,
+                    inner: landing,
+                }),
+                None => Err(HELD),
+            }
+        }
+    }
+}
+
+/// A put of the inventory items `ids` into `dest_dir`: inside a mount, an
+/// addition under each item's name, its bytes put in the staging tree.
+fn put_in(
+    dest_dir: &Path,
+    ids: &[String],
+    mounts: &Mounts,
+    inventory_names: &dyn Fn(&[String]) -> Vec<String>,
+) -> Verdict {
+    if !mounts.contains(dest_dir) {
+        return Verdict::Pass;
+    }
+    let Some((mount, inner_dir)) = mounts.resolve(dest_dir) else {
+        return Verdict::Pass;
+    };
+    // The inventory worker copies from its own cache into a directory, so
+    // pointing it at the staging tree is all it takes; the names it will
+    // write are the yanked files' own.
+    let mut changes: Vec<PendingChange> = Vec::new();
+    for name in &inventory_names(ids) {
+        let inner = join_inner(&inner_dir, name);
+        if let Some(why) = put_refusal(mount, &inner, &changes) {
+            return Verdict::Refuse(why);
+        }
+        changes.push(PendingChange::Add {
+            archive: mount.archive().to_path_buf(),
+            inner,
+        });
+    }
+    if changes.is_empty() {
+        return Verdict::Refuse("archive: nothing to put");
+    }
+    Verdict::RewriteAndRecord {
+        effect: Box::new(Effect::Inventory(InventoryOp::Put {
+            dest_dir: mount.staging_root.join(&inner_dir),
+            ids: ids.to_vec(),
+        })),
+        changes,
+    }
+}
+
+/// Why a put can't write `inner`: a put on disk doesn't overwrite, and the
+/// journal can't hold an addition under a name a pending change holds.
+/// `earlier` are the additions this put makes before it.
+fn put_refusal(
+    mount: &ArchiveMount,
+    inner: &str,
+    earlier: &[PendingChange],
+) -> Option<&'static str> {
+    let again = earlier
+        .iter()
+        .any(|change| matches!(change, PendingChange::Add { inner: added, .. } if added == inner));
+    if again || shown_kind(mount, inner).is_some() {
+        Some(TAKEN)
+    } else if claimed(mount, inner) {
+        Some(HELD)
+    } else {
+        None
     }
 }
 

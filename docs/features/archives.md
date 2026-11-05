@@ -63,7 +63,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   no bytes move however large it is), and `e` / `V` edit a member by extracting it
   and opening your editor on that copy. A file you bring in is a member from that
   moment — read it, edit it, rename it — and `R` on one takes it straight back out
-  rather than recording a removal, since the archive never held it. Everything
+  rather than recording a removal, since the archive never held it. As on disk,
+  `c` over a file of the same name replaces it, while `c` over a directory or a
+  link and `p` over any name already there are refused; so is either under a
+  name a pending rename or delete still holds, until `:archive write`. Everything
   else stays pending until
   `:archive write`; the suffix carries a `+2 ~1 -3` badge meanwhile, and each
   changed member is marked in the listing's own status gutter — and the archive
