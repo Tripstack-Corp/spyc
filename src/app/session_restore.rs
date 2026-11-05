@@ -522,10 +522,8 @@ impl App {
 
     /// Restore a saved vertical split: reopen the second commander at its saved
     /// cwd (PR G) or re-load the Stage-1 preview file, then apply the saved
-    /// shape. Split out of `restore_project` so it's unit-testable WITHOUT the
-    /// session-cwd `chdir` (which `set_current_dir`s and would race the parallel
-    /// test runner) — `open_second_commander_at` / `load_right_preview` don't
-    /// touch the process cwd.
+    /// shape. Split out of `restore_project` so it's unit-testable without the
+    /// rest of a session.
     pub(super) fn restore_vsplit(
         &mut self,
         sv: &crate::state::sessions::SavedVsplit,

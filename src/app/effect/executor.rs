@@ -40,7 +40,8 @@ impl App {
             // held back until its bytes exist, and one that would write into a
             // container is refused. `run_effects` is the only route to the OS, so
             // this is the only place that has to know.
-            let Some(effect) = self.screen_archive_effect(effect) else {
+            // A relative `ChangeDir` is anchored on its column first.
+            let Some(effect) = self.screen_archive_effect(self.anchor_change_dir(effect)) else {
                 continue;
             };
             match effect {
@@ -206,40 +207,7 @@ impl App {
                     args,
                     pause_after,
                     subshell,
-                } => {
-                    // Capture the result instead of `?`-propagating it: a
-                    // failed spawn (missing/misspelled $EDITOR/$SHELL) used to
-                    // bubble out of run_effects → App::run and exit spyc,
-                    // dropping every pane PtyHost (SIGKILL on the agent
-                    // children) without saving the session. `run` already
-                    // restored the TUI on the spawn-error path, so here we just
-                    // flash it (below) and carry on.
-                    let fg_result = fg.run(terminal, &program, &args, pause_after, subshell);
-                    // `suspend_tui` handed mouse reporting to the child; record
-                    // that so the loop-bottom `settle_mouse_mode` re-enables it
-                    // if the user wants it. `resume_tui` deliberately doesn't do
-                    // this itself — it has no config access, and the settle is
-                    // the single place that decides.
-                    // --- after-work (moved verbatim from the run loop's
-                    // former `if let PostAction::Spawn` call site) ---
-                    // Runs regardless of the spawn result: the pager
-                    // round-trip still needs unwinding (the temp file holds the
-                    // pre-edit content when the editor never launched) and the
-                    // listing refresh is harmless.
-                    // Child may have clobbered our title; force a
-                    // re-emit on next draw.
-                    self.view.last_term_title = None;
-                    // The listing may have changed (mv, rm, chmod, etc).
-                    self.state.refresh_listing();
-                    // If we were editing a pager buffer, restore it.
-                    self.restore_pending_pager_return();
-                    // Flash a failed spawn last (so it's the message left on
-                    // screen) — never fatal. The TUI and pager were already
-                    // restored above.
-                    if let Err(e) = fg_result {
-                        self.state.flash_error(format!("{program}: {e:#}"));
-                    }
-                }
+                } => self.run_foreground(terminal, fg, &program, &args, pause_after, subshell),
                 // The tar+zstd / trash IO runs on a detached worker, never the
                 // event loop.
                 Effect::Graveyard(op) => self.spawn_graveyard_op(op),
@@ -299,6 +267,75 @@ impl App {
 }
 
 impl App {
+    /// A relative `ChangeDir` path starts from the focused column, the one the
+    /// effect moves. Anchored before the archive screen looks it up, so neither
+    /// reads the process cwd, which a navigation earlier in this tick hasn't
+    /// moved yet.
+    fn anchor_change_dir(&self, effect: Effect) -> Effect {
+        match effect {
+            Effect::ChangeDir {
+                path,
+                focus,
+                on_ok,
+                err_prefix,
+            } if path.is_relative() => Effect::ChangeDir {
+                path: self.state.cur().listing.dir.join(path),
+                focus,
+                on_ok,
+                err_prefix,
+            },
+            other => other,
+        }
+    }
+
+    /// Hand the terminal to `program` (`$`, `$EDITOR`, a `unix` binding), then
+    /// put the TUI back. The child runs in the focused column's directory: a
+    /// navigation earlier in this tick has moved the column but not the process.
+    fn run_foreground(
+        &mut self,
+        terminal: &mut Tui,
+        fg: &ForegroundExec,
+        program: &str,
+        args: &[String],
+        pause_after: bool,
+        subshell: bool,
+    ) {
+        // Capture the result instead of `?`-propagating it: a failed spawn
+        // (missing/misspelled $EDITOR/$SHELL) used to bubble out of
+        // run_effects → App::run and exit spyc, dropping every pane PtyHost
+        // (SIGKILL on the agent children) without saving the session. `run`
+        // already restored the TUI on the spawn-error path, so here we just
+        // flash it (below) and carry on.
+        let fg_result = fg.run(
+            terminal,
+            program,
+            args,
+            pause_after,
+            subshell,
+            self.desired_process_cwd(),
+        );
+        // `suspend_tui` handed mouse reporting to the child; record that so the
+        // loop-bottom `settle_mouse_mode` re-enables it if the user wants it.
+        // `resume_tui` deliberately doesn't do this itself — it has no config
+        // access, and the settle is the single place that decides.
+        // --- after-work (moved verbatim from the run loop's former
+        // `if let PostAction::Spawn` call site) ---
+        // Runs regardless of the spawn result: the pager round-trip still needs
+        // unwinding (the temp file holds the pre-edit content when the editor
+        // never launched) and the listing refresh is harmless.
+        // Child may have clobbered our title; force a re-emit on next draw.
+        self.view.last_term_title = None;
+        // The listing may have changed (mv, rm, chmod, etc).
+        self.state.refresh_listing();
+        // If we were editing a pager buffer, restore it.
+        self.restore_pending_pager_return();
+        // Flash a failed spawn last (so it's the message left on screen) —
+        // never fatal. The TUI and pager were already restored above.
+        if let Err(e) = fg_result {
+            self.state.flash_error(format!("{program}: {e:#}"));
+        }
+    }
+
     /// `ForegroundExec`'s after-work (run_effects, every program handoff
     /// `$EDITOR` through `$`): if a pager buffer was closed for the child to
     /// edit the same file, reopen it now that the child has exited. Moved

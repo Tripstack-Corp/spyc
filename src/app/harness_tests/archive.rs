@@ -51,13 +51,10 @@ pub(super) fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec
     fx
 }
 
-/// Puts the process cwd back on drop.
-///
-/// `change_dir` moves the *process* cwd, and a test that points it at a tempdir
-/// leaves it dangling the moment that tempdir is cleaned up — after which every
-/// later test in this binary that needs a working directory fails with
-/// "Could not obtain the current working directory". Restoring to the crate root
-/// is unconditional because it is the one path guaranteed to still exist.
+/// Puts the process cwd back on drop, at the crate root: the one path
+/// guaranteed to still exist. A process cwd left in a cleaned-up tempdir fails
+/// every later test in this binary that needs a working directory with "Could
+/// not obtain the current working directory".
 struct CwdGuard;
 
 impl Drop for CwdGuard {
