@@ -531,6 +531,7 @@ mod pane_fork;
 mod per_column;
 mod pick_jump;
 mod picker_routing;
+mod process_cwd;
 mod project_config;
 mod project_landings;
 mod project_switch;
