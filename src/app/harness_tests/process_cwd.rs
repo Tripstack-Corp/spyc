@@ -305,7 +305,6 @@ fn a_relative_jump_history_entry_goes_there_from_the_column() {
 /// child started from there runs, rather than wherever it was left: in another
 /// column's directory, or the one spyc was launched in.
 #[test]
-#[ignore = "red: inside an archive the process stays wherever it is"]
 fn inside_an_archive_the_process_belongs_beside_it() {
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap();

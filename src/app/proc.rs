@@ -242,8 +242,7 @@ impl ForegroundExec {
 }
 
 /// The child [`run_child_in_foreground`] starts: `program` in `cwd`, or where
-/// spyc is when there's none (a column inside an archive mount has no
-/// directory to give).
+/// spyc is when there's none.
 fn foreground_command(
     program: &str,
     args: &[String],
