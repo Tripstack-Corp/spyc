@@ -235,7 +235,7 @@ rectangular selection.
 | `;` | Foreground command (top, vim, etc.) |
 | `$` | Drop into `$SHELL` |
 | `Space m` | The make menu: the targets of the Makefile under the cursor, or in the column's directory; a row runs one as a `!` capture (`^a Space m` from the pane) |
-| `:make [target]` | Run a Makefile target as a `!` capture from the column's directory; bare, open the make menu |
+| `:make [target…]` | Run Makefile targets as a `!` capture from the column's directory, each word its own argument (`:make check V=1`); bare, open the make menu |
 | `:` | Command line (`:cd`, `:sort`, `:limit`, `:grep`, `:fg`, `:task`, `:q`) |
 
 `%` in any command expands to the current selection, relative to the directory the command runs in (`./%` runs the selected script); anything outside it stays absolute. `%%` is a literal `%`: `!printf '%%s\n' %` prints each selected name.

@@ -11,9 +11,11 @@
 //! is cached.
 //!
 //! A row's key is `:make <target>`, and the row and the typed command both run
-//! through [`App::run_make`]. A target name is the Makefile's text, so every
-//! word of the command is shell-quoted. A list taller than the frame keeps the
-//! rows it can draw and ends in one naming how many more `:make` reaches.
+//! through [`App::run_make`]. A typed `:make` takes each word as its own
+//! argument, targets and `NAME=value` alike. A target name is the Makefile's
+//! text and a typed word the user's, so every word of the command is
+//! shell-quoted. A list taller than the frame keeps the rows it can draw and
+//! ends in one naming how many more `:make` reaches.
 
 use std::path::{Path, PathBuf};
 
@@ -44,17 +46,18 @@ pub struct MakefileLanded {
     found: Result<Taskfile, String>,
 }
 
-/// What a make menu row runs: `target`, from `dir`, naming `file` with `-f`
-/// when plain `make` there would read another.
+/// What a make menu row or a typed `:make` runs: make's `args`, a menu row's
+/// target or the words typed, from `dir`, naming `file` with `-f` when plain
+/// `make` there would read another.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MakeRun {
     pub dir: PathBuf,
     pub file: Option<String>,
-    pub target: String,
+    pub args: Vec<String>,
 }
 
 impl MakeRun {
-    /// `make [-f FILE] TARGET`, each word quoted for the shell.
+    /// `make [-f FILE] ARGS…`, each word quoted for the shell.
     pub fn command(&self) -> String {
         let quote = crate::shell::shell_quote;
         let mut words = vec!["make".to_string()];
@@ -62,7 +65,7 @@ impl MakeRun {
             words.push("-f".to_string());
             words.push(quote(file));
         }
-        words.push(quote(&self.target));
+        words.extend(self.args.iter().map(|arg| quote(arg)));
         words.join(" ")
     }
 }
@@ -173,13 +176,14 @@ impl App {
             .into_iter()
             .map(|target| {
                 let label = row_label(&target);
+                let key = format!(":make {}", target.name);
                 let run = MakeRun {
                     dir: dir.clone(),
                     file: file.clone(),
-                    target: target.name,
+                    args: vec![target.name],
                 };
                 (
-                    format!(":make {}", run.target),
+                    key,
                     label,
                     HintEntry::Command(Some(super::view_state::CommandRow::Make(run))),
                 )
@@ -202,8 +206,9 @@ impl App {
     }
 }
 
-/// `:make [target]`: with a target, run it from the focused column's
-/// directory, where plain `make` picks the Makefile; bare, open the menu.
+/// `:make [args…]`: with words, run make with each as its own argument, from
+/// the focused column's directory, where plain `make` picks the Makefile;
+/// bare, open the menu.
 pub(super) fn cmd_make(app: &mut App, args: &str) -> Vec<Effect> {
     if args.is_empty() {
         return app.apply(&Action::MakeMenu).unwrap_or_else(|e| {
@@ -226,7 +231,7 @@ pub(super) fn cmd_make(app: &mut App, args: &str) -> Vec<Effect> {
     let run = MakeRun {
         dir,
         file: None,
-        target: args.to_string(),
+        args: args.split_whitespace().map(str::to_string).collect(),
     };
     app.run_make(&run);
     Vec::new()

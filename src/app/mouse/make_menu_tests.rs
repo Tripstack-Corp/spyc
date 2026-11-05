@@ -384,7 +384,6 @@ y`touch>pwned-tick`: ## Backtick
 
 /// `:make fmt lint` builds both targets, as `make fmt lint` does.
 #[test]
-#[ignore = "red: `:make fmt lint` runs `make 'fmt lint'`, one target"]
 fn make_with_two_words_builds_both_targets() {
     with_mouse(|tmp| {
         let dir = tmp.join("work");
@@ -403,7 +402,6 @@ fn make_with_two_words_builds_both_targets() {
 
 /// `:make check V=1` passes the variable to make, as `make check V=1` does.
 #[test]
-#[ignore = "red: `:make check V=1` runs `make 'check V=1'`, one target"]
 fn make_passes_a_variable() {
     with_mouse(|tmp| {
         let dir = tmp.join("work");
