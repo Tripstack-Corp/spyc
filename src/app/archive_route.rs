@@ -1143,7 +1143,7 @@ mod tests {
             }),
             Effect::FileOp(FileOp::RenameEach {
                 pairs: vec![(container.clone(), PathBuf::from("/src/renamed.zip"))],
-                is_move: false,
+                is_move: true,
             }),
         ] {
             let sink = route_archive_effect(effect, &mounts, &nothing_staged, &no_names, &no_dirs);
