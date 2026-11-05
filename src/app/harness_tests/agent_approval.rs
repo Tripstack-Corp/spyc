@@ -856,7 +856,13 @@ fn draw_agy_fixture(app: &mut App, dir: &std::path::Path, fixture: &str) {
             .send_bytes(format!("\x1b[2J\x1b[H{}", fixture.replace('\n', "\r\n")).as_bytes())
             .unwrap();
     }
-    wait_screen(app, "· high");
+    let footer = fixture
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|row| !row.is_empty())
+        .expect("the fixture has a footer");
+    wait_screen(app, footer);
 }
 
 /// Reports `working`, then runs the quiet scrape over the screen.
@@ -1120,4 +1126,156 @@ fn agy_mcp_and_file_access_approvals_turn_the_dot_blocked() {
             ));
         });
     }
+}
+
+const AGY_EDITOR: &str =
+    include_str!("../../../tests/fixtures/agy-output/approval-command-editor.txt");
+
+/// [`AGY_EDITOR`] editing a command that names a path, which `gf`, `J` and
+/// `^a u` would offer if they read the editor as output.
+fn agy_editor_with_a_path() -> String {
+    AGY_EDITOR.replaced("uname -m", "cat src/printed.rs")
+}
+
+/// `ctrl+g` over a command approval opens agy's expanded permission editor,
+/// and the approval still waits on the user while it is open.
+#[test]
+#[ignore = "red: no agy dialog has the editor's `Requested Permission (Editable):` box"]
+fn agy_permission_editor_scrapes_as_blocked() {
+    let expected = Some((
+        AgentActivity::Blocked,
+        Some("awaiting tool-execution approval"),
+    ));
+    assert_eq!(agy_scan(AGY_EDITOR), expected);
+    assert_eq!(agy_scan(&agy_editor_with_a_path()), expected);
+}
+
+/// The editor fills the screen, so none of it is agy's output.
+#[test]
+#[ignore = "red: `agy_output_len` reads the whole editor as output"]
+fn agy_permission_editor_is_not_output() {
+    let header = header_row(AGY_EDITOR, "Expanded Tool Permission Editor");
+    assert_eq!(agy_output_rows(AGY_EDITOR), header);
+    assert_eq!(
+        agy_output_rows(&AGY_EDITOR.replaced("  > uname -m\n", "  > uname -m &&\n  uname -r\n")),
+        header,
+        "a command edited onto two rows is the editor too"
+    );
+}
+
+/// Each anchor of the editor is required: its header over a rule, the
+/// `Requested Permission (Editable):` box under a second rule, the hint and
+/// the cancel footer.
+#[test]
+fn agy_permission_editor_lookalikes_stay_output() {
+    let rule = "─".repeat(100);
+    let editor = agy_editor_with_a_path();
+    for (what, text) in [
+        (
+            "an indented header",
+            editor.replaced(
+                "Expanded Tool Permission Editor\n",
+                "  Expanded Tool Permission Editor\n",
+            ),
+        ),
+        (
+            "an unknown header",
+            editor.replaced("Expanded Tool Permission Editor\n", "Notes\n"),
+        ),
+        (
+            "no rule under the header",
+            editor.replacen(&format!("{rule}\n"), "", 1),
+        ),
+        (
+            "no rule over the box",
+            editor.replaced(
+                &format!("{rule}\n  Requested Permission (Editable):"),
+                "  Requested Permission (Editable):",
+            ),
+        ),
+        (
+            "no box label",
+            editor.replaced("  Requested Permission (Editable):\n", "\n"),
+        ),
+        (
+            "no hint",
+            editor.replaced(
+                "  enter confirm · esc back · pgup/pgdown scroll Full Command\n",
+                "\n",
+            ),
+        ),
+        (
+            "prose before ` confirm`",
+            editor.replaced("  enter confirm · esc back", "  then confirm · esc back"),
+        ),
+        (
+            "no cancel footer",
+            editor.replaced("\nesc to cancel ", "\nhow to cancel "),
+        ),
+        (
+            "a turn row in the box",
+            editor.replaced(
+                "  > cat src/printed.rs\n",
+                "  > cat src/printed.rs\n● Ran (git status)\n",
+            ),
+        ),
+        (
+            "a turn row in the command",
+            editor.replaced(
+                "    cat src/printed.rs\n",
+                "    cat src/printed.rs\n● Ran (git status)\n",
+            ),
+        ),
+    ] {
+        assert_ne!(text, editor, "{what}: the edit must change the fixture");
+        assert_eq!(agy_scan(&text), None, "{what} must not match");
+        assert_eq!(
+            agy_output_rows(&text),
+            text.lines().count(),
+            "{what} must stay output"
+        );
+    }
+}
+
+/// `^a u` labels nothing in the editor.
+#[test]
+#[ignore = "red: `^a u` labels the editor's command and hint"]
+fn agy_quick_select_leaves_out_the_permission_editor() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        draw_agy_fixture(&mut app, tmp.path(), &agy_editor_with_a_path());
+        app.open_quick_select();
+        let labelled = app.view.quick_select.as_ref().map(|qs| &qs.matches);
+        assert!(
+            labelled.is_none(),
+            "the editor's rows got labels: {labelled:?}"
+        );
+    });
+}
+
+/// The editor keeps agy's dot red behind its `working` report.
+#[test]
+#[ignore = "red: no agy dialog has the editor's `Requested Permission (Editable):` box"]
+fn agy_permission_editor_turns_the_dot_blocked() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        draw_agy_fixture(&mut app, tmp.path(), AGY_EDITOR);
+        settle_scrape_behind_working(&mut app);
+        let activity = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info()
+            .activity;
+        assert_eq!(activity, AgentActivity::Blocked);
+        assert!(
+            dump(&mut app).contains(
+                "source: SCRAPE-FALLBACK status=blocked (awaiting tool-execution approval)"
+            )
+        );
+    });
 }

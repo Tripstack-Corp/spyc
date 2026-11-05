@@ -13,6 +13,7 @@ row's distance from the bottom matches the live viewport.
 | `approval-question-narrow.txt` | live | 1.4.7 | 70 × 28 | `ask_question` whose `Question 1/1:` prompt wraps onto a second row |
 | `approval-mcp.txt` | live, hook-forced | 1.4.7 | 100 × 28 | `MCP` approval for `spyc/list_scopes` |
 | `approval-file-access.txt` | live, hook-forced | 1.4.7 | 100 × 28 | `File access` approval for a read, its target wrapped |
+| `approval-command-editor.txt` | live | 1.5.0 | 100 × 28 | the expanded permission editor `ctrl+g` opens over a `Command` approval for `uname -m` |
 | `composer-empty.txt` | live | 1.4.7 | 100 × 28 | idle, empty composer, after a turn |
 | `composer-draft.txt` | live | 1.4.7 | 100 × 28 | idle, an unsent draft in the composer |
 | `working.txt` | live | 1.4.7 | 100 × 28 | a running command, empty composer below it |
@@ -24,7 +25,10 @@ row's distance from the bottom matches the live viewport.
 `agy_live_capture_viewport_fixtures` in `src/app/harness_tests/agy_live.rs`
 captured them on 2026-10-24, and the three added for #866 on 2026-10-26. It
 starts `agy` in a spyc pane, drives it through each screen, and writes each one
-sanitized. Recapture with:
+sanitized. `agy_live_capture_permission_editor` captured
+`approval-command-editor.txt` on 2026-11-04, after agy updated itself to 1.5.0:
+it presses `ctrl+g` on a command approval, then Esc, and declines the approval.
+Recapture with:
 
 ```sh
 SPYC_AGY_CAPTURE_DIR=/tmp/agy-capture \

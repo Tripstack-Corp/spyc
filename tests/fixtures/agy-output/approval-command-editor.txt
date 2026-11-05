@@ -1,0 +1,28 @@
+Expanded Tool Permission Editor
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  Full Command:
+    uname -m
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  Requested Permission (Editable):
+  > uname -m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  enter confirm · esc back · pgup/pgdown scroll Full Command
+esc to cancel                                                   accept-edits · Gemini 4 Argon · high
