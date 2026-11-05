@@ -109,7 +109,7 @@ pub(super) fn right_click(app: &mut App, (col, row): (u16, u16)) {
 }
 
 /// Where `text` is drawn on the screen.
-fn drawn_at(app: &mut App, text: &str) -> (u16, u16) {
+pub(super) fn drawn_at(app: &mut App, text: &str) -> (u16, u16) {
     let buf = drawn(app);
     for y in 0..FRAME.height {
         let cells: Vec<String> = (0..FRAME.width)
@@ -576,8 +576,25 @@ fn a_rows_own_key_names_nothing() {
     });
 }
 
+/// Give the project a home, which gives the column a harpoon list, and fill
+/// the list, so `Ha` is offered and refuses: there is no slot left.
+fn fill_the_harpoon(app: &mut App) {
+    let home = app.state.cur().listing.dir.clone();
+    app.state.active_project_mut().home = Some(home.clone());
+    app.reconcile_harpoon();
+    let list = app
+        .state
+        .cur_mut()
+        .harpoon
+        .as_mut()
+        .expect("a home gives the column a harpoon list");
+    for slot in 0..crate::state::harpoon::MAX_SLOTS {
+        list.append(home.join(format!("slot{slot}")));
+    }
+}
+
 /// An action's own message keeps its place, with the row's key in front of it:
-/// harpoon's refusal outside a repo still shows, as an error, and still names
+/// harpoon's refusal of a full list still shows, as an error, and still names
 /// the key that would have done the same.
 #[test]
 fn an_actions_own_message_gets_the_key_in_front() {
@@ -585,6 +602,7 @@ fn an_actions_own_message_gets_the_key_in_front() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = app_over_entries(tmp.path());
+        fill_the_harpoon(&mut app);
         crate::set_mouse_capture_for_test(true);
         cursor_on(&mut app, "notes.txt");
         press(&mut app, '.');
@@ -594,7 +612,7 @@ fn an_actions_own_message_gets_the_key_in_front() {
 
         assert_eq!(
             flash(&app).as_deref(),
-            Some("Ha · harpoon: open a repo or set PROJECT_HOME (gP)")
+            Some("Ha · harpoon full (9 slots) — Hx to remove first")
         );
         assert!(
             app.state
@@ -646,6 +664,7 @@ fn a_learned_keys_message_shows_as_it_is() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = app_over_entries(tmp.path());
+        fill_the_harpoon(&mut app);
         crate::set_mouse_capture_for_test(true);
         cursor_on(&mut app, "notes.txt");
         for _ in 0..3 {
@@ -659,7 +678,7 @@ fn a_learned_keys_message_shows_as_it_is() {
 
         assert_eq!(
             flash(&app).as_deref(),
-            Some("harpoon: open a repo or set PROJECT_HOME (gP)")
+            Some("harpoon full (9 slots) — Hx to remove first")
         );
         crate::set_mouse_capture_for_test(false);
     });

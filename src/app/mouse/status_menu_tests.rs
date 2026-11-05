@@ -80,7 +80,7 @@ fn bar_text(cells: &[Cell]) -> String {
 }
 
 /// Where `text` is first drawn on the status bar.
-fn on_bar(app: &mut App, text: &str) -> (u16, u16) {
+pub(super) fn on_bar(app: &mut App, text: &str) -> (u16, u16) {
     let (y, cells) = bar(app);
     let line = bar_text(&cells);
     let byte = line
@@ -97,7 +97,7 @@ fn on_bar(app: &mut App, text: &str) -> (u16, u16) {
 }
 
 /// The body lines of the menu titled `title`, as drawn.
-fn menu(app: &mut App, title: &str) -> Vec<String> {
+pub(super) fn menu(app: &mut App, title: &str) -> Vec<String> {
     let buf = draw(app);
     let menu = menu_in(&buf, title);
     (menu.y + 1..menu.bottom() - 1)
@@ -139,7 +139,7 @@ fn release(app: &mut App, (col, row): (u16, u16)) -> Vec<Effect> {
     app.handle_mouse(at(MouseEventKind::Up(MouseButton::Left), col, row))
 }
 
-fn esc(app: &mut App) {
+pub(super) fn esc(app: &mut App) {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         .unwrap();
 }
@@ -413,7 +413,7 @@ fn the_collapsed_count_opens_the_project_list_and_the_projects_menu() {
 // ── the git segment ──
 
 /// A repo at `dir` with one commit, listed in an App's left column.
-fn repo_app(dir: &Path) -> App {
+pub(super) fn repo_app(dir: &Path) -> App {
     use crate::git::test_support::run_git;
     std::fs::create_dir_all(dir).unwrap();
     run_git(dir, &["init", "-q", "--initial-branch=main"]);
@@ -426,7 +426,7 @@ fn repo_app(dir: &Path) -> App {
 }
 
 /// Read `app`'s left column's repo as the git poll does.
-fn read_git(app: &mut App, dir: &Path) {
+pub(super) fn read_git(app: &mut App, dir: &Path) {
     app.state.update_repo_root(Side::Left, dir);
     app.state.refresh_git_state();
     assert!(app.state.cur().git.info.is_some(), "premise: in a repo");
@@ -473,7 +473,7 @@ fn the_git_segments_menu_offers_gd_only_with_changes() {
 }
 
 /// The git segment's menu of an App over `dir`'s repo, read afresh.
-fn git_menu(dir: &Path, split: bool) -> Vec<String> {
+pub(super) fn git_menu(dir: &Path, split: bool) -> Vec<String> {
     let mut app = App::test_app(dir.to_path_buf());
     app.view.term_size = (120, HEIGHT);
     read_git(&mut app, dir);
