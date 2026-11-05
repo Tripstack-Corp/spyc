@@ -146,6 +146,24 @@ impl PromptLine<'_> {
             .collect()
     }
 
+    /// Where byte `at` of the prefix is drawn once the prompt is wrapped to
+    /// `width` columns, as [`Self::wrapped_lines`] wraps it: its row and its
+    /// display column. `None` past the prefix.
+    pub fn prefix_cell(&self, width: u16, at: usize) -> Option<(usize, usize)> {
+        if at >= self.prefix.len() {
+            return None;
+        }
+        let runs = self.runs();
+        // The mode tag is the first run and the prefix the second.
+        let at = runs.first().map_or(0, |(tag, _)| tag.len()) + at;
+        let full: String = runs.iter().map(|(text, _)| text.as_str()).collect();
+        word_wrap_ranges(&full, width.max(1) as usize)
+            .into_iter()
+            .enumerate()
+            .find(|(_, (start, end))| (*start..*end).contains(&at))
+            .map(|(row, (start, _))| (row, crate::ui::display_width(&full[start..at])))
+    }
+
     /// How many rows the prompt needs at `width` columns once wrapped — so the
     /// layout can grow the prompt rect upward to fit a long command line
     /// instead of truncating it. Always ≥ 1.
@@ -154,6 +172,21 @@ impl PromptLine<'_> {
             .unwrap_or(u16::MAX)
             .max(1)
     }
+}
+
+/// The byte offsets in a confirm's `prefix` of the `y` and the `n` of the
+/// `[y/N]`, `(y/N)` or `[Y/n]` that ends it, a trailing `:` and spaces aside.
+/// Read from the end, so a question quoting a name that holds the same text
+/// can't move it. `None` when the prefix ends in no such choice.
+pub fn choice_in(prefix: &str) -> Option<(usize, usize)> {
+    let body = prefix.trim_end_matches([' ', ':']);
+    let at = body.len().checked_sub(5)?;
+    let tail = body.get(at..)?.as_bytes();
+    let bracketed = matches!((tail[0], tail[4]), (b'[', b']') | (b'(', b')'));
+    let y_n = tail[1].eq_ignore_ascii_case(&b'y')
+        && tail[2] == b'/'
+        && tail[3].eq_ignore_ascii_case(&b'n');
+    (bracketed && y_n).then_some((at + 1, at + 3))
 }
 
 #[cfg(test)]

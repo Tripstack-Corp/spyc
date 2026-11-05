@@ -168,6 +168,13 @@ takes, or keeps the hints for good, or turns them off
   The rest of the bar is text to select.
 - **Click the status bar's `⚠N` to open `:stderr`**, the log of what spyc's
   stderr received.
+- **Click the `y` or the `n` of a prompt's `[y/N]` to answer it**, as
+  typing the letter does: restarting or closing a running tab, closing a
+  project, removing files, mounting a large archive, and the other
+  single-key confirms. A consent's pop-up takes a click on its `[y]` or
+  `[n]`, and a startup-tab list's on `[Esc]`. A click anywhere else leaves
+  the prompt up. A prompt you finish with `Enter`, such as removing a
+  worktree, still wants the keyboard.
 - **Click the background tasks' tags to open the task viewer**, as `gB`
   does, on the newest task: the `[N●]` tags on the divider, or the status
   bar's `bg:` with no pane open. The viewer names `gB` until you have

@@ -6,7 +6,13 @@
 
 use ratatui::Frame;
 
+use crossterm::event::KeyCode;
+
 use crate::app::{App, Mode, PromptKind};
+
+/// A consent pop-up's answer: its key as drawn, its word, and the key it
+/// stands for.
+type ConsentAnswer = (&'static str, &'static str, KeyCode);
 
 impl App {
     /// P3-1 visual bell: paint spyc's spice-heat gradient border pulse over the
@@ -370,19 +376,22 @@ impl App {
         };
         // A project's startup-tab list shares the pop-up: it asks at launch,
         // and every command it would run needs a row the user can read.
-        let (title, max_w, answers): (&str, u16, &[(&str, &str)]) = match &prompt.kind {
+        let (title, max_w, answers): (&str, u16, &[ConsentAnswer]) = match &prompt.kind {
             PromptKind::HookConsent { .. } => (
                 " spyc — agent status ",
                 68,
-                &[("[y] ", "yes     "), ("[n] ", "no")],
+                &[
+                    ("[y] ", "yes     ", KeyCode::Char('y')),
+                    ("[n] ", "no", KeyCode::Char('n')),
+                ],
             ),
             PromptKind::ProjectTabsConsent { .. } => (
                 " spyc — project startup tabs ",
                 100,
                 &[
-                    ("[y] ", "run them     "),
-                    ("[n] ", "no     "),
-                    ("[Esc] ", "not now"),
+                    ("[y] ", "run them     ", KeyCode::Char('y')),
+                    ("[n] ", "no     ", KeyCode::Char('n')),
+                    ("[Esc] ", "not now", KeyCode::Esc),
                 ],
             ),
             _ => return,
@@ -440,17 +449,45 @@ impl App {
             .map(|l| Line::from(Span::styled(format!(" {l}"), body_style)))
             .collect();
         lines.push(Line::from("")); // spacer
+        let footer_row = u16::try_from(lines.len()).unwrap_or(u16::MAX);
+        if footer_row < inner.height {
+            self.record_consent_answers(answers, inner.x, inner.y + footer_row);
+        }
+        lines.push(self.consent_footer(answers));
+        frame.render_widget(Paragraph::new(lines), inner);
+    }
+
+    /// A consent pop-up's footer: each answer's key, then its word.
+    fn consent_footer(&self, answers: &[ConsentAnswer]) -> ratatui::text::Line<'static> {
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
         let key = Style::default()
             .fg(self.view.theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
         let word = Style::default().fg(self.view.theme.status_suffix);
         let mut footer = vec![Span::raw(" ")];
-        for (k, w) in answers {
+        for (k, w, _) in answers {
             footer.push(Span::styled(*k, key));
             footer.push(Span::styled(*w, word));
         }
-        lines.push(Line::from(footer));
-        frame.render_widget(Paragraph::new(lines), inner);
+        Line::from(footer)
+    }
+
+    /// Record where [`Self::consent_footer`] draws each answer, its key and
+    /// its word, on row `y` from column `x`, for a click on one.
+    fn record_consent_answers(&self, answers: &[ConsentAnswer], x: u16, y: u16) {
+        let width = |s: &str| u16::try_from(crate::ui::display_width(s)).unwrap_or(u16::MAX);
+        let mut at = x.saturating_add(1);
+        let mut choices = self.view.confirm_choices.borrow_mut();
+        for (k, w, code) in answers {
+            choices.push(crate::app::mouse::ChoiceSpan {
+                y,
+                x: at,
+                width: width(k).saturating_add(width(w.trim_end())),
+                key: *code,
+            });
+            at = at.saturating_add(width(k)).saturating_add(width(w));
+        }
     }
 
     /// Render the which-key chord-hint popup: a centred box listing the armed

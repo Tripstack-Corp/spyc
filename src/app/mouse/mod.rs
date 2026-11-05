@@ -258,6 +258,17 @@ pub struct TasksIndicator {
     pub width: u16,
 }
 
+/// A confirm prompt's answer as drawn, recorded by the renderer with the key it
+/// stands for: the `y` or the `n` of the prompt row's `[y/N]`, or a consent
+/// pop-up's `[y] yes`. What a click on it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChoiceSpan {
+    pub y: u16,
+    pub x: u16,
+    pub width: u16,
+    pub key: crossterm::event::KeyCode,
+}
+
 /// The key a click on the tasks' indicator, and its menu's first row, name:
 /// `gB` opens the task viewer from the file list.
 pub(super) const TASK_VIEWER_KEY: &str = "gB (list)";
@@ -326,6 +337,26 @@ impl super::App {
             .is_some_and(|r| {
                 crate::ui::status::notice_at(&r.line, usize::from(ev.column - r.x), &notice)
             })
+    }
+
+    /// The key of the confirm answer the pointer is on, as drawn.
+    fn confirm_choice_under(&self, ev: MouseEvent) -> Option<crossterm::event::KeyCode> {
+        self.view
+            .confirm_choices
+            .borrow()
+            .iter()
+            .find(|c| c.y == ev.row && (c.x..c.x.saturating_add(c.width)).contains(&ev.column))
+            .map(|c| c.key)
+    }
+
+    /// A click on a confirm prompt's answer: the key it stands for, typed, so
+    /// the prompt takes it as it takes the key.
+    fn answer_by_click(&mut self, code: crossterm::event::KeyCode) -> Vec<Effect> {
+        let key = crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE);
+        self.handle_key(key).unwrap_or_else(|e| {
+            self.state.flash_error(format!("{e:#}"));
+            Vec::new()
+        })
     }
 
     /// Whether the pointer is on the background tasks' indicator, as drawn.
@@ -438,6 +469,7 @@ impl super::App {
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
             MouseSink::StderrLog => self.open_stderr_log(),
             MouseSink::TaskViewer => self.click_tasks(),
+            MouseSink::Answer(code) => self.answer_by_click(code),
             MouseSink::Project(action) => self.click_project(action),
             MouseSink::FocusPane => {
                 self.set_pane_focus(true);
@@ -517,6 +549,7 @@ impl super::App {
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL),
             is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
+            confirm_choice: self.confirm_choice_under(ev),
             has_scroll_pager: self.view.project().scroll_pager.is_some(),
             pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),
