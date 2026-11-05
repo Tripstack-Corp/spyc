@@ -12,7 +12,7 @@ use super::*;
 fn yanking_a_member_captures_its_contents() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -44,7 +44,7 @@ fn yanking_a_member_captures_its_contents() {
 fn a_yank_is_held_back_until_the_member_is_extracted() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -213,7 +213,7 @@ fn the_screen_leaves_unrelated_effects_alone() {
 fn yanking_a_member_of_a_streamed_archive_captures_its_contents() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.tar.gz");
         build_tar_gz(&archive);
         let mut app = App::test_app(dir);
@@ -248,7 +248,7 @@ fn yanking_a_member_of_a_streamed_archive_captures_its_contents() {
 fn reading_a_member_twice_still_reads_its_bytes() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -297,7 +297,7 @@ fn reading_a_member_twice_still_reads_its_bytes() {
 fn a_mixed_selection_rewrites_the_staged_member_too() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -358,7 +358,7 @@ fn a_mixed_selection_rewrites_the_staged_member_too() {
 fn a_yanked_member_is_remembered_by_its_path_in_the_archive() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -400,7 +400,7 @@ fn a_yanked_member_is_remembered_by_its_path_in_the_archive() {
 fn re_yanking_a_member_refreshes_one_entry() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
