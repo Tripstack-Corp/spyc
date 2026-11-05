@@ -80,7 +80,6 @@ fn here(p: &Path) -> bool {
 
 /// `spyc -c 'cd sub' -c '!touch here'`: the capture runs where the `cd` went.
 #[test]
-#[ignore = "red: the capture starts before the `cd` lands"]
 fn a_capture_runs_where_an_earlier_cd_went() {
     let state = tempfile::tempdir().unwrap();
     let tree = tree();
@@ -100,7 +99,6 @@ fn a_capture_runs_where_an_earlier_cd_went() {
 
 /// `spyc -c 'cd sub' -c ';touch here'`: the command runs where the `cd` went.
 #[test]
-#[ignore = "red: the command starts before the `cd` lands"]
 fn a_foreground_command_runs_where_an_earlier_cd_went() {
     let state = tempfile::tempdir().unwrap();
     let tree = tree();
@@ -121,7 +119,6 @@ fn a_foreground_command_runs_where_an_earlier_cd_went() {
 /// `spyc -c 'cd sub' -c '!touch %.seen'`: `%` names the cursor row of the
 /// directory the `cd` went to.
 #[test]
-#[ignore = "red: `%` is expanded before the `cd` lands"]
 fn percent_names_the_row_an_earlier_cd_left_the_cursor_on() {
     let state = tempfile::tempdir().unwrap();
     let tree = tree();
@@ -143,7 +140,6 @@ fn percent_names_the_row_an_earlier_cd_left_the_cursor_on() {
 /// `spyc -c 'cd sub' -c 'grep needle'`: the pager searches from where the
 /// `cd` went.
 #[test]
-#[ignore = "red: the search starts before the `cd` lands"]
 fn a_grep_searches_from_where_an_earlier_cd_went() {
     let state = tempfile::tempdir().unwrap();
     let tree = tree();
@@ -178,7 +174,6 @@ fn a_grep_searches_from_where_an_earlier_cd_went() {
 /// `spyc -c 'there' -c '!touch here'`, `there` an `init.lua` command that
 /// navigates into `sub`: the capture waits for the Lua run to land.
 #[test]
-#[ignore = "red: the capture starts before the Lua run lands"]
 fn a_command_after_a_lua_command_waits_for_it_to_land() {
     use crate::lua::LuaWorker;
 
@@ -226,7 +221,6 @@ fn a_command_after_a_lua_command_waits_for_it_to_land() {
 /// the second until it's answered, as a typed `:sort mtime` would have gone
 /// into it.
 #[test]
-#[ignore = "red: `sort` runs under the prompt `setenv` opened"]
 fn a_prompt_an_earlier_command_opens_holds_the_rest() {
     let state = tempfile::tempdir().unwrap();
     let tree = tree();
