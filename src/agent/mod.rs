@@ -673,7 +673,11 @@ impl AgentProfile for CodexProfile {
 /// the cancel footer at the bottom. Agy formats that footer from `"%s to cancel"`,
 /// so the matcher accepts `<token> to cancel` rather than a literal `esc to cancel`.
 /// Mentioning those phrases in ordinary output, grep results, diffs, or an
-/// answered prompt above a subsequent turn does not match.
+/// answered prompt above a subsequent turn does not match. `ctrl+g` over a
+/// command approval opens agy's expanded permission editor, which fills the
+/// screen with its `Expanded Tool Permission Editor` header and its
+/// `Requested Permission (Editable):` box while the approval still waits, so it
+/// matches too.
 ///
 /// Verify a needle against a real pane (`harness_tests/agy_live.rs` captures
 /// one), not the binary's string table, where a runtime-formatted string such

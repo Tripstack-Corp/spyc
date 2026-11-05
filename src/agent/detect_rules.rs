@@ -51,7 +51,8 @@ pub enum Matcher {
     /// dialog header (`Command`, `File`, `Pending edit`, etc.), full-width `─`
     /// rule, `Requesting permission for:` (or the file-edit diff preview),
     /// recognized approval question, sequential numbered options (`1. Yes...`
-    /// .. `N. No...`), `↑/↓ Navigate` hint row, and `<token> to cancel` footer.
+    /// .. `N. No...`), `↑/↓ Navigate` hint row, and `<token> to cancel` footer;
+    /// or the expanded permission editor `ctrl+g` opens over that menu.
     AgyApproval,
 }
 
