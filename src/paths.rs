@@ -1,4 +1,5 @@
-//! Path expansion: `~` and `$VAR` / `${VAR}` substitution.
+//! Path expansion: `~` and `$VAR` / `${VAR}` substitution, and the canonical
+//! forms paths are compared in.
 //!
 //! Scoped deliberately narrow — we do *not* try to emulate `sh -c`. Anyone
 //! who needs more power can invoke the shell (`$`, `!`). This just makes
@@ -92,6 +93,39 @@ pub fn canonical_contains(root: &std::path::Path, candidate: &std::path::Path) -
     let root = std::fs::canonicalize(root).ok()?;
     let candidate = std::fs::canonicalize(candidate).ok()?;
     Some(candidate == root || candidate.starts_with(&root))
+}
+
+/// The canonical form of a path that may run on past a file into a mounted
+/// archive (`/src/pkg.zip/a/b`): the form a mount is keyed by, and the form
+/// a listing row's path already has.
+///
+/// The deepest existing directory on the path is canonicalized, so a symlink
+/// or `..` on the way there resolves as `chdir` resolves it. What follows,
+/// a file and the places inside it, is normalized lexically: spyc follows no
+/// link inside a mount, and the OS may refuse a `..` that follows a file.
+/// A relative path, or one with no directory the OS can resolve, comes back
+/// as given.
+pub fn canonical_mount_path(path: &std::path::Path) -> PathBuf {
+    use std::path::Component;
+    if !path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let Some(dir) = path.ancestors().find(|a| a.is_dir()) else {
+        return path.to_path_buf();
+    };
+    let (Ok(mut out), Ok(rest)) = (std::fs::canonicalize(dir), path.strip_prefix(dir)) else {
+        return path.to_path_buf();
+    };
+    for part in rest.components() {
+        match part {
+            Component::Normal(name) => out.push(name),
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    out
 }
 
 #[cfg(test)]

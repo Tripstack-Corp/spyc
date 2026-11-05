@@ -168,7 +168,6 @@ fn flashed(app: &App) -> String {
 /// Climbing out of an archive entered by another spelling of its path puts
 /// the cursor on the archive, as climbing out of any directory does.
 #[test]
-#[ignore = "red: the climb focuses the path as spelled, which no row in the canonical directory has"]
 fn climbing_out_lands_on_the_archive_however_its_path_was_spelled() {
     for_each_spelling(|mut tree, spelling| {
         cd(&mut tree.app, &spelling);
@@ -194,7 +193,6 @@ fn climbing_out_lands_on_the_archive_however_its_path_was_spelled() {
 /// The row of an archive holding an unwritten change says so, from the
 /// directory it lives in, whichever way the user went in.
 #[test]
-#[ignore = "red: the mount is keyed by the path as spelled, so the archive's row finds no mount"]
 fn the_archive_row_shows_its_unwritten_change_however_its_path_was_spelled() {
     for_each_spelling(|mut tree, spelling| {
         cd(&mut tree.app, &spelling);
@@ -215,7 +213,6 @@ fn the_archive_row_shows_its_unwritten_change_however_its_path_was_spelled() {
 /// its pending change, rather than mounting the archive a second time with a
 /// clean journal.
 #[test]
-#[ignore = "red: Enter on the row mounts the archive again under its canonical path, with a clean journal"]
 fn coming_back_by_its_row_finds_the_mount_entered_by_another_spelling() {
     for_each_spelling(|mut tree, spelling| {
         cd(&mut tree.app, &spelling);
@@ -242,7 +239,6 @@ fn coming_back_by_its_row_finds_the_mount_entered_by_another_spelling() {
 /// The other way round: an archive mounted from its row, then reached by
 /// another spelling of its path, is the same mount.
 #[test]
-#[ignore = "red: a :cd by another spelling finds no mount under that path and mounts the archive again"]
 fn another_spelling_finds_the_archive_already_mounted() {
     for_each_spelling(|mut tree, spelling| {
         enter(&mut tree.app, "pkg.zip");
@@ -269,7 +265,6 @@ fn another_spelling_finds_the_archive_already_mounted() {
 /// directory in it to its root, and from its root to where it lives; and
 /// `:cd ../..` from a directory in it climbs out in one go.
 #[test]
-#[ignore = "red: a path with `..` after the archive finds no mount, and the OS can't resolve it through a file"]
 fn cd_dot_dot_climbs_inside_an_archive() {
     in_a_tree(|mut tree| {
         enter(&mut tree.app, "pkg.zip");

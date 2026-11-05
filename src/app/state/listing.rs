@@ -415,12 +415,14 @@ impl AppState {
         let path = &self.col(side).listing.dir.join(path);
         // A path inside a mounted archive is virtual — there is no directory to
         // canonicalize and nothing to `chdir` into, since the "directory" is a
-        // file. `chdir_into_mount` builds the listing from the index instead.
-        if self.chdir_into_mount(side, path) {
+        // file. `chdir_into_mount` builds the listing from the index instead,
+        // found by the form the mount is keyed by.
+        let at = crate::paths::canonical_mount_path(path);
+        if self.chdir_into_mount(side, &at) {
             return Ok(());
         }
         let canonical =
-            std::fs::canonicalize(path).with_context(|| format!("resolving {}", path.display()))?;
+            std::fs::canonicalize(&at).with_context(|| format!("resolving {}", path.display()))?;
         let new_listing = Listing::read(&canonical)?;
         let focused = self.focused_side() == side;
         let users = focused && !self.in_background;
