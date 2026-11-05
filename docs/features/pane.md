@@ -306,7 +306,9 @@ Multiple tabs, each running an independent pty:
   column `^a k` returns to, so a pane opened while browsing a linked
   worktree lands there; `"project_home"` pins it to `PROJECT_HOME`
   regardless of the focused worktree; `"browse_dir"` opens it in the
-  focused column's current dir.
+  focused column's current dir. Inside an archive, where no program can
+  start, it opens in the directory holding the archive instead, unless
+  `"project_home"` has a `PROJECT_HOME` to pin it to.
 
 ## Quick Select — labelled overlay picker
 

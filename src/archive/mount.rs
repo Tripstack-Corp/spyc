@@ -210,6 +210,19 @@ impl Mounts {
         self.resolve(path).is_some()
     }
 
+    /// The nearest directory to `dir` a process can start in: `dir` itself
+    /// outside every mount, else the one holding the outermost archive, since a
+    /// path inside one names no directory on disk.
+    pub fn real_dir<'a>(&self, dir: &'a Path) -> &'a Path {
+        let mut dir = dir;
+        while self.contains(dir)
+            && let Some(parent) = dir.parent()
+        {
+            dir = parent;
+        }
+        dir
+    }
+
     /// The mount `path` is a **member** of, excluding the mount root.
     ///
     /// A mounted archive is still an ordinary file where it lives: it can be
