@@ -545,6 +545,7 @@ mod projects_switcher;
 mod prompt_templates;
 mod second_commander;
 mod send_selection;
+mod startup_commands;
 mod tab_completion;
 mod tab_cwd;
 mod thinking_history;
