@@ -350,7 +350,7 @@ fn a_harpoon_slot_inside_an_archive_comes_back_to_it() {
 // ── an archive inside an archive ──────────────────────────────────────────
 
 /// A zip holding a text file and a second zip.
-fn build_nested_zip(path: &Path) {
+pub(super) fn build_nested_zip(path: &Path) {
     let inner_bytes = {
         let mut buf = std::io::Cursor::new(Vec::new());
         let mut w = zip::ZipWriter::new(&mut buf);
