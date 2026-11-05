@@ -10,13 +10,17 @@
 //! decide from and opens the menu as a which-key popup that no chord armed.
 //!
 //! While a menu is open it takes the keys first (`InputSink::Menu`): `↑`/`↓`
-//! move a highlight, `Enter` fires it as a click on the row would, and `Esc`
-//! closes. Any other key closes the menu and goes where it would have gone
-//! with none open, so a row's own key does what the row says.
+//! move a highlight, `←`/`→` move it to the entry drawn on the same line of
+//! the previous or next column, over the columns `chord_hint_layout` draws,
+//! `Enter` fires it as a click on the row would, and `Esc` closes. Any other
+//! key closes the menu and goes where it would have gone with none open, so a
+//! row's own key does what the row says.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 
+use super::mouse::chord_hit::entry_across;
 use super::pager_handler::pager_menu;
 use super::view_state::{CommandRow, MenuState};
 use super::{App, ChordHint, Effect, HintEntry, View};
@@ -281,7 +285,7 @@ impl App {
         let plain = !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
-        let Some(hint) = self.view.chord_hint.as_mut() else {
+        let Some(hint) = self.view.chord_hint.as_ref() else {
             return self.handle_key(key);
         };
         let len = hint.entries.len();
@@ -295,9 +299,14 @@ impl App {
                     (_, Some(i)) => (i + len - 1) % len,
                     (_, None) => len - 1,
                 };
-                hint.menu = Some(MenuState {
-                    selected: Some(next),
-                });
+                self.select_menu_row(next);
+                Ok(Vec::new())
+            }
+            (KeyCode::Left | KeyCode::Right, _) if plain => {
+                let right = key.code == KeyCode::Right;
+                if let Some(next) = self.menu_row_across(selected, right) {
+                    self.select_menu_row(next);
+                }
                 Ok(Vec::new())
             }
             (KeyCode::Enter, Some(i)) if plain => Ok(self.fire_chord_row(i)),
@@ -316,6 +325,24 @@ impl App {
                 self.handle_key(key)
             }
         }
+    }
+
+    /// Highlight the open menu's entry `index`.
+    const fn select_menu_row(&mut self, index: usize) {
+        if let Some(hint) = self.view.chord_hint.as_mut() {
+            hint.menu = Some(MenuState {
+                selected: Some(index),
+            });
+        }
+    }
+
+    /// The entry `→` (`right`) or `←` moves the open menu's highlight to from
+    /// `selected`, over its columns as the frame draws them.
+    fn menu_row_across(&self, selected: Option<usize>, right: bool) -> Option<usize> {
+        let (cols, rows) = self.view.term_size;
+        let frame = Rect::new(0, 0, cols, rows);
+        let drawn = self.chord_hint_drawn(&self.frame_layout(frame), frame)?;
+        entry_across(&drawn, selected, right)
     }
 }
 

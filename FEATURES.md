@@ -51,7 +51,7 @@ on-demand answer to "what can I do from here?", modelled on Neovim's which-key.
 - `?` (or `F1`) still opens the full, scrollable, searchable key reference.
 - **`.` opens the same kind of menu for the entry under the cursor**, and
   **`^a .` for the active pane tab**: what you can do to that one thing, each
-  row with its key. `↑`/`↓` and `Enter` pick a row, `Esc` closes, and any
+  row with its key. The arrows and `Enter` pick a row, `Esc` closes, and any
   other key closes the menu and does what it always does. A right-click opens
   the menu of what it lands on ([Mouse](#mouse) lists them; hold ⌃ on
   iTerm2). Until one first opens, the status bar ends with `. menu`.

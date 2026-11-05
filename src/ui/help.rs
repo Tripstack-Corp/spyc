@@ -93,7 +93,7 @@ const SECTIONS: &[Section] = &[
             ("D", "open in pager (top pane, bottom pane stays visible)"),
             (
                 ".",
-                "menu for the entry under the cursor (↑↓ Enter pick a row, Esc closes; or right-click it)",
+                "menu for the entry under the cursor (↑↓←→ Enter pick a row, Esc closes; or right-click it)",
             ),
             ("u  -", "climb to parent"),
             ("~  Home", "go to home directory ($HOME)"),
