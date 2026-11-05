@@ -404,6 +404,7 @@ impl App {
             teach_menu: self.teaches_the_menu_key(),
         }
         .build(rect);
+        self.record_status_bar_tasks(rect, line.suffix_at);
         *self.view.status_row.borrow_mut() = Some(crate::app::mouse::StatusRow {
             y: rect.y,
             x: rect.x,

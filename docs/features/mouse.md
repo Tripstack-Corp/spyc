@@ -26,9 +26,15 @@ quick-select and `y` in the pager are the mouse-free yank paths.
   rest, as `^a .` opens it.
 - **On a pane tab's label**, spyc switches to that tab, as a left click does,
   and opens its menu.
-- **On the pane divider, off the tab labels** (past the last tab, or on the
-  cwd), the pane takes the keyboard and the `pane tabs` menu opens: new tab,
+- **On the pane divider, off the tab labels and the task tags** (past the
+  last tab, or on the cwd), the pane takes the keyboard and the `pane tabs` menu opens: new tab,
   next and previous tab once there are two, zoom, grow and shrink.
+- **On the background tasks' tags** (`[1●]` on the divider, or the status
+  bar's `bg:1●` with no pane open), the `tasks` menu opens: the task viewer
+  (`gB`), then each task by its command, with the `:fg N` that brings it
+  back. A click on a task's row brings it back as the live capture, as
+  `:fg N` does. While a capture is live only the task viewer is offered,
+  since `:fg` would refuse.
 - **On the split's divider**, the `split` menu opens: flip its height, focus
   the left or right column, and dim the inactive one, then close the split
   beside a preview, or close the second commander beside one. The keyboard
@@ -162,6 +168,10 @@ takes, or keeps the hints for good, or turns them off
   The rest of the bar is text to select.
 - **Click the status bar's `⚠N` to open `:stderr`**, the log of what spyc's
   stderr received.
+- **Click the background tasks' tags to open the task viewer**, as `gB`
+  does, on the newest task: the `[N●]` tags on the divider, or the status
+  bar's `bg:` with no pane open. The viewer names `gB` until you have
+  learned it.
 - Over an agent pane the wheel scrolls in whatever way that agent can:
   **claude** and **agy** scroll their own output; **codex**'s main chat view
   doesn't scroll, so the wheel drives its `^T` transcript overlay instead —

@@ -195,6 +195,7 @@ impl App {
         if fill > 0 {
             spans.push(Span::styled("─".repeat(fill), styles.rule));
         }
+        self.record_tasks_indicator(area, used + fill, tags_width);
         for (text, tone) in task_tags {
             let color = match tone {
                 TaskTone::Running => self.view.theme.dir, // soft blue
@@ -224,6 +225,28 @@ impl App {
             ));
         }
         self.draw_chrome_line(frame, area, Line::from(spans));
+    }
+
+    /// Record where the background tasks' indicator was drawn on the row
+    /// `area`: `width` columns from `offset`, kept to what the row shows.
+    /// Nothing when it is empty or off the row.
+    pub(super) fn record_tasks_indicator(
+        &self,
+        area: ratatui::layout::Rect,
+        offset: usize,
+        width: usize,
+    ) {
+        let offset = u16::try_from(offset).unwrap_or(u16::MAX);
+        let room = area.width.saturating_sub(offset);
+        let width = u16::try_from(width).unwrap_or(u16::MAX).min(room);
+        if width == 0 {
+            return;
+        }
+        *self.view.tasks_indicator.borrow_mut() = Some(crate::app::mouse::TasksIndicator {
+            y: area.y,
+            x: area.x + offset,
+            width,
+        });
     }
 
     /// The divider's styles. Tinting the rule + active tab in scroll mode is
@@ -482,67 +505,7 @@ impl App {
             View::Dir => (
                 crate::paths::display_tilde(&self.state.cur().listing.dir),
                 {
-                    let col = self.state.cur();
-                    let hidden = col.listing.entries.len().saturating_sub(col.rows.len());
-                    // Bg tasks normally render in the divider line above the
-                    // pane (distinct colour, right-aligned). When the pane is
-                    // hidden there is no divider, so fall back to the status-bar
-                    // suffix here.
-                    let bg_tag = if self.runtime.project().pane_tabs.is_some() {
-                        None
-                    } else {
-                        let running = self.runtime.background_tasks.running_count();
-                        let done = self.runtime.background_tasks.done_count();
-                        if running == 0 && done == 0 {
-                            None
-                        } else if done == 0 {
-                            Some(format!("bg:{running}\u{25cf}"))
-                        } else {
-                            Some(format!("bg:{running}\u{25cf}{done}\u{2713}"))
-                        }
-                    };
-                    // Inside a mounted archive, say so — the path alone reads
-                    // like an ordinary directory under a file, which is exactly
-                    // what it is, but not obviously deliberate.
-                    let archive_tag =
-                        self.state
-                            .mounts
-                            .resolve(&col.listing.dir)
-                            .map(|(mount, _)| {
-                                let ro = if mount.capability.is_writable() {
-                                    ""
-                                } else {
-                                    " ro"
-                                };
-                                let pending = if mount.is_dirty() {
-                                    format!(" {}", mount.journal.counts().badge())
-                                } else {
-                                    String::new()
-                                };
-                                format!("{}{ro}{pending}", mount.format().label())
-                            });
-                    let ignore = &self.state.active_project().config.ignore_masks;
-                    let mask = |on, group| status_flags::MaskFlag {
-                        on,
-                        default_on: crate::state::ignore::default_enabled(ignore, group),
-                    };
-                    let mut suffix = status_flags::suffix(
-                        &status_flags::FlagState {
-                            picks: col.picks.len(),
-                            inventory: self.state.inventory.len(),
-                            masks: [
-                                mask(col.masks.mask1.enabled, 1),
-                                mask(col.masks.mask2.enabled, 2),
-                            ],
-                            limit: col.temp_filter.as_deref(),
-                            hidden,
-                            sort: col.sort_order,
-                            sort_reversed: col.sort_reversed,
-                            archive: archive_tag.as_deref(),
-                            bg: bg_tag.as_deref(),
-                        },
-                        self.state.status_flags(),
-                    );
+                    let mut suffix = self.flags_suffix();
                     // `TopList` zoom collapses the pane (no divider), so its
                     // zoom cue can't ride the pane divider like `BottomPane`'s
                     // does — surface it here, the same fallback the bg-task tag
@@ -582,6 +545,106 @@ impl App {
                 )),
             ),
         }
+    }
+
+    /// The focused column's state as the status bar's suffix words it in a
+    /// directory, before the zoom cue.
+    fn flags_suffix(&self) -> status_flags::Suffix {
+        let col = self.state.cur();
+        let hidden = col.listing.entries.len().saturating_sub(col.rows.len());
+        let bg_tag = self.status_bar_tasks_tag();
+        // Inside a mounted archive, say so — the path alone reads
+        // like an ordinary directory under a file, which is exactly
+        // what it is, but not obviously deliberate.
+        let archive_tag = self
+            .state
+            .mounts
+            .resolve(&col.listing.dir)
+            .map(|(mount, _)| {
+                let ro = if mount.capability.is_writable() {
+                    ""
+                } else {
+                    " ro"
+                };
+                let pending = if mount.is_dirty() {
+                    format!(" {}", mount.journal.counts().badge())
+                } else {
+                    String::new()
+                };
+                format!("{}{ro}{pending}", mount.format().label())
+            });
+        let ignore = &self.state.active_project().config.ignore_masks;
+        let mask = |on, group| status_flags::MaskFlag {
+            on,
+            default_on: crate::state::ignore::default_enabled(ignore, group),
+        };
+        status_flags::suffix(
+            &status_flags::FlagState {
+                picks: col.picks.len(),
+                inventory: self.state.inventory.len(),
+                masks: [
+                    mask(col.masks.mask1.enabled, 1),
+                    mask(col.masks.mask2.enabled, 2),
+                ],
+                limit: col.temp_filter.as_deref(),
+                hidden,
+                sort: col.sort_order,
+                sort_reversed: col.sort_reversed,
+                archive: archive_tag.as_deref(),
+                bg: bg_tag.as_deref(),
+            },
+            self.state.status_flags(),
+        )
+    }
+
+    /// The background tasks' tag the status bar's suffix carries, `bg:N●` or
+    /// `bg:N●M✓` once some are done. Bg tasks normally render in the divider
+    /// line above the pane (distinct colour, right-aligned); `None` while
+    /// there is one, or no task.
+    fn status_bar_tasks_tag(&self) -> Option<String> {
+        if self.runtime.project().pane_tabs.is_some() {
+            return None;
+        }
+        let running = self.runtime.background_tasks.running_count();
+        let done = self.runtime.background_tasks.done_count();
+        if running == 0 && done == 0 {
+            None
+        } else if done == 0 {
+            Some(format!("bg:{running}\u{25cf}"))
+        } else {
+            Some(format!("bg:{running}\u{25cf}{done}\u{2713}"))
+        }
+    }
+
+    /// Record where the status bar drew the tasks' tag, given where the bar
+    /// drew its suffix. The tag is the suffix's last field, right before the
+    /// bracket that closes its flags (`[… bg:1●]`), in either form; anything
+    /// after that bracket was added later.
+    pub(super) fn record_status_bar_tasks(
+        &self,
+        rect: ratatui::layout::Rect,
+        drawn: Option<crate::ui::status::SuffixAt>,
+    ) {
+        let (Some(drawn), Some(tag)) = (drawn, self.status_bar_tasks_tag()) else {
+            return;
+        };
+        if self.state.cur().view != View::Dir {
+            return;
+        }
+        let suffix = self.flags_suffix();
+        let form = if drawn.short {
+            suffix.short.as_deref()
+        } else {
+            Some(suffix.full.as_str())
+        };
+        let Some(before) = form
+            .and_then(|f| f.strip_suffix(']'))
+            .and_then(|f| f.strip_suffix(tag.as_str()))
+        else {
+            return;
+        };
+        let offset = drawn.col + crate::ui::display_width(before);
+        self.record_tasks_indicator(rect, offset, crate::ui::display_width(&tag));
     }
 
     /// Build the styled display rows for one commander column `c` (its

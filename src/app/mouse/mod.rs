@@ -247,6 +247,19 @@ pub struct StatusRow {
     pub segments: Vec<crate::ui::status_segments::SegmentSpan>,
 }
 
+/// Where the background tasks' indicator was drawn, recorded by the renderer
+/// with the row it is on: what a click on it reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TasksIndicator {
+    pub y: u16,
+    pub x: u16,
+    pub width: u16,
+}
+
+/// The key a click on the tasks' indicator, and its menu's first row, name:
+/// `gB` opens the task viewer from the file list.
+pub(super) const TASK_VIEWER_KEY: &str = "gB (list)";
+
 impl super::App {
     /// Whether the active tab's child asked for mouse reporting of its own.
     fn active_pane_wants_mouse(&self) -> bool {
@@ -311,6 +324,13 @@ impl super::App {
             .is_some_and(|r| {
                 crate::ui::status::notice_at(&r.line, usize::from(ev.column - r.x), &notice)
             })
+    }
+
+    /// Whether the pointer is on the background tasks' indicator, as drawn.
+    fn tasks_indicator_under(&self, ev: MouseEvent) -> bool {
+        self.view.tasks_indicator.borrow().is_some_and(|t| {
+            t.y == ev.row && (t.x..t.x.saturating_add(t.width)).contains(&ev.column)
+        })
     }
 
     /// The status-bar segment the pointer is on, read from the spans the
@@ -415,6 +435,7 @@ impl super::App {
             }
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
             MouseSink::StderrLog => self.open_stderr_log(),
+            MouseSink::TaskViewer => self.click_tasks(),
             MouseSink::Project(action) => self.click_project(action),
             MouseSink::FocusPane => {
                 self.set_pane_focus(true);
@@ -501,6 +522,7 @@ impl super::App {
             prompt_on_divider: matches!(region, Some(route::Region::Divider))
                 && self.prompt_has_the_divider(layout),
             over_stderr_notice: self.stderr_notice_under(ev),
+            over_tasks: self.tasks_indicator_under(ev),
             status_segment: self.status_segment_under(ev),
             // The renderer records every selectable chrome row each frame, so
             // this is a lookup rather than a second hit-test — one source for
@@ -629,7 +651,24 @@ impl super::App {
                 self.open_pager_menu()
             }
             MenuAt::Status(segment) => self.open_status_menu_at(segment),
+            MenuAt::Tasks => self.open_tasks_menu(),
         }
+    }
+
+    /// A left click on the background tasks' indicator: the task viewer, as
+    /// `gB` opens it, then that key named in the viewer, as a menu row's
+    /// click names its own.
+    fn click_tasks(&mut self) -> Vec<Effect> {
+        let action = crate::keymap::Action::OpenTaskViewer;
+        let before = self.state.flash.as_ref().map(|f| f.text.clone());
+        let fx = self.apply(&action).unwrap_or_else(|e| {
+            self.state.flash_error(format!("tasks: {e:#}"));
+            Vec::new()
+        });
+        let key = Some(TASK_VIEWER_KEY.to_string());
+        self.name_the_key(key, action.describe(), action.canonical_name(), before);
+        self.relocate_flash_into_pager();
+        fx
     }
 
     /// A pager's row: what its key does in the pager, through the same
@@ -649,29 +688,38 @@ impl super::App {
         fx
     }
 
-    /// A make menu row, clicked or `Enter`ed: run its target as `:make <target>`
-    /// does, then name that command over the capture it started. A row with
-    /// nothing to run leaves the menu open.
-    fn fire_make_row(
+    /// A command row, clicked or `Enter`ed: run it as typing its command
+    /// does, a make target as `:make <target>` and a task as `:fg N`, then
+    /// name that command over the pager it opened. A row with nothing to run
+    /// leaves the menu open.
+    fn fire_command_row(
         &mut self,
-        run: Option<super::make_menu::MakeRun>,
+        run: Option<super::view_state::CommandRow>,
         key: Option<String>,
         label: &str,
     ) -> Vec<Effect> {
+        use super::view_state::CommandRow;
         let Some(run) = run else {
             return Vec::new();
         };
         self.clear_chord_hint();
         let before = self.state.flash.as_ref().map(|f| f.text.clone());
-        self.run_make(&run);
-        let label = if label.is_empty() {
-            "make target"
-        } else {
-            label
+        let (fx, name, unlabelled) = match run {
+            CommandRow::Make(run) => {
+                self.run_make(&run);
+                (Vec::new(), "make".to_string(), "make target")
+            }
+            CommandRow::Typed(line) => {
+                let name = super::command_table::split_name_args(line.trim())
+                    .0
+                    .to_string();
+                (self.dispatch_command(&line), name, "command")
+            }
         };
-        self.name_the_key(key, label, "make", before);
+        let label = if label.is_empty() { unlabelled } else { label };
+        self.name_the_key(key, label, &name, before);
         self.relocate_flash_into_pager();
-        Vec::new()
+        fx
     }
 
     /// Whether `ev` is on the open which-key popup, laid out exactly as the
@@ -740,7 +788,7 @@ impl super::App {
         };
         let entry = match entry {
             HintEntry::Pager(action) => return self.fire_pager_row(action, key),
-            HintEntry::Make(run) => return self.fire_make_row(run, key, &label),
+            HintEntry::Command(run) => return self.fire_command_row(run, key, &label),
             HintEntry::Chord(entry) => entry,
         };
         match entry {

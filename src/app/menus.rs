@@ -4,10 +4,10 @@
 //! pane divider's labels, the tabs' menu; on the split's divider, the split's;
 //! on a project's label, that project's; on the collapsed count, the open
 //! projects'; and on the git, agent or session segment, the repo's, the
-//! active tab's or the session's. The rows come from
-//! [`crate::keymap::menu::menu_for`], or for a pager from
-//! `pager_handler::pager_menu`; this module gathers the facts they decide from
-//! and opens the menu as a which-key popup that no chord armed.
+//! active tab's or the session's; on the background tasks' indicator, the
+//! tasks'. The rows come from [`crate::keymap::menu::menu_for`], or for a
+//! pager from `pager_handler::pager_menu`; this module gathers the facts they
+//! decide from and opens the menu as a which-key popup that no chord armed.
 //!
 //! While a menu is open it takes the keys first (`InputSink::Menu`): `↑`/`↓`
 //! move a highlight, `Enter` fires it as a click on the row would, and `Esc`
@@ -18,7 +18,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::pager_handler::pager_menu;
-use super::view_state::MenuState;
+use super::view_state::{CommandRow, MenuState};
 use super::{App, ChordHint, Effect, HintEntry, View};
 use crate::keymap::ChordEntry;
 use crate::keymap::menu::{
@@ -153,6 +153,31 @@ impl App {
             .map_or(0, crate::pane::tabs::PaneTabs::len);
         let target = Target::Divider(DividerFacts { tabs });
         self.open_menu(target, "pane tabs".to_string())
+            .into_iter()
+            .collect()
+    }
+
+    /// A right-click on the background tasks' indicator: `gB`, then a row per
+    /// task that `:fg N` brings back, labelled with its command. `:fg` refuses
+    /// every task while a capture is live, so then only `gB` is offered.
+    pub(super) fn open_tasks_menu(&mut self) -> Vec<Effect> {
+        let viewer = crate::keymap::Action::OpenTaskViewer;
+        let key = super::mouse::TASK_VIEWER_KEY;
+        let mut rows = vec![(
+            key.to_string(),
+            viewer.describe().to_string(),
+            HintEntry::Chord(ChordEntry::Act(key, viewer)),
+        )];
+        if self.runtime.pending_capture.is_none() {
+            rows.extend(self.runtime.background_tasks.tasks.iter().map(|task| {
+                (
+                    format!(":fg {} (list)", task.id),
+                    task_label(&task.cmd_display),
+                    HintEntry::Command(Some(CommandRow::Typed(format!("fg {}", task.id)))),
+                )
+            }));
+        }
+        self.show_menu("tasks".to_string(), rows)
             .into_iter()
             .collect()
     }
@@ -292,6 +317,20 @@ impl App {
             }
         }
     }
+}
+
+/// How wide a task's row label may be before it is cut.
+const TASK_LABEL_WIDTH: usize = 40;
+
+/// A task's row label: its command, without anything a terminal would read as
+/// a control sequence, cut to [`TASK_LABEL_WIDTH`] columns.
+fn task_label(command: &str) -> String {
+    let clean: String = command.chars().filter(|c| !c.is_control()).collect();
+    if crate::ui::display_width(&clean) <= TASK_LABEL_WIDTH {
+        return clean;
+    }
+    let cut = crate::ui::display_truncate(&clean, TASK_LABEL_WIDTH - 1);
+    format!("{cut}\u{2026}")
 }
 
 #[cfg(test)]
