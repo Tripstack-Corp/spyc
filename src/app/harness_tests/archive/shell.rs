@@ -71,7 +71,6 @@ fn the_shell_keys_are_refused_inside_an_archive() {
 
 /// `:!cmd` inside an archive is refused as `!` is, and starts nothing.
 #[test]
-#[ignore = "red: `:!cmd` bypasses the refusal and spawns in the member's path, which falls back to $HOME"]
 fn a_captured_command_at_the_colon_prompt_is_refused_inside_an_archive() {
     inside_a_mount(|_, app| {
         let why = key_refusal(app, '!');
@@ -86,7 +85,6 @@ fn a_captured_command_at_the_colon_prompt_is_refused_inside_an_archive() {
 
 /// `:;cmd` inside an archive is refused as `;` is, and starts nothing.
 #[test]
-#[ignore = "red: `:;cmd` bypasses the refusal and spawns in the member's path, which falls back to $HOME"]
 fn a_foreground_command_at_the_colon_prompt_is_refused_inside_an_archive() {
     inside_a_mount(|_, app| {
         let why = key_refusal(app, ';');
@@ -102,7 +100,6 @@ fn a_foreground_command_at_the_colon_prompt_is_refused_inside_an_archive() {
 /// `:!!` repeats the last `!` command, typed outside the archive; inside it
 /// that is refused too.
 #[test]
-#[ignore = "red: `:!!` bypasses the refusal and spawns in the member's path, which falls back to $HOME"]
 fn repeating_the_last_captured_command_is_refused_inside_an_archive() {
     inside_a_mount(|_, app| {
         let why = key_refusal(app, '!');
