@@ -37,7 +37,7 @@ impl App {
         // Close, save, and the task viewer's pause and continue: what the
         // pager's menu offers too.
         if let Some(action) = PagerAction::of_key(key, view.task_id.is_some(), view.saveable) {
-            return self.apply_pager_action(action);
+            return self.apply_pager_key(action);
         }
         match key.code {
             KeyCode::Char('/') => view.begin_search(),

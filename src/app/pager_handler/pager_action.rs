@@ -2,9 +2,10 @@
 //! each row with the key that does the same, and [`pager_menu`], the rows a
 //! pager's state applies to. The pager's own keys classify through the same
 //! enum (`of_capture_key`, `of_ctrl_c`, `of_bracket`, `of_key`), so a key and a
-//! click on its row both run [`App::apply_pager_action`]. Motion and search
-//! keys stay in the raw match: they move through the pager rather than act on
-//! it.
+//! click on its row both run [`App::apply_pager_action`]; a key, through
+//! [`App::apply_pager_key`], also counts toward its row's hint fading. Motion
+//! and search keys stay in the raw match: they move through the pager rather
+//! than act on it.
 //!
 //! `keymap`'s `menu_for` builds the rows of `Action`s, and `keymap` can't name
 //! an app type, so a pager's rows are their own kind of popup entry
@@ -89,9 +90,8 @@ impl PagerAction {
         }
     }
 
-    /// The name a menu hint reads its learned count under. The pager's keys
-    /// aren't counted, so its rows name their keys while hints are on. No
-    /// `Action`'s `canonical_name` starts `pager_`.
+    /// The name the row's key is counted under in `learned.json`, which its
+    /// menu hint fades on. No `Action`'s `canonical_name` starts `pager_`.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Background => "pager_background",
@@ -214,6 +214,15 @@ pub fn pager_menu(f: PagerFacts) -> Vec<PagerAction> {
 }
 
 impl App {
+    /// `action` fired by its key in the pager: counted toward its row's hint
+    /// fading (`menu_hints`), then done as a click on the row does it. The
+    /// count's write goes first, as an `Action` key's does.
+    pub(in crate::app) fn apply_pager_key(&mut self, action: PagerAction) -> Vec<Effect> {
+        let mut effects: Vec<Effect> = self.learn_pager_key(action).into_iter().collect();
+        effects.extend(self.apply_pager_action(action));
+        effects
+    }
+
     /// Do `action` to the pager that owns input: what its key does there, and
     /// what a click on its menu row does.
     pub(in crate::app) fn apply_pager_action(&mut self, action: PagerAction) -> Vec<Effect> {

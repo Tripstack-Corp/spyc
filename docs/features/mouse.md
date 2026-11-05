@@ -115,9 +115,11 @@ place: `^a z · zoom: pane (^a z to exit)`, or an error as an error.
 The hint fades as you learn the key: once you have fired an action by its key
 three times, a click on its row no longer names it. Only the key counts, a key
 typed while the menu is open included, and a click never does, so clicking a
-row can't silence what it teaches. What you have learned is yours, kept across
-runs and projects: `:hints` lists the actions whose hint has faded, and `:hints
-reset` brings every hint back. The menus themselves never fade; each row keeps
+row can't silence what it teaches. A pager's keys count too: after three `q`s,
+a click on a pager menu's "close the pager" no longer names `q`. What you have
+learned is yours, kept across runs and projects: `:hints` lists the actions
+and pager rows whose hint has faded, and `:hints reset` brings every hint
+back. The menus themselves never fade; each row keeps
 its key. Until you first open an object's menu, the status bar ends with
 `. menu`, the key that opens one. `[ui] menu_hints` sets how many presses it
 takes, or keeps the hints for good, or turns them off
