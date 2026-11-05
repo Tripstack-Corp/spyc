@@ -36,6 +36,8 @@ mod hint_tests;
 #[cfg(test)]
 mod make_menu_tests;
 #[cfg(test)]
+mod menu_column_tests;
+#[cfg(test)]
 mod menu_tests;
 #[cfg(test)]
 mod pager_menu_tests;

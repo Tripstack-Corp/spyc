@@ -26,7 +26,7 @@ nap: ## Sleep a while
 
 /// Run `body` over a fresh state root, with mouse reporting on, as a click
 /// needs it.
-fn with_mouse(body: impl FnOnce(&Path)) {
+pub(super) fn with_mouse(body: impl FnOnce(&Path)) {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -37,7 +37,7 @@ fn with_mouse(body: impl FnOnce(&Path)) {
 }
 
 /// An App over `dir`, which holds `files` (`(name, text)`) and a note.
-fn app_over(dir: &Path, files: &[(&str, &str)]) -> App {
+pub(super) fn app_over(dir: &Path, files: &[(&str, &str)]) -> App {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("notes.txt"), "x").unwrap();
     for (name, text) in files {
@@ -92,7 +92,7 @@ fn make_menu_open(app: &App) -> bool {
 }
 
 /// Land the make menu `fx` asks for, failing the test if it doesn't open.
-fn land_make_menu(app: &mut App, fx: Vec<Effect>) {
+pub(super) fn land_make_menu(app: &mut App, fx: Vec<Effect>) {
     assert!(
         land(app, fx, make_menu_open),
         "the make menu did not open: title {:?}, flash {:?}",
@@ -102,7 +102,7 @@ fn land_make_menu(app: &mut App, fx: Vec<Effect>) {
 }
 
 /// `Space m` from the file list.
-fn space_m(app: &mut App) -> Vec<Effect> {
+pub(super) fn space_m(app: &mut App) -> Vec<Effect> {
     let mut fx = key(app, ' ');
     fx.extend(key(app, 'm'));
     fx
@@ -113,7 +113,7 @@ fn key(app: &mut App, c: char) -> Vec<Effect> {
         .unwrap()
 }
 
-fn special(app: &mut App, code: KeyCode) -> Vec<Effect> {
+pub(super) fn special(app: &mut App, code: KeyCode) -> Vec<Effect> {
     app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
         .unwrap()
 }
@@ -183,7 +183,7 @@ fn drawn_at(app: &mut App, needle: &str) -> (u16, u16) {
     panic!("{needle:?} is not drawn");
 }
 
-fn pager_title(app: &App) -> Option<String> {
+pub(super) fn pager_title(app: &App) -> Option<String> {
     app.view.project().pager.as_ref().map(|v| v.title.clone())
 }
 

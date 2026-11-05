@@ -271,6 +271,27 @@ fn arrows_and_enter_drive_the_capture_menu_not_the_command() {
     });
 }
 
+/// `←` and `→` are the menu's while it is open, over a capture too: neither
+/// reaches the command, and the menu stays open.
+#[test]
+#[ignore = "red: ← and → close the menu and reach the command"]
+fn side_arrows_stay_in_the_capture_menu() {
+    with_mouse(|tmp| {
+        let mut app = app_with_capture(tmp);
+        right_click_the_pager(&mut app);
+        assert!(app.view.chord_hint.is_some(), "premise: the menu is open");
+
+        let mut fx = key(&mut app, KeyCode::Left);
+        fx.extend(key(&mut app, KeyCode::Right));
+
+        assert!(
+            !fx.iter().any(|e| matches!(e, Effect::SendToCapture { .. })),
+            "nothing was typed into the command: {fx:?}"
+        );
+        assert!(app.view.chord_hint.is_some(), "the menu stayed open");
+    });
+}
+
 /// `?` in the capture's menu is the command's like any other key: it closes the
 /// menu and reaches the command, and the capture keeps its pager.
 #[test]
