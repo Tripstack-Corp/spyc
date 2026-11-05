@@ -221,6 +221,7 @@ fn build_tar_gz_with(path: &Path, count: usize) {
 mod copying;
 mod mounting;
 mod navigation;
+mod pane;
 mod pending;
 mod read_only;
 mod reading;
