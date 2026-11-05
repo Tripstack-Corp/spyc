@@ -329,9 +329,7 @@ fn chdir_clears_dir_scoped_pending_ghosts() {
     std::fs::create_dir(&b).unwrap();
 
     let mut s = test_state();
-    // Drive the RIGHT (non-focused) column: `chdir_side` skips the process-cwd
-    // `set_current_dir` for a non-focused column, so this test stays chdir-free
-    // (a global cwd change races the parallel test runner).
+    // Drive the RIGHT (non-focused) column.
     let right = Commander::for_dir(&a, &s.active_project().config).unwrap();
     s.active_project_mut().right = Some(right);
     s.active_project_mut()
@@ -383,9 +381,8 @@ fn reset_orphaned_columns_snaps_a_removed_worktree_column_home() {
 /// whose cwd was deleted *externally* — a raw `git worktree remove`, `rm -rf`,
 /// or another agent — not just spyc's own `remove_worktree`. This pins the
 /// wiring that keeps a pane from being stranded in a deleted worktree.
-/// (Deletes the non-focused Right column to stay chdir-free — healing the
-/// focused column would call `set_current_dir`, which races the parallel
-/// runner; the heal logic is identical for either side.)
+/// (Deletes the non-focused Right column; the heal logic is identical for
+/// either side.)
 #[test]
 fn refresh_listing_self_heals_a_column_whose_dir_was_deleted() {
     let tmp = tempfile::tempdir().unwrap();

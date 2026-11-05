@@ -231,42 +231,30 @@ impl ForegroundExec {
         args: &[String],
         pause_after: bool,
         subshell: bool,
+        cwd: Option<&std::path::Path>,
     ) -> Result<()> {
         self.park_and_wait();
-        // The existing takeover, byte-for-byte unchanged.
-        let r = run_child_in_foreground(terminal, program, args, pause_after, subshell);
+        let cmd = foreground_command(program, args, subshell, cwd);
+        let r = run_child_in_foreground(terminal, cmd, pause_after, subshell);
         self.unpark_reader();
         r
     }
 }
 
-/// Hand the tty to a child process, optionally pausing for a keypress
-/// afterwards so the user can read the command's output before we repaint
-/// over it.
-///
-/// Job-control aware: the child is placed in its own process group and
-/// becomes the foreground process group of the controlling tty for the
-/// duration of the run. This is what a normal shell does when launching
-/// a foreground command, and it's what makes Ctrl+C / Ctrl+\ delivery
-/// land *only* on the child instead of being broadcast to spyc + child.
-/// Without this, less running line-counts would react to ^C *and* spyc
-/// would see it (caught by our no-op handler, but the FG-group ambiguity
-/// caused other anomalies -- less appearing to miss the signal, etc.).
-fn run_child_in_foreground(
-    terminal: &mut Tui,
+/// The child [`run_child_in_foreground`] starts: `program` in `cwd`, or where
+/// spyc is when there's none (a column inside an archive mount has no
+/// directory to give).
+fn foreground_command(
     program: &str,
     args: &[String],
-    pause_after: bool,
     subshell: bool,
-) -> Result<()> {
-    use std::io::Write;
-    suspend_tui(terminal)?;
-    if subshell {
-        paint_subshell_banner(terminal);
-    }
-
+    cwd: Option<&std::path::Path>,
+) -> std::process::Command {
     let mut cmd = std::process::Command::new(program);
     cmd.args(args);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
     // process_group(0) ⇒ child becomes leader of a new process group
     // (PGID == child PID). Equivalent to setpgid(0, 0) right before
     // exec. The child no longer shares spyc's group, so a tty signal
@@ -280,6 +268,31 @@ fn run_child_in_foreground(
         // A marker the shell's own prompt can show (#686); spyc never reads
         // this back, only sets it for the child.
         cmd.env("SPYC_SUBSHELL", "1");
+    }
+    cmd
+}
+
+/// Hand the tty to `cmd`, optionally pausing for a keypress afterwards so the
+/// user can read the command's output before we repaint over it.
+///
+/// Job-control aware: the child is placed in its own process group and
+/// becomes the foreground process group of the controlling tty for the
+/// duration of the run. This is what a normal shell does when launching
+/// a foreground command, and it's what makes Ctrl+C / Ctrl+\ delivery
+/// land *only* on the child instead of being broadcast to spyc + child.
+/// Without this, less running line-counts would react to ^C *and* spyc
+/// would see it (caught by our no-op handler, but the FG-group ambiguity
+/// caused other anomalies -- less appearing to miss the signal, etc.).
+fn run_child_in_foreground(
+    terminal: &mut Tui,
+    mut cmd: std::process::Command,
+    pause_after: bool,
+    subshell: bool,
+) -> Result<()> {
+    use std::io::Write;
+    suspend_tui(terminal)?;
+    if subshell {
+        paint_subshell_banner(terminal);
     }
 
     let mut child = match cmd.spawn() {
@@ -471,5 +484,24 @@ mod foreground_exec_tests {
 
         dummy.thread().unpark();
         let _ = dummy.join();
+    }
+
+    /// A foreground child starts in the directory it's given, and without one
+    /// where spyc is.
+    #[test]
+    fn a_foreground_child_starts_in_the_directory_it_is_given() {
+        let pwd = |cwd: Option<&std::path::Path>| {
+            let args = ["-c".to_string(), "pwd -P".to_string()];
+            let out = super::foreground_command("sh", &args, false, cwd)
+                .output()
+                .expect("sh runs");
+            std::path::PathBuf::from(String::from_utf8(out.stdout).unwrap().trim_end())
+        };
+        let dir = std::fs::canonicalize(concat!(env!("CARGO_MANIFEST_DIR"), "/docs")).unwrap();
+        assert_eq!(pwd(Some(&dir)), dir);
+        assert_eq!(
+            pwd(None),
+            std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap()
+        );
     }
 }

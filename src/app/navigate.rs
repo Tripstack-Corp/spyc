@@ -391,7 +391,7 @@ mod tests {
     }
 
     /// An app whose column lists `dir`, read straight in: `test_app` starts
-    /// empty, and `chdir` would `set_current_dir`.
+    /// empty.
     fn app_listing(dir: &Path) -> App {
         let mut app = App::test_app(dir.to_path_buf());
         app.state.cur_mut().listing = crate::fs::listing::Listing::read(dir).unwrap();
@@ -414,10 +414,6 @@ mod tests {
     /// only if `gf` put it there.
     /// Canonical, as a pane's cwd is: the listing holds canonical paths, and
     /// macOS's temp dir sits behind the `/var` symlink.
-    ///
-    /// The tests below open their column in the target's own directory: `gf`
-    /// then lands without a `chdir`, which `set_current_dir`s, and a process
-    /// cwd left in a dropped temp dir breaks every gix test running beside it.
     fn repo(tmp: &Path) -> PathBuf {
         let root = tmp.canonicalize().unwrap().join("repo");
         std::fs::create_dir_all(root.join(".git")).unwrap();
@@ -498,9 +494,6 @@ mod tests {
     fn gf_directory_reference_does_not_open_a_pager() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(tmp.path(), || {
-            // Cargo's own cwd for the test binary: the `chdir` this makes
-            // `set_current_dir`s, and into a temp dir it would leave every
-            // gix test after it in a deleted directory.
             let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
             let dir = tmp.path().to_path_buf();
             let mut app = App::test_app(dir.clone());

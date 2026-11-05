@@ -38,10 +38,9 @@ fn j_asks_the_pane_for_its_default() {
     });
 }
 
-// The submits below name paths that don't exist: a jump that resolves chdirs,
-// which `set_current_dir`s, and the unit tests stay chdir-free for the
-// parallel runner. `jump_to` itself (a file lands in its directory with the
-// cursor on it) is the existing path both cases reach.
+// The submits below name paths that don't exist. `jump_to` itself (a file
+// lands in its directory with the cursor on it) is the existing path both
+// cases reach.
 
 /// History records where Enter went, and the failed jump names it.
 #[test]

@@ -401,15 +401,18 @@ impl AppState {
     }
 
     /// `chdir`, but targeting a SPECIFIC column rather than always the focused
-    /// one. The process cwd, `prev_dir`, and frecency are *focused-column*
-    /// concerns, so they move only when `side` IS the focused column — resetting
-    /// a background column (e.g. `b` after its worktree is removed) must not yank
-    /// the process cwd or back-nav history out from under the focused one.
-    /// `chdir` is the `side == focused_side()` case, behaviour-for-behaviour.
-    /// In a project an agent drives in the background (`in_background`, #99)
-    /// even the focused column leaves the process cwd and frecency alone: both
-    /// are the user's.
+    /// one. `prev_dir` and frecency are *focused-column* concerns, so they move
+    /// only when `side` IS the focused column — resetting a background column
+    /// (e.g. `b` after its worktree is removed) must not yank the back-nav
+    /// history out from under the focused one. `chdir` is the
+    /// `side == focused_side()` case, behaviour-for-behaviour. In a project an
+    /// agent drives in the background (`in_background`, #99) even the focused
+    /// column leaves frecency alone: it is the user's.
+    ///
+    /// A relative `path` starts from the column's own directory. The process cwd
+    /// is the loop's: `App::settle_process_cwd` brings it to the focused column.
     pub fn chdir_side(&mut self, side: Side, path: &Path) -> Result<()> {
+        let path = &self.col(side).listing.dir.join(path);
         // A path inside a mounted archive is virtual — there is no directory to
         // canonicalize and nothing to `chdir` into, since the "directory" is a
         // file. `chdir_into_mount` builds the listing from the index instead.
@@ -423,9 +426,6 @@ impl AppState {
         let users = focused && !self.in_background;
         if focused && self.col(side).listing.dir != canonical {
             self.active_project_mut().prev_dir = Some(self.col(side).listing.dir.clone());
-        }
-        if users {
-            let _ = std::env::set_current_dir(&canonical);
         }
         // If the directory had more than `MAX_ENTRIES`, the read
         // stopped early. Surface that to the user with a flash so a

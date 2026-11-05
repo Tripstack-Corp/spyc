@@ -327,9 +327,7 @@ fn overlay_pager_consumes_keys_not_list() {
 }
 
 /// Worktree picker: `j`/`k` move the highlighted `picker_cursor` (not the pager
-/// scroll), clamping at the ends, and don't close the picker. (Selection on
-/// Enter/1-9 chdirs the focused column, which `set_current_dir`s — left out
-/// here to keep the unit test chdir-free per the parallel-runner rule.)
+/// scroll), clamping at the ends, and don't close the picker.
 #[test]
 fn worktree_picker_jk_moves_highlight() {
     let tmp = tempfile::tempdir().unwrap();
