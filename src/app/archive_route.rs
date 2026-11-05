@@ -183,7 +183,7 @@ fn classify(
         Effect::FileOp(FileOp::Copy { paths, dest }) => {
             if mounts.contains(dest) {
                 if paths.iter().any(|p| mounts.holds_member(p)) {
-                    return Verdict::Refuse("archive: copy out first, then in");
+                    return Verdict::Refuse(COPY_WITHIN);
                 }
                 return bring_in(paths, dest, mounts, is_dir);
             }
@@ -216,30 +216,12 @@ fn classify(
             // steps deliberately.
             Verdict::Refuse("archive: move in or out isn't a single step — copy, then delete")
         }
-        Effect::FileOp(FileOp::RenameEach { pairs, .. }) => {
-            // Renaming the archive file itself is an ordinary rename, once its
-            // mount stops claiming the old name.
-            if !pairs.iter().any(|(_, dst)| mounts.contains(dst)) {
-                let srcs: Vec<PathBuf> = pairs.iter().map(|(src, _)| src.clone()).collect();
-                if let Some(verdict) = takes_container(&srcs, mounts) {
-                    return verdict;
-                }
-            }
-            let touching = pairs
-                .iter()
-                .filter(|(src, dst)| mounts.holds_member(src) || mounts.contains(dst))
-                .count();
-            if touching == 0 {
-                return Verdict::Pass;
-            }
-            let changes: Vec<PendingChange> = pairs
-                .iter()
-                .filter_map(|(src, dst)| rename_change(src, dst, mounts))
-                .collect();
-            if changes.len() == pairs.len() {
-                Verdict::Record(changes)
+        // A `%` destination's fan-out, one pair per source.
+        Effect::FileOp(FileOp::RenameEach { pairs, is_move }) => {
+            if *is_move {
+                move_each(pairs, mounts)
             } else {
-                Verdict::Refuse("archive: rename members within the archive, not across it")
+                copy_each(pairs, mounts, is_staged)
             }
         }
         Effect::Inventory(InventoryOp::Put { dest_dir, ids }) => {
@@ -337,6 +319,58 @@ fn classify(
         // themselves. `ChangeDir` is deliberately here — navigating *into* a mount
         // is the whole point, and `chdir_into_mount` handles it.
         _ => Verdict::Pass,
+    }
+}
+
+/// The refusal for copying a member to somewhere in its own archive: a rename
+/// dressed as a copy, with the source's bytes not yet on disk.
+const COPY_WITHIN: &str = "archive: copy out first, then in";
+
+/// A `%` copy fan-out, answered pair by pair as [`FileOp::Copy`] is. Its
+/// sources stay where they are, so no pair is ever journaled as a rename, and a
+/// mounted archive among them is a file to read, not one being taken away.
+fn copy_each(
+    pairs: &[(PathBuf, PathBuf)],
+    mounts: &Mounts,
+    is_staged: &dyn Fn(&Path) -> bool,
+) -> Verdict {
+    let sources: Vec<PathBuf> = pairs.iter().map(|(src, _)| src.clone()).collect();
+    if pairs.iter().any(|(_, dst)| mounts.contains(dst)) {
+        if sources.iter().any(|src| mounts.holds_member(src)) {
+            return Verdict::Refuse(COPY_WITHIN);
+        }
+        // `bring_in` names each addition after its source, so a per-file
+        // target name has nowhere to be recorded.
+        return Verdict::Refuse("archive: copy files in under their own names, then rename");
+    }
+    need(&sources, mounts, is_staged)
+}
+
+/// A `%` move fan-out: inside one archive, each pair is a rename.
+fn move_each(pairs: &[(PathBuf, PathBuf)], mounts: &Mounts) -> Verdict {
+    // Renaming the archive file itself is an ordinary rename, once its
+    // mount stops claiming the old name.
+    if !pairs.iter().any(|(_, dst)| mounts.contains(dst)) {
+        let srcs: Vec<PathBuf> = pairs.iter().map(|(src, _)| src.clone()).collect();
+        if let Some(verdict) = takes_container(&srcs, mounts) {
+            return verdict;
+        }
+    }
+    let touching = pairs
+        .iter()
+        .filter(|(src, dst)| mounts.holds_member(src) || mounts.contains(dst))
+        .count();
+    if touching == 0 {
+        return Verdict::Pass;
+    }
+    let changes: Vec<PendingChange> = pairs
+        .iter()
+        .filter_map(|(src, dst)| rename_change(src, dst, mounts))
+        .collect();
+    if changes.len() == pairs.len() {
+        Verdict::Record(changes)
+    } else {
+        Verdict::Refuse("archive: rename members within the archive, not across it")
     }
 }
 
@@ -570,6 +604,16 @@ pub fn rewrite_paths(effect: Effect, staged: &HashMap<PathBuf, PathBuf>) -> Effe
             paths: map_all(&paths),
             dest,
         }),
+        // Each source reads from staging; each target stays where the user named.
+        Effect::FileOp(FileOp::RenameEach { pairs, is_move }) => {
+            Effect::FileOp(FileOp::RenameEach {
+                pairs: pairs
+                    .into_iter()
+                    .map(|(src, dst)| (map(&src), dst))
+                    .collect(),
+                is_move,
+            })
+        }
         Effect::FileOp(FileOp::PipeContent {
             use_inventory,
             inventory_ids,
