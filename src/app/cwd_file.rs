@@ -7,10 +7,9 @@
 //! a wrapper never reads half a path.
 
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::App;
-use super::state::Mounts;
 
 impl App {
     /// Where a confirmed quit writes the browsed directory: `--cwd-file`, else
@@ -20,13 +19,13 @@ impl App {
     }
 
     /// Write the focused column's directory, in the project in view, to the
-    /// cwd file if there is one. A failure joins the exit summary; the quit
-    /// goes ahead.
+    /// cwd file if there is one; inside an archive, the directory holding it.
+    /// A failure joins the exit summary; the quit goes ahead.
     pub(super) fn write_cwd_file(&mut self) {
         let Some(target) = self.runtime.cwd_file.as_deref() else {
             return;
         };
-        let dir = shell_dir(&self.state.cur().listing.dir, &self.state.mounts);
+        let dir = self.state.cur_real_dir();
         let Err(e) = crate::fs::atomic::write_atomic(target, dir.as_os_str().as_bytes()) else {
             return;
         };
@@ -39,17 +38,4 @@ impl App {
             None => note,
         });
     }
-}
-
-/// The directory a shell can `cd` into for a column showing `dir`. A path
-/// inside a mounted archive names no directory, so it climbs to the one
-/// holding the outermost archive.
-fn shell_dir<'a>(dir: &'a Path, mounts: &Mounts) -> &'a Path {
-    let mut dir = dir;
-    while mounts.contains(dir)
-        && let Some(parent) = dir.parent()
-    {
-        dir = parent;
-    }
-    dir
 }

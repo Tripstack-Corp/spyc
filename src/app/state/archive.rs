@@ -35,6 +35,13 @@ impl AppState {
             .is_some_and(|row| row.kind != EntryKind::Dir);
         refusal_in(action, &mount.capability, on_file)
     }
+
+    /// The focused column's directory as a child process can start in it:
+    /// inside a mount, the directory holding the outermost archive. A pty
+    /// handed the mount's own path starts its child in `$HOME` instead.
+    pub fn cur_real_dir(&self) -> &std::path::Path {
+        self.mounts.real_dir(&self.cur().listing.dir)
+    }
 }
 
 /// Why `action` can't run in a mount of `capability`, the cursor on a file

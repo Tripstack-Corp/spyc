@@ -313,12 +313,16 @@ impl App {
     /// `top_overlay_right` slot so it coexists with a `V`/`D` in `a`; both
     /// auto-dismiss on exit. Shared by `V` (`edit_in_pane`), `D` on a huge file,
     /// and the in-pager `v` editor handoff.
+    ///
+    /// Inside an archive the cwd is the directory holding it, not the staged
+    /// copy's: the editor is handed that copy by its absolute path, and a file
+    /// it writes beside it in spyc's staging tree is no member.
     pub(super) fn spawn_top_overlay(&mut self, cmd: &str) {
         let (rows, cols) = Self::top_overlay_size(
             self.effective_pane_pct(),
             self.runtime.project().pane_tabs.is_some(),
         );
-        let cwd = self.state.cur().listing.dir.clone();
+        let cwd = self.state.cur_real_dir().to_path_buf();
         let wake = self.make_pane_wake();
         match Pane::spawn(
             cmd,

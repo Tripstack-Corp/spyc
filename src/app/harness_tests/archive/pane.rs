@@ -115,7 +115,6 @@ fn beside_a_mount(test: impl FnOnce(&Path, &mut App)) {
 /// holding it, under each `[pane] new_tab_cwd`: a project with no home and no
 /// repository in an archive leaves each with the column's directory.
 #[test]
-#[ignore = "red: the cwd offered is the archive's own path, and the pty starts the child in $HOME"]
 fn a_new_tab_inside_an_archive_starts_in_the_directory_holding_it() {
     for mode in [
         NewTabCwd::WorktreeRoot,
@@ -138,7 +137,6 @@ fn a_new_tab_inside_an_archive_starts_in_the_directory_holding_it() {
 /// A cwd cleared from the prompt asks for the default one, which inside an
 /// archive is the directory holding it too.
 #[test]
-#[ignore = "red: the default cwd is the archive's own path, and the pty starts the child in $HOME"]
 fn a_new_tab_given_no_cwd_inside_an_archive_starts_beside_it() {
     inside_a_mount(|root, app| {
         ask_for_a_tab(app, TAB);
@@ -153,7 +151,6 @@ fn a_new_tab_given_no_cwd_inside_an_archive_starts_beside_it() {
 /// Inside an archive inside another, the directory holding the outer one: the
 /// inner one's path is inside the outer.
 #[test]
-#[ignore = "red: the cwd offered is the inner archive's own path, and the pty starts the child in $HOME"]
 fn a_new_tab_inside_a_nested_archive_starts_beside_the_outer_one() {
     let tmp = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap();
@@ -215,7 +212,6 @@ fn a_new_tab_beside_a_mounted_archive_starts_in_the_column() {
 /// `V` on a member opens the editor on its extracted copy, started in the
 /// directory holding the archive, as a tab there would be.
 #[test]
-#[ignore = "red: the overlay is spawned in the archive's own path, and the pty starts it in $HOME"]
 fn an_editor_opened_on_a_member_starts_beside_the_archive() {
     inside_a_mount(|root, app| {
         app.state.focus_on_path(&root.join("pkg.zip/src/main.rs"));
