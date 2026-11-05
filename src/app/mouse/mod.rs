@@ -34,6 +34,8 @@ mod forward;
 #[cfg(test)]
 mod hint_tests;
 #[cfg(test)]
+mod make_filter_tests;
+#[cfg(test)]
 mod make_menu_tests;
 #[cfg(test)]
 mod menu_column_tests;

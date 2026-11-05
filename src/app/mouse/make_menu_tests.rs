@@ -108,7 +108,7 @@ pub(super) fn space_m(app: &mut App) -> Vec<Effect> {
     fx
 }
 
-fn key(app: &mut App, c: char) -> Vec<Effect> {
+pub(super) fn key(app: &mut App, c: char) -> Vec<Effect> {
     app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE))
         .unwrap()
 }
@@ -124,7 +124,7 @@ fn text(buf: &ratatui::buffer::Buffer, y: u16, x: u16, right: u16) -> String {
 
 /// The box whose top border carries ` make · `: its rect, its title row and
 /// its body lines, as drawn on a `frame`-sized screen.
-fn make_menu_drawn(app: &mut App, frame: Rect) -> (Rect, String, Vec<String>) {
+pub(super) fn make_menu_drawn(app: &mut App, frame: Rect) -> (Rect, String, Vec<String>) {
     let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(
         frame.width,
         frame.height,
@@ -157,7 +157,7 @@ fn make_menu_drawn(app: &mut App, frame: Rect) -> (Rect, String, Vec<String>) {
 }
 
 /// Where `row` is drawn in the open make menu: where a click aims.
-fn make_row_at(app: &mut App, row: &str) -> (u16, u16) {
+pub(super) fn make_row_at(app: &mut App, row: &str) -> (u16, u16) {
     let (menu, _, lines) = make_menu_drawn(app, FRAME);
     for (i, line) in lines.iter().enumerate() {
         if let Some(byte) = line.find(row) {
@@ -187,7 +187,7 @@ pub(super) fn pager_title(app: &App) -> Option<String> {
     app.view.project().pager.as_ref().map(|v| v.title.clone())
 }
 
-fn pager_flash(app: &App) -> Option<String> {
+pub(super) fn pager_flash(app: &App) -> Option<String> {
     app.view
         .project()
         .pager
