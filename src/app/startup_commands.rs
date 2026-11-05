@@ -1,8 +1,13 @@
-//! `spyc -c <cmd>`: `:` commands from the command line, run in order once
-//! startup has settled — `init.lua` loaded, a `-r` session picked, and every
-//! startup question (status hooks, project tabs, the skill update) answered.
-//! Run before then, a restore would overwrite what they did, and a prompt
-//! would take keys meant for it.
+//! `spyc -c <cmd>`: `:` commands from the command line, run once startup has
+//! settled — `init.lua` loaded, a `-r` session picked, and every startup
+//! question (status hooks, project tabs, the skill update) answered. Run before
+//! then, a restore would overwrite what they did, and a prompt would take keys
+//! meant for it.
+//!
+//! They run in order, as if typed one after another. The loop runs each one's
+//! effects before it dispatches the next, so a `cd` has landed before the `!`
+//! after it starts, and the same wait holds before each: a prompt or a Lua run
+//! one of them starts holds the rest until it's done.
 
 use crate::app::{App, Effect, Mode};
 use crate::lua::LuaWorker;
@@ -23,14 +28,16 @@ impl App {
         self.state.startup_commands = commands;
     }
 
-    /// Run the queued `spyc -c` commands once startup has settled, each as if
-    /// typed at `:`. Called at loop bottom; `Some` with their effects when
-    /// they ran, since one can change the frame without returning any.
+    /// Run the next queued `spyc -c` command once startup has settled, as if
+    /// typed at `:`. The loop calls it until `None`, running each command's
+    /// effects before the next call; `Some` with its effects when one ran,
+    /// since one can change the frame without returning any.
     pub(super) fn settle_startup_commands(&mut self) -> Option<Vec<Effect>> {
         if self.state.startup_commands.is_empty() {
             return None;
         }
-        // The load, and the `startup` handlers it fires as it lands.
+        // The load and the `startup` handlers it fires as it lands, or a Lua
+        // `:` command an earlier one ran.
         let lua_loading = self.runtime.lua_events.startup_pending
             || self.runtime.lua_inflight.is_some()
             || self.runtime.lua.as_ref().is_some_and(LuaWorker::is_busy);
@@ -42,12 +49,9 @@ impl App {
         if !settled {
             return None;
         }
-        let mut effects = Vec::new();
-        for command in std::mem::take(&mut self.state.startup_commands) {
-            let command = command.trim();
-            effects.extend(self.dispatch_command(command.strip_prefix(':').unwrap_or(command)));
-        }
-        Some(effects)
+        let command = self.state.startup_commands.remove(0);
+        let command = command.trim();
+        Some(self.dispatch_command(command.strip_prefix(':').unwrap_or(command)))
     }
 }
 
@@ -147,7 +151,6 @@ mod tests {
     /// Each command's effects run before the next is dispatched, and the loop
     /// runs the whole queue before it waits: nothing wakes it for the rest.
     #[test]
-    #[ignore = "red: the loop runs every command's effects after the last is dispatched"]
     fn the_loop_runs_each_command_before_the_next() {
         let run = crate::guard_support::production_half(include_str!("pre_recv.rs"));
         assert!(run.contains("while let Some(startup_fx) = self.settle_startup_commands()"));

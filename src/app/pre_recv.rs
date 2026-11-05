@@ -322,9 +322,11 @@ impl App {
         // idle.
         self.settle_lua_events();
 
-        // `spyc -c` commands, once startup has settled. A no-op after the
-        // first run, since the queue is empty.
-        if let Some(startup_fx) = self.settle_startup_commands() {
+        // `spyc -c` commands, once startup has settled. Each one's effects run
+        // before the next is dispatched, and the rest follow in this pass
+        // unless one holds them with a prompt or a Lua run, whose end wakes
+        // the loop.
+        while let Some(startup_fx) = self.settle_startup_commands() {
             ctx.draw.mark(3);
             self.run_effects(startup_fx, terminal, foreground_exec);
         }

@@ -97,7 +97,8 @@ struct Cli {
 
     /// Run a `:` command once spyc has started: after `init.lua` loads, a `-r`
     /// session is picked, and any startup question is answered. Repeatable,
-    /// run in order; the leading `:` is optional:
+    /// each run once the one before it has taken effect; the leading `:` is
+    /// optional:
     ///   spyc -c "sort mtime" -c "limit *.rs"
     #[arg(short = 'c', long = "cmd", value_name = "CMD")]
     cmd: Vec<String>,
