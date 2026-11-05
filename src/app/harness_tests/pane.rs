@@ -893,12 +893,9 @@ fn cycle_task_viewer_wraps_across_tasks() {
 // ── quick-select dispatch + path-jump (testing campaign, cluster 6) ──
 // The scanner is unit-tested in src/pane/quick_select.rs and the kind ×
 // intent action matrix in src/app/quick_select.rs; these cover the overlay
-// state machine + the path leaf's *not-found* branch. The successful jump
-// executes `chdir` → `std::env::set_current_dir` (a process-global mutation
-// that races the parallel test runner — the codebase keeps unit tests
-// chdir-free), and the yank / URL-open / git-show leaves are impure
-// (clipboard / OS opener / git), so those are covered at the pure-matrix
-// level rather than executed here.
+// state machine + the path leaf's *not-found* branch. The yank / URL-open /
+// git-show leaves are impure (clipboard / OS opener / git), so those are
+// covered at the pure-matrix level rather than executed here.
 
 /// A path jump to a nonexistent path flashes and does NOT chdir.
 #[test]
@@ -964,9 +961,7 @@ fn quick_select_esc_closes_without_dispatch() {
 /// An uppercase (open-intent) label on a Path match dispatches the *open*
 /// (jump), not a yank — proving the lowercase-yank / uppercase-open split
 /// end to end through the full key path. Targets a *missing* path so the
-/// jump flashes and returns before `chdir` (a successful jump would
-/// `set_current_dir` and race the parallel runner); a yank would not flash
-/// "path not found".
+/// jump flashes "path not found", which a yank would not.
 #[test]
 fn quick_select_uppercase_path_label_dispatches_open() {
     let tmp = tempfile::tempdir().unwrap();

@@ -1,12 +1,21 @@
-//! Process-cwd reconcile: the process cwd follows the focused column.
+//! Process-cwd reconcile: the process cwd follows the focused column, and
+//! nothing else moves it.
 //!
-//! `AppState::chdir_side` moves it on a navigation, but only for the column
-//! focused at that moment. Anything that changes *which* column is focused, or
-//! installs a column without navigating — an agent's `open_worktree` into `b`,
-//! a restore, a focus switch — used to leave the process behind, and a worktree
-//! removed from under a stale cwd broke every in-process git call after it
-//! (#495). One loop-bottom compare makes all of those correct, the
-//! `settle_mouse_mode` shape: a read here, the `chdir` in the executor.
+//! A navigation moves only its column; the Model never calls
+//! `set_current_dir` (#980, guarded below), since the process cwd is the whole
+//! process's and, in the test binary, every test's. The loop compares the
+//! focused column's directory with the process cwd and returns the move as
+//! `Effect::SetProcessCwd`, the `settle_mouse_mode` shape: a read here, the
+//! `chdir` in the executor. The same compare covers a column focused or
+//! installed without a navigation — an agent's `open_worktree` into `b`, a
+//! restore, a focus switch — where a worktree removed from under a stale cwd
+//! once broke every in-process git call after it (#495).
+//!
+//! The loop settles before a Lua event fires, since a handler reads the cwd on
+//! its own thread, and again last before it waits. Between a navigation and the
+//! settle, whatever needs a directory names the column's: a relative `cd`
+//! starts from it, and a capture, a `;` command, a pane tab and a foreground
+//! child are spawned in it.
 
 use std::path::{Path, PathBuf};
 
@@ -76,7 +85,6 @@ mod tests {
     /// again after the last step that can navigate (a `spyc -c` command, an MCP
     /// one), so it is settled whenever the loop waits.
     #[test]
-    #[ignore = "red: the loop settles the process cwd once, after the Lua events and before the MCP commands"]
     fn the_loop_settles_the_process_cwd_before_lua_and_after_the_last_navigation() {
         let src = crate::guard_support::production_half(include_str!("pre_recv.rs"));
         let start = src
@@ -108,7 +116,6 @@ mod tests {
     /// binding) runs in the focused column's directory, which a navigation
     /// earlier in the same tick may have changed without moving the process.
     #[test]
-    #[ignore = "red: a foreground child inherits the process cwd"]
     fn a_foreground_child_is_given_the_focused_columns_directory() {
         let src = crate::guard_support::production_half(include_str!("effect/executor.rs"));
         let call = src
@@ -125,7 +132,6 @@ mod tests {
     /// Model and the pure layers never call `set_current_dir`, which moves it
     /// for every thread at once.
     #[test]
-    #[ignore = "red: `AppState::chdir_side` calls `set_current_dir`"]
     fn the_pure_layers_never_move_the_process_cwd() {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files: Vec<std::path::PathBuf> = ["app/route.rs", "app/modal.rs", "app/focus.rs"]

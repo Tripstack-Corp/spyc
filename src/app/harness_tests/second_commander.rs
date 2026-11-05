@@ -308,9 +308,8 @@ fn session_persists_and_restores_a_commander_split() {
         );
         assert_eq!(sv.width_pct, 42, "split shape saved");
 
-        // Restore the split into a fresh app via the chdir-free helper (calling
-        // restore_session would set_current_dir and race the parallel runner) →
-        // b reopens at its saved cwd with the saved shape.
+        // Restore the split into a fresh app → b reopens at its saved cwd with
+        // the saved shape.
         let mut fresh = App::test_app(left);
         fresh.restore_vsplit(sv, false);
         let b = fresh

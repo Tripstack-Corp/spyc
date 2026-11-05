@@ -112,7 +112,8 @@ one word.
 
 **`:`** opens a vim-style command prompt with vi editing and history:
 
-- **`:cd <path>`** — change directory (`~` and `$VAR` expanded, bare `:cd` goes home)
+- **`:cd <path>`** — change directory (`~` and `$VAR` expanded, a relative path
+  starts from the column's directory, bare `:cd` goes home)
 - **`:sort <mode>`** — sort listing by `name`, `size`, `mtime`, or `ext`
   (persists across chdir), the cursor staying on its file; **`:sort reverse`**
   toggles reverse order

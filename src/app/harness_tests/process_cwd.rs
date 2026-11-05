@@ -102,7 +102,6 @@ fn wait_until_in(pid: u32, dir: &Path) {
 /// #980's acceptance: `Enter` on a directory moves the column and leaves the
 /// process cwd to the loop's settle, which then owes exactly one move, there.
 #[test]
-#[ignore = "red: `AppState::chdir_side` calls `set_current_dir` itself"]
 fn entering_a_directory_leaves_the_process_cwd_to_the_settle() {
     let _cwd = CwdGuard::save();
     let tmp = tempfile::tempdir().unwrap();
@@ -177,7 +176,6 @@ fn a_foreground_command_after_a_navigation_runs_in_the_column() {
 /// `:cd` with a relative path goes there from the column, whatever the process
 /// cwd is.
 #[test]
-#[ignore = "red: a relative `:cd` resolves against the process cwd"]
 fn a_relative_cd_goes_there_from_the_column() {
     let _cwd = CwdGuard::save();
     let tmp = tempfile::tempdir().unwrap();
@@ -202,7 +200,6 @@ fn a_relative_cd_goes_there_from_the_column() {
 /// the first one went, though both run in one tick, before the loop moves the
 /// process.
 #[test]
-#[ignore = "red: each `cd` moves the process cwd as it runs"]
 fn startup_cds_each_start_where_the_last_one_went() {
     let _cwd = CwdGuard::save();
     let tmp = tempfile::tempdir().unwrap();
@@ -232,7 +229,6 @@ fn startup_cds_each_start_where_the_last_one_went() {
 /// A relative `:cd` naming an archive is mounted from the column too: the
 /// screen that holds the `cd` back for the mount looks the path up there.
 #[test]
-#[ignore = "red: the archive screen looks a relative `:cd` up from the process cwd"]
 fn a_relative_cd_into_an_archive_mounts_it_from_the_column() {
     let _cwd = CwdGuard::save();
     let tmp = tempfile::tempdir().unwrap();
@@ -279,7 +275,6 @@ fn a_relative_jump_after_a_navigation_goes_there_from_the_column() {
 /// A relative path `J` recorded goes there from the column when picked from
 /// the jump history.
 #[test]
-#[ignore = "red: a relative jump-history entry resolves against the process cwd"]
 fn a_relative_jump_history_entry_goes_there_from_the_column() {
     let _cwd = CwdGuard::save();
     let tmp = tempfile::tempdir().unwrap();

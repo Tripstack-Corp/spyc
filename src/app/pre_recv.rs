@@ -303,6 +303,15 @@ impl App {
             ctx.draw.mark(3);
         }
 
+        // Bring the process cwd to the focused column (#495, #980) before a
+        // Lua event fires: a handler runs on the Lua thread, where a relative
+        // path or a child it starts reads the process cwd. One `getcwd`;
+        // nothing emitted when they agree.
+        let cwd_fx = self.settle_process_cwd();
+        if !cwd_fx.is_empty() {
+            self.run_effects(cwd_fx, terminal, foreground_exec);
+        }
+
         // Fire the low-frequency `spyc.on` state-change events (dir_changed
         // / project_changed) by diffing against the last-fired baselines —
         // AFTER `handle_lua_done` + its `run_effects(lua_fx)` above, so a
@@ -336,15 +345,6 @@ impl App {
             self.run_effects(mouse_fx, terminal, foreground_exec);
         }
 
-        // Bring the process cwd to the focused column (#495). A focus
-        // change or an agent's `open_worktree` into `b` installs a column
-        // without the `chdir` a navigation does. One `getcwd`; nothing
-        // emitted when they agree.
-        let cwd_fx = self.settle_process_cwd();
-        if !cwd_fx.is_empty() {
-            self.run_effects(cwd_fx, terminal, foreground_exec);
-        }
-
         // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
         // `drain_mcp_pending` — kept at this early loop position for the
         // 5s read-after-write timeout contract).
@@ -372,6 +372,13 @@ impl App {
         // message dispatch) so a cache-miss reaches the worker without
         // waiting for the next event.
         self.flush_git_requests();
+
+        // Again, last: a `spyc -c` command or an MCP one above may have
+        // navigated, and the process cwd is settled whenever the loop waits.
+        let cwd_fx = self.settle_process_cwd();
+        if !cwd_fx.is_empty() {
+            self.run_effects(cwd_fx, terminal, foreground_exec);
+        }
     }
 }
 
