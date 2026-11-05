@@ -136,8 +136,11 @@ rather than create a new modal type.
   A key that works only from the file list says so: `yp (list)`. `.` opens
   the cursor entry's menu, `^a .` the active tab's, and a right-click the
   menu of what it lands on, or the leader where nothing there has one.
-  `↑`/`↓` highlight a row, `Enter` or a click fires it, `Esc` closes, and any
-  other key closes the menu and does what it always does. A click outside
+  `↑`/`↓` highlight a row, `←`/`→` move the highlight to the same line of
+  the previous or next column of a menu that flows into several, `Enter` or a
+  click fires it, `Esc` closes, and any other key closes the menu and does
+  what it always does; the arrows stay with the menu even over a running
+  capture. A click outside
   dismisses it and does nothing else; nothing beneath the popup hears a
   click on it.
 - **Menu hint** — once a row fires by a click or `Enter`, the prompt row

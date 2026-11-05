@@ -84,7 +84,6 @@ fn press_n(app: &mut App, code: KeyCode, n: usize) {
 /// of the first highlights the second row of the second, drawn on the same
 /// line; `←` brings the highlight back, and `Enter` fires the row `→` reached.
 #[test]
-#[ignore = "red: ← and → close the menu, as any key the menu doesn't take"]
 fn right_and_left_move_along_a_line_across_columns() {
     with_mouse(|tmp| {
         let mut app = make_menu_of(tmp, 30, None);
@@ -122,7 +121,6 @@ fn right_and_left_move_along_a_line_across_columns() {
 /// column's last row, below the second column's end, lands on the second
 /// column's last entry.
 #[test]
-#[ignore = "red: ← and → close the menu, as any key the menu doesn't take"]
 fn right_past_a_shorter_columns_end_lands_on_its_last_entry() {
     with_mouse(|tmp| {
         let mut app = make_menu_of(tmp, 29, None);
@@ -144,7 +142,6 @@ fn right_past_a_shorter_columns_end_lands_on_its_last_entry() {
 /// The arrows stop at the outer columns: `←` in the first and `→` in the last
 /// leave the highlight where it is, and the menu open.
 #[test]
-#[ignore = "red: ← and → close the menu, as any key the menu doesn't take"]
 fn the_side_arrows_do_not_wrap_at_the_edges() {
     with_mouse(|tmp| {
         let mut app = make_menu_of(tmp, 30, None);
@@ -171,7 +168,6 @@ fn the_side_arrows_do_not_wrap_at_the_edges() {
 /// With nothing highlighted, `→` and `←` highlight the first entry, as `↓`
 /// does.
 #[test]
-#[ignore = "red: ← and → close the menu, as any key the menu doesn't take"]
 fn a_side_arrow_with_no_highlight_highlights_the_first_entry() {
     with_mouse(|tmp| {
         for code in [KeyCode::Right, KeyCode::Left] {
@@ -191,7 +187,6 @@ fn a_side_arrow_with_no_highlight_highlights_the_first_entry() {
 /// own line: with the first label on two lines, `target-03` sits on the
 /// fourth line, beside `target-19`, not `target-18`.
 #[test]
-#[ignore = "red: ← and → close the menu, as any key the menu doesn't take"]
 fn right_lands_on_the_line_drawn_beside_a_wrapped_label() {
     with_mouse(|tmp| {
         let long = "A label long enough to wrap onto a second line";
@@ -213,7 +208,6 @@ fn right_lands_on_the_line_drawn_beside_a_wrapped_label() {
 /// and the menu stays open, with or without a highlight, and nothing beneath
 /// it moves either.
 #[test]
-#[ignore = "red: ← and → close the menu, as any key the menu doesn't take"]
 fn a_one_column_menu_ignores_the_side_arrows() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

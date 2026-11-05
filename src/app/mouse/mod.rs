@@ -759,6 +759,22 @@ impl super::App {
         fx
     }
 
+    /// The open which-key popup laid out on `frame` exactly as the renderer
+    /// lays it out over `layout`.
+    pub(super) fn chord_hint_drawn(
+        &self,
+        layout: &FrameLayout,
+        frame: ratatui::layout::Rect,
+    ) -> Option<chord_hit::ChordHintLayout> {
+        let hint = self.view.chord_hint.as_ref()?;
+        chord_hit::chord_hint_layout(
+            &hint.row_refs(),
+            frame,
+            layout.divider.map(|r| r.y),
+            layout.vdivider.map(|r| r.x),
+        )
+    }
+
     /// Whether `ev` is on the open which-key popup, laid out exactly as the
     /// renderer lays it out, and the entry under the pointer there, if any.
     fn chord_menu_at(
@@ -767,14 +783,7 @@ impl super::App {
         frame: ratatui::layout::Rect,
         ev: MouseEvent,
     ) -> (bool, Option<usize>) {
-        let Some(menu) = self.view.chord_hint.as_ref().and_then(|hint| {
-            chord_hit::chord_hint_layout(
-                &hint.row_refs(),
-                frame,
-                layout.divider.map(|r| r.y),
-                layout.vdivider.map(|r| r.x),
-            )
-        }) else {
+        let Some(menu) = self.chord_hint_drawn(layout, frame) else {
             return (false, None);
         };
         let on = menu

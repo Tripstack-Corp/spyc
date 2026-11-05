@@ -2,10 +2,11 @@
 //! its body lines draws.
 //!
 //! **`chord_hint_layout` is the single source of truth for the popup's
-//! geometry**, consumed by both the renderer (`render/overlays.rs`) and the
-//! mouse, which gives a click on the box to the menu instead of to whatever the
-//! layout says lies beneath it. The rule [`super::tab_hit`] states for the tab
-//! bar holds here: a hit-test that re-derived the box would drift from the one
+//! geometry**, consumed by the renderer (`render/overlays.rs`), by the mouse,
+//! which gives a click on the box to the menu instead of to whatever the layout
+//! says lies beneath it, and by a menu's `←`/`→`, which [`entry_across`] moves
+//! over the columns drawn. The rule [`super::tab_hit`] states for the tab bar
+//! holds here: a hit-test that re-derived the box would drift from the one
 //! drawn, and a click aimed at the menu would land beside it.
 
 use ratatui::layout::Rect;
@@ -126,6 +127,36 @@ pub fn entry_at(layout: &ChordHintLayout, col: u16, row: u16) -> Option<usize> {
     let column = usize::from(col - rect.x - 1) / layout.col_w.max(1);
     let line = usize::from(row - rect.y - 1);
     layout.columns.get(column)?.get(line).map(|l| l.entry)
+}
+
+/// The entry a menu's `→` (`right`) or `←` moves its highlight to from
+/// `selected`: the one drawn on the line where `selected`'s first line is, in
+/// the next or previous column, or that column's last when it ends above. With
+/// nothing highlighted, the first entry. `None` in a one-column menu, at the
+/// outer column the arrow points past, or for an entry not drawn.
+pub fn entry_across(
+    layout: &ChordHintLayout,
+    selected: Option<usize>,
+    right: bool,
+) -> Option<usize> {
+    let columns = &layout.columns;
+    if columns.len() < 2 {
+        return None;
+    }
+    let Some(selected) = selected else {
+        return columns.first()?.first().map(|line| line.entry);
+    };
+    let (column, line) = columns.iter().enumerate().find_map(|(c, lines)| {
+        let line = lines.iter().position(|l| l.entry == selected && l.first)?;
+        Some((c, line))
+    })?;
+    let target = if right {
+        column + 1
+    } else {
+        column.checked_sub(1)?
+    };
+    let lines = columns.get(target)?;
+    lines.get(line).or_else(|| lines.last()).map(|l| l.entry)
 }
 
 /// Flow cells into columns, balancing by rendered-line count so a tall menu (or
