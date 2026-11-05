@@ -189,6 +189,7 @@ impl App {
         self.view.chrome_rows.borrow_mut().clear();
         self.view.status_row.borrow_mut().take();
         self.view.tasks_indicator.borrow_mut().take();
+        self.view.confirm_choices.borrow_mut().clear();
         // The two structural rules a centred popup border could land on (and so
         // visually merge with): the horizontal pane divider and the vertical
         // split separator. Captured before `layout` is consumed by render_inner.
@@ -1123,6 +1124,13 @@ mod purity_guard {
              status bar, for a click on it: its columns come from the pass that laid \
              that row out, for `chrome_rows`'s reason, and are cleared with it every \
              frame.",
+        ),
+        (
+            "confirm_choices",
+            "Where an open confirm's `y` and `n` were drawn, on the prompt row or a \
+             consent's pop-up, for a click on one: their cells come from the pass that \
+             wrapped the prompt or laid the pop-up out, for `chrome_rows`'s reason, and \
+             are cleared with it every frame.",
         ),
     ];
 

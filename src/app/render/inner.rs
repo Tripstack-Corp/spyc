@@ -306,8 +306,9 @@ impl App {
                 // Same wrapping PromptLine::render would do, but drawn row-by-row
                 // through the chrome funnel so the text is selectable. A long `:`
                 // command wraps, and each visible row is independently selectable.
-                let lines = p.line(&self.view.theme).wrapped_lines(rect.width);
-                self.draw_chrome_rows(frame, rect, lines);
+                let line = p.line(&self.view.theme);
+                self.record_confirm_choices(p, &line, rect);
+                self.draw_chrome_rows(frame, rect, line.wrapped_lines(rect.width));
             }
             Some(PromptRow::Flash(flash)) => {
                 let color = match flash.kind {
@@ -336,6 +337,39 @@ impl App {
                 self.draw_chrome_line(frame, rect, line);
             }
             None => {}
+        }
+    }
+
+    /// Record where a single-key confirm drew the `y` and the `n` of its
+    /// choice in `rect`, wrapped as it is drawn, for a click on one.
+    fn record_confirm_choices(
+        &self,
+        prompt: &crate::app::Prompt,
+        line: &crate::ui::prompt::PromptLine<'_>,
+        rect: ratatui::layout::Rect,
+    ) {
+        if !Self::answers_on_one_key(&prompt.kind) {
+            return;
+        }
+        let Some((y, n)) = crate::ui::prompt::choice_in(&prompt.prefix) else {
+            return;
+        };
+        let mut choices = self.view.confirm_choices.borrow_mut();
+        for (at, key) in [(y, 'y'), (n, 'n')] {
+            let Some((row, col)) = line.prefix_cell(rect.width, at) else {
+                continue;
+            };
+            let (Ok(row), Ok(col)) = (u16::try_from(row), u16::try_from(col)) else {
+                continue;
+            };
+            if row < rect.height && col < rect.width {
+                choices.push(crate::app::mouse::ChoiceSpan {
+                    y: rect.y + row,
+                    x: rect.x + col,
+                    width: 1,
+                    key: crossterm::event::KeyCode::Char(key),
+                });
+            }
         }
     }
 

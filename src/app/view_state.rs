@@ -507,6 +507,10 @@ pub struct ViewState {
     /// no pane is open. Recorded by the renderer as `chrome_rows` is; `None`
     /// while neither is drawn.
     pub(super) tasks_indicator: std::cell::RefCell<Option<mouse::TasksIndicator>>,
+    /// Where the open confirm's answers were drawn this frame, for a click on
+    /// one: the prompt row's `y` and `n`, or a consent pop-up's. Recorded by
+    /// the renderer as `chrome_rows` is; empty while none is drawn.
+    pub(super) confirm_choices: std::cell::RefCell<Vec<mouse::ChoiceSpan>>,
     /// A sustained same-direction wheel-scroll gesture over an agent's own view
     /// (today: codex's `^T`), tracked so a long one can escalate to a page-sized
     /// step and so a short one can't open the view by accident — see
@@ -623,6 +627,7 @@ impl ViewState {
             chrome_rows: std::cell::RefCell::new(Vec::new()),
             status_row: std::cell::RefCell::new(None),
             tasks_indicator: std::cell::RefCell::new(None),
+            confirm_choices: std::cell::RefCell::new(Vec::new()),
             last_chrome_click: None,
             pane_scroll_streak: None,
             pane_view_sent: None,

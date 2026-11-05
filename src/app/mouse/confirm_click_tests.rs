@@ -125,7 +125,6 @@ fn ask_to_mount(app: &mut App, tmp: &Path) {
 
 /// `^a R` on a live tab, then a click on `y`, restarts it, as `y` does.
 #[test]
-#[ignore = "red: a click on a prompt's y is swallowed"]
 fn a_click_on_y_restarts_the_tab() {
     with_mouse(|tmp| {
         let mut app = app_with_tab(tmp, "cat");
@@ -142,7 +141,6 @@ fn a_click_on_y_restarts_the_tab() {
 
 /// `^a x` on a live tab, then a click on `n`, keeps it, as `n` does.
 #[test]
-#[ignore = "red: a click on a prompt's n is swallowed"]
 fn a_click_on_n_keeps_the_tab() {
     with_mouse(|tmp| {
         let mut app = app_with_tab(tmp, "cat");
@@ -165,7 +163,6 @@ fn a_click_on_n_keeps_the_tab() {
 
 /// A `(y/N):` prompt takes the click too: `dd`, then `y`, removes the file.
 #[test]
-#[ignore = "red: a click on a prompt's y is swallowed"]
 fn a_click_on_y_answers_the_remove_confirm() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);
@@ -191,7 +188,6 @@ fn a_click_on_y_answers_the_remove_confirm() {
 /// A `[Y/n]` prompt: a click on `n` declines the mount, and one on `Y`
 /// re-issues it as confirmed, as the keys do.
 #[test]
-#[ignore = "red: a click on a prompt's Y or n is swallowed"]
 fn a_mount_confirms_y_and_n_take_a_click() {
     with_mouse(|tmp| {
         let mut app = App::test_app(tmp.to_path_buf());
@@ -248,7 +244,6 @@ fn a_click_elsewhere_leaves_the_prompt_up() {
 /// The agent consent's pop-up takes a click on its `[n]` as `n`: the answer
 /// is recorded and the pop-up closes.
 #[test]
-#[ignore = "red: a click on a consent's [n] is swallowed"]
 fn a_click_on_a_consents_n_declines_it() {
     with_mouse(|tmp| {
         let mut app = app_over_entries(tmp);

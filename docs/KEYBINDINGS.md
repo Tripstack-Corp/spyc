@@ -380,6 +380,7 @@ focus.
 | Left click on a project's label (status bar) | Go to that project, as `Space N` does; on the collapsed count (`2/4`), list the projects, as `Space j` does |
 | Left click on the status bar's agent | Focus the pane |
 | Left click on the background tasks' tags (divider), or `bg:` (status bar) | Open the task viewer, as `gB` does |
+| Left click on a prompt's `y` or `n` (`[y/N]`), or a consent's `[y]` or `[n]` | Answer it, as the key does |
 | Left drag | Select text: pager content, a non-mouse pane's held grid, any chrome row, or file-list rows. Release copies |
 | `Ctrl` + left drag (pane) | Select through spyc even when the child uses mouse reporting. The grid stays fixed during the drag; release copies it and resumes live output. The terminal must forward Ctrl+left events; see [selection caveats](config/mouse.md#selecting-text) |
 | `Ctrl` + left click (pane) | See [selection caveats](config/mouse.md#selecting-text) for click behaviour |

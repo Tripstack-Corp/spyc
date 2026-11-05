@@ -120,6 +120,9 @@ pub enum MouseSink {
     /// Open the `:stderr` log: the pointer was on the status bar's `⚠N`.
     /// Beats [`Self::SelectChrome`] for the reason [`Self::PaneTab`] does.
     StderrLog,
+    /// Answer the open confirm prompt with this key, as typing it does: the
+    /// pointer was on its `y` or its `n`.
+    Answer(crossterm::event::KeyCode),
     /// Open the task viewer, as `gB` does: the pointer was on the background
     /// tasks' indicator. Beats [`Self::SelectChrome`] for the reason
     /// [`Self::PaneTab`] does.
@@ -219,6 +222,9 @@ pub struct MouseSnapshot {
     /// `Mode::Prompting`, which is exactly why omitting this was dangerous rather
     /// than merely untidy. See [`route_mouse`]'s prompt arm.
     pub is_prompting: bool,
+    /// The key of the open confirm's answer the pointer is on, as drawn
+    /// ([`super::ChoiceSpan`]): its `y` or its `n`.
+    pub confirm_choice: Option<crossterm::event::KeyCode>,
     /// A `^a v` scrollback pager owns the pane's rect, hiding the live child
     /// behind it.
     pub has_scroll_pager: bool,
@@ -640,7 +646,7 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // prompt at all, via a focused full-frame pager, which is why this is a
     // snapshot field rather than a check on `Mode` at one call site.
     if snap.is_prompting {
-        return prompt_sink(gesture, snap.over_chrome_row);
+        return prompt_sink(gesture, snap.over_chrome_row, snap.confirm_choice);
     }
 
     // Middle and right are spyc's everywhere, never forwarded — otherwise the
@@ -795,18 +801,26 @@ const fn modal_pager_sink(gesture: Gesture, covering: Option<PagerSlot>) -> Mous
     }
 }
 
-/// A gesture while a prompt is open: a paste, or a selection of the prompt
-/// row's own text (`over_chrome_row`).
-const fn prompt_sink(gesture: Gesture, over_chrome_row: bool) -> MouseSink {
-    match gesture {
-        Gesture::Middle => MouseSink::Paste,
+/// A gesture while a prompt is open: a paste, the answer a confirm's drawn
+/// `y` or `n` stands for (`choice`), or a selection of the prompt row's own
+/// text (`over_chrome_row`).
+const fn prompt_sink(
+    gesture: Gesture,
+    over_chrome_row: bool,
+    choice: Option<crossterm::event::KeyCode>,
+) -> MouseSink {
+    match (gesture, choice) {
+        (Gesture::Middle, _) => MouseSink::Paste,
+        // Nothing above the prompt took the event, so the key it stands for,
+        // typed, reaches the prompt too.
+        (Gesture::Left, Some(key)) => MouseSink::Answer(key),
         // Selecting the prompt row's own text is the exception, and safe:
         // the latch this arm guards against is a *chord* one — right-click
         // arms a pending sequence the prompt's key handler never consumes.
         // A left drag arms nothing and never reaches the resolver, so
         // copying the command you just typed costs the guard nothing.
-        Gesture::Left if over_chrome_row => MouseSink::SelectChrome,
-        Gesture::Left | Gesture::Right | Gesture::Wheel => MouseSink::Swallow,
+        (Gesture::Left, None) if over_chrome_row => MouseSink::SelectChrome,
+        (Gesture::Left | Gesture::Right | Gesture::Wheel, _) => MouseSink::Swallow,
     }
 }
 
@@ -903,6 +917,7 @@ mod tests {
             pane_wants_mouse: false,
             force_pane_selection: false,
             is_prompting: false,
+            confirm_choice: None,
             has_scroll_pager: false,
             pane_closed: false,
             pane_scroll_keys: false,

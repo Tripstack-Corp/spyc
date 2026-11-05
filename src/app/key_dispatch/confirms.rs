@@ -9,15 +9,31 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::graveyard_ops::GraveyardOp;
 use crate::app::{App, Effect, Mode, Prompt, PromptKind};
 
+/// How a single-key confirm takes its answer.
+type Answer = fn(&mut App, KeyEvent) -> Vec<Effect>;
+
 impl App {
     /// The answer to a single-key confirm, when the open prompt is one: each
     /// answers on its first key, so none reaches a line editor. `None` for
-    /// any other prompt. Every kind is named, so a new one is placed here.
+    /// any other prompt.
     pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         let Mode::Prompting(prompt) = &self.state.mode else {
             return None;
         };
-        let answer: fn(&mut Self, KeyEvent) -> Vec<Effect> = match prompt.kind {
+        let answer = Self::confirm_answer(&prompt.kind)?;
+        Some(answer(self, key))
+    }
+
+    /// Whether `kind` is a single-key confirm, whose drawn `y` and `n` a
+    /// click answers as the keys do.
+    pub(in crate::app) const fn answers_on_one_key(kind: &PromptKind) -> bool {
+        Self::confirm_answer(kind).is_some()
+    }
+
+    /// What answers a single-key confirm `kind`; `None` for any other
+    /// prompt. Every kind is named, so a new one is placed here.
+    const fn confirm_answer(kind: &PromptKind) -> Option<Answer> {
+        let answer: Answer = match kind {
             PromptKind::RemoveConfirm => Self::handle_remove_confirm_key,
             PromptKind::GraveyardPurgeAllConfirm => Self::handle_graveyard_purge_all_confirm,
             PromptKind::HookConsent { .. } => Self::handle_hook_consent_key,
@@ -49,7 +65,7 @@ impl App {
             | PromptKind::Command
             | PromptKind::ProjectOpen => return None,
         };
-        Some(answer(self, key))
+        Some(answer)
     }
 
     /// Single-key confirmation for `R`. `y` / `Y` triggers the delete;
