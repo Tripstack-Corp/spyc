@@ -53,10 +53,34 @@ pub fn with_editor<R>(editor: &str, body: impl FnOnce() -> R) -> R {
 /// line-folding-on-demand. Spyc's in-app pager remains the default
 /// for normal viewing; `p` is the escape hatch.
 pub fn resolve_pager() -> Vec<String> {
+    #[cfg(test)]
+    if let Some(pager) = PAGER_OVERRIDE.with(|p| p.borrow().clone()) {
+        return split_command(&pager);
+    }
     let raw = crate::envset::var("PAGER")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "less".to_string());
     split_command(&raw)
+}
+
+#[cfg(test)]
+thread_local! {
+    static PAGER_OVERRIDE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Test-only: run `body` with [`resolve_pager`] answering `pager`, as
+/// [`with_editor`] does for the editor.
+#[cfg(test)]
+pub fn with_pager<R>(pager: &str, body: impl FnOnce() -> R) -> R {
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            PAGER_OVERRIDE.with(|p| *p.borrow_mut() = None);
+        }
+    }
+    PAGER_OVERRIDE.with(|p| *p.borrow_mut() = Some(pager.to_string()));
+    let _guard = Guard;
+    body()
 }
 
 /// Split an `$EDITOR`-style value into `[program, arg, arg, ...]` on

@@ -225,6 +225,7 @@ mod canonical;
 mod copying;
 mod mounting;
 mod navigation;
+mod paging;
 mod pane;
 mod pending;
 mod read_only;
