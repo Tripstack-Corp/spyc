@@ -8,13 +8,14 @@
 //!   cargo test --lib agy_live -- --ignored --nocapture --test-threads=1
 //! ```
 //!
-//! agy runs with `AGY_CLI_HIDE_ACCOUNT_INFO`, and screens are written
-//! sanitized besides: the workspace becomes `/Users/example/src/spyc`, the
+//! agy runs with `AGY_CLI_HIDE_ACCOUNT_INFO`, and with
+//! `AGY_CLI_DISABLE_AUTO_UPDATE`, so a run never replaces the installed agy
+//! under the capture. Screens are written sanitized: the workspace becomes `/Users/example/src/spyc`, the
 //! temporary directory `/tmp`, `$HOME` `/Users/example`, an email address
 //! `user@example.com`, a GCP project `example-project` and `$USER` `example`.
 //! Read them before committing.
 //!
-//! Both work with agy's vim editor mode, which opens the composer in NORMAL
+//! Each works with agy's vim editor mode, which opens the composer in NORMAL
 //! mode and makes Enter in INSERT mode a newline.
 //!
 //! No dialog is answered with an `always` option, which writes a rule into
@@ -77,6 +78,8 @@ impl LiveAgy {
             &[
                 ("TERM", "xterm-256color"),
                 ("AGY_CLI_HIDE_ACCOUNT_INFO", "1"),
+                // Left on, agy replaces its own binary when a release is out.
+                ("AGY_CLI_DISABLE_AUTO_UPDATE", "1"),
             ],
             wake,
         )
@@ -543,6 +546,41 @@ fn capture_forced_dialogs() {
     }
     agy.finish_turn("the file access turn's end", Duration::from_secs(60));
     agy.save_timeline("capture-forced-timeline");
+}
+
+/// agy's expanded permission editor, which `ctrl+g` opens over a command
+/// approval.
+fn is_permission_editor(screen: &str) -> bool {
+    screen.contains("Requested Permission (Editable):")
+}
+
+/// The expanded permission editor over a command approval. Esc returns to the
+/// approval, which is then declined.
+#[test]
+#[ignore = "manual: drives the local agy, signed in"]
+fn agy_live_capture_permission_editor() {
+    let mut agy = start(28, 100);
+    agy.submit("Use run_command to run `uname -m` and wait for it, then reply with only: done");
+    if agy.expect("the command approval", Duration::from_secs(90), is_approval) {
+        agy.watch(Duration::from_millis(500));
+        agy.send(b"\x07");
+        if agy.expect(
+            "the permission editor",
+            Duration::from_secs(10),
+            is_permission_editor,
+        ) {
+            agy.watch(Duration::from_millis(500));
+            agy.snapshot("approval-command-editor");
+        }
+        agy.send(b"\x1b");
+        if agy.expect("the approval again", Duration::from_secs(10), |s| {
+            is_dialog(s) && !is_permission_editor(s)
+        }) {
+            agy.decline();
+        }
+    }
+    agy.finish_turn("the command turn's end", Duration::from_secs(60));
+    agy.save_timeline("capture-editor-timeline");
 }
 
 /// One probe: a prompt, and the longest output gap from the moment agy is
