@@ -445,9 +445,11 @@ impl App {
                 result,
             } => {
                 match result {
-                    Ok(()) => self
-                        .state
-                        .flash_info(format!("copied {count} item(s) to {}", dest.display())),
+                    Ok(()) => {
+                        let dest = self.shown_dest(&dest);
+                        self.state
+                            .flash_info(format!("copied {count} item(s) to {}", dest.display()));
+                    }
                     Err(e) => self.state.flash_error(format!("error: {e:#}")),
                 }
                 self.state.cur_mut().picks.clear();

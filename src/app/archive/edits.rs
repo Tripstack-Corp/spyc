@@ -38,6 +38,14 @@ impl App {
         Some((mount.archive().to_path_buf(), entry.inner.clone()))
     }
 
+    /// Where an op that wrote to `dest` wrote, as the user named it: the place
+    /// in a mount a staging path stands for, else `dest`. A copy or put into a
+    /// mount is pointed at the staging tree, and its message names the place.
+    pub(in crate::app) fn shown_dest(&self, dest: &Path) -> PathBuf {
+        self.mount_path_for_staged(dest)
+            .unwrap_or_else(|| dest.to_path_buf())
+    }
+
     /// The mount path a staged file stands in for — the inverse of
     /// `ArchiveMount::staging_path`, used to rewrite a held-back effect.
     pub(super) fn mount_path_for_staged(&self, real: &Path) -> Option<PathBuf> {
@@ -60,6 +68,11 @@ impl App {
                 after.strip_prefix(rank).ok()
             })
             .unwrap_or(rel);
+        // The staging root stands for the archive itself, named without the
+        // trailing `/` an empty join adds.
+        if rel.as_os_str().is_empty() {
+            return Some(mount.archive().to_path_buf());
+        }
         Some(mount.archive().join(rel))
     }
 

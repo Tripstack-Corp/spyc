@@ -120,7 +120,7 @@ impl App {
                 if self.refuse_changes_while_written(&changes) {
                     return None;
                 }
-                for dir in self.addition_dirs(&changes) {
+                for dir in self.staged_dirs(&changes) {
                     if let Err(e) = std::fs::create_dir_all(&dir) {
                         self.state
                             .flash_error(format!("archive: staging {}: {e:#}", dir.display()));
@@ -159,16 +159,18 @@ impl App {
         }))
     }
 
-    /// The directories the additions among `changes` are staged in, to create
-    /// before the op that writes them runs: the copy and inventory workers write
-    /// into a directory, they don't make one. An addition's bytes live at its
-    /// journal path under the staging root, so its directory is that path's
-    /// parent.
-    fn addition_dirs(&self, changes: &[PendingChange]) -> Vec<PathBuf> {
+    /// The directories the additions and replacements among `changes` are
+    /// staged in, to create before the op that writes them runs: the copy and
+    /// inventory workers write into a directory, they don't make one, and a
+    /// member never read has no directory in staging yet. Either's bytes live
+    /// at its journal path under the staging root, so its directory is that
+    /// path's parent.
+    fn staged_dirs(&self, changes: &[PendingChange]) -> Vec<PathBuf> {
         let mut dirs: Vec<PathBuf> = changes
             .iter()
             .filter_map(|change| match change {
-                PendingChange::Add { archive, inner } => {
+                PendingChange::Add { archive, inner }
+                | PendingChange::Replace { archive, inner } => {
                     let bytes = self.state.mounts.get(archive)?.staging_root.join(inner);
                     bytes.parent().map(Path::to_path_buf)
                 }
@@ -185,6 +187,7 @@ impl App {
         let mut deleted = 0usize;
         let mut renamed = 0usize;
         let mut added = 0usize;
+        let mut replaced = 0usize;
         for change in changes {
             match change {
                 PendingChange::Delete { archive, inner } => {
@@ -216,24 +219,43 @@ impl App {
                         renamed += 1;
                     }
                 }
+                // A file copied in over one copied in before, or over a member
+                // replaced before, is still the one change.
                 PendingChange::Add { archive, inner } => {
                     if let Some(mount) = self.state.mounts.get_mut(&archive) {
-                        mount.journal.add(inner);
-                        added += 1;
+                        if mount.journal.is_addition(&inner) {
+                            replaced += 1;
+                        } else {
+                            mount.journal.add(inner);
+                            added += 1;
+                        }
+                    }
+                }
+                PendingChange::Replace { archive, inner } => {
+                    if let Some(mount) = self.state.mounts.get_mut(&archive) {
+                        if !mount.journal.is_replaced(&inner) {
+                            mount.journal.replace(inner);
+                        }
+                        replaced += 1;
                     }
                 }
             }
         }
-        if deleted + renamed + added == 0 {
+        if deleted + renamed + added + replaced == 0 {
             return;
         }
         self.state.refresh_listing();
-        let what = [(deleted, "removed"), (renamed, "renamed"), (added, "added")]
-            .iter()
-            .filter(|(n, _)| *n > 0)
-            .map(|(n, verb)| format!("{n} {verb}"))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let what = [
+            (deleted, "removed"),
+            (renamed, "renamed"),
+            (added, "added"),
+            (replaced, "replaced"),
+        ]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, verb)| format!("{n} {verb}"))
+        .collect::<Vec<_>>()
+        .join(", ");
         // Un-adding the last pending addition leaves nothing to write back, so
         // pointing at `:archive write` would name a no-op.
         let touched: Vec<PathBuf> = self
