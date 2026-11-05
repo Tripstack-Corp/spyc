@@ -52,7 +52,7 @@ fn app_in_the_task_viewer(tmp: &Path, count: usize) -> App {
     app
 }
 
-fn viewed_task(app: &App) -> Option<u32> {
+pub(super) fn viewed_task(app: &App) -> Option<u32> {
     app.view.project().pager.as_ref().and_then(|v| v.task_id)
 }
 
@@ -98,14 +98,14 @@ fn menu_holding(app: &mut App, row: &str) -> Option<(Rect, String, Vec<String>)>
 }
 
 /// The body lines of the open menu holding `row`.
-fn menu_lines(app: &mut App, row: &str) -> Vec<String> {
+pub(super) fn menu_lines(app: &mut App, row: &str) -> Vec<String> {
     menu_holding(app, row)
         .unwrap_or_else(|| panic!("no menu with a row {row:?} is drawn"))
         .2
 }
 
 /// Where `row` is drawn in the open menu holding it: where a click aims.
-fn row_at(app: &mut App, row: &str) -> (u16, u16) {
+pub(super) fn row_at(app: &mut App, row: &str) -> (u16, u16) {
     let (menu, ..) =
         menu_holding(app, row).unwrap_or_else(|| panic!("no menu with a row {row:?} is drawn"));
     let buf = drawn(app);
@@ -128,7 +128,7 @@ fn row_at(app: &mut App, row: &str) -> (u16, u16) {
 }
 
 /// A right-click on the middle of the screen, over the pager drawn there.
-fn right_click_the_pager(app: &mut App) {
+pub(super) fn right_click_the_pager(app: &mut App) {
     drawn(app);
     right_click(app, centre(FRAME));
 }
