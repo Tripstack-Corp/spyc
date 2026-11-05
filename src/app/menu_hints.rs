@@ -67,10 +67,10 @@ pub(super) fn cmd_hints(app: &mut App, args: &str) -> Vec<Effect> {
             Vec::new()
         }
         "reset" => {
-            app.state.learned = Learned::default();
+            app.state.learned.forget();
             app.state
                 .flash_info("hints: every count forgotten; the menus name their keys again");
-            vec![Effect::SaveLearned(Learned::default())]
+            vec![Effect::SaveLearned(app.state.learned.clone())]
         }
         _ => {
             app.state.flash_error("usage: :hints [reset]");
