@@ -59,7 +59,7 @@ const FUNCTION: Rule = Rule {
         ("src/git/diff_model/build.rs::build_tree_change_file", 120),
         ("src/keymap/action.rs::Action::canonical_name", 119),
         ("src/keymap/action.rs::Action::describe", 119),
-        ("src/keymap/action.rs::action_from_name", 103),
+        ("src/keymap/action/names.rs::action_from_name", 103),
         ("src/keymap/resolver/mod.rs::Resolver::feed", 386),
         ("src/lua/api.rs::install", 170),
         ("src/mcp/protocol.rs::handle_tools_call", 321),

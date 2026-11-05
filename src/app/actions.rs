@@ -488,9 +488,10 @@ impl App {
                     ok: ClipMsg::Scrollback,
                 },
             }],
-            // yf — yank cursor file's absolute path (or all picks,
-            // newline-separated) to system clipboard.
+            // yf — yank the cursor entry's absolute path, file or directory
+            // (or all picks, newline-separated) to system clipboard.
             Action::YankPaths => self.yank_paths_to_clipboard(),
+            Action::YankDir => self.yank_dir_to_clipboard(),
             Action::ContextMenu => self.open_entry_menu(),
             Action::PaneContextMenu => self.open_tab_menu(),
             Action::PaneSendEsc => self.send_esc_to_pane(),

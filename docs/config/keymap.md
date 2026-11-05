@@ -99,7 +99,8 @@ verbs above (`down`, `pick`,
 | `yank_prompt` | yank visible pane output to clipboard |
 | `yank_last_prompt` | yank last typed prompt to clipboard |
 | `yank_scrollback` | yank full pane scrollback to clipboard |
-| `yank_paths` | yank cursor file path (or picks) to clipboard |
+| `yank_paths` | yank path of file or dir under cursor (or picks) to clipboard |
+| `yank_dir` | yank path of the column's directory to clipboard |
 | `toggle_mask =N` | toggle ignore mask `N` (1 or 2) |
 | `limit_prompt` | filter file list (glob, ! for picks, empty clears) |
 | `command_prompt` | command line (:limit, :!, :!!, :;, etc.) |

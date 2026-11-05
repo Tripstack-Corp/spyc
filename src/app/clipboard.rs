@@ -9,8 +9,8 @@ use super::{App, ClipMsg, Effect, PaneInput, PaneTarget, Wake};
 use crate::keymap::PanePrefix;
 
 impl App {
-    /// yf — yank the cursor file's absolute path to the system
-    /// clipboard. When picks are active, yanks all of them
+    /// yf — yank the cursor entry's absolute path, file or directory, to
+    /// the system clipboard. When picks are active, yanks all of them
     /// newline-separated. Always absolute paths so the receiving
     /// shell resolves them correctly regardless of where the user
     /// pastes them. The user's recurring real-world ask was a clean
@@ -33,6 +33,16 @@ impl App {
             ClipMsg::MultiPath { count: paths.len() }
         };
         vec![Effect::CopyToClipboard { text, ok }]
+    }
+
+    /// yd — yank the focused column's directory as the column lists it, so
+    /// inside an archive mount the path inside the archive. Picks don't change
+    /// it.
+    pub fn yank_dir_to_clipboard(&self) -> Vec<Effect> {
+        vec![Effect::CopyToClipboard {
+            text: self.state.cur().listing.dir.display().to_string(),
+            ok: ClipMsg::SinglePath,
+        }]
     }
 
     /// yP — yank the last prompt the user typed into the pane.
