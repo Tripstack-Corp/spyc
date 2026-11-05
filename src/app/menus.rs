@@ -71,14 +71,10 @@ impl App {
     /// whose action the mount refuses are left out, as `apply_inner` would
     /// refuse them.
     fn open_menu(&mut self, target: Target, title: String) -> Option<Effect> {
-        let c = self.state.cur();
-        let in_mount = self.state.mounts.contains(&c.listing.dir);
         let rows = menu_for(target)
             .into_iter()
             .filter(|row| {
-                !(in_mount
-                    && matches!(row, ChordEntry::Act(_, a)
-                        if super::state::archive::refusal(a).is_some()))
+                !matches!(row, ChordEntry::Act(_, a) if self.state.mount_refusal(a).is_some())
             })
             .map(|e| {
                 let label = e.label().to_string();

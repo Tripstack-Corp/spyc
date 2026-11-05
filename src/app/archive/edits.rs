@@ -21,6 +21,15 @@ impl App {
         }
     }
 
+    /// Why the staged file `real` can't go to an editor: it is a member of a
+    /// read-only mount, which could never take the edit back. `None` for any
+    /// other file.
+    pub(in crate::app) fn staged_edit_refusal(&self, real: &Path) -> Option<String> {
+        let at = self.mount_path_for_staged(real)?;
+        let (mount, _) = self.state.mounts.resolve(&at)?;
+        crate::app::state::archive::read_only_refusal(&mount.capability)
+    }
+
     /// The mount and journal path a staged file stands for.
     fn staged_owner(&self, real: &Path) -> Option<(PathBuf, String)> {
         let at = self.mount_path_for_staged(real)?;

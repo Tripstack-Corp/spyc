@@ -152,7 +152,6 @@ fn assert_refused_and_clean(fx: &Fixture, what: &str) {
 // ── the keys ─────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "red: dd and R open the delete prompt in a read-only mount"]
 fn deleting_a_member_of_a_read_only_mount_is_refused_with_the_reason() {
     for keys in ["dd", "R"] {
         read_only(|mut fx| {
@@ -164,7 +163,6 @@ fn deleting_a_member_of_a_read_only_mount_is_refused_with_the_reason() {
 }
 
 #[test]
-#[ignore = "red: M opens the move prompt in a read-only mount"]
 fn moving_or_renaming_a_member_of_a_read_only_mount_is_refused_with_the_reason() {
     read_only(|mut fx| {
         let effects = press(&mut fx.app, "M");
@@ -174,7 +172,6 @@ fn moving_or_renaming_a_member_of_a_read_only_mount_is_refused_with_the_reason()
 }
 
 #[test]
-#[ignore = "red: p puts the inventory into a read-only mount and journals it"]
 fn putting_into_a_read_only_mount_is_refused_with_the_reason() {
     read_only(|mut fx| {
         let archive = fx.archive.clone();
@@ -188,7 +185,6 @@ fn putting_into_a_read_only_mount_is_refused_with_the_reason() {
 /// Copying a file in from outside the mount: `c` on a real file, the archive
 /// typed as its destination.
 #[test]
-#[ignore = "red: a copy into a read-only mount is staged and journaled"]
 fn copying_into_a_read_only_mount_is_refused_with_the_reason() {
     read_only(|mut fx| {
         let _cwd = CwdGuard;
@@ -214,7 +210,6 @@ fn copying_into_a_read_only_mount_is_refused_with_the_reason() {
 
 /// `e` and `V` hand a member to an editor, whose save the journal would record.
 #[test]
-#[ignore = "red: e and V extract a member of a read-only mount for an editor"]
 fn editing_a_member_of_a_read_only_mount_is_refused_with_the_reason() {
     for keys in ["e", "v", "V"] {
         read_only(|mut fx| {
@@ -229,7 +224,6 @@ fn editing_a_member_of_a_read_only_mount_is_refused_with_the_reason() {
 
 /// The pager's `v` edits the extracted copy it is showing.
 #[test]
-#[ignore = "red: the pager's v hands a read-only member to an editor"]
 fn editing_from_the_pager_in_a_read_only_mount_is_refused_with_the_reason() {
     read_only(|mut fx| {
         let effects = press_enter(&mut fx.app);
@@ -267,7 +261,6 @@ fn entering_a_directory_of_a_read_only_mount_with_e_still_works() {
 // ── the menu ─────────────────────────────────────────────────────────────
 
 #[test]
-#[ignore = "red: the entry menu in a read-only mount offers the edits it refuses"]
 fn the_entry_menu_in_a_read_only_mount_leaves_the_edits_out() {
     read_only(|mut fx| {
         let keys = menu_keys(&mut fx.app);
@@ -411,7 +404,6 @@ fn journaled_edits(
 }
 
 #[test]
-#[ignore = "red: the effect screen journals edits to a read-only mount"]
 fn the_effect_screen_refuses_every_journaled_edit_to_a_read_only_mount() {
     for at in 0..4 {
         read_only(|mut fx| {

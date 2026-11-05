@@ -139,12 +139,9 @@ impl App {
         }
 
         // Inside a mounted archive, refuse the handful of actions whose meaning
-        // depends on the rows being real files — before dispatch, so no handler
-        // has to know about mounts.
-        if !self.state.mounts.is_empty()
-            && self.state.mounts.contains(&self.state.cur().listing.dir)
-            && let Some(why) = state::archive::refusal(action)
-        {
+        // depends on the rows being real files, and a read-only mount's edits —
+        // before dispatch, so no handler has to know about mounts.
+        if let Some(why) = self.state.mount_refusal(action) {
             self.state.flash_error(why);
             return Ok(Vec::new());
         }

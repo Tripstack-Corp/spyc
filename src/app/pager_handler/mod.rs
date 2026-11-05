@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::pane::Pane;
 use crate::shell;
@@ -149,7 +149,25 @@ impl App {
         if let Some(r) = self.handle_pager_visual(key, viewport) {
             return r;
         }
+        if let Some(r) = self.refuse_editing_read_only_member(key) {
+            return r;
+        }
         self.handle_pager_motion(key, viewport)
+    }
+
+    /// `v` on a pager showing a member of a read-only mount: refused with the
+    /// mount's reason, before `handle_pager_motion` hands the extracted copy
+    /// to an editor.
+    fn refuse_editing_read_only_member(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let edit = key.code == KeyCode::Char('v') && !key.modifiers.contains(KeyModifiers::CONTROL);
+        let source = self
+            .active_pager_ref()
+            .filter(|_| edit)?
+            .source_path
+            .clone()?;
+        let why = self.staged_edit_refusal(&source)?;
+        self.state.flash_error(why);
+        Some(Vec::new())
     }
 
     /// The pager's content viewport height (body rows). Prefers the

@@ -384,8 +384,12 @@ impl App {
             let now = current_staged_stats(mount);
             if !mount.is_dirty() && !differs(&mount.staged, &now) {
                 None
-            } else if let Some(why) = mount.capability.reason() {
-                Some(Err(format!("archive is read-only: {why}")))
+            } else if let Some(why) =
+                crate::app::state::archive::read_only_refusal(&mount.capability)
+            {
+                // Each edit is refused when it's made; this catches an edit
+                // saved outside spyc, which nothing could refuse.
+                Some(Err(why))
             } else {
                 let op = ArchiveOp::Write {
                     steps: crate::archive::plan_repack(
