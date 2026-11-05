@@ -9,7 +9,12 @@
 //! The match over path-bearing effects is exhaustive on purpose. A future effect
 //! that carries a path has to be classified here or the build fails, which is the
 //! difference between a considered decision and a silent hole.
+//!
+//! Every change the journal records leaves here as a `Record` or a
+//! `RewriteAndRecord`, so this is where a read-only mount refuses each one,
+//! whatever key, prompt or tool produced it.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -32,7 +37,7 @@ pub enum ArchiveSink {
         then: Box<Effect>,
     },
     /// Can't be done inside an archive; the string is shown to the user.
-    Refuse(&'static str),
+    Refuse(Cow<'static, str>),
     /// The op takes the archive *file* — deleting, moving or renaming it. Drop
     /// these mounts first, then run it: a mount keyed on a path that no longer
     /// holds that archive would resolve a future file's members against a stale
@@ -107,16 +112,29 @@ pub fn route_archive_effect(
             then: Box::new(rewrite_paths(effect, &staged)),
         },
         Verdict::Staged(staged) => ArchiveSink::PassThrough(rewrite_paths(effect, &staged)),
-        Verdict::Refuse(why) => ArchiveSink::Refuse(why),
+        Verdict::Refuse(why) => ArchiveSink::Refuse(Cow::Borrowed(why)),
         Verdict::TakesContainer(archives) => ArchiveSink::UnmountFirst {
             archives,
             effect: Box::new(effect),
         },
-        Verdict::Record(changes) => ArchiveSink::Record(changes),
-        Verdict::RewriteAndRecord { effect, changes } => {
-            ArchiveSink::RewriteAndRecord { effect, changes }
-        }
+        Verdict::Record(changes) => match read_only(&changes, mounts) {
+            Some(why) => ArchiveSink::Refuse(Cow::Owned(why)),
+            None => ArchiveSink::Record(changes),
+        },
+        Verdict::RewriteAndRecord { effect, changes } => match read_only(&changes, mounts) {
+            Some(why) => ArchiveSink::Refuse(Cow::Owned(why)),
+            None => ArchiveSink::RewriteAndRecord { effect, changes },
+        },
     }
+}
+
+/// The refusal when any of `changes` is to a read-only mount: a selection is
+/// refused whole, never half-recorded.
+fn read_only(changes: &[PendingChange], mounts: &Mounts) -> Option<String> {
+    changes.iter().find_map(|change| {
+        let mount = mounts.get(change.archive())?;
+        super::state::archive::read_only_refusal(&mount.capability)
+    })
 }
 
 /// The decision, before the effect is moved into a sink.
