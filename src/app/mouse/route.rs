@@ -120,6 +120,10 @@ pub enum MouseSink {
     /// Open the `:stderr` log: the pointer was on the status bar's `⚠N`.
     /// Beats [`Self::SelectChrome`] for the reason [`Self::PaneTab`] does.
     StderrLog,
+    /// Open the task viewer, as `gB` does: the pointer was on the background
+    /// tasks' indicator. Beats [`Self::SelectChrome`] for the reason
+    /// [`Self::PaneTab`] does.
+    TaskViewer,
     /// Do what a project's key does: `Space N` for a project's label on the
     /// status bar, `Space j` for the collapsed count. Beats
     /// [`Self::SelectChrome`] for the reason [`Self::PaneTab`] does.
@@ -163,6 +167,9 @@ pub enum MenuAt {
     /// project's segment, the collapsed count, the git, agent or session
     /// segment.
     Status(StatusSegment),
+    /// The background tasks' indicator: the divider's task tags, or the
+    /// status bar's `bg:`.
+    Tasks,
 }
 
 /// What the user did, reduced to the axis routing cares about.
@@ -245,6 +252,9 @@ pub struct MouseSnapshot {
     pub prompt_on_divider: bool,
     /// The pointer is on the status bar's `⚠N` of unread stderr, as drawn.
     pub over_stderr_notice: bool,
+    /// The pointer is on the background tasks' indicator, as drawn
+    /// ([`super::TasksIndicator`]).
+    pub over_tasks: bool,
     /// The status-bar segment the pointer is on, from the spans the renderer
     /// recorded with the bar ([`super::StatusRow`]): a project's label rather
     /// than the segment holding it. `None` off the bar.
@@ -308,7 +318,8 @@ impl MouseSnapshot {
     }
 
     /// The object a right-click opens a menu for: a tab label, a pager, the
-    /// pane divider or the split's, a file row, or the body of a live pane. A
+    /// background tasks' indicator, the pane divider or the split's, a
+    /// status-bar segment, a file row, or the body of a live pane. A
     /// pager or chrome painted over the layout hides what is beneath it, and
     /// blank space is no object.
     const fn menu_at(self) -> Option<MenuAt> {
@@ -318,6 +329,10 @@ impl MouseSnapshot {
         }
         if let Some(slot) = self.covering_pager {
             return Some(MenuAt::Pager(slot));
+        }
+        // The tasks' indicator is drawn on the divider or the status bar.
+        if self.over_tasks {
+            return Some(MenuAt::Tasks);
         }
         // So is the rest of the divider, unless the prompt row has taken it.
         if matches!(self.region, Some(Region::Divider)) && !self.prompt_on_divider {
@@ -651,6 +666,9 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
             if let Some(index) = snap.tab_under_pointer {
                 return MouseSink::PaneTab(index);
             }
+            if snap.over_tasks {
+                return MouseSink::TaskViewer;
+            }
             if snap.over_stderr_notice {
                 return MouseSink::StderrLog;
             }
@@ -892,6 +910,7 @@ mod tests {
             prompt_on_divider: false,
             over_chrome_row: false,
             over_stderr_notice: false,
+            over_tasks: false,
             status_segment: None,
             chord_armed: false,
             menu_open: false,

@@ -181,13 +181,13 @@ impl App {
                 (
                     format!(":make {}", run.target),
                     label,
-                    HintEntry::Make(Some(run)),
+                    HintEntry::Command(Some(super::view_state::CommandRow::Make(run))),
                 )
             })
             .collect();
         if rows.is_empty() {
             let none = "make: no explicit targets".to_string();
-            rows.push((String::new(), none, HintEntry::Make(None)));
+            rows.push((String::new(), none, HintEntry::Command(None)));
         }
         let (width, height) = self.view.term_size;
         let rows = fit(rows, Rect::new(0, 0, width, height));
@@ -262,7 +262,7 @@ fn fit(mut rows: Vec<(String, String, HintEntry)>, area: Rect) -> Vec<(String, S
         let more = (
             String::new(),
             format!("… {} more: :make <target>", total - keep),
-            HintEntry::Make(None),
+            HintEntry::Command(None),
         );
         let mut tried = rows[..keep].to_vec();
         tried.push(more.clone());

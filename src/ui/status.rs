@@ -54,6 +54,18 @@ pub struct StatusBar<'a> {
 pub struct StatusLine {
     pub line: Line<'static>,
     pub segments: Vec<SegmentSpan>,
+    /// Where the suffix's own text was drawn; `None` when it wasn't.
+    pub suffix_at: Option<SuffixAt>,
+}
+
+/// Where the suffix's text starts on the bar, and which form of it was drawn,
+/// so a caller can find a field it placed in that form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SuffixAt {
+    /// The display column of its first character, from the bar's left edge.
+    pub col: usize,
+    /// The short form (`suffix_short`) was drawn, not `suffix`.
+    pub short: bool,
 }
 
 /// The bar's spans as they are pushed, the columns they take, and the
@@ -63,6 +75,7 @@ struct Bar {
     spans: Vec<Span<'static>>,
     segments: Vec<SegmentSpan>,
     width: usize,
+    suffix_at: Option<SuffixAt>,
 }
 
 impl Bar {
@@ -98,6 +111,7 @@ impl Bar {
         StatusLine {
             line: Line::from(self.spans),
             segments: self.segments,
+            suffix_at: self.suffix_at,
         }
     }
 }
@@ -163,6 +177,17 @@ fn push_segment(
     bar.mark(segment, from);
 }
 
+/// The suffix's segment, `text` padded, noting where its own text starts and
+/// whether it is the `short` form.
+fn push_suffix(bar: &mut Bar, text: &str, short: bool, fg: Color, bg: Color, next_bg: Color) {
+    // Past the space that pads it.
+    bar.suffix_at = Some(SuffixAt {
+        col: bar.width + 1,
+        short,
+    });
+    push_segment(bar, StatusSegment::Suffix, text, fg, bg, next_bg);
+}
+
 /// [`push_segment`] for a segment of styled spans: each drawn on `bg`, in `fg`
 /// unless it has a colour of its own.
 fn push_spans(
@@ -182,11 +207,16 @@ fn push_spans(
 impl StatusBar<'_> {
     /// The suffix to draw in `room` columns, given what a suffix costs there
     /// and what the uncut path needs: the full one, unless it would cut the path
-    /// and a short form exists.
-    fn fitting_suffix(&self, room: usize, cost: impl Fn(&str) -> usize, path_need: usize) -> &str {
+    /// and a short form exists. Whether it is the short one, too.
+    fn fitting_suffix(
+        &self,
+        room: usize,
+        cost: impl Fn(&str) -> usize,
+        path_need: usize,
+    ) -> (&str, bool) {
         match self.suffix_short {
-            Some(short) if room.saturating_sub(cost(self.suffix)) < path_need => short,
-            _ => self.suffix,
+            Some(short) if room.saturating_sub(cost(self.suffix)) < path_need => (short, true),
+            _ => (self.suffix, false),
         }
     }
 
@@ -303,7 +333,7 @@ impl StatusBar<'_> {
         let git_w = width_of(&git_text);
         let agent_w = width_of(&agent_text);
         // A suffix segment is ` text ` plus its separator; the path's is ` path `.
-        let suffix = self.fitting_suffix(
+        let (suffix, short) = self.fitting_suffix(
             avail.saturating_sub(emoji_w + project_w + session_w + git_w + agent_w + 1),
             |s| if s.is_empty() { 0 } else { dw(s) + 3 },
             dw(self.path) + 2,
@@ -369,8 +399,7 @@ impl StatusBar<'_> {
             push_segment(&mut bar, agent, text, agent_fg, agent_bg, next_bg);
         }
         if let Some(ref text) = suffix_text {
-            let segment = StatusSegment::Suffix;
-            push_segment(&mut bar, segment, text, suffix_fg, suffix_bg, term_bg);
+            push_suffix(&mut bar, text, short, suffix_fg, suffix_bg, term_bg);
         }
 
         // Fill remaining width.
@@ -429,7 +458,7 @@ impl StatusBar<'_> {
         }
         let pre_w = bar.width;
         let cost = |s: &str| if s.is_empty() { 0 } else { 2 + dw(s) };
-        let suffix = self.fitting_suffix(avail.saturating_sub(pre_w), cost, dw(self.path));
+        let (suffix, short) = self.fitting_suffix(avail.saturating_sub(pre_w), cost, dw(self.path));
         let suffix_w = cost(suffix);
 
         let path_budget = avail.saturating_sub(pre_w + suffix_w);
@@ -446,6 +475,7 @@ impl StatusBar<'_> {
         if !suffix_disp.is_empty() {
             bar.push(Span::raw("  "));
             let from = bar.width;
+            bar.suffix_at = Some(SuffixAt { col: from, short });
             bar.push(Span::styled(
                 suffix_disp,
                 Style::default().add_modifier(Modifier::DIM),

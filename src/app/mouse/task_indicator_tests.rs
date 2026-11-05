@@ -110,7 +110,6 @@ fn background_ids(app: &App) -> Vec<u32> {
 /// A click on a task's tag on the divider opens the task viewer, as `gB`
 /// does.
 #[test]
-#[ignore = "red: a click on the divider's task tags selects their text"]
 fn a_click_on_the_dividers_task_tags_opens_the_task_viewer() {
     with_mouse(|tmp| {
         let mut app = app_with_tasks(tmp, 2, true);
@@ -125,7 +124,6 @@ fn a_click_on_the_dividers_task_tags_opens_the_task_viewer() {
 /// With no pane open, the tasks ride the status bar's `bg:`, and a click on
 /// it does the same.
 #[test]
-#[ignore = "red: a click on the status bar's bg: selects its text"]
 fn with_no_pane_a_click_on_the_status_bars_tasks_opens_the_task_viewer() {
     with_mouse(|tmp| {
         let mut app = app_with_tasks(tmp, 1, false);
@@ -140,7 +138,6 @@ fn with_no_pane_a_click_on_the_status_bars_tasks_opens_the_task_viewer() {
 /// The click names `gB`, the key that does the same, until `gB` has been
 /// pressed three times.
 #[test]
-#[ignore = "red: a click on the task tags opens nothing, and names no key"]
 fn a_click_on_the_task_tags_names_gb_until_it_is_learned() {
     with_mouse(|tmp| {
         let mut app = app_with_tasks(tmp, 1, true);
@@ -174,7 +171,6 @@ fn a_click_on_the_task_tags_names_gb_until_it_is_learned() {
 /// does: the task is the live capture again, and the other stays in the
 /// background.
 #[test]
-#[ignore = "red: a right-click on the task tags opens the pane tabs' menu"]
 fn a_right_click_lists_each_task_and_a_row_brings_it_back() {
     with_mouse(|tmp| {
         let mut app = app_with_tasks(tmp, 2, true);
@@ -198,7 +194,6 @@ fn a_right_click_lists_each_task_and_a_row_brings_it_back() {
 /// With no pane open, a right-click on the status bar's `bg:` opens the same
 /// menu, and its `gB` row opens the task viewer.
 #[test]
-#[ignore = "red: a right-click on the status bar's bg: opens the leader"]
 fn with_no_pane_a_right_click_on_the_status_bars_tasks_opens_the_menu() {
     with_mouse(|tmp| {
         let mut app = app_with_tasks(tmp, 1, false);

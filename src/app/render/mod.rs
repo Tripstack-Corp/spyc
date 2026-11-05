@@ -188,6 +188,7 @@ impl App {
         // against, which is the trap `pager_slot_at` documents for pager rects.
         self.view.chrome_rows.borrow_mut().clear();
         self.view.status_row.borrow_mut().take();
+        self.view.tasks_indicator.borrow_mut().take();
         // The two structural rules a centred popup border could land on (and so
         // visually merge with): the horizontal pane divider and the vertical
         // split separator. Captured before `layout` is consumed by render_inner.
@@ -1115,6 +1116,13 @@ mod purity_guard {
             "Where the status bar's segments were drawn, for a click on a project's \
              label or another segment: the spans come from the pass that laid the bar \
              out, for `chrome_rows`'s reason, and are cleared with it every frame.",
+        ),
+        (
+            "tasks_indicator",
+            "Where the background tasks' indicator was drawn, on the divider or the \
+             status bar, for a click on it: its columns come from the pass that laid \
+             that row out, for `chrome_rows`'s reason, and are cleared with it every \
+             frame.",
         ),
     ];
 

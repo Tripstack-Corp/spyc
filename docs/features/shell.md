@@ -201,7 +201,9 @@ to lock you out of spyc.
   `[N+]` running with new output (teal), `[N●]` running quiescent
   (blue), `[N✓]` exited cleanly (green), `[N✗]` non-zero / killed
   (red). When the pane is hidden, falls back to a status-bar
-  `bg:N●M✓` suffix.
+  `bg:N●M✓` suffix. A click on the tags (or on `bg:`) opens the task
+  viewer, as `gB` does; a right-click lists each task with the `:fg N`
+  that brings it back, and a click on one brings it back.
 - **`:fg`** resumes the most-recently-backgrounded task; **`:fg N`**
   targets a specific task id. Still-running tasks come back as a
   streaming pager seeded with everything captured so far; already-

@@ -143,9 +143,20 @@ pub enum HintEntry {
     Chord(crate::keymap::ChordEntry),
     /// A row of an open pager's menu, fired as the pager's key for it is.
     Pager(super::pager_handler::PagerAction),
-    /// A row of the make menu, which runs its target as `:make <target>`
-    /// does; `None` for a row that says something and runs nothing.
-    Make(Option<super::make_menu::MakeRun>),
+    /// A row that runs a `:` command as typing it does: a make menu's target,
+    /// or a task's `:fg N`. `None` for a row that says something and runs
+    /// nothing.
+    Command(Option<CommandRow>),
+}
+
+/// What a command row runs.
+#[derive(Debug, Clone)]
+pub enum CommandRow {
+    /// A make menu's target, run as `:make <target>` runs it, from its
+    /// Makefile's directory.
+    Make(super::make_menu::MakeRun),
+    /// A `:` command line, dispatched as typed: `fg 2`.
+    Typed(String),
 }
 
 /// What an object's menu holds beside a chord popup's rows.
@@ -491,6 +502,11 @@ pub struct ViewState {
     /// one: recorded by the renderer as `chrome_rows` is, from the pass that
     /// laid the bar out. `None` while the bar isn't drawn.
     pub(super) status_row: std::cell::RefCell<Option<mouse::StatusRow>>,
+    /// Where the background tasks' indicator was drawn this frame, for a
+    /// click on it: the divider's task tags, or the status bar's `bg:` when
+    /// no pane is open. Recorded by the renderer as `chrome_rows` is; `None`
+    /// while neither is drawn.
+    pub(super) tasks_indicator: std::cell::RefCell<Option<mouse::TasksIndicator>>,
     /// A sustained same-direction wheel-scroll gesture over an agent's own view
     /// (today: codex's `^T`), tracked so a long one can escalate to a page-sized
     /// step and so a short one can't open the view by accident — see
@@ -606,6 +622,7 @@ impl ViewState {
             chrome_selection: None,
             chrome_rows: std::cell::RefCell::new(Vec::new()),
             status_row: std::cell::RefCell::new(None),
+            tasks_indicator: std::cell::RefCell::new(None),
             last_chrome_click: None,
             pane_scroll_streak: None,
             pane_view_sent: None,
