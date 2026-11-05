@@ -46,7 +46,6 @@ fn continues(fx: &[Effect]) -> bool {
 /// viewer's menu offers continue, not pause. Continuing it sends the `SIGCONT`
 /// and clears the pause.
 #[test]
-#[ignore = "red: `:pane-to-task` makes a running, unpaused task of a suspended tab"]
 fn a_suspended_tab_moved_to_a_task_is_a_paused_task() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
