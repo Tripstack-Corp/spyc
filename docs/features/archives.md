@@ -94,8 +94,17 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   the name and lose what's under it), moving across the archive boundary in one
   step, `:grep`, `F` and shell commands are refused with a message rather than
   half-working, and so are `gP` and `gS`: a project's home and start directory
-  are real directories. The suffix shows `ro` when the archive can't be written
-  back.
+  are real directories.
+- **An archive spyc can't write back** — one with duplicate member names, a
+  member skipped for an unsafe path, or a tar hardlink or device node, where
+  rewriting it would lose a member. The suffix shows `ro`, and each change is
+  refused when you make it, with that reason: `R` / `dd`, `M`, `p`, copying a
+  file in, and `e` / `V` on a member, or `v` in the pager showing one. The `.`
+  menu leaves those rows out. Reading, yanking and copying members out work as
+  they do anywhere else, and `:archive info` gives the reason in full. An edit
+  saved to an extracted copy outside spyc, by an agent, can't be refused: it
+  shows as pending, `:archive write` refuses it with the same reason, and
+  `:archive discard` drops it.
 - **An agent can read a member too** — MCP `get_file_content` resolves a path
   inside a mount, reading the container in memory (or your not-yet-written edit,
   if there is one), so asking the agent in the pane about the file you're looking

@@ -10,8 +10,62 @@
 //! What's left is the two things that can't be papered over — writing into a
 //! container, and running something that has no meaning in here — plus the ops
 //! whose effects never reach the screen because they don't carry a path.
+//!
+//! A read-only mount refuses its edits too, with its capability's reason:
+//! [`AppState::mount_refusal`] is what the keys, the `:` commands and the
+//! entry menu ask, and the effect screen refuses with [`read_only_refusal`]'s
+//! words whatever edit reaches it.
 
+use std::borrow::Cow;
+
+use super::AppState;
+use crate::archive::Capability;
+use crate::fs::EntryKind;
 use crate::keymap::Action;
+
+impl AppState {
+    /// Why `action` can't run in the mount the focused column is in; `None`
+    /// outside one.
+    pub fn mount_refusal(&self, action: &Action) -> Option<Cow<'static, str>> {
+        let c = self.cur();
+        let (mount, _) = self.mounts.resolve(&c.listing.dir)?;
+        let on_file = c
+            .rows
+            .get(c.cursor.index)
+            .is_some_and(|row| row.kind != EntryKind::Dir);
+        refusal_in(action, &mount.capability, on_file)
+    }
+}
+
+/// Why `action` can't run in a mount of `capability`, the cursor on a file
+/// when `on_file`: [`refusal`]'s reason, or a read-only mount's for an edit.
+fn refusal_in(
+    action: &Action,
+    capability: &Capability,
+    on_file: bool,
+) -> Option<Cow<'static, str>> {
+    if let Some(why) = refusal(action) {
+        return Some(Cow::Borrowed(why));
+    }
+    let edits = match action {
+        Action::RemovePrompt(_) | Action::MovePrompt | Action::Drop | Action::EditInPane => true,
+        // On a directory, `e` enters it.
+        Action::EnterOrEdit => on_file,
+        _ => false,
+    };
+    if !edits {
+        return None;
+    }
+    read_only_refusal(capability).map(Cow::Owned)
+}
+
+/// What a read-only mount says when it refuses an edit: the reason its
+/// capability gives. `None` for a writable one.
+pub fn read_only_refusal(capability: &Capability) -> Option<String> {
+    capability
+        .reason()
+        .map(|why| format!("archive is read-only: {why}"))
+}
 
 /// Why an action can't run inside a mount. The string is what the user sees, so
 /// it says what is true rather than what is missing.
