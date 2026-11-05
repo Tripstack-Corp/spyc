@@ -1140,7 +1140,6 @@ fn agy_editor_with_a_path() -> String {
 /// `ctrl+g` over a command approval opens agy's expanded permission editor,
 /// and the approval still waits on the user while it is open.
 #[test]
-#[ignore = "red: no agy dialog has the editor's `Requested Permission (Editable):` box"]
 fn agy_permission_editor_scrapes_as_blocked() {
     let expected = Some((
         AgentActivity::Blocked,
@@ -1152,7 +1151,6 @@ fn agy_permission_editor_scrapes_as_blocked() {
 
 /// The editor fills the screen, so none of it is agy's output.
 #[test]
-#[ignore = "red: `agy_output_len` reads the whole editor as output"]
 fn agy_permission_editor_is_not_output() {
     let header = header_row(AGY_EDITOR, "Expanded Tool Permission Editor");
     assert_eq!(agy_output_rows(AGY_EDITOR), header);
@@ -1239,7 +1237,6 @@ fn agy_permission_editor_lookalikes_stay_output() {
 
 /// `^a u` labels nothing in the editor.
 #[test]
-#[ignore = "red: `^a u` labels the editor's command and hint"]
 fn agy_quick_select_leaves_out_the_permission_editor() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -1256,7 +1253,6 @@ fn agy_quick_select_leaves_out_the_permission_editor() {
 
 /// The editor keeps agy's dot red behind its `working` report.
 #[test]
-#[ignore = "red: no agy dialog has the editor's `Requested Permission (Editable):` box"]
 fn agy_permission_editor_turns_the_dot_blocked() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
