@@ -11,7 +11,7 @@ use super::*;
 fn deleting_a_member_then_writing_removes_it_from_the_archive() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -60,7 +60,7 @@ fn deleting_a_member_then_writing_removes_it_from_the_archive() {
 fn discarding_pending_changes_restores_the_listing() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -159,7 +159,7 @@ fn declining_the_write_unmounts_and_discards() {
 fn an_archive_with_a_skipped_member_mounts_read_only_and_says_so() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         {
             let file = std::fs::File::create(&archive).unwrap();
@@ -353,7 +353,7 @@ fn renaming_a_member_then_writing_moves_it() {
 fn editing_a_member_opens_the_extracted_copy() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         let staging = tmp.path().join("staging");
         build_zip(&archive);
@@ -601,7 +601,7 @@ fn writing_with_nothing_pending_says_so() {
 fn discarding_an_edit_drops_the_staged_copy_too() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -663,7 +663,7 @@ fn discarding_an_edit_drops_the_staged_copy_too() {
 fn discarding_an_added_member_removes_its_staged_bytes() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let brought = dir.join("extra.txt");

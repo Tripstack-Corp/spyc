@@ -13,7 +13,7 @@ use super::*;
 fn a_streamed_mount_is_not_dirty_the_moment_it_opens() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.tar.gz");
         build_tar_gz(&archive);
         let mut app = App::test_app(dir);
@@ -38,7 +38,7 @@ fn a_streamed_mount_is_not_dirty_the_moment_it_opens() {
 fn an_edit_becomes_a_pending_change_the_badge_can_show() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -84,7 +84,7 @@ fn an_edit_becomes_a_pending_change_the_badge_can_show() {
 fn an_edit_spyc_did_not_make_shows_up_without_being_asked() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -248,7 +248,7 @@ fn archive_info_outside_a_mount_reports_what_is_mounted() {
 fn the_status_bar_paints_the_badge_after_an_edit() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -305,7 +305,7 @@ fn the_status_bar_paints_the_badge_after_an_edit() {
 fn an_edited_member_is_marked_in_the_listing() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -573,7 +573,7 @@ fn a_put_member_can_be_opened_yanked_and_deleted() {
 fn deleting_a_put_member_un_adds_it_and_frees_the_name() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let staging = tmp.path().join("staging");
@@ -765,7 +765,7 @@ fn being_written(app: &App) -> bool {
 fn writing(test: impl FnOnce(&mut App, &Path, Vec<Effect>)) {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -892,7 +892,7 @@ fn a_write_that_has_landed_lets_the_next_one_start() {
 fn an_edit_saved_while_the_archive_is_written_is_kept_pending() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -954,7 +954,7 @@ fn an_edit_saved_while_the_archive_is_written_is_kept_pending() {
 fn an_edit_a_streamed_write_carried_is_not_pending_again() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.tar.gz");
         build_tar_gz(&archive);
         let mut app = App::test_app(dir);
@@ -999,7 +999,7 @@ fn an_edit_a_streamed_write_carried_is_not_pending_again() {
 fn a_member_read_while_the_archive_is_written_is_not_pending_after() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -1038,7 +1038,7 @@ fn a_member_read_while_the_archive_is_written_is_not_pending_after() {
 fn an_edit_saved_while_a_closed_projects_write_ran_is_kept_pending() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let elsewhere = dir.join("elsewhere");
         std::fs::create_dir(&elsewhere).unwrap();
         let archive = dir.join("pkg.zip");

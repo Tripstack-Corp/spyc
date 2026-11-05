@@ -9,7 +9,7 @@ use super::*;
 fn mounting_an_archive_lists_its_members() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -29,7 +29,7 @@ fn mounting_an_archive_lists_its_members() {
 fn a_mounted_column_sits_somewhere_that_is_not_a_directory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -47,7 +47,7 @@ fn a_mounted_column_sits_somewhere_that_is_not_a_directory() {
 fn descending_inside_a_mount_lists_the_subdirectory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -98,7 +98,7 @@ fn climbing_out_of_a_mount_returns_to_the_archive() {
 fn a_refresh_inside_a_mount_keeps_the_column_there() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -139,7 +139,7 @@ fn a_refresh_inside_a_mount_keeps_the_cursor() {
 fn a_mount_carries_no_git_state() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -199,7 +199,7 @@ fn the_gate_does_not_leak_outside_a_mount() {
 fn opening_a_member_extracts_it_then_pages_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         let staging = tmp.path().join("staging");
         build_zip(&archive);
@@ -249,7 +249,7 @@ fn opening_a_member_extracts_it_then_pages_it() {
 fn re_opening_a_member_skips_the_worker() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         let staging = tmp.path().join("staging");
         build_zip(&archive);
@@ -284,7 +284,7 @@ fn re_opening_a_member_skips_the_worker() {
 fn a_file_that_only_looks_like_an_archive_still_opens_as_a_file() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let fake = dir.join("notes.zip");
         std::fs::write(&fake, b"just text, not a container\n").unwrap();
         let mut app = App::test_app(dir);
@@ -347,7 +347,7 @@ fn disabling_the_feature_pages_the_archive_instead() {
 fn unmounting_is_refused_while_a_column_is_inside() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -466,7 +466,7 @@ fn eviction_hands_back_the_staging_tree_to_clean() {
 fn the_reading_message_goes_once_the_archive_is_mounted() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -625,7 +625,7 @@ fn starts_a_read(effects: &[Effect]) -> bool {
 fn entering_an_archive_being_read_joins_the_read() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir);
@@ -669,7 +669,7 @@ fn entering_a_nested_archive_being_read_joins_the_read() {
 fn an_edit_saved_while_a_compressed_tar_is_read_twice_survives() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.tar.gz");
         build_tar_gz(&archive);
         let mut app = App::test_app(dir);
@@ -720,7 +720,7 @@ fn a_read_that_ends_without_a_mount_lets_the_next_request_read() {
 fn a_request_while_a_write_is_reread_joins_the_reread() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.zip");
         build_zip(&archive);
         let mut app = App::test_app(dir.clone());
@@ -773,7 +773,7 @@ fn cleans(effects: &[Effect]) -> bool {
 fn a_read_right_after_an_unmount_keeps_what_it_extracts() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let archive = dir.join("pkg.tar.gz");
         build_tar_gz(&archive);
         let mut app = App::test_app(dir.clone());
@@ -801,7 +801,7 @@ fn a_read_right_after_an_unmount_keeps_what_it_extracts() {
 fn a_read_right_after_an_eviction_keeps_what_it_extracts() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
-        let dir = tmp.path().to_path_buf();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
         let first = dir.join("first.tar.gz");
         build_tar_gz(&first);
         let mut app = App::test_app(dir.clone());
