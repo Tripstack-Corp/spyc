@@ -145,7 +145,6 @@ fn a_percent_copy_of_one_member_inside_its_mount_is_refused() {
 /// archive were journaled as renames, so `:archive write` moved them and the
 /// originals were gone. They're answered as a single member is.
 #[test]
-#[ignore = "red: a multi-pick `%` copy is journaled as renames and the write moves the originals"]
 fn a_percent_copy_of_several_members_inside_their_mount_keeps_the_originals() {
     let several = percent_bak_inside("c", &["notes.txt", "todo.txt"]);
     assert!(
@@ -202,7 +201,6 @@ fn a_percent_move_of_several_members_inside_their_mount_renames_each() {
 /// Copying several members out under `%` names is a read of each, as copying
 /// one out is.
 #[test]
-#[ignore = "red: a multi-pick `%` copy out of a mount is refused as a rename across it"]
 fn a_percent_copy_of_several_members_out_of_their_mount_extracts_each() {
     mounted(|mut fx| {
         let archive = fx.archive.clone();
@@ -254,7 +252,6 @@ fn a_percent_copy_of_several_files_into_a_mount_is_refused() {
 /// A `%` copy of the archive file itself is a read of a real file: the mount
 /// stays, and so do its unwritten changes.
 #[test]
-#[ignore = "red: a multi-pick `%` copy takes the archive file as a move would and refuses a dirty mount"]
 fn a_percent_copy_of_a_mounted_archive_keeps_its_mount_and_its_changes() {
     mounted(|mut fx| {
         let _cwd = CwdGuard;
