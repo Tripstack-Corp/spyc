@@ -711,6 +711,76 @@ pub mod matchers {
         fn pane_bytes(&self) -> Option<Vec<u8>>;
         fn clipboard_capture_tab(&self) -> Option<&str>;
         fn transcript_index(&self) -> Option<&crate::app::image_ops::TranscriptIndexOp>;
+        /// The first effect that types at a child: input, a paste or a piped
+        /// file for a pane, or input for a `!` capture, searching the effect an
+        /// archive op holds back too.
+        fn typed_input(&self) -> Option<&Effect>;
+    }
+
+    /// Whether running `effect` puts input in front of a pane's or a `!`
+    /// capture's child. Exhaustive, so a new variant is classified here.
+    fn types_at_a_child(effect: &Effect) -> bool {
+        use crate::app::file_ops::FileOp;
+        match effect {
+            Effect::SendToPane { .. } | Effect::SendToCapture { .. } => true,
+            // Lands where a paste lands: the pane, when it has the keyboard.
+            Effect::PasteFromClipboard => true,
+            Effect::FileOp(op) => match op {
+                FileOp::PipeContent { .. } => true,
+                FileOp::Copy { .. }
+                | FileOp::Move { .. }
+                | FileOp::RenameEach { .. }
+                | FileOp::GitRestore { .. }
+                | FileOp::LongList { .. }
+                | FileOp::FileType { .. }
+                | FileOp::OpenSpecialFile { .. }
+                | FileOp::RefreshListing { .. }
+                | FileOp::RelistColumns { .. } => false,
+            },
+            Effect::Archive(op) => held_back(op).is_some_and(types_at_a_child),
+            #[cfg(unix)]
+            Effect::SignalGroup { .. }
+            | Effect::SignalPane { .. }
+            | Effect::SignalCapture { .. } => false,
+            Effect::AgentHud(_)
+            | Effect::SetMouseMode { .. }
+            | Effect::SetProcessCwd { .. }
+            | Effect::ForegroundExec { .. }
+            | Effect::CopyToClipboard { .. }
+            | Effect::CopyToPagerClipboard { .. }
+            | Effect::SavePagerOutput { .. }
+            | Effect::SaveLearned(_)
+            | Effect::SetTerminalTitle { .. }
+            | Effect::EditProjectConfig { .. }
+            | Effect::Notify { .. }
+            | Effect::ReadPaneText { .. }
+            | Effect::ChangeDir { .. }
+            | Effect::Graveyard(_)
+            | Effect::RenderMermaid(_)
+            | Effect::OpenImage(_)
+            | Effect::IndexTranscriptImages(_)
+            | Effect::CaptureClipboardImage(_)
+            | Effect::ShowImageBytes(_)
+            | Effect::OpenTranscriptImage(_)
+            | Effect::Inventory(_)
+            | Effect::ReadMakefile(_)
+            | Effect::WorktreeCreateInteractive { .. } => false,
+        }
+    }
+
+    /// The effect an archive op re-issues once the bytes it extracts exist.
+    fn held_back(op: &crate::app::archive_ops::ArchiveOp) -> Option<&Effect> {
+        use crate::app::archive_ops::{ArchiveOp, MaterializeThen};
+        let then = match op {
+            ArchiveOp::Mount { then, .. } => return then.as_deref(),
+            ArchiveOp::Materialize { then, .. } | ArchiveOp::MaterializeMany { then, .. } => then,
+            ArchiveOp::Write { .. } | ArchiveOp::Clean { .. } => return None,
+        };
+        match then {
+            MaterializeThen::Retry(effect) => Some(effect),
+            MaterializeThen::Mount { then, .. } => then.as_deref(),
+            MaterializeThen::OpenPager(_) | MaterializeThen::Edit { .. } => None,
+        }
     }
 
     impl EffectSliceExt for [Effect] {
@@ -787,6 +857,10 @@ pub mod matchers {
                 [Effect::Inventory(op, ..)] => Some(op),
                 _ => None,
             }
+        }
+
+        fn typed_input(&self) -> Option<&Effect> {
+            self.iter().find(|effect| types_at_a_child(effect))
         }
     }
 
