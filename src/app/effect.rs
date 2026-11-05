@@ -715,6 +715,9 @@ pub mod matchers {
         /// file for a pane, or input for a `!` capture, searching the effect an
         /// archive op holds back too.
         fn typed_input(&self) -> Option<&Effect>;
+        /// The signals sent to a `!` capture's process group, in order.
+        #[cfg(unix)]
+        fn capture_signals(&self) -> Vec<rustix::process::Signal>;
     }
 
     /// Whether running `effect` puts input in front of a pane's or a `!`
@@ -861,6 +864,16 @@ pub mod matchers {
 
         fn typed_input(&self) -> Option<&Effect> {
             self.iter().find(|effect| types_at_a_child(effect))
+        }
+
+        #[cfg(unix)]
+        fn capture_signals(&self) -> Vec<rustix::process::Signal> {
+            self.iter()
+                .filter_map(|effect| match effect {
+                    Effect::SignalCapture { sig, .. } => Some(*sig),
+                    _ => None,
+                })
+                .collect()
         }
     }
 
