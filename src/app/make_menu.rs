@@ -16,13 +16,23 @@
 //! text and a typed word the user's, so every word of the command is
 //! shell-quoted. A list taller than the frame keeps the rows it can draw and
 //! ends in one naming how many more `:make` reaches.
+//!
+//! The open menu keeps every target the read found, in [`MakeMenu`] on its
+//! `MenuState`, with a filter the user types: each printable character but
+//! `?` (no target name holds one, so it still opens the key reference). The
+//! rows are rebuilt from the targets the filter matches, as the list's `=`
+//! filter matches a name ([`Matcher`]), and fitted to the frame again on each
+//! keystroke, so the filter reaches the targets the fit had cut off.
 
 use std::path::{Path, PathBuf};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
+use super::matcher::Matcher;
 use super::mouse::chord_hit::chord_hint_layout;
 use super::state::ProjectId;
+use super::view_state::CommandRow;
 use super::{App, Effect, HintEntry, Mode, View, Wake};
 use crate::fs::EntryKind;
 use crate::keymap::Action;
@@ -67,6 +77,61 @@ impl MakeRun {
         }
         words.extend(self.args.iter().map(|arg| quote(arg)));
         words.join(" ")
+    }
+}
+
+/// An open make menu's source: the Makefile's targets, where they run from,
+/// and the filter typed over them.
+#[derive(Debug, Clone)]
+pub struct MakeMenu {
+    /// The Makefile's file name, which titles the menu.
+    name: String,
+    dir: PathBuf,
+    /// The `-f` a run names, when plain `make` in `dir` would read another.
+    file: Option<String>,
+    targets: Vec<MakeTarget>,
+    filter: String,
+}
+
+impl MakeMenu {
+    /// The title, and the rows of the targets the filter matches as an
+    /// `area`-sized frame draws them; one that runs nothing when none does.
+    fn rows(&self, area: Rect) -> (String, Vec<(String, String, HintEntry)>) {
+        let matcher = Matcher::build(&self.filter);
+        let mut rows: Vec<(String, String, HintEntry)> = self
+            .targets
+            .iter()
+            .filter(|target| matcher.matches(&target.name))
+            .map(|target| self.row(target))
+            .collect();
+        if rows.is_empty() {
+            let none = if self.filter.is_empty() {
+                "make: no explicit targets".to_string()
+            } else {
+                format!("make: no target matches \"{}\"", self.filter)
+            };
+            rows.push((String::new(), none, HintEntry::Command(None)));
+        }
+        let title = if self.filter.is_empty() {
+            format!("make · {}", self.name)
+        } else {
+            format!("make · {} · {}", self.name, self.filter)
+        };
+        (title, fit(rows, area))
+    }
+
+    /// `target`'s row: its `:make` key, its label, and the run it fires.
+    fn row(&self, target: &MakeTarget) -> (String, String, HintEntry) {
+        let run = MakeRun {
+            dir: self.dir.clone(),
+            file: self.file.clone(),
+            args: vec![target.name.clone()],
+        };
+        (
+            format!(":make {}", target.name),
+            row_label(target),
+            HintEntry::Command(Some(CommandRow::Make(run))),
+        )
     }
 }
 
@@ -171,31 +236,80 @@ impl App {
             .parent()
             .map_or_else(|| self.state.cur().listing.dir.clone(), Path::to_path_buf);
         let file = (!taskfile.is_default).then(|| name.clone());
-        let mut rows: Vec<(String, String, HintEntry)> = taskfile
-            .targets
-            .into_iter()
-            .map(|target| {
-                let label = row_label(&target);
-                let key = format!(":make {}", target.name);
-                let run = MakeRun {
-                    dir: dir.clone(),
-                    file: file.clone(),
-                    args: vec![target.name],
-                };
-                (
-                    key,
-                    label,
-                    HintEntry::Command(Some(super::view_state::CommandRow::Make(run))),
-                )
-            })
-            .collect();
-        if rows.is_empty() {
-            let none = "make: no explicit targets".to_string();
-            rows.push((String::new(), none, HintEntry::Command(None)));
+        let make = MakeMenu {
+            name,
+            dir,
+            file,
+            targets: taskfile.targets,
+            filter: String::new(),
+        };
+        let (title, rows) = make.rows(self.frame_area());
+        let fx = self.show_menu(title, rows);
+        if let Some(menu) = self.view.chord_hint.as_mut().and_then(|h| h.menu.as_mut()) {
+            menu.make = Some(make);
         }
+        fx
+    }
+
+    /// The whole frame, as the menu is drawn over it.
+    const fn frame_area(&self) -> Rect {
         let (width, height) = self.view.term_size;
-        let rows = fit(rows, Rect::new(0, 0, width, height));
-        self.show_menu(format!("make · {name}"), rows)
+        Rect::new(0, 0, width, height)
+    }
+
+    /// A key the open make menu's filter takes: a printable character but
+    /// `?` adds to it, `Backspace` takes one off, and `Esc` clears it. Whether
+    /// the key was taken: never in another menu, nor `Esc` with no filter,
+    /// which closes the menu.
+    pub(super) fn make_filter_key(&mut self, key: KeyEvent) -> bool {
+        let Some(make) = self
+            .view
+            .chord_hint
+            .as_mut()
+            .and_then(|hint| hint.menu.as_mut())
+            .and_then(|menu| menu.make.as_mut())
+        else {
+            return false;
+        };
+        let plain = !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        match key.code {
+            KeyCode::Char(c) if plain && c != '?' && !c.is_control() => make.filter.push(c),
+            KeyCode::Backspace if plain && make.filter.is_empty() => return true,
+            KeyCode::Backspace if plain => {
+                make.filter.pop();
+            }
+            KeyCode::Esc if !make.filter.is_empty() => make.filter.clear(),
+            _ => return false,
+        }
+        self.refit_make_menu();
+        true
+    }
+
+    /// Rebuild the open make menu's rows from its targets and filter, fitted
+    /// to the frame, and highlight the first while a filter is typed, so
+    /// `Enter` runs it.
+    fn refit_make_menu(&mut self) {
+        let area = self.frame_area();
+        let Some(hint) = self.view.chord_hint.as_mut() else {
+            return;
+        };
+        let Some(menu) = hint.menu.as_mut() else {
+            return;
+        };
+        let Some(make) = menu.make.as_ref() else {
+            return;
+        };
+        let (title, rows) = make.rows(area);
+        menu.selected = (!make.filter.is_empty()).then_some(0);
+        let (rows, entries) = rows
+            .into_iter()
+            .map(|(keys, label, entry)| ((keys, label), entry))
+            .unzip();
+        hint.title = title;
+        hint.rows = rows;
+        hint.entries = entries;
     }
 
     /// Run `run`'s target as a `!` capture from its directory: what a make

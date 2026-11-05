@@ -81,13 +81,15 @@ to the left or right, or to that column's last row where it ends sooner. They
 stop at the outer columns, and in a menu of one column they do nothing. Any
 other key closes the menu and then does what it always does, so typing a row's
 key does what the row says, and from the pane a letter still reaches the agent,
-while `?` opens the list of every key, as the title says. In a pager's menu
-every other key is the pager's, `?` too: in a running capture it is typed into
-the command, while the arrows stay with the menu for as long as it is open.
-A row appears only where its action applies: no `e` on a directory, no
-harpoon outside a repo or a project home, no suspend on a shell tab, no fork
-before an agent tab has a conversation, no pause on a paused task, and inside
-an archive no row the archive refuses.
+while `?` opens the list of every key, as the title says. The make menu is the
+exception: a character typed there filters its targets
+([Make targets](shell.md#make-targets)). In a pager's menu every other key is
+the pager's, `?` too: in a running capture it is typed into the command,
+while the arrows stay with the menu for as long as it is open. A row appears
+only where its action applies: no `e` on a directory, no harpoon outside a
+repo or a project home, no suspend on a shell tab, no fork before an agent tab
+has a conversation, no pause on a paused task, and inside an archive no row
+the archive refuses.
 
 iTerm2 keeps a plain right-click for its own menu, so hold **⌃** while you
 right-click there; spyc reads a right-click with any modifier the same.

@@ -160,10 +160,14 @@ pub enum CommandRow {
 }
 
 /// What an object's menu holds beside a chord popup's rows.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct MenuState {
-    /// The entry `↑`/`↓` highlighted, which `Enter` fires: none until an arrow.
+    /// The entry the arrows highlighted, which `Enter` fires: none until an
+    /// arrow, or the first match of a make menu's filter.
     pub(super) selected: Option<usize>,
+    /// A make menu's targets and the filter typed over them, which its rows
+    /// are rebuilt from; `None` in any other menu.
+    pub(super) make: Option<super::make_menu::MakeMenu>,
 }
 
 /// A brief spice-heat border-pulse flash — the P3-1 visual bell. `start` times
