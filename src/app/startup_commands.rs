@@ -67,7 +67,7 @@ mod tests {
     fn startup_commands_run_in_order_once_startup_settles() {
         let (tmp, mut app) = app_with(&["sort size", ":sort mtime"]);
         crate::state::with_state_root(tmp.path(), || {
-            let _ = app.settle_startup_commands();
+            while app.settle_startup_commands().is_some() {}
             assert_eq!(
                 app.state.cur().sort_order,
                 SortMode::Mtime,
@@ -142,6 +142,15 @@ mod tests {
         assert!(lib.contains("app.queue_startup_commands(cli.cmd)"));
         let run = crate::guard_support::production_half(include_str!("pre_recv.rs"));
         assert!(run.contains("self.settle_startup_commands()"));
+    }
+
+    /// Each command's effects run before the next is dispatched, and the loop
+    /// runs the whole queue before it waits: nothing wakes it for the rest.
+    #[test]
+    #[ignore = "red: the loop runs every command's effects after the last is dispatched"]
+    fn the_loop_runs_each_command_before_the_next() {
+        let run = crate::guard_support::production_half(include_str!("pre_recv.rs"));
+        assert!(run.contains("while let Some(startup_fx) = self.settle_startup_commands()"));
     }
 
     #[test]

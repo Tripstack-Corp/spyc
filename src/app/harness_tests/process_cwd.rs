@@ -209,8 +209,9 @@ fn startup_cds_each_start_where_the_last_one_went() {
         app.queue_startup_commands(vec![first, ":cd keymap".to_string()]);
         let before = std::env::current_dir().ok();
 
-        let fx = app.settle_startup_commands().expect("startup has settled");
-        run(&mut app, fx);
+        while let Some(fx) = app.settle_startup_commands() {
+            run(&mut app, fx);
+        }
 
         assert_eq!(
             std::env::current_dir().ok(),
