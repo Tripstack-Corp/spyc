@@ -543,7 +543,7 @@ impl App {
         // blank `col_w`-wide span so columns stay aligned. An entry's first line
         // carries its key; its continuation lines leave the key column blank.
         // A menu's highlighted entry is reversed on every line it takes.
-        let selected = hint.menu.and_then(|m| m.selected);
+        let selected = hint.menu.as_ref().and_then(|m| m.selected);
         let lit = |style: Style, entry: usize| {
             if selected == Some(entry) {
                 style.add_modifier(Modifier::REVERSED)

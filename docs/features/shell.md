@@ -86,13 +86,24 @@ line (the `make help` idiom), or else the comment line directly above the
 rule. The default goal's label ends in `(default)`, and `.PHONY` targets come
 first.
 
-Click a row, or pick it with `↑`/`↓` and `Enter`, and the target runs as a
+Click a row, or pick it with the arrows and `Enter`, and the target runs as a
 `!` capture from the Makefile's directory: the live pager, `^C`, `^Z` to the
 background, `:fg` and the task viewer all work as they do for `!`, and the
 prompt row names the `:make <target>` that does the same. A Makefile that
 make wouldn't pick on its own (a `Makefile` beside a `GNUmakefile`) runs with
 `-f`. A target name is the Makefile's text, so it is quoted for the shell as
 one word.
+
+Type to filter the menu: every character but `?` goes to a filter the title
+shows (`make · Makefile · che`), and the menu keeps only the targets whose
+name it matches, as the list's `=` filter matches a name (a substring in any
+case; `*`, `[…]` and a leading `^` or trailing `$` work as there). The
+highlight sits on the first match, so `Enter` right after typing runs it, and
+the arrows move among the matches. `Backspace` takes a character off, `Esc`
+clears the filter, and a second `Esc` closes the menu. The filter searches
+every target, the ones a long list left off the screen too; when it matches
+none, the menu says `make: no target matches "…"`. `?` still opens the key
+reference, since no target name holds one.
 
 - **`:make <target>`** runs a target of the column's directory's Makefile
   directly; a bare **`:make`** opens the menu. Each word after `:make` is
@@ -108,7 +119,7 @@ one word.
   `include` only when its path is written out, exists, and stays inside the
   repository (or the Makefile's directory outside one).
 - A list taller than the screen ends in `… N more: :make <target>`: the
-  rest are a typed `:make` away.
+  rest are a filter or a typed `:make` away.
 - Inside an archive (`Enter` on a zip or tarball) a Makefile is a member,
   not something make can run, so `Space m` and `:make` are refused there.
 

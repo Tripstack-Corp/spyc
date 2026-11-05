@@ -14,7 +14,8 @@
 //! the previous or next column, over the columns `chord_hint_layout` draws,
 //! `Enter` fires it as a click on the row would, and `Esc` closes. Any other
 //! key closes the menu and goes where it would have gone with none open, so a
-//! row's own key does what the row says.
+//! row's own key does what the row says. The make menu's filter takes the
+//! characters first (`make_menu.rs`).
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -285,11 +286,14 @@ impl App {
         let plain = !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        if self.make_filter_key(key) {
+            return Ok(Vec::new());
+        }
         let Some(hint) = self.view.chord_hint.as_ref() else {
             return self.handle_key(key);
         };
         let len = hint.entries.len();
-        let selected = hint.menu.and_then(|m| m.selected);
+        let selected = hint.menu.as_ref().and_then(|m| m.selected);
         let pager = hint.is_pager_menu();
         match (key.code, selected) {
             (KeyCode::Down | KeyCode::Up, _) if plain && len > 0 => {
@@ -329,10 +333,10 @@ impl App {
 
     /// Highlight the open menu's entry `index`.
     const fn select_menu_row(&mut self, index: usize) {
-        if let Some(hint) = self.view.chord_hint.as_mut() {
-            hint.menu = Some(MenuState {
-                selected: Some(index),
-            });
+        if let Some(hint) = self.view.chord_hint.as_mut()
+            && let Some(menu) = hint.menu.as_mut()
+        {
+            menu.selected = Some(index);
         }
     }
 

@@ -140,7 +140,8 @@ rather than create a new modal type.
   the previous or next column of a menu that flows into several, `Enter` or a
   click fires it, `Esc` closes, and any other key closes the menu and does
   what it always does; the arrows stay with the menu even over a running
-  capture. A click outside
+  capture. In the make menu alone, a typed character other than `?` filters
+  its targets instead, and its title shows the filter. A click outside
   dismisses it and does nothing else; nothing beneath the popup hears a
   click on it.
 - **Menu hint** — once a row fires by a click or `Enter`, the prompt row
