@@ -325,6 +325,61 @@ fn a_lua_map_binds_in_a_project_opened_later() {
     });
 }
 
+/// `zproj/pkg.zip` mounted in the column, which is inside it, with the
+/// project in view homed at `home`.
+fn inside_an_archive(t: &mut Three, home: Option<PathBuf>) {
+    let archive = t.z_home.join("pkg.zip");
+    super::archive::build_zip(&archive);
+    let app = &mut t.app;
+    app.state.active_project_mut().home = home;
+    super::archive::mount_inline(app, &archive, &t.home.join("staging"));
+    assert_eq!(app.state.cur().listing.dir, archive);
+}
+
+/// What `Space n`'s prompt offers.
+fn space_n_offers(app: &mut App) -> String {
+    leader(app, 'n');
+    match &app.state.mode {
+        Mode::Prompting(p) if matches!(p.kind, PromptKind::ProjectOpen) => p.buffer.clone(),
+        _ => panic!("Space n opened no prompt: {:?}", app.flash_text()),
+    }
+}
+
+/// Inside an archive, `Space n` offers the directory holding it, since a
+/// project is a real directory, and `Enter` opens it: a project with no home
+/// and no repository offers the column's directory.
+#[test]
+#[ignore = "red: it offers the archive's own path, which flashes an error when accepted"]
+fn space_n_inside_an_archive_offers_the_directory_holding_it() {
+    with_three(|t| {
+        inside_an_archive(t, None);
+        let app = &mut t.app;
+
+        let offered = space_n_offers(app);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+
+        assert_eq!(offered, t.z_home.display().to_string());
+        assert_eq!(
+            project_at(app, &t.z_home),
+            Some(app.state.active),
+            "{:?}",
+            app.flash_text()
+        );
+    });
+}
+
+/// With a home, `Space n` offers it, inside an archive as anywhere else.
+#[test]
+fn space_n_inside_an_archive_still_offers_the_project_home() {
+    with_three(|t| {
+        let home = t.x_home.clone();
+        inside_an_archive(t, Some(home.clone()));
+
+        assert_eq!(space_n_offers(&mut t.app), home.display().to_string());
+    });
+}
+
 // ── Moving between projects ──────────────────────────────────────────────────
 
 /// `Space 2` goes to the second project, and `Space Space` back to the one

@@ -300,3 +300,27 @@ fn a_relative_jump_history_entry_goes_there_from_the_column() {
         );
     });
 }
+
+/// Inside an archive the process belongs in the directory holding it, where a
+/// child started from there runs, rather than wherever it was left: in another
+/// column's directory, or the one spyc was launched in.
+#[test]
+#[ignore = "red: inside an archive the process stays wherever it is"]
+fn inside_an_archive_the_process_belongs_beside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(tmp.path()).unwrap();
+    crate::state::with_state_root(&root.join("state"), || {
+        let archive = root.join("pkg.zip");
+        super::archive::build_zip(&archive);
+        let mut app = App::test_app(root.clone());
+        super::archive::mount_inline(&mut app, &archive, &root.join("staging"));
+        assert_eq!(app.state.cur().listing.dir, archive);
+
+        let owed = app.settle_process_cwd();
+
+        assert!(
+            matches!(owed.as_slice(), [Effect::SetProcessCwd { dir }] if *dir == root),
+            "the settle owes {owed:?}"
+        );
+    });
+}
