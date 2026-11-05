@@ -553,6 +553,7 @@ mod view_chords;
 mod vsplit;
 mod why_status;
 mod writes_to_pane;
+mod yank_dir;
 
 mod session_restore;
 mod shell_agents;

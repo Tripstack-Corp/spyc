@@ -233,7 +233,7 @@ fn arrows_highlight_a_row_and_enter_fires_it() {
         }
         // A directory's rows open `Enter`, `t`, `yf`: the third yanks its path.
         let buf = drawn(&mut app);
-        let (col, row) = drawn_row(&mut app, "sub", "yank cursor file path");
+        let (col, row) = drawn_row(&mut app, "sub", "yf");
         assert!(
             buf[(col, row)]
                 .modifier
