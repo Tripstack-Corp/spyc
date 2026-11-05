@@ -29,7 +29,7 @@ fn with_mouse(body: impl FnOnce(&Path)) {
 
 /// An App over `work/` with a pane tab running `cat` for each of `tabs`, the
 /// keyboard in the file list.
-fn app_with_tabs(tmp: &Path, tabs: usize) -> App {
+pub(super) fn app_with_tabs(tmp: &Path, tabs: usize) -> App {
     let mut app = app_with_tab(tmp, "cat");
     for _ in 1..tabs {
         app.open_pane_tab("cat");
@@ -43,7 +43,7 @@ fn app_with_tabs(tmp: &Path, tabs: usize) -> App {
 }
 
 /// A point on the divider's rule past the last tab, as drawn.
-fn past_the_tabs(app: &mut App) -> (u16, u16) {
+pub(super) fn past_the_tabs(app: &mut App) -> (u16, u16) {
     let buf = drawn(app);
     let divider = app.frame_layout(FRAME).divider.expect("a divider");
     let point = (divider.right() - 2, divider.y);
@@ -90,12 +90,12 @@ fn ctrl_s(app: &mut App) {
 }
 
 /// The split's shape, which `^a f` flips.
-fn split_mode(app: &App) -> Option<VsplitMode> {
+pub(super) fn split_mode(app: &App) -> Option<VsplitMode> {
     app.state.active_project().vsplit.map(|v| v.mode)
 }
 
 /// A point on the split's vertical divider, as the layout places it.
-fn on_the_split(app: &mut App) -> (u16, u16) {
+pub(super) fn on_the_split(app: &mut App) -> (u16, u16) {
     drawn(app);
     let layout = app.frame_layout(FRAME);
     let line = layout.vdivider.expect("premise: the split is open");
@@ -110,7 +110,7 @@ fn on_the_split(app: &mut App) -> (u16, u16) {
 
 /// An App with the split open on `notes.txt` by `^a |`, the keyboard in the
 /// file list.
-fn app_with_split(tmp: &Path) -> App {
+pub(super) fn app_with_split(tmp: &Path) -> App {
     let mut app = app_with_tabs(tmp, 1);
     cursor_on(&mut app, "notes.txt");
     ctrl_a(&mut app);
