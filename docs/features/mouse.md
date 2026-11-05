@@ -156,7 +156,9 @@ takes, or keeps the hints for good, or turns them off
 - **Click a pane tab to switch to it.**
 - **Click a project's label on the status bar to go to that project**, as
   `Space N` does, or the collapsed count (`2/4`) to list the projects, as
-  `Space j` does. A click on the agent segment gives the pane the keyboard.
+  `Space j` does; the prompt row names that key, as a menu row's click does,
+  until you have learned it. A click on the agent segment gives the pane the
+  keyboard.
   The rest of the bar is text to select.
 - **Click the status bar's `⚠N` to open `:stderr`**, the log of what spyc's
   stderr received.

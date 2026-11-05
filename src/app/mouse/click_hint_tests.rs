@@ -50,7 +50,6 @@ fn names(app: &App, key: &str) -> bool {
 /// A click on a project's label goes there and names `Space N`, as a menu
 /// row's click names its key.
 #[test]
-#[ignore = "red: a project label's click names no key"]
 fn a_click_on_a_project_label_names_its_key() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo"], 120);
@@ -66,7 +65,6 @@ fn a_click_on_a_project_label_names_its_key() {
 /// Once `Space N` has been pressed three times, a label's click names it no
 /// more: two presses, and it still does.
 #[test]
-#[ignore = "red: a project label's click names no key"]
 fn a_project_labels_key_fades_as_space_n_is_learned() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo"], 120);
@@ -89,7 +87,6 @@ fn a_project_labels_key_fades_as_space_n_is_learned() {
 
 /// A click on the collapsed count lists the projects and names `Space j`.
 #[test]
-#[ignore = "red: the collapsed count's click names no key"]
 fn a_click_on_the_collapsed_count_names_space_j() {
     with_mouse(|base| {
         let labels = ["alpha", "bravo", "charlie", "delta"];
@@ -132,7 +129,6 @@ const SUSPEND: &str = "suspend / resume pane tab";
 /// action does: after three presses a click on the menu's suspend row still
 /// suspends or resumes, and names `^z` no more.
 #[test]
-#[ignore = "red: the pane's `^z` dispatches without counting toward the fade"]
 fn the_panes_ctrl_z_counts_toward_its_hint_fading() {
     with_mouse(|base| {
         let mut app = app_with_tab(base, "sleep 30");

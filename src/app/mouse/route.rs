@@ -366,6 +366,19 @@ pub const fn project_key(index: usize) -> ProjectAction {
     ProjectAction::ByIndex(n)
 }
 
+/// The key a click on a status-bar project stands for, and what it does, as
+/// the click names them: `Space N` for a project's label, `Space j` for the
+/// collapsed count. A project past the ninth has no key to name.
+pub fn project_click_hint(action: ProjectAction) -> Option<(String, String)> {
+    match action {
+        ProjectAction::ByIndex(n @ 1..=9) => {
+            Some((format!("Space {n}"), format!("go to project {n}")))
+        }
+        ProjectAction::List => Some(("Space j".to_string(), action.describe().to_string())),
+        _ => None,
+    }
+}
+
 /// What a left click on a status-bar `segment` does beyond selecting its
 /// text: a project's label goes to that project and the collapsed count lists
 /// them, as their keys do, and the agent segment gives the pane the keyboard.

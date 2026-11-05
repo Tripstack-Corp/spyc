@@ -259,7 +259,7 @@ impl App {
                 let (is_shell, suspended) = self.active_tab_shell_and_suspended();
                 match pane_suspend_key_action(key, is_shell, suspended) {
                     PaneKeyAction::Toggle => {
-                        return self.update(UiMsg::Action(Action::PaneToggleSuspend));
+                        return self.dispatch_key_action(Action::PaneToggleSuspend, key.code);
                     }
                     PaneKeyAction::EatSuspended => {
                         self.state.flash_info("pane suspended — ^z to resume");
