@@ -27,6 +27,8 @@ pub(super) mod chord_hit;
 #[cfg(test)]
 mod click_hint_tests;
 #[cfg(test)]
+mod confirm_click_tests;
+#[cfg(test)]
 mod divider_menu_tests;
 mod forward;
 #[cfg(test)]
