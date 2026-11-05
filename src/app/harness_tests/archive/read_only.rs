@@ -327,7 +327,6 @@ fn a_read_only_mount_still_reads_extracts_and_copies_out() {
 /// `D` reads a member, so a read-only mount pages its extracted copy in the
 /// top pane.
 #[test]
-#[ignore = "red: `D` reads the member's archive path, which names no file, and flashes `hex: Not a directory`"]
 fn a_read_only_mount_pages_a_member_with_d() {
     read_only(|mut fx| {
         let effects = press(&mut fx.app, "D");

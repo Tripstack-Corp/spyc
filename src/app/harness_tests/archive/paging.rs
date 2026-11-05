@@ -130,7 +130,6 @@ fn d_on_a_file_on_disk_pages_it_in_the_top_pane() {
 /// `D` on a text member pages its extracted copy, as `D` pages the same
 /// file on disk.
 #[test]
-#[ignore = "red: `D` reads the member's archive path, which names no file, and flashes `hex: Not a directory`"]
 fn d_on_a_text_member_pages_its_extracted_copy() {
     with_files(&[NOTES], |fx| {
         let (member, file) = member_and_file(fx, NOTES.0);
@@ -149,7 +148,6 @@ fn d_on_a_text_member_pages_its_extracted_copy() {
 
 /// A binary member gets the hex view a binary file on disk gets.
 #[test]
-#[ignore = "red: `D` reads the member's archive path, which names no file, and flashes `hex: Not a directory`"]
 fn d_on_a_binary_member_shows_the_hex_view_of_its_bytes() {
     with_files(&[BLOB], |fx| {
         let (member, file) = member_and_file(fx, BLOB.0);
@@ -161,7 +159,6 @@ fn d_on_a_binary_member_shows_the_hex_view_of_its_bytes() {
 /// In a split, `D` wraps a markdown member to the focused column's width, as
 /// it wraps the file on disk.
 #[test]
-#[ignore = "red: `D` reads the member's archive path, which names no file, and flashes `hex: Not a directory`"]
 fn d_on_a_markdown_member_in_a_split_wraps_to_the_column() {
     with_files(&[GUIDE], |fx| {
         for app in [&mut fx.inside, &mut fx.beside] {
@@ -180,7 +177,6 @@ fn d_on_a_markdown_member_in_a_split_wraps_to_the_column() {
 /// A member too big for the in-app pager goes to `$PAGER` in the top overlay,
 /// as a file that size does, started beside the archive.
 #[test]
-#[ignore = "red: `D` reads the member's archive path, which names no file, and flashes `hex: Not a directory`"]
 fn d_on_a_member_too_big_for_the_pager_hands_it_to_dollar_pager() {
     let line = [b'x'; 79].iter().chain(b"\n").copied().collect::<Vec<u8>>();
     let rows = usize::try_from(crate::fs::ops::MAX_PAGER_BYTES).unwrap() / line.len() + 1;
@@ -218,7 +214,6 @@ fn d_on_a_member_too_big_for_the_pager_hands_it_to_dollar_pager() {
 /// The pager's `v` on a member `D` paged edits the extracted copy in the top
 /// overlay, started beside the archive, and the mount watches the copy.
 #[test]
-#[ignore = "red: `D` reads the member's archive path, which names no file, and flashes `hex: Not a directory`"]
 fn v_in_the_pager_d_opened_on_a_member_edits_its_extracted_copy() {
     with_files(&[NOTES], |fx| {
         page_with_d(&mut fx.inside, &fx.archive.join(NOTES.0));
