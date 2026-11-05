@@ -4,6 +4,9 @@
 //! The mount itself is driven by running the worker inline and applying its
 //! outcome, which is exactly what the event loop does — just without the thread,
 //! so the assertions are deterministic.
+//!
+//! A fixture that moves a column into or out of a mount canonicalizes its
+//! directory first, as `chdir` canonicalizes a column's.
 
 use super::*;
 use crate::app::archive_ops::{ArchiveOp, ArchiveOutcome, run_archive_op};
@@ -218,6 +221,7 @@ fn build_tar_gz_with(path: &Path, count: usize) {
     b.into_inner().unwrap().finish().unwrap();
 }
 
+mod canonical;
 mod copying;
 mod mounting;
 mod navigation;

@@ -460,6 +460,9 @@ fn the_make_menu_is_refused_inside_a_mounted_archive() {
     use crate::app::archive_ops::{ArchiveOp, ArchiveOutcome, run_archive_op};
     use std::io::Write as _;
     with_mouse(|tmp| {
+        // Canonical, as `chdir` makes a column's directory.
+        let canonical = std::fs::canonicalize(tmp).unwrap();
+        let tmp = canonical.as_path();
         let archive = tmp.join("pkg.zip");
         let mut w = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
         let opts = zip::write::SimpleFileOptions::default().unix_permissions(0o644);
