@@ -65,7 +65,6 @@ fn targets(rows: &[String]) -> Vec<String> {
 /// `ch` leaves the two targets it matches, `check` and `chmod-all`, the title
 /// shows it, and `Enter` right away runs the first.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn typing_narrows_the_targets_and_enter_runs_the_first_match() {
     with_mouse(|tmp| {
         let mut app = make_menu_over(tmp, MAKEFILE);
@@ -86,7 +85,6 @@ fn typing_narrows_the_targets_and_enter_runs_the_first_match() {
 
 /// The arrows move among the matches.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn the_arrows_move_among_the_matches() {
     with_mouse(|tmp| {
         let mut app = make_menu_over(tmp, MAKEFILE);
@@ -106,7 +104,6 @@ fn the_arrows_move_among_the_matches() {
 /// `Backspace` takes a character off the filter, widening the match, back to
 /// every target; with nothing left to take off, it leaves the menu as it is.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn backspace_widens_the_match() {
     with_mouse(|tmp| {
         let mut app = make_menu_over(tmp, MAKEFILE);
@@ -134,7 +131,6 @@ fn backspace_widens_the_match() {
 /// `Esc` with a filter clears it, back to every target, and a second `Esc`
 /// closes the menu.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn esc_clears_the_filter_and_a_second_esc_closes() {
     with_mouse(|tmp| {
         let mut app = make_menu_over(tmp, MAKEFILE);
@@ -152,7 +148,6 @@ fn esc_clears_the_filter_and_a_second_esc_closes() {
 
 /// A filter no target matches leaves one row that says so and runs nothing.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn a_filter_matching_nothing_shows_one_inert_row() {
     with_mouse(|tmp| {
         let mut app = make_menu_over(tmp, MAKEFILE);
@@ -171,7 +166,6 @@ fn a_filter_matching_nothing_shows_one_inert_row() {
 /// them: one the fitted list cut off is found, and the closing row counts
 /// the matches left off, not the targets.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn the_filter_finds_a_target_the_fitted_list_cut_off() {
     with_mouse(|tmp| {
         let mut text = String::new();
@@ -215,7 +209,6 @@ fn the_filter_finds_a_target_the_fitted_list_cut_off() {
 /// A click on a filtered row runs its target and names `:make <target>`, as a
 /// click on any make row does.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn a_click_on_a_filtered_row_names_its_command() {
     with_mouse(|tmp| {
         let mut app = make_menu_over(tmp, MAKEFILE);
@@ -267,7 +260,6 @@ fn a_letter_in_the_entry_menu_closes_it_and_acts() {
 /// The filter matches a name as the list's `=` filter does: anywhere in it,
 /// in any case, so `MOD` finds `chmod-all`.
 #[test]
-#[ignore = "red: a letter closes the make menu, as any key the menu doesn't take"]
 fn the_filter_matches_as_the_lists_filter_does() {
     with_mouse(|tmp| {
         let mut app = make_menu_over(tmp, MAKEFILE);
