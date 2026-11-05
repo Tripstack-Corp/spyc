@@ -83,7 +83,7 @@ fn run(app: &mut App, effects: Vec<Effect>) {
 
 /// Wait until process `pid` runs in `dir`. A bound for a broken spawn, not a
 /// measure of a working one: a child is in its directory before it execs.
-fn wait_until_in(pid: u32, dir: &Path) {
+pub(super) fn wait_until_in(pid: u32, dir: &Path) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let cwd = crate::proc_cwd::cwd_for_pid(pid);

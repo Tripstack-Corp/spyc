@@ -224,4 +224,5 @@ mod navigation;
 mod pending;
 mod read_only;
 mod reading;
+mod shell;
 mod writing;
