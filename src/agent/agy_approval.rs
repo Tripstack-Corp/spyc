@@ -1,5 +1,6 @@
 //! Recognize Antigravity (`agy`) live tool-approval and question dialogs at the
-//! bottom of the pane viewport.
+//! bottom of the pane viewport, and the expanded permission editor `ctrl+g`
+//! opens over a command approval.
 //!
 //! Shared between [`super::detect_rules::Matcher::AgyApproval`] (status scrape
 //! fallback) and [`super::chrome::agy_output_len`] (output navigation boundary)
@@ -13,15 +14,15 @@ const MAX_TARGET_ROWS: usize = 12;
 const MAX_EDIT_DIFF_ROWS: usize = 20;
 
 /// Whether `text` (the bottom non-empty lines of a pane) ends with a live `agy`
-/// tool-approval dialog.
+/// tool-approval dialog, or the permission editor opened over one.
 pub(super) fn matches(text: &str) -> bool {
     let rows: Vec<&str> = text.lines().filter(|row| !row.trim().is_empty()).collect();
-    approval_top(&rows).is_some()
+    approval_top(&rows).or_else(|| editor_top(&rows)).is_some()
 }
 
 /// Index in `lines` of the top header row (`Command`, `File`, `Pending edit`,
-/// `Question`, etc.) of a live `agy` approval or question dialog at the bottom
-/// of the viewport.
+/// `Question`, `Expanded Tool Permission Editor`, etc.) of a live `agy`
+/// approval or question dialog at the bottom of the viewport.
 pub(super) fn dialog_top(lines: &[String]) -> Option<usize> {
     let mut indexed: Vec<(usize, &str)> = lines
         .iter()
@@ -33,7 +34,9 @@ pub(super) fn dialog_top(lines: &[String]) -> Option<usize> {
         .collect();
     indexed.reverse();
     let rows: Vec<&str> = indexed.iter().map(|&(_, row)| row).collect();
-    let top = approval_top(&rows).or_else(|| question_top(&rows))?;
+    let top = approval_top(&rows)
+        .or_else(|| editor_top(&rows))
+        .or_else(|| question_top(&rows))?;
     Some(indexed[top].0)
 }
 
@@ -73,6 +76,43 @@ fn question_top(rows: &[&str]) -> Option<usize> {
         return None;
     }
     has_ordered_options(&rows[options_idx..nav_idx], false).then_some(hdr_idx)
+}
+
+/// Index in `rows` (non-empty lines) of the header of agy's expanded permission
+/// editor: `Expanded Tool Permission Editor` at column 0 over a rule, the full
+/// command, then under a second rule the `Requested Permission (Editable):` box,
+/// its key hint and the cancel footer. It fills the screen while the approval
+/// it was opened over still waits.
+fn editor_top(rows: &[&str]) -> Option<usize> {
+    let cancel_idx = cancel_footer_index(rows)?;
+    let hint_idx = cancel_idx
+        .checked_sub(1)
+        .filter(|&i| is_editor_hint(rows[i]))?;
+    let label_idx = (0..hint_idx)
+        .rev()
+        .find(|&i| rows[i].trim() == "Requested Permission (Editable):")?;
+    let rule_idx = label_idx.checked_sub(1).filter(|&i| is_box_rule(rows[i]))?;
+    let header_rule = (0..rule_idx).rev().find(|&i| is_box_rule(rows[i]))?;
+    let header = header_rule.checked_sub(1)?;
+    let command = &rows[header_rule + 1..rule_idx];
+    let editable = &rows[label_idx + 1..hint_idx];
+    if command.iter().chain(editable).any(|&r| is_turn_row(r))
+        || !is_col0(rows[header])
+        || rows[header].trim() != "Expanded Tool Permission Editor"
+    {
+        return None;
+    }
+    Some(header)
+}
+
+/// The editor's key hint, which opens with `<key> confirm`:
+/// `enter confirm · esc back · pgup/pgdown scroll Full Command`.
+fn is_editor_hint(row: &str) -> bool {
+    row.trim()
+        .split(" · ")
+        .next()
+        .and_then(|part| part.strip_suffix(" confirm"))
+        .is_some_and(is_key_token)
 }
 
 /// The header of a permission dialog asking `rows[q_idx]`: one with a
