@@ -8,8 +8,10 @@
 //! Global, not per project: muscle memory is the user's. Persisted to
 //! `$XDG_STATE_HOME/spyc/learned.json` (or `$HOME/.local/state/spyc/`) and
 //! read tolerantly: a missing file is empty, a corrupt one is empty and logged
-//! (the startup health check names it too), and a name this spyc doesn't know,
-//! a newer spyc's action, loads and is written back as it was.
+//! (the startup health check names it too), and what this spyc doesn't know, a
+//! newer spyc's, loads and is written back as it was: a name in `counts`, or a
+//! top-level key of its own. `:hints reset` forgets the counts and the flag,
+//! and keeps those keys.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -25,6 +27,10 @@ pub struct Learned {
     /// Whether an object's menu (`.`, `^a .`, a right-click) has ever opened.
     #[serde(default)]
     pub menu_seen: bool,
+    /// The top-level keys this spyc doesn't know, a newer spyc's, kept to be
+    /// written back as they were.
+    #[serde(flatten)]
+    pub unknown: BTreeMap<String, serde_json::Value>,
 }
 
 impl Learned {
@@ -43,6 +49,13 @@ impl Learned {
         }
         self.counts.insert(name.to_owned(), count + 1);
         true
+    }
+
+    /// Forget every count and the first-menu flag. A newer spyc's keys stay:
+    /// what they hold isn't this spyc's to forget.
+    pub fn forget(&mut self) {
+        self.counts.clear();
+        self.menu_seen = false;
     }
 
     /// Note that an object's menu has opened. Whether that is news.
@@ -147,7 +160,6 @@ mod tests {
     /// A top-level key this spyc doesn't know, a newer spyc's, an object or a
     /// scalar, is written back as it was when a key is counted here.
     #[test]
-    #[ignore = "red: `Learned` drops a top-level key it doesn't know on parse"]
     fn a_newer_spycs_top_level_keys_survive_a_count() {
         let tmp = tempfile::tempdir().unwrap();
         let newer = serde_json::json!({

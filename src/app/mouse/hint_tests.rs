@@ -321,7 +321,6 @@ fn a_newer_spycs_file() -> serde_json::Value {
 /// A top-level key this spyc doesn't know, a newer spyc's, loads at startup
 /// and is written back as it was when a key press here is counted.
 #[test]
-#[ignore = "red: `Learned` drops a top-level key it doesn't know, so the count's write loses it"]
 fn a_newer_spycs_keys_survive_a_counted_key() {
     with_mouse(|tmp| {
         let newer = a_newer_spycs_file();
@@ -341,7 +340,6 @@ fn a_newer_spycs_keys_survive_a_counted_key() {
 /// `:hints reset` forgets the counts and the first-menu flag, and keeps what a
 /// newer spyc wrote that this one doesn't know.
 #[test]
-#[ignore = "red: `:hints reset` writes an empty `Learned`, without a newer spyc's keys"]
 fn hints_reset_keeps_a_newer_spycs_keys() {
     with_mouse(|tmp| {
         let newer = a_newer_spycs_file();
