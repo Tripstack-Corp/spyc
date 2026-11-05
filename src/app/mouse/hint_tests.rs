@@ -5,6 +5,7 @@
 //! opens. Each case goes through `handle_key`, `handle_mouse`, a `:` command,
 //! a drawn frame or a new `App` over the same state root.
 
+use super::make_menu_tests::terminal_and_foreground;
 use super::menu_tests::{app_over_entries, cursor_on, flash};
 use super::tests::{FRAME, click, drawn, drawn_row, press};
 use crate::app::{App, Effect};
@@ -75,6 +76,12 @@ fn persist(fx: Vec<Effect>) -> usize {
         })
         .map(|learned| crate::app::menu_hints::persist(&learned))
         .count()
+}
+
+/// Carry out `fx` as the loop does.
+fn run(app: &mut App, fx: Vec<Effect>) {
+    let (mut terminal, fg) = terminal_and_foreground();
+    app.run_effects(fx, &mut terminal, &fg);
 }
 
 /// Load `toml` as the user's config, through the config loader, and put it in
@@ -297,6 +304,58 @@ fn an_unknown_name_survives_a_write() {
         assert_eq!(count_on_disk(tmp, "goto_last"), Some(1));
         assert_eq!(count_on_disk(tmp, "a_future_action"), Some(2));
         assert_eq!(count_on_disk(tmp, "goto_first"), Some(3));
+    });
+}
+
+/// What a newer spyc might write: the two fields this one knows, and two
+/// top-level keys it doesn't, an object and a scalar.
+fn a_newer_spycs_file() -> serde_json::Value {
+    serde_json::json!({
+        "counts": {"goto_first": 1},
+        "menu_seen": true,
+        "a_future_table": {"since": "a newer spyc", "rows": [1, 2]},
+        "a_future_flag": 7,
+    })
+}
+
+/// A top-level key this spyc doesn't know, a newer spyc's, loads at startup
+/// and is written back as it was when a key press here is counted.
+#[test]
+#[ignore = "red: `Learned` drops a top-level key it doesn't know, so the count's write loses it"]
+fn a_newer_spycs_keys_survive_a_counted_key() {
+    with_mouse(|tmp| {
+        let newer = a_newer_spycs_file();
+        std::fs::write(tmp.join("learned.json"), newer.to_string()).unwrap();
+        let mut app = app_over_entries(tmp);
+
+        let fx = key(&mut app, 'G');
+        run(&mut app, fx);
+
+        assert_eq!(count_on_disk(tmp, "goto_last"), Some(1), "G was counted");
+        let on_disk = learned_json(tmp).expect("learned.json is there");
+        assert_eq!(on_disk["a_future_table"], newer["a_future_table"]);
+        assert_eq!(on_disk["a_future_flag"], newer["a_future_flag"]);
+    });
+}
+
+/// `:hints reset` forgets the counts and the first-menu flag, and keeps what a
+/// newer spyc wrote that this one doesn't know.
+#[test]
+#[ignore = "red: `:hints reset` writes an empty `Learned`, without a newer spyc's keys"]
+fn hints_reset_keeps_a_newer_spycs_keys() {
+    with_mouse(|tmp| {
+        let newer = a_newer_spycs_file();
+        std::fs::write(tmp.join("learned.json"), newer.to_string()).unwrap();
+        let mut app = app_over_entries(tmp);
+
+        let fx = app.dispatch_command("hints reset");
+        run(&mut app, fx);
+
+        assert_eq!(count_on_disk(tmp, "goto_first"), None, "counts forgotten");
+        let on_disk = learned_json(tmp).expect("learned.json is there");
+        assert_eq!(on_disk["menu_seen"], false, "the first menu forgotten");
+        assert_eq!(on_disk["a_future_table"], newer["a_future_table"]);
+        assert_eq!(on_disk["a_future_flag"], newer["a_future_flag"]);
     });
 }
 

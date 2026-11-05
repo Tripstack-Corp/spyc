@@ -144,6 +144,31 @@ mod tests {
         assert_eq!(Learned::parse("{}").unwrap(), Learned::default());
     }
 
+    /// A top-level key this spyc doesn't know, a newer spyc's, an object or a
+    /// scalar, is written back as it was when a key is counted here.
+    #[test]
+    #[ignore = "red: `Learned` drops a top-level key it doesn't know on parse"]
+    fn a_newer_spycs_top_level_keys_survive_a_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let newer = serde_json::json!({
+            "counts": {"goto_first": 1},
+            "menu_seen": true,
+            "a_future_table": {"since": "a newer spyc", "rows": [1, 2], "note": null},
+            "a_future_flag": 7,
+        });
+        crate::state::with_state_root(tmp.path(), || {
+            let mut learned = Learned::parse(&newer.to_string()).unwrap();
+            assert!(learned.record("goto_first", 3), "premise: the count moved");
+            learned.save().unwrap();
+        });
+
+        let text = std::fs::read_to_string(tmp.path().join("learned.json")).unwrap();
+        let written: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let mut expected = newer;
+        expected["counts"]["goto_first"] = 2.into();
+        assert_eq!(written, expected);
+    }
+
     #[test]
     fn save_and_load_round_trip_under_the_state_root() {
         let tmp = tempfile::tempdir().unwrap();
