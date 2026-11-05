@@ -218,6 +218,7 @@ fn build_tar_gz_with(path: &Path, count: usize) {
     b.into_inner().unwrap().finish().unwrap();
 }
 
+mod copying;
 mod mounting;
 mod navigation;
 mod pending;
