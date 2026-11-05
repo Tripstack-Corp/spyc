@@ -92,9 +92,13 @@ they land in a session-scoped staging dir that is cleaned up on exit.
 - **Not yet supported inside an archive** — creating an empty directory or a new
   file, copying a whole directory *in* (only files, since the archive would keep
   the name and lose what's under it), moving across the archive boundary in one
-  step, `:grep`, `F` and shell commands are refused with a message rather than
-  half-working, and so are `gP` and `gS`: a project's home and start directory
-  are real directories.
+  step, `:grep` and `F` are refused with a message rather than half-working, and
+  so are `gP` and `gS`: a project's home and start directory are real
+  directories.
+- **Shell commands run outside the archive** — a directory inside one isn't on
+  disk for a command to start in, so `!`, `;`, `$`, `:make` and `:exec` are
+  refused there, typed as a key or at the `:` prompt (`:!`, `:;`, `:!!`). Climb
+  out to the directory holding the archive and run them from there.
 - **An archive spyc can't write back** — one with duplicate member names, a
   member skipped for an unsafe path, or a tar hardlink or device node, where
   rewriting it would lose a member. The suffix shows `ro`, and each change is

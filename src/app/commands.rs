@@ -24,8 +24,14 @@ impl App {
     /// auto-dismiss — the user reads the output), expanding `%`/selection
     /// placeholders first. Shared by the `:;cmd` command and the `;`-prompt
     /// (`ShellCmd`) arms — they had independent copies of this spawn block.
-    /// Flashes on expand/spawn error.
+    /// Flashes on expand/spawn error, and refuses inside an archive mount as
+    /// the `;` key does: `:;` reaches here without that key's gate, and a
+    /// mount's path is no directory to spawn in.
     pub(super) fn run_foreground_shell_overlay(&mut self, cmd: &str) {
+        if let Some(why) = self.state.mount_refusal(&Action::ShellForegroundPrompt) {
+            self.state.flash_error(why);
+            return;
+        }
         let expanded = match self.state.expand_selection_percent(cmd) {
             Ok(s) => s,
             Err(e) => {

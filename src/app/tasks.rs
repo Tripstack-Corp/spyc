@@ -131,6 +131,16 @@ impl App {
     /// `cmd_display` lets `:!!` show `!` while titling with the actual
     /// resolved command.
     pub fn start_capture(&mut self, expanded: &str, title_cmd: &str, cmd_display: &str) {
+        // A path inside a mount is no directory, and the pty would start the
+        // child in `$HOME` instead: refused as the `!` key is, however the
+        // command got here (`:!`, `:!!`).
+        if let Some(why) = self
+            .state
+            .mount_refusal(&crate::keymap::Action::ShellCapturedPrompt)
+        {
+            self.state.flash_error(why);
+            return;
+        }
         // Run in the FOCUSED column's dir (like `;`/`$` shell spawns + every
         // other prompt op since per-column), so `!touch foo` lands where the
         // user is looking — column `b`'s worktree, not `a`/PROJECT_HOME.
