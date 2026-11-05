@@ -14,6 +14,11 @@ they land in a session-scoped staging dir that is cleaned up on exit.
 - **What the rows are** — the archive's own members, with their real sizes,
   mtimes and permission bits. Sorting, `=` filters, picks, search and the
   cursor all work as they do in a directory.
+- **One archive, however you name it** — `:cd` through a symlinked directory
+  or a `..` (`:cd ~/link/pkg.zip`, `:cd ../pkg.zip`) reaches the same archive
+  its row does: climbing out puts the cursor on it, its row shows the `~` of
+  a pending change, and coming back finds that change still there. `:cd ..`
+  climbs inside an archive as it does in a directory.
 - **Reading a member** — `Enter` extracts just that member and opens it in the
   pager. `D` on the archive itself still shows the raw bytes, so the hex view
   is never more than one key away.
