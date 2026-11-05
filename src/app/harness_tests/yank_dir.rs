@@ -51,7 +51,6 @@ fn listed_app(dir: &Path) -> App {
 /// The headline: `yd` yanks the directory the column is in, not the entry
 /// under the cursor, even when that entry is a directory itself.
 #[test]
-#[ignore = "red: `y d` is not bound, so it copies nothing"]
 fn yd_yanks_the_directory_the_column_is_in() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -73,7 +72,6 @@ fn yd_yanks_the_directory_the_column_is_in() {
 
 /// Picks choose what `yf` yanks, never what `yd` does.
 #[test]
-#[ignore = "red: `y d` is not bound, so it copies nothing"]
 fn yd_with_picks_still_yanks_the_directory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -93,7 +91,6 @@ fn yd_with_picks_still_yanks_the_directory() {
 /// With two columns open, `yd` yanks the focused one's directory: `b`'s while
 /// `b` has focus, then `a`'s once focus moves back.
 #[test]
-#[ignore = "red: `y d` is not bound, so it copies nothing"]
 fn yd_yanks_the_focused_columns_directory() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -119,7 +116,6 @@ fn yd_yanks_the_focused_columns_directory() {
 /// Inside a mounted archive the column lists a path inside the archive, and
 /// that is what `yd` yanks, not the directory holding the archive.
 #[test]
-#[ignore = "red: `y d` is not bound, so it copies nothing"]
 fn yd_inside_an_archive_yanks_the_path_inside_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {

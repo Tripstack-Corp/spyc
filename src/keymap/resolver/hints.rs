@@ -204,6 +204,7 @@ impl Resolver {
             PendingSeq::Yank => vec![
                 Act("y", A::Take),
                 Act("f", A::YankPaths),
+                Act("d", A::YankDir),
                 Act("p", A::YankPrompt),
                 Act("P", A::YankLastPrompt),
                 Act("a", A::YankScrollback),

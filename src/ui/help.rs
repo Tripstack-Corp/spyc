@@ -123,7 +123,11 @@ const SECTIONS: &[Section] = &[
             ("y y", "yank file(s) into inventory cache"),
             (
                 "y f",
-                "yank cursor file's absolute path (or picks) to clipboard",
+                "yank absolute path of file or dir under cursor (or picks) to clipboard",
+            ),
+            (
+                "y d",
+                "yank absolute path of the column's directory to clipboard",
             ),
             ("y p", "yank visible pane output to clipboard"),
             ("y P", "yank last typed prompt to clipboard"),

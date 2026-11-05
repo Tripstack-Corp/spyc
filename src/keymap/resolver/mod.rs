@@ -517,6 +517,7 @@ impl Resolver {
                 KeyCode::Char('P') => ResolverOutcome::Action(Action::YankLastPrompt),
                 KeyCode::Char('a') => ResolverOutcome::Action(Action::YankScrollback),
                 KeyCode::Char('f') => ResolverOutcome::Action(Action::YankPaths),
+                KeyCode::Char('d') => ResolverOutcome::Action(Action::YankDir),
                 _ => ResolverOutcome::Ignored,
             };
             self.reset();

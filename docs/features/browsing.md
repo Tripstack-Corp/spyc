@@ -145,9 +145,14 @@ Two levels of selection for flexible file management.
 **Inventory** is a file cache — yanked files are copied to a local cache
 (`~/.local/state/spyc/inventory/`), persisted across sessions:
 - **yy** yank file(s) into inventory cache (regular files only)
-- **yf** yank the cursor file's absolute path (or all picks,
-  newline-separated) to the system clipboard — for one-off shell
-  use without a pane (`git restore $(pbpaste)` etc.)
+- **yf** yank the absolute path of the entry under the cursor, a file
+  or a directory (or all picks, newline-separated), to the system
+  clipboard — for one-off shell use without a pane
+  (`git restore $(pbpaste)` etc.)
+- **yd** yank the absolute path of the directory the focused column is
+  in, whatever the cursor is on or is picked. Inside a mounted archive
+  it is the path inside the archive, as the column shows it
+  (`/work/pkg.zip/src`).
 - **yp** yank visible pane output to the system clipboard
 - **yP** yank the last prompt you typed into the pane to the clipboard
 - **ya** yank the full pane scrollback (up to 10K lines) to the clipboard
@@ -159,7 +164,7 @@ Two levels of selection for flexible file management.
   OSC-52 terminal escape over SSH instead; `[clipboard] command` /
   `$SPYC_CLIPBOARD` overrides the backend entirely with a
   user-supplied command — see CONFIGURATION.md. Every verb that yanks
-  text — `yf`, `yP`, `yp`, `ya`, a mouse drag, `^a u` Quick Select and
+  text — `yf`, `yd`, `yP`, `yp`, `ya`, a mouse drag, `^a u` Quick Select and
   the image overlay's `Y` — goes the same way, so the SSH and override
   behaviour is the same whichever one you reach for.
 

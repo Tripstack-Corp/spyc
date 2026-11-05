@@ -61,7 +61,8 @@ file cache that survives across sessions.
 | `^T` | Pick all / clear all |
 | `]p` / `[p` | Cursor to next / prev picked entry (wraps) |
 | `yy` | Yank to inventory (copies file to cache) |
-| `yf` | Yank cursor file's absolute path (or picks) to clipboard |
+| `yf` | Yank the absolute path of the file or directory under the cursor (or picks) to clipboard |
+| `yd` | Yank the absolute path of the column's directory to clipboard (inside an archive, the path inside it) |
 | `yp` | Yank visible pane output to clipboard |
 | `yP` | Yank last typed prompt to clipboard |
 | `ya` | Yank full pane scrollback to clipboard |
