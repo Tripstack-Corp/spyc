@@ -20,8 +20,10 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   a pending change, and coming back finds that change still there. `:cd ..`
   climbs inside an archive as it does in a directory.
 - **Reading a member** — `Enter` extracts just that member and opens it in the
-  pager. `D` on the archive itself still shows the raw bytes, so the hex view
-  is never more than one key away.
+  pager. `D` extracts it and pages it in the top pane, as it would any file:
+  the hex view for a binary, `$PAGER` for one too big to load. `D` on the
+  archive itself still shows the raw bytes, so the hex view is never more than
+  one key away.
 - **A compressed tar is different** — `.tar.gz` / `.tar.zst` can't be listed
   without decompressing the whole stream, so mounting one extracts as it reads.
   `[archive] extract_budget_mb` (default 512) is the ceiling; past it the mount

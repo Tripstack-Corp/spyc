@@ -77,9 +77,14 @@ impl App {
     }
 
     /// Open an already-extracted member. The pager's own planner takes it from
-    /// here — by now it's an ordinary local file.
+    /// here — by now it's an ordinary local file, so `D`'s top pane gets what
+    /// `D` on a file gets.
     pub(super) fn open_staged_in_pager(&mut self, real: &Path, dest: PagerDest) {
-        if let Some(op) = self.plan_pager_open(real, None, dest) {
+        let op = match dest {
+            PagerDest::TopPane => self.plan_display_in_pane(real),
+            PagerDest::Overlay { .. } => self.plan_pager_open(real, None, dest),
+        };
+        if let Some(op) = op {
             self.spawn_file_op(op);
         }
     }

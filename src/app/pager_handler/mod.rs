@@ -628,12 +628,6 @@ impl App {
     /// (search, jump, syntax highlighting, range yank, markdown
     /// render, hex dump for binaries), and uses the existing
     /// `Mount::TopPane` rail laid in Phase 1.
-    ///
-    /// **Huge-file fallback:** files past `MAX_PAGER_BYTES` are
-    /// still handed to `\$PAGER` as a top overlay because `less`
-    /// streams from disk while the in-app pager loads the (already
-    /// truncated) buffer into memory. Streaming wins for multi-GB
-    /// logs.
     pub fn display_in_pane(&mut self) -> Vec<Effect> {
         // Page the FOCUSED column's cursor file. From the right commander the
         // pager opens INSIDE `b` (its own `pager_right` slot), coexisting with a
@@ -648,15 +642,33 @@ impl App {
             self.state.flash_error("D: cannot page a directory");
             return Vec::new();
         }
-        let file_size = std::fs::metadata(&path).map_or(0, |m| m.len());
-        if file_size > crate::fs::ops::MAX_PAGER_BYTES {
-            // Huge file: $PAGER's stream-from-disk wins over our
-            // in-memory pager. Fall back to the pre-v1.5 behaviour
-            // (spawn $PAGER as a top overlay). A char device reports
-            // length 0, so it never lands here — it routes to the
-            // device-safe off-thread open below.
-            self.spawn_pager_overlay_for_path(&path);
-            return Vec::new();
+        // A member has no bytes on disk yet, so it is extracted first and
+        // paged from the extracted copy.
+        if self.state.mounts.holds_member(&path) {
+            return self.open_member(
+                &path,
+                crate::app::archive_ops::MaterializeThen::OpenPager(PagerDest::TopPane),
+            );
+        }
+        self.plan_display_in_pane(&path)
+            .map(Effect::FileOp)
+            .into_iter()
+            .collect()
+    }
+
+    /// `D` on `path`, a file on disk: the in-app pager in the focused column's
+    /// top pane, or `$PAGER` in the top overlay for a file past
+    /// `MAX_PAGER_BYTES`, since `less` streams from disk while the in-app
+    /// pager loads the (already truncated) buffer into memory. A special file
+    /// comes back as the off-thread read to run.
+    pub(super) fn plan_display_in_pane(&mut self, path: &Path) -> Option<FileOp> {
+        let file_size = std::fs::metadata(path).map_or(0, |m| m.len());
+        // A char device reports length 0, so it never lands here. `$PAGER`
+        // takes a pty, which in a project out of view would wait unseen; the
+        // in-app pager shows the file's first lines there instead.
+        if file_size > crate::fs::ops::MAX_PAGER_BYTES && !self.state.in_background {
+            self.spawn_pager_overlay_for_path(path);
+            return None;
         }
         // With a vertical split open, `D`'s pager renders inside the focused
         // column (the carve scopes `top_unit` to it), so wrap to that column's
@@ -672,12 +684,9 @@ impl App {
             )
         });
         // Regular file → built + mounted inline (no thread/flicker); a special
-        // file → read off-thread (returned as the `OpenSpecialFile` effect) so a
-        // blocking device can't freeze the input thread.
-        self.plan_pager_open(&path, wrap, PagerDest::TopPane)
-            .map(Effect::FileOp)
-            .into_iter()
-            .collect()
+        // file → read off-thread so a blocking device can't freeze the input
+        // thread.
+        self.plan_pager_open(path, wrap, PagerDest::TopPane)
     }
 
     /// Load a one-shot preview of the file under the cursor into the right
@@ -852,7 +861,7 @@ impl App {
 impl App {
     /// Pre-v1.5 `D` behaviour: spawn `\$PAGER` as a top overlay pty.
     /// Now used only as the huge-file fallback path from
-    /// `display_in_pane` — files past `MAX_PAGER_BYTES` benefit from
+    /// `plan_display_in_pane` — files past `MAX_PAGER_BYTES` benefit from
     /// `less`'s stream-from-disk over our in-memory pager.
     pub fn spawn_pager_overlay_for_path(&mut self, path: &Path) {
         let argv = shell::resolve_pager();
