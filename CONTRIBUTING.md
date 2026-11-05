@@ -323,6 +323,13 @@ Bound the loop: `BLOCKED` covers *running* and *failed* alike, so an unbounded w
 
 Resolve `<N>` from the head branch (`gh pr view <branch> --json number,headRefName`), never from a guess at the next number: a guessed one merged a dependabot PR nobody had approved. `UNSTABLE` means a check that isn't required is still running or has failed. `Vendored archives` runs for about ten minutes whenever `Makefile` changes, so wait it out rather than merge past it, and look at it if it stays.
 
+**`scripts/ship-pr.sh` runs this whole sequence for a red and fix pair.**
+- It rebases both commits onto `origin/main` and runs `make lint` on each before pushing it.
+- It opens the red PR, merges it with the loop above, then rebases the fix onto the new `main` and does the same for it. It merges by branch, never by number.
+- A check GitHub cancelled without ever assigning a runner is re-run, at most three times.
+- `SHIP_LOCAL_MACOS_LINT=1` is the one exception to waiting out `UNSTABLE`. It lets a PR merge when the only check not passing is the macOS lint and its head passed `make lint` on a Mac. Use it only with the owner's OK, while GitHub's macOS runners are out.
+- Teardown stays manual.
+
 ## Merge-train conflicts
 
 Since `main` sits on a static `-CURRENT` version, no PR touches the
