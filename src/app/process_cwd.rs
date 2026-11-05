@@ -71,6 +71,115 @@ mod tests {
         );
     }
 
+    /// The process cwd follows the focused column before a Lua event fires, as a
+    /// handler runs on the Lua thread and reads the cwd as it finds it, and
+    /// again after the last step that can navigate (a `spyc -c` command, an MCP
+    /// one), so it is settled whenever the loop waits.
+    #[test]
+    #[ignore = "red: the loop settles the process cwd once, after the Lua events and before the MCP commands"]
+    fn the_loop_settles_the_process_cwd_before_lua_and_after_the_last_navigation() {
+        let src = crate::guard_support::production_half(include_str!("pre_recv.rs"));
+        let start = src
+            .find("fn settle_before_recv")
+            .expect("pre_recv.rs lost `settle_before_recv`");
+        let body = &src[start..];
+        let at = |needle: &str| {
+            body.find(needle)
+                .unwrap_or_else(|| panic!("`settle_before_recv` lost `{needle}`"))
+        };
+        let settles: Vec<usize> = body
+            .match_indices("self.settle_process_cwd()")
+            .map(|(i, _)| i)
+            .collect();
+        let lua = at("self.settle_lua_events()");
+        let last_navigation =
+            at("self.settle_startup_commands()").max(at("self.drain_mcp_pending("));
+        assert!(
+            settles.iter().any(|&s| s < lua),
+            "a Lua event fires before the process cwd follows the focused column"
+        );
+        assert!(
+            settles.iter().any(|&s| s > last_navigation),
+            "the loop can wait with an MCP or `spyc -c` navigation still owed"
+        );
+    }
+
+    /// A child the executor hands the terminal to (`$`, `$EDITOR`, a `unix`
+    /// binding) runs in the focused column's directory, which a navigation
+    /// earlier in the same tick may have changed without moving the process.
+    #[test]
+    #[ignore = "red: a foreground child inherits the process cwd"]
+    fn a_foreground_child_is_given_the_focused_columns_directory() {
+        let src = crate::guard_support::production_half(include_str!("effect/executor.rs"));
+        let call = src
+            .find("fg.run(")
+            .map(|at| &src[at..at + src[at..].find(");").expect("`fg.run(` is closed")])
+            .expect("the executor no longer runs a foreground child");
+        assert!(
+            call.contains("self.desired_process_cwd()"),
+            "`{call}` doesn't name the focused column's directory"
+        );
+    }
+
+    /// #980: the process cwd moves only through `Effect::SetProcessCwd`. The
+    /// Model and the pure layers never call `set_current_dir`, which moves it
+    /// for every thread at once.
+    #[test]
+    #[ignore = "red: `AppState::chdir_side` calls `set_current_dir`"]
+    fn the_pure_layers_never_move_the_process_cwd() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files: Vec<std::path::PathBuf> = ["app/route.rs", "app/modal.rs", "app/focus.rs"]
+            .iter()
+            .map(|f| src.join(f))
+            .collect();
+        let mut dirs: Vec<std::path::PathBuf> = ["app/state", "app/render", "ui"]
+            .iter()
+            .map(|d| src.join(d))
+            .collect();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    files.push(path);
+                }
+            }
+        }
+        let test_only = |path: &Path| {
+            path.components().any(|c| c.as_os_str() == "tests")
+                || path
+                    .file_stem()
+                    .is_some_and(|s| s == "tests" || s.to_string_lossy().ends_with("_tests"))
+        };
+        let mut scanned = Vec::new();
+        for path in files.iter().filter(|p| !test_only(p)) {
+            let text =
+                std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let production = crate::guard_support::production_half(&text);
+            for line in production.lines() {
+                let code = line.split("//").next().unwrap_or_default();
+                assert!(
+                    !code.contains("set_current_dir"),
+                    "{}: `{}` — the process cwd is the loop's: return the move as \
+                     `Effect::SetProcessCwd` (see `settle_process_cwd`)",
+                    path.display(),
+                    line.trim()
+                );
+            }
+            scanned.push((path.clone(), production));
+        }
+        // A scan that found nothing to read passes for the wrong reason.
+        assert!(scanned.len() >= 20, "scanned only {} files", scanned.len());
+        assert!(
+            scanned
+                .iter()
+                .any(|(path, text)| path.ends_with("app/state/listing.rs")
+                    && text.contains("fn chdir_side")),
+            "the Model's navigation is no longer where this guard reads"
+        );
+    }
+
     /// #495: an agent's `open_worktree` makes `b` the focused column without
     /// navigating, so nothing moved the process. It must now want `b`'s dir,
     /// and after a second open, the second one's.
