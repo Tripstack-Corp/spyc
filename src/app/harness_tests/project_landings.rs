@@ -841,6 +841,44 @@ fn a_member_opened_from_x_opens_in_xs_pager() {
     });
 }
 
+/// A member `D` paged from X, too big for the in-app pager, lands after the
+/// user moved to Y: X's top pane shows it, and no `$PAGER` overlay opens,
+/// neither over Y nor unseen in X.
+#[test]
+fn a_big_member_paged_with_d_from_x_starts_no_pager_overlay() {
+    with_two(|t| {
+        let app = &mut t.app;
+        let x = t.x;
+        let big = t.x_home.join("big.log");
+        let rows = usize::try_from(crate::fs::ops::MAX_PAGER_BYTES).unwrap() / 8 + 1;
+        std::fs::write(&big, "xxxxxxx\n".repeat(rows)).unwrap();
+        app.file_archive_outcome(ArchiveOutcome::Materialized {
+            real: big,
+            then: MaterializeThen::OpenPager(PagerDest::TopPane),
+        });
+        app.make_active(t.y);
+        crate::shell::with_pager("tail -f", || settle_archive(app));
+        assert!(
+            app.runtime.project().top_overlay.is_none(),
+            "no `$PAGER` opens over Y"
+        );
+        assert!(app.view.project().pager.is_none(), "no pager opens over Y");
+        assert!(
+            app.as_project(x, |app| app.runtime.project().top_overlay.is_none()),
+            "none waits unseen in X"
+        );
+        assert!(
+            app.as_project(x, |app| app
+                .view
+                .project()
+                .pager
+                .as_ref()
+                .is_some_and(|v| matches!(v.mount, crate::ui::pager::Mount::TopPane))),
+            "X's top pane holds the member"
+        );
+    });
+}
+
 /// A member extracted for editing in X lands after the user moved to Y. An
 /// editor would take the terminal away from Y, so the edit is dropped and the
 /// flash says so.

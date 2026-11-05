@@ -324,6 +324,33 @@ fn a_read_only_mount_still_reads_extracts_and_copies_out() {
     });
 }
 
+/// `D` reads a member, so a read-only mount pages its extracted copy in the
+/// top pane.
+#[test]
+#[ignore = "red: `D` reads the member's archive path, which names no file, and flashes `hex: Not a directory`"]
+fn a_read_only_mount_pages_a_member_with_d() {
+    read_only(|mut fx| {
+        let effects = press(&mut fx.app, "D");
+        settle(&mut fx.app, effects);
+        let view = fx
+            .app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .unwrap_or_else(|| panic!("`D` opened no pager: {:?}", told(&fx.app)));
+        assert!(
+            matches!(view.mount, crate::ui::pager::Mount::TopPane),
+            "{:?}",
+            view.mount
+        );
+        let source = view.source_path.clone().expect("a file-backed pager");
+        assert!(source.starts_with(&fx.staging), "{}", source.display());
+        assert_eq!(std::fs::read(source).unwrap(), b"# second\n");
+        assert!(!fx.app.mount_is_dirty(&fx.archive));
+    });
+}
+
 /// The same edits in a writable mount reach their prompts and the journal.
 #[test]
 fn a_writable_mount_takes_the_same_edits() {
