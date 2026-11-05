@@ -79,7 +79,7 @@ fn persist(fx: Vec<Effect>) -> usize {
 }
 
 /// Carry out `fx` as the loop does.
-fn run(app: &mut App, fx: Vec<Effect>) {
+pub(super) fn run(app: &mut App, fx: Vec<Effect>) {
     let (mut terminal, fg) = terminal_and_foreground();
     app.run_effects(fx, &mut terminal, &fg);
 }
@@ -101,7 +101,7 @@ fn learned_json(tmp: &Path) -> Option<serde_json::Value> {
 }
 
 /// The count `learned.json` holds for the action named `name`.
-fn count_on_disk(tmp: &Path, name: &str) -> Option<u64> {
+pub(super) fn count_on_disk(tmp: &Path, name: &str) -> Option<u64> {
     learned_json(tmp)?.get("counts")?.get(name)?.as_u64()
 }
 
@@ -430,6 +430,27 @@ fn hints_lists_the_faded_and_reset_brings_them_back() {
 
         assert!(named_gg(&app), "after a reset: {:?}", flash(&app));
         assert_eq!(count_on_disk(tmp, "goto_first"), None, "the file forgot");
+    });
+}
+
+/// A pager's row fades as an action's does, and `:hints` lists it: by its
+/// label, and the name its key is counted under.
+#[test]
+#[ignore = "red: a pager's keys never count, and `:hints` knows only an `Action`'s name"]
+fn hints_lists_a_faded_pager_row() {
+    with_mouse(|tmp| {
+        let mut app = app_over_entries(tmp);
+        for _ in 0..3 {
+            cursor_on(&mut app, "notes.txt");
+            key(&mut app, 'D');
+            assert!(app.view.project().pager.is_some(), "premise: `D` opened it");
+            key(&mut app, 'q');
+        }
+
+        let listed = hints_pager(&mut app);
+
+        assert!(listed.contains("close the pager"), "{listed}");
+        assert!(listed.contains("pager_close"), "{listed}");
     });
 }
 

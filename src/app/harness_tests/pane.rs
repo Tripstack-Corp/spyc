@@ -765,12 +765,14 @@ fn capture_ctrl_c_signals_the_group_not_the_byte() {
         app.start_capture("cat", "cat", "cat");
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         let fx = app.handle_key(ctrl_c).unwrap();
+        assert_eq!(
+            fx.capture_signals(),
+            [rustix::process::Signal::INT],
+            "^C must send the capture one SIGINT, got {fx:?}"
+        );
         assert!(
-            matches!(
-                fx.as_slice(),
-                [Effect::SignalCapture { sig, .. }] if *sig == rustix::process::Signal::INT
-            ),
-            "^C must emit one SIGINT SignalCapture, got {fx:?}"
+            fx.typed_input().is_none(),
+            "^C must send the command no byte, got {fx:?}"
         );
         assert!(
             app.runtime.pending_capture.is_some(),

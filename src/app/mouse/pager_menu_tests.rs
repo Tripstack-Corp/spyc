@@ -4,6 +4,7 @@
 //! pager. Each case goes through `handle_mouse` or `handle_key` and reads the
 //! menu as the frame draws it.
 
+use super::hint_tests::{count_on_disk, run};
 use super::menu_tests::{app_over_entries, app_with_tab, cursor_on, flash, offers, right_click};
 use super::tests::{FRAME, centre, click, drawn, press};
 use crate::app::{App, Effect, SigOk};
@@ -596,6 +597,207 @@ fn a_picker_has_no_pager_menu() {
 
         assert!(app.view.chord_hint.is_none(), "no menu opened");
         assert!(!app.state.resolver.is_pending(), "and no leader is armed");
+    });
+}
+
+// ── the hint fades as a pager's keys are learned ──
+
+/// What the open pager shows in its footer, where a fired row's hint goes.
+fn pager_flash(app: &App) -> Option<String> {
+    app.view
+        .project()
+        .pager
+        .as_ref()
+        .and_then(|v| v.flash.clone())
+}
+
+/// Open the task viewer's menu and click "pause the task".
+fn click_pause(app: &mut App) -> Vec<Effect> {
+    right_click_the_pager(app);
+    let row = row_at(app, "pause the task");
+    click(app, row)
+}
+
+/// Whether `fx` pauses task #1, as `S` does.
+fn pauses_task_one(fx: &[Effect]) -> bool {
+    fx.iter().any(|e| {
+        matches!(
+            e,
+            Effect::SignalGroup { sig, on_ok: SigOk::Pause(1), .. }
+                if *sig == rustix::process::Signal::STOP
+        )
+    })
+}
+
+/// Three `S`s in the task viewer and the pause row's key is learned: a click
+/// on the row still pauses the task, and names no key. Two, and it still does.
+#[test]
+#[ignore = "red: a pager's keys never call `learn_key`, so the pause row names `S` forever"]
+fn the_pause_rows_hint_fades_after_three_s_presses() {
+    with_mouse(|tmp| {
+        let mut app = app_in_the_task_viewer(tmp, 1);
+        press(&mut app, 'S');
+        press(&mut app, 'S');
+        click_pause(&mut app);
+        assert_eq!(
+            pager_flash(&app).as_deref(),
+            Some("S  pause the task"),
+            "two presses"
+        );
+
+        press(&mut app, 'S');
+        let fx = click_pause(&mut app);
+
+        assert!(pauses_task_one(&fx), "the row still fires: {fx:?}");
+        assert_eq!(pager_flash(&app), None, "three presses");
+        assert!(flash(&app).is_none(), "{:?}", flash(&app));
+    });
+}
+
+/// A click is not a key: clicking the capture menu's interrupt row again and
+/// again never silences the `^C` it is there to teach, and writes no count.
+#[test]
+fn capture_menu_clicks_never_count() {
+    with_mouse(|tmp| {
+        let mut app = app_with_capture(tmp);
+        for click_number in 1..=5 {
+            // Clear the last click's hint, so the hint read is this click's.
+            if let Some(view) = app.view.project_mut().pager.as_mut() {
+                view.flash = None;
+            }
+            right_click_the_pager(&mut app);
+            let row = row_at(&mut app, "interrupt the command");
+
+            let fx = click(&mut app, row);
+
+            assert!(
+                !fx.iter().any(|e| matches!(e, Effect::SaveLearned(_))),
+                "click {click_number} wrote a count: {fx:?}"
+            );
+            assert_eq!(
+                pager_flash(&app).as_deref(),
+                Some("^C  interrupt the command"),
+                "click {click_number}"
+            );
+        }
+    });
+}
+
+/// `q` closing a pager is its close row's key, and counts: `learned.json`
+/// holds it under `pager_close`.
+#[test]
+#[ignore = "red: a pager's keys never call `learn_key`, so `q` writes no count"]
+fn q_closing_a_pager_counts_as_pager_close() {
+    with_mouse(|tmp| {
+        let mut app = app_over_entries(tmp);
+        cursor_on(&mut app, "notes.txt");
+        press(&mut app, 'D');
+        assert!(
+            app.view.project().pager.is_some(),
+            "premise: `D` opened the file in a pager"
+        );
+
+        let fx = key(&mut app, KeyCode::Char('q'));
+        run(&mut app, fx);
+
+        assert!(app.view.project().pager.is_none(), "`q` closed it");
+        assert_eq!(count_on_disk(tmp, "pager_close"), Some(1));
+    });
+}
+
+fn ctrl(c: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+}
+
+fn plain(c: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+}
+
+fn one_task(tmp: &Path) -> App {
+    app_in_the_task_viewer(tmp, 1)
+}
+
+fn two_tasks(tmp: &Path) -> App {
+    app_in_the_task_viewer(tmp, 2)
+}
+
+fn a_paused_task(tmp: &Path) -> App {
+    let mut app = app_in_the_task_viewer(tmp, 1);
+    // What the executor does once `S`'s SIGSTOP is delivered.
+    app.runtime.background_tasks.tasks[0].paused = true;
+    app
+}
+
+/// The count for `name` in the write of `learned.json` among `fx`, if any.
+fn written_count(fx: &[Effect], name: &str) -> Option<u32> {
+    fx.iter().find_map(|e| match e {
+        Effect::SaveLearned(learned) => Some(learned.count(name)),
+        _ => None,
+    })
+}
+
+/// Each key a pager's row names counts under the row's name, wherever the
+/// pager reads it: a live capture's three, the task viewer's `^C`, `S`, `C`,
+/// `]t` and `[t`, and `s` and `q`.
+#[test]
+#[ignore = "red: a pager's keys never call `learn_key`, so none writes a count"]
+fn each_pager_rows_key_counts_under_its_name() {
+    type Open = fn(&Path) -> App;
+    with_mouse(|tmp| {
+        let cases: [(&str, Open, Vec<KeyEvent>, &str); 10] = [
+            (
+                "a capture's ^Z",
+                app_with_capture,
+                vec![ctrl('z')],
+                "pager_background",
+            ),
+            (
+                "a capture's ^C",
+                app_with_capture,
+                vec![ctrl('c')],
+                "pager_interrupt",
+            ),
+            (
+                "a capture's ^\\",
+                app_with_capture,
+                vec![ctrl('\\')],
+                "pager_kill",
+            ),
+            (
+                "the task viewer's ^C",
+                one_task,
+                vec![ctrl('c')],
+                "pager_interrupt",
+            ),
+            ("S", one_task, vec![plain('S')], "pager_pause"),
+            ("C", a_paused_task, vec![plain('C')], "pager_continue"),
+            (
+                "]t",
+                two_tasks,
+                vec![plain(']'), plain('t')],
+                "pager_next_task",
+            ),
+            (
+                "[t",
+                two_tasks,
+                vec![plain('['), plain('t')],
+                "pager_prev_task",
+            ),
+            ("s", one_task, vec![plain('s')], "pager_save"),
+            ("q", one_task, vec![plain('q')], "pager_close"),
+        ];
+        for (i, (typed, open, keys, name)) in cases.into_iter().enumerate() {
+            let root = tmp.join(format!("case{i}"));
+            std::fs::create_dir(&root).unwrap();
+            let mut app = open(&root);
+
+            let fx: Vec<Effect> = keys
+                .into_iter()
+                .flat_map(|k| app.handle_key(k).unwrap())
+                .collect();
+
+            assert_eq!(written_count(&fx, name), Some(1), "{typed}: {fx:?}");
+        }
     });
 }
 
