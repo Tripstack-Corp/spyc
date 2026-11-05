@@ -92,6 +92,33 @@ merged() {
   [ "$(gh pr view "$1" --json state --jq .state 2>/dev/null)" = MERGED ]
 }
 
+# Whether PR <branch>'s squash commit is already on main. GitHub can answer
+# a merge with an error (a 502) after writing that commit and leave the PR
+# open; merging it again then lands an empty duplicate.
+landed() {
+  local n
+  n=$(gh pr view "$1" --json number --jq .number) || return 1
+  git fetch -q origin main && git log -30 --format=%s origin/main | grep -qF "(#$n)"
+}
+
+# Squash-merge PR <branch>, or find it already merged. A PR that changes
+# nothing against main is never merged: whatever it held has landed.
+squash() {
+  local b=$1
+  if [ "$(gh pr view "$b" --json changedFiles --jq .changedFiles)" = 0 ]; then
+    echo "EMPTY $b: it changes nothing against main; check main's log, then close it"
+    exit 13
+  fi
+  gh pr merge "$b" --squash && return 0
+  merged "$b" && return 0
+  if landed "$b"; then
+    echo "LANDED $b: GitHub reported an error but its commit is on main; closing it"
+    gh pr close "$b" --comment "Merged to main: GitHub reported an error on the merge and left this open."
+    return 0
+  fi
+  return 1
+}
+
 # Merge PR <branch> once it may: about 45 minutes, then give up.
 merge_loop() {
   local b=$1 st reruns=0
@@ -103,13 +130,13 @@ merge_loop() {
       CLEAN)
         # A refusal ("Base branch was modified": main moved under it) is
         # checked again, as BEHIND or CLEAN.
-        if gh pr merge "$b" --squash || merged "$b"; then echo "MERGED $b"; return 0; fi
+        if squash "$b"; then echo "MERGED $b"; return 0; fi
         sleep 20 ;;
       BEHIND) gh pr update-branch "$b"; sleep 20 ;;
       DIRTY) echo "DIRTY $b: resolve the conflict, then run this again"; return 1 ;;
       UNSTABLE)
         if macos_lint_only "$b"; then
-          if gh pr merge "$b" --squash || merged "$b"; then
+          if squash "$b"; then
             echo "MERGED $b (macOS lint run here)"
             return 0
           fi
