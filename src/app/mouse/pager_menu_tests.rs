@@ -274,7 +274,6 @@ fn arrows_and_enter_drive_the_capture_menu_not_the_command() {
 /// `←` and `→` are the menu's while it is open, over a capture too: neither
 /// reaches the command, and the menu stays open.
 #[test]
-#[ignore = "red: ← and → close the menu and reach the command"]
 fn side_arrows_stay_in_the_capture_menu() {
     with_mouse(|tmp| {
         let mut app = app_with_capture(tmp);

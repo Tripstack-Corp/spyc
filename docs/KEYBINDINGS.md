@@ -24,7 +24,7 @@ bound too, and on by default — see [Mouse](#mouse).
 | `R` | Remove selection (picks, else cursor) to the graveyard |
 | `V` | Open `$EDITOR` in top pane (bottom pane stays visible) |
 | `D` | Open file in the in-app pager in top pane (bottom pane stays visible) |
-| `.` | Menu for the entry under the cursor: each row shows its key. `↑`/`↓` highlight a row, `Enter` fires it, `Esc` closes; any other key closes the menu and does what it always does |
+| `.` | Menu for the entry under the cursor: each row shows its key. `↑`/`↓` highlight a row, `←`/`→` move across its columns, `Enter` fires it, `Esc` closes; any other key closes the menu and does what it always does |
 | `u` / `-` | Climb to parent |
 | `/` | Search current listing (incremental; glob-aware, `^`/`$` anchors) |
 | `n` / `N` | Next / previous match of the last search |
