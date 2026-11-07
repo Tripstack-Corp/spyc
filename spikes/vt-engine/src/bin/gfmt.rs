@@ -14,60 +14,10 @@
 fn main() {
     use spyc_vt_sys::ffi;
 
-    /// Build formatter options with one extra toggle enabled.
-    fn opts(f: impl Fn(&mut ffi::GhosttyFormatterTerminalExtra)) -> ffi::GhosttyFormatterTerminalOptions {
-        let screen = ffi::GhosttyFormatterScreenExtra {
-            size: size_of::<ffi::GhosttyFormatterScreenExtra>(),
-            cursor: false,
-            style: false,
-            hyperlink: false,
-            protection: false,
-            kitty_keyboard: false,
-            charsets: false,
-        };
-        let mut extra = ffi::GhosttyFormatterTerminalExtra {
-            size: size_of::<ffi::GhosttyFormatterTerminalExtra>(),
-            palette: false,
-            modes: false,
-            scrolling_region: false,
-            tabstops: false,
-            pwd: false,
-            keyboard: false,
-            screen,
-        };
-        f(&mut extra);
-        ffi::GhosttyFormatterTerminalOptions {
-            size: size_of::<ffi::GhosttyFormatterTerminalOptions>(),
-            emit: ffi::GhosttyFormatterFormat::GHOSTTY_FORMATTER_FORMAT_VT,
-            unwrap: false,
-            trim: false,
-            extra,
-            selection: std::ptr::null(),
-        }
-    }
+    use vt_engine_spike::engines::ghostty_engine::vt_format;
 
-    fn emit(t: ffi::GhosttyTerminal, o: ffi::GhosttyFormatterTerminalOptions) -> Vec<u8> {
-        let mut f: ffi::GhosttyFormatter = std::ptr::null_mut();
-        if unsafe { ffi::ghostty_formatter_terminal_new(std::ptr::null(), &raw mut f, t, o) }
-            != spyc_vt_sys::SUCCESS
-        {
-            return Vec::new();
-        }
-        let mut need: usize = 0;
-        let _ =
-            unsafe { ffi::ghostty_formatter_format_buf(f, std::ptr::null_mut(), 0, &raw mut need) };
-        let mut buf = vec![0u8; need.max(1)];
-        let mut wrote: usize = 0;
-        let r = unsafe {
-            ffi::ghostty_formatter_format_buf(f, buf.as_mut_ptr(), buf.len(), &raw mut wrote)
-        };
-        unsafe { ffi::ghostty_formatter_free(f) };
-        if r == spyc_vt_sys::SUCCESS {
-            buf.truncate(wrote);
-            buf
-        } else {
-            Vec::new()
-        }
+    fn emit(t: ffi::GhosttyTerminal, extras: u32) -> Vec<u8> {
+        vt_format(t, extras).unwrap_or_default()
     }
 
     let mk = || {
@@ -81,36 +31,39 @@ fn main() {
         t
     };
 
-    type Toggle = (&'static str, fn(&mut ffi::GhosttyFormatterTerminalExtra));
-    let toggles: &[Toggle] = &[
-        ("bare", |_| {}),
-        ("+palette", |e| e.palette = true),
-        ("+modes", |e| e.modes = true),
-        ("+scrolling_region", |e| e.scrolling_region = true),
-        ("+tabstops", |e| e.tabstops = true),
-        ("+pwd", |e| e.pwd = true),
-        ("+keyboard", |e| e.keyboard = true),
-        ("+cursor", |e| e.screen.cursor = true),
-        ("+style", |e| e.screen.style = true),
-        ("+hyperlink", |e| e.screen.hyperlink = true),
-        ("+protection", |e| e.screen.protection = true),
-        ("+kitty_keyboard", |e| e.screen.kitty_keyboard = true),
-        ("+charsets", |e| e.screen.charsets = true),
+    let toggles: &[(&str, u32)] = &[
+        ("bare", ffi::GHOSTTY_FORMATTER_EXTRAS_NONE),
+        ("+palette", ffi::GHOSTTY_FORMATTER_EXTRA_PALETTE),
+        ("+modes", ffi::GHOSTTY_FORMATTER_EXTRA_MODES),
+        ("+scrolling_region", ffi::GHOSTTY_FORMATTER_EXTRA_SCROLLING_REGION),
+        ("+tabstops", ffi::GHOSTTY_FORMATTER_EXTRA_TABSTOPS),
+        ("+pwd", ffi::GHOSTTY_FORMATTER_EXTRA_PWD),
+        ("+keyboard", ffi::GHOSTTY_FORMATTER_EXTRA_KEYBOARD),
+        ("+cursor", ffi::GHOSTTY_FORMATTER_EXTRA_CURSOR),
+        ("+style", ffi::GHOSTTY_FORMATTER_EXTRA_STYLE),
+        ("+hyperlink", ffi::GHOSTTY_FORMATTER_EXTRA_HYPERLINK),
+        ("+protection", ffi::GHOSTTY_FORMATTER_EXTRA_PROTECTION),
+        ("+kitty_keyboard", ffi::GHOSTTY_FORMATTER_EXTRA_KITTY_KEYBOARD),
+        ("+charsets", ffi::GHOSTTY_FORMATTER_EXTRA_CHARSETS),
     ];
 
-    println!("formatter option costs at pin {}", spyc_vt_sys::pin::GHOSTTY_COMMIT);
+    println!(
+        "formatter option costs at libghostty-vt {} ({})",
+        spyc_vt_sys::pin::GHOSTTY_VT_VERSION,
+        spyc_vt_sys::pin::GHOSTTY_COMMIT
+    );
     println!("20x4 terminal, two styled lines; each row is `bare` plus ONE toggle");
     println!("{:-<86}", "");
     let base = {
         let t = mk();
-        let n = emit(t, opts(|_| {})).len();
+        let n = emit(t, ffi::GHOSTTY_FORMATTER_EXTRAS_NONE).len();
         unsafe { ffi::ghostty_terminal_free(t) };
         n
     };
     println!("{:<20} {:>7} {:>9}  {}", "options", "bytes", "delta", "first 46 bytes");
-    for (label, f) in toggles {
+    for &(label, extras) in toggles {
         let t = mk();
-        let out = emit(t, opts(f));
+        let out = emit(t, extras);
         unsafe { ffi::ghostty_terminal_free(t) };
         let show: String = String::from_utf8_lossy(&out[..out.len().min(46)])
             .escape_debug()

@@ -2,7 +2,7 @@
 
 Raw FFI to [libghostty-vt](https://libghostty.tip.ghostty.org/) — the terminal
 state machine extracted from [Ghostty](https://ghostty.org) — at a spyc-owned
-pinned commit, with the static archives vendored.
+pinned commit (libghostty-vt 1.0.0), with the static archives vendored.
 
 This crate exists so that everything C has one home: the pin, the generated
 bindings, the prebuilt archives and their checksums. The safe engine wrapper
@@ -59,7 +59,7 @@ build fails with a message that says so.
 ## Rebuilding the archives
 
 ```sh
-make vendor-ghostty              # on Linux; needs zig 0.16.0 (see REQUIRED_ZIG)
+make vendor-ghostty              # on Linux; needs zig 0.17.0 (see REQUIRED_ZIG)
 make vendor-ghostty-container    # from a Mac: the same, in a podman/docker container
 ```
 

@@ -17,12 +17,19 @@
 //!   which is exactly how the published bindings failed silently against a
 //!   newer ghostty (see [`pin::BUMP_POLICY`]).
 //!
+//! # What the tests check
+//!
+//! * The release the pin names, the headers the bindings were generated from,
+//!   and the archive actually linked all report the same libghostty-vt
+//!   version, so bindings regenerated over stale archives fail a test rather
+//!   than mis-number every option.
+//!
 //! # What is NOT checked, and cannot be
 //!
-//! A C ABI has no version handshake. If a future pin keeps every struct layout
-//! but changes a function's *meaning* — the same shape, different semantics —
-//! nothing here catches it. That is what re-running the spike harness on a pin
-//! bump is for, and why it is a gate rather than a courtesy.
+//! If a future pin keeps every struct layout and version check but changes a
+//! function's *meaning* — the same shape, different semantics — nothing here
+//! catches it. That is what re-running the spike harness on a pin bump is for,
+//! and why it is a gate rather than a courtesy.
 
 #![allow(clippy::pedantic)]
 
@@ -75,6 +82,22 @@ mod smoke {
         let mut v: u16 = 0;
         let r = unsafe { ffi::ghostty_terminal_get(t, tag, (&raw mut v).cast()) };
         (r == SUCCESS).then_some(v)
+    }
+
+    /// The pin, the bindings' headers and the linked archive name one release.
+    #[test]
+    fn the_linked_library_is_the_pinned_release() {
+        let headers = std::ffi::CStr::from_bytes_with_nul(ffi::GHOSTTY_VT_VERSION)
+            .expect("the header version is a C string")
+            .to_str()
+            .expect("the header version is UTF-8");
+        // SAFETY: `ghostty_version` takes no arguments and returns a static,
+        // non-null, NUL-terminated string owned by the library.
+        let linked = unsafe { std::ffi::CStr::from_ptr(ffi::ghostty_version()) }
+            .to_str()
+            .expect("the library version is UTF-8");
+        assert_eq!(headers, crate::pin::GHOSTTY_VT_VERSION, "bindings vs pin");
+        assert_eq!(linked, crate::pin::GHOSTTY_VT_VERSION, "archive vs pin");
     }
 
     /// Geometry survives the round trip through the constructor.

@@ -13,8 +13,7 @@
 
 use spyc_vt_sys::ffi::{
     GhosttyCellData as CellData, GhosttyFormatterFormat as FmtFormat,
-    GhosttyFormatterScreenExtra, GhosttyFormatterTerminalExtra,
-    GhosttyFormatterTerminalOptions, GhosttyPoint, GhosttyPointCoordinate, GhosttyPointTag,
+    GhosttyPoint, GhosttyPointCoordinate, GhosttyPointTag,
     GhosttyRowData as RowData, GhosttyTerminalData as Data, GhosttyTerminalOption as Opt,
     GhosttyTerminalScreen as ScreenKind,
 };
@@ -55,12 +54,10 @@ fn get_bool(t: ffi::GhosttyTerminal, tag: Data::Type) -> Option<bool> {
     (ok == spyc_vt_sys::SUCCESS).then_some(v)
 }
 
-/// A zeroed `GhosttyGridRef` with its `size` set. ghostty's extensible structs
-/// carry their own byte length as the first field and the callee reads it, so a
-/// zero there would tell the library the struct has no fields.
+/// A zeroed `GhosttyGridRef`. From libghostty-vt 1.0 its layout is frozen and
+/// carries no `size` header.
 fn empty_grid_ref() -> ffi::GhosttyGridRef {
     ffi::GhosttyGridRef {
-        size: size_of::<ffi::GhosttyGridRef>(),
         node: std::ptr::null_mut(),
         x: 0,
         y: 0,
@@ -70,7 +67,6 @@ fn empty_grid_ref() -> ffi::GhosttyGridRef {
 /// The default style, initialised by the library rather than by us.
 fn default_style() -> ffi::GhosttyStyle {
     let mut st: ffi::GhosttyStyle = unsafe { std::mem::zeroed() };
-    st.size = size_of::<ffi::GhosttyStyle>();
     unsafe { ffi::ghostty_style_default(&raw mut st) };
     st
 }
@@ -86,7 +82,7 @@ fn point(tag: GhosttyPointTag::Type, x: u16, y: u32) -> GhosttyPoint {
 
 fn color(c: ffi::GhosttyStyleColor) -> Color {
     // GhosttyStyleColor is a tagged union: NONE / PALETTE / RGB.
-    match c.tag {
+    match ffi::GhosttyStyleColorTag::Type::from(c.tag) {
         ffi::GhosttyStyleColorTag::GHOSTTY_STYLE_COLOR_PALETTE => {
             Color::Idx(unsafe { c.value.palette })
         }
@@ -151,10 +147,10 @@ impl GhosttyEngine {
             text: if wide == Wide::Tail { String::new() } else { text },
             fg: color(st.fg_color),
             bg: color(st.bg_color),
-            bold: st.bold,
-            italic: st.italic,
-            underline: st.underline != ffi::GhosttySgrUnderline::GHOSTTY_SGR_UNDERLINE_NONE,
-            reverse: st.inverse,
+            bold: u32::from(st.flags) & ffi::GHOSTTY_STYLE_FLAG_BOLD != 0,
+            italic: u32::from(st.flags) & ffi::GHOSTTY_STYLE_FLAG_ITALIC != 0,
+            underline: u32::from(st.flags) & ffi::GHOSTTY_STYLE_UNDERLINE_MASK != 0,
+            reverse: u32::from(st.flags) & ffi::GHOSTTY_STYLE_FLAG_INVERSE != 0,
             wide,
         }
     }
@@ -362,53 +358,12 @@ impl Engine for GhosttyEngine {
         // fixed at this pin, re-checked before the gate ran. Palette stays OFF
         // — 256 OSC 4 sequences restore the CLIENT's palette, which is a
         // capability choice rather than terminal state.
-        let screen = GhosttyFormatterScreenExtra {
-            size: size_of::<GhosttyFormatterScreenExtra>(),
-            cursor: true,
-            style: true,
-            hyperlink: true,
-            protection: true,
-            kitty_keyboard: true,
-            charsets: true,
-        };
-        let extra = GhosttyFormatterTerminalExtra {
-            size: size_of::<GhosttyFormatterTerminalExtra>(),
-            palette: false,
-            modes: true,
-            scrolling_region: true,
-            tabstops: true,
-            pwd: false,
-            keyboard: true,
-            screen,
-        };
-        let opts = GhosttyFormatterTerminalOptions {
-            size: size_of::<GhosttyFormatterTerminalOptions>(),
-            emit: FmtFormat::GHOSTTY_FORMATTER_FORMAT_VT,
-            unwrap: false,
-            trim: false,
-            extra,
-            selection: std::ptr::null(),
-        };
-        let mut f: ffi::GhosttyFormatter = std::ptr::null_mut();
-        if unsafe {
-            ffi::ghostty_formatter_terminal_new(std::ptr::null(), &raw mut f, self.t, opts)
-        } != spyc_vt_sys::SUCCESS
-        {
-            return None;
-        }
-        let mut need: usize = 0;
-        let _ = unsafe {
-            ffi::ghostty_formatter_format_buf(f, std::ptr::null_mut(), 0, &raw mut need)
-        };
-        let mut buf = vec![0u8; need.max(1)];
-        let mut wrote: usize = 0;
-        let r =
-            unsafe { ffi::ghostty_formatter_format_buf(f, buf.as_mut_ptr(), buf.len(), &raw mut wrote) };
-        unsafe { ffi::ghostty_formatter_free(f) };
-        (r == spyc_vt_sys::SUCCESS).then(|| {
-            buf.truncate(wrote);
-            buf
-        })
+        vt_format(
+            self.t,
+            ffi::GHOSTTY_FORMATTER_EXTRAS_ALL
+                & !ffi::GHOSTTY_FORMATTER_EXTRA_PALETTE
+                & !ffi::GHOSTTY_FORMATTER_EXTRA_PWD,
+        )
     }
 
     fn full_text(&mut self) -> Option<Vec<String>> {
@@ -430,4 +385,40 @@ impl Engine for GhosttyEngine {
         }
         Some(out)
     }
+}
+
+/// `t`'s whole screen as VT sequences with `extras` (a `GHOSTTY_FORMATTER_EXTRA_*`
+/// mask), untrimmed and unwrapped, so the output fills the screen's rows.
+pub fn vt_format(t: ffi::GhosttyTerminal, extras: u32) -> Option<Vec<u8>> {
+    use ffi::GhosttyFormatterOption as FOpt;
+    let mut f: ffi::GhosttyFormatter = std::ptr::null_mut();
+    if unsafe { ffi::ghostty_formatter_terminal_new(std::ptr::null(), &raw mut f, t) }
+        != spyc_vt_sys::SUCCESS
+    {
+        return None;
+    }
+    let emit: ffi::GhosttyFormatterFormat::Type = FmtFormat::GHOSTTY_FORMATTER_FORMAT_VT;
+    let off = false;
+    let set: [(FOpt::Type, *const std::ffi::c_void); 4] = [
+        (FOpt::GHOSTTY_FORMATTER_OPT_EMIT, (&raw const emit).cast()),
+        (FOpt::GHOSTTY_FORMATTER_OPT_UNWRAP, (&raw const off).cast()),
+        (FOpt::GHOSTTY_FORMATTER_OPT_TRIM, (&raw const off).cast()),
+        (FOpt::GHOSTTY_FORMATTER_OPT_EXTRAS, (&raw const extras).cast()),
+    ];
+    for (opt, v) in set {
+        if unsafe { ffi::ghostty_formatter_set(f, opt, v) } != spyc_vt_sys::SUCCESS {
+            unsafe { ffi::ghostty_formatter_free(f) };
+            return None;
+        }
+    }
+    let mut need: usize = 0;
+    let _ = unsafe { ffi::ghostty_formatter_format_buf(f, std::ptr::null_mut(), 0, &raw mut need) };
+    let mut buf = vec![0u8; need.max(1)];
+    let mut wrote: usize = 0;
+    let r = unsafe { ffi::ghostty_formatter_format_buf(f, buf.as_mut_ptr(), buf.len(), &raw mut wrote) };
+    unsafe { ffi::ghostty_formatter_free(f) };
+    (r == spyc_vt_sys::SUCCESS).then(|| {
+        buf.truncate(wrote);
+        buf
+    })
 }

@@ -87,6 +87,7 @@ for pair in $TARGETS; do
         -Demit-xcframework=false \
         -Dapp-runtime=none \
         -Dtarget="$zt" \
+        -Dcpu=baseline \
         --prefix "$WORK/pfx-$rust" \
         --cache-dir "$WORK/zc-$rust" )
     src="$WORK/pfx-$rust/lib/libghostty-vt.a"
