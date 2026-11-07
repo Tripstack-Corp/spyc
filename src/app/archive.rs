@@ -880,9 +880,22 @@ fn current_staged_stats(mount: &ArchiveMount) -> StagedStats {
 
 /// Stat every member with a file in the staging tree, whoever put it there:
 /// what a new mount records as spyc's own, and what a landed write's re-read
-/// would otherwise wipe.
+/// would otherwise wipe. A tree with nothing in it, as a seekable mount's is
+/// when it lands, has no member to stat, and one look says so.
 fn on_disk_stats(mount: &ArchiveMount) -> StagedStats {
+    if holds_nothing(&mount.staging_root) {
+        return StagedStats::new();
+    }
     stats_of(mount, mount.index.entries.iter())
+}
+
+/// Whether `dir` is missing or empty. A read that fails otherwise says
+/// neither, so the walk still runs.
+fn holds_nothing(dir: &Path) -> bool {
+    match std::fs::read_dir(dir) {
+        Ok(mut entries) => entries.next().is_none(),
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    }
 }
 
 fn stats_of<'a>(
