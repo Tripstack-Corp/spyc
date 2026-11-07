@@ -143,7 +143,7 @@ impl App {
         self.go_to_tab(|tabs| tabs.switch_to(to.tab));
         let pane = self.runtime.project().pane_tabs.as_ref();
         self.view.attention_last = pane.map(|tabs| (tabs.active_info().id.clone(), to.key()));
-        if let Some(on) = pane.and_then(|tabs| tabs.active_info().blocked_on()) {
+        if let Some(on) = pane.and_then(|tabs| tabs.active_info().waiting_for()) {
             self.state.flash_info(format!("tab {}: {on}", to.tab + 1));
         }
     }

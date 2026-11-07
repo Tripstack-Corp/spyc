@@ -1,8 +1,9 @@
 //! Read complete hook JSON without retaining tool arguments or responses.
 //!
 //! serde's `IgnoredAny` validates and skips the document without allocating its
-//! strings. This reader observes only root metadata fields, `toolCall.name`, and
-//! the entry count of two root arrays, while bytes pass by.
+//! strings. This reader observes only root metadata fields, `toolCall.name`,
+//! the entry count of two root arrays, and the two `tool_input` strings a
+//! [`BlockedDetail`](super::BlockedDetail) is made of, while bytes pass by.
 //! Fixed field slots, a bounded token buffer and a depth limit also bound memory
 //! for huge keys, oversized metadata and deeply nested ignored content.
 
@@ -128,6 +129,15 @@ pub fn read_payload(reader: impl Read) -> Option<String> {
     if !input.has_field(Field::ToolName) {
         *input.field_mut(Field::ToolName) = input.tool_call_name.take();
     }
+    let detail = input.fields[Field::ToolName as usize]
+        .as_deref()
+        .and_then(|tool| {
+            super::BlockedDetail::of(
+                tool,
+                input.tool_description.as_deref(),
+                input.tool_file.as_deref(),
+            )
+        });
     if !input.has_field(Field::HookEventName) {
         *input.field_mut(Field::HookEventName) = if input.has_field(Field::TerminationReason)
             || input.fully_idle.is_some()
@@ -159,6 +169,12 @@ pub fn read_payload(reader: impl Read) -> Option<String> {
     if let Some(idle) = input.fully_idle {
         fields.insert("fully_idle".to_owned(), Value::Bool(idle));
     }
+    if let Some(detail) = detail {
+        fields.insert(
+            "detail".to_owned(),
+            Value::String(detail.as_str().to_owned()),
+        );
+    }
     serde_json::to_string(&fields).ok()
 }
 
@@ -168,8 +184,43 @@ enum RootSlot {
     Field(Field),
     Int(IntField),
     Counted(usize),
-    ToolCall,
+    Nested(Nested),
     FullyIdle,
+}
+
+/// A root object one of whose strings is read: agy's `toolCall`, for its
+/// `name`, and a tool's `tool_input`, for what a detail is made of.
+#[derive(Clone, Copy)]
+enum Nested {
+    ToolCall,
+    ToolInput,
+}
+
+/// The string of a [`Nested`] object read.
+#[derive(Clone, Copy)]
+enum NestedField {
+    Name,
+    Description,
+    File,
+}
+
+impl Nested {
+    fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "toolCall" => Some(Self::ToolCall),
+            "tool_input" => Some(Self::ToolInput),
+            _ => None,
+        }
+    }
+
+    fn field(self, key: &str) -> Option<NestedField> {
+        match (self, key) {
+            (Self::ToolCall, "name") => Some(NestedField::Name),
+            (Self::ToolInput, "description") => Some(NestedField::Description),
+            (Self::ToolInput, "file_path" | "notebook_path") => Some(NestedField::File),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -177,8 +228,8 @@ enum Token {
     Ignored,
     Key,
     Field(Field),
-    ToolCallKey,
-    ToolCallName,
+    NestedKey,
+    NestedValue(NestedField),
     EntryKey,
     EntryValue(EntryField),
 }
@@ -215,15 +266,17 @@ struct MetadataReader<R> {
     ints: [Option<u32>; IntField::COUNT],
     counts: [Option<u32>; COUNTED.len()],
     tool_call_name: Option<String>,
+    tool_description: Option<String>,
+    tool_file: Option<String>,
     fully_idle: Option<bool>,
     slot: Option<RootSlot>,
     counting: Option<usize>,
     entry: Option<Entry>,
     int_acc: Option<u32>,
     int_invalid: bool,
-    in_tool_call: bool,
+    nested: Option<Nested>,
     nested_key_next: bool,
-    nested_name_field: bool,
+    nested_field: Option<NestedField>,
     awaiting_colon: bool,
     started: bool,
     root_object: bool,
@@ -244,15 +297,17 @@ impl<R> MetadataReader<R> {
             ints: [None; IntField::COUNT],
             counts: [None; COUNTED.len()],
             tool_call_name: None,
+            tool_description: None,
+            tool_file: None,
             fully_idle: None,
             slot: None,
             counting: None,
             entry: None,
             int_acc: None,
             int_invalid: false,
-            in_tool_call: false,
+            nested: None,
             nested_key_next: false,
-            nested_name_field: false,
+            nested_field: None,
             awaiting_colon: false,
             started: false,
             root_object: false,
@@ -278,6 +333,14 @@ impl<R> MetadataReader<R> {
         self.ints[field as usize]
     }
 
+    const fn nested_slot(&mut self, field: NestedField) -> &mut Option<String> {
+        match field {
+            NestedField::Name => &mut self.tool_call_name,
+            NestedField::Description => &mut self.tool_description,
+            NestedField::File => &mut self.tool_file,
+        }
+    }
+
     fn capture(&mut self, byte: u8) {
         if matches!(self.token, Token::Ignored) || self.overflow {
             return;
@@ -300,8 +363,8 @@ impl<R> MetadataReader<R> {
                 Some(RootSlot::Int(field))
             } else if let Some(idx) = COUNTED.iter().position(|counted| *counted == key) {
                 Some(RootSlot::Counted(idx))
-            } else if key == "toolCall" {
-                Some(RootSlot::ToolCall)
+            } else if let Some(nested) = Nested::from_key(key) {
+                Some(RootSlot::Nested(nested))
             } else if key == "fullyIdle" {
                 Some(RootSlot::FullyIdle)
             } else {
@@ -318,7 +381,11 @@ impl<R> MetadataReader<R> {
                 self.int_invalid = false;
             }
             Some(RootSlot::Counted(counted)) => self.counts[counted] = None,
-            Some(RootSlot::ToolCall) => self.tool_call_name = None,
+            Some(RootSlot::Nested(Nested::ToolCall)) => self.tool_call_name = None,
+            Some(RootSlot::Nested(Nested::ToolInput)) => {
+                self.tool_description = None;
+                self.tool_file = None;
+            }
             Some(RootSlot::FullyIdle) => self.fully_idle = None,
             None => {}
         }
@@ -337,16 +404,24 @@ impl<R> MetadataReader<R> {
                         && (!matches!(field, Field::Error) || super::StopError::from_wire(value).is_some())
                 });
             }
-            Token::ToolCallKey => {
+            Token::NestedKey => {
                 self.nested_key_next = false;
-                self.nested_name_field = decoded.as_deref() == Some("name");
-                if self.nested_name_field {
-                    self.tool_call_name = None;
+                self.nested_field = self
+                    .nested
+                    .zip(decoded.as_deref())
+                    .and_then(|(nested, key)| nested.field(key));
+                // Last key wins, whatever type its value turns out to be.
+                if let Some(field) = self.nested_field {
+                    *self.nested_slot(field) = None;
                 }
             }
-            Token::ToolCallName => {
-                self.tool_call_name = decoded.filter(|value| value.len() <= STRING_LIMIT);
-                self.nested_name_field = false;
+            Token::NestedValue(field) => {
+                // A name is metadata; a detail's text is cut to one line later,
+                // and the token buffer bounds it here.
+                *self.nested_slot(field) = decoded.filter(|value| {
+                    !matches!(field, NestedField::Name) || value.len() <= STRING_LIMIT
+                });
+                self.nested_field = None;
             }
             Token::EntryKey => {
                 if let Some(entry) = &mut self.entry {
@@ -463,11 +538,11 @@ impl<R> MetadataReader<R> {
             } else {
                 Token::Ignored
             }
-        } else if self.in_tool_call && self.depth == 2 {
+        } else if self.nested.is_some() && self.depth == 2 {
             if self.nested_key_next {
-                Token::ToolCallKey
-            } else if self.nested_name_field {
-                Token::ToolCallName
+                Token::NestedKey
+            } else if let Some(field) = self.nested_field {
+                Token::NestedValue(field)
             } else {
                 Token::Ignored
             }
@@ -521,13 +596,13 @@ impl<R> MetadataReader<R> {
                 } else if byte == b'{'
                     && self.depth == 1
                     && !self.key_next
-                    && matches!(self.slot, Some(RootSlot::ToolCall))
+                    && let Some(RootSlot::Nested(nested)) = self.slot
                 {
-                    self.in_tool_call = true;
+                    self.nested = Some(nested);
                     self.nested_key_next = true;
-                    self.nested_name_field = false;
+                    self.nested_field = None;
                 } else if self.depth == 2 {
-                    self.nested_name_field = false;
+                    self.nested_field = None;
                     if byte == b'{' && self.counting.is_some() {
                         self.entry = Some(Entry::default());
                     }
@@ -555,8 +630,8 @@ impl<R> MetadataReader<R> {
                 if self.depth <= 1 {
                     self.counting = None;
                     self.entry = None;
-                    self.in_tool_call = false;
-                    self.nested_name_field = false;
+                    self.nested = None;
+                    self.nested_field = None;
                 }
             }
             b',' if self.depth == 1 => self.finish_root_value(),
@@ -566,9 +641,9 @@ impl<R> MetadataReader<R> {
                     entry.field = None;
                 }
             }
-            b',' if self.depth == 2 && self.in_tool_call => {
+            b',' if self.depth == 2 && self.nested.is_some() => {
                 self.nested_key_next = true;
-                self.nested_name_field = false;
+                self.nested_field = None;
             }
             _ => {}
         }
@@ -642,6 +717,56 @@ mod tests {
         assert_eq!(
             metadata(r#"{"turn_id":"old","turn_id":"new"}"#),
             serde_json::json!({"turn_id":"new"})
+        );
+    }
+
+    /// A detail is made of `tool_input`'s own `description` or file path,
+    /// whichever comes first, the input or the tool's name: never a string
+    /// nested deeper, nor one under another key, nor the command.
+    #[test]
+    fn a_detail_is_read_from_tool_inputs_own_strings() {
+        let detail = |json: &str| metadata(json)["detail"].as_str().map(String::from);
+        assert_eq!(
+            detail(
+                r#"{"tool_input":{"command":"private-command","description":"Run the tests"},"tool_name":"Bash"}"#
+            )
+            .as_deref(),
+            Some("Run the tests")
+        );
+        assert_eq!(
+            detail(r#"{"tool_name":"Edit","tool_input":{"file_path":"/w/src/main.rs","old_string":"x"}}"#)
+                .as_deref(),
+            Some("main.rs")
+        );
+        assert_eq!(
+            detail(r#"{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"/w/a.ipynb"}}"#)
+                .as_deref(),
+            Some("a.ipynb")
+        );
+        for json in [
+            r#"{"tool_name":"Bash","tool_input":{"command":"private-command"}}"#,
+            r#"{"tool_name":"Bash","tool_input":{"nested":{"description":"private"}}}"#,
+            r#"{"tool_name":"Bash","description":"private","tool_input":{}}"#,
+            r#"{"tool_name":"Bash","tool_input":{"description":{"text":"private"}}}"#,
+            r#"{"tool_name":"Read","tool_input":{"file_path":"/w/private.rs"}}"#,
+            r#"{"tool_name":"Bash","toolCall":{"description":"private"}}"#,
+        ] {
+            assert_eq!(detail(json), None, "{json}");
+        }
+        assert_eq!(
+            detail(
+                r#"{"tool_name":"Bash","tool_input":{"description":"old","description":"new"}}"#
+            )
+            .as_deref(),
+            Some("new"),
+            "the last key wins"
+        );
+        assert_eq!(
+            detail(
+                r#"{"tool_name":"Bash","tool_input":{"description":"old"},"tool_input":{"command":"x"}}"#
+            ),
+            None,
+            "the last input wins"
         );
     }
 

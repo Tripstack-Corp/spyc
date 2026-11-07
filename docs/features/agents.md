@@ -251,7 +251,8 @@ Codex, Claude Code, or Antigravity pane; `:agent hud full` adds a tools row and 
 mode row.
 Every agent shares one layout of aligned, coloured columns, led by the tab's
 own activity dot, its session and model, with a `waiting` agent's note at the
-end of the row, or what a blocked one waits on (`Bash`, `question`, `plan`, `command`:
+end of the row, or what a blocked one waits on (`Bash`, `question`, `plan`, `command`,
+and with `[notify] blocked_detail` what the tool acts on, `Bash · Run the test suite`:
 [`docs/config/notifications.md`](../config/notifications.md)). The tools row is a summary: every call, every failure, what is
 running and the three most called, each marked for its own failures. A Claude
 Code tab also gets a `todo` cell once `TodoWrite` or `TaskCreate`/`TaskUpdate`

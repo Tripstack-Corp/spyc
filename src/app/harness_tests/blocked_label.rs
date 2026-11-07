@@ -2,7 +2,8 @@
 //! you: Bash", the HUD's activity row ends in the label, and `Space !` flashes
 //! "tab 2: Bash" where it lands. The label comes from the hook's metadata only:
 //! the tool's name, `question` or `plan` for the tools that ask, `mcp` for
-//! another server's tool, or why a failed turn stopped. Never tool input.
+//! another server's tool, or why a failed turn stopped. Never tool input,
+//! unless `[notify] blocked_detail` asks for one line of it after the label.
 
 use super::agent_readiness::{agent_app, dump, why_status};
 use super::project_tabs::agent_tab_in;
@@ -554,7 +555,6 @@ fn detailed_claude(dir: &std::path::Path) -> App {
 /// model gave it, never the command: in the ping and at the end of the HUD's
 /// activity row.
 #[test]
-#[ignore = "red: no [notify] blocked_detail"]
 fn with_detail_on_a_bash_request_says_what_it_runs() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -574,7 +574,6 @@ fn with_detail_on_a_bash_request_says_what_it_runs() {
 
 /// An edit or a write names the file it is for, by its name alone.
 #[test]
-#[ignore = "red: no [notify] blocked_detail"]
 fn with_detail_on_an_edit_names_its_file() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -596,7 +595,6 @@ fn with_detail_on_an_edit_names_its_file() {
 /// A detail is one clean line: its first, without control characters, cut
 /// short when long.
 #[test]
-#[ignore = "red: no [notify] blocked_detail"]
 fn a_detail_is_one_clean_line() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -624,7 +622,6 @@ fn a_detail_is_one_clean_line() {
 
 /// `Space !` says it where it lands.
 #[test]
-#[ignore = "red: no [notify] blocked_detail"]
 fn with_detail_space_bang_says_what_the_tool_acts_on() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -642,7 +639,6 @@ fn with_detail_space_bang_says_what_the_tool_acts_on() {
 /// Claude's `permission_prompt` notification names nothing, so it keeps the
 /// detail of the request before it, as it keeps that request's label.
 #[test]
-#[ignore = "red: no [notify] blocked_detail"]
 fn a_permission_prompt_keeps_the_detail_of_the_request_before_it() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -662,7 +658,6 @@ fn a_permission_prompt_keeps_the_detail_of_the_request_before_it() {
 /// `Space !` alone: never in the diagnostics, the tab's hook history or a
 /// debug print of its reports.
 #[test]
-#[ignore = "red: no [notify] blocked_detail"]
 fn with_detail_on_it_stays_out_of_the_diagnostics() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -684,6 +679,44 @@ fn with_detail_on_it_stays_out_of_the_diagnostics() {
         );
         for text in [kept, why_status(&mut app), dump(&mut app)] {
             assert!(!text.contains("private"), "{text}");
+        }
+    });
+}
+
+/// No tool input is held but the detail the option asks for: with it off, as
+/// by default, none on the tab's reports; on or off, none in its hook history.
+#[test]
+fn no_detail_is_held_but_the_one_the_option_asks_for() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for on in [false, true] {
+            let mut app = agent(tmp.path(), "claude");
+            if on {
+                with_detail(&mut app, tmp.path());
+            }
+            hook(&mut app, "working", &prompt());
+            ping(&mut app);
+            let input = json!({"description":"Run the test suite"});
+            hook(&mut app, "blocked", &asking_with("Bash", input));
+            ping(&mut app);
+            let info = app
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .unwrap()
+                .active_info();
+            let held = |report: Option<&crate::pane::ReportedStatus>| {
+                report.and_then(|r| r.blocked_detail.as_ref()).is_some()
+            };
+            assert_eq!(held(info.reported.as_ref()), on, "on={on}");
+            assert_eq!(held(info.last_reported.as_ref()), on, "on={on}");
+            assert!(
+                info.recent_hook_events
+                    .iter()
+                    .all(|(event, ..)| event.detail.is_none()),
+                "on={on}"
+            );
         }
     });
 }

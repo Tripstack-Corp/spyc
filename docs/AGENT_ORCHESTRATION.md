@@ -382,6 +382,21 @@ read only while the scrape says blocked; a hook's label wins over it. The
 agent's own `blocked` carries none: its note stays out because a desktop ping
 can leave the machine.
 
+**What the tool acts on (#918, opt-in).** Under `[notify] blocked_detail`
+(off by default; only a trusted rc turns it on) a `PermissionRequest` also
+names what its tool acts on: Bash's `description`, or the file name of an
+`Edit`/`MultiEdit`/`Write`/`NotebookEdit`. The reporter's payload reader keeps
+just those two `tool_input` strings while bytes pass by and makes one line of
+them (`status_hook::BlockedDetail`: the first line, control characters out, 60
+characters at most). It rides the hook event to spyc with a `blocked` report
+alone, and never into the reporter's trace. `waiting::take_detail` takes it off
+the event on arrival, so the tab's hook history never holds it, and keeps it on
+`ReportedStatus::blocked_detail` only while the option is on; a
+`permission_prompt` keeps the live block's, as it keeps its label.
+`TabInfo::waiting_for` joins label and detail (`Bash · Run the test suite`) for
+the ping, the HUD and `Space !`. `BlockedDetail`'s `Debug` prints none of it,
+and no session file or diagnostic does.
+
 **Seen and unseen (#99).** A tab is in view when it is the active tab of the
 project in view and its pane is drawn: not hidden, not zoomed away, not under a
 full-frame pager or image. A done that lands on a tab out of view is *unseen*

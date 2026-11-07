@@ -374,16 +374,25 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             crate::agent::status_hook::read_payload(stdin.lock()).unwrap_or_default()
         }
     };
-    let hook_event = crate::agent::status_hook::StatusHookEvent::from_payload(&payload);
+    let mut hook_event = crate::agent::status_hook::StatusHookEvent::from_payload(&payload);
+    // An idle Notification means "finished, waiting" → `done`, not the alarming
+    // `blocked` square (the false-red-on-idle bug); permission stays `blocked`.
+    let state = effective_report_state(state, &payload);
+    // What the tool acts on goes to spyc with a `blocked` report alone, which
+    // keeps it only under `[notify] blocked_detail`; the trace never has it.
+    let detail = hook_event
+        .as_mut()
+        .and_then(|event| event.detail.take())
+        .filter(|_| state == "blocked");
     if trace {
         trace_log(&format!(
             "report-status: hook metadata: {}",
             serde_json::json!(hook_event)
         ));
     }
-    // An idle Notification means "finished, waiting" → `done`, not the alarming
-    // `blocked` square (the false-red-on-idle bug); permission stays `blocked`.
-    let state = effective_report_state(state, &payload);
+    if let Some(event) = hook_event.as_mut() {
+        event.detail = detail;
+    }
     // P1-3: piggyback the agent's live session id (from the same hook stdin) so
     // spyc can pin this pane's exact conversation for `-r` restore.
     let session_id = session_id_from_hook_payload(&payload);

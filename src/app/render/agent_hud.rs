@@ -88,7 +88,7 @@ impl App {
             session: info.pinned_session_id(),
             dot,
             attention,
-            note,
+            note: note.as_deref(),
             repository: Some(&repository),
             branch,
             elapsed_secs,
@@ -128,16 +128,17 @@ impl App {
 }
 
 /// What ends the activity row: what a `waiting` agent waits on, as it or its
-/// `Stop` hook said, or what a blocked one does, as its hook said.
-fn activity_note(info: &crate::pane::tabs::TabInfo) -> Option<&str> {
+/// `Stop` hook said, or what a blocked one does, as its hook or screen said.
+fn activity_note(info: &crate::pane::tabs::TabInfo) -> Option<std::borrow::Cow<'_, str>> {
     match info.activity {
         _ if info.suspended => None,
         AgentActivity::Waiting => info
             .reported
             .as_ref()
             .filter(|r| r.status == AgentActivity::Waiting)
-            .and_then(|r| r.note.as_deref()),
-        AgentActivity::Blocked => info.blocked_on(),
+            .and_then(|r| r.note.as_deref())
+            .map(std::borrow::Cow::Borrowed),
+        AgentActivity::Blocked => info.waiting_for(),
         _ => None,
     }
 }

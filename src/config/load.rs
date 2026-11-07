@@ -10,8 +10,8 @@
 use std::path::Path;
 
 use super::{
-    Config, FileClipboard, FileConfig, FileMouse, FilePager, FilePane, FilePaneTab, PaneTabConfig,
-    ProjectTabs, ScanPatternFile, dsl, home_dir,
+    Config, FileClipboard, FileConfig, FileMouse, FileNotify, FilePager, FilePane, FilePaneTab,
+    PaneTabConfig, ProjectTabs, ScanPatternFile, dsl, home_dir,
 };
 
 /// Trust level of a config file. A `Project` (`<cwd>/.spycrc.toml`) file is
@@ -168,6 +168,44 @@ impl Config {
 
     /// `[clipboard]`, per field. The command runs on every yank, so a project
     /// rc may not name one: it would run the repo's command on a keypress.
+    /// `[notify]`, key by key. `blocked_detail` sends tool input to desktop
+    /// notifications, so only the user's own config files may turn it on; a
+    /// project's may turn it off.
+    fn merge_notify(&mut self, file: FileNotify, source: &Path, trust: Trust) {
+        if let Some(b) = file.desktop {
+            self.notify.desktop = b;
+        }
+        if let Some(v) = file.desktop_via {
+            self.notify.desktop_via = v;
+        }
+        if let Some(b) = file.desktop_done {
+            self.notify.desktop_done = b;
+        }
+        if let Some(b) = file.bell {
+            self.notify.bell = b;
+        }
+        if let Some(b) = file.bell_done {
+            self.notify.bell_done = b;
+        }
+        if let Some(b) = file.visual {
+            self.notify.visual = b;
+        }
+        if let Some(b) = file.visual_done {
+            self.notify.visual_done = b;
+        }
+        if let Some(b) = file.suppress_focused_tab {
+            self.notify.suppress_focused_tab = b;
+        }
+        match file.blocked_detail {
+            Some(true) if trust != Trust::Trusted => self.warnings.push(format!(
+                "{}: [notify] blocked_detail ignored — only your own config files may turn it on",
+                source.display()
+            )),
+            Some(on) => self.notify.blocked_detail = on,
+            None => {}
+        }
+    }
+
     fn merge_clipboard(&mut self, file: FileClipboard, source: &Path, trust: Trust) {
         if let Some(v) = file.via {
             self.clipboard.via = v;
@@ -420,30 +458,7 @@ impl Config {
         }
 
         self.merge_clipboard(file.clipboard, source, trust);
-        if let Some(b) = file.notify.desktop {
-            self.notify.desktop = b;
-        }
-        if let Some(v) = file.notify.desktop_via {
-            self.notify.desktop_via = v;
-        }
-        if let Some(b) = file.notify.desktop_done {
-            self.notify.desktop_done = b;
-        }
-        if let Some(b) = file.notify.bell {
-            self.notify.bell = b;
-        }
-        if let Some(b) = file.notify.bell_done {
-            self.notify.bell_done = b;
-        }
-        if let Some(b) = file.notify.visual {
-            self.notify.visual = b;
-        }
-        if let Some(b) = file.notify.visual_done {
-            self.notify.visual_done = b;
-        }
-        if let Some(b) = file.notify.suppress_focused_tab {
-            self.notify.suppress_focused_tab = b;
-        }
+        self.merge_notify(file.notify, source, trust);
 
         // Ignore masks: append.
         self.ignore_masks.extend(file.ignore_masks);
