@@ -4,7 +4,8 @@
 //! discard, an unmount, and a mount of an archive inside it are refused rather
 //! than lost. An edit saved to an extracted copy can't be refused, since an
 //! editor or an agent saves it outside spyc's ops, so one saved after the
-//! write was planned is held aside from the re-read and put back, pending.
+//! write was planned is held aside by the re-read, on its worker just before
+//! it empties the tree, and put back, pending.
 
 use std::path::{Path, PathBuf};
 
@@ -12,16 +13,27 @@ use super::{display_name, on_disk_stats, sibling_of};
 use crate::app::App;
 use crate::app::archive_ops::ArchiveOutcome;
 use crate::app::archive_route::PendingChange;
-use crate::archive::index::staging_rel_for;
+use crate::archive::index::{ArchiveIndex, staging_rel_for};
 use crate::archive::journal::StagedStats;
 
 /// Edits saved to an archive's extracted copies while it was written, held
-/// aside from its re-read (`Runtime::archive_held`): the tree they are in,
-/// and each one's inner path and path under it.
+/// aside from its re-read (`Runtime::archive_held`): the archive, the tree
+/// they are in, and each one's inner path and path under it.
 #[derive(Debug)]
-pub(in crate::app) struct Held {
+pub struct Held {
+    archive: PathBuf,
     root: PathBuf,
     copies: Vec<(String, PathBuf)>,
+}
+
+/// What a write's re-read needs to tell an edit from spyc's own copy: the
+/// written mount's index, and its copies' stats as the write was planned from
+/// them and as spyc last recorded them.
+#[derive(Debug)]
+pub struct LateEdits {
+    index: ArchiveIndex,
+    planned: StagedStats,
+    recorded: StagedStats,
 }
 
 impl App {
@@ -33,53 +45,35 @@ impl App {
             .insert(archive.to_path_buf(), planned);
     }
 
-    /// The write `outcome` ends, if it ends one, is over. One that landed
-    /// holds aside the edits saved since it was planned.
+    /// A write that failed is over. One that landed ends in
+    /// [`Self::end_write`], as its outcome is applied.
     pub(super) fn finish_write(&mut self, outcome: &ArchiveOutcome) {
-        match outcome {
-            ArchiveOutcome::Written { archive, .. } => {
-                if let Some(planned) = self.runtime.archive_writes.remove(archive) {
-                    self.hold_late_edits(archive, &planned);
-                }
-            }
-            ArchiveOutcome::WriteFailed { archive, .. } => {
-                self.runtime.archive_writes.remove(archive);
-            }
-            _ => {}
+        if let ArchiveOutcome::WriteFailed { archive, .. } = outcome {
+            self.runtime.archive_writes.remove(archive);
         }
     }
 
-    /// Move aside each file in `archive`'s staging tree edited since its write
-    /// was planned from `planned`, whoever wrote it: the write didn't carry
-    /// it, and the re-read empties the staging tree. A copy spyc extracted
-    /// itself in the meantime is not an edit.
-    fn hold_late_edits(&mut self, archive: &Path, planned: &StagedStats) {
-        let Some(mount) = self.state.mounts.get(archive) else {
-            return;
+    /// The write of `archive` landed: it is over, and its mount is dropped
+    /// for the re-read, which is handed what it needs to hold aside the edits
+    /// saved since the write was planned.
+    pub(super) fn end_write(&mut self, archive: &Path) -> Option<Box<LateEdits>> {
+        let planned = self.runtime.archive_writes.remove(archive);
+        let mount = self.state.mounts.take(archive)?;
+        Some(Box::new(LateEdits {
+            index: mount.index,
+            planned: planned?,
+            recorded: mount.staged,
+        }))
+    }
+
+    /// Unwrap a re-read that held edits aside: they wait in
+    /// `Runtime::archive_held` for the mount it lands.
+    pub(super) fn keep_held(&mut self, outcome: ArchiveOutcome) -> ArchiveOutcome {
+        let ArchiveOutcome::HeldAside { held, outcome } = outcome else {
+            return outcome;
         };
-        let now = on_disk_stats(mount);
-        let late: Vec<(String, PathBuf)> = mount
-            .index
-            .entries
-            .iter()
-            .filter(|e| {
-                now.get(&e.inner).is_some_and(|stat| {
-                    planned.get(&e.inner) != Some(stat) && mount.staged.get(&e.inner) != Some(stat)
-                })
-            })
-            .map(|e| (e.inner.clone(), e.staging_rel()))
-            .collect();
-        let staging = mount.staging_root.clone();
-        let Some(root) = sibling_of(&staging, "held").filter(|_| !late.is_empty()) else {
-            return;
-        };
-        let copies = late
-            .into_iter()
-            .filter(|(_, rel)| move_file(&staging.join(rel), &root.join(rel)))
-            .collect();
-        self.runtime
-            .archive_held
-            .insert(archive.to_path_buf(), Held { root, copies });
+        self.runtime.archive_held.insert(held.archive.clone(), held);
+        *outcome
     }
 
     /// Put back the edits held aside for `archive` now that it has been read
@@ -176,6 +170,37 @@ impl App {
             .iter()
             .any(|change| self.refuse_while_written(change.archive()))
     }
+}
+
+/// Move aside each file in the staging tree `staging` edited since its write
+/// was planned, whoever wrote it: the write didn't carry it, and the re-read
+/// is about to empty the tree. A copy spyc extracted itself in the meantime
+/// is not an edit. Runs on the re-read's worker right before it empties the
+/// tree, so an edit saved after the write landed is held too.
+pub(in crate::app) fn hold_late_edits(late: &LateEdits, staging: &Path) -> Option<Held> {
+    let now = on_disk_stats(&late.index, staging);
+    let edited: Vec<(String, PathBuf)> = late
+        .index
+        .entries
+        .iter()
+        .filter(|e| {
+            now.get(&e.inner).is_some_and(|stat| {
+                late.planned.get(&e.inner) != Some(stat)
+                    && late.recorded.get(&e.inner) != Some(stat)
+            })
+        })
+        .map(|e| (e.inner.clone(), e.staging_rel()))
+        .collect();
+    let root = sibling_of(staging, "held").filter(|_| !edited.is_empty())?;
+    let copies = edited
+        .into_iter()
+        .filter(|(_, rel)| move_file(&staging.join(rel), &root.join(rel)))
+        .collect();
+    Some(Held {
+        archive: late.index.archive.clone(),
+        root,
+        copies,
+    })
 }
 
 /// Move the file `from` to `to`, making `to`'s directory; whether it moved.
