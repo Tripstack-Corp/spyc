@@ -1,33 +1,39 @@
 //! The pinned ghostty commit, and the policy for moving it.
 
 /// The ghostty commit every vendored archive and the checked-in bindings were
-/// built from.
+/// built from: the one ghostty's `vt-1.0.0` tag names.
 ///
-/// **Why a bare commit and not a tag.** No released ghostty tag carries the C
-/// API: `v1.3.1`, the latest release at the time of pinning, has no
-/// `include/ghostty/vt/` at all and requires Zig 0.15.2, which cannot link on
-/// macOS 26. Ghostty publishes a rolling `tip` tag, but a tag that moves is
-/// strictly worse than a hash for a pin — it had already moved off this commit
-/// by the time the pin was recorded.
-pub const GHOSTTY_COMMIT: &str = "1f5bb5769fbb5e717546073d33d3985604a315b2";
+/// **Why the commit and not the tag.** libghostty-vt has its own release
+/// cycle, and its `vt-X.Y.Z` tags are separate from the app's `vX.Y.Z` ones.
+/// A tag can still be re-pointed, and a hash cannot, so the hash is what the
+/// vendor script checks out; [`GHOSTTY_VT_VERSION`] names the release it is.
+pub const GHOSTTY_COMMIT: &str = "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec";
+
+/// The libghostty-vt release [`GHOSTTY_COMMIT`] is tagged as.
+pub const GHOSTTY_VT_VERSION: &str = "1.0.0";
 
 /// The pin's author date, so the pin's age is readable without a network round
-/// trip. `2026-09-04`.
-pub const GHOSTTY_COMMIT_DATE: &str = "2026-09-04";
+/// trip. `2026-11-06`.
+pub const GHOSTTY_COMMIT_DATE: &str = "2026-11-06";
 
 /// The Zig version the pin's `build.zig.zon` requires. ghostty's `requireZig`
-/// compares **major and minor for equality**, so this is exact, not a floor.
-pub const REQUIRED_ZIG: &str = "0.16.0";
+/// wants **major and minor equal** and the patch at least as new; the vendor
+/// recipe uses exactly this version, because another Zig compiles different
+/// bytes and the archives are checked for reproducibility.
+pub const REQUIRED_ZIG: &str = "0.17.0";
 
 /// Bump policy — deliberate, gated, and never tracking `main`.
 ///
-/// libghostty's C API is pre-1.0 and its own documentation says breaking
-/// changes are expected. It has already broken once in a way that a C ABI
-/// cannot report: between the commit the published `libghostty-vt-sys 0.2.1`
-/// bindings target and a commit eight weeks later, `ghostty_terminal_new` lost
-/// its options struct in favour of two scalar parameters. The published
-/// bindings still compile against the newer library and return garbage —
-/// `rows()` reported the scrollback budget. Nothing warned.
+/// From 1.0 libghostty-vt promises semver and a stable C ABI: opaque handles,
+/// enum-keyed getters and setters, size-prefixed structs, and
+/// `GHOSTTY_UNSUPPORTED` rather than a crash when newer headers meet an older
+/// library. Before 1.0 it broke in a way a C ABI cannot report: between the
+/// commit the published `libghostty-vt-sys 0.2.1` bindings target and a commit
+/// eight weeks later, `ghostty_terminal_new` lost its options struct in favour
+/// of two scalar parameters, and the published bindings still compiled against
+/// the newer library and returned garbage — `rows()` reported the scrollback
+/// budget. The promise covers the ABI, not behaviour: scrollback retention and
+/// snapshot fidelity are what spyc depends on, and no ABI check measures them.
 ///
 /// So the pin moves only on purpose:
 ///
@@ -46,14 +52,12 @@ pub const REQUIRED_ZIG: &str = "0.16.0";
 /// A pin bump that skips step 3 is the failure this crate exists to prevent.
 pub const BUMP_POLICY: () = ();
 
-/// Defects reported upstream against this pin, so a bump checks them off
-/// instead of re-investigating them.
+/// Defects reported upstream against an earlier pin, so a bump checks them
+/// off instead of re-investigating them.
 ///
-/// - **The VT formatter loses the last scroll on replay.** Reported as
-///   <https://github.com/ghostty-org/ghostty/discussions/14148>. Replaying the
-///   formatter's output into a fresh terminal puts the viewport one row high
-///   and history one row short whenever the source had scrolled. It does not
-///   affect us: the mechanism spyc consumes is `ghostty_snapshot_*`, which
-///   round-trips these states exactly. On a pin bump, check whether it is
-///   fixed before re-investigating.
+/// - **The VT formatter lost the last scroll on replay** — reported as
+///   <https://github.com/ghostty-org/ghostty/discussions/14148>. **Fixed at
+///   1.0.0**: `rehydrate` round-trips all 26 cases with no viewport offset and
+///   `offset_isolate` no longer reproduces it. It never affected spyc, which
+///   restores through `ghostty_snapshot_*`.
 pub const REPORTED_UPSTREAM: () = ();

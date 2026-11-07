@@ -2,7 +2,7 @@
 
 Raw FFI to [libghostty-vt](https://libghostty.tip.ghostty.org/) — the terminal
 state machine extracted from [Ghostty](https://ghostty.org) — at a spyc-owned
-pinned commit, with the static archives vendored.
+pinned commit (libghostty-vt 1.0.0), with the static archives vendored.
 
 This crate exists so that everything C has one home: the pin, the generated
 bindings, the prebuilt archives and their checksums. The safe engine wrapper
@@ -59,7 +59,7 @@ build fails with a message that says so.
 ## Rebuilding the archives
 
 ```sh
-make vendor-ghostty              # on Linux; needs zig 0.16.0 (see REQUIRED_ZIG)
+make vendor-ghostty              # on Linux; needs zig 0.17.0 (see REQUIRED_ZIG)
 make vendor-ghostty-container    # from a Mac: the same, in a podman/docker container
 ```
 
@@ -85,6 +85,13 @@ table records the build time and the builder's uid/gid. The objects inside are
 identical across runs, paths and caches, so the script re-archives the same
 members, in the same order, under their basenames, with this zig's own `ar` in
 deterministic mode.
+
+The build runs on one CPU (`taskset -c 0`). From Zig 0.17 the anonymous symbol
+names in `compiler_rt.o` carry the index of the compiler thread that made them,
+so a 7-CPU build, a 4-CPU build and a 4-CPU build on another host each emit
+different bytes, while every other object is identical. `-j1` does not reach the
+compiler's thread pool, which is sized from the CPU affinity; one CPU of
+affinity does.
 
 Zig cross-compiles all five from one host. The recipe uses `ReleaseSmall`,
 which is the size lever; it does **not** strip, because at `ReleaseSmall` the

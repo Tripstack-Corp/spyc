@@ -106,6 +106,13 @@ pub(super) fn install(t: ffi::GhosttyTerminal, sink: *mut Sink) {
     }
 }
 
+// `ghostty_terminal_set` takes each callback as a `void*`, which checks no
+// signature, so these hold every callback to its generated typedef: a pin
+// whose callback changes shape fails the build instead of the call.
+const _: ffi::GhosttyTerminalWritePtyFn = Some(write_pty);
+const _: ffi::GhosttyTerminalXtversionFn = Some(xtversion);
+const _: ffi::GhosttyTerminalDeviceAttributesFn = Some(device_attributes);
+
 unsafe extern "C" fn write_pty(
     _t: ffi::GhosttyTerminal,
     userdata: *mut c_void,

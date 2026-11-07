@@ -181,7 +181,6 @@ const fn point(tag: GhosttyPointTag::Type, col: u16, row: u32) -> GhosttyPoint {
 
 const fn empty_grid_ref() -> ffi::GhosttyGridRef {
     ffi::GhosttyGridRef {
-        size: size_of::<ffi::GhosttyGridRef>(),
         node: std::ptr::null_mut(),
         x: 0,
         y: 0,
@@ -189,17 +188,17 @@ const fn empty_grid_ref() -> ffi::GhosttyGridRef {
 }
 
 fn default_style() -> ffi::GhosttyStyle {
-    // SAFETY: `GhosttyStyle` is integers, bools and unions of integers, all
-    // valid as zero bytes.
+    // SAFETY: `GhosttyStyle` is integers and unions of integers, all valid as
+    // zero bytes.
     let mut st: ffi::GhosttyStyle = unsafe { std::mem::zeroed() };
-    st.size = size_of::<ffi::GhosttyStyle>();
-    // SAFETY: `st` is a writable `GhosttyStyle` with its `size` set.
+    // SAFETY: `st` is a writable `GhosttyStyle`, a fixed 16-byte layout with no
+    // size header.
     unsafe { ffi::ghostty_style_default(&raw mut st) };
     st
 }
 
 const fn colour(c: ffi::GhosttyStyleColor) -> Color {
-    match c.tag {
+    match c.tag as ffi::GhosttyStyleColorTag::Type {
         ffi::GhosttyStyleColorTag::GHOSTTY_STYLE_COLOR_PALETTE => {
             // SAFETY: the tag names `palette` as the union's active field.
             Color::Idx(unsafe { c.value.palette })
@@ -213,15 +212,21 @@ const fn colour(c: ffi::GhosttyStyleColor) -> Color {
     }
 }
 
+/// Whether any bit of `mask` is set in the style's packed `flags`.
+const fn style_flag(st: &ffi::GhosttyStyle, mask: u32) -> bool {
+    st.flags as u32 & mask != 0
+}
+
 const fn style_from(st: &ffi::GhosttyStyle, wide: Wide) -> CellStyle {
     CellStyle {
         fg: colour(st.fg_color),
         bg: colour(st.bg_color),
-        bold: st.bold,
-        dim: st.faint,
-        italic: st.italic,
-        underline: st.underline != ffi::GhosttySgrUnderline::GHOSTTY_SGR_UNDERLINE_NONE,
-        reverse: st.inverse,
+        bold: style_flag(st, ffi::GHOSTTY_STYLE_FLAG_BOLD),
+        dim: style_flag(st, ffi::GHOSTTY_STYLE_FLAG_FAINT),
+        italic: style_flag(st, ffi::GHOSTTY_STYLE_FLAG_ITALIC),
+        // Any underline style, single through dashed, is an underline here.
+        underline: style_flag(st, ffi::GHOSTTY_STYLE_UNDERLINE_MASK),
+        reverse: style_flag(st, ffi::GHOSTTY_STYLE_FLAG_INVERSE),
         wide,
     }
 }
@@ -501,7 +506,7 @@ impl GhosttyScreen {
             frame.wrapped.push(self.row_wrapped_at(y));
             for c in 0..cols {
                 let mut gr = empty_grid_ref();
-                // SAFETY: `t` is live, and `gr` is a writable, sized grid ref.
+                // SAFETY: `t` is live, and `gr` is a writable grid ref.
                 let ok = unsafe {
                     ffi::ghostty_terminal_grid_ref(
                         self.t,
@@ -547,7 +552,7 @@ impl GhosttyScreen {
                 let end = u32::try_from(frame.text.len()).unwrap_or(u32::MAX);
                 frame.spans.push((start, end));
                 let mut st = default_style();
-                // SAFETY: `gr` is valid as above, and `st` is a sized `GhosttyStyle`.
+                // SAFETY: `gr` is valid as above, and `st` is a writable `GhosttyStyle`.
                 let _ = unsafe { ffi::ghostty_grid_ref_style(&raw const gr, &raw mut st) };
                 let mut cell = style_from(&st, wide);
                 if let Some(bg) = content_tag_bg(raw) {
@@ -560,7 +565,7 @@ impl GhosttyScreen {
 
     fn row_wrapped_at(&self, y: u32) -> bool {
         let mut gr = empty_grid_ref();
-        // SAFETY: `t` is live, and `gr` is a writable, sized grid ref.
+        // SAFETY: `t` is live, and `gr` is a writable grid ref.
         if unsafe {
             ffi::ghostty_terminal_grid_ref(
                 self.t,

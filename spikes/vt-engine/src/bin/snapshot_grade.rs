@@ -178,8 +178,9 @@ fn main() {
         println!("  envelope magic   {magic:?}");
         println!("  format version   {version}");
         println!("  -> the version is IN the stream, so a decoder meeting an unknown one");
-        println!("     rejects it rather than misparsing it. Per snapshot.h, version 1");
-        println!("     'does not yet carry a binary-compatibility guarantee', so:");
+        println!("     rejects it rather than misparsing it. Per snapshot.h, the format");
+        println!("     'is versioned separately from the library and isn't covered by");
+        println!("     the ABI promise', so:");
         println!("     snapshots are TRANSPORT-ONLY — same binary, same pin.");
         println!("     Never at-rest persistence across an upgrade.");
     }

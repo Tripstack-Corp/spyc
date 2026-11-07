@@ -66,6 +66,7 @@ rebuild after changing the checkout.
 | `bench` | Throughput (8 KiB chunks, the `PtyHost` reader size), RSS per pane, and `size_of::<vt100::Cell>()`. |
 | `adapter_probe` | Is #34 an engine defect or an adapter defect? Transcribes spyc's `PaneWidget` cell walk and `cell_style` and compares them against the engine's own state. |
 | `sbprobe` | What unit is each engine's scrollback budget in? |
+| `rowcost` | What does a retained row cost ghostty in bytes? The sweep behind `spyc_vt_sys::scrollback::BYTES_PER_ROW_HEAVY`. |
 | `gfmt` | What does libghostty's `Formatter` emit, and what does each option toggle cost in bytes? |
 | `grt` | Focused ghostty round trip — isolates the `with_tabstops` cursor-clobber bug. |
 | `gprobe` | Geometry readback; the evidence for the silent ABI mismatch against ghostty `main`. |

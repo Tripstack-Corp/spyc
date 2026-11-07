@@ -226,7 +226,7 @@ dependency's `path`, so spyc's published manifest resolves the FFI crate from
 the registry by its `version`. That gives two requirements, and the first
 release carrying the crate needed both fixed (#490):
 
-- **The dependency carries a version.** `spyc-vt-sys = { version = "0.1.0",
+- **The dependency carries a version.** `spyc-vt-sys = { version = "0.2.0",
   path = "crates/spyc-vt-sys" }`. Without it `cargo package` refuses outright
   (*"all dependencies must have a version requirement specified when
   packaging"*). Bump the requirement whenever the crate's own version moves;

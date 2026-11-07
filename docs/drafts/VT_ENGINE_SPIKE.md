@@ -1142,3 +1142,153 @@ It does not affect the adoption either way: the mechanism spyc consumes is
 `spyc_vt_sys::pin` carries the reference so a pin bump checks it off rather
 than re-investigating it.
 
+
+# Addendum — 2026-11-07: re-measured at libghostty-vt 1.0.0
+
+**Appended, not merged into the above.** The pin moved from `1f5bb576`
+(2026-09-04) to `0fa3d577`, the commit ghostty's `vt-1.0.0` tag names
+(2026-11-06): 1,012 commits, the first release of libghostty-vt with a stable C
+ABI. It needs Zig 0.17.0. Every figure the adoption rests on was re-run through
+`crates/spyc-vt-sys` at the new pin, as `pin::BUMP_POLICY` requires.
+**Harness:** `spikes/vt-engine/`, `--features ghostty,wezterm`.
+
+## Verdict: the gate passes, and the formatter is fixed
+
+| gate criterion | result |
+|---|---|
+| scrollback budget functional, shipped config | **pass** — 9,649 / 9,889 retained against a 9,560 floor |
+| zero panics over ≥50k `fuzz_diff` iterations | **pass** — 0 |
+| rehydration re-graded | **pass** — both mechanisms now 100% on every axis |
+| the known emit bug re-checked | **fixed upstream** |
+| throughput and memory re-measured | throughput up, memory unchanged |
+
+## What the bump changed in spyc
+
+The ABI moved, and the regenerated bindings absorbed most of it. Every
+`GHOSTTY_TERMINAL_OPT_*` value shifted up by one, a new option having been
+inserted at 0. Through the old bindings every option spyc sets would have set
+its neighbour, silently; through regenerated ones nothing changes. The key
+types behind every `void*` getter and setter spyc uses were compared header
+against header and are unchanged.
+
+What did not carry over, and failed the build rather than the run:
+`GhosttyStyle` is now a frozen 16-byte struct whose attributes are packed into
+one `flags` word (`GHOSTTY_STYLE_FLAG_*`, the underline style in bits 8–10),
+and neither it nor `GhosttyGridRef` carries a `size` header any more. The style
+masks are cast macros bindgen's own parser skips, so the generator now uses
+`clang_macro_fallback()`; on the old pin's headers that changes no line of
+output.
+
+Two checks were added so the next bump fails louder:
+
+- `the_linked_library_is_the_pinned_release` asserts that `pin::GHOSTTY_VT_VERSION`,
+  the headers' `GHOSTTY_VT_VERSION` and the linked archive's `ghostty_version()`
+  agree. Bindings regenerated over a stale archive fail it: a pre-1.0 archive
+  under the 1.0 bindings does not link, and a wrong pin version fails the
+  assertion, both tried.
+- The three reply callbacks, which `ghostty_terminal_set` takes as `void*`, are
+  held to their generated typedefs at compile time. Changing one parameter's
+  type fails the build, tried.
+
+The harness's formatter calls were ported to 1.0's opaque formatter (options
+set through `ghostty_formatter_set`, extras as a bitmask) with the same toggles
+as before: everything but palette and pwd.
+
+## The scrollback budget
+
+`sbprobe`, at `max_lines = 10_000` and `max_bytes = 10,109,200`:
+
+| corpus | vt100 | ghostty (was) | floor |
+|---|---:|---:|---:|
+| plain | 10,000 | 9,649 (9,658) | 9,560 |
+| heavy | 10,000 | 9,889 (9,658) | 9,560 |
+
+The pathological stream still binds the valve, harder than before: ghostty kept
+**1,017 of 3,976** rows (was 1,613), ~9.7 KiB/row stored against ~6.1. A
+distinct truecolour pair in every cell is what the valve is for.
+
+### `BYTES_PER_ROW_HEAVY` re-measured — 929 stands
+
+The 929 B/row figure had no probe of its own; `rowcost` is that sweep, checked
+in: a byte ceiling, an unreachable line limit, 60,000 rows fed, ceiling divided
+by rows retained. As a control it was first run at the **old** pin, where it
+reproduces the documented figures: heavy content at 767 B/row at 8 MiB, and both
+corpora at an identical 1,195 B/row at the tightest ceiling, the
+page-quantisation the constant's doc describes.
+
+| ceiling | plain (old → 1.0) | heavy (old → 1.0) |
+|---:|---:|---:|
+| 1 MiB | 1,195 → 1,349 | 1,195 → 1,119 |
+| 2 MiB | 791 → 821 | 1,018 → 799 |
+| 4 MiB | 748 → 760 | 836 → 772 |
+| 8 MiB | 728 → 733 | 767 → 758 |
+| 16 MiB | 718 → 720 | 757 → 752 |
+
+At ceilings of 2 MiB and up, heavy content costs no more than before, so the
+constant stays conservative and the derived ceiling is unchanged.
+
+## Robustness — unchanged
+
+`fuzz_diff`, 50,000 iterations, seed `0x5157c0de`: vt100 **1,437**, wezterm
+15, **ghostty 0** — identical to both earlier runs. Agreement moved toward the
+pair: all three identical on 11.7% of non-panicking iterations (was 7.3%), no
+two agreeing on 81.3% (was 90%). As before, the agreement rate is not a
+fidelity verdict; the curated corpus is.
+
+## Fidelity — unchanged
+
+`differential`: **20/26 cases at exact parity**, as before.
+
+## Rehydration: both mechanisms are now exact
+
+**Mechanism A, the VT formatter (`rehydrate`)** — the one-row viewport offset
+is gone:
+
+| | ghostty at `1f5bb576` | ghostty at 1.0.0 |
+|---|---:|---:|
+| rows exact | 57.3% | **100.0%** |
+| rows, ±1 shift allowed | 98.0% | 100.0% |
+| cell text | 84.3% | **100.0%** |
+| cell attributes | 94.6% | **100.0%** |
+| cursor / alt-screen | 26/26, 26/26 | 26/26, 26/26 |
+| scrollback preserved | 99.9% | **100.0%** (4,230 of 4,230) |
+| emitted, all cases | 389,039 B | 389,363 B |
+
+`offset_isolate` no longer reproduces the offset at any geometry it tries, so
+[discussion 14148](https://github.com/ghostty-org/ghostty/discussions/14148) is
+fixed upstream; the range carries `bd1c9cc8` "formatter: keep trailing blank
+rows in VT output without trimming", among other formatter fixes.
+`gfmt`'s per-toggle costs are unchanged: palette +5,522 B, tabstops +20, cursor
++6, style +4, the rest +0 on its state.
+
+**Mechanism B, the snapshot API (`snapshot_grade`)** — identical to the
+2026-09-04 run on every criterion: 100% rows, text, attributes and scrollback,
+26/26 cursor and alt-screen, 1,232,014 B encoded, the continuation round trip
+exact, and truncated, CRC-corrupted and version-65535 streams all refused.
+1.0's `snapshot.h` says the byte format "is versioned separately from the
+library and isn't covered by the ABI promise", so the conclusion stands:
+**snapshots are transport-only, never at-rest persistence across an upgrade.**
+
+## Throughput and memory
+
+`bench`, `big-spew` replayed 40× in 8 KiB chunks, three runs on an otherwise
+idle machine:
+
+| engine | MiB/s |
+|---|---:|
+| vt100 | 97–108 |
+| **ghostty (ReleaseSmall)** | **474–501** |
+| wezterm | 48–49 |
+
+ghostty's shipped build rose from 375.7 to ~490 MiB/s. vt100 measured 188.7
+on 2026-09-04 and ~100 here on the same fixture, so the cross-run ratio is not
+comparable; within this run ghostty is ~4.8× vt100, and only the ghostty
+figure is offered as a change.
+
+`membudget` at a full budget (15,000 heavy rows into 10,000): ghostty
+**7.08 MiB/pane** (was 6.94) at 9,889 rows retained (was 9,658), so the cost per
+retained row is unchanged; vt100 26.71, wezterm 6.86. `bench`'s partial fill:
+ghostty 2,730 KiB/pane (was 2,635).
+
+The five `ReleaseSmall` archives grew 11–13%, the largest 2.69 MB, inside the
+4 MiB per-target budget.

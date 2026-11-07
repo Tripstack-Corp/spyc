@@ -14,6 +14,9 @@ fn main() {
         .allowlist_function("ghostty_.*")
         .allowlist_type("Ghostty.*")
         .allowlist_var("GHOSTTY_.*")
+        // ghostty spells some constants as casts, `((GhosttyStyleFlags)(1u << 0))`,
+        // which bindgen's own macro parser skips; clang evaluates them instead.
+        .clang_macro_fallback()
         // Enums as plain integer constants: the C headers pin them to `int`
         // (GHOSTTY_ENUM_TYPED : int) and give explicit values, so a Rust enum
         // would add a validity invariant the C side does not promise.
