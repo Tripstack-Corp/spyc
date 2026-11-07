@@ -66,10 +66,15 @@ quick-select and `y` in the pager are the mouse-free yank paths.
     project) opens the open projects' rows alone.
   - **The git segment** offers the worktree list, a new worktree and, at the
     root of a clean linked worktree no session has claimed, deleting it
-    (`Space w l`, `n`, `d`), and `gd` while the repo has changes.
+    (`Space w l`, `n`, `d`), `gd` while the repo has changes, and `:diff`,
+    the branch's changes since it left its base ([Pager](pager.md)).
   - **The agent segment** gives the pane the keyboard and opens its active
     tab's menu, as `^a .` does.
-  - **The session segment** offers the session's info (`Space s`).
+  - **The session segment** offers the session's info (`Space s`) and
+    renaming it (`:name`): that row opens the `:` line holding `name` and
+    the session's name, the cursor after it, as though you had typed them.
+    From there it is an ordinary `:` line: edit the name and press `Enter`
+    to rename the session, or back out as from any other.
 - **Anywhere else** (blank list space, the rest of the status bar, the prompt
   row, the agent strip, or the divider while the prompt row has its place),
   the leader menu opens.

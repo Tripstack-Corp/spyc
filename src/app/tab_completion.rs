@@ -204,8 +204,9 @@ impl App {
         true
     }
 
-    /// Replace the prompt's text, keeping a vi prompt's editor in step.
-    fn set_prompt_text(&mut self, text: String) {
+    /// Replace the prompt's text, keeping a vi prompt's editor in step, its
+    /// cursor at the end.
+    pub(super) fn set_prompt_text(&mut self, text: String) {
         let Mode::Prompting(ref mut prompt) = self.state.mode else {
             return;
         };

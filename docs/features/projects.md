@@ -139,7 +139,8 @@ take the place of both) and persist across `spyc -r`.
   ([per-project files](../config/projects.md)); `./config` reaches a
   directory named `config`. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to
-  `[A-Z0-9_]`). `:whoami` flashes `user@host`.
+  `[A-Z0-9_]`); the session segment's menu opens the `:` line holding
+  `name` and the current name, to edit. `:whoami` flashes `user@host`.
 - **New pane tabs** default their cwd to the focused column's
   worktree/repo root (`gw`'s target), falling back to the current
   listing dir when there's no repo. Set `[pane] new_tab_cwd` in

@@ -729,8 +729,10 @@ impl super::App {
 
     /// A command row, clicked or `Enter`ed: run it as typing its command
     /// does, a make target as `:make <target>` and a task as `:fg N`, then
-    /// name that command over the pager it opened. A row with nothing to run
-    /// leaves the menu open.
+    /// name that command over the pager it opened. A row to edit opens the
+    /// `:` line as `:` opens it, holding its command with the cursor after
+    /// it, unrun; the line shows the command, so no key is named. A row with
+    /// nothing to run leaves the menu open.
     fn fire_command_row(
         &mut self,
         run: Option<super::view_state::CommandRow>,
@@ -753,6 +755,16 @@ impl super::App {
                     .0
                     .to_string();
                 (self.dispatch_command(&line), name, "command")
+            }
+            CommandRow::Edit(line) => {
+                let fx = self
+                    .apply(&crate::keymap::Action::CommandPrompt)
+                    .unwrap_or_else(|e| {
+                        self.state.flash_error(format!("{e:#}"));
+                        Vec::new()
+                    });
+                self.set_prompt_text(line);
+                return fx;
             }
         };
         let label = if label.is_empty() { unlabelled } else { label };
