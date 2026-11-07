@@ -1552,3 +1552,238 @@ fn agent_hud_retries_missing_claude_transcript_on_status_report() {
         );
     });
 }
+
+// ── #919: the subagents a Claude tab runs, on the `agents` row ──
+
+/// A Claude tab in `tmp`, reading the session at `home`, its HUD in `mode`.
+fn claude_app(tmp: &Path, home: &Path, mode: &str) -> App {
+    let mut app = App::test_app(std::env::current_dir().unwrap());
+    app.view.term_size = (100, 32);
+    app.state.active_project_mut().config.mouse.capture = false;
+    app.state.active_project_mut().pane.pane_height_pct = 50;
+    app.state.active_project_mut().pane.agent_hud.claude_home = Some(home.to_owned());
+    let entry = claude_entry(&mut app, tmp, Some(SESSION));
+    app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry));
+    app.cmd_agent_hud(mode);
+    app
+}
+
+fn append(path: &Path, record: &serde_json::Value) {
+    writeln!(
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap(),
+        "{record}"
+    )
+    .unwrap();
+}
+
+/// The session's `subagents/` directory, beside its transcript, as Claude
+/// Code files a subagent's records.
+fn subagents_dir(transcript: &Path) -> std::path::PathBuf {
+    let dir = transcript.with_extension("").join("subagents");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// The main thread's `Agent` call `call`, its prompt private.
+fn agent_call(transcript: &Path, call: &str) {
+    append(
+        transcript,
+        &json!({"type": "assistant", "sessionId": SESSION, "timestamp": "2026-10-13T12:00:00Z",
+            "message": {"id": format!("msg-{call}"), "model": "claude-opus-5-5",
+                "content": [{"type": "tool_use", "id": call, "name": "Agent",
+                    "input": {"description": "private-task", "prompt": "private-prompt"}}]}}),
+    );
+}
+
+/// The `Agent` call's result in the main thread, failed or not.
+fn agent_result(transcript: &Path, call: &str, failed: bool) {
+    append(
+        transcript,
+        &json!({"type": "user", "sessionId": SESSION, "timestamp": "2026-10-13T12:05:00Z",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": call,
+                "is_error": failed, "content": "private-result"}]}}),
+    );
+}
+
+/// Subagent `id`'s metadata: its type, the call that started it, its private
+/// description, and whether it has finished.
+fn subagent_meta(dir: &Path, id: &str, kind: &str, call: &str, finished: bool) {
+    let mut meta = json!({"agentType": kind, "toolUseId": call,
+        "description": "private-description", "isBuiltIn": true});
+    if finished {
+        meta["finished"] = json!(true);
+    }
+    std::fs::write(dir.join(format!("agent-{id}.meta.json")), meta.to_string()).unwrap();
+}
+
+/// Subagent `id` calls `tool` (call `tool_id`), its input private.
+fn subagent_calls(dir: &Path, id: &str, tool_id: &str, tool: &str) {
+    append(
+        &dir.join(format!("agent-{id}.jsonl")),
+        &json!({"type": "assistant", "isSidechain": true, "agentId": id, "sessionId": SESSION,
+            "timestamp": "2026-10-13T12:01:00Z",
+            "message": {"id": format!("msg-{tool_id}"), "model": "claude-opus-5-5",
+                "content": [{"type": "tool_use", "id": tool_id, "name": tool,
+                    "input": {"pattern": "private-pattern"}}]}}),
+    );
+}
+
+/// Subagent `id`'s call `tool_id` returns.
+fn subagent_result(dir: &Path, id: &str, tool_id: &str) {
+    append(
+        &dir.join(format!("agent-{id}.jsonl")),
+        &json!({"type": "user", "isSidechain": true, "agentId": id, "sessionId": SESSION,
+            "timestamp": "2026-10-13T12:02:00Z",
+            "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id,
+                "content": "private-output"}]}}),
+    );
+}
+
+/// A running subagent shows on the full HUD's `agents` row as its type and the
+/// tool it runs now, follows it from tool to tool, and once it has finished
+/// says so. Its description, prompt and tool input never reach the strip.
+#[test]
+fn a_running_subagent_shows_its_type_and_the_tool_it_runs() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        wait_hud_line(&mut app, &mut ctx, 1, " 111 ");
+
+        agent_call(&main, "toolu_a1");
+        let dir = subagents_dir(&main);
+        subagent_meta(&dir, "a1", "Explore", "toolu_a1", false);
+        subagent_calls(&dir, "a1", "toolu_g1", "Grep");
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, "Explore · Grep");
+        let words: Vec<&str> = lines[3].split_whitespace().collect();
+        assert!(words.windows(2).any(|w| w == ["agents", "1"]), "{lines:?}");
+
+        subagent_result(&dir, "a1", "toolu_g1");
+        subagent_calls(&dir, "a1", "toolu_r1", "Read");
+        wait_hud_line(&mut app, &mut ctx, 3, "Explore · Read");
+
+        subagent_result(&dir, "a1", "toolu_r1");
+        subagent_meta(&dir, "a1", "Explore", "toolu_a1", true);
+        agent_result(&main, "toolu_a1", false);
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, "Explore · done");
+        assert!(
+            lines.iter().all(|line| !line.contains("private")),
+            "{lines:?}"
+        );
+    });
+}
+
+/// A subagent whose `Agent` call came back as an error ended `failed`.
+#[test]
+fn a_subagent_whose_call_failed_reads_failed() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        agent_call(&main, "toolu_a1");
+        let dir = subagents_dir(&main);
+        subagent_calls(&dir, "a1", "toolu_b1", "Bash");
+        subagent_meta(&dir, "a1", "general-purpose", "toolu_a1", true);
+        agent_result(&main, "toolu_a1", true);
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        wait_hud_line(&mut app, &mut ctx, 3, "general-purpose · failed");
+    });
+}
+
+/// Past the subagents the row has room to name, it says how many more run, so
+/// it never runs off the strip.
+#[test]
+fn past_what_fits_the_row_counts_the_rest() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        let dir = subagents_dir(&main);
+        for n in 1..=5 {
+            let call = format!("toolu_a{n}");
+            agent_call(&main, &call);
+            subagent_meta(&dir, &format!("a{n}"), "Explore", &call, false);
+            subagent_calls(&dir, &format!("a{n}"), &format!("toolu_g{n}"), "Grep");
+        }
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, " more");
+        let named = lines[3].matches("Explore · Grep").count();
+        assert!(named >= 1, "{lines:?}");
+        assert!(
+            lines[3].ends_with(&format!("+{} more", 5 - named)),
+            "{lines:?}"
+        );
+    });
+}
+
+/// A subagent that finished over a minute ago has left the row; one still
+/// running stays.
+#[test]
+fn a_subagent_that_ended_a_minute_ago_has_left_the_row() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        let dir = subagents_dir(&main);
+        agent_call(&main, "toolu_a1");
+        subagent_calls(&dir, "a1", "toolu_g1", "Grep");
+        subagent_meta(&dir, "a1", "Explore", "toolu_a1", true);
+        let two_minutes_ago = std::time::SystemTime::now() - Duration::from_secs(120);
+        for name in ["agent-a1.meta.json", "agent-a1.jsonl"] {
+            std::fs::File::options()
+                .write(true)
+                .open(dir.join(name))
+                .unwrap()
+                .set_modified(two_minutes_ago)
+                .unwrap();
+        }
+        agent_call(&main, "toolu_a2");
+        subagent_meta(&dir, "a2", "Plan", "toolu_a2", false);
+        subagent_calls(&dir, "a2", "toolu_b2", "Bash");
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, "Plan · Bash");
+        assert!(!lines[3].contains("Explore"), "{lines:?}");
+    });
+}
+
+/// The compact HUD has no `agents` row; it counts the subagents running, not
+/// one that has finished.
+#[test]
+fn the_compact_hud_counts_the_running_subagents() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        let dir = subagents_dir(&main);
+        for n in 1..=2 {
+            let call = format!("toolu_a{n}");
+            agent_call(&main, &call);
+            subagent_meta(&dir, &format!("a{n}"), "Explore", &call, false);
+            subagent_calls(&dir, &format!("a{n}"), &format!("toolu_g{n}"), "Grep");
+        }
+        agent_call(&main, "toolu_a3");
+        subagent_meta(&dir, "a3", "Plan", "toolu_a3", true);
+        let mut app = claude_app(tmp.path(), &home, "compact");
+        let mut ctx = RunCtx::for_test();
+        wait_hud_line(&mut app, &mut ctx, 1, "subagents 2");
+    });
+}

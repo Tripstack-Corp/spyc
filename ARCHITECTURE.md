@@ -453,6 +453,21 @@ No missing-source polling is armed. The existing bounded reader
 handles complete records, partial writes, file replacement and truncation. HUD
 state is memory-only and diagnostics expose its metric projection.
 
+A Claude Code session's subagents (#919) write to their own files, never the
+transcript: `<session>/subagents/agent-<id>.meta.json` (type, the `Agent` call,
+`finished`) and `agent-<id>.jsonl`. So a Claude tab's consumer is two
+subscriptions whose latest each make one update (`collector::ClaudeFeeds`). The
+subagents' one is `tail::watch::Subscription::start_set`: its source names,
+after each read, the paths to watch, which appear one inside another as the
+first subagent starts (the session's directory, `subagents/`, each running
+subagent's two files), and the worker arms each once it exists and reads again
+when it arms one. On macOS that is one kqueue with a descriptor per path,
+because a directory's vnode changes when an entry comes or goes and not when a
+file in it grows; elsewhere a directory's watch covers its files. A metadata
+file is read once per change for three keys and never its `description`; a
+subagent's records are followed while it runs and for a minute after, for the
+tool it runs now.
+
 `frame_layout` carves the strip after the vertical split and before prompt
 wrapping. Its child rectangle is shared by PTY resize, draw, mouse routing,
 scrollback and held-grid selection. A geometry change cancels a held pane drag

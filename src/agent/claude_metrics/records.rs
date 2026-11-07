@@ -82,6 +82,20 @@ pub fn decode(value: &Value, expected_session: &str) -> Option<Event> {
     }
 }
 
+/// The event a subagent's own record contributes to what that subagent is
+/// doing: its tool calls and their results, as [`decode`] reads the main
+/// thread's. Only a sidechain record counts.
+pub fn decode_sidechain(value: &Value) -> Option<Event> {
+    if value["isSidechain"] != true {
+        return None;
+    }
+    match value["type"].as_str()? {
+        "assistant" => assistant(value),
+        "user" => results(value),
+        _ => None,
+    }
+}
+
 fn assistant(value: &Value) -> Option<Event> {
     let message = &value["message"];
     let calls = blocks(&message["content"], "tool_use")

@@ -1,5 +1,7 @@
 //! One cancellable startup lookup and one exact-file subscription: a Codex
-//! rollout, a Claude Code transcript, or an Antigravity transcript. The
+//! rollout, a Claude Code transcript, or an Antigravity transcript. A Claude
+//! Code transcript's subscription comes with one to the subagents its session
+//! runs, and the two make one update. The
 //! lookup is bounded and happens once per binding. A missing rollout needs a
 //! new consumer; a missing Claude Code or agy transcript is looked up again on
 //! its tab's next status report.
@@ -20,27 +22,65 @@ const MAX_LOOKUP_ENTRIES: usize = 65_536;
 
 enum Subscription {
     Codex(codex_metrics::watch::Subscription),
-    Claude(claude_metrics::watch::Subscription),
+    Claude(Box<ClaudeFeeds>),
     Agy(agy_metrics::watch::Subscription),
 }
 
+/// A Claude Code session's two feeds, its transcript and the subagents it
+/// runs, each keeping its latest so a change to either sends the whole.
+struct ClaudeFeeds {
+    transcript: claude_metrics::watch::Subscription,
+    subagents: claude_metrics::subagents::Subscription,
+    last: Option<claude_metrics::Update>,
+    running: Vec<claude_metrics::subagents::Subagent>,
+}
+
+impl ClaudeFeeds {
+    fn take(&mut self) -> Option<Update> {
+        let transcript = self.transcript.take();
+        let subagents = self.subagents.take();
+        if transcript.is_none() && subagents.is_none() {
+            return None;
+        }
+        if let Some(running) = subagents {
+            self.running = running;
+        }
+        if transcript.is_some() {
+            self.last = transcript;
+        }
+        let mut update = self.last.clone()?;
+        update.snapshot.subagents.clone_from(&self.running);
+        Some(Update::Claude(Box::new(update)))
+    }
+}
+
 impl Subscription {
-    fn start(binding: Binding, path: PathBuf, wake: impl Fn() + Send + 'static) -> Self {
+    fn start(binding: Binding, path: PathBuf, wake: impl Fn() + Clone + Send + 'static) -> Self {
         match binding {
             Binding::Codex(b) => {
                 Self::Codex(codex_metrics::watch::Subscription::start(b, path, wake))
             }
             Binding::Claude(b) => {
-                Self::Claude(claude_metrics::watch::Subscription::start(b, path, wake))
+                let subagents = claude_metrics::subagents::Subscription::start(
+                    &b.claude_home,
+                    &path,
+                    wake.clone(),
+                );
+                Self::Claude(Box::new(ClaudeFeeds {
+                    transcript: claude_metrics::watch::Subscription::start(b, path, wake),
+                    subagents,
+                    last: None,
+                    running: Vec::new(),
+                }))
             }
             Binding::Agy(b) => Self::Agy(agy_metrics::watch::Subscription::start(b, path, wake)),
         }
     }
 
-    fn take(&self) -> Option<Update> {
+    fn take(&mut self) -> Option<Update> {
         match self {
             Self::Codex(s) => s.take().map(|u| Update::Codex(Box::new(u))),
-            Self::Claude(s) => s.take().map(|u| Update::Claude(Box::new(u))),
+            Self::Claude(feeds) => feeds.take(),
             Self::Agy(s) => s.take().map(|u| Update::Agy(Box::new(u))),
         }
     }
@@ -48,7 +88,7 @@ impl Subscription {
     fn work(&self) -> (u64, u64) {
         match self {
             Self::Codex(s) => s.work(),
-            Self::Claude(s) => s.work(),
+            Self::Claude(feeds) => feeds.transcript.work(),
             Self::Agy(s) => s.work(),
         }
     }
@@ -118,7 +158,7 @@ impl Collector {
                 }
             }
         }
-        self.subscription.as_ref().and_then(Subscription::take)
+        self.subscription.as_mut().and_then(Subscription::take)
     }
 
     pub(super) fn work(&self) -> (u64, u64) {

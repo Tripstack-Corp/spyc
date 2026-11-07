@@ -2,13 +2,19 @@
 //! transcript carries no window size, and the statusline input that does is
 //! the user's.
 
+use crate::agent::claude_metrics::subagents::{ENDED_SHOWN, Subagent};
 use crate::agent::claude_metrics::{Plan, Sample, Snapshot, ToolStatus};
+use jiff::Timestamp;
 
 use ratatui::text::Span;
 
 use super::{
-    AgentRows, Field, HudView, Palette, Reported, Row, Tally, resets, short_count, tools_row,
+    AgentRows, Field, HudView, Metrics, Palette, Reported, Row, Tally, Trailer, resets,
+    short_count, tools_row,
 };
+
+/// The most subagents the `agents` row names, room allowing; the rest it counts.
+const NAMED_SUBAGENTS: usize = 4;
 
 pub(super) fn rows(
     snapshot: Option<&Snapshot>,
@@ -176,6 +182,75 @@ fn tools(s: &Snapshot, tail_only: bool, p: Palette) -> Row {
     tools_row(label, &tallies, Some(&running), p)
 }
 
+/// The subagents a full HUD's `agents` row ends in: each one's type and the
+/// tool it runs now, or how it ended, for a minute after
+/// (`Explore · Grep │ Plan · done`), as many as fit, at most
+/// [`NAMED_SUBAGENTS`], and the rest counted (`+2 more`).
+pub(super) fn subagents(view: &HudView<'_>, p: Palette) -> Option<Trailer> {
+    let s = snapshot(view)?;
+    let shown: Vec<&Subagent> = s
+        .subagents
+        .iter()
+        .filter(|agent| still_shown(agent, view.now))
+        .collect();
+    if shown.is_empty() {
+        return None;
+    }
+    let mut items: Vec<Field> = Vec::new();
+    for agent in &shown {
+        let mut spans = vec![p.strong(agent.agent_type.as_deref().unwrap_or("agent"))];
+        let failed = agent
+            .call
+            .as_ref()
+            .is_some_and(|call| s.failed_agent_calls.contains(call));
+        let state = match agent.ended {
+            Some(_) if failed => Some(p.tint("failed", p.bad)),
+            Some(_) => Some(p.label("done")),
+            None => agent
+                .tool
+                .as_deref()
+                .map(|tool| p.value(&display_name(tool))),
+        };
+        if let Some(state) = state {
+            spans.push(p.label(" · "));
+            spans.push(state);
+        }
+        items.push(Field(spans));
+    }
+    Some(Trailer::List {
+        items,
+        most: NAMED_SUBAGENTS,
+        separator: Field(vec![p.label(" │ ")]),
+        more: p.label("").style,
+    })
+}
+
+/// The compact HUD's count of the subagents running.
+pub(super) fn running_subagents(view: &HudView<'_>, p: Palette) -> Option<Field> {
+    let running = snapshot(view)?
+        .subagents
+        .iter()
+        .filter(|agent| agent.ended.is_none())
+        .count();
+    (running > 0).then(|| p.pair("subagents", p.strong(&running.to_string())))
+}
+
+const fn snapshot<'a>(view: &HudView<'a>) -> Option<&'a Snapshot> {
+    match view.metrics {
+        Metrics::Claude { snapshot, .. } => snapshot,
+        _ => None,
+    }
+}
+
+/// Running, or finished within [`ENDED_SHOWN`] of `now`.
+fn still_shown(agent: &Subagent, now: Option<Timestamp>) -> bool {
+    let shown = i64::try_from(ENDED_SHOWN.as_secs()).unwrap_or(i64::MAX);
+    match (agent.ended, now) {
+        (Some(end), Some(now)) => now.as_second().saturating_sub(end.as_second()) <= shown,
+        _ => true,
+    }
+}
+
 /// spyc's own MCP tools read `spyc:` rather than their full MCP name.
 fn display_name(name: &str) -> String {
     name.strip_prefix("mcp__spyc__")
@@ -278,6 +353,30 @@ mod tests {
             .iter()
             .map(ToString::to_string)
             .collect()
+    }
+
+    /// A subagent that ended shows how for a minute after, by the strip's
+    /// clock, though no read has dropped it since; one running always shows.
+    #[test]
+    fn an_ended_subagent_leaves_the_row_a_minute_after_by_the_strips_clock() {
+        use crate::agent::claude_metrics::subagents::Subagent;
+        let agent = |kind: &str, ended: Option<Timestamp>| Subagent {
+            agent_type: Some(kind.to_owned()),
+            call: None,
+            tool: None,
+            ended,
+        };
+        let snapshot = Snapshot {
+            subagents: vec![agent("Explore", Some(at(0))), agent("Plan", None)],
+            ..session()
+        };
+        let mut shown = view(Some(&snapshot), false);
+        shown.now = Some(at(60));
+        assert!(rows(&shown, 200)[3].contains("Explore · done"));
+        shown.now = Some(at(61));
+        let row = rows(&shown, 200)[3].clone();
+        assert!(!row.contains("Explore"), "{row}");
+        assert!(row.contains("Plan"), "{row}");
     }
 
     #[test]
