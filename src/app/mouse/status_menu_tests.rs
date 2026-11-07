@@ -522,6 +522,34 @@ fn the_git_segments_menu_offers_delete_at_a_clean_linked_worktree() {
     });
 }
 
+/// The git segment's menu runs `:diff`: its row opens the whole branch's
+/// changes since it left `main`, from a directory none of them are in.
+#[test]
+#[ignore = "red: the git segment's menu has no :diff row"]
+fn the_git_segments_diff_row_opens_the_branchs_diff() {
+    with_mouse(|base| {
+        let repo = crate::git::test_support::branch_repo(base);
+        let other = repo.join("other");
+        let mut app = App::test_app(other.clone());
+        app.view.term_size = (120, HEIGHT);
+        read_git(&mut app, &other);
+        let segment = on_bar(&mut app, "\u{e0a0}");
+        right_click(&mut app, segment);
+
+        let row = menu_row(&mut app, "git", ":diff");
+        click(&mut app, row);
+
+        let (title, text) = app
+            .land_git_view()
+            .unwrap_or_else(|| panic!("the row opens a diff: {:?}", app.flash_text()));
+        for name in ["alpha", "bravo", "charlie", "delta"] {
+            assert!(text.contains(&format!("{name}.txt")), "{name}: {text}");
+        }
+        assert!(!text.contains("echo.txt"), "main's own work: {text}");
+        assert!(title.contains("main"), "since main: {title}");
+    });
+}
+
 // ── the agent and session segments ──
 
 /// An App over `work/` with a `cat` tab that spyc takes for claude, the

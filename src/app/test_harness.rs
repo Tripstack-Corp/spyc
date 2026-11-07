@@ -65,6 +65,32 @@ impl App {
         p.left.cursor.clamp(len);
     }
 
+    /// Wait for the git view a key or command started to land, as the loop's
+    /// drain lands it: its pager's title and text once mounted. `None` when
+    /// none was started, or it landed as a flash instead of a pager.
+    pub(crate) fn land_git_view(&mut self) -> Option<(String, String)> {
+        use std::time::{Duration, Instant};
+        self.runtime.project().pending_git_view.as_ref()?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !self.drain_pending_git_view() {
+            assert!(Instant::now() < deadline, "the git view never landed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let pager = self.view.project().pager.as_ref()?;
+        let text = pager
+            .lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some((pager.title.clone(), text))
+    }
+
     /// Flash message text, if any — compact assertion helper.
     pub(crate) fn flash_text(&self) -> Option<&str> {
         self.state.flash.as_ref().map(|f| f.text.as_str())

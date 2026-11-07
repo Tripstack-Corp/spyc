@@ -512,6 +512,7 @@ mod agent_waiting;
 mod agy_live;
 mod archive;
 mod blocked_label;
+mod branch_diff;
 mod claude_home;
 mod codex_home;
 mod codex_images;
