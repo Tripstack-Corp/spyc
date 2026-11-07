@@ -238,6 +238,28 @@ fn a_stopped_agent_leaves_the_tab_a_shell_until_it_is_brought_back() {
     });
 }
 
+/// An agent can take the foreground long after its line's echo, the output
+/// the tab's look was scheduled on, as `make && claude` starts it once the
+/// build is done. That look finds the build, and the agent's own drawing is
+/// what schedules the look that finds the agent.
+#[test]
+#[ignore = "red: the fake agent never draws, so nothing schedules a look after it starts"]
+fn an_agent_started_late_in_its_line_is_seen_once_it_draws() {
+    use crate::state::sessions::AgentKind;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let bin = fake_agents(&dir);
+        let mut app = App::test_app(dir.clone());
+        assert!(app.open_pane_tab_in("sh", &dir));
+        let late = format!("sleep 1 && {}", run_fake_agent(&bin.join("claude")));
+        type_until(&mut app, &late, "claude", |info| {
+            kind_of(info) == AgentKind::Claude
+        });
+        type_until(&mut app, "\x03", "exit", |info| info.running.is_none());
+    });
+}
+
 /// Restore relaunches the tab's command, so a shell tab running an agent is
 /// saved as its shell, with no conversation for restore to type into it.
 #[test]
