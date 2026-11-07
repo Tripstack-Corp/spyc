@@ -1308,7 +1308,9 @@ repack writes back comes from the index, never off disk.
 **Seekable vs streamed.** A zip or plain tar is indexed only and materialized
 per entry. A compressed tar cannot be listed without decompressing it, so it
 extracts as it streams under `[archive] extract_budget_mb` — the budget counts
-bytes that *arrive*, not bytes a header declares.
+bytes that *arrive*, not bytes a header declares. What a mount records as
+spyc's own, each staged copy's size and modification time, is read on the
+worker as its read finishes, so the event loop never stats every member.
 
 **One read of an archive at a time** (`app/archive/reads.rs`). Every read of an
 archive stages into the same tree, so a second read of a compressed tar would
@@ -1322,8 +1324,8 @@ from an emptied tree, so a second write, a delete, rename or put into that
 archive, a discard, an unmount and a mount of an archive inside it are refused
 until it has landed, and an archive with one mounted inside it is not written.
 An edit saved to an extracted copy can't be refused, so one saved after the
-write was planned is held aside from the re-read and put back, pending, once
-the archive is mounted again. **A read-only mount refuses an edit when it
+write was planned is held aside by the re-read, on its worker just before it
+empties the tree, and put back, pending, once the archive is mounted again. **A read-only mount refuses an edit when it
 is made**, with its capability's reason: at the key through
 `AppState::mount_refusal`, which the entry menu filters on, and at the effect
 screen, which every change the journal records passes through. An edit saved

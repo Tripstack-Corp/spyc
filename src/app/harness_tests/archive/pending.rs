@@ -1109,7 +1109,6 @@ fn an_edit_saved_while_a_closed_projects_write_ran_is_kept_pending() {
 /// editor left open across a write can save into the tree its re-read has just
 /// refilled, is a change.
 #[test]
-#[ignore = "red: the mount records the tree as it is when it lands, so an edit made before then reads as spyc's own"]
 fn a_copy_changed_before_its_mount_lands_is_a_change() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -1144,7 +1143,6 @@ fn a_copy_changed_before_its_mount_lands_is_a_change() {
 /// staging tree is kept, pending, as one saved while the write ran is: the
 /// re-read holds it aside itself, right before it empties the tree.
 #[test]
-#[ignore = "red: edits are held aside when the write lands, so one saved before the re-read runs goes with the tree"]
 fn an_edit_saved_before_the_re_read_runs_is_kept_pending() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

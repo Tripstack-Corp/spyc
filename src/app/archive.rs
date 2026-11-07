@@ -23,7 +23,7 @@ mod reads;
 mod screen;
 mod writes;
 
-pub(super) use writes::Held;
+pub(super) use writes::{Held, LateEdits, hold_late_edits};
 
 pub(super) use reads::Joined;
 
@@ -86,6 +86,7 @@ impl App {
             address: None,
             depth: 0,
             reset_staging: false,
+            hold: None,
         })]
     }
 
@@ -151,6 +152,7 @@ impl App {
             address: Some(at.to_path_buf()),
             depth,
             reset_staging: false,
+            hold: None,
         })]
     }
 
@@ -163,11 +165,13 @@ impl App {
     /// separate `Clean` would race the extraction refilling that directory.
     ///
     /// `nested_source` is the staged copy for an archive that lives inside
-    /// another one; `None` for a file on disk.
+    /// another one; `None` for a file on disk. `hold` is what the re-read
+    /// needs to hold aside the edits saved since the write was planned.
     pub(super) fn request_remount(
         &mut self,
         archive: &Path,
         nested_source: Option<PathBuf>,
+        hold: Option<Box<LateEdits>>,
     ) -> Vec<Effect> {
         let Some(staging_root) = staging_root_for(archive) else {
             self.state
@@ -198,6 +202,7 @@ impl App {
             address: Some(archive.to_path_buf()),
             depth,
             reset_staging: true,
+            hold,
         })]
     }
 
@@ -282,6 +287,8 @@ impl App {
         }
         let mut effects = Vec::new();
         for (origin, outcome) in landed {
+            // First, so the write and read it ends see the re-read's own outcome.
+            let outcome = self.keep_held(outcome);
             self.finish_write(&outcome);
             let joined = self.finish_read(&outcome);
             let mounted = match &outcome {
@@ -367,9 +374,17 @@ impl App {
                 capability,
                 warnings,
                 staging_root,
+                staged,
                 then,
                 depth,
-            } => self.apply_mounted(*index, capability, warnings, staging_root, then, depth),
+            } => self.apply_mounted(
+                landed_mount(*index, capability, warnings, staging_root, staged, depth),
+                then,
+            ),
+            held @ ArchiveOutcome::HeldAside { .. } => {
+                let outcome = self.keep_held(held);
+                self.apply_one_archive_outcome(outcome)
+            }
             // A question is modal: asked over another project, it would be
             // answered for the wrong place.
             ArchiveOutcome::NeedsConfirm { path, .. } if self.state.in_background => {
@@ -456,6 +471,7 @@ impl App {
                 capability,
                 warnings,
                 staging_root,
+                staged,
                 depth,
                 then,
             } => {
@@ -463,7 +479,14 @@ impl App {
                     self.flash_held_back_dropped();
                 }
                 let archive = index.archive.clone();
-                let effects = self.record_mount(*index, capability, warnings, staging_root, depth);
+                let effects = self.record_mount(landed_mount(
+                    *index,
+                    capability,
+                    warnings,
+                    staging_root,
+                    staged,
+                    depth,
+                ));
                 self.restore_late_edits(&archive);
                 effects
             }
@@ -526,18 +549,10 @@ impl App {
 
     /// A mount landed: record it in the (global) mount table, then enter it,
     /// or hand back the effect that was waiting for it.
-    fn apply_mounted(
-        &mut self,
-        index: crate::archive::index::ArchiveIndex,
-        capability: crate::archive::scan::Capability,
-        warnings: Vec<String>,
-        staging_root: PathBuf,
-        then: Option<Box<Effect>>,
-        depth: usize,
-    ) -> Vec<Effect> {
-        let archive = index.archive.clone();
-        let notes = mount_notes(&capability, &warnings);
-        let mut effects = self.record_mount(index, capability, warnings, staging_root, depth);
+    fn apply_mounted(&mut self, mount: ArchiveMount, then: Option<Box<Effect>>) -> Vec<Effect> {
+        let archive = mount.archive().to_path_buf();
+        let notes = mount_notes(&mount.capability, &mount.warnings);
+        let mut effects = self.record_mount(mount);
         // Enter it, then say what was odd about it — the flash outlives
         // the chdir, so the note is what the user is left reading. A
         // held-back effect names where to land instead, and re-running it
@@ -564,31 +579,8 @@ impl App {
 
     /// Record a landed mount in the (global) mount table, handing back the
     /// clean-up of whatever it evicted.
-    fn record_mount(
-        &mut self,
-        index: crate::archive::index::ArchiveIndex,
-        capability: crate::archive::scan::Capability,
-        warnings: Vec<String>,
-        staging_root: PathBuf,
-        depth: usize,
-    ) -> Vec<Effect> {
+    fn record_mount(&mut self, mount: ArchiveMount) -> Vec<Effect> {
         let protected = self.protected_archives();
-        let mut mount = ArchiveMount {
-            index,
-            journal: Journal::default(),
-            staged: StagedStats::new(),
-            capability,
-            warnings,
-            staging_root,
-            last_used: 0,
-            depth,
-            editing: Vec::new(),
-        };
-        // Whatever is on disk at mount time is what spyc just put there —
-        // a streamed mount wrote every member during the pass. Recording
-        // it is what stops the first dirty check from reading the whole
-        // archive as edited behind our back.
-        mount.staged = on_disk_stats(&mount);
         clean_effects(self.state.mounts.insert(mount, &protected))
     }
 
@@ -598,26 +590,22 @@ impl App {
         archive: PathBuf,
         report: crate::archive::write::RepackReport,
     ) -> Vec<Effect> {
-        // The journal is only cleared once the archive on disk actually
-        // holds the changes — a failed write leaves them pending.
-        if let Some(mount) = self.state.mounts.get_mut(&archive) {
-            mount.journal.clear();
-            mount.staged.clear();
-        }
         self.flash_written(&archive, &report);
         // Re-read it: a repack renumbers a zip's entries and moves a tar's
         // offsets, so every locator in the old index now points at the
         // wrong bytes. The mount has to be *dropped* for that to happen —
         // a live one is re-entered rather than re-indexed, which is right
-        // everywhere except here. A nested archive is read from its staged
-        // copy, which the write just replaced in place.
+        // everywhere except here. Its journal goes with it: only now does
+        // the archive on disk hold the changes, so a failed write leaves
+        // them pending. A nested archive is read from its staged copy,
+        // which the write just replaced in place.
         let nested = self
             .state
             .mounts
             .get(&archive)
             .and_then(|m| (m.depth > 0).then(|| m.source().to_path_buf()));
-        self.state.mounts.remove(&archive);
-        let effects = self.request_remount(&archive, nested);
+        let hold = self.end_write(&archive);
+        let effects = self.request_remount(&archive, nested, hold);
         // Writing an archive that lives inside another one changes a file
         // in that one's staging, so the outer now has a pending change of
         // its own. Say so rather than leaving it to the quit warning.
@@ -848,6 +836,31 @@ fn staging_root_for(archive: &Path) -> Option<PathBuf> {
     Some(archives_root()?.join(format!("{}-{:016x}", std::process::id(), hasher.finish())))
 }
 
+/// The mount a read landed, recording `staged`, the tree as the read left
+/// it, as spyc's own. The dirty check compares only what spyc recorded, so a
+/// streamed mount, which writes every member during the pass, records them
+/// all for an edit to any of them to be seen.
+fn landed_mount(
+    index: crate::archive::index::ArchiveIndex,
+    capability: crate::archive::scan::Capability,
+    warnings: Vec<String>,
+    staging_root: PathBuf,
+    staged: StagedStats,
+    depth: usize,
+) -> ArchiveMount {
+    ArchiveMount {
+        index,
+        journal: Journal::default(),
+        staged,
+        capability,
+        warnings,
+        staging_root,
+        last_used: 0,
+        depth,
+        editing: Vec::new(),
+    }
+}
+
 /// Whether `then` carries an effect held back for the member, rather than
 /// acting on the extracted copy in a project's view.
 const fn holds_back_work(then: &MaterializeThen) -> bool {
@@ -870,7 +883,7 @@ fn display_name(path: &Path) -> String {
 /// stat per extracted member however large the archive.
 fn current_staged_stats(mount: &ArchiveMount) -> StagedStats {
     stats_of(
-        mount,
+        &mount.staging_root,
         mount
             .staged
             .keys()
@@ -878,15 +891,20 @@ fn current_staged_stats(mount: &ArchiveMount) -> StagedStats {
     )
 }
 
-/// Stat every member with a file in the staging tree, whoever put it there:
-/// what a new mount records as spyc's own, and what a landed write's re-read
-/// would otherwise wipe. A tree with nothing in it, as a seekable mount's is
-/// when it lands, has no member to stat, and one look says so.
-fn on_disk_stats(mount: &ArchiveMount) -> StagedStats {
-    if holds_nothing(&mount.staging_root) {
+/// Stat every member of `index` with a file in the staging tree `staging_root`,
+/// whoever put it there: what a new mount records as spyc's own, and what a
+/// write's re-read would otherwise wipe. Both run on the archive worker, as a
+/// stat per member is a walk of the whole archive. A tree with nothing in it,
+/// as a seekable mount's is when it is read, has no member to stat, and one
+/// look says so.
+pub(super) fn on_disk_stats(
+    index: &crate::archive::index::ArchiveIndex,
+    staging_root: &Path,
+) -> StagedStats {
+    if holds_nothing(staging_root) {
         return StagedStats::new();
     }
-    stats_of(mount, mount.index.entries.iter())
+    stats_of(staging_root, index.entries.iter())
 }
 
 /// Whether `dir` is missing or empty. A read that fails otherwise says
@@ -899,12 +917,12 @@ fn holds_nothing(dir: &Path) -> bool {
 }
 
 fn stats_of<'a>(
-    mount: &ArchiveMount,
+    staging_root: &Path,
     entries: impl Iterator<Item = &'a crate::archive::IndexEntry>,
 ) -> StagedStats {
     let mut now = StagedStats::new();
     for entry in entries {
-        let path = mount.staging_path(entry);
+        let path = crate::archive::listing::staging_path(staging_root, entry);
         let Ok(md) = std::fs::metadata(&path) else {
             continue;
         };

@@ -302,8 +302,13 @@ impl Mounts {
 
     /// Drop a mount, returning its staging root to clean up.
     pub fn remove(&mut self, archive: &Path) -> Option<PathBuf> {
+        self.take(archive).map(|mount| mount.staging_root)
+    }
+
+    /// Drop a mount, handing it back.
+    pub fn take(&mut self, archive: &Path) -> Option<ArchiveMount> {
         let pos = self.live.iter().position(|m| m.archive() == archive)?;
-        Some(self.live.remove(pos).staging_root)
+        Some(self.live.remove(pos))
     }
 
     /// Hand back a staging root whose mount is gone but which nobody has removed
