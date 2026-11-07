@@ -1327,6 +1327,15 @@ bytes that *arrive*, not bytes a header declares. What a mount records as
 spyc's own, each staged copy's size and modification time, is read on the
 worker as its read finishes, so the event loop never stats every member.
 
+**A mount's staging tree is watched** (`app/archive/edits.rs`), so a check for
+changes stats only the members the watch named, not every member spyc
+recorded, which for a compressed tar is all of them. The worker starts the
+watch before it records the tree, so an edit after the record is one the
+watch names. A mount whose watch can't start, as when inotify runs out of
+watches, or that drops events or fails, is checked by statting every recorded
+member again, as before. A copy spyc never recorded is not an edit, so the
+watch seeing spyc extract a member changes nothing.
+
 **One read of an archive at a time** (`app/archive/reads.rs`). Every read of an
 archive stages into the same tree, so a second read of a compressed tar would
 land after the first and rewrite every member, an edit saved in between

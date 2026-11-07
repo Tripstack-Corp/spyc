@@ -82,6 +82,8 @@ impl App {
     fn open_menu(&mut self, target: Target, title: String) -> Option<Effect> {
         let mut rows = self.menu_rows(target);
         if matches!(target, Target::Entry(_)) {
+            // What the staging watches saw since the loop last looked counts.
+            self.note_staging_edits();
             rows.extend(self.archive_rows());
         }
         self.show_menu(format!("{title} · ? all keys"), rows)

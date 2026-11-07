@@ -363,6 +363,7 @@ fn a_project_is_not_offered_a_home_inside_an_archive() {
             depth: 0,
             reset_staging: false,
             hold: None,
+            watch: None,
         });
         assert!(
             matches!(outcome, ArchiveOutcome::Mounted { .. }),

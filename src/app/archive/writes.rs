@@ -58,6 +58,7 @@ impl App {
     /// saved since the write was planned.
     pub(super) fn end_write(&mut self, archive: &Path) -> Option<Box<LateEdits>> {
         let planned = self.runtime.archive_writes.remove(archive);
+        self.runtime.staging_watches.remove(archive);
         let mount = self.state.mounts.take(archive)?;
         Some(Box::new(LateEdits {
             index: mount.index,

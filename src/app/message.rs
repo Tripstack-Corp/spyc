@@ -166,7 +166,8 @@ pub enum Wake {
     /// outcome on `runtime.archive_results` — a mount, a materialized member,
     /// or a staging cleanup. Payloadless wake of the same shape as
     /// `Graveyard`; `apply_archive_outcomes` drains it in the pre-recv
-    /// scan.
+    /// scan. A mount's staging watch wakes with it too, for
+    /// `settle_archive_edits` to take what the watch saw.
     Archive,
     /// An off-thread file op (`Effect::FileOp`) finished and landed its outcome on
     /// `runtime.file_results`.
