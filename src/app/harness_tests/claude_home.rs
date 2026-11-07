@@ -146,7 +146,7 @@ fn saved_tab(app: &mut App) -> serde_json::Value {
 }
 
 /// One pass of the loop's drain and settle, as `App::run` makes before it waits.
-fn tick(app: &mut App, ctx: &mut RunCtx) {
+pub(super) fn tick(app: &mut App, ctx: &mut RunCtx) {
     let mut terminal = Terminal::with_options(
         CrosstermBackend::new(std::io::stdout()),
         TerminalOptions {
