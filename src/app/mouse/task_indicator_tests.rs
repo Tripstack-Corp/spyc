@@ -229,3 +229,48 @@ fn off_the_task_tags_the_divider_is_as_before() {
         assert!(offers(&menu, "^a c"), "{menu:#?}");
     });
 }
+
+// ── a message already on the status bar ──
+
+const WAITING: &str = "opened in external viewer";
+
+/// Fade the menu hint of the action or command named `name`, as using its key
+/// that many times does.
+fn learn(app: &mut App, name: &str) {
+    let after = app.state.active_project().config.ui.menu_hints_fade_after;
+    for _ in 0..after {
+        app.state.learned.record(name, after);
+    }
+}
+
+/// What the open pager shows in its footer.
+fn pager_flash(app: &App) -> Option<String> {
+    app.view
+        .project()
+        .pager
+        .as_ref()
+        .and_then(|v| v.flash.clone())
+}
+
+/// A click on the task tags is `gB` typed: a message left on the status bar is
+/// cleared, as `gB` clears it, and never shown in the viewer it opens as the
+/// click's answer (`gB` learned, so the click names no key).
+#[test]
+#[ignore = "red: a click on the task tags shows a message left on the status bar in the viewer"]
+fn a_click_on_the_task_tags_clears_a_waiting_message_rather_than_showing_it() {
+    with_mouse(|tmp| {
+        let mut app = app_with_tasks(tmp, 1, true);
+        learn(
+            &mut app,
+            crate::keymap::Action::OpenTaskViewer.canonical_name(),
+        );
+        let at = task_tag(&mut app, 1);
+        app.state.flash_error(WAITING);
+
+        click(&mut app, at);
+
+        assert_eq!(viewed_task(&app), Some(1), "premise: the viewer opened");
+        assert_eq!(pager_flash(&app), None, "the click said nothing");
+        assert_eq!(flash(&app), None, "cleared, as the key clears it");
+    });
+}
