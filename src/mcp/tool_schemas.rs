@@ -370,7 +370,7 @@ pub fn tools() -> Value {
             },
             {
                 "name": "git_diff",
-                "description": "Unified diff of the focused column's worktree, in-process (don't shell out to `git diff` — and the production guard forbids it). Three scopes: default = the working tree (staged + unstaged + untracked) vs HEAD; `cached:true` = staged vs HEAD (what would commit); `unstaged:true` = the index vs the working tree (plain `git diff` — only what changed SINCE you staged). The last is the read you want when someone stages a checkpoint and then keeps editing. Returns `git diff`-style unified text (empty string when there's nothing to show). Pass `root` for a different worktree, and `paths` to restrict to specific files/subtrees.",
+                "description": "Unified diff of the focused column's worktree, in-process (don't shell out to `git diff` — and the production guard forbids it). Four scopes: default = the working tree (staged + unstaged + untracked) vs HEAD; `cached:true` = staged vs HEAD (what would commit); `unstaged:true` = the index vs the working tree (plain `git diff` — only what changed SINCE you staged), the read you want when someone stages a checkpoint and then keeps editing; `base:\"main\"` = what this branch has changed since it left `main` (its commits plus its uncommitted and untracked work, without what landed on `main` after it forked), the answer to \"what has this branch changed?\". Returns `git diff`-style unified text (empty string when there's nothing to show). Pass `root` for a different worktree, and `paths` to restrict to specific files/subtrees.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -381,6 +381,10 @@ pub fn tools() -> Value {
                         "unstaged": {
                             "type": "boolean",
                             "description": "If true, diff the index vs the working tree (plain `git diff` — only the unstaged changes, i.e. what changed since you last staged). Takes precedence over `cached`."
+                        },
+                        "base": {
+                            "type": "string",
+                            "description": "A branch, tag or commit: diff the working tree (staged + unstaged + untracked) against the merge-base of HEAD and this base, i.e. everything the branch changed since it left it. A local branch with an `origin/<name>` counterpart uses whichever merge-base is later, so a branch rebased onto `origin/main` doesn't count commits local `main` hasn't pulled. Empty string = the repo's default branch. Can't be combined with `cached` or `unstaged`."
                         },
                         "paths": {
                             "type": "array",

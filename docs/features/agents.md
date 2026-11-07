@@ -168,14 +168,16 @@ a pane is never stranded.
   `{path, staged, unstaged, untracked}` per changed path.
 - **`git_log([limit])`** -- recent commits newest-first,
   `{short_id, author, time, subject}` per commit.
-- **`git_diff([cached], [unstaged], [paths])`** -- unified-diff text
-  at one of three scopes: the working tree (staged + unstaged +
-  untracked) vs HEAD (default), `cached:true` for staged-vs-HEAD, or
+- **`git_diff([cached], [unstaged], [base], [paths])`** -- unified-diff
+  text at one of four scopes: the working tree (staged + unstaged +
+  untracked) vs HEAD (default), `cached:true` for staged-vs-HEAD,
   `unstaged:true` for the index vs the working tree (plain `git diff` —
   only what changed since the last `git add`, the read for a
-  stage-then-keep-editing checkpoint); `paths` restricts to specific
-  files/subtrees. The read for reviewing your own changes before
-  committing.
+  stage-then-keep-editing checkpoint), or `base:"main"` for everything
+  the branch changed since it left `main`, committed or not (`gm`'s and
+  `:diff`'s view, with the same base rule); `paths` restricts to
+  specific files/subtrees. The read for reviewing your own changes
+  before committing.
 
 **Working in another worktree (`root`):** every read/search/git tool
 above (`get_file_content`, `search_paths`, `search_content`,
@@ -211,7 +213,7 @@ Contents:
 | `SKILL.md` | grounding via `get_spyc_context`, the shell-vs-spyc tool table, status reporting, scope coordination, the gotchas |
 | `references/worktrees.md` | full worktree lifecycle, claims, the scope registry, the squash-merge kept-branch case |
 | `references/search.md` | which of the four search corpora to use, and `root` scoping |
-| `references/git.md` | the three `git_diff` scopes, and when to shell out anyway |
+| `references/git.md` | the `git_diff` scopes, and when to shell out anyway |
 
 The skill is the depth under spyc's MCP server. The instructions the server
 gives every agent are kept short, since an agent may repeat them alongside each
