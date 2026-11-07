@@ -640,12 +640,13 @@ impl super::App {
     }
 
     /// Report an image-path message wherever the user is actually looking: the
-    /// pager's status line when one is open (a diagram is always opened *from* a
-    /// pager), the main status bar otherwise (an image file opened from the
-    /// list has no pager — the message would be swallowed).
+    /// footer of the pager that has the keyboard when one is open (a diagram is
+    /// always opened *from* a pager, perhaps a scrollback below a `D` pager),
+    /// the main status bar otherwise (an image file opened from the list has no
+    /// pager — the message would be swallowed).
     fn flash_image_status(&mut self, msg: &str) {
-        if let Some(pager) = self.view.project_mut().pager.as_mut() {
-            pager.flash = Some(msg.to_string());
+        if self.active_pager_ref().is_some() {
+            self.set_active_pager_flash(msg.to_string());
         } else {
             self.state.flash_error(msg);
         }
