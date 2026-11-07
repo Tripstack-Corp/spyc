@@ -108,7 +108,7 @@ impl AgentProfile for ClaudeProfile {
     fn transcript(&self) -> Option<TranscriptSpec> {
         Some(TranscriptSpec {
             resolve: crate::state::claude_transcript::resolve_active_jsonl,
-            render: crate::state::claude_transcript::render_transcript,
+            render: crate::state::claude_transcript::render_transcript_doc,
             config_key: Some("claude_transcript_scrollback"),
             default_enabled: false,
             miss_message: None,

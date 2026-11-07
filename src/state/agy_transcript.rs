@@ -60,19 +60,19 @@ fn resolve_under_home(home: &Path, q: crate::agent::TranscriptQuery) -> Option<P
 /// `tool_calls` while `show_tool_calls` is on) in `truncated_fields`,
 /// its untruncated counterpart is resolved by `step_index` from the
 /// sibling `transcript_full.jsonl` when present.
-pub fn render_transcript(
+pub fn render_transcript_doc(
     path: &Path,
     theme: &Theme,
     width: Option<usize>,
     show_tool_calls: bool,
-) -> Vec<Line<'static>> {
+) -> crate::state::TranscriptDoc {
     let Some(file) = open_regular_file(path) else {
-        return Vec::new();
+        return crate::state::TranscriptDoc::default();
     };
     let Ok(text) =
         crate::state::read_file_tail_lossy(file, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
-        return Vec::new();
+        return crate::state::TranscriptDoc::default();
     };
     let (records, needed_steps) = parse_rendered_records(&text, show_tool_calls);
     let full_records = load_full_records(path, &needed_steps, show_tool_calls, MAX_FULL_SCAN_BYTES);
@@ -85,7 +85,7 @@ pub fn render_transcript(
             .fg(theme.prompt_prefix)
             .add_modifier(Modifier::BOLD),
         tool_style: Style::default().fg(theme.take),
-        out: Vec::new(),
+        out: crate::state::TranscriptDoc::default(),
         last_was_blank: true,
         last_was_prose: false,
     };
@@ -105,7 +105,7 @@ struct TranscriptPage<'a> {
     show_tool_calls: bool,
     user_style: Style,
     tool_style: Style,
-    out: Vec<Line<'static>>,
+    out: crate::state::TranscriptDoc,
     last_was_blank: bool,
     last_was_prose: bool,
 }
@@ -130,15 +130,15 @@ impl TranscriptPage<'_> {
             let stripped = strip_user_request_tags(raw_content).trim();
             if !stripped.is_empty() {
                 crate::state::push_transcript_prompt(
-                    &mut self.out,
+                    &mut self.out.lines,
                     &mut self.last_was_blank,
                     stripped,
                     self.user_style,
                 );
             }
             if unhydrated_content {
-                crate::state::push_transcript_blank(&mut self.out, &mut self.last_was_blank);
-                self.out.push(Line::from("[truncated]"));
+                crate::state::push_transcript_blank(&mut self.out.lines, &mut self.last_was_blank);
+                self.out.lines.push(Line::from("[truncated]"));
                 self.last_was_blank = false;
             }
             self.last_was_prose = false;
@@ -154,8 +154,8 @@ impl TranscriptPage<'_> {
                 self.last_was_prose = true;
             }
             if unhydrated_content {
-                crate::state::push_transcript_blank(&mut self.out, &mut self.last_was_blank);
-                self.out.push(Line::from("[truncated]"));
+                crate::state::push_transcript_blank(&mut self.out.lines, &mut self.last_was_blank);
+                self.out.lines.push(Line::from("[truncated]"));
                 self.last_was_blank = false;
                 self.last_was_prose = true;
             }
@@ -180,13 +180,14 @@ impl TranscriptPage<'_> {
                 if !labels.is_empty() {
                     if self.last_was_prose {
                         crate::state::push_transcript_blank(
-                            &mut self.out,
+                            &mut self.out.lines,
                             &mut self.last_was_blank,
                         );
                         self.last_was_prose = false;
                     }
                     for label in labels {
                         self.out
+                            .lines
                             .push(Line::from(Span::styled(label, self.tool_style)));
                         self.last_was_blank = false;
                     }
@@ -921,6 +922,16 @@ fn decode_arg_scalar(val: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rendered transcript's lines.
+    fn render_transcript(
+        path: &Path,
+        theme: &Theme,
+        width: Option<usize>,
+        show_tool_calls: bool,
+    ) -> Vec<Line<'static>> {
+        render_transcript_doc(path, theme, width, show_tool_calls).lines
+    }
 
     #[test]
     fn missing_file_is_empty() {
@@ -1914,5 +1925,36 @@ mod tests {
             Ok((0, 0, 1, true)),
             "FIFO at transcript.jsonl or transcript_full.jsonl blocked the worker instead of returning immediately"
         );
+    }
+
+    /// Model prose's diagram is reported where the transcript shows it, so the
+    /// scrollback's `i` and `o` find it.
+    #[test]
+    fn a_diagram_in_model_prose_is_reported_where_it_shows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.jsonl");
+        let rows = [
+            serde_json::json!({"source": "USER_EXPLICIT", "type": "USER_INPUT",
+                               "content": "<USER_REQUEST>draw it</USER_REQUEST>"}),
+            serde_json::json!({"source": "MODEL", "type": "PLANNER_RESPONSE",
+                               "content": "The flow:\n\n```mermaid\ngraph TD\n  A --> B\n```\n\nDone."}),
+        ];
+        let body = rows
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        std::fs::write(&path, body).unwrap();
+
+        let doc = render_transcript_doc(&path, &Theme::default(), None, true);
+        let [block] = doc.mermaid_blocks.as_slice() else {
+            panic!("one diagram: {:?}", doc.mermaid_blocks);
+        };
+        assert_eq!(block.source, "graph TD\n  A --> B");
+        let header = flatten(&doc.lines[block.line_range.start..=block.line_range.start]);
+        assert!(header.contains("mermaid diagram"), "{header}");
+        let shown = flatten(&doc.lines[block.line_range.clone()]);
+        assert!(shown.contains("A --> B"), "{shown}");
     }
 }

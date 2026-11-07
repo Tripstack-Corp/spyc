@@ -207,19 +207,19 @@ fn read_session_meta(path: &Path) -> Option<(String, u64)> {
 }
 
 /// Parse a codex rollout JSONL file into styled pager lines, in
-/// chronological order. Returns an empty vec on read failure. Agent
+/// chronological order. Returns an empty transcript on read failure. Agent
 /// prose is rendered through the Markdown viewer (`width` hints
 /// prose/table reflow); user prompts and tool lines stay plain.
-pub fn render_transcript(
+pub fn render_transcript_doc(
     path: &Path,
     theme: &Theme,
     width: Option<usize>,
     show_tool_calls: bool,
-) -> Vec<Line<'static>> {
+) -> crate::state::TranscriptDoc {
     let Ok(text) =
         super::codex_history::read_with_history(path, crate::state::MAX_TRANSCRIPT_TAIL_BYTES)
     else {
-        return Vec::new();
+        return crate::state::TranscriptDoc::default();
     };
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
@@ -230,7 +230,7 @@ pub fn render_transcript(
     // previews near-invisible on dark backgrounds (dogfood report).
     let dim_style = Style::default().fg(theme.status_suffix);
 
-    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut out = crate::state::TranscriptDoc::default();
     let mut last_was_blank = true; // suppress leading blank
     let mut seen = HashSet::new();
     let mut session = String::new();
@@ -259,7 +259,7 @@ pub fn render_transcript(
             match record.kind {
                 RecordKind::User(msg) => {
                     crate::state::push_transcript_prompt(
-                        &mut out,
+                        &mut out.lines,
                         &mut last_was_blank,
                         &msg,
                         user_style,
@@ -276,7 +276,7 @@ pub fn render_transcript(
                 }
                 RecordKind::ToolCall { name, arguments } if show_tool_calls => {
                     let args_summary = summarize_args(&arguments);
-                    out.push(Line::from(Span::styled(
+                    out.lines.push(Line::from(Span::styled(
                         format!("\u{2699} {name}({args_summary})"),
                         tool_style,
                     )));
@@ -285,7 +285,7 @@ pub fn render_transcript(
                 RecordKind::ToolOutput(output) if show_tool_calls => {
                     let first = output.lines().next().unwrap_or("");
                     let summary = crate::state::truncate_chars(first, 100);
-                    out.push(Line::from(Span::styled(
+                    out.lines.push(Line::from(Span::styled(
                         format!("  \u{2514} {summary}"),
                         dim_style,
                     )));
@@ -312,6 +312,16 @@ mod record_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rendered transcript's lines.
+    fn render_transcript(
+        path: &Path,
+        theme: &Theme,
+        width: Option<usize>,
+        show_tool_calls: bool,
+    ) -> Vec<Line<'static>> {
+        render_transcript_doc(path, theme, width, show_tool_calls).lines
+    }
 
     #[test]
     fn summarize_args_flattens_and_truncates() {

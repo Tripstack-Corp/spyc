@@ -178,7 +178,6 @@ fn assert_i_and_o_render_the_diagram(app: &mut App) {
 /// The reported case: Claude draws a diagram, and `i` / `o` on it in `^a v` do
 /// what the header above it promises.
 #[test]
-#[ignore = "red: a transcript scrollback drops its mermaid blocks"]
 fn i_and_o_render_a_diagram_in_a_claude_transcript_scrollback() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -202,7 +201,6 @@ fn i_and_o_render_a_diagram_in_a_claude_transcript_scrollback() {
 /// A long conversation keeps only its newest lines; a diagram among them is
 /// still the one `i` and `o` find once the older lines are dropped.
 #[test]
-#[ignore = "red: a transcript scrollback drops its mermaid blocks"]
 fn a_diagram_survives_a_long_claude_transcript_dropping_its_oldest_lines() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -247,7 +245,6 @@ fn a_diagram_survives_a_long_claude_transcript_dropping_its_oldest_lines() {
 
 /// Codex's rollout, the same.
 #[test]
-#[ignore = "red: a transcript scrollback drops its mermaid blocks"]
 fn i_and_o_render_a_diagram_in_a_codex_transcript_scrollback() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -285,7 +282,6 @@ fn i_and_o_render_a_diagram_in_a_codex_transcript_scrollback() {
 /// The scrollback is borderless, so it has no title bar for a flash; what its
 /// keys flash still reaches the screen. Here, `o` with no diagram in view.
 #[test]
-#[ignore = "red: a borderless pager draws no flash"]
 fn a_flash_from_a_scrollback_key_is_on_screen() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();

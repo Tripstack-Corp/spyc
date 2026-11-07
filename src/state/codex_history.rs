@@ -160,12 +160,13 @@ mod tests {
             FORK,
             &(meta(FORK, Some((PARENT, before.len()))) + &user("the fork's own")),
         );
-        let lines = super::super::codex_transcript::render_transcript(
+        let lines = super::super::codex_transcript::render_transcript_doc(
             &fork,
             &crate::ui::theme::Theme::default(),
             None,
             true,
-        );
+        )
+        .lines;
         let text: String = lines
             .iter()
             .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
@@ -199,12 +200,13 @@ mod tests {
             FORK,
             &(meta(FORK, Some((PARENT, before.len()))) + &current_user("current child prompt")),
         );
-        let lines = super::super::codex_transcript::render_transcript(
+        let lines = super::super::codex_transcript::render_transcript_doc(
             &fork,
             &crate::ui::theme::Theme::default(),
             None,
             false,
-        );
+        )
+        .lines;
         let text: String = lines
             .iter()
             .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))

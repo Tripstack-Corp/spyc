@@ -6,8 +6,6 @@
 //! key-handler entry points are `pub` (called from `actions` /
 //! `key_dispatch`); `mount_scroll_pager` is internal.
 
-use ratatui::text::Line;
-
 use super::pager_stream::{DrainOutcome, PagerStream, PagerStreamMount, RenderCtx};
 use super::{App, Effect, PaneTextKind, PaneTextSink, state};
 use crate::ui::pager::PagerView;
@@ -409,11 +407,10 @@ impl App {
                             codex_home: codex_home.as_deref(),
                             claude_home: claude_home.as_deref(),
                         };
-                        let lines = match resolve(query) {
-                            Some(path) => render(&path, &theme, width, show_tool_calls),
-                            None => Vec::new(),
-                        };
-                        let _ = tx.send(lines);
+                        let doc = resolve(query)
+                            .map(|path| render(&path, &theme, width, show_tool_calls))
+                            .unwrap_or_default();
+                        let _ = tx.send(doc);
                     },
                     |id, rx| Box::new(TranscriptStream { id, rx, miss }),
                 );
@@ -611,12 +608,12 @@ impl App {
                     codex_home: None,
                     claude_home: None,
                 };
-                let lines = crate::state::agy_transcript::resolve_active_jsonl(query)
+                let doc = crate::state::agy_transcript::resolve_active_jsonl(query)
                     .map(|path| {
                         crate::state::agy_transcript::render_thinking_history(&path, &theme, width)
                     })
                     .unwrap_or_default();
-                let _ = tx.send(lines);
+                let _ = tx.send(doc);
             },
             |id, rx| Box::new(TranscriptStream { id, rx, miss }),
         );
@@ -687,13 +684,15 @@ impl App {
             view.stream_id = Some(id);
             view.streaming = true;
         }
+        // The key hint goes in the scrollback's own footer, which the first key
+        // there clears. On the status bar it would outlive that key and be
+        // swept into the scrollback over the key's own answer.
+        view.flash = Some("scroll: on (/, n/N, :N, V, y, Esc exit)".to_string());
         // The bottom-region scrollback slot — coexists with a top-region
         // `view.pager` (`D`) rather than evicting it.
         self.view.project_mut().scroll_pager = Some(view);
         self.state.active_project_mut().focus = state::Focus::Pane;
         self.view.needs_full_repaint = true;
-        self.state
-            .flash_info("scroll: on (/, n/N, :N, V, y, Esc exit)");
     }
 
     pub fn handle_pane_scroll_key(&mut self, key: crossterm::event::KeyEvent) -> Vec<Effect> {
@@ -788,7 +787,7 @@ fn retain_live_streams(
 /// result, flashes `miss` and closes back to the pane). One-shot — not retained.
 struct TranscriptStream {
     id: u32,
-    rx: std::sync::mpsc::Receiver<Vec<Line<'static>>>,
+    rx: std::sync::mpsc::Receiver<crate::state::TranscriptDoc>,
     /// Flashed when the transcript resolves to nothing (no session on disk yet,
     /// or a parse that yielded no renderable turns).
     miss: String,
@@ -801,8 +800,12 @@ impl PagerStream for TranscriptStream {
 
     fn drain(&mut self, view: &mut PagerView, _ctx: &RenderCtx) -> DrainOutcome {
         match self.rx.try_recv() {
-            Ok(lines) if !lines.is_empty() => {
-                view.lines = lines;
+            Ok(doc) if !doc.is_empty() => {
+                view.lines = doc.lines;
+                // The lines are the rendered view (there's no source to toggle
+                // to), so `i` and `o` read the diagram ranges against them.
+                view.mermaid_blocks = doc.mermaid_blocks;
+                view.markdown_rendered = true;
                 view.streaming = false;
                 // Re-arm park-at-bottom: the mount-time flag already fired on
                 // the empty pager (content arrives async), so without this the

@@ -19,6 +19,7 @@ use super::{
     HydratedRecord, MAX_FULL_SCAN_BYTES, STEP_ORDER_SLACK, field_is_truncated, load_full_records,
     open_regular_file, strip_user_request_tags, window_reader,
 };
+use crate::ui::markdown::MarkdownDoc;
 use crate::ui::theme::Theme;
 
 /// What one read may keep and cost.
@@ -83,13 +84,18 @@ pub fn render_thinking_history(
     path: &Path,
     theme: &Theme,
     width: Option<usize>,
-) -> Vec<Line<'static>> {
+) -> crate::state::TranscriptDoc {
     render(path, theme, width, LIMITS)
 }
 
-fn render(path: &Path, theme: &Theme, width: Option<usize>, limits: Limits) -> Vec<Line<'static>> {
+fn render(
+    path: &Path,
+    theme: &Theme,
+    width: Option<usize>,
+    limits: Limits,
+) -> crate::state::TranscriptDoc {
     let Some((mut thoughts, mut omitted)) = collect(path, limits) else {
-        return Vec::new();
+        return crate::state::TranscriptDoc::default();
     };
     let needed: HashSet<u64> = thoughts
         .iter()
@@ -98,7 +104,7 @@ fn render(path: &Path, theme: &Theme, width: Option<usize>, limits: Limits) -> V
         .filter_map(|piece| piece.step)
         .collect();
     let mut full = load_full_records(path, &needed, false, MAX_FULL_SCAN_BYTES);
-    let mut blocks: VecDeque<(Option<String>, Vec<Line<'static>>)> = VecDeque::new();
+    let mut blocks: VecDeque<(Option<String>, MarkdownDoc)> = VecDeque::new();
     let mut carried: Option<String> = None;
     for thought in &mut thoughts {
         if let Some(prompt) = &mut thought.prompt {
@@ -107,8 +113,8 @@ fn render(path: &Path, theme: &Theme, width: Option<usize>, limits: Limits) -> V
             carried = (!text.is_empty()).then(|| text.to_owned());
         }
         thought.thinking.hydrate(&mut full, |h| h.thinking);
-        let body = crate::ui::markdown::render(thought.thinking.text.trim(), theme, width);
-        if !body.is_empty() {
+        let body = crate::ui::markdown::render_doc(thought.thinking.text.trim(), theme, width);
+        if !body.lines.is_empty() {
             blocks.push_back((carried.take(), body));
         }
     }
@@ -201,12 +207,12 @@ fn drop_oldest<T, P>(entries: &mut VecDeque<T>, prompt: fn(&mut T) -> &mut Optio
 /// Drops the oldest blocks until the rest fit in `max_lines`, always keeping
 /// the newest. Whether any were dropped.
 fn keep_newest_lines(
-    blocks: &mut VecDeque<(Option<String>, Vec<Line<'static>>)>,
+    blocks: &mut VecDeque<(Option<String>, MarkdownDoc)>,
     max_lines: usize,
 ) -> bool {
     // A block is a blank, its prompt's lines and a blank, then its body.
-    let height = |block: &(Option<String>, Vec<Line<'static>>)| {
-        block.0.as_deref().map_or(0, |p| p.lines().count() + 1) + block.1.len() + 1
+    let height = |block: &(Option<String>, MarkdownDoc)| {
+        block.0.as_deref().map_or(0, |p| p.lines().count() + 1) + block.1.lines.len() + 1
     };
     let mut total: usize = blocks.iter().map(height).sum();
     let mut dropped = false;
@@ -221,19 +227,19 @@ fn keep_newest_lines(
 }
 
 fn format(
-    blocks: VecDeque<(Option<String>, Vec<Line<'static>>)>,
+    blocks: VecDeque<(Option<String>, MarkdownDoc)>,
     omitted: bool,
     theme: &Theme,
-) -> Vec<Line<'static>> {
+) -> crate::state::TranscriptDoc {
     let user_style = Style::default()
         .fg(theme.prompt_prefix)
         .add_modifier(Modifier::BOLD);
-    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut out = crate::state::TranscriptDoc::default();
     let mut last_was_blank = if omitted && !blocks.is_empty() {
         let notice = Style::default()
             .fg(theme.status_suffix)
             .add_modifier(Modifier::ITALIC);
-        out.push(Line::from(Span::styled(OMITTED, notice)));
+        out.lines.push(Line::from(Span::styled(OMITTED, notice)));
         false
     } else {
         true
@@ -241,15 +247,16 @@ fn format(
     for (prompt, body) in blocks {
         if let Some(prompt) = prompt {
             crate::state::push_transcript_prompt(
-                &mut out,
+                &mut out.lines,
                 &mut last_was_blank,
                 &prompt,
                 user_style,
             );
         }
-        crate::state::push_transcript_blank(&mut out, &mut last_was_blank);
-        out.extend(body);
+        crate::state::push_transcript_blank(&mut out.lines, &mut last_was_blank);
+        out.append(body);
         last_was_blank = out
+            .lines
             .last()
             .is_some_and(|l| l.spans.iter().all(|s| s.content.trim().is_empty()));
     }
@@ -282,7 +289,7 @@ mod tests {
     }
 
     fn shown(path: &Path, limits: Limits) -> String {
-        flatten(&render(path, &Theme::default(), None, limits))
+        flatten(&render(path, &Theme::default(), None, limits).lines)
     }
 
     #[test]
@@ -479,5 +486,29 @@ mod tests {
         assert!(render_thinking_history(dir.path(), &Theme::default(), None).is_empty());
         let missing = dir.path().join("transcript.jsonl");
         assert!(render_thinking_history(&missing, &Theme::default(), None).is_empty());
+    }
+
+    /// A thought's diagram is reported where the thinking view shows it, under
+    /// the prompt that heads it.
+    #[test]
+    fn a_diagram_in_a_thought_is_reported_where_it_shows() {
+        let dir = tempfile::tempdir().unwrap();
+        let rows = [
+            serde_json::json!({"step_index": 1, "source": "USER_EXPLICIT", "type": "USER_INPUT",
+                               "content": "<USER_REQUEST>plan it</USER_REQUEST>"}),
+            serde_json::json!({"step_index": 2, "source": "MODEL", "type": "PLANNER_RESPONSE",
+                               "thinking": "Sketching:\n\n```mermaid\ngraph TD\n  A --> B\n```"}),
+        ]
+        .map(|r| r.to_string());
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let compact = transcript(dir.path(), &rows, &[]);
+
+        let doc = render(&compact, &Theme::default(), None, LIMITS);
+        let [block] = doc.mermaid_blocks.as_slice() else {
+            panic!("one diagram: {:?}", doc.mermaid_blocks);
+        };
+        assert_eq!(block.source, "graph TD\n  A --> B");
+        let header = flatten(&doc.lines[block.line_range.start..=block.line_range.start]);
+        assert!(header.contains("mermaid diagram"), "{header}");
     }
 }

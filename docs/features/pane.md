@@ -167,7 +167,9 @@ image protocols or OSC 52 clipboard writes. How it answers:
     (`agy`, under `~/.gemini/antigravity-cli/`) — get the actual
     conversation instead of a screen capture: user turns, agent
     replies, and tool calls rendered in the pager, titled
-    `(transcript)` rather than `(history)`.
+    `(transcript)` rather than `(history)`. Replies render as
+    Markdown, so a ` ```mermaid ` diagram in one opens as it does in a
+    markdown file: `i` views it in the terminal, `o` in the OS image viewer.
 
     A codex transcript shows its messages, commands and tool calls, each
     once; its injected instructions and reasoning are left out.
