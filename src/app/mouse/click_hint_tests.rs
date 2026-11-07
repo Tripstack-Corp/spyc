@@ -265,7 +265,7 @@ fn arrows_and_enter_fire_the_git_menus_rows() {
     });
 }
 
-/// The session segment's menu: `Enter` on its one row shows the session.
+/// The session segment's menu: `Enter` on its `Space s` row shows the session.
 #[test]
 fn arrows_and_enter_fire_the_session_menus_row() {
     with_mouse(|base| {

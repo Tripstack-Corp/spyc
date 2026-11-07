@@ -630,6 +630,230 @@ fn a_right_click_on_the_session_segment_offers_its_info() {
     });
 }
 
+// ── renaming the session from its segment's menu ──
+
+const SESSION: &str = "SAFFRON_CUMIN";
+
+/// An App over `work/` in the session [`SESSION`].
+fn session_app(base: &Path) -> App {
+    let dir = base.join("work");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut app = App::test_app(dir);
+    app.view.term_size = (120, HEIGHT);
+    app.state.session_name = Some(SESSION.to_string());
+    app
+}
+
+/// Right-click the session segment, then click its menu's `:name` row.
+fn click_the_name_row(app: &mut App) {
+    let segment = on_bar(app, SESSION);
+    right_click(app, segment);
+    let row = menu_row(app, SESSION, ":name");
+    click(app, row);
+}
+
+fn key(app: &mut App, code: KeyCode) {
+    app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+        .unwrap();
+}
+
+fn type_text(app: &mut App, text: &str) {
+    for c in text.chars() {
+        key(app, KeyCode::Char(c));
+    }
+}
+
+/// The open `:` line: its text, where its cursor is, and whether its editor
+/// is inserting. `None` while no `:` line is open.
+fn command_line(app: &App) -> Option<(String, usize, bool)> {
+    let crate::app::Mode::Prompting(prompt) = &app.state.mode else {
+        return None;
+    };
+    if !matches!(prompt.kind, crate::app::PromptKind::Command) {
+        return None;
+    }
+    assert_eq!(prompt.prefix, ":", "the line `:` opens");
+    let editor = prompt.editor.as_ref().expect("the `:` line edits as vi");
+    assert_eq!(
+        editor.text(),
+        prompt.buffer,
+        "the editor holds what is drawn"
+    );
+    let inserting = editor.mode == crate::ui::line_edit::Mode::Insert;
+    Some((prompt.buffer.clone(), editor.cursor, inserting))
+}
+
+/// What typing `:` then `text` leaves: the line holding `text`, the cursor
+/// after it, inserting.
+fn as_typed(text: &str) -> (String, usize, bool) {
+    (text.to_string(), text.chars().count(), true)
+}
+
+/// Every row of the frame, one after another.
+fn screen(app: &mut App) -> String {
+    let buf = draw(app);
+    let (width, height) = app.view.term_size;
+    (0..height)
+        .map(|y| (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The session segment's menu offers renaming the session beside its info.
+#[test]
+#[ignore = "red: the session segment's menu has no `:name` row"]
+fn the_session_segments_menu_offers_name_and_its_info() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+        let segment = on_bar(&mut app, SESSION);
+
+        right_click(&mut app, segment);
+
+        let rows = menu(&mut app, SESSION);
+        assert!(offers(&rows, "Space s  session info"), "{rows:#?}");
+        assert!(
+            rows.iter()
+                .any(|r| r.contains(":name") && r.contains("rename this session")),
+            "{rows:#?}"
+        );
+    });
+}
+
+/// The `:name` row opens the `:` line holding `name` and the session's name,
+/// as typing them would leave it, without running it. Rubbing out the old
+/// name, typing a new one and `Enter` renames the session, and the segment
+/// draws the new name.
+#[test]
+#[ignore = "red: the session segment's menu has no `:name` row"]
+fn the_name_row_opens_the_command_line_holding_the_current_name() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+
+        click_the_name_row(&mut app);
+
+        let held = format!("name {SESSION}");
+        assert_eq!(
+            command_line(&app),
+            Some(as_typed(&held)),
+            "{:?}",
+            app.flash_text()
+        );
+        assert!(screen(&mut app).contains(&format!(":{held}")), "drawn");
+        assert_eq!(app.state.session_name.as_deref(), Some(SESSION), "not run");
+
+        for _ in SESSION.chars() {
+            key(&mut app, KeyCode::Backspace);
+        }
+        type_text(&mut app, "ginger");
+        key(&mut app, KeyCode::Enter);
+
+        assert_eq!(command_line(&app), None, "the line ran");
+        assert_eq!(app.state.session_name.as_deref(), Some("GINGER"));
+        on_bar(&mut app, "GINGER");
+        let (_, cells) = bar(&mut app);
+        assert!(!bar_text(&cells).contains(SESSION), "the old name is gone");
+    });
+}
+
+/// With no name set the line holds `name ` alone, as there is no name to
+/// edit. Only a named session draws the segment, so this one is aimed at
+/// where it was drawn before the name went.
+#[test]
+#[ignore = "red: the session segment's menu has no `:name` row"]
+fn with_no_name_set_the_name_row_opens_the_line_holding_name_alone() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+        let segment = on_bar(&mut app, SESSION);
+        app.state.session_name = None;
+        right_click(&mut app, segment);
+        let row = menu_row(&mut app, "session", ":name");
+
+        click(&mut app, row);
+
+        assert_eq!(command_line(&app), Some(as_typed("name ")));
+    });
+}
+
+/// `Esc` closes the prefilled line as it closes a typed one (the first `Esc`
+/// takes its editor to Normal mode), and the session keeps its name, the
+/// line's edits unrun.
+#[test]
+#[ignore = "red: the session segment's menu has no `:name` row"]
+fn esc_on_the_prefilled_line_closes_it_and_keeps_the_name() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+        click_the_name_row(&mut app);
+        assert!(command_line(&app).is_some(), "premise: the line is open");
+        for _ in SESSION.chars() {
+            key(&mut app, KeyCode::Backspace);
+        }
+        type_text(&mut app, "ginger");
+
+        esc(&mut app);
+        esc(&mut app);
+
+        assert_eq!(command_line(&app), None, "the line closed");
+        assert!(matches!(app.state.mode, crate::app::Mode::Normal));
+        assert_eq!(app.state.session_name.as_deref(), Some(SESSION));
+    });
+}
+
+/// `Enter` on the highlighted `:name` row opens the same line a click does.
+#[test]
+#[ignore = "red: the session segment's menu has no `:name` row"]
+fn enter_on_the_highlighted_name_row_opens_the_same_line() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+        let segment = on_bar(&mut app, SESSION);
+        right_click(&mut app, segment);
+        let index = app
+            .view
+            .chord_hint
+            .as_ref()
+            .and_then(|hint| hint.rows.iter().position(|(keys, _)| keys == ":name"))
+            .expect("the menu has a `:name` row");
+
+        for _ in 0..=index {
+            key(&mut app, KeyCode::Down);
+        }
+        key(&mut app, KeyCode::Enter);
+
+        assert_eq!(
+            command_line(&app),
+            Some(as_typed(&format!("name {SESSION}")))
+        );
+        assert_eq!(app.state.session_name.as_deref(), Some(SESSION), "not run");
+    });
+}
+
+/// The `:` line's history is not touched until the line runs, as with a
+/// typed `:`: neither opening it nor cancelling it records it, and running
+/// it records the line run.
+#[test]
+#[ignore = "red: the session segment's menu has no `:name` row"]
+fn the_name_row_leaves_the_history_alone_until_the_line_runs() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+        let before = app.state.command_history.entries().to_vec();
+
+        click_the_name_row(&mut app);
+        assert_eq!(app.state.command_history.entries(), before, "opened");
+        esc(&mut app);
+        esc(&mut app);
+        assert_eq!(app.state.command_history.entries(), before, "cancelled");
+
+        click_the_name_row(&mut app);
+        key(&mut app, KeyCode::Enter);
+
+        let ran = format!("name {SESSION}");
+        assert_eq!(
+            app.state.command_history.entries().last(),
+            Some(&ran),
+            "the line ran"
+        );
+    });
+}
+
 // ── the rest of the bar ──
 
 /// The path is no object, nor the parting between two labels: a
