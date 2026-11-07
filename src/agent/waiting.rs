@@ -22,7 +22,7 @@
 
 use std::time::Instant;
 
-use crate::agent::status_hook::StatusHookEvent;
+use crate::agent::status_hook::{BlockedDetail, StatusHookEvent};
 use crate::pane::{AgentActivity, ReportedStatus};
 
 /// Where a report came from.
@@ -162,6 +162,30 @@ pub fn blocked_on(
     event.blocked_on().or_else(|| live?.blocked_on.clone())
 }
 
+/// Take the detail off a hook's `event` as it arrives, so the tab's hook
+/// history never holds it, and return it only when `keep` (`[notify]
+/// blocked_detail`) says to: tool input, kept in memory only.
+pub fn take_detail(event: Option<&mut StatusHookEvent>, keep: bool) -> Option<BlockedDetail> {
+    event?.detail.take().filter(|_| keep)
+}
+
+/// What the tool a `blocked` report waits on acts on, when `[notify]
+/// blocked_detail` let the report keep it (`detail`): the event's own, or for
+/// an event that names nothing, as [`blocked_on`] does, the live block's.
+pub fn blocked_detail(
+    live: Option<&ReportedStatus>,
+    incoming: AgentActivity,
+    event: Option<&StatusHookEvent>,
+    detail: Option<BlockedDetail>,
+) -> Option<BlockedDetail> {
+    let event = event.filter(|_| incoming == AgentActivity::Blocked)?;
+    if event.blocked_on().is_some() {
+        detail
+    } else {
+        live?.blocked_detail.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AgentActivity, Origin, ReportedStatus, StatusHookEvent, Verdict, meet, note_for};
@@ -186,6 +210,7 @@ mod tests {
             background_tasks: tasks,
             session_crons: crons,
             error: None,
+            detail: None,
         }
     }
 

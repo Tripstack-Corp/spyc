@@ -764,6 +764,13 @@ pub struct NotifyConfig {
     /// the "needs me" / "done" ping is exactly when it's wanted. Set true to stay
     /// quiet for the on-screen tab.
     pub suppress_focused_tab: bool,
+    /// Name what the tool a blocked agent asks to use acts on, after its label:
+    /// Bash's own description of its command, or the file an edit or write is
+    /// for (`claude needs you: Bash · Run the test suite`), in the ping, the
+    /// HUD and `Space !`. **Off by default**: it is tool input, and a desktop
+    /// notification can leave the machine. Held in memory only; only your own
+    /// config files may turn it on.
+    pub blocked_detail: bool,
 }
 
 impl Default for NotifyConfig {
@@ -777,6 +784,7 @@ impl Default for NotifyConfig {
             visual: true,
             visual_done: false,
             suppress_focused_tab: false,
+            blocked_detail: false,
         }
     }
 }
@@ -809,6 +817,8 @@ struct FileNotify {
     visual_done: Option<bool>,
     #[serde(default)]
     suppress_focused_tab: Option<bool>,
+    #[serde(default)]
+    blocked_detail: Option<bool>,
 }
 
 /// On-disk shape of `[markdown]`. `Option` for "didn't set" disambig.
@@ -1215,6 +1225,40 @@ mod tests {
         assert!(n.visual);
         assert!(!n.visual_done);
         assert!(!n.suppress_focused_tab);
+    }
+
+    /// `[notify] blocked_detail` sends tool input to desktop notifications, so
+    /// a project's file can't turn it on, only the user's own; and it is off
+    /// unless one does.
+    #[test]
+    fn only_your_own_config_turns_blocked_detail_on() {
+        assert!(!Config::default().notify.blocked_detail);
+        let tmp = tempdir().unwrap();
+        let home = tmp.path().join("home.toml");
+        let project = tmp.path().join("project.toml");
+        std::fs::write(&project, "[notify]\nblocked_detail = true\n").unwrap();
+        std::fs::write(&home, "").unwrap();
+        let cfg = Config::load_layered(Some(&home), &project).unwrap();
+        assert!(!cfg.notify.blocked_detail, "a project's file can't");
+        assert!(
+            cfg.warnings
+                .iter()
+                .any(|w| w.contains("blocked_detail ignored")),
+            "{:?}",
+            cfg.warnings
+        );
+
+        std::fs::write(&home, "[notify]\nblocked_detail = true\n").unwrap();
+        std::fs::write(&project, "").unwrap();
+        let cfg = Config::load_layered(Some(&home), &project).unwrap();
+        assert!(cfg.notify.blocked_detail, "your own can");
+
+        std::fs::write(&project, "[notify]\nblocked_detail = false\n").unwrap();
+        let cfg = Config::load_layered(Some(&home), &project).unwrap();
+        assert!(
+            !cfg.notify.blocked_detail,
+            "and a project's can turn it off"
+        );
     }
 
     #[test]

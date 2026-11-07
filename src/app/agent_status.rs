@@ -173,12 +173,12 @@ fn notification_for_transition(
 
 /// Who a notification is about: the tab's label and its number in its
 /// project, the project, named only while several are open, and what a
-/// blocked one waits on ([`TabInfo::blocked_on`]).
+/// blocked one waits on ([`TabInfo::waiting_for`]).
 struct Subject<'a> {
     label: &'a str,
     tab_number: usize,
     project: Option<&'a str>,
-    blocked_on: Option<&'a str>,
+    blocked_on: Option<std::borrow::Cow<'a, str>>,
 }
 
 /// Compose the `(summary, body)` for a transition notification: a glanceable
@@ -202,6 +202,7 @@ fn notification_text(who: &Subject, new: AgentActivity) -> (String, String) {
         AgentActivity::Blocked => {
             let on = who
                 .blocked_on
+                .as_ref()
                 .map_or_else(String::new, |on| format!(": {on}"));
             (
                 format!("{agent} needs you{on}"),
@@ -374,7 +375,7 @@ impl ActivityScan<'_> {
                 label: &entry.info.label,
                 tab_number: index + 1,
                 project: project.named.as_deref(),
-                blocked_on: entry.info.blocked_on(),
+                blocked_on: entry.info.waiting_for(),
             };
             let plan = notification_for_transition(
                 entry.info.notified,

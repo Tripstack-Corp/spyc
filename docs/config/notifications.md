@@ -51,6 +51,23 @@ the tool would act on, and never the agent's own note, since a desktop
 notification can leave the machine. A wait the agent reports itself, or a form
 whose question names nothing, pings without one: `claude needs you`.
 
+### What the tool acts on (`blocked_detail`)
+
+With `blocked_detail = true`, a Claude permission request also names what the
+tool acts on, after its label, wherever the label shows:
+
+- `Bash`: the description Claude gave its command, never the command itself:
+  `claude needs you: Bash · Run the test suite`;
+- `Edit`, `MultiEdit`, `Write`, `NotebookEdit`: the file's name alone, without
+  its directory: `claude needs you: Edit · main.rs`.
+
+It is off by default, since it is tool input and a desktop notification can
+leave the machine, and only your own `~/.spycrc.toml` can turn it on; a
+project's `.spycrc.toml` can only turn it off. It is one line: the first,
+without control characters, cut short at 60 characters. spyc holds it in memory
+only while the agent waits, never in `:activity dump`, `:why-status` or a saved
+session.
+
 ```toml
 [notify]
 desktop = true            # notify on Blocked (and Done, if desktop_done) — on by default
@@ -61,6 +78,7 @@ bell_done = false         # ring on Done too (default: Blocked-only)
 visual = true             # the spice-heat border-pulse flash — on by default
 visual_done = false       # flash on Done too (default: Blocked-only)
 suppress_focused_tab = false  # stay quiet about the tab you're already watching
+blocked_detail = false    # name what a blocked tool acts on (your own config only)
 ```
 
 **`desktop_via`** — how the desktop ping is delivered:

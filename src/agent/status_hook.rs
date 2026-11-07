@@ -1,6 +1,8 @@
 //! The lifecycle metadata a status hook reports, bounded and sanitized for
 //! diagnostics: event names, tools and ids, never hook arguments or response
-//! content. A pane keeps its last [`HISTORY_LIMIT`] events.
+//! content. A pane keeps its last [`HISTORY_LIMIT`] events. The one piece of
+//! tool input, a [`BlockedDetail`], rides the event to spyc, which takes it off
+//! on arrival and keeps it only under `[notify] blocked_detail`.
 
 mod input;
 
@@ -12,6 +14,68 @@ use serde_json::Value;
 pub const HISTORY_LIMIT: usize = 8;
 /// Cap on normalized metadata, not on raw hook arguments or responses.
 pub const PAYLOAD_LIMIT: usize = 8192;
+/// The most characters of a [`BlockedDetail`], its `…` included.
+const DETAIL_CHARS: usize = 60;
+
+/// What the tool a blocked agent asks to use acts on, for `[notify]
+/// blocked_detail` (off by default): Bash's own description of its command, or
+/// the name of the file an edit or write is for. It is tool input, so spyc
+/// holds it in memory only, while that option is on, and its `Debug` prints
+/// none of it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct BlockedDetail(String);
+
+impl BlockedDetail {
+    /// What `tool` acts on, from its input's `description` and file path:
+    /// one line, at most [`DETAIL_CHARS`] long. Any other tool has none.
+    pub fn of(tool: &str, description: Option<&str>, file: Option<&str>) -> Option<Self> {
+        let text = match tool {
+            "Bash" => description?,
+            "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => {
+                std::path::Path::new(file?).file_name()?.to_str()?
+            }
+            _ => return None,
+        };
+        Self::from_text(text)
+    }
+
+    /// `text`'s first line, without control characters, cut to
+    /// [`DETAIL_CHARS`]; `None` when nothing is left.
+    pub fn from_text(text: &str) -> Option<Self> {
+        let line: String = text
+            .lines()
+            .next()?
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect();
+        let line = line.trim();
+        if line.is_empty() {
+            return None;
+        }
+        Some(Self(if line.chars().count() > DETAIL_CHARS {
+            let cut: String = line.chars().take(DETAIL_CHARS - 1).collect();
+            format!("{}…", cut.trim_end())
+        } else {
+            line.to_owned()
+        }))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for BlockedDetail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BlockedDetail(..)")
+    }
+}
+
+impl Serialize for BlockedDetail {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
 
 /// Why agy's `Stop` ended the turn (`exa.hooks_pb.StopHookArgs` on agy 1.4.5:
 /// `NO_TOOL_CALL`, `USER_CANCELED`, `ERROR`, `MAX_ITERATIONS`).
@@ -102,6 +166,11 @@ pub struct StatusHookEvent {
     /// The API error a Claude `StopFailure` ended the turn on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<StopError>,
+    /// What the tool acts on ([`BlockedDetail`]), carried from the hook to
+    /// spyc, which takes it off the event on arrival and keeps it only while
+    /// `[notify] blocked_detail` is on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<BlockedDetail>,
 }
 
 impl StatusHookEvent {
@@ -129,6 +198,7 @@ impl StatusHookEvent {
             background_tasks: count("background_tasks"),
             session_crons: count("session_crons"),
             error: StopError::deserialize(&value["error"]).ok(),
+            detail: value["detail"].as_str().and_then(BlockedDetail::from_text),
         })
     }
 

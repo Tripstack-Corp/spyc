@@ -150,6 +150,9 @@ pub struct ReportedStatus {
     /// alone (`agent::waiting::blocked_on`): the tool, `question`, `plan`, or
     /// why the turn failed.
     pub blocked_on: Option<String>,
+    /// What the tool it waits on acts on, held only while `[notify]
+    /// blocked_detail` is on (`agent::waiting::blocked_detail`).
+    pub blocked_detail: Option<crate::agent::status_hook::BlockedDetail>,
     /// A `waiting` report has absorbed the hook `done` that ended the turn
     /// which reported it (`agent::waiting::meet`).
     pub turn_end_absorbed: bool,
@@ -170,6 +173,7 @@ impl ReportedStatus {
             retired_reason: None,
             note: None,
             blocked_on: None,
+            blocked_detail: None,
             turn_end_absorbed: false,
         }
     }
@@ -468,6 +472,20 @@ impl TabInfo {
                 self.scrape_waits_on
                     .filter(|_| matches!(self.scrape_status, Some((AgentActivity::Blocked, _))))
             })
+    }
+
+    /// What a blocked tab waits for, as the ping, the HUD and `Space !` show
+    /// it: [`Self::blocked_on`], then what the tool acts on when the report
+    /// holds that (`Bash · Run the test suite`).
+    pub fn waiting_for(&self) -> Option<std::borrow::Cow<'_, str>> {
+        let label = self.blocked_on()?;
+        let detail = self
+            .reported
+            .as_ref()
+            .and_then(|r| r.blocked_detail.as_ref());
+        Some(detail.map_or(std::borrow::Cow::Borrowed(label), |detail| {
+            std::borrow::Cow::Owned(format!("{label} · {}", detail.as_str()))
+        }))
     }
 
     /// The agent this tab runs now: the one detected in a shell tab's

@@ -708,8 +708,10 @@ impl App {
             note,
             session_id,
             claude_home,
-            hook_event,
+            mut hook_event,
         } = report;
+        let keep_detail = self.state.active_project().config.notify.blocked_detail;
+        let detail = waiting::take_detail(hook_event.as_mut(), keep_detail);
         let Some(activity) = report_activity(&status) else {
             return McpResponse::Error {
                 message: format!("unknown status: {status}"),
@@ -769,6 +771,8 @@ impl App {
         let mut received = ReportedStatus::new(activity, now, now + report_ttl(activity, ttl_ms));
         received.note = waiting::note_for(live, activity, note, hook_event.as_ref(), now);
         received.blocked_on = waiting::blocked_on(live, activity, hook_event.as_ref());
+        received.blocked_detail =
+            waiting::blocked_detail(live, activity, hook_event.as_ref(), detail);
         entry.info.last_reported = Some(received.clone());
         entry.info.last_report_ignored = decision.err();
         if decision.is_ok() {
