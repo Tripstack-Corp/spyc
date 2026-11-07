@@ -8,6 +8,7 @@
 //! tasks'. The rows come from [`crate::keymap::menu::menu_for`], or for a
 //! pager from `pager_handler::pager_menu`; this module gathers the facts they
 //! decide from and opens the menu as a which-key popup that no chord armed.
+//! The git segment's adds a `:diff` row, run as typing `:diff` runs it.
 //!
 //! While a menu is open it takes the keys first (`InputSink::Menu`): `↑`/`↓`
 //! move a highlight, `←`/`→` move it to the entry drawn on the same line of
@@ -72,11 +73,17 @@ impl App {
         Some((Target::PaneTab(facts), info.label.clone()))
     }
 
-    /// Open `target`'s menu, titled `title`. Inside a mounted archive the rows
-    /// whose action the mount refuses are left out, as `apply_inner` would
-    /// refuse them.
+    /// Open `target`'s menu, titled `title`.
     fn open_menu(&mut self, target: Target, title: String) -> Option<Effect> {
-        let rows = menu_for(target)
+        let rows = self.menu_rows(target);
+        self.show_menu(format!("{title} · ? all keys"), rows)
+    }
+
+    /// `target`'s rows, each `(keys, label, entry)`. Inside a mounted archive
+    /// the rows whose action the mount refuses are left out, as `apply_inner`
+    /// would refuse them.
+    fn menu_rows(&self, target: Target) -> Vec<(String, String, HintEntry)> {
+        menu_for(target)
             .into_iter()
             .filter(|row| {
                 !matches!(row, ChordEntry::Act(_, a) if self.state.mount_refusal(a).is_some())
@@ -85,8 +92,22 @@ impl App {
                 let label = e.label().to_string();
                 (e.keys().to_string(), label, HintEntry::Chord(e))
             })
-            .collect();
-        self.show_menu(format!("{title} · ? all keys"), rows)
+            .collect()
+    }
+
+    /// The git segment's menu: the repo's rows, then `:diff`, which runs as
+    /// typing it does, and which a mount refuses as it refuses `gm`.
+    fn open_git_menu(&mut self) -> Option<Effect> {
+        let mut rows = self.menu_rows(self.git_target());
+        let branch = crate::keymap::Action::GitDiffBranch;
+        if self.state.mount_refusal(&branch).is_none() {
+            rows.push((
+                ":diff".to_string(),
+                "git diff of the branch since it left its base".to_string(),
+                HintEntry::Command(Some(CommandRow::Typed("diff".to_string()))),
+            ));
+        }
+        self.show_menu("git · ? all keys".to_string(), rows)
     }
 
     /// Show a menu of `rows`, each `(keys, label, entry)`, titled `title`.
@@ -208,7 +229,7 @@ impl App {
                 let projects = Target::Projects(self.projects_facts());
                 (projects, "projects".to_string())
             }
-            StatusSegment::Git => (self.git_target(), "git".to_string()),
+            StatusSegment::Git => return self.open_git_menu().into_iter().collect(),
             StatusSegment::Session => {
                 let name = self.state.session_name.as_deref().unwrap_or("session");
                 (Target::Session, name.to_string())

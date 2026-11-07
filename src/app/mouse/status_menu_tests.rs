@@ -525,7 +525,6 @@ fn the_git_segments_menu_offers_delete_at_a_clean_linked_worktree() {
 /// The git segment's menu runs `:diff`: its row opens the whole branch's
 /// changes since it left `main`, from a directory none of them are in.
 #[test]
-#[ignore = "red: the git segment's menu has no :diff row"]
 fn the_git_segments_diff_row_opens_the_branchs_diff() {
     with_mouse(|base| {
         let repo = crate::git::test_support::branch_repo(base);

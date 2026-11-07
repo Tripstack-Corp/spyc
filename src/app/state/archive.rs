@@ -98,6 +98,7 @@ pub const fn refusal(action: &Action) -> Option<&'static str> {
         A::GitDiff
         | A::GitDiffCached
         | A::GitDiffUnstaged
+        | A::GitDiffBranch
         | A::GitBlame
         | A::GitRestore
         | A::JumpNextGitChange

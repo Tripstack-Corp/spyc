@@ -97,6 +97,20 @@ characters that differ, `"word"` marks the whole changed token the way
   tree — only what changed *since* you staged. The view you want after
   staging a checkpoint and continuing to edit (e.g. while an agent keeps
   working): `gD` shows the checkpoint, `gu` shows everything since
+- **gm** — the selection's changes since the branch left its base:
+  everything it committed, plus what it hasn't committed yet (staged,
+  unstaged and new files), and none of the work that landed on the base
+  after it forked. The base is the repo's integration branch (`main`, or
+  whatever `origin/HEAD` names). The title names it and the commit the
+  branch left it at. A file renamed in one of the branch's commits shows
+  as a deletion and an addition
+- **`:diff [<base>]`** — the same for the whole repository, from anywhere
+  in it: "what has this branch changed?" `<base>` is any branch, tag or
+  commit (`:diff origin/main`, `:diff HEAD~3`); with none, the repo's base
+  branch. A local branch that has an `origin/` copy is compared with both,
+  and the later fork wins, so a branch rebased onto `origin/main` doesn't
+  show other people's work that local `main` hasn't pulled yet. The git
+  segment's menu (right-click the branch on the status bar) runs it too
 - **gb** — blame the cursor file (selection ignored)
 - **|** inside a diff / show view toggles **side-by-side ⇄ unified**
   layout. Side-by-side is the default, falling back to unified when

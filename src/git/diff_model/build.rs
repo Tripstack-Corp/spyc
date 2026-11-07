@@ -10,6 +10,7 @@ use super::blob::{
     blob_similarity, diff_kind_from_cache, set_blob, tree_blob_at, worktree_similarity,
 };
 use crate::git::model::{DiffKind, FileDiff, FileStatus, lang_hint_for};
+use std::collections::BTreeSet;
 
 /// One unit of work for the working-tree (`gd`) diff: either a detected
 /// rename/copy pair, or a single path whose HEAD blob is diffed against its
@@ -46,7 +47,6 @@ pub fn collect_worktree_plan(repo: &gix::Repository) -> Option<Vec<WorkItem>> {
     use gix::diff::index::ChangeRef;
     use gix::status::index_worktree::Item as IwItem;
     use gix::status::{Item, UntrackedFiles};
-    use std::collections::BTreeSet;
 
     // `UntrackedFiles::Files`: each untracked file becomes its own WorkItem
     // so the diff plan sees individual additions. Staged-rename detection and
@@ -139,7 +139,6 @@ pub fn collect_index_worktree_plan(repo: &gix::Repository) -> Option<Vec<String>
     use gix::status::index_worktree::Item as IwItem;
     use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
     use gix::status::{Item, UntrackedFiles};
-    use std::collections::BTreeSet;
 
     // `UntrackedFiles::Files` so each untracked file is its own addition (not a
     // collapsed `dir/` entry) — same choice as `collect_worktree_plan`.
@@ -195,11 +194,57 @@ pub fn collect_index_worktree_plan(repo: &gix::Repository) -> Option<Vec<String>
     Some(plain.into_iter().collect())
 }
 
-/// Build a `FileDiff` for a detected working-tree rename/copy: old side is the
-/// HEAD-tree blob at `source`, new side is the worktree file at `dest`.
+/// Fold `committed`, the paths a branch's commits changed since `old_tree`,
+/// into the working-tree plan as plain paths, but for those a staged rename
+/// pairs. A staged rename whose source `old_tree` lacks (a file the branch
+/// added, then moved) has no old side to pair, so its destination is a plain
+/// path too: an addition.
+pub fn fold_committed(
+    plan: Vec<WorkItem>,
+    mut committed: BTreeSet<String>,
+    old_tree: Option<&gix::Tree<'_>>,
+) -> Vec<WorkItem> {
+    let in_old = |path: &str| old_tree.and_then(|t| tree_blob_at(t, path)).is_some();
+    let (renames, plain): (Vec<WorkItem>, Vec<WorkItem>) = plan
+        .into_iter()
+        .partition(|item| matches!(item, WorkItem::Rename { source, .. } if in_old(source)));
+    committed.extend(plain.iter().map(|item| item.key().to_string()));
+    for item in &renames {
+        if let WorkItem::Rename { source, dest, .. } = item {
+            committed.remove(source);
+            committed.remove(dest);
+        }
+    }
+    let mut out = renames;
+    out.extend(committed.into_iter().map(|path| WorkItem::Path { path }));
+    out
+}
+
+/// The paths whose entries differ between the trees `old` and `new`: what the
+/// commits between them changed, a committed rename as its two paths.
+/// Directories are walked into, never listed themselves.
+pub fn committed_paths(
+    repo: &gix::Repository,
+    old: &gix::Tree<'_>,
+    new: &gix::Tree<'_>,
+) -> anyhow::Result<BTreeSet<String>> {
+    use gix::bstr::ByteSlice;
+    let opts = gix::diff::Options::default().with_rewrites(None);
+    let changes = repo.diff_tree_to_tree(Some(old), Some(new), opts)?;
+    Ok(changes
+        .iter()
+        .filter(|c| !(c.entry_mode().is_tree() && c.source_entry_mode_and_id().0.is_tree()))
+        .flat_map(|c| [c.source_location(), c.location()])
+        .map(|path| path.to_str_lossy().into_owned())
+        .collect())
+}
+
+/// Build a `FileDiff` for a detected working-tree rename/copy: old side is
+/// `old_tree`'s blob at `source`, new side is the worktree file at `dest`.
 pub fn build_worktree_rename(
     rc: &mut gix::diff::blob::Platform,
     repo: &gix::Repository,
+    old_tree: &gix::Tree<'_>,
     source: &str,
     dest: &str,
     copy: bool,
@@ -207,8 +252,7 @@ pub fn build_worktree_rename(
     use gix::bstr::BStr;
     use gix::object::tree::EntryKind;
 
-    let head_tree = repo.head_tree().ok()?;
-    let (old_id, _kind) = tree_blob_at(&head_tree, source)?;
+    let (old_id, _kind) = tree_blob_at(old_tree, source)?;
     let null = gix::ObjectId::null(repo.object_hash());
 
     // Similarity is computed against the actual worktree content of `dest`.
@@ -245,9 +289,9 @@ pub fn build_worktree_rename(
     })
 }
 
-/// Build a `FileDiff` for a working-tree (`gd`) path: old side is the HEAD
-/// blob (if any), new side is the worktree file (read via the worktree root
-/// in `rc`). `None` if there's nothing to diff. The status is `Added` (no old
+/// Build a `FileDiff` for a working-tree (`gd`, `gm`) path: old side is the
+/// old tree's blob (if any), new side is the worktree file (read via the
+/// worktree root in `rc`). `None` if there's nothing to diff. The status is `Added` (no old
 /// blob), `Deleted` (no worktree file), or `Modified`.
 pub fn build_worktree_file(
     rc: &mut gix::diff::blob::Platform,

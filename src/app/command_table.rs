@@ -104,6 +104,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     pure("cd"),
     app("chmod", commands::cmd_chmod),
     app("date", commands::cmd_date),
+    app("diff", App::cmd_diff),
     app("dump-scrollback", commands::cmd_dump_scrollback),
     app("exec", commands::cmd_exec),
     app("fg", commands::cmd_fg),

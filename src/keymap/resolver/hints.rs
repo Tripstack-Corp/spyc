@@ -172,6 +172,7 @@ impl Resolver {
                 Act("d", A::GitDiff),
                 Act("D", A::GitDiffCached),
                 Act("u", A::GitDiffUnstaged),
+                Act("m", A::GitDiffBranch),
                 Act("b", A::GitBlame),
                 Act("r", A::GitRestore),
                 Act("f", A::GotoFile),

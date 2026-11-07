@@ -5,7 +5,8 @@
 //! default branch instead of the focused column's HEAD (the POLA fix in
 //! `docs/archive/WORKTREE_MCP_PLAN.md` §3/§7). The richer branch-relationship queries
 //! (merge-base, ahead/behind, merged-ness) land with `list_worktrees`, their
-//! first consumer.
+//! first consumer, and [`fork_point`] is where a branch left its base, which a
+//! diff of the branch's own changes counts from.
 //!
 //! Pure facade, in-process gix: paths in, owned `Send` data out, no `App`
 //! dependency — same contract as the rest of `src/git/`.
@@ -113,6 +114,93 @@ fn count_reachable(
             .filter_map(Result::ok)
             .count(),
     )
+}
+
+/// Where `HEAD` left a base: the commit a branch's own changes are counted
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkPoint {
+    /// The base as it was named, or the repo's [`default_base`].
+    pub base: String,
+    /// The merge-base of `HEAD` and the base.
+    pub commit: gix::ObjectId,
+}
+
+/// Where `HEAD` left `base`, the repo's [`default_base`] when `None`: their
+/// merge-base. A base naming a local branch that has an `origin/<name>`
+/// counterpart forks at the later of `HEAD`'s merge-bases with the two: a
+/// branch rebased onto `origin/main` while local `main` lags would otherwise
+/// claim the commits local `main` hasn't pulled. Any other base is the rev it
+/// names. Each error names its cause: an unborn `HEAD`, a base that names no
+/// commit, histories with nothing in common.
+pub fn fork_point(repo: &gix::Repository, base: Option<&str>) -> anyhow::Result<ForkPoint> {
+    use anyhow::anyhow;
+    let head = repo
+        .head_id()
+        .map_err(|e| anyhow!("HEAD has no commit yet: {}", super::error_chain(&e)))?
+        .detach();
+    let base = match base {
+        Some(base) => base.to_string(),
+        None => default_base_in(repo).ok_or_else(|| anyhow!("the repository has no branch"))?,
+    };
+    let mut forks = Vec::new();
+    for tip in base_tips(repo, &base)? {
+        match repo.merge_base(head, tip) {
+            Ok(fork) => forks.push(fork.detach()),
+            Err(gix::repository::merge_base::Error::NotFound { .. }) => {}
+            Err(e) => {
+                return Err(anyhow!(
+                    "finding where HEAD left `{base}`: {}",
+                    super::error_chain(&e)
+                ));
+            }
+        }
+    }
+    let commit = forks
+        .into_iter()
+        .reduce(|a, b| later(repo, a, b))
+        .ok_or_else(|| anyhow!("HEAD and `{base}` share no history"))?;
+    Ok(ForkPoint { base, commit })
+}
+
+/// The commits `base` names: a local branch and its `origin/<name>`
+/// counterpart when it has one, else the rev as written. A name only `origin`
+/// has, as `default_base` can read from `origin/HEAD`, is that remote branch.
+fn base_tips(repo: &gix::Repository, base: &str) -> anyhow::Result<Vec<gix::ObjectId>> {
+    let branch = |prefix: &str| {
+        let mut reference = repo.find_reference(&format!("{prefix}{base}")).ok()?;
+        Some(reference.peel_to_commit().ok()?.id)
+    };
+    let remote = branch("refs/remotes/origin/");
+    if let Some(local) = branch("refs/heads/") {
+        return Ok(std::iter::once(local).chain(remote).collect());
+    }
+    let named = repo
+        .rev_parse_single(gix::bstr::BStr::new(base))
+        .ok()
+        .and_then(|id| Some(id.object().ok()?.peel_to_commit().ok()?.id));
+    named
+        .or(remote)
+        .map(|tip| vec![tip])
+        .ok_or_else(|| anyhow::anyhow!("base `{base}` names no commit"))
+}
+
+/// The later of two commits: the one the other is an ancestor of, else the
+/// more recently committed.
+fn later(repo: &gix::Repository, a: gix::ObjectId, b: gix::ObjectId) -> gix::ObjectId {
+    match repo.merge_base(a, b).map(gix::Id::detach) {
+        Ok(shared) if shared == a => b,
+        Ok(shared) if shared == b => a,
+        _ => {
+            let time = |id| {
+                repo.find_commit(id)
+                    .ok()
+                    .and_then(|c| c.time().ok())
+                    .map(|t| t.seconds)
+            };
+            if time(b) > time(a) { b } else { a }
+        }
+    }
 }
 
 /// Delete the local branch ref `refs/heads/<branch>` in the repo at

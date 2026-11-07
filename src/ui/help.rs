@@ -278,6 +278,10 @@ const SECTIONS: &[Section] = &[
             ("g d", "git diff HEAD (staged + unstaged + new)"),
             ("g D", "git diff --cached (staged changes only)"),
             ("g u", "git diff (unstaged — what changed since you staged)"),
+            (
+                "g m",
+                "git diff since the branch left its base (+ uncommitted)",
+            ),
             ("g b", "git blame (cursor file)"),
             ("g r", "restore a deleted (struck-through) file from git"),
             ("] g", "cursor to next git-changed entry (wraps)"),

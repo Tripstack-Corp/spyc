@@ -198,6 +198,7 @@ pub enum Action {
     GitDiff,       // g d — diff-vs-HEAD for cursor file / selection (staged + unstaged + new)
     GitDiffCached, // g D — staged (cached) diff
     GitDiffUnstaged, // g u — unstaged diff (index vs worktree — plain `git diff`)
+    GitDiffBranch, // g m — the selection's diff since the branch left its base (+ uncommitted)
     GitBlame,      // g b — git blame on cursor file
     GitRestore,    // g r — restore a deleted (struck-through) file from index/HEAD
 
@@ -461,9 +462,9 @@ impl Action {
             Self::WorktreeList | Self::WorktreeNew | Self::WorktreeDelete | Self::MakeMenu => {
                 self.describe_workspace()
             }
-            Self::GitDiff => "git diff HEAD (staged + unstaged + new)",
-            Self::GitDiffCached => "git diff --cached (staged)",
-            Self::GitDiffUnstaged => "git diff (unstaged — since you staged)",
+            Self::GitDiff | Self::GitDiffCached | Self::GitDiffUnstaged | Self::GitDiffBranch => {
+                self.describe_git_diff()
+            }
             Self::GitBlame => "git blame (cursor file)",
             Self::GitRestore => "restore deleted file (struck-through row) from git",
             Self::GotoFile | Self::GotoFileLine => self.describe_goto(),
@@ -633,9 +634,9 @@ impl Action {
                 self.workspace_name()
             }
             // Git diff / blame / restore.
-            Self::GitDiff => "git_diff",
-            Self::GitDiffCached => "git_diff_cached",
-            Self::GitDiffUnstaged => "git_diff_unstaged",
+            Self::GitDiff | Self::GitDiffCached | Self::GitDiffUnstaged | Self::GitDiffBranch => {
+                self.git_diff_name()
+            }
             Self::GitBlame => "git_blame",
             Self::GitRestore => "git_restore",
             // Path references.
@@ -713,6 +714,16 @@ impl Action {
         }
     }
 
+    /// The git diffs' arm of [`Self::describe`], which is at its length pin.
+    const fn describe_git_diff(&self) -> &'static str {
+        match self {
+            Self::GitDiffCached => "git diff --cached (staged)",
+            Self::GitDiffUnstaged => "git diff (unstaged — since you staged)",
+            Self::GitDiffBranch => "git diff since the branch left its base (+ uncommitted)",
+            _ => "git diff HEAD (staged + unstaged + new)",
+        }
+    }
+
     /// The path yanks' arm of [`Self::describe`], which is at its length pin.
     const fn describe_path_yank(&self) -> &'static str {
         match self {
@@ -773,6 +784,16 @@ impl Action {
             Self::WorktreeNew => "worktree_new",
             Self::WorktreeDelete => "worktree_delete",
             _ => "make_menu",
+        }
+    }
+
+    /// The git diffs' arm of [`Self::canonical_name`], which is at its length pin.
+    const fn git_diff_name(&self) -> &'static str {
+        match self {
+            Self::GitDiffCached => "git_diff_cached",
+            Self::GitDiffUnstaged => "git_diff_unstaged",
+            Self::GitDiffBranch => "git_diff_branch",
+            _ => "git_diff",
         }
     }
 

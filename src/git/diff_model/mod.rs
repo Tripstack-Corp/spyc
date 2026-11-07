@@ -5,9 +5,11 @@
 //! the in-house renderer in [`crate::ui::diff_render`]. They are the live
 //! diff/show path — production no longer shells out to git.
 //!
-//! Four scopes mirror spyc's git keys:
+//! Five scopes mirror spyc's git keys:
 //! * [`diff_head_to_worktree`] — `gd`: `HEAD` vs the working tree
 //!   (staged + unstaged + untracked).
+//! * [`diff_since_base`] — `gm` / `:diff`: the commit a branch left its base
+//!   at vs the working tree, so the branch's commits and its uncommitted work.
 //! * [`diff_cached`] — `gD`: `HEAD` tree vs the index (staged only).
 //! * [`diff_index_to_worktree`] — `gu`: the index vs the working tree
 //!   (unstaged only — plain `git diff`, "what changed since you staged").
@@ -29,7 +31,9 @@ mod build;
 
 pub use blob::{commit_meta, format_git_time};
 
+use crate::git::branch::ForkPoint;
 use crate::git::model::DiffModel;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 /// Decoded-object LRU budget for the `gd` per-path HEAD-tree lookups. Tree
@@ -42,7 +46,7 @@ use blob::{MAX_DIFF_LINES, account_file, path_selected, tree_blob_at};
 use build::{
     OwnedIndexChange, WorkItem, build_index_change_file, build_tree_change_file,
     build_worktree_file, build_worktree_rename, collect_index_worktree_plan, collect_worktree_plan,
-    own_index_change,
+    committed_paths, fold_committed, own_index_change,
 };
 
 /// `gd` scope: working tree (staged + unstaged) vs `HEAD`. For every changed
@@ -55,17 +59,69 @@ use build::{
 /// matching files/subtrees; empty means "everything".
 pub fn diff_head_to_worktree(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
     let mut repo = gix::open(repo_root).ok()?;
-    // Cache decoded objects so the per-changed-path HEAD-tree lookups below
-    // (`tree_blob_at` → root-down `lookup_entry_by_path`, and the same call in
-    // `build_worktree_rename`) reuse shared parent trees instead of re-decoding
-    // them from the pack for every path. Without it a large diff over a deep
-    // tree pays O(N·depth) tree decodes, re-walking the same directories once
-    // per changed file. Adaptive LRU (only caches trees actually touched);
-    // `_if_unset` respects a user-configured `core.deltaBaseCacheLimit`-style
-    // size if one is already set.
+    // Cache decoded objects so the per-changed-path old-tree lookups in
+    // `diff_tree_to_worktree` (`tree_blob_at` → root-down
+    // `lookup_entry_by_path`, and the same call in `build_worktree_rename`)
+    // reuse shared parent trees instead of re-decoding them from the pack for
+    // every path. Without it a large diff over a deep tree pays O(N·depth) tree
+    // decodes, re-walking the same directories once per changed file. Adaptive
+    // LRU (only caches trees actually touched); `_if_unset` respects a
+    // user-configured `core.deltaBaseCacheLimit`-style size if one is already
+    // set.
     repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
-    let workdir = repo.workdir()?.to_path_buf();
     let head_tree = repo.head_tree().ok();
+    diff_tree_to_worktree(&repo, head_tree.as_ref(), BTreeSet::new(), paths)
+}
+
+/// A branch's changes since it left its base, and where it left it.
+pub struct BranchDiff {
+    /// Where `HEAD` left the base.
+    pub fork: ForkPoint,
+    /// The fork's tree vs the working tree.
+    pub model: DiffModel,
+}
+
+/// `gm` / `:diff` scope: the working tree (staged + unstaged + untracked) vs
+/// the commit `HEAD` left `base` at ([`crate::git::branch::fork_point`]), so
+/// `git diff $(git merge-base <base> HEAD)` plus untracked files. Its paths
+/// are those the branch's commits changed since the fork and those `gd` shows;
+/// each one's old side is the fork's blob. A rename committed on the branch
+/// shows as a deletion and an addition; a staged one pairs as `gd` pairs it.
+/// `paths` restricts the result as in [`diff_head_to_worktree`].
+pub fn diff_since_base(
+    repo_root: &Path,
+    base: Option<&str>,
+    paths: &[String],
+) -> anyhow::Result<BranchDiff> {
+    use anyhow::Context;
+    let mut repo = gix::open(repo_root)
+        .with_context(|| format!("{} is not a git repository", repo_root.display()))?;
+    repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
+    let fork = crate::git::branch::fork_point(&repo, base)?;
+    let fork_tree = repo
+        .find_commit(fork.commit)
+        .context("reading the fork commit")?
+        .tree()
+        .context("reading the fork's tree")?;
+    let head_tree = repo.head_tree().context("reading HEAD's tree")?;
+    let committed = committed_paths(&repo, &fork_tree, &head_tree)
+        .context("listing the branch's committed changes")?;
+    let model = diff_tree_to_worktree(&repo, Some(&fork_tree), committed, paths)
+        .context("reading the working tree")?;
+    Ok(BranchDiff { fork, model })
+}
+
+/// The working tree vs `old_tree` (`None`: an unborn `HEAD`, so everything is
+/// an addition) over the status walk's plan and `committed`, the paths commits
+/// since `old_tree` changed. `gd` is the case where `old_tree` is `HEAD`'s and
+/// `committed` is empty. `None` if there's no working tree or the walk fails.
+fn diff_tree_to_worktree(
+    repo: &gix::Repository,
+    old_tree: Option<&gix::Tree<'_>>,
+    committed: BTreeSet<String>,
+    paths: &[String],
+) -> Option<DiffModel> {
+    let workdir = repo.workdir()?.to_path_buf();
 
     // Worktree-rooted resource cache so the "new" side can be read straight
     // from the working tree (null id + rela_path) for tracked + untracked.
@@ -81,7 +137,10 @@ pub fn diff_head_to_worktree(repo_root: &Path, paths: &[String]) -> Option<DiffM
 
     // Reduce the status walk to a per-path plan of what to diff against the
     // worktree, with rename pairs detected and untracked files individual.
-    let mut plan = collect_worktree_plan(&repo)?;
+    let mut plan = collect_worktree_plan(repo)?;
+    if !committed.is_empty() {
+        plan = fold_committed(plan, committed, old_tree);
+    }
     plan.retain(|w| path_selected(w.key(), paths));
     plan.sort_by(|a, b| a.key().cmp(b.key()));
 
@@ -96,13 +155,13 @@ pub fn diff_head_to_worktree(repo_root: &Path, paths: &[String]) -> Option<DiffM
         let file = match item {
             WorkItem::Rename {
                 source, dest, copy, ..
-            } => build_worktree_rename(&mut rc, &repo, &source, &dest, copy),
+            } => {
+                old_tree.and_then(|t| build_worktree_rename(&mut rc, repo, t, &source, &dest, copy))
+            }
             WorkItem::Path { path } => {
-                let old_blob = head_tree
-                    .as_ref()
-                    .and_then(|t| tree_blob_at(t, &path).map(|(id, _kind)| id));
+                let old_blob = old_tree.and_then(|t| tree_blob_at(t, &path).map(|(id, _kind)| id));
                 let worktree_present = workdir.join(&path).is_file();
-                build_worktree_file(&mut rc, &repo, &path, old_blob, worktree_present)
+                build_worktree_file(&mut rc, repo, &path, old_blob, worktree_present)
             }
         };
         if let Some(file) = file {
