@@ -70,7 +70,6 @@ fn files_in(diff: &str) -> Vec<&'static str> {
 /// `bravo` in a commit, `charlie` in the working tree, and added `delta`
 /// untracked; `echo`, which `main` changed after the fork, isn't the branch's.
 #[test]
-#[ignore = "red: git_diff ignores base and diffs against HEAD"]
 fn git_diff_with_a_base_shows_the_branch_since_it_left_it() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = branch_repo(tmp.path());
@@ -94,7 +93,6 @@ fn git_diff_with_a_base_shows_the_branch_since_it_left_it() {
 /// change `main` never pulled is other people's work, so `base: "main"`
 /// leaves it out.
 #[test]
-#[ignore = "red: git_diff ignores base and diffs against HEAD"]
 fn git_diff_with_a_stale_local_main_shows_only_the_branchs_own_files() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = stale_main_repo(tmp.path());
@@ -109,7 +107,6 @@ fn git_diff_with_a_stale_local_main_shows_only_the_branchs_own_files() {
 /// `base` picks the old side, and so do `cached` and `unstaged`: asked for
 /// both, the call is an error that says why, never one of the two silently.
 #[test]
-#[ignore = "red: git_diff ignores base, so cached or unstaged wins silently"]
 fn git_diff_refuses_a_base_with_cached_or_unstaged() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = branch_repo(tmp.path());
@@ -126,7 +123,6 @@ fn git_diff_refuses_a_base_with_cached_or_unstaged() {
 
 /// `paths` narrows a diff since a base as it narrows the others.
 #[test]
-#[ignore = "red: git_diff ignores base and diffs against HEAD"]
 fn git_diff_with_a_base_still_takes_paths() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = branch_repo(tmp.path());
@@ -141,7 +137,6 @@ fn git_diff_with_a_base_still_takes_paths() {
 
 /// A base that names nothing is an error that names it.
 #[test]
-#[ignore = "red: git_diff ignores base, so nothing errors"]
 fn git_diff_with_an_unknown_base_names_it() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = branch_repo(tmp.path());

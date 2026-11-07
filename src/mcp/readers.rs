@@ -640,6 +640,44 @@ pub(super) fn git_diff_text(root: &Path, mode: DiffMode, paths: &[String]) -> St
         .unwrap_or_default()
 }
 
+/// `git_diff`'s reply to `args`: the unified diff at the scope they name, or
+/// why there is none. `base` diffs the branch since it left that base (the
+/// repo's default base when empty) through
+/// [`crate::git::diff_model::diff_since_base`], `gm`'s builder. It picks the
+/// old side as `cached` and `unstaged` do, so it takes neither.
+pub(super) fn git_diff_reply(root: &Path, args: &Value) -> Result<String, String> {
+    let flag = |name: &str| args[name].as_bool().unwrap_or(false);
+    let paths: Vec<String> = args["paths"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let Some(base) = args["base"].as_str() else {
+        // `unstaged` (index↔worktree) wins over `cached` (index↔HEAD); with
+        // neither set it's the working tree vs HEAD.
+        let mode = if flag("unstaged") {
+            DiffMode::Unstaged
+        } else if flag("cached") {
+            DiffMode::Cached
+        } else {
+            DiffMode::HeadToWorktree
+        };
+        return Ok(git_diff_text(root, mode, &paths));
+    };
+    if let Some(scope) = ["cached", "unstaged"].into_iter().find(|s| flag(s)) {
+        return Err(format!(
+            "git_diff: `base` and `{scope}` each pick what to diff against; pass one"
+        ));
+    }
+    let base = Some(base.trim()).filter(|b| !b.is_empty());
+    crate::git::diff_model::diff_since_base(root, base, &paths)
+        .map(|diff| diff_model_to_unified(&diff.model))
+        .map_err(|e| format!("git_diff: {e:#}"))
+}
+
 /// Serialize a [`DiffModel`] to `git diff`-style unified text: a `diff --git`
 /// header + rename/copy/binary/submodule lines + `@@` hunks per file. The
 /// `DiffModel` already carries 1-based hunk line numbers and marker-free line

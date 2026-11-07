@@ -73,8 +73,9 @@ commit on main. So `remove_worktree`'s ancestry check reports
 `kept branch '<name>' (1 commit not in base)` even though the content shipped.
 That is conservative, not wrong.
 
-To confirm it really landed before deleting the ref, compare only the files the
-branch touched:
+`git_diff(base: "main", root: <worktree>)` shows what the branch carries: every
+file it touched since it left `main`, committed or not. To confirm that really
+landed before deleting the ref, compare only those files with `main`:
 
 ```
 git diff -z --name-only $(git merge-base <branch> main) <branch> |

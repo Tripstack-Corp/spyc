@@ -7,10 +7,10 @@ different cwd than you expect.
 ```
 git_status(root?)
 git_log(limit?, root?)
-git_diff(cached?, unstaged?, paths?, root?)
+git_diff(cached?, unstaged?, base?, paths?, root?)
 ```
 
-## The three diff scopes
+## The diff scopes
 
 This is the part worth getting right:
 
@@ -19,9 +19,18 @@ This is the part worth getting right:
 | `git_diff()` | working tree vs HEAD | "everything I've changed" |
 | `git_diff(cached: true)` | staged vs HEAD | "what a commit would contain" |
 | `git_diff(unstaged: true)` | index vs working tree | "what changed since my last `git add`" |
+| `git_diff(base: "main")` | where the branch left `main` vs working tree | "what has this branch changed?" |
 
 `unstaged: true` is the one to reach for after a staged checkpoint — it shows only
 what moved since then, instead of re-reading the whole delta.
+
+`base` is the one for a branch as a whole: its commits since it forked plus its
+uncommitted and untracked work, and none of what landed on `main` after the fork.
+Any rev works (`base: "origin/main"`, `base: "HEAD~3"`); an empty string means the
+repo's default branch. A local branch with an `origin/` counterpart counts from
+whichever fork is later, so a branch rebased onto `origin/main` doesn't claim the
+commits local `main` hasn't pulled. It can't be combined with `cached` or
+`unstaged`.
 
 Narrow with `paths` when you care about specific files; it's cheaper and the
 output is easier to reason about than filtering a full diff yourself.

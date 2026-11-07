@@ -10,7 +10,7 @@ use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 use super::deadline::{READ_TOOL_TIMEOUT, reply_budget, scope_wait_ms};
 use super::framing::{send_error, send_result, send_tool_error, send_tool_result};
 use super::readers::{
-    DiffMode, claim_worktree_result, effective_root, git_diff_text, git_log_json, git_status_json,
+    claim_worktree_result, effective_root, git_diff_reply, git_log_json, git_status_json,
     grep_matches_to_json, is_in_mount, list_worktrees_json, read_context_or_empty,
     read_cwd_from_context, read_file_content, read_inventory_from_context, read_member_content,
     read_picks_from_context, release_worktree_result,
@@ -735,27 +735,10 @@ fn handle_tools_call(
                 Ok(r) => r,
                 Err(e) => return send_tool_error(w, id, &e),
             };
-            // `unstaged` (index↔worktree) wins over `cached` (index↔HEAD); with
-            // neither set it's the working tree vs HEAD.
-            let mode = if args["unstaged"].as_bool().unwrap_or(false) {
-                DiffMode::Unstaged
-            } else if args["cached"].as_bool().unwrap_or(false) {
-                DiffMode::Cached
-            } else {
-                DiffMode::HeadToWorktree
-            };
-            let paths: Vec<String> = args["paths"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            match call_with_timeout(READ_TOOL_TIMEOUT, move || {
-                git_diff_text(&root, mode, &paths)
-            }) {
-                Ok(text) => send_tool_result(w, id, &text),
+            let args = args.clone();
+            match call_with_timeout(READ_TOOL_TIMEOUT, move || git_diff_reply(&root, &args)) {
+                Ok(Ok(text)) => send_tool_result(w, id, &text),
+                Ok(Err(e)) => send_tool_error(w, id, &e),
                 Err(msg) => send_tool_error(w, id, &format!("git_diff timed out: {msg}")),
             }
         }
