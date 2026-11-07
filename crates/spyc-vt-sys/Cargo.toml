@@ -1,6 +1,6 @@
 [package]
 name = "spyc-vt-sys"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # spyc's MSRV, unchanged. The FFI needs nothing newer: the published
 # libghostty-vt crates declare 1.90, but spyc does not depend on them — their
