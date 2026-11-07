@@ -699,13 +699,15 @@ impl super::App {
     /// click names its own.
     fn click_tasks(&mut self) -> Vec<Effect> {
         let action = crate::keymap::Action::OpenTaskViewer;
-        let before = self.state.flash.as_ref().map(|f| f.text.clone());
+        // Cleared as `gB` typed clears it, so the viewer shows only the
+        // click's own message.
+        self.state.flash = None;
         let fx = self.apply(&action).unwrap_or_else(|e| {
             self.state.flash_error(format!("tasks: {e:#}"));
             Vec::new()
         });
         let key = Some(TASK_VIEWER_KEY.to_string());
-        self.name_the_key(key, action.describe(), action.canonical_name(), before);
+        self.name_the_key(key, action.describe(), action.canonical_name(), None);
         self.relocate_flash_into_pager();
         fx
     }
@@ -720,9 +722,8 @@ impl super::App {
         key: Option<String>,
     ) -> Vec<Effect> {
         self.clear_chord_hint();
-        let before = self.state.flash.as_ref().map(|f| f.text.clone());
         let fx = self.apply_pager_action(action);
-        self.name_the_key(key, action.describe(), action.name(), before);
+        self.name_the_key(key, action.describe(), action.name(), None);
         self.relocate_flash_into_pager();
         fx
     }
@@ -744,7 +745,6 @@ impl super::App {
             return Vec::new();
         };
         self.clear_chord_hint();
-        let before = self.state.flash.as_ref().map(|f| f.text.clone());
         let (fx, name, unlabelled) = match run {
             CommandRow::Make(run) => {
                 self.run_make(&run);
@@ -768,7 +768,7 @@ impl super::App {
             }
         };
         let label = if label.is_empty() { unlabelled } else { label };
-        self.name_the_key(key, label, &name, before);
+        self.name_the_key(key, label, &name, None);
         self.relocate_flash_into_pager();
         fx
     }
@@ -806,9 +806,6 @@ impl super::App {
         (on, chord_hit::entry_at(&menu, ev.column, ev.row))
     }
 
-    /// A click on entry `index` of the open which-key popup: what the row's key
-    /// would do, through the key's own path. A range row (`1-9`) can't say
-    /// which member, so it names its keys and leaves the menu open for them.
     /// Name `key`, the key a fired row stands for, unless the user has learned
     /// it (`menu_hints`): as the flash when the action said nothing, else in
     /// front of what the action said, so its own message, an error especially,
@@ -834,6 +831,9 @@ impl super::App {
         }
     }
 
+    /// A click on entry `index` of the open which-key popup: what the row's key
+    /// would do, through the key's own path. A range row (`1-9`) can't say
+    /// which member, so it names its keys and leaves the menu open for them.
     pub(super) fn fire_chord_row(&mut self, index: usize) -> Vec<Effect> {
         use super::HintEntry;
         use crate::keymap::ChordEntry;
@@ -846,6 +846,10 @@ impl super::App {
         }) else {
             return Vec::new();
         };
+        // A row fired is its key typed, and a key clears the status bar's
+        // message (`handle_key`): what shows after is the row's own, never one
+        // left from before and taken into a pager as the row's answer.
+        self.state.flash = None;
         let entry = match entry {
             HintEntry::Pager(action) => return self.fire_pager_row(action, key),
             HintEntry::Command(run) => return self.fire_command_row(run, key, &label),
@@ -857,14 +861,13 @@ impl super::App {
                 let name = action.canonical_name();
                 let action = self.state.resolver.take_menu_action(action);
                 self.clear_chord_hint();
-                let before = self.state.flash.as_ref().map(|f| f.text.clone());
                 let fx = self
                     .update(super::update::UiMsg::Action(action))
                     .unwrap_or_else(|e| {
                         self.state.flash_error(format!("{e:#}"));
                         Vec::new()
                     });
-                self.name_the_key(key, label, name, before);
+                self.name_the_key(key, label, name, None);
                 fx
             }
             ChordEntry::Sub(_, _, seq) => {

@@ -92,6 +92,10 @@ impl App {
     /// message would render half-occluded. A handler whose result lands on the
     /// file list closed its pager first, leaving nothing to relocate into — so
     /// those messages stay on the status bar without needing a per-site opt-out.
+    ///
+    /// Every input that calls this began by clearing the flash, as a key does
+    /// in `handle_key` and a clicked menu row or task tag does as its key, so
+    /// what it moves is that input's own answer, never an older message.
     pub(crate) fn relocate_flash_into_pager(&mut self) {
         if self.active_pager_ref().is_none() {
             return;

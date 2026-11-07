@@ -677,7 +677,6 @@ fn the_pause_rows_hint_fades_after_three_s_presses() {
 /// cleared, as that key clears it, and never shown in the pager as the
 /// answer of a row that says nothing (its key learned, so it isn't named).
 #[test]
-#[ignore = "red: a clicked pager row shows a message left on the status bar as its answer"]
 fn a_silent_rows_click_clears_a_waiting_message_rather_than_showing_it() {
     with_mouse(|tmp| {
         let mut app = app_in_the_task_viewer(tmp, 1);

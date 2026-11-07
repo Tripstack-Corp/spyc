@@ -310,7 +310,6 @@ fn a_flash_from_a_scrollback_key_is_on_screen() {
 /// What `o` opened is reported in the scrollback it was pressed in, though a
 /// file is open in the pager above: not in that pager, nor on the status bar.
 #[test]
-#[ignore = "red: a diagram's result goes to the pager above the scrollback"]
 fn opening_a_diagram_is_reported_in_the_scrollback_it_came_from() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
