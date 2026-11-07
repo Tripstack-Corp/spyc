@@ -8,7 +8,9 @@
 //! tasks'. The rows come from [`crate::keymap::menu::menu_for`], or for a
 //! pager from `pager_handler::pager_menu`; this module gathers the facts they
 //! decide from and opens the menu as a which-key popup that no chord armed.
-//! The git segment's adds a `:diff` row, run as typing `:diff` runs it.
+//! The git segment's adds a `:diff` row, run as typing `:diff` runs it, and
+//! an entry's, inside a mounted archive, the archive's `:archive write`,
+//! `discard` and `unmount`.
 //!
 //! While a menu is open it takes the keys first (`InputSink::Menu`): `↑`/`↓`
 //! move a highlight, `←`/`→` move it to the entry drawn on the same line of
@@ -24,6 +26,7 @@ use ratatui::layout::Rect;
 
 use super::mouse::chord_hit::entry_across;
 use super::pager_handler::pager_menu;
+use super::state::archive::read_only_refusal;
 use super::view_state::{CommandRow, MenuState};
 use super::{App, ChordHint, Effect, HintEntry, View};
 use crate::keymap::ChordEntry;
@@ -73,9 +76,13 @@ impl App {
         Some((Target::PaneTab(facts), info.label.clone()))
     }
 
-    /// Open `target`'s menu, titled `title`.
+    /// Open `target`'s menu, titled `title`. An entry's ends with the
+    /// archive's rows inside a mounted archive.
     fn open_menu(&mut self, target: Target, title: String) -> Option<Effect> {
-        let rows = self.menu_rows(target);
+        let mut rows = self.menu_rows(target);
+        if matches!(target, Target::Entry(_)) {
+            rows.extend(self.archive_rows());
+        }
         self.show_menu(format!("{title} · ? all keys"), rows)
     }
 
@@ -108,6 +115,36 @@ impl App {
             ));
         }
         self.show_menu("git · ? all keys".to_string(), rows)
+    }
+
+    /// Inside a mounted archive, a row for each `:archive` verb that would
+    /// act on it, run as typing it does: `write` while the mount has changes
+    /// it can write, `discard` while it has changes, and `unmount`. Its
+    /// changes are the ones `:archive write` finds. None while a write of it
+    /// runs, which each verb refuses.
+    fn archive_rows(&self) -> Vec<(String, String, HintEntry)> {
+        let Some((mount, _)) = self.state.mounts.resolve(&self.state.cur().listing.dir) else {
+            return Vec::new();
+        };
+        let archive = mount.archive();
+        if self.runtime.archive_writes.contains_key(archive) {
+            return Vec::new();
+        }
+        let changes = self.mount_is_dirty(archive);
+        let writable = read_only_refusal(&mount.capability).is_none();
+        [
+            (changes && writable, "write", "write the changes back"),
+            (changes, "discard", "discard the changes"),
+            (true, "unmount", "unmount the archive"),
+        ]
+        .into_iter()
+        .filter(|(shown, ..)| *shown)
+        .map(|(_, verb, label)| {
+            let line = format!("archive {verb}");
+            let run = HintEntry::Command(Some(CommandRow::Typed(line.clone())));
+            (format!(":{line}"), label.to_string(), run)
+        })
+        .collect()
     }
 
     /// Show a menu of `rows`, each `(keys, label, entry)`, titled `title`.

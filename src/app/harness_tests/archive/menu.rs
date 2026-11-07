@@ -189,7 +189,6 @@ fn click(app: &mut App, button: MouseButton, at: (u16, u16)) -> Vec<Effect> {
 /// ends with all three rows, after the entry's own, and `:archive write`
 /// there writes the delete into the archive on disk as typing it does.
 #[test]
-#[ignore = "red: the entry menu offers none of the archive's rows"]
 fn a_changed_mounts_menu_ends_with_its_rows_and_write_writes_it_back() {
     writable(|mut fx| {
         delete_the_readme(&mut fx);
@@ -219,7 +218,6 @@ fn a_changed_mounts_menu_ends_with_its_rows_and_write_writes_it_back() {
 /// `:archive unmount`; a click on it, in the menu a right-click opened,
 /// leaves the archive for the directory holding it, the cursor on it.
 #[test]
-#[ignore = "red: the entry menu offers none of the archive's rows"]
 fn a_clean_mounts_menu_offers_only_unmount_and_a_click_on_it_leaves() {
     let _lock = crate::mouse_test_lock();
     writable(|mut fx| {
@@ -253,7 +251,6 @@ fn a_clean_mounts_menu_offers_only_unmount_and_a_click_on_it_leaves() {
 /// offers to discard that change and to unmount, but not to write, which
 /// the mount refuses.
 #[test]
-#[ignore = "red: the entry menu offers none of the archive's rows"]
 fn a_changed_read_only_mounts_menu_offers_discard_and_unmount_but_not_write() {
     read_only(|mut fx| {
         type_keys(&mut fx.app, "yy");
@@ -271,7 +268,6 @@ fn a_changed_read_only_mounts_menu_offers_discard_and_unmount_but_not_write() {
 /// `:archive discard` from the menu drops the pending delete: the member is
 /// listed again, and the archive on disk is as it was.
 #[test]
-#[ignore = "red: the entry menu offers none of the archive's rows"]
 fn discard_on_the_menu_drops_the_change() {
     writable(|mut fx| {
         let before = std::fs::read(&fx.archive).unwrap();
@@ -290,7 +286,6 @@ fn discard_on_the_menu_drops_the_change() {
 /// "ask"`, asks to write the changes first, as typing it does, and keeps the
 /// mount until answered.
 #[test]
-#[ignore = "red: the entry menu offers none of the archive's rows"]
 fn unmount_on_the_menu_of_a_changed_mount_asks_to_write_first() {
     writable(|mut fx| {
         fx.app.state.active_project_mut().config.archive.write_back = crate::config::WriteBack::Ask;
@@ -338,7 +333,6 @@ fn outside_a_mount_the_entry_menu_has_none_of_the_archives_rows() {
 /// `unmount` each refuse, so its menu offers none of them; once the write
 /// lands, the clean mount's menu offers `:archive unmount` again.
 #[test]
-#[ignore = "red: the entry menu offers none of the archive's rows"]
 fn while_its_write_runs_the_menu_has_none_of_the_archives_rows() {
     writable(|mut fx| {
         delete_the_readme(&mut fx);
