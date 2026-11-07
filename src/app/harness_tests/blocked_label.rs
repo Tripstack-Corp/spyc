@@ -526,3 +526,164 @@ fn a_forms_label_goes_once_it_is_answered() {
         assert_eq!(ping(&mut app).as_deref(), Some("agy needs you"));
     });
 }
+
+// ── `[notify] blocked_detail`: what the tool acts on ──
+
+/// Turn on `[notify] blocked_detail`, as a `.spycrc.toml` does.
+fn with_detail(app: &mut App, dir: &std::path::Path) {
+    let rc = dir.join("detail.spycrc.toml");
+    std::fs::write(&rc, "[notify]\nblocked_detail = true\n").unwrap();
+    app.state.active_project_mut().config = crate::config::Config::load_from(&[Some(&rc)]).unwrap();
+}
+
+/// Claude asking to use `tool` with `input`.
+fn asking_with(tool: &str, input: serde_json::Value) -> serde_json::Value {
+    json!({"hook_event_name":"PermissionRequest", "tool_name":tool, "tool_input":input})
+}
+
+/// A Claude tab, its option on, that has started a turn.
+fn detailed_claude(dir: &std::path::Path) -> App {
+    let mut app = agent(dir, "claude");
+    with_detail(&mut app, dir);
+    hook(&mut app, "working", &prompt());
+    ping(&mut app);
+    app
+}
+
+/// With the option on, a `Bash` request says what it runs in the words the
+/// model gave it, never the command: in the ping and at the end of the HUD's
+/// activity row.
+#[test]
+#[ignore = "red: no [notify] blocked_detail"]
+fn with_detail_on_a_bash_request_says_what_it_runs() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = detailed_claude(tmp.path());
+        let input = json!({"command":"private-command", "description":"Run the test suite"});
+        hook(&mut app, "blocked", &asking_with("Bash", input));
+        let pinged = ping(&mut app).unwrap_or_default();
+        assert_eq!(pinged, "claude needs you: Bash · Run the test suite");
+        let row = hud_row(&mut app);
+        assert!(
+            row.trim_end().ends_with("Bash · Run the test suite"),
+            "{row}"
+        );
+        assert!(!row.contains("private"), "{row}");
+    });
+}
+
+/// An edit or a write names the file it is for, by its name alone.
+#[test]
+#[ignore = "red: no [notify] blocked_detail"]
+fn with_detail_on_an_edit_names_its_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for tool in ["Edit", "Write"] {
+            let mut app = detailed_claude(tmp.path());
+            let input = json!({
+                "file_path":"/work/private-dir/src/main.rs",
+                "old_string":"private-old", "new_string":"private-new", "content":"private-content"
+            });
+            hook(&mut app, "blocked", &asking_with(tool, input));
+            assert_eq!(
+                ping(&mut app).as_deref(),
+                Some(format!("claude needs you: {tool} · main.rs").as_str())
+            );
+        }
+    });
+}
+
+/// A detail is one clean line: its first, without control characters, cut
+/// short when long.
+#[test]
+#[ignore = "red: no [notify] blocked_detail"]
+fn a_detail_is_one_clean_line() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = detailed_claude(tmp.path());
+        let input = json!({"description":"Run \u{1b}[31mthe tests\u{7}\nand then private-more"});
+        hook(&mut app, "blocked", &asking_with("Bash", input));
+        let pinged = ping(&mut app).unwrap_or_default();
+        assert_eq!(pinged, "claude needs you: Bash · Run [31mthe tests");
+
+        let mut app = detailed_claude(tmp.path());
+        let long = "word ".repeat(60);
+        hook(
+            &mut app,
+            "blocked",
+            &asking_with("Bash", json!({"description": long})),
+        );
+        let pinged = ping(&mut app).unwrap_or_default();
+        let detail = pinged
+            .strip_prefix("claude needs you: Bash · ")
+            .unwrap_or_else(|| panic!("{pinged}"));
+        assert!(detail.ends_with('…'), "{detail}");
+        assert!(detail.chars().count() < long.len() / 2, "{detail}");
+    });
+}
+
+/// `Space !` says it where it lands.
+#[test]
+#[ignore = "red: no [notify] blocked_detail"]
+fn with_detail_space_bang_says_what_the_tool_acts_on() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = detailed_claude(tmp.path());
+        let input = json!({"description":"Run the test suite"});
+        hook(&mut app, "blocked", &asking_with("Bash", input));
+        ping(&mut app);
+        app.state.active_project_mut().focus = state::Focus::FileList;
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(key('!')).unwrap();
+        assert_eq!(app.flash_text(), Some("tab 1: Bash · Run the test suite"));
+    });
+}
+
+/// Claude's `permission_prompt` notification names nothing, so it keeps the
+/// detail of the request before it, as it keeps that request's label.
+#[test]
+#[ignore = "red: no [notify] blocked_detail"]
+fn a_permission_prompt_keeps_the_detail_of_the_request_before_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = detailed_claude(tmp.path());
+        let input = json!({"file_path":"/work/src/main.rs"});
+        hook(&mut app, "blocked", &asking_with("Edit", input));
+        ping(&mut app);
+        let prompt_shown =
+            json!({"hook_event_name":"Notification", "notification_type":"permission_prompt"});
+        hook(&mut app, "blocked", &prompt_shown);
+        let row = hud_row(&mut app);
+        assert!(row.trim_end().ends_with("Edit · main.rs"), "{row}");
+    });
+}
+
+/// Even with the option on, the detail is held for the ping, the HUD and
+/// `Space !` alone: never in the diagnostics, the tab's hook history or a
+/// debug print of its reports.
+#[test]
+#[ignore = "red: no [notify] blocked_detail"]
+fn with_detail_on_it_stays_out_of_the_diagnostics() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = detailed_claude(tmp.path());
+        let input = json!({"description":"private-description"});
+        hook(&mut app, "blocked", &asking_with("Bash", input));
+        let pinged = ping(&mut app).unwrap_or_default();
+        assert!(pinged.ends_with("private-description"), "premise: {pinged}");
+        let info = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .active_info();
+        let kept = format!(
+            "{:?} {:?} {:?}",
+            info.reported, info.last_reported, info.recent_hook_events
+        );
+        for text in [kept, why_status(&mut app), dump(&mut app)] {
+            assert!(!text.contains("private"), "{text}");
+        }
+    });
+}
