@@ -550,6 +550,7 @@ mod startup_commands;
 mod tab_completion;
 mod tab_cwd;
 mod thinking_history;
+mod transcript_mermaid;
 mod view_chords;
 mod vsplit;
 mod why_status;
