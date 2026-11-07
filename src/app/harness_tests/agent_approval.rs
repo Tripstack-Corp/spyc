@@ -839,6 +839,12 @@ fn wait_screen(app: &mut App, expected: &str) {
 /// Opens a tab whose command reads as agy and draws `fixture` on its 30 × 132
 /// screen from the top-left, through a pty running `cat`.
 fn draw_agy_fixture(app: &mut App, dir: &std::path::Path, fixture: &str) {
+    draw_fixture(app, dir, "agy", fixture);
+}
+
+/// Opens a tab whose command reads as `agent` and draws `fixture` on its
+/// 30 × 132 screen from the top-left, through a pty running `cat`.
+pub(super) fn draw_fixture(app: &mut App, dir: &std::path::Path, agent: &str, fixture: &str) {
     assert!(app.open_pane_tab_in("sh -c 'stty raw -echo; printf READY; exec cat'", dir));
     wait_screen(app, "READY");
     {
@@ -849,7 +855,7 @@ fn draw_agy_fixture(app: &mut App, dir: &std::path::Path, fixture: &str) {
             .as_mut()
             .unwrap()
             .tabs_mut()[0];
-        entry.info.command = "agy".into();
+        entry.info.command = agent.into();
         entry.pane.resize(30, 132).unwrap();
         entry
             .pane

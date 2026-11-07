@@ -14,7 +14,7 @@ use crate::config::AgentHudMode;
 use crate::mcp_cmd::{McpCommand, McpResponse};
 use ratatui::layout::Rect;
 use serde_json::json;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// An agent tab named for `name`, as spyc labels one it launched.
 fn agent(dir: &std::path::Path, name: &str) -> App {
@@ -61,6 +61,11 @@ fn permission(tool: &str) -> serde_json::Value {
 /// Settle the dots, and the summary of the desktop ping that fired, if any.
 fn ping(app: &mut App) -> Option<String> {
     let (_, effects) = app.settle_agent_activity(Instant::now(), &mut RunCtx::for_test());
+    summary(&effects)
+}
+
+/// The summary of the desktop ping among `effects`, if one fired.
+fn summary(effects: &[Effect]) -> Option<String> {
     effects.iter().find_map(|fx| match fx {
         Effect::Notify {
             system: Some((summary, _)),
@@ -342,5 +347,186 @@ fn no_tool_input_enters_spycs_state() {
         for text in seen {
             assert!(!text.contains("private"), "{text}");
         }
+    });
+}
+
+// ── a wait spyc reads off the screen ──
+
+/// A tab running `name` whose screen shows `fixture`, a wait the agent draws
+/// with no hook of its own, behind the `working` its last prompt reported.
+fn showing(dir: &std::path::Path, name: &str, fixture: &str) -> App {
+    let mut app = App::test_app(dir.to_path_buf());
+    super::agent_approval::draw_fixture(&mut app, dir, name, fixture);
+    let info = app
+        .runtime
+        .project_mut()
+        .pane_tabs
+        .as_mut()
+        .unwrap()
+        .active_info_mut();
+    info.label = name.into();
+    if name == "codex" {
+        info.codex_home = Some(dir.join("codex-home"));
+    }
+    hook(&mut app, "working", &prompt());
+    ping(&mut app);
+    app
+}
+
+/// The screen read once its output has gone quiet, then the dots: the summary
+/// of the ping that fired, if any.
+fn ping_after_reading_the_screen(app: &mut App) -> Option<String> {
+    let quiet_since = Instant::now();
+    {
+        let info = app
+            .runtime
+            .project_mut()
+            .pane_tabs
+            .as_mut()
+            .unwrap()
+            .active_info_mut();
+        info.last_output_at = Some(quiet_since);
+        info.scrape_dirty = true;
+    }
+    let at = quiet_since + Duration::from_secs(1);
+    app.settle_scrape_quiet(at, &mut RunCtx::for_test());
+    let (_, effects) = app.settle_agent_activity(at, &mut RunCtx::for_test());
+    summary(&effects)
+}
+
+/// A wait spyc reads off codex's screen names the form it shows, as a hook's
+/// names its tool: in the ping and at the end of the HUD's activity row.
+#[test]
+#[ignore = "red: a form read off codex's screen pings with no label"]
+fn a_wait_read_off_codexs_screen_names_its_form() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for (fixture, label) in [
+            (
+                include_str!("../../../tests/fixtures/codex-approval-exec.txt"),
+                "command",
+            ),
+            (
+                include_str!("../../../tests/fixtures/codex-approval-edit.txt"),
+                "file edit",
+            ),
+            (
+                include_str!("../../../tests/fixtures/codex-approval-mcp.txt"),
+                "mcp",
+            ),
+            (
+                include_str!("../../../tests/fixtures/codex-approval-network.txt"),
+                "network",
+            ),
+            (
+                include_str!("../../../tests/fixtures/codex-questions/expanded-options.txt"),
+                "question",
+            ),
+        ] {
+            let mut app = showing(tmp.path(), "codex", fixture);
+            assert_eq!(
+                ping_after_reading_the_screen(&mut app),
+                Some(format!("codex needs you: {label}")),
+                "{label}"
+            );
+            let row = hud_row(&mut app);
+            assert!(row.trim_end().ends_with(label), "{label}: {row}");
+        }
+    });
+}
+
+/// agy's dialogs, the same: each names what its question asks to allow.
+#[test]
+#[ignore = "red: a dialog read off agy's screen pings with no label"]
+fn a_wait_read_off_agys_screen_names_its_form() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        for (fixture, label) in [
+            (
+                include_str!("../../../tests/fixtures/agy-output/approval-command.txt"),
+                "command",
+            ),
+            (
+                include_str!("../../../tests/fixtures/agy-output/approval-command-editor.txt"),
+                "command",
+            ),
+            (
+                include_str!("../../../tests/fixtures/agy-output/approval-edit.txt"),
+                "file edit",
+            ),
+            (
+                include_str!("../../../tests/fixtures/agy-output/approval-file.txt"),
+                "file access",
+            ),
+            (
+                include_str!("../../../tests/fixtures/agy-output/approval-file-access.txt"),
+                "file access",
+            ),
+            (
+                include_str!("../../../tests/fixtures/agy-output/approval-mcp.txt"),
+                "mcp",
+            ),
+        ] {
+            let mut app = showing(tmp.path(), "agy", fixture);
+            assert_eq!(
+                ping_after_reading_the_screen(&mut app),
+                Some(format!("agy needs you: {label}")),
+                "{label}"
+            );
+            let row = hud_row(&mut app);
+            assert!(row.trim_end().ends_with(label), "{label}: {row}");
+        }
+    });
+}
+
+/// `Space !` names a wait read off the screen where it lands, as it names a
+/// hook's.
+#[test]
+#[ignore = "red: Space ! names no wait read off the screen"]
+fn space_bang_names_a_wait_read_off_the_screen() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let fixture = include_str!("../../../tests/fixtures/codex-approval-exec.txt");
+        let mut app = showing(tmp.path(), "codex", fixture);
+        ping_after_reading_the_screen(&mut app);
+        app.state.active_project_mut().focus = state::Focus::FileList;
+        app.handle_key(key(' ')).unwrap();
+        app.handle_key(key('!')).unwrap();
+        assert_eq!(app.flash_text(), Some("tab 1: command"));
+    });
+}
+
+/// The label goes with the form that showed it: answered in the pane, a later
+/// block the agent reports itself names nothing.
+#[test]
+#[ignore = "red: a form read off the screen pings with no label"]
+fn a_forms_label_goes_once_it_is_answered() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let fixture = include_str!("../../../tests/fixtures/agy-output/approval-command.txt");
+        let mut app = showing(tmp.path(), "agy", fixture);
+        assert_eq!(
+            ping_after_reading_the_screen(&mut app).as_deref(),
+            Some("agy needs you: command")
+        );
+        app.execute_pane_input(
+            PaneTarget::Active,
+            PaneInput::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            None,
+            None,
+        );
+        ping(&mut app);
+        let response = app.execute_mcp_command(McpCommand::ReportStatus {
+            pane_id: None,
+            pane: None,
+            status: "blocked".into(),
+            ttl_ms: None,
+            note: None,
+            session_id: None,
+            claude_home: None,
+            hook_event: None,
+        });
+        assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");
+        assert_eq!(ping(&mut app).as_deref(), Some("agy needs you"));
     });
 }
