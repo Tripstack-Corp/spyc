@@ -102,6 +102,102 @@ pub fn run_git(dir: &Path, args: &[&str]) -> String {
     panic!("git {args:?} failed after {RUN_GIT_MAX_ATTEMPTS} attempts: {last_err}");
 }
 
+/// Write each `(path, text)` under `repo`, making the directories it needs.
+fn write_files(repo: &Path, files: &[(&str, &str)]) {
+    for (path, text) in files {
+        let path = repo.join(path);
+        std::fs::create_dir_all(path.parent().expect("a file has a parent")).expect("mkdir");
+        std::fs::write(path, text).expect("write");
+    }
+}
+
+/// A fresh repo at `root/repo` on `main`, canonical so gix's paths line up.
+fn fresh_repo(root: &Path) -> std::path::PathBuf {
+    let repo = std::fs::canonicalize(root)
+        .expect("root exists")
+        .join("repo");
+    std::fs::create_dir_all(&repo).expect("mkdir repo");
+    run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+    repo
+}
+
+/// A branch with work of its own, committed and not, in a repo whose `main`
+/// moved on after it forked. At `root/repo`: `main` commits `proj/alpha.txt`,
+/// `proj/charlie.txt`, `proj/echo.txt` and `other/keep.txt`; `feature` forks
+/// there and commits a change to `alpha.txt` and a new `bravo.txt`; `main`
+/// then changes `echo.txt`. `feature` is checked out with `charlie.txt` edited
+/// and `delta.txt` untracked, so its changes since `main` are `alpha`–`delta`,
+/// and never `echo`.
+pub fn branch_repo(root: &Path) -> std::path::PathBuf {
+    let repo = fresh_repo(root);
+    write_files(
+        &repo,
+        &[
+            ("proj/alpha.txt", "alpha\n"),
+            ("proj/charlie.txt", "charlie\n"),
+            ("proj/echo.txt", "echo\n"),
+            ("other/keep.txt", "keep\n"),
+        ],
+    );
+    run_git(&repo, &["add", "-A"]);
+    run_git(&repo, &["commit", "-q", "-m", "base"]);
+    run_git(&repo, &["checkout", "-q", "-b", "feature"]);
+    write_files(
+        &repo,
+        &[
+            ("proj/alpha.txt", "alpha\nfrom the branch\n"),
+            ("proj/bravo.txt", "bravo\n"),
+        ],
+    );
+    run_git(&repo, &["add", "-A"]);
+    run_git(&repo, &["commit", "-q", "-m", "branch work"]);
+    run_git(&repo, &["checkout", "-q", "main"]);
+    write_files(&repo, &[("proj/echo.txt", "echo\nfrom main\n")]);
+    run_git(&repo, &["commit", "-q", "-am", "main moves on"]);
+    run_git(&repo, &["checkout", "-q", "feature"]);
+    write_files(
+        &repo,
+        &[
+            ("proj/charlie.txt", "charlie\nuncommitted\n"),
+            ("proj/delta.txt", "delta\n"),
+        ],
+    );
+    repo
+}
+
+/// A branch rebased onto `origin/main` while local `main` lags behind it. At
+/// `root/repo`: `main` commits `proj/alpha.txt`, `proj/echo.txt` and
+/// `other/keep.txt`; `refs/remotes/origin/main` adds a change to `echo.txt`
+/// that local `main` never pulled; `feature`, checked out, forks from
+/// `origin/main` and commits a change to `alpha.txt`. Its own changes are
+/// `alpha.txt` alone: `echo.txt` is someone else's merged work.
+pub fn stale_main_repo(root: &Path) -> std::path::PathBuf {
+    let repo = fresh_repo(root);
+    write_files(
+        &repo,
+        &[
+            ("proj/alpha.txt", "alpha\n"),
+            ("proj/echo.txt", "echo\n"),
+            ("other/keep.txt", "keep\n"),
+        ],
+    );
+    run_git(&repo, &["add", "-A"]);
+    run_git(&repo, &["commit", "-q", "-m", "base"]);
+    run_git(&repo, &["checkout", "-q", "-b", "upstream"]);
+    write_files(&repo, &[("proj/echo.txt", "echo\nmerged upstream\n")]);
+    run_git(&repo, &["commit", "-q", "-am", "someone else's work"]);
+    run_git(
+        &repo,
+        &["update-ref", "refs/remotes/origin/main", "upstream"],
+    );
+    run_git(&repo, &["checkout", "-q", "main"]);
+    run_git(&repo, &["branch", "-q", "-D", "upstream"]);
+    run_git(&repo, &["checkout", "-q", "-b", "feature", "origin/main"]);
+    write_files(&repo, &[("proj/alpha.txt", "alpha\nfrom the branch\n")]);
+    run_git(&repo, &["commit", "-q", "-am", "branch work"]);
+    repo
+}
+
 #[cfg(test)]
 mod tests {
     use super::{GIT_REDIRECT_ENV, git_command};
