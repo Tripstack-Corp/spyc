@@ -32,16 +32,24 @@ A `Blocked` ping says what the agent waits on when its status hook names it:
   spyc's own tools keep theirs;
 - why a turn that failed stopped: `claude needs you: stopped: rate limit`.
 
+A wait spyc reads off the screen, where the agent asks with no hook of its
+own, names the form it shows:
+
+- Codex: `command`, `file edit`, `mcp` and `network` for its approval forms,
+  and `question` for its questions view: `codex needs you: command`;
+- agy: `command` (a command, a sandbox bypass, an elevation, and the
+  permission editor opened over one), `file edit`, `file access`, `URL`,
+  `mcp` and `permission`, from the question its dialog asks.
+
 Claude's "needs your permission" notice names no tool, so the wait keeps the
 label of the request before it. The same label ends the agent HUD's activity
 row, and `Space !` flashes it where it lands: `tab 2: Bash`. It goes when you
 answer.
 
-The label comes from the hook's metadata alone: never what the tool would act
-on, and never the agent's own note, since a desktop notification can leave the
-machine. A wait spyc reads off the screen (agy's approval prompts, Codex's
-approval forms), or one the agent reports itself, pings without one:
-`claude needs you`.
+The label comes from the hook's metadata or the form's kind alone: never what
+the tool would act on, and never the agent's own note, since a desktop
+notification can leave the machine. A wait the agent reports itself, or a form
+whose question names nothing, pings without one: `claude needs you`.
 
 ```toml
 [notify]

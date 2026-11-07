@@ -103,13 +103,17 @@ fn footer_matches(text: &str, footer: &str) -> bool {
 /// One priority-ordered rule in an [`crate::agent::AgentProfile::detection_rules`]
 /// ruleset: scan `region`, and if `matcher` matches, the tab's scrape-inferred
 /// status is `state`. `visible_blocker` is the human-readable reason surfaced
-/// by `:why-status` / `:activity dump`.
+/// by `:why-status` / `:activity dump`; `waits_on` is the short label a
+/// blocked tab's ping, HUD row and `Space !` show, in a hook label's words
+/// (`command`, `file edit`). agy's one rule covers every dialog, so its label
+/// comes from the dialog matched ([`waits_on`]).
 #[derive(Debug, Clone, Copy)]
 pub struct DetectionRule {
     pub region: Region,
     pub matcher: Matcher,
     pub state: AgentActivity,
     pub visible_blocker: Option<&'static str>,
+    pub waits_on: Option<&'static str>,
 }
 
 fn region_text(lines: &[String], region: Region) -> String {
@@ -137,11 +141,27 @@ pub fn scan(
     lines: &[String],
     rules: &[DetectionRule],
 ) -> Option<(AgentActivity, Option<&'static str>)> {
+    first_match(lines, rules).map(|(rule, _)| (rule.state, rule.visible_blocker))
+}
+
+/// What the wait [`scan`] finds in `lines` is for: its rule's label, or for
+/// agy the dialog's own.
+pub fn waits_on(lines: &[String], rules: &[DetectionRule]) -> Option<&'static str> {
+    let (rule, text) = first_match(lines, rules)?;
+    match rule.matcher {
+        Matcher::AgyApproval => super::agy_approval::waits_on(&text),
+        _ => rule.waits_on,
+    }
+}
+
+/// The first rule in `rules` that matches `lines`, with the text it matched.
+fn first_match<'r>(
+    lines: &[String],
+    rules: &'r [DetectionRule],
+) -> Option<(&'r DetectionRule, String)> {
     rules.iter().find_map(|rule| {
         let text = region_text(lines, rule.region);
-        rule.matcher
-            .matches(&text)
-            .then_some((rule.state, rule.visible_blocker))
+        rule.matcher.matches(&text).then_some((rule, text))
     })
 }
 
@@ -202,12 +222,14 @@ mod tests {
                 matcher: Matcher::All(&["Do you want to proceed?"]),
                 state: AgentActivity::Blocked,
                 visible_blocker: Some("awaiting tool-execution approval"),
+                waits_on: None,
             },
             DetectionRule {
                 region: Region::BottomNonEmptyLines(5),
                 matcher: Matcher::All(&["anything"]),
                 state: AgentActivity::Working,
                 visible_blocker: None,
+                waits_on: None,
             },
         ];
         let l = lines(&["Do you want to proceed?", "anything else"]);
@@ -228,6 +250,7 @@ mod tests {
             matcher: Matcher::All(&["Do you want to proceed?"]),
             state: AgentActivity::Blocked,
             visible_blocker: None,
+            waits_on: None,
         }];
         assert_eq!(scan(&lines(&["nothing relevant"]), rules), None);
     }

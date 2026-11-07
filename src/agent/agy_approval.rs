@@ -20,6 +20,17 @@ pub(super) fn matches(text: &str) -> bool {
     approval_top(&rows).or_else(|| editor_top(&rows)).is_some()
 }
 
+/// What the live dialog at the bottom of `text` asks to allow, in a hook
+/// label's words: its question's label ([`APPROVAL_QUESTIONS`]), or `command`
+/// for the permission editor, which opens over a command's approval.
+pub(super) fn waits_on(text: &str) -> Option<&'static str> {
+    let rows: Vec<&str> = text.lines().filter(|row| !row.trim().is_empty()).collect();
+    if let Some((_, q_idx)) = approval(&rows) {
+        return question_label(rows[q_idx].trim());
+    }
+    editor_top(&rows).map(|_| "command")
+}
+
 /// Index in `lines` of the top header row (`Command`, `File`, `Pending edit`,
 /// `Question`, `Expanded Tool Permission Editor`, etc.) of a live `agy`
 /// approval or question dialog at the bottom of the viewport.
@@ -43,6 +54,12 @@ pub(super) fn dialog_top(lines: &[String]) -> Option<usize> {
 /// Index in `rows` (non-empty lines) of the header word starting a live `agy`
 /// tool-approval dialog.
 fn approval_top(rows: &[&str]) -> Option<usize> {
+    approval(rows).map(|(top, _)| top)
+}
+
+/// Indices in `rows` (non-empty lines) of a live `agy` tool-approval dialog's
+/// header word and its question.
+fn approval(rows: &[&str]) -> Option<(usize, usize)> {
     let cancel_idx = cancel_footer_index(rows)?;
     let nav_idx = navigate_row_index(rows, cancel_idx)?;
     let q_idx = (0..nav_idx)
@@ -51,7 +68,9 @@ fn approval_top(rows: &[&str]) -> Option<usize> {
     if !has_ordered_options(&rows[q_idx + 1..nav_idx], true) {
         return None;
     }
-    permission_header_top(rows, q_idx).or_else(|| pending_edit_header_top(rows, q_idx))
+    let top =
+        permission_header_top(rows, q_idx).or_else(|| pending_edit_header_top(rows, q_idx))?;
+    Some((top, q_idx))
 }
 
 /// Index in `rows` (non-empty lines) of the `Question` header starting a live
@@ -336,20 +355,33 @@ fn is_edit_header(row: &str) -> bool {
     is_col0(row) && matches!(row.trim(), "Pending edit" | "Edit" | "File")
 }
 
+/// The questions an agy approval dialog asks, each with what it asks to allow
+/// in a hook label's words. `Do you want to proceed?` names nothing.
+const APPROVAL_QUESTIONS: &[(&str, Option<&str>)] = &[
+    ("Run this command?", Some("command")),
+    (
+        "Allow sandbox bypass for command execution?",
+        Some("command"),
+    ),
+    ("Allow administrator elevation?", Some("command")),
+    ("Accept this file edit?", Some("file edit")),
+    ("Allow creation of this file?", Some("file edit")),
+    ("Allow access to this file?", Some("file access")),
+    ("Allow access to this URL?", Some("URL")),
+    ("Allow calling this tool?", Some("mcp")),
+    ("Grant requested permission?", Some("permission")),
+    ("Do you want to proceed?", None),
+];
+
 fn is_approval_question(trimmed: &str) -> bool {
-    matches!(
-        trimmed,
-        "Run this command?"
-            | "Allow access to this file?"
-            | "Allow access to this URL?"
-            | "Allow calling this tool?"
-            | "Allow creation of this file?"
-            | "Accept this file edit?"
-            | "Grant requested permission?"
-            | "Allow sandbox bypass for command execution?"
-            | "Allow administrator elevation?"
-            | "Do you want to proceed?"
-    )
+    APPROVAL_QUESTIONS.iter().any(|(q, _)| *q == trimmed)
+}
+
+fn question_label(trimmed: &str) -> Option<&'static str> {
+    APPROVAL_QUESTIONS
+        .iter()
+        .find(|(q, _)| *q == trimmed)
+        .and_then(|(_, label)| *label)
 }
 
 fn has_ordered_options(rows: &[&str], require_yes_no: bool) -> bool {

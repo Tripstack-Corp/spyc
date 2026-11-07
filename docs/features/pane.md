@@ -112,8 +112,9 @@ image protocols or OSC 52 clipboard writes. How it answers:
   - **Desktop notification** naming the tab (e.g. *"codex needs you — tab 2 is
     blocked"*) on `Blocked` and `Done`, and its project when several are open
     (*"codex in web needs you — web: tab 2 is blocked"*). A blocked agent's
-    ping says what it waits on when its hook names it (*"claude needs you:
-    Bash"*; [`docs/config/notifications.md`](../config/notifications.md)).
+    ping says what it waits on when its hook or the form on its screen names
+    it (*"claude needs you: Bash"*, *"codex needs you: command"*;
+    [`docs/config/notifications.md`](../config/notifications.md)).
     **On by default.** `desktop_via` picks
     how it's delivered — default **`"auto"`**: an **OSC-9 terminal escape over
     SSH** (so it pops on your *client* terminal, where your eyes are) and the OS

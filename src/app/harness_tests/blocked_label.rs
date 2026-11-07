@@ -397,7 +397,6 @@ fn ping_after_reading_the_screen(app: &mut App) -> Option<String> {
 /// A wait spyc reads off codex's screen names the form it shows, as a hook's
 /// names its tool: in the ping and at the end of the HUD's activity row.
 #[test]
-#[ignore = "red: a form read off codex's screen pings with no label"]
 fn a_wait_read_off_codexs_screen_names_its_form() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -437,7 +436,6 @@ fn a_wait_read_off_codexs_screen_names_its_form() {
 
 /// agy's dialogs, the same: each names what its question asks to allow.
 #[test]
-#[ignore = "red: a dialog read off agy's screen pings with no label"]
 fn a_wait_read_off_agys_screen_names_its_form() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -482,7 +480,6 @@ fn a_wait_read_off_agys_screen_names_its_form() {
 /// `Space !` names a wait read off the screen where it lands, as it names a
 /// hook's.
 #[test]
-#[ignore = "red: Space ! names no wait read off the screen"]
 fn space_bang_names_a_wait_read_off_the_screen() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -499,7 +496,6 @@ fn space_bang_names_a_wait_read_off_the_screen() {
 /// The label goes with the form that showed it: answered in the pane, a later
 /// block the agent reports itself names nothing.
 #[test]
-#[ignore = "red: a form read off the screen pings with no label"]
 fn a_forms_label_goes_once_it_is_answered() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
