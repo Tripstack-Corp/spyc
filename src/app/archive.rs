@@ -588,7 +588,7 @@ impl App {
         // a streamed mount wrote every member during the pass. Recording
         // it is what stops the first dirty check from reading the whole
         // archive as edited behind our back.
-        mount.staged = current_staged_stats(&mount);
+        mount.staged = on_disk_stats(&mount);
         clean_effects(self.state.mounts.insert(mount, &protected))
     }
 
@@ -864,12 +864,33 @@ fn display_name(path: &Path) -> String {
     )
 }
 
-/// Stat every staged file a mount knows about, keyed the same way the recorded
-/// stats are. The difference between the two is the only signal that an edit spyc
-/// didn't perform has happened.
-fn current_staged_stats(mount: &ArchiveMount) -> crate::archive::journal::StagedStats {
-    let mut now = crate::archive::journal::StagedStats::new();
-    for entry in &mount.index.entries {
+/// Stat each member spyc extracted, keyed the same way the recorded stats are.
+/// The difference between the two is the only signal that an edit spyc didn't
+/// perform has happened. Only recorded members are read, so the check costs a
+/// stat per extracted member however large the archive.
+fn current_staged_stats(mount: &ArchiveMount) -> StagedStats {
+    stats_of(
+        mount,
+        mount
+            .staged
+            .keys()
+            .filter_map(|inner| mount.index.get(inner)),
+    )
+}
+
+/// Stat every member with a file in the staging tree, whoever put it there:
+/// what a new mount records as spyc's own, and what a landed write's re-read
+/// would otherwise wipe.
+fn on_disk_stats(mount: &ArchiveMount) -> StagedStats {
+    stats_of(mount, mount.index.entries.iter())
+}
+
+fn stats_of<'a>(
+    mount: &ArchiveMount,
+    entries: impl Iterator<Item = &'a crate::archive::IndexEntry>,
+) -> StagedStats {
+    let mut now = StagedStats::new();
+    for entry in entries {
         let path = mount.staging_path(entry);
         let Ok(md) = std::fs::metadata(&path) else {
             continue;

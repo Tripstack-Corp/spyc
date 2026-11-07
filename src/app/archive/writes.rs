@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{current_staged_stats, display_name, sibling_of};
+use super::{display_name, on_disk_stats, sibling_of};
 use crate::app::App;
 use crate::app::archive_ops::ArchiveOutcome;
 use crate::app::archive_route::PendingChange;
@@ -49,15 +49,15 @@ impl App {
         }
     }
 
-    /// Move aside each extracted copy of `archive` edited since its write was
-    /// planned from `planned`: the write didn't carry it, and the re-read
-    /// empties the staging tree. A copy spyc extracted itself in the meantime
-    /// is not an edit.
+    /// Move aside each file in `archive`'s staging tree edited since its write
+    /// was planned from `planned`, whoever wrote it: the write didn't carry
+    /// it, and the re-read empties the staging tree. A copy spyc extracted
+    /// itself in the meantime is not an edit.
     fn hold_late_edits(&mut self, archive: &Path, planned: &StagedStats) {
         let Some(mount) = self.state.mounts.get(archive) else {
             return;
         };
-        let now = current_staged_stats(mount);
+        let now = on_disk_stats(mount);
         let late: Vec<(String, PathBuf)> = mount
             .index
             .entries
