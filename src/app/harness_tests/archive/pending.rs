@@ -1195,3 +1195,92 @@ fn an_edit_saved_before_the_re_read_runs_is_kept_pending() {
         assert!(mount.is_dirty(), "the edit isn't pending");
     });
 }
+
+// ── a watched staging folder ─────────────────────────────────────────────────
+
+/// A `.tar.gz` of `count` members mounted the way the running loop mounts
+/// one, with a wake sender installed so the mount can watch its staging
+/// folder, and the column inside it.
+fn watched_tarball(count: usize, test: impl FnOnce(&mut App, &Path)) {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("many.tar.gz");
+        build_tar_gz_with(&archive, count);
+        let mut app = App::test_app(dir);
+        let (wake, _woken) = std::sync::mpsc::channel();
+        app.runtime.pane_wake_tx = Some(wake);
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        let mount = app.state.mounts.get(&archive).expect("mounted");
+        assert!(
+            mount.staged.len() > 256,
+            "the fixture is past the per-wake bound: {}",
+            mount.staged.len()
+        );
+        test(&mut app, &archive);
+    });
+}
+
+/// An edit to a copy extracted from a tarball too big to check on every
+/// wake is noticed as it is saved, as a small archive's is: the staging
+/// folder is watched, and the watch names the member that changed.
+#[test]
+#[ignore = "red: past 256 extracted members an edit is only checked for by an `:archive` command or quitting"]
+fn an_edit_to_a_big_tarball_is_noticed_as_it_is_saved() {
+    watched_tarball(300, |app, archive| {
+        let staged = {
+            let mount = app.state.mounts.get(archive).unwrap();
+            mount.staging_path(mount.index.get("file-7.txt").unwrap())
+        };
+        std::fs::write(&staged, b"edited\n").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !app.settle_archive_edits() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the edit was never noticed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            app.state
+                .mounts
+                .get(archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+    });
+}
+
+/// Opening the entry menu inside a watched tarball, and typing an
+/// `:archive` command there, each check for changes by statting what the
+/// watch named, not every member the tarball extracted.
+#[test]
+#[ignore = "red: the check stats every member a tarball extracted, which is all of them"]
+fn checking_a_watched_tarball_for_changes_skips_what_did_not_change() {
+    watched_tarball(300, |app, archive| {
+        app.settle_archive_edits();
+        app.state.focus_on_path(&archive.join("file-7.txt"));
+        let _ = crate::app::archive::staged_stats_taken();
+        app.handle_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('.'),
+            crossterm::event::KeyModifiers::NONE,
+        ))
+        .unwrap();
+        assert!(
+            app.view
+                .chord_hint
+                .as_ref()
+                .is_some_and(|h| h.menu.is_some()),
+            "the menu never opened"
+        );
+        let menu = crate::app::archive::staged_stats_taken();
+        assert!(menu < 30, "opening the menu statted {menu} copies");
+        let _ = app.cmd_archive("info");
+        let info = crate::app::archive::staged_stats_taken();
+        assert!(info < 30, "`:archive info` statted {info} copies");
+    });
+}

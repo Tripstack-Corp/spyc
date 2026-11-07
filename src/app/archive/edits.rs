@@ -315,7 +315,7 @@ fn stats_of<'a>(
     let mut now = StagedStats::new();
     for entry in entries {
         let path = crate::archive::listing::staging_path(staging_root, entry);
-        let Ok(md) = std::fs::metadata(&path) else {
+        let Ok(md) = stat_staged(&path) else {
             continue;
         };
         // Directories are skipped: a staging directory's mtime moves whenever
@@ -336,6 +336,25 @@ fn stats_of<'a>(
     now
 }
 
+/// Stat a staged copy. A test counts them on its own thread: a check for
+/// changes costs one per member it looks at.
+fn stat_staged(path: &Path) -> std::io::Result<std::fs::Metadata> {
+    #[cfg(test)]
+    STAGED_STATS.with(|n| n.set(n.get() + 1));
+    std::fs::metadata(path)
+}
+
+#[cfg(test)]
+thread_local! {
+    static STAGED_STATS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many staged copies this thread has statted since it last asked.
+#[cfg(test)]
+pub(in crate::app) fn staged_stats_taken() -> usize {
+    STAGED_STATS.with(|n| n.replace(0))
+}
+
 /// How many staged members spyc will stat on every loop wake to notice an edit.
 ///
 /// A handful of reads costs nothing; a streamed tarball's whole member list would
@@ -352,7 +371,7 @@ fn changed_among(mount: &ArchiveMount, candidates: &[String]) -> Vec<String> {
             let Some(entry) = mount.index.get(inner) else {
                 return false;
             };
-            let Ok(md) = std::fs::metadata(mount.staging_path(entry)) else {
+            let Ok(md) = stat_staged(&mount.staging_path(entry)) else {
                 return false;
             };
             if md.is_dir() {

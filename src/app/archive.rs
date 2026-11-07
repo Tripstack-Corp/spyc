@@ -26,6 +26,8 @@ mod writes;
 pub(super) use writes::{Held, LateEdits, hold_late_edits};
 
 pub(super) use edits::on_disk_stats;
+#[cfg(test)]
+pub(super) use edits::staged_stats_taken;
 use edits::{current_staged_stats, differs};
 
 pub(super) use reads::Joined;
