@@ -684,9 +684,8 @@ impl App {
             view.stream_id = Some(id);
             view.streaming = true;
         }
-        // The key hint goes in the scrollback's own footer, which the first key
-        // there clears. On the status bar it would outlive that key and be
-        // swept into the scrollback over the key's own answer.
+        // The key hint goes in the scrollback's own footer, where its keys'
+        // answers show; the first key there replaces it.
         view.flash = Some("scroll: on (/, n/N, :N, V, y, Esc exit)".to_string());
         // The bottom-region scrollback slot — coexists with a top-region
         // `view.pager` (`D`) rather than evicting it.

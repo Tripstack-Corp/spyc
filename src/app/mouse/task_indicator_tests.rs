@@ -256,7 +256,6 @@ fn pager_flash(app: &App) -> Option<String> {
 /// cleared, as `gB` clears it, and never shown in the viewer it opens as the
 /// click's answer (`gB` learned, so the click names no key).
 #[test]
-#[ignore = "red: a click on the task tags shows a message left on the status bar in the viewer"]
 fn a_click_on_the_task_tags_clears_a_waiting_message_rather_than_showing_it() {
     with_mouse(|tmp| {
         let mut app = app_with_tasks(tmp, 1, true);
