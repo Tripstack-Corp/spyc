@@ -89,6 +89,22 @@ fn git_diff_with_a_base_shows_the_branch_since_it_left_it() {
     );
 }
 
+/// A file a branch commit changed and the working tree has since put back as
+/// it was at the fork is no change since the fork, so no `diff --git` names it.
+#[test]
+#[ignore = "red: a file put back as it was at the fork gets a header with no hunks"]
+fn git_diff_with_a_base_leaves_out_a_file_put_back_as_it_was_at_the_fork() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = branch_repo(tmp.path());
+    std::fs::write(repo.join("proj/alpha.txt"), "alpha\n").unwrap();
+    let ctx_path = context_beside(tmp.path());
+
+    let (diff, error) = git_diff(&ctx_path, &repo, json!({"base": "main"}));
+
+    assert!(!error, "{diff}");
+    assert_eq!(files_in(&diff), ["bravo", "charlie", "delta"], "{diff}");
+}
+
 /// Local `main` lags `origin/main`, which the branch was rebased onto: the
 /// change `main` never pulled is other people's work, so `base: "main"`
 /// leaves it out.

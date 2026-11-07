@@ -223,3 +223,71 @@ fn the_g_popup_lists_gm() {
         );
     });
 }
+
+/// A file a branch commit changed and the working tree has since put back as
+/// it was at the fork is no change since the fork: `:diff` leaves it out, as
+/// `git diff $(git merge-base main HEAD)` does.
+#[test]
+#[ignore = "red: a file put back as it was at the fork shows as an empty modified entry"]
+fn diff_leaves_out_a_file_the_worktree_put_back_as_it_was_at_the_fork() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let repo = branch_repo(tmp.path());
+        std::fs::write(repo.join("proj/alpha.txt"), "alpha\n").unwrap();
+        let mut app = app_in(&repo);
+
+        command(&mut app, "diff");
+
+        let (_, text) = diff_opened(&mut app, ":diff");
+        assert_eq!(files_in(&text), ["bravo", "charlie", "delta"], "{text}");
+    });
+}
+
+/// The same for a binary file, which has no lines to compare: put back byte
+/// for byte as it was at the fork, it is left out.
+#[test]
+#[ignore = "red: a binary file put back as it was at the fork shows as a changed binary"]
+fn diff_leaves_out_a_binary_file_the_worktree_put_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let repo = branch_repo(tmp.path());
+        let blob = repo.join("proj/blob.bin");
+        std::fs::write(&blob, b"\0first\0").unwrap();
+        run_git(&repo, &["add", "proj/blob.bin"]);
+        run_git(&repo, &["commit", "-q", "-m", "a binary file"]);
+        let fork = run_git(&repo, &["rev-parse", "HEAD"]).trim().to_string();
+        std::fs::write(&blob, b"\0second\0").unwrap();
+        run_git(&repo, &["add", "proj/blob.bin"]);
+        run_git(&repo, &["commit", "-q", "-m", "the binary file changes"]);
+        std::fs::write(&blob, b"\0first\0").unwrap();
+        let mut app = app_in(&repo);
+
+        command(&mut app, &format!("diff {fork}"));
+
+        let (_, text) = diff_opened(&mut app, ":diff <sha>");
+        assert_eq!(files_in(&text), ["charlie", "delta"], "{text}");
+        assert!(!text.contains("blob.bin"), "{text}");
+    });
+}
+
+/// A file whose content is as it was at the fork but whose mode a branch
+/// commit changed is a change: it stays.
+#[cfg(unix)]
+#[test]
+fn diff_keeps_a_file_whose_mode_the_branch_changed() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let repo = branch_repo(tmp.path());
+        let keep = repo.join("other/keep.txt");
+        std::fs::set_permissions(&keep, std::fs::Permissions::from_mode(0o755)).unwrap();
+        run_git(&repo, &["add", "other/keep.txt"]);
+        run_git(&repo, &["commit", "-q", "-m", "keep.txt runs"]);
+        let mut app = app_in(&repo);
+
+        command(&mut app, "diff");
+
+        let (_, text) = diff_opened(&mut app, ":diff");
+        assert!(text.contains("keep.txt"), "the mode change: {text}");
+    });
+}
