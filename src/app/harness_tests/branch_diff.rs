@@ -228,7 +228,6 @@ fn the_g_popup_lists_gm() {
 /// it was at the fork is no change since the fork: `:diff` leaves it out, as
 /// `git diff $(git merge-base main HEAD)` does.
 #[test]
-#[ignore = "red: a file put back as it was at the fork shows as an empty modified entry"]
 fn diff_leaves_out_a_file_the_worktree_put_back_as_it_was_at_the_fork() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -246,7 +245,6 @@ fn diff_leaves_out_a_file_the_worktree_put_back_as_it_was_at_the_fork() {
 /// The same for a binary file, which has no lines to compare: put back byte
 /// for byte as it was at the fork, it is left out.
 #[test]
-#[ignore = "red: a binary file put back as it was at the fork shows as a changed binary"]
 fn diff_leaves_out_a_binary_file_the_worktree_put_back() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {

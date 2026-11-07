@@ -46,7 +46,7 @@ use blob::{MAX_DIFF_LINES, account_file, path_selected, tree_blob_at};
 use build::{
     OwnedIndexChange, WorkItem, build_index_change_file, build_tree_change_file,
     build_worktree_file, build_worktree_rename, collect_index_worktree_plan, collect_worktree_plan,
-    committed_paths, fold_committed, own_index_change,
+    committed_paths, fold_committed, own_index_change, unchanged_from_old,
 };
 
 /// `gd` scope: working tree (staged + unstaged) vs `HEAD`. For every changed
@@ -87,7 +87,9 @@ pub struct BranchDiff {
 /// are those the branch's commits changed since the fork and those `gd` shows;
 /// each one's old side is the fork's blob. A rename committed on the branch
 /// shows as a deletion and an addition; a staged one pairs as `gd` pairs it.
-/// `paths` restricts the result as in [`diff_head_to_worktree`].
+/// A path the working tree has put back as it was at the fork is left out, as
+/// `git diff` leaves it out. `paths` restricts the result as in
+/// [`diff_head_to_worktree`].
 pub fn diff_since_base(
     repo_root: &Path,
     base: Option<&str>,
@@ -159,9 +161,16 @@ fn diff_tree_to_worktree(
                 old_tree.and_then(|t| build_worktree_rename(&mut rc, repo, t, &source, &dest, copy))
             }
             WorkItem::Path { path } => {
-                let old_blob = old_tree.and_then(|t| tree_blob_at(t, &path).map(|(id, _kind)| id));
+                let old = old_tree.and_then(|t| tree_blob_at(t, &path));
                 let worktree_present = workdir.join(&path).is_file();
-                build_worktree_file(&mut rc, repo, &path, old_blob, worktree_present)
+                build_worktree_file(
+                    &mut rc,
+                    repo,
+                    &path,
+                    old.map(|(id, _)| id),
+                    worktree_present,
+                )
+                .filter(|file| !unchanged_from_old(repo, &workdir.join(&path), old, file))
             }
         };
         if let Some(file) = file {
