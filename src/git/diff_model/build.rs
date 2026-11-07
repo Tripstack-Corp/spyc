@@ -336,6 +336,49 @@ pub fn build_worktree_file(
     })
 }
 
+/// Whether `file`, the diff of the working-tree file at `worktree_path`
+/// against `old` (its old tree's blob and kind), shows no change at all: the
+/// same kind, and no line changed, or for a binary the same bytes. A change a
+/// branch committed and the working tree has put back is such a file, which
+/// `git diff` leaves out. A mode-only change differs in kind, so it stays.
+pub fn unchanged_from_old(
+    repo: &gix::Repository,
+    worktree_path: &std::path::Path,
+    old: Option<(gix::ObjectId, gix::object::tree::EntryKind)>,
+    file: &FileDiff,
+) -> bool {
+    let Some((old_id, old_kind)) = old else {
+        return false;
+    };
+    if file.status != FileStatus::Modified || worktree_kind(worktree_path) != Some(old_kind) {
+        return false;
+    }
+    match &file.kind {
+        DiffKind::Text(hunks) => hunks.is_empty(),
+        DiffKind::Binary => {
+            std::fs::read(worktree_path).ok().and_then(|bytes| {
+                gix::objs::compute_hash(repo.object_hash(), gix::objs::Kind::Blob, &bytes).ok()
+            }) == Some(old_id)
+        }
+        DiffKind::Submodule { .. } | DiffKind::Error(_) => false,
+    }
+}
+
+/// The tree entry kind the working-tree file at `path` would be committed as:
+/// a symlink, an executable or a plain blob.
+fn worktree_kind(path: &std::path::Path) -> Option<gix::object::tree::EntryKind> {
+    use gix::object::tree::EntryKind;
+    use std::os::unix::fs::PermissionsExt;
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    Some(if meta.file_type().is_symlink() {
+        EntryKind::Link
+    } else if meta.permissions().mode() & 0o111 != 0 {
+        EntryKind::BlobExecutable
+    } else {
+        EntryKind::Blob
+    })
+}
+
 /// An owned copy of one `tree_index` (staged) change, decoupled from the
 /// transient `ChangeRef` borrow so the diff resource cache (which also borrows
 /// the repo's object store) can be built afterwards.

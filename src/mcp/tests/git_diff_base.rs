@@ -92,7 +92,6 @@ fn git_diff_with_a_base_shows_the_branch_since_it_left_it() {
 /// A file a branch commit changed and the working tree has since put back as
 /// it was at the fork is no change since the fork, so no `diff --git` names it.
 #[test]
-#[ignore = "red: a file put back as it was at the fork gets a header with no hunks"]
 fn git_diff_with_a_base_leaves_out_a_file_put_back_as_it_was_at_the_fork() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = branch_repo(tmp.path());

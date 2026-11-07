@@ -103,7 +103,8 @@ characters that differ, `"word"` marks the whole changed token the way
   after it forked. The base is the repo's integration branch (`main`, or
   whatever `origin/HEAD` names). The title names it and the commit the
   branch left it at. A file renamed in one of the branch's commits shows
-  as a deletion and an addition
+  as a deletion and an addition, and one you've put back as it was when
+  the branch forked isn't listed
 - **`:diff [<base>]`** — the same for the whole repository, from anywhere
   in it: "what has this branch changed?" `<base>` is any branch, tag or
   commit (`:diff origin/main`, `:diff HEAD~3`); with none, the repo's base
