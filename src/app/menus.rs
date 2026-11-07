@@ -8,9 +8,10 @@
 //! tasks'. The rows come from [`crate::keymap::menu::menu_for`], or for a
 //! pager from `pager_handler::pager_menu`; this module gathers the facts they
 //! decide from and opens the menu as a which-key popup that no chord armed.
-//! The git segment's adds a `:diff` row, run as typing `:diff` runs it, and
+//! The git segment's adds a `:diff` row, run as typing `:diff` runs it;
 //! an entry's, inside a mounted archive, the archive's `:archive write`,
-//! `discard` and `unmount`.
+//! `discard` and `unmount`; and the session segment's a `:name` row, which
+//! opens the `:` line holding `name` and the session's name, for editing.
 //!
 //! While a menu is open it takes the keys first (`InputSink::Menu`): `↑`/`↓`
 //! move a highlight, `←`/`→` move it to the entry drawn on the same line of
@@ -147,6 +148,24 @@ impl App {
         .collect()
     }
 
+    /// The session segment's menu: the session's rows, then `:name`, which
+    /// opens the `:` line holding `name` and the session's name, for editing.
+    /// With no name, the line holds `name ` alone.
+    fn open_session_menu(&mut self) -> Option<Effect> {
+        let mut rows = self.menu_rows(Target::Session);
+        let name = self.state.session_name.as_deref();
+        rows.push((
+            ":name".to_string(),
+            "rename this session".to_string(),
+            HintEntry::Command(Some(CommandRow::Edit(format!(
+                "name {}",
+                name.unwrap_or_default()
+            )))),
+        ));
+        let title = name.unwrap_or("session");
+        self.show_menu(format!("{title} · ? all keys"), rows)
+    }
+
     /// Show a menu of `rows`, each `(keys, label, entry)`, titled `title`.
     /// The first menu ever opened retires the status bar's `. menu`, and
     /// returns the write that records it.
@@ -267,10 +286,7 @@ impl App {
                 (projects, "projects".to_string())
             }
             StatusSegment::Git => return self.open_git_menu().into_iter().collect(),
-            StatusSegment::Session => {
-                let name = self.state.session_name.as_deref().unwrap_or("session");
-                (Target::Session, name.to_string())
-            }
+            StatusSegment::Session => return self.open_session_menu().into_iter().collect(),
             StatusSegment::Agent => return self.open_tab_menu(),
             StatusSegment::Projects | StatusSegment::Path | StatusSegment::Suffix => {
                 return Vec::new();

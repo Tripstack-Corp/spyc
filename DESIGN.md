@@ -133,7 +133,10 @@ rather than create a new modal type.
   project's label, the pager's title, `make · Makefile`). Its rows come from
   `menu_for`, or `pager_menu` for a pager, or a Makefile's targets for the
   make menu, and a row appears only where spyc would carry out its action.
-  A key that works only from the file list says so: `yp (list)`. `.` opens
+  A key that works only from the file list says so: `yp (list)`. A row keyed
+  by a `:` command runs it as typed (`:diff`, `:fg 2`), or, where the
+  command wants an argument, opens the `:` line holding it, the cursor at
+  its end, for the user to finish (`:name`). `.` opens
   the cursor entry's menu, `^a .` the active tab's, and a right-click the
   menu of what it lands on, or the leader where nothing there has one.
   `↑`/`↓` highlight a row, `←`/`→` move the highlight to the same line of
@@ -146,7 +149,8 @@ rather than create a new modal type.
   click on it.
 - **Menu hint** — once a row fires by a click or `Enter`, the prompt row
   names its key (`^a n  next pane tab`), in front of the action's own
-  message when it has one. The hint fades for an action once the user has
+  message when it has one; a row that opens the `:` line names nothing, as
+  the line shows its command. The hint fades for an action once the user has
   fired it by its key three times (`[ui] menu_hints`); a click never counts,
   and the menus themselves never fade. Until the first menu opens, the
   status bar ends with `. menu`.

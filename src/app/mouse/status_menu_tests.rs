@@ -701,7 +701,6 @@ fn screen(app: &mut App) -> String {
 
 /// The session segment's menu offers renaming the session beside its info.
 #[test]
-#[ignore = "red: the session segment's menu has no `:name` row"]
 fn the_session_segments_menu_offers_name_and_its_info() {
     with_mouse(|base| {
         let mut app = session_app(base);
@@ -724,7 +723,6 @@ fn the_session_segments_menu_offers_name_and_its_info() {
 /// name, typing a new one and `Enter` renames the session, and the segment
 /// draws the new name.
 #[test]
-#[ignore = "red: the session segment's menu has no `:name` row"]
 fn the_name_row_opens_the_command_line_holding_the_current_name() {
     with_mouse(|base| {
         let mut app = session_app(base);
@@ -759,7 +757,6 @@ fn the_name_row_opens_the_command_line_holding_the_current_name() {
 /// edit. Only a named session draws the segment, so this one is aimed at
 /// where it was drawn before the name went.
 #[test]
-#[ignore = "red: the session segment's menu has no `:name` row"]
 fn with_no_name_set_the_name_row_opens_the_line_holding_name_alone() {
     with_mouse(|base| {
         let mut app = session_app(base);
@@ -778,7 +775,6 @@ fn with_no_name_set_the_name_row_opens_the_line_holding_name_alone() {
 /// takes its editor to Normal mode), and the session keeps its name, the
 /// line's edits unrun.
 #[test]
-#[ignore = "red: the session segment's menu has no `:name` row"]
 fn esc_on_the_prefilled_line_closes_it_and_keeps_the_name() {
     with_mouse(|base| {
         let mut app = session_app(base);
@@ -800,7 +796,6 @@ fn esc_on_the_prefilled_line_closes_it_and_keeps_the_name() {
 
 /// `Enter` on the highlighted `:name` row opens the same line a click does.
 #[test]
-#[ignore = "red: the session segment's menu has no `:name` row"]
 fn enter_on_the_highlighted_name_row_opens_the_same_line() {
     with_mouse(|base| {
         let mut app = session_app(base);
@@ -830,7 +825,6 @@ fn enter_on_the_highlighted_name_row_opens_the_same_line() {
 /// typed `:`: neither opening it nor cancelling it records it, and running
 /// it records the line run.
 #[test]
-#[ignore = "red: the session segment's menu has no `:name` row"]
 fn the_name_row_leaves_the_history_alone_until_the_line_runs() {
     with_mouse(|base| {
         let mut app = session_app(base);

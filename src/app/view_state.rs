@@ -144,8 +144,9 @@ pub enum HintEntry {
     /// A row of an open pager's menu, fired as the pager's key for it is.
     Pager(super::pager_handler::PagerAction),
     /// A row that runs a `:` command as typing it does: a make menu's target,
-    /// or a task's `:fg N`. `None` for a row that says something and runs
-    /// nothing.
+    /// or a task's `:fg N`; or one that opens the `:` line holding a command
+    /// to finish, as the session's `:name` does. `None` for a row that says
+    /// something and runs nothing.
     Command(Option<CommandRow>),
 }
 
@@ -157,6 +158,10 @@ pub enum CommandRow {
     Make(super::make_menu::MakeRun),
     /// A `:` command line, dispatched as typed: `fg 2`.
     Typed(String),
+    /// A `:` command line opened for editing, as typed but not yet run:
+    /// `name SAFFRON_CUMIN`. `Enter` runs it and `Esc` cancels, as on any
+    /// `:` line.
+    Edit(String),
 }
 
 /// What an object's menu holds beside a chord popup's rows.

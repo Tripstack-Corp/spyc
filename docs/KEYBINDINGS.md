@@ -397,7 +397,7 @@ focus.
 | Right click on the background tasks' tags, or `bg:` | Open the `tasks` menu: the task viewer, then each task's `:fg N`, which a click brings back |
 | Right click on the split's divider | Open the `split` menu: flip height, focus a column, dim, and close the preview or the second commander |
 | Right click on a project's label (status bar) | Go to that project and open its menu: close, jump home, re-home here, then the projects' list, new, next, previous and the agent that needs you. With one project open, its segment opens the same menu, less close and stepping |
-| Right click on the status bar's count, git, agent or session | The projects' rows; the worktree list and new, delete at the root of a clean linked worktree, and `gd` while the repo has changes; the active tab's menu, as `^a .`; the session's info |
+| Right click on the status bar's count, git, agent or session | The projects' rows; the worktree list and new, delete at the root of a clean linked worktree, and `gd` while the repo has changes; the active tab's menu, as `^a .`; the session's info, and `:name`, which opens the `:` line holding `name` and the session's name to edit |
 | Right click on an open pager | Focus it and open its menu: a running `!` capture's background, interrupt and kill (anywhere on screen); the task viewer's foreground, pause or continue, interrupt, move to a pane tab, next and previous task; save and close |
 | Right click anywhere else | Open the leader menu |
 | Any click outside an open menu | Close it, and nothing else |
