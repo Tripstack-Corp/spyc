@@ -484,6 +484,7 @@ fn the_make_menu_is_refused_inside_a_mounted_archive() {
             address: None,
             depth: 0,
             reset_staging: false,
+            hold: None,
         });
         assert!(
             matches!(outcome, ArchiveOutcome::Mounted { .. }),
