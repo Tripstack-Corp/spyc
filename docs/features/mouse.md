@@ -20,7 +20,9 @@ quick-select and `y` in the pager are the mouse-free yank paths.
   rest, as `.` opens it from the keyboard. A Makefile's menu (`GNUmakefile`,
   `makefile` or `Makefile`) starts with `make target …`, which opens the make
   menu of its targets; a click on a target runs it ([Make
-  targets](shell.md#make-targets)).
+  targets](shell.md#make-targets)). Inside a mounted archive the menu ends
+  with `:archive write` and `:archive discard`, while it has changes, and
+  `:archive unmount` ([Archives](archives.md)).
 - **On the pane**, while its program runs, the pane takes the keyboard and
   the active tab's menu opens: restart, suspend, fork, rename, close, zoom, scroll back, and the
   rest, as `^a .` opens it.

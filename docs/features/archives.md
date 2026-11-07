@@ -138,4 +138,8 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   `unmount` (drop it and its staged bytes), `cancel`. `write` and `discard` work
   from outside a mount too: they take the archive under the cursor — the row
   showing `~` — else the only one with changes, and name them rather than guess
-  when several do.
+  when several do. Inside a mount, the `.` menu (or a right-click on a member)
+  ends with `:archive write` and `:archive discard` while it has changes,
+  `write` only where the archive can be written, and `:archive unmount`; a
+  row runs as typing its command does, and none shows while a write of that
+  archive runs.
