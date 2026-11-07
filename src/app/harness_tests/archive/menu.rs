@@ -363,7 +363,6 @@ fn while_its_write_runs_the_menu_has_none_of_the_archives_rows() {
 /// `:archive unmount` and `:archive write` has nothing to write; an edit to
 /// the member spyc did extract is a change both see.
 #[test]
-#[ignore = "red: the check reads every member of the archive, not only those extracted"]
 fn only_the_members_spyc_extracted_are_checked_for_changes() {
     writable(|mut fx| {
         type_keys(&mut fx.app, "yy");

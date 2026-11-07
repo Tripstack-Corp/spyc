@@ -467,9 +467,9 @@ fn a_mount_that_lands_after_its_project_closed_is_recorded_not_entered() {
 }
 
 /// A member X extracted lands after X closed. The mount outlives X, so the
-/// extracted copy is recorded as spyc's own rather than read as an edit:
-/// nothing waits to be written, and the archive can still be moved or
-/// deleted. No pager opens over Y.
+/// extracted copy is recorded as spyc's own: nothing waits to be written, the
+/// archive can still be moved or deleted, and an edit to the copy is seen.
+/// No pager opens over Y.
 #[test]
 fn a_member_extracted_after_its_project_closed_is_not_an_edit() {
     with_two(|t| {
@@ -488,13 +488,8 @@ fn a_member_extracted_after_its_project_closed_is_not_an_edit() {
             .join("README.md");
         std::fs::create_dir_all(real.parent().unwrap()).unwrap();
         std::fs::write(&real, "# pkg\n").unwrap();
-        assert_eq!(
-            app.dirty_mounts(),
-            std::slice::from_ref(&zip),
-            "an extracted copy reads as an edit until it is recorded"
-        );
         app.file_archive_outcome(ArchiveOutcome::Materialized {
-            real,
+            real: real.clone(),
             then: MaterializeThen::OpenPager(PagerDest::Overlay { scroll: None }),
         });
         app.make_active(t.y);
@@ -505,6 +500,12 @@ fn a_member_extracted_after_its_project_closed_is_not_an_edit() {
             "the extracted copy reads as an edit"
         );
         assert!(app.view.project().pager.is_none(), "a pager opened over Y");
+        std::fs::write(&real, "# pkg, edited\n").unwrap();
+        assert_eq!(
+            app.dirty_mounts(),
+            std::slice::from_ref(&zip),
+            "an edit to the copy isn't seen: it was never recorded"
+        );
     });
 }
 
