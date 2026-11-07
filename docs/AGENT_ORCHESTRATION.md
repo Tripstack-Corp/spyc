@@ -374,9 +374,13 @@ another server's `mcp__<server>__…` tool, or a `StopFailure`'s
 `stopped: rate limit`. A `permission_prompt` `Notification` names no tool and
 keeps the live block's label. The ping reads `claude needs you: Bash`, the HUD's
 activity row ends in it, and `Space !` flashes `tab 2: Bash`. It goes with the
-report that carried it. A screen-scraped wait and the agent's own `blocked`
-carry none; the agent's note stays out because a desktop ping can leave the
-machine.
+report that carried it. A screen-scraped wait carries its rule's label
+(`DetectionRule::waits_on`: Codex's `command`, `file edit`, `mcp`, `network`,
+`question`), or for agy the label of the question its dialog asks
+(`agy_approval::APPROVAL_QUESTIONS`), kept as `TabInfo::scrape_waits_on` and
+read only while the scrape says blocked; a hook's label wins over it. The
+agent's own `blocked` carries none: its note stays out because a desktop ping
+can leave the machine.
 
 **Seen and unseen (#99).** A tab is in view when it is the active tab of the
 project in view and its pane is drawn: not hidden, not zoomed away, not under a

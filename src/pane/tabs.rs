@@ -377,6 +377,10 @@ pub struct TabInfo {
     /// retaining it for recovery; other live reports discard stale guesses.
     /// Also cleared by prompt-settling input.
     pub scrape_status: Option<(AgentActivity, Option<&'static str>)>,
+    /// What the wait the same scan found is for (`detect_rules::waits_on`):
+    /// `command`, `file edit`. Read only while [`Self::scrape_status`] says
+    /// blocked, so clearing that clears this.
+    pub scrape_waits_on: Option<&'static str>,
     /// Output from an agent with detection rules needs another viewport scan.
     pub scrape_dirty: bool,
     /// First pending Codex scan. Repaints cannot postpone its deadline; other
@@ -453,9 +457,17 @@ impl TabInfo {
     }
 
     /// What the tab's live `blocked` report waits on
-    /// ([`ReportedStatus::blocked_on`]).
+    /// ([`ReportedStatus::blocked_on`]), else what a blocked screen shows it
+    /// waiting on ([`Self::scrape_waits_on`]): a wait the agent draws with no
+    /// hook of its own.
     pub fn blocked_on(&self) -> Option<&str> {
-        self.reported.as_ref()?.blocked_on.as_deref()
+        self.reported
+            .as_ref()
+            .and_then(|r| r.blocked_on.as_deref())
+            .or_else(|| {
+                self.scrape_waits_on
+                    .filter(|_| matches!(self.scrape_status, Some((AgentActivity::Blocked, _))))
+            })
     }
 
     /// The agent this tab runs now: the one detected in a shell tab's
@@ -542,6 +554,7 @@ impl TabInfo {
             claude_statusline: None,
             live_session_id: None,
             scrape_status: None,
+            scrape_waits_on: None,
             scrape_dirty: false,
             scrape_pending_at: None,
             // A separate uuid from `id`: this one is restore-stable (see the

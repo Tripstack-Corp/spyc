@@ -722,8 +722,12 @@ impl App {
                     entry.info.scrape_pending_at = None;
                     let lines = entry.pane.visible_lines();
                     let scanned = crate::agent::detect_rules::scan(&lines, rules);
-                    changed |= entry.info.scrape_status != scanned;
+                    let waits_on =
+                        scanned.and_then(|_| crate::agent::detect_rules::waits_on(&lines, rules));
+                    changed |= entry.info.scrape_status != scanned
+                        || entry.info.scrape_waits_on != waits_on;
                     entry.info.scrape_status = scanned;
+                    entry.info.scrape_waits_on = waits_on;
                 }
             }
         }

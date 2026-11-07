@@ -686,6 +686,7 @@ static AGY_DETECTION_RULES: &[DetectionRule] = &[DetectionRule {
     matcher: detect_rules::Matcher::AgyApproval,
     state: crate::pane::AgentActivity::Blocked,
     visible_blocker: Some("awaiting tool-execution approval"),
+    waits_on: None,
 }];
 
 pub struct AgyProfile;

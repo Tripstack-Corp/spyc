@@ -24,6 +24,7 @@ pub const RULES: &[DetectionRule] = &[
         },
         state: AgentActivity::Blocked,
         visible_blocker: Some("awaiting command approval"),
+        waits_on: Some("command"),
     },
     DetectionRule {
         region: Region::BottomNonEmptyLines(usize::MAX),
@@ -38,6 +39,7 @@ pub const RULES: &[DetectionRule] = &[
         },
         state: AgentActivity::Blocked,
         visible_blocker: Some("awaiting file-edit approval"),
+        waits_on: Some("file edit"),
     },
     DetectionRule {
         region: Region::BottomNonEmptyLines(usize::MAX),
@@ -52,6 +54,7 @@ pub const RULES: &[DetectionRule] = &[
         },
         state: AgentActivity::Blocked,
         visible_blocker: Some("awaiting MCP tool approval"),
+        waits_on: Some("mcp"),
     },
     DetectionRule {
         region: Region::BottomNonEmptyLines(usize::MAX),
@@ -65,12 +68,14 @@ pub const RULES: &[DetectionRule] = &[
         },
         state: AgentActivity::Blocked,
         visible_blocker: Some("awaiting network approval"),
+        waits_on: Some("network"),
     },
     DetectionRule {
         region: Region::BottomNonEmptyLines(usize::MAX),
         matcher: Matcher::CodexAsyncQuestions,
         state: AgentActivity::Blocked,
         visible_blocker: Some("awaiting async question answer"),
+        waits_on: Some("question"),
     },
 ];
 
