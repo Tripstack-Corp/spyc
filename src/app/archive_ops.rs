@@ -1,5 +1,6 @@
 //! Archive IO on a worker thread: mounting (indexing, or streaming a compressed
-//! tar into staging) and materializing one member.
+//! tar into staging, and recording what is staged), materializing one member,
+//! and writing back, whose re-read holds aside the edits the write didn't carry.
 //!
 //! Indexing a `.tar.gz` means decompressing it end to end, so none of this may
 //! touch the event loop. Same shape as `graveyard_ops`: an [`ArchiveOp`] rides
@@ -12,7 +13,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::archive::budget::{BudgetLimits, MountDecision, MountFacts, decide_mount};
 use crate::archive::index::{ArchiveIndex, IndexEntry};
-use crate::archive::journal::RepackStep;
+use crate::archive::journal::{RepackStep, StagedStats};
 use crate::archive::scan::{Capability, assess, warnings};
 use crate::archive::write::RepackOptions;
 use crate::archive::{detect_at, read};
@@ -75,6 +76,10 @@ pub enum ArchiveOp {
         /// extraction filling the same directory. Doing both here is the only
         /// ordering guarantee available.
         reset_staging: bool,
+        /// For a re-read after a write: the edits saved since the write was
+        /// planned are moved out of the tree before `reset_staging` empties
+        /// it, on this thread, so one saved after the write landed is kept.
+        hold: Option<Box<super::archive::LateEdits>>,
     },
     /// Extract one member so something can read it.
     Materialize {
@@ -118,10 +123,21 @@ pub enum ArchiveOutcome {
         capability: Capability,
         warnings: Vec<String>,
         staging_root: PathBuf,
+        /// Each member with a file in the staging tree, statted as the read
+        /// left it: what the mount records as spyc's own. A compressed tar's
+        /// read extracts every member, so this is a stat per member, taken
+        /// here rather than on the event loop.
+        staged: StagedStats,
         /// The held-back effect from [`ArchiveOp::Mount`], to run now that the
         /// mount exists.
         then: Option<Box<super::Effect>>,
         depth: usize,
+    },
+    /// A re-read's outcome, with the edits it held aside before emptying the
+    /// staging tree. Unwrapped as it lands: the edits wait for the mount.
+    HeldAside {
+        held: super::archive::Held,
+        outcome: Box<Self>,
     },
     /// Big enough to ask about first. Answering `y` re-issues the op.
     NeedsConfirm {
@@ -180,12 +196,14 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
             address,
             depth,
             reset_staging,
+            hold,
         } => {
-            // Before the read, on this thread — see `reset_staging`.
+            // Before the read, on this thread — see `reset_staging` and `hold`.
+            let held = hold.and_then(|late| super::archive::hold_late_edits(&late, &staging_root));
             if reset_staging {
                 let _ = std::fs::remove_dir_all(&staging_root);
             }
-            carry_then(
+            let outcome = carry_then(
                 readdress(
                     mount(
                         &path,
@@ -200,7 +218,14 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
                     depth,
                 ),
                 then,
-            )
+            );
+            match held {
+                Some(held) => ArchiveOutcome::HeldAside {
+                    held,
+                    outcome: Box::new(outcome),
+                },
+                None => outcome,
+            }
         }
         ArchiveOp::Materialize {
             archive,
@@ -288,6 +313,7 @@ fn readdress(
         capability,
         warnings,
         staging_root,
+        staged,
         then,
         ..
     } = outcome
@@ -303,6 +329,7 @@ fn readdress(
         capability,
         warnings,
         staging_root,
+        staged,
         then,
         depth,
     }
@@ -315,6 +342,7 @@ fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> Arch
             capability,
             warnings,
             staging_root,
+            staged,
             depth,
             ..
         } => ArchiveOutcome::Mounted {
@@ -322,6 +350,7 @@ fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> Arch
             capability,
             warnings,
             staging_root,
+            staged,
             then,
             // Carried, not reset: `readdress` ran first and it is what knows how
             // deep this mount is.
@@ -390,6 +419,7 @@ fn mount(
 
     let capability = assess(&indexed.facts, format);
     let warnings = warnings(&indexed.facts, &indexed.index);
+    let staged = super::archive::on_disk_stats(&indexed.index, staging_root);
     ArchiveOutcome::Mounted {
         // `readdress` sets the real depth at the op boundary.
         depth: 0,
@@ -397,6 +427,7 @@ fn mount(
         capability,
         warnings,
         staging_root: staging_root.to_path_buf(),
+        staged,
         // `carry_then` attaches the held-back effect at the op boundary.
         then: None,
     }
@@ -520,6 +551,7 @@ mod tests {
             address: None,
             depth: 0,
             reset_staging: false,
+            hold: None,
         })
     }
 
@@ -569,6 +601,7 @@ mod tests {
             address: Some(archive),
             depth: 0,
             reset_staging: true,
+            hold: None,
         });
         assert!(matches!(out, ArchiveOutcome::Mounted { .. }), "got {out:?}");
         assert!(
