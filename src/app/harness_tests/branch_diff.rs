@@ -73,7 +73,6 @@ fn merge_base(repo: &Path, a: &str, b: &str) -> String {
 /// it would be no change at all. The title names the base and the commit the
 /// branch left it at, and says uncommitted work is in.
 #[test]
-#[ignore = "red: gm is not bound, so no diff opens"]
 fn gm_over_a_directory_shows_the_branchs_changes_and_not_its_bases() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -99,7 +98,6 @@ fn gm_over_a_directory_shows_the_branchs_changes_and_not_its_bases() {
 
 /// Picks choose what `gm` shows, as they do for `gd`.
 #[test]
-#[ignore = "red: gm is not bound, so no diff opens"]
 fn gm_with_picks_shows_only_the_picks() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -121,7 +119,6 @@ fn gm_with_picks_shows_only_the_picks() {
 /// `:diff` answers for the whole branch, from a directory none of its changes
 /// are in.
 #[test]
-#[ignore = "red: :diff is an unknown command"]
 fn diff_from_a_subdirectory_shows_the_whole_branch() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -143,7 +140,6 @@ fn diff_from_a_subdirectory_shows_the_whole_branch() {
 /// `:diff <sha>` takes the commit as given: from the branch's own commit, only
 /// what is not committed yet.
 #[test]
-#[ignore = "red: :diff is an unknown command"]
 fn diff_with_a_sha_diffs_from_that_commits_merge_base() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -161,7 +157,6 @@ fn diff_with_a_sha_diffs_from_that_commits_merge_base() {
 
 /// A base that names nothing is an error that says which, and no pager opens.
 #[test]
-#[ignore = "red: :diff is an unknown command"]
 fn diff_with_an_unknown_base_flashes_its_name_and_opens_nothing() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -187,7 +182,6 @@ fn diff_with_an_unknown_base_flashes_its_name_and_opens_nothing() {
 /// `origin/main`: what `main` lacks is other people's merged work, not this
 /// branch's, so `gm` leaves it out.
 #[test]
-#[ignore = "red: gm is not bound, so no diff opens"]
 fn gm_with_a_stale_local_main_shows_only_the_branchs_own_files() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -209,7 +203,6 @@ fn gm_with_a_stale_local_main_shows_only_the_branchs_own_files() {
 
 /// The `g` popup lists `m` beside `gd`, `gD` and `gu`.
 #[test]
-#[ignore = "red: the g popup has no m row"]
 fn the_g_popup_lists_gm() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

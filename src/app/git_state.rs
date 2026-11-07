@@ -3,7 +3,7 @@
 //! child module — reads App's private `self.state` via the
 //! descendant-module rule, same pattern as `effect` / `actions`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::ui::pager;
 
@@ -166,6 +166,22 @@ impl App {
         );
     }
 
+    /// `gd`, `gD`, `gu` and `gm`: the selection's diff at the key's scope, in
+    /// a repository.
+    pub(super) fn git_diff_action(&mut self, action: &crate::keymap::Action) {
+        use crate::keymap::Action;
+        if self.state.cur().git.info.is_none() {
+            self.state.flash_error("not in a git repository");
+            return;
+        }
+        match action {
+            Action::GitDiffBranch => self.open_branch_diff(),
+            Action::GitDiffCached => self.open_git_diff(DiffScope::Cached),
+            Action::GitDiffUnstaged => self.open_git_diff(DiffScope::IndexToWorktree),
+            _ => self.open_git_diff(DiffScope::HeadToWorktree),
+        }
+    }
+
     /// g d / g D / g u — run `git diff` on selection and show in pager.
     ///
     /// `gd` ([`DiffScope::HeadToWorktree`]) shows diff-vs-HEAD (staged +
@@ -178,22 +194,9 @@ impl App {
     /// already surfaces untracked files, so the old `untracked_bytes` synthesis
     /// is gone.
     pub fn open_git_diff(&mut self, scope: DiffScope) {
-        let paths = self.state.selection_paths();
-        if paths.is_empty() {
-            return;
-        }
-        let Some(root) = self.state.cur().git_cache.current_repo_root.clone() else {
-            self.state.flash_error("git diff: not a git repository");
+        let Some((root, rel)) = self.selection_in_repo() else {
             return;
         };
-        // Relativize each selected absolute path to a repo-relative,
-        // forward-slash path (mirroring the status path-mapping's
-        // `strip_prefix(&repo_root)`). Paths not under the repo root are
-        // skipped — they can't appear in this repo's diff.
-        let rel: Vec<String> = paths
-            .iter()
-            .filter_map(|p| repo_relative(p, &root))
-            .collect();
         let title = match scope {
             DiffScope::Cached => "git diff --cached",
             DiffScope::IndexToWorktree => "git diff (unstaged)",
@@ -207,6 +210,69 @@ impl App {
             },
             title.to_string(),
         );
+    }
+
+    /// `gm` — the selection's changes since the branch left the repo's
+    /// default base, chosen as `gd` chooses its paths.
+    pub fn open_branch_diff(&mut self) {
+        let Some((repo_root, paths)) = self.selection_in_repo() else {
+            return;
+        };
+        self.open_since_base(repo_root, paths, None);
+    }
+
+    /// `:diff [<base>]` — the whole repository's changes since the branch
+    /// left `<base>`, or the repo's default base: what this branch changed,
+    /// from anywhere in it.
+    pub(super) fn cmd_diff(&mut self, base: &str) -> Vec<Effect> {
+        if let Some(why) = self
+            .state
+            .mount_refusal(&crate::keymap::Action::GitDiffBranch)
+        {
+            self.state.flash_error(why);
+            return Vec::new();
+        }
+        let Some(repo_root) = self.state.cur().git_cache.current_repo_root.clone() else {
+            self.state.flash_error("git diff: not a git repository");
+            return Vec::new();
+        };
+        let base = (!base.is_empty()).then(|| base.to_string());
+        self.open_since_base(repo_root, Vec::new(), base);
+        Vec::new()
+    }
+
+    /// Build the diff since the branch left `base` off-thread. Only the worker
+    /// knows the commit it left at, so the worker titles the view.
+    fn open_since_base(&mut self, repo_root: PathBuf, paths: Vec<String>, base: Option<String>) {
+        self.open_git_view(
+            GitViewKind::SinceBase {
+                repo_root,
+                paths,
+                base,
+            },
+            "git diff".to_string(),
+        );
+    }
+
+    /// The selection as `gd` reads it: the focused column's repo root and each
+    /// selected path relative to it, forward-slashed as the status
+    /// path-mapping's `strip_prefix(&repo_root)` does. A path outside the repo
+    /// is skipped, since it can't appear in this repo's diff. `None` when
+    /// there is nothing to diff, with a flash outside a repository.
+    fn selection_in_repo(&mut self) -> Option<(PathBuf, Vec<String>)> {
+        let paths = self.state.selection_paths();
+        if paths.is_empty() {
+            return None;
+        }
+        let Some(root) = self.state.cur().git_cache.current_repo_root.clone() else {
+            self.state.flash_error("git diff: not a git repository");
+            return None;
+        };
+        let rel = paths
+            .iter()
+            .filter_map(|p| repo_relative(p, &root))
+            .collect();
+        Some((root, rel))
     }
 
     /// g b — `git blame` on the cursor file. Selection is ignored

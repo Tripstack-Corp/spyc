@@ -27,7 +27,9 @@ use super::App;
 use super::pager_stream::{DrainOutcome, PagerStream, PagerStreamCmd, PagerStreamMount, RenderCtx};
 
 /// Which two sides a `git diff` view compares — the three diff keys (`gd` /
-/// `gD` / `gu`) each pick one. Maps 1:1 to a `diff_model` builder.
+/// `gD` / `gu`) each pick one. Maps 1:1 to a `diff_model` builder. `gm`'s
+/// fourth, since the branch left a base, carries the base, so it is a
+/// [`GitViewKind`] of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffScope {
     /// `gd` / `git diff HEAD`: `HEAD` vs the working tree (staged + unstaged +
@@ -51,6 +53,16 @@ pub enum GitViewKind {
         paths: Vec<String>,
         /// Which two sides to compare.
         scope: DiffScope,
+    },
+    /// `git diff` since the branch left `base` (the repo's default base when
+    /// `None`), over `paths`.
+    SinceBase {
+        /// Repository workdir root.
+        repo_root: PathBuf,
+        /// Repo-relative paths to restrict the diff to.
+        paths: Vec<String>,
+        /// The base the branch left, as the user named it.
+        base: Option<String>,
     },
     /// `git show <rev>`.
     Show {
@@ -90,6 +102,9 @@ pub enum GitViewContent {
 pub enum GitViewPayload {
     /// A built view (model + highlight), ready to mount and render.
     Built(GitViewContent),
+    /// A built view whose title the build decided: a branch's diff names the
+    /// commit it left its base at, which only the worker knows.
+    Titled(String, GitViewContent),
     /// The diff/show produced no changes.
     Empty,
     /// The build failed (bad rev, not tracked, not a repo, …).
@@ -361,15 +376,16 @@ impl App {
             .pending_git_view
             .take()
             .expect("pending git-view present (checked above)");
-        let content = match payload {
-            GitViewPayload::Built(c) => c,
+        let (content, title) = match payload {
+            GitViewPayload::Built(c) => (c, pending.title),
+            GitViewPayload::Titled(title, c) => (c, title),
             GitViewPayload::Empty | GitViewPayload::Error(_) => {
                 unreachable!("empty/error handled above")
             }
         };
         self.mount_stream_pager(
             PagerStreamMount::Overlay {
-                title: pending.title.clone(),
+                title: title.clone(),
                 line_count_hint: None,
             },
             pending.id,
@@ -378,7 +394,7 @@ impl App {
             id: pending.id,
             layout: pending.layout,
             content,
-            title: pending.title,
+            title,
         };
         let full_width = self
             .view
@@ -429,6 +445,19 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
                 None => GitViewPayload::Error("git diff: not a git repository".into()),
             }
         }
+        GitViewKind::SinceBase {
+            repo_root,
+            paths,
+            base,
+        } => match diff_model::diff_since_base(&repo_root, base.as_deref(), &paths) {
+            Ok(diff) if diff.model.files.is_empty() => GitViewPayload::Empty,
+            Ok(diff) => {
+                let hl = diff_render::highlight_diff(&diff.model);
+                let title = since_base_title(&diff.fork);
+                GitViewPayload::Titled(title, GitViewContent::Diff(diff.model, hl))
+            }
+            Err(e) => GitViewPayload::Error(format!("git diff: {e:#}")),
+        },
         GitViewKind::Show { repo_root, rev } => match diff_model::show_model(&repo_root, &rev) {
             Some(pair) if pair.1.files.is_empty() => GitViewPayload::Empty,
             Some((meta, model)) => {
@@ -445,6 +474,16 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
             None => GitViewPayload::Error("git blame: not tracked at HEAD".into()),
         },
     }
+}
+
+/// A branch diff's title: the base, the commit the branch left it at, and
+/// that uncommitted work is in, as `gd`'s `(+ new)` says.
+fn since_base_title(fork: &crate::git::branch::ForkPoint) -> String {
+    let short = fork.commit.to_hex_with_len(7);
+    format!(
+        "git diff {}\u{2026} (since {short}, + uncommitted)",
+        fork.base
+    )
 }
 
 #[cfg(test)]

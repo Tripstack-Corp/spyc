@@ -195,6 +195,7 @@ verbs above (`down`, `pick`,
 | `git_diff` | git diff HEAD (staged + unstaged + new) |
 | `git_diff_cached` | git diff --cached (staged) |
 | `git_diff_unstaged` | git diff (unstaged — since you staged) |
+| `git_diff_branch` | git diff since the branch left its base (+ uncommitted) |
 | `git_blame` | git blame (cursor file) |
 | `git_restore` | restore deleted file (struck-through row) from git |
 | `goto_file` | jump to path in pane output |

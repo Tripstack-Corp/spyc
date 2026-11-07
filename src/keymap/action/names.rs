@@ -132,9 +132,9 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         "worktree_new" => Action::WorktreeNew,
         "worktree_delete" => Action::WorktreeDelete,
         // Git diff / blame / restore.
-        "git_diff" => Action::GitDiff,
-        "git_diff_cached" => Action::GitDiffCached,
-        "git_diff_unstaged" => Action::GitDiffUnstaged,
+        "git_diff" | "git_diff_cached" | "git_diff_unstaged" | "git_diff_branch" => {
+            git_diff_from_name(name)
+        }
         "git_blame" => Action::GitBlame,
         "git_restore" => Action::GitRestore,
         // Path references.
@@ -194,6 +194,16 @@ fn path_yank_from_name(name: &str) -> Action {
         Action::YankDir
     } else {
         Action::YankPaths
+    }
+}
+
+/// The git diffs' arm of [`action_from_name`], which is at its length pin.
+fn git_diff_from_name(name: &str) -> Action {
+    match name {
+        "git_diff_cached" => Action::GitDiffCached,
+        "git_diff_unstaged" => Action::GitDiffUnstaged,
+        "git_diff_branch" => Action::GitDiffBranch,
+        _ => Action::GitDiff,
     }
 }
 

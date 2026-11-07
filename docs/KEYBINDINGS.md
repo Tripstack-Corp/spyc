@@ -108,6 +108,8 @@ toggles), intra-line change highlighting (per-character by default;
 | `gd` | Diff vs HEAD for the selection (staged + unstaged + new) |
 | `gD` | Staged-only diff (`git diff --cached`) |
 | `gu` | Unstaged diff (`git diff`) — what changed since you staged |
+| `gm` | The selection's changes since the branch left the repo's base branch (`main`), committed or not |
+| `:diff [<base>]` | The whole branch's changes since it left `<base>` (any rev; default the repo's base branch), committed or not. A local branch with an `origin/` copy counts from the later of the two forks |
 | `gb` | Blame the cursor file |
 | `gr` | Restore a deleted (struck-through) file from git |
 | `]g` / `[g` | Cursor to next / prev git-changed entry (wraps) |
