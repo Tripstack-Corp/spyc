@@ -354,3 +354,43 @@ fn while_its_write_runs_the_menu_has_none_of_the_archives_rows() {
         assert_eq!(archive_rows(&keys), [UNMOUNT], "once landed: {keys:?}");
     });
 }
+
+/// "Has changes", for the menu and for `:archive write` alike, compares each
+/// member spyc extracted against what it wrote there: a stat per extracted
+/// member, where a stat per member of the archive made the menu of a zip of
+/// 200,000 members, one of them read, cost 200,000. A file at the place of a
+/// member spyc never extracted is none of those, so the menu offers only
+/// `:archive unmount` and `:archive write` has nothing to write; an edit to
+/// the member spyc did extract is a change both see.
+#[test]
+#[ignore = "red: the check reads every member of the archive, not only those extracted"]
+fn only_the_members_spyc_extracted_are_checked_for_changes() {
+    writable(|mut fx| {
+        type_keys(&mut fx.app, "yy");
+        let mount = fx.app.state.mounts.get(&fx.archive).unwrap();
+        let readme = mount.staging_path(mount.index.get("README.md").unwrap());
+        let unread = mount.staging_path(mount.index.get("src/main.rs").unwrap());
+        assert!(readme.is_file(), "premise: `yy` extracted README.md");
+        assert!(!unread.exists(), "premise: src/main.rs never extracted");
+        std::fs::create_dir_all(unread.parent().unwrap()).unwrap();
+        std::fs::write(&unread, b"fn main() { planted() }\n").unwrap();
+
+        let keys = menu_keys(&mut fx.app);
+        fx.app.handle_key(special(KeyCode::Esc)).unwrap();
+        let write = typed_command(&mut fx.app, "archive write");
+        let wrote = write
+            .iter()
+            .any(|e| matches!(e, Effect::Archive(ArchiveOp::Write { .. })));
+        settle(&mut fx.app, write);
+
+        assert_eq!(archive_rows(&keys), [UNMOUNT], "{keys:?}");
+        assert!(!wrote, "nothing to write: {:?}", fx.app.flash_text());
+        std::fs::write(&readme, b"# edited by an agent\n").unwrap();
+        let keys = menu_keys(&mut fx.app);
+        assert_eq!(
+            archive_rows(&keys),
+            ARCHIVE_ROWS,
+            "an extracted edit: {keys:?}"
+        );
+    });
+}
