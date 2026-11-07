@@ -223,6 +223,7 @@ fn build_tar_gz_with(path: &Path, count: usize) {
 
 mod canonical;
 mod copying;
+mod menu;
 mod mounting;
 mod navigation;
 mod paging;

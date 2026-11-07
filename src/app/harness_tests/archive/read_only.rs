@@ -6,7 +6,7 @@ use super::*;
 
 /// `pkg.tar` holding `README.md` twice beside `src/main.rs`. The duplicate
 /// makes the mount read-only: a repack would drop the shadowed copy.
-fn build_tar_with_a_duplicate(path: &Path) {
+pub(super) fn build_tar_with_a_duplicate(path: &Path) {
     let mut b = tar::Builder::new(std::fs::File::create(path).unwrap());
     for (name, body) in [
         ("README.md", "# first\n"),
