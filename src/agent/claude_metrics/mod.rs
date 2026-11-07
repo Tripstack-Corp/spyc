@@ -11,6 +11,7 @@
 pub mod records;
 mod reducer;
 pub mod stream;
+pub mod subagents;
 pub mod watch;
 
 use std::ffi::OsString;
@@ -121,6 +122,13 @@ pub struct Snapshot {
     /// `Agent` (or older `Task`) calls: subagents started, not parallel tools.
     pub subagent_calls: u32,
     pub background_calls: u32,
+    /// The `Agent` calls whose result was an error, newest last: the
+    /// subagents they started failed.
+    pub failed_agent_calls: Vec<String>,
+    /// The subagents running, and those finished within
+    /// [`subagents::ENDED_SHOWN`], from the session's `subagents/` directory
+    /// rather than this transcript.
+    pub subagents: Vec<subagents::Subagent>,
 }
 
 #[cfg(test)]
