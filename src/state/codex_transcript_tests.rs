@@ -1,5 +1,15 @@
 use super::*;
 
+/// The rendered transcript's lines.
+fn render_transcript(
+    path: &Path,
+    theme: &Theme,
+    width: Option<usize>,
+    show_tool_calls: bool,
+) -> Vec<Line<'static>> {
+    render_transcript_doc(path, theme, width, show_tool_calls).lines
+}
+
 fn render_records(records: &[serde_json::Value], show_tools: bool) -> String {
     let directory = tempfile::tempdir().expect("temporary transcript directory");
     let path = directory.path().join("rollout.jsonl");

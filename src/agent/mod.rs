@@ -37,8 +37,6 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use ratatui::text::Line;
-
 use crate::pane::Pane;
 use crate::state::sessions::{AgentKind, SessionCandidate};
 use crate::ui::theme::Theme;
@@ -115,12 +113,13 @@ pub struct TranscriptQuery<'a> {
 pub struct TranscriptSpec {
     /// Locate the transcript file for the pane (see [`TranscriptQuery`]).
     pub resolve: fn(TranscriptQuery) -> Option<PathBuf>,
-    /// Render that file into pager lines. `width` is the pager body-width
-    /// hint (cells) so agent prose reflows to the scrollback pane width
-    /// when rendered as Markdown; `None` falls back to the default.
+    /// Render that file into pager lines, with the diagrams among them.
+    /// `width` is the pager body-width hint (cells) so agent prose reflows
+    /// to the scrollback pane width when rendered as Markdown; `None` falls
+    /// back to the default.
     /// `show_tool_calls` keeps the agent's tool-use / tool-result lines
     /// (`t` toggles them in the scrollback) — `false` renders prose only.
-    pub render: fn(&Path, &Theme, Option<usize>, bool) -> Vec<Line<'static>>,
+    pub render: fn(&Path, &Theme, Option<usize>, bool) -> crate::state::TranscriptDoc,
     /// Config key gating the view; `None` = always-on (codex).
     pub config_key: Option<&'static str>,
     /// Default when the config key is unset.
@@ -639,7 +638,7 @@ impl AgentProfile for CodexProfile {
     fn transcript(&self) -> Option<TranscriptSpec> {
         Some(TranscriptSpec {
             resolve: crate::state::codex_transcript::resolve_active_rollout,
-            render: crate::state::codex_transcript::render_transcript,
+            render: crate::state::codex_transcript::render_transcript_doc,
             config_key: None,
             default_enabled: true,
             miss_message: Some(
@@ -769,7 +768,7 @@ impl AgentProfile for AgyProfile {
     fn transcript(&self) -> Option<TranscriptSpec> {
         Some(TranscriptSpec {
             resolve: crate::state::agy_transcript::resolve_active_jsonl,
-            render: crate::state::agy_transcript::render_transcript,
+            render: crate::state::agy_transcript::render_transcript_doc,
             config_key: Some("agy_transcript_scrollback"),
             default_enabled: true,
             miss_message: None,

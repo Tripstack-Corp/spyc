@@ -102,18 +102,18 @@ fn unrendered_record(line: &[u8]) -> bool {
 /// of them. Returns empty on read failure. Assistant prose
 /// is rendered through the Markdown viewer (`width` hints prose/table
 /// reflow); user prompts and tool calls stay plain, agent-styled.
-pub fn render_transcript(
+pub fn render_transcript_doc(
     path: &Path,
     theme: &Theme,
     width: Option<usize>,
     show_tool_calls: bool,
-) -> Vec<Line<'static>> {
+) -> crate::state::TranscriptDoc {
     let Some(records) = crate::state::jsonl_records(
         path,
         crate::state::MAX_TRANSCRIPT_RECORD_BYTES,
         unrendered_record,
     ) else {
-        return Vec::new();
+        return crate::state::TranscriptDoc::default();
     };
     let keep = crate::state::MAX_TRANSCRIPT_LINES;
     let user_style = Style::default()
@@ -124,13 +124,13 @@ pub fn render_transcript(
     // renders near-invisible on dark backgrounds.
     let dim_style = Style::default().fg(theme.status_suffix);
 
-    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut out = crate::state::TranscriptDoc::default();
     let mut last_was_blank = true;
 
     for record in records {
         // The newest lines win; trimming in batches keeps it linear.
-        if out.len() >= 2 * keep {
-            out.drain(..out.len() - keep);
+        if out.lines.len() >= 2 * keep {
+            out.drop_oldest(out.lines.len() - keep);
         }
         let line = record.trim();
         if line.is_empty() {
@@ -144,7 +144,7 @@ pub fn render_transcript(
                 let content = &val["message"]["content"];
                 if let Some(text) = content.as_str() {
                     crate::state::push_transcript_prompt(
-                        &mut out,
+                        &mut out.lines,
                         &mut last_was_blank,
                         text,
                         user_style,
@@ -161,7 +161,7 @@ pub fn render_transcript(
                     match block["type"].as_str() {
                         Some("tool_result") => {
                             if show_tool_calls && let Some(preview) = tool_result_preview(block) {
-                                out.push(Line::from(Span::styled(
+                                out.lines.push(Line::from(Span::styled(
                                     format!("  \u{2514} {preview}"),
                                     dim_style,
                                 )));
@@ -170,7 +170,7 @@ pub fn render_transcript(
                         }
                         Some("text") => {
                             crate::state::push_transcript_prompt(
-                                &mut out,
+                                &mut out.lines,
                                 &mut last_was_blank,
                                 block["text"].as_str().unwrap_or(""),
                                 user_style,
@@ -202,7 +202,7 @@ pub fn render_transcript(
                                 Some(detail) => format!("\u{2699} {name}({detail})"),
                                 None => format!("\u{2699} {name}"),
                             };
-                            out.push(Line::from(Span::styled(label, tool_style)));
+                            out.lines.push(Line::from(Span::styled(label, tool_style)));
                             last_was_blank = false;
                         }
                         // thinking blocks are signature-only on disk.
@@ -213,8 +213,8 @@ pub fn render_transcript(
             _ => {}
         }
     }
-    if out.len() > keep {
-        out.drain(..out.len() - keep);
+    if out.lines.len() > keep {
+        out.drop_oldest(out.lines.len() - keep);
     }
     out
 }
@@ -279,6 +279,16 @@ fn tool_result_preview(block: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rendered transcript's lines.
+    fn render_transcript(
+        path: &Path,
+        theme: &Theme,
+        width: Option<usize>,
+        show_tool_calls: bool,
+    ) -> Vec<Line<'static>> {
+        render_transcript_doc(path, theme, width, show_tool_calls).lines
+    }
 
     #[test]
     fn missing_file_is_empty() {

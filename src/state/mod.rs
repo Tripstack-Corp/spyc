@@ -369,6 +369,47 @@ pub fn read_line_capped<R: std::io::BufRead>(
     }
 }
 
+/// A transcript rendered for the scrollback: its lines, and the
+/// ` ```mermaid ` diagrams among them with the lines each occupies, by which
+/// the pager's `i` and `o` find the one in view. Lines leave only through
+/// [`Self::drop_oldest`], which moves the diagrams with them.
+#[derive(Debug, Default)]
+pub struct TranscriptDoc {
+    pub lines: Vec<ratatui::text::Line<'static>>,
+    pub mermaid_blocks: Vec<crate::ui::markdown::MermaidBlock>,
+}
+
+impl TranscriptDoc {
+    /// Whether it has no lines: nothing to show.
+    pub const fn is_empty(&self) -> bool {
+        self.lines.is_empty()
+    }
+
+    /// Append a rendered Markdown body, its diagrams moved to where it lands.
+    pub fn append(&mut self, body: crate::ui::markdown::MarkdownDoc) {
+        let at = self.lines.len();
+        self.mermaid_blocks
+            .extend(body.mermaid_blocks.into_iter().map(|mut block| {
+                block.line_range = block.line_range.start + at..block.line_range.end + at;
+                block
+            }));
+        self.lines.extend(body.lines);
+    }
+
+    /// Drop the oldest `n` lines and every diagram wholly inside them. A
+    /// diagram they cut keeps the lines left of it, since its source is whole.
+    pub fn drop_oldest(&mut self, n: usize) {
+        let n = n.min(self.lines.len());
+        self.lines.drain(..n);
+        self.mermaid_blocks.retain_mut(|block| {
+            let kept = block.line_range.end > n;
+            block.line_range =
+                block.line_range.start.saturating_sub(n)..block.line_range.end.saturating_sub(n);
+            kept
+        });
+    }
+}
+
 /// Append an agent prose block to a transcript view, rendered through
 /// the Markdown viewer so headings / lists / code / emphasis show as
 /// formatting instead of raw `#` / `**` source. Inserts a single blank
@@ -381,7 +422,7 @@ pub fn read_line_capped<R: std::io::BufRead>(
 /// only structured-conversation lines that are Markdown source (user
 /// prompts and tool calls stay plain, agent-styled).
 pub fn push_agent_markdown(
-    out: &mut Vec<ratatui::text::Line<'static>>,
+    out: &mut TranscriptDoc,
     last_was_blank: &mut bool,
     body: &str,
     theme: &crate::ui::theme::Theme,
@@ -391,10 +432,11 @@ pub fn push_agent_markdown(
         return;
     }
     if !*last_was_blank {
-        out.push(ratatui::text::Line::from(""));
+        out.lines.push(ratatui::text::Line::from(""));
     }
-    out.extend(crate::ui::markdown::render(body, theme, width));
+    out.append(crate::ui::markdown::render_doc(body, theme, width));
     *last_was_blank = out
+        .lines
         .last()
         .is_some_and(|l| l.spans.iter().all(|s| s.content.trim().is_empty()));
 }
@@ -773,6 +815,62 @@ mod tests {
             assert!(open_state_file_append("link.log").is_none());
             assert_eq!(std::fs::read_to_string(&target).unwrap(), "private");
         });
+    }
+}
+
+#[cfg(test)]
+mod transcript_doc_tests {
+    use super::TranscriptDoc;
+    use crate::ui::markdown::MermaidBlock;
+
+    fn doc(lines: usize, blocks: &[std::ops::Range<usize>]) -> TranscriptDoc {
+        TranscriptDoc {
+            lines: (0..lines).map(|i| i.to_string().into()).collect(),
+            mermaid_blocks: blocks
+                .iter()
+                .map(|r| MermaidBlock {
+                    line_range: r.clone(),
+                    source: format!("{r:?}"),
+                })
+                .collect(),
+        }
+    }
+
+    /// Dropping the oldest lines moves each diagram up with its lines, drops
+    /// one wholly inside them, and keeps the rest of one they cut.
+    #[test]
+    fn dropping_the_oldest_lines_moves_the_diagrams_with_them() {
+        let mut doc = doc(20, &[0..3, 4..8, 10..14]);
+        doc.drop_oldest(6);
+        assert_eq!(doc.lines.len(), 14);
+        assert_eq!(doc.lines[0].to_string(), "6");
+        let kept: Vec<_> = doc
+            .mermaid_blocks
+            .iter()
+            .map(|b| (b.source.as_str(), b.line_range.clone()))
+            .collect();
+        assert_eq!(kept, [("4..8", 0..2), ("10..14", 4..8)]);
+    }
+
+    /// Appending a body moves its diagrams to where it lands.
+    #[test]
+    fn an_appended_bodys_diagrams_land_with_it() {
+        let mut out = doc(5, &[]);
+        let body = crate::ui::markdown::render_doc(
+            "```mermaid\ngraph TD\n```",
+            &crate::ui::theme::Theme::default(),
+            None,
+        );
+        let at = body.mermaid_blocks[0].line_range.clone();
+        out.append(body);
+        assert_eq!(out.mermaid_blocks[0].line_range, at.start + 5..at.end + 5);
+        assert!(
+            out.lines[at.start + 5]
+                .to_string()
+                .contains("mermaid diagram"),
+            "{:?}",
+            out.lines
+        );
     }
 }
 

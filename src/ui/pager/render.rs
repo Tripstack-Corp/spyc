@@ -41,6 +41,24 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     let ncols = view.columns.max(1) as usize;
     let multi_col_chunks = (ncols > 1).then(|| partition_lines_static(&view.lines, ncols));
 
+    let borderless = view.full_width || matches!(view.mount, Mount::LowerPane);
+    // Flash is teal + BOLD against the amber title so help notices
+    // (e.g. "truncated at 5000 lines · press p for full file in
+    // $PAGER") stand out clearly as a separate piece of info, not as
+    // an extension of the filename.
+    let flash_style = Style::default().fg(theme.take).add_modifier(Modifier::BOLD);
+    // A borderless pager has no title bar to carry its flash, so the bottom
+    // row does, over the status: the flash answers the key just pressed, and
+    // the next key clears it.
+    let footer = match &view.flash {
+        Some(msg) if borderless => Some((msg.clone(), flash_style)),
+        _ => view.status_text().map(|text| {
+            let style = Style::default()
+                .fg(theme.prompt_prefix)
+                .add_modifier(Modifier::BOLD);
+            (text, style)
+        }),
+    };
     // Reserve the bottom row for the search/status bar. In multi-column
     // views (help) the row is always reserved so the viewport height stays
     // constant when search is activated — otherwise the column layout
@@ -48,9 +66,7 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     // Decided before the block because the position indicator must be measured
     // against the same viewport the body gets: read off `inner - 2` it ignored
     // this row and could label a view "All" with a line still off-screen.
-    let show_search_row = view.status_text().is_some() || ncols > 1;
-
-    let borderless = view.full_width || matches!(view.mount, Mount::LowerPane);
+    let show_search_row = footer.is_some() || ncols > 1;
     let block = if borderless {
         Block::default()
     } else {
@@ -66,11 +82,6 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
         let title_style = Style::default()
             .fg(theme.prompt_prefix)
             .add_modifier(Modifier::BOLD);
-        // Flash is teal + BOLD against the amber title so help notices
-        // (e.g. "truncated at 5000 lines · press p for full file in
-        // $PAGER") stand out clearly as a separate piece of info, not as
-        // an extension of the filename.
-        let flash_style = Style::default().fg(theme.take).add_modifier(Modifier::BOLD);
         let title_line: Line<'static> = if let Some(ref msg) = view.flash {
             Line::from(vec![
                 Span::styled(format!("  {}  ", view.title), title_style),
@@ -135,11 +146,8 @@ pub fn render(frame: &mut Frame, area: Rect, view: &PagerView, theme: &Theme) {
     }
 
     if let Some(rect) = search_area
-        && let Some(text) = view.status_text()
+        && let Some((text, style)) = footer
     {
-        let style = Style::default()
-            .fg(theme.prompt_prefix)
-            .add_modifier(Modifier::BOLD);
         frame.render_widget(Paragraph::new(Line::from(Span::styled(text, style))), rect);
     }
 }

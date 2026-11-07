@@ -325,6 +325,7 @@ pub fn build_scrollback_help(theme: &Theme) -> PagerView {
                 ("T", "swap source: terminal capture ⇄ agent transcript"),
                 ("t", "show / hide agent tool-use & tool-result lines"),
                 ("r", "reload (a full-screen agent keeps appending)"),
+                ("i / o", "mermaid diagram: view here / open in viewer"),
             ],
         ),
         (
