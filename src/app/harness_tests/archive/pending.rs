@@ -1103,3 +1103,97 @@ fn an_edit_saved_while_a_closed_projects_write_ran_is_kept_pending() {
         );
     });
 }
+
+/// What a mount records as spyc's own is what its read extracted, as the read
+/// left it. A copy changed after the read and before the mount lands, as an
+/// editor left open across a write can save into the tree its re-read has just
+/// refilled, is a change.
+#[test]
+#[ignore = "red: the mount records the tree as it is when it lands, so an edit made before then reads as spyc's own"]
+fn a_copy_changed_before_its_mount_lands_is_a_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        let mut fx = app.request_mount(&archive, false);
+        assert_eq!(fx.len(), 1, "{fx:?}");
+        let Some(Effect::Archive(read)) = fx.pop() else {
+            panic!("no read was started");
+        };
+        let ArchiveOp::Mount { staging_root, .. } = &read else {
+            panic!("not a mount: {read:?}");
+        };
+        let readme = staging_root.join("README.md");
+        let outcome = run_archive_op(read);
+        assert!(readme.exists(), "the read never extracted README.md");
+        std::fs::write(&readme, "# pkg, saved before the mount landed\n").unwrap();
+        app.file_archive_outcome(outcome);
+        let _ = app.apply_archive_outcomes();
+        assert!(app.state.mounts.get(&archive).is_some(), "never mounted");
+        assert_eq!(
+            app.dirty_mounts(),
+            vec![archive.clone()],
+            "an edit made before the mount landed was recorded as spyc's own"
+        );
+    });
+}
+
+/// An edit saved after a write lands and before its re-read empties the
+/// staging tree is kept, pending, as one saved while the write ran is: the
+/// re-read holds it aside itself, right before it empties the tree.
+#[test]
+#[ignore = "red: edits are held aside when the write lands, so one saved before the re-read runs goes with the tree"]
+fn an_edit_saved_before_the_re_read_runs_is_kept_pending() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.tar.gz");
+        build_tar_gz(&archive);
+        let mut app = App::test_app(dir);
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        settle(
+            &mut app,
+            vec![Effect::Graveyard(
+                crate::app::graveyard_ops::GraveyardOp::Archive {
+                    paths: vec![archive.join("src").join("main.rs")],
+                },
+            )],
+        );
+        let staged = app
+            .state
+            .mounts
+            .get(&archive)
+            .unwrap()
+            .staging_root
+            .join("README.md");
+        let write = app.cmd_archive("write");
+        assert!(writes(&write), "{write:?}");
+        for effect in write {
+            if let Effect::Archive(op) = effect {
+                app.file_archive_outcome(run_archive_op(op));
+            }
+        }
+        let (_, reread) = app.apply_archive_outcomes();
+        assert!(
+            app.state.mounts.get(&archive).is_none(),
+            "the write never landed, or its re-read already ran"
+        );
+        let edited = "# edited after the write landed\n";
+        std::fs::write(&staged, edited).unwrap();
+        settle(&mut app, reread);
+        let mount = app.state.mounts.get(&archive).expect("read again");
+        assert!(
+            mount.index.entries.iter().all(|e| e.inner != "src/main.rs"),
+            "the write never landed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(mount.staging_root.join("README.md")).ok(),
+            Some(edited.to_string()),
+            "the edit was lost"
+        );
+        assert!(mount.is_dirty(), "the edit isn't pending");
+    });
+}
