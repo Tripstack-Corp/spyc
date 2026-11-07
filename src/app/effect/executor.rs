@@ -74,6 +74,7 @@ impl App {
                 // process cwd, then flash the path/error in the active pager's
                 // title (mirrors the former inline `save_to_file` + `view.flash`).
                 Effect::SavePagerOutput { content } => self.save_pager_output(content),
+                Effect::AwayRecap(absence) => self.start_away_recap(absence),
                 Effect::ReadPaneText { kind, then } => self.execute_pane_text(kind, then),
                 // A-class: queue input for the target pane (same tick).
                 // Resolve the target; if it's gone, skip silently (matches
@@ -108,13 +109,7 @@ impl App {
                 // documents why. `apply_clipboard_pastes` hands the text to
                 // `handle_paste` when it lands.
                 Effect::PasteFromClipboard => self.spawn_clipboard_read(),
-                Effect::SetProcessCwd { dir } => {
-                    // A failure (the dir vanished) leaves the settle seeing
-                    // divergence, so it retries once the column moves on.
-                    if let Err(e) = std::env::set_current_dir(&dir) {
-                        crate::spyc_debug!("process cwd → {}: {e}", dir.display());
-                    }
-                }
+                Effect::SetProcessCwd { dir } => set_process_cwd(&dir),
                 Effect::SetMouseMode { capture } => {
                     // Mutually exclusive with 1007 alternate-scroll: a terminal
                     // honouring both could deliver one wheel tick twice.
@@ -447,5 +442,13 @@ fn notify(system: Option<(String, String)>, osc9: Option<String>, bell: bool) {
     }
     if bell {
         crate::notifications::ring_bell();
+    }
+}
+
+/// Move the process to `dir`. A failure (the dir vanished) leaves the settle
+/// seeing divergence, so it retries once the column moves on.
+fn set_process_cwd(dir: &std::path::Path) {
+    if let Err(e) = std::env::set_current_dir(dir) {
+        crate::spyc_debug!("process cwd → {}: {e}", dir.display());
     }
 }

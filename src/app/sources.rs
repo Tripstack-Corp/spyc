@@ -548,6 +548,7 @@ mod tests {
             Message::Wake(Wake::AgentStatus),
             Message::Wake(Wake::Graveyard),
             Message::Wake(Wake::Image),
+            Message::Wake(Wake::AwayRecap),
             Message::Wake(Wake::Archive),
             Message::Wake(Wake::PreviewReload),
             Message::Wake(Wake::WorktreeJob),

@@ -287,8 +287,9 @@ struct ActivityScan<'a> {
 
 impl ActivityScan<'_> {
     /// When a tab's `Blocked` began, and a `Done` that lands while the tab is
-    /// out of view, kept until it is in view. In view, the tab's unseen done
-    /// and its `+` are seen.
+    /// out of view, kept until it is in view, with the turns finished
+    /// meanwhile. In view, the tab's unseen done and its `+` are seen, and the
+    /// turns it finished out of view are recapped (`Effect::AwayRecap`).
     fn settle_attention(&mut self, info: &mut TabInfo, new: AgentActivity, in_view: bool) {
         if new == AgentActivity::Blocked {
             info.blocked_since.get_or_insert(self.now);
@@ -298,8 +299,27 @@ impl ActivityScan<'_> {
         if in_view {
             let seen = info.unseen_done.take().is_some();
             self.changed |= seen | std::mem::take(&mut info.has_activity);
-        } else if new == AgentActivity::Done && info.notified != AgentActivity::Done {
-            info.unseen_done.get_or_insert(self.now);
+            if let Some(away) = info.away.take().filter(|away| seen && away.turns > 0) {
+                self.effects
+                    .push(Effect::AwayRecap(super::away_recap::Absence {
+                        pane_id: info.id.clone(),
+                        turns: away.turns,
+                        left: away.left,
+                        done: away.last_done.unwrap_or(self.now),
+                    }));
+            }
+        } else {
+            let now = self.now;
+            let away = info.away.get_or_insert(crate::pane::tabs::Away {
+                left: now,
+                turns: 0,
+                last_done: None,
+            });
+            if new == AgentActivity::Done && info.notified != AgentActivity::Done {
+                away.turns = away.turns.saturating_add(1);
+                away.last_done = Some(now);
+                info.unseen_done.get_or_insert(now);
+            }
         }
     }
 

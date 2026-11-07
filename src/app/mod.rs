@@ -110,6 +110,7 @@ mod archive;
 mod archive_ops;
 mod archive_route;
 mod attention;
+mod away_recap;
 mod bootstrap;
 mod capture;
 mod claude_home;

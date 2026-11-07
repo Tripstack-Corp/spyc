@@ -232,7 +232,11 @@ fn find_pinned(home: &Path, thread: &str, cancelled: &AtomicBool) -> Option<Path
 /// Claude Code started in, which the pane's cwd may have left, so every
 /// project is asked for the exact name. A session in two projects is not
 /// guessed between.
-fn find_transcript(home: &Path, session: &str, cancelled: &AtomicBool) -> Option<PathBuf> {
+pub(in crate::app) fn find_transcript(
+    home: &Path,
+    session: &str,
+    cancelled: &AtomicBool,
+) -> Option<PathBuf> {
     if !home.is_absolute() || !crate::state::sessions::is_uuid(session) {
         return None;
     }
