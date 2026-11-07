@@ -14,6 +14,8 @@ use crate::agent::metrics::{MAX_TOOLS, count_tool, replace};
 /// How many message ids are remembered to deduplicate their records. A
 /// message's records are written together, so a short window is enough.
 const RECENT_MESSAGES: usize = 64;
+/// The most failed `Agent` calls remembered: enough for the subagents shown.
+const MAX_FAILED_AGENT_CALLS: usize = 64;
 
 /// Folds transcript events in file order. A message's usage counts once
 /// however many records repeat it; a compaction ends what is known about the
@@ -177,6 +179,12 @@ impl Reducer {
         };
         if failed {
             let name = tool.name.clone();
+            if matches!(name.as_deref(), Some("Agent" | "Task")) {
+                let calls = &mut self.snapshot.failed_agent_calls;
+                calls.push(id.to_owned());
+                let over = calls.len().saturating_sub(MAX_FAILED_AGENT_CALLS);
+                calls.drain(..over);
+            }
             let count = self.count(name.as_deref());
             count.failed = count.failed.saturating_add(1);
         }

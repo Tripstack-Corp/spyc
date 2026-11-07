@@ -224,6 +224,7 @@ pub fn lines(
         let mut mode_row = agent.mode;
         mode_row.cells.push(hooks(view.hooks, p));
         mode_row.cells.push(mcp(view.mcp_connections, p));
+        mode_row.trailer = claude::subagents(view, p);
         rows.push(agent.tools);
         match thinking_row(view, p) {
             // The mode row still sizes the columns, so none moves as the
@@ -234,6 +235,8 @@ pub fn lines(
             }
             None => rows.push(mode_row),
         }
+    } else if let Some(field) = claude::running_subagents(view, p) {
+        rows[1].trailer = Some(Trailer::Field(field));
     }
     // The rows below hang from the dot, each heading under the activity label.
     for row in rows[1..].iter_mut().chain(&mut measured) {
@@ -266,10 +269,20 @@ struct Row {
     trailer: Option<Trailer>,
 }
 
-struct Trailer {
-    field: Field,
+/// What follows a row's cells, and how it is cut to the room left.
+enum Trailer {
+    /// Cut from the right.
+    Field(Field),
     /// Cut from the left, keeping the end in view.
-    tail: bool,
+    Tail(Field),
+    /// As many items as fit, in order and at most `most`, `separator` between
+    /// them, then `+N more` in `more`'s style for the rest.
+    List {
+        items: Vec<Field>,
+        most: usize,
+        separator: Field,
+        more: Style,
+    },
 }
 
 impl Row {
@@ -419,16 +432,49 @@ fn place(row: Row, starts: &[usize], width: usize) -> Line<'static> {
         };
         if start < width {
             let room = width - start;
-            let field = if trailer.tail {
-                trailer.field.clip_tail(room)
-            } else {
-                trailer.field.clip(room)
+            let field = match trailer {
+                Trailer::Field(field) => field.clip(room),
+                Trailer::Tail(field) => field.clip_tail(room),
+                Trailer::List {
+                    items,
+                    most,
+                    separator,
+                    more,
+                } => fit_list(&items, most, &separator, more, room),
             };
             pad(&mut spans, start - x);
             spans.extend(field.0);
         }
     }
     Line::from(spans)
+}
+
+/// The most of `items`, at most `most`, that fit in `room`, joined by
+/// `separator`, then `+N more` for the rest; cut if even that doesn't fit.
+fn fit_list(items: &[Field], most: usize, separator: &Field, more: Style, room: usize) -> Field {
+    let joined = |shown: &[Field], rest: usize| {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for item in shown {
+            if !spans.is_empty() {
+                spans.extend(separator.0.iter().cloned());
+            }
+            spans.extend(item.0.iter().cloned());
+        }
+        if rest > 0 {
+            if !spans.is_empty() {
+                spans.extend(separator.0.iter().cloned());
+            }
+            spans.push(Span::styled(format!("+{rest} more"), more));
+        }
+        Field(spans)
+    };
+    for shown in (1..=items.len().min(most)).rev() {
+        let field = joined(&items[..shown], items.len() - shown);
+        if field.width() <= room {
+            return field;
+        }
+    }
+    joined(&[], items.len()).clip(room)
 }
 
 fn pad(spans: &mut Vec<Span<'static>>, n: usize) {
@@ -584,12 +630,11 @@ fn activity(view: &HudView<'_>, p: Palette) -> Row {
             place,
             Field(vec![elapsed]),
         ],
-        trailer: view.note.map(|note| Trailer {
-            field: Field(vec![Span::styled(
+        trailer: view.note.map(|note| {
+            Trailer::Field(Field(vec![Span::styled(
                 safe_label(note),
                 Style::default().fg(colour.unwrap_or(p.value)),
-            )]),
-            tail: false,
+            )]))
         }),
     }
 }
@@ -609,10 +654,7 @@ fn thinking_row(view: &HudView<'_>, p: Palette) -> Option<Row> {
         .filter(|text| !text.is_empty())?;
     Some(Row {
         cells: vec![Field(vec![p.heading("thinking")])],
-        trailer: Some(Trailer {
-            field: Field(vec![p.value(text)]),
-            tail: true,
-        }),
+        trailer: Some(Trailer::Tail(Field(vec![p.value(text)]))),
     })
 }
 
@@ -805,6 +847,27 @@ mod tests {
             hooks: Hooks::Unverified,
             mcp_connections: 0,
         }
+    }
+
+    /// A list trailer names as many items as fit the room, at most its most,
+    /// and counts the rest; cut, the count alone still says how many.
+    #[test]
+    fn a_list_trailer_names_what_fits_and_counts_the_rest() {
+        let item = |name: &str| Field(vec![Span::raw(name.to_owned())]);
+        let items = [item("aaaa"), item("bbbb"), item("cccc")];
+        let separator = item(" | ");
+        let fit = |most: usize, room: usize| -> String {
+            fit_list(&items, most, &separator, Style::default(), room)
+                .0
+                .iter()
+                .map(|span| span.content.to_string())
+                .collect()
+        };
+        assert_eq!(fit(3, 100), "aaaa | bbbb | cccc");
+        assert_eq!(fit(2, 100), "aaaa | bbbb | +1 more");
+        assert_eq!(fit(3, 17), "aaaa | +2 more");
+        assert_eq!(fit(3, 13), "+3 more");
+        assert_eq!(fit(3, 4), "+3 …");
     }
 
     fn text(lines: &[Line<'_>]) -> Vec<String> {
