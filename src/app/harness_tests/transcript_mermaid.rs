@@ -306,3 +306,62 @@ fn a_flash_from_a_scrollback_key_is_on_screen() {
         );
     });
 }
+
+/// What `o` opened is reported in the scrollback it was pressed in, though a
+/// file is open in the pager above: not in that pager, nor on the status bar.
+#[test]
+#[ignore = "red: a diagram's result goes to the pager above the scrollback"]
+fn opening_a_diagram_is_reported_in_the_scrollback_it_came_from() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        std::fs::write(dir.join("notes.txt"), "x").unwrap();
+        let mut app = app_in(&dir);
+        app.state.refresh_listing();
+        let notes = app
+            .state
+            .cur()
+            .rows
+            .iter()
+            .position(|r| r.path.ends_with("notes.txt"))
+            .expect("notes.txt is listed");
+        app.state.cur_mut().cursor.index = notes;
+        app.handle_key(KeyEvent::new(KeyCode::Char('D'), KeyModifiers::empty()))
+            .unwrap();
+        assert!(
+            app.view.project().pager.is_some(),
+            "premise: `D` opened the file"
+        );
+        claude_conversation(
+            &mut app,
+            &dir,
+            &[
+                claude_user("draw the request flow"),
+                claude_assistant(&prose_with_diagram()),
+            ],
+        );
+        app.set_pane_focus(true);
+        open_scrollback(&mut app);
+        jump_to_diagram(&mut app);
+        let opened = press(&mut app, KeyCode::Char('o'));
+        assert!(mermaid_render(&opened).is_some(), "premise: `o` opens it");
+
+        // What the worker lands once the OS viewer has the diagram.
+        app.file_image_outcome(crate::app::image_ops::ImageOutcome::Opened);
+        app.apply_image_outcomes();
+
+        let flash_of = |v: Option<&crate::ui::pager::PagerView>| v.and_then(|v| v.flash.clone());
+        assert_eq!(
+            flash_of(app.view.project().scroll_pager.as_ref()).as_deref(),
+            Some("opened in external viewer"),
+            "in the scrollback's footer"
+        );
+        assert_eq!(
+            flash_of(app.view.project().pager.as_ref()),
+            None,
+            "not in the file's pager"
+        );
+        assert!(app.state.flash.is_none(), "{:?}", app.flash_text());
+    });
+}

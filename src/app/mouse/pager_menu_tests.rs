@@ -673,6 +673,29 @@ fn the_pause_rows_hint_fades_after_three_s_presses() {
     });
 }
 
+/// A click on a row is its key pressed: a message left on the status bar is
+/// cleared, as that key clears it, and never shown in the pager as the
+/// answer of a row that says nothing (its key learned, so it isn't named).
+#[test]
+#[ignore = "red: a clicked pager row shows a message left on the status bar as its answer"]
+fn a_silent_rows_click_clears_a_waiting_message_rather_than_showing_it() {
+    with_mouse(|tmp| {
+        let mut app = app_in_the_task_viewer(tmp, 1);
+        for _ in 0..3 {
+            press(&mut app, 'S');
+        }
+        right_click_the_pager(&mut app);
+        let row = row_at(&mut app, "pause the task");
+        app.state.flash_error("opened in external viewer");
+
+        let fx = click(&mut app, row);
+
+        assert!(pauses_task_one(&fx), "the row fires: {fx:?}");
+        assert_eq!(pager_flash(&app), None, "the click said nothing");
+        assert_eq!(flash(&app), None, "cleared, as `S` clears it");
+    });
+}
+
 /// A click is not a key: clicking the capture menu's interrupt row again and
 /// again never silences the `^C` it is there to teach, and writes no count.
 #[test]
