@@ -81,7 +81,12 @@ for pair in $TARGETS; do
     # ReleaseSmall these archives carry no debug sections, and stripping them
     # measurably changes nothing. A previous version of this script did strip,
     # and on Linux it was a silent no-op (llvm-strip absent, failure swallowed).
-    ( cd "$SRC" && zig build \
+    # One CPU. zig sizes its compiler's thread pool from the CPU affinity, and
+    # from 0.17 compiler_rt's anonymous symbol names carry the index of the
+    # thread that made them, so a build on another core count or another host
+    # gives different bytes. `-j1` does not reach that pool; a single-CPU
+    # affinity does.
+    ( cd "$SRC" && taskset -c 0 zig build \
         -Demit-lib-vt=true \
         -Doptimize=ReleaseSmall \
         -Demit-xcframework=false \

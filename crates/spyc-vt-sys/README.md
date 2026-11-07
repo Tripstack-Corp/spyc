@@ -86,6 +86,13 @@ identical across runs, paths and caches, so the script re-archives the same
 members, in the same order, under their basenames, with this zig's own `ar` in
 deterministic mode.
 
+The build runs on one CPU (`taskset -c 0`). From Zig 0.17 the anonymous symbol
+names in `compiler_rt.o` carry the index of the compiler thread that made them,
+so a 7-CPU build, a 4-CPU build and a 4-CPU build on another host each emit
+different bytes, while every other object is identical. `-j1` does not reach the
+compiler's thread pool, which is sized from the CPU affinity; one CPU of
+affinity does.
+
 Zig cross-compiles all five from one host. The recipe uses `ReleaseSmall`,
 which is the size lever; it does **not** strip, because at `ReleaseSmall` the
 archives carry no debug sections and a strip step measurably changes nothing.
