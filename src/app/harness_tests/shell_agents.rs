@@ -99,10 +99,16 @@ pub(super) fn fake_agents(dir: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// The line that runs the fake agent at `path` in a shell tab, in the
-/// foreground for a minute. The trailing `:` keeps bash from replacing itself
+/// foreground for a minute. It draws a dot a second, as an agent's screen
+/// draws: a tab looks at its foreground only after output, so a fake that
+/// never drew was seen only when the look its line's echo scheduled came
+/// after it started. Bash runs the loop itself rather than replacing itself
 /// with `sleep`, which would rename the process.
 pub(super) fn run_fake_agent(path: &std::path::Path) -> String {
-    format!("{} -c 'sleep 60; :'\r", path.display())
+    format!(
+        "{} -c 'for ((i = 0; i < 60; i++)); do printf .; sleep 1; done'\r",
+        path.display()
+    )
 }
 
 /// Type `text` into the tab, then drain output and settle until `done` holds.
@@ -243,7 +249,6 @@ fn a_stopped_agent_leaves_the_tab_a_shell_until_it_is_brought_back() {
 /// build is done. That look finds the build, and the agent's own drawing is
 /// what schedules the look that finds the agent.
 #[test]
-#[ignore = "red: the fake agent never draws, so nothing schedules a look after it starts"]
 fn an_agent_started_late_in_its_line_is_seen_once_it_draws() {
     use crate::state::sessions::AgentKind;
     let tmp = tempfile::tempdir().unwrap();
