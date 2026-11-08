@@ -90,6 +90,10 @@ pub enum Effect {
     /// effects-as-data contract). `content` is materialized in the producer; the
     /// write is bounded (pager output, not a streaming source).
     SavePagerOutput { content: String },
+    /// A tab whose agent finished turns out of view is seen again: recap them
+    /// on a worker (`App::start_away_recap`), which lands on
+    /// `runtime.away_recaps` and wakes with `Message::Wake(Wake::AwayRecap)`.
+    AwayRecap(super::away_recap::Absence),
 
     /// A-class. Send `sig` to the task's process group (`kill_pg` applies
     /// the negative-pid / group convention), then on success toggle the
@@ -756,6 +760,7 @@ pub mod matchers {
             | Effect::CopyToClipboard { .. }
             | Effect::CopyToPagerClipboard { .. }
             | Effect::SavePagerOutput { .. }
+            | Effect::AwayRecap(_)
             | Effect::SaveLearned(_)
             | Effect::SetTerminalTitle { .. }
             | Effect::EditProjectConfig { .. }

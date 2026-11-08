@@ -20,7 +20,8 @@ fn workspace(tmp: &Path) -> (PathBuf, PathBuf) {
     let run_git = crate::git::test_support::run_git;
     run_git(&dir, &["init", "-q", "--initial-branch=main"]);
     std::fs::write(dir.join("f.txt"), "v1\n").unwrap();
-    run_git(&dir, &["add", "f.txt"]);
+    std::fs::write(dir.join("g.txt"), "v1\n").unwrap();
+    run_git(&dir, &["add", "f.txt", "g.txt"]);
     run_git(&dir, &["commit", "-q", "-m", "v1"]);
     let home = tmp.join("claude-home");
     let project = home
@@ -156,7 +157,6 @@ fn recap(app: &mut App, ctx: &mut RunCtx) -> Option<String> {
 /// back in view, the tab says how many turns, which tools, how many files
 /// changed and how long ago it finished. Never what the tools acted on.
 #[test]
-#[ignore = "red: no recap when a tab comes back into view"]
 fn coming_back_to_a_tab_that_finished_out_of_view_recaps_it() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -170,6 +170,9 @@ fn coming_back_to_a_tab_that_finished_out_of_view_recaps_it() {
             Some(0),
             "premise: Claude's tab is in view"
         );
+        // Changed before the tab was left: not the agent's doing meanwhile.
+        std::fs::write(dir.join("g.txt"), "v2\n").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
         show_tab(&mut app, &mut ctx, 1);
         std::thread::sleep(Duration::from_millis(20));
 
@@ -198,7 +201,6 @@ fn coming_back_to_a_tab_that_finished_out_of_view_recaps_it() {
 
 /// Each turn finished out of view counts.
 #[test]
-#[ignore = "red: no recap when a tab comes back into view"]
 fn every_turn_finished_out_of_view_counts() {
     let _lock = crate::mouse_test_lock();
     let tmp = tempfile::tempdir().unwrap();
@@ -241,6 +243,57 @@ fn a_finish_seen_in_view_has_no_recap() {
         turn(&mut app, &mut ctx);
         show_tab(&mut app, &mut ctx, 1);
         show_tab(&mut app, &mut ctx, 0);
+        let recap = recap(&mut app, &mut ctx);
+        assert!(
+            !recap.as_deref().is_some_and(|f| f.contains(" turn")),
+            "{recap:?}"
+        );
+    });
+}
+
+/// A second absence recaps its own turns, not the first one's again.
+#[test]
+fn each_absence_recaps_its_own_turns() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let (dir, home) = workspace(tmp.path());
+        let mut app = two_tabs(&dir, &home);
+        let mut ctx = RunCtx::for_test();
+        tick(&mut app, &mut ctx);
+        for _ in 0..2 {
+            show_tab(&mut app, &mut ctx, 1);
+            turn(&mut app, &mut ctx);
+            show_tab(&mut app, &mut ctx, 0);
+            let recap = recap(&mut app, &mut ctx).unwrap_or_default();
+            assert!(recap.starts_with("1 turn · "), "{recap}");
+            app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+                .unwrap();
+            assert!(
+                app.flash_text().is_none(),
+                "the next key clears it: {:?}",
+                app.flash_text()
+            );
+        }
+    });
+}
+
+/// A recap that lands once the tab has gone out of view again is dropped:
+/// the status bar would be speaking of a tab no longer shown.
+#[test]
+fn a_recap_for_a_tab_left_again_is_dropped() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let (dir, home) = workspace(tmp.path());
+        let mut app = two_tabs(&dir, &home);
+        let mut ctx = RunCtx::for_test();
+        tick(&mut app, &mut ctx);
+        show_tab(&mut app, &mut ctx, 1);
+        turn(&mut app, &mut ctx);
+        assert!(unseen_done(&app), "premise: it finished out of view");
+        show_tab(&mut app, &mut ctx, 0);
+        show_tab(&mut app, &mut ctx, 1);
         let recap = recap(&mut app, &mut ctx);
         assert!(
             !recap.as_deref().is_some_and(|f| f.contains(" turn")),

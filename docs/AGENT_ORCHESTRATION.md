@@ -405,6 +405,17 @@ view, even after the done report decays to idle or the agent exits, and its dot
 stays teal meanwhile (`:activity dump` shows `unseen_done=`). A blocked agent's
 wait is timed from when it began (`TabInfo::blocked_since`). Neither is saved.
 
+**The away recap (#919).** While a tab is out of view, `TabInfo::away` keeps
+when it left and the done edges since (`ActivityScan::settle_attention`, the
+edge that sets `unseen_done`). Seen again with one or more, the tab raises
+`Effect::AwayRecap`; the executor gathers its live cwd and, for a Claude tab,
+its home and session, and `away_recap.rs`'s worker reads the transcript's end,
+longer until it reaches back to when the tab was left, counting tool calls by
+name (`≥` when it couldn't reach back), and counts the files git calls changed
+whose last write is since then. It lands on `runtime.away_recaps`
+(`Wake::AwayRecap`), and the drain flashes it only if the tab is still the one
+in view. Tool names only: no input, result or agent text.
+
 **Each project's roll-up (#99).** While several projects are open, each
 project's chip in the status bar and its `Space j` row show its most urgent
 agent in the tab dots' glyphs: blocked (red `■`), then a done not yet seen

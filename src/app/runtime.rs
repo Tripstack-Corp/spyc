@@ -205,6 +205,9 @@ pub(super) struct Runtime {
     /// Each outcome is tagged with the project that started it
     /// (`App::spawn_image_work`).
     pub(super) image_results: Landing<(super::state::ProjectId, image_ops::ImageOutcome)>,
+    /// Recaps of tabs seen again after finishing out of view (`Effect::AwayRecap`),
+    /// woken by `Message::Wake(Wake::AwayRecap)` and drained by `apply_away_recaps`.
+    pub(super) away_recaps: Landing<super::away_recap::Recap>,
     /// Where off-thread archive ops (`Effect::Archive`) land: mount,
     /// materialize, clean. Same shape as `graveyard_results` — the worker lands
     /// and wakes with `Message::Wake(Wake::Archive)`, `apply_archive_outcomes` drains.
@@ -360,6 +363,7 @@ impl Runtime {
             graveyard_results: Landing::default(),
             wiring_results: Landing::default(),
             image_results: Landing::default(),
+            away_recaps: Landing::default(),
             archive_results: Landing::default(),
             archive_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             archive_mount_then: None,

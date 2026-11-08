@@ -142,8 +142,9 @@ impl App {
         }
 
         // Mermaid render+open results (woke us via `Message::Wake(Wake::Image)`) —
-        // surface success/failure in the pager status line.
-        if self.apply_image_outcomes() {
+        // surface success/failure in the pager status line — and away recaps
+        // (`Wake::AwayRecap`), flashed if their tab is still in view. Both run.
+        if self.apply_image_outcomes() | self.apply_away_recaps() {
             ctx.draw.mark(3);
         }
 
