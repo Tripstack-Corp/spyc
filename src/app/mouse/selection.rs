@@ -495,6 +495,9 @@ impl super::super::App {
     /// of a drag. Claims the drag only if the press landed on a row, so a press in
     /// the gutter between columns leaves forwarding and focus untouched.
     ///
+    /// The second press of a double-click on one row does what `Enter` does there
+    /// instead: see [`Self::open_double_clicked_row`].
+    ///
     /// The modifier is read HERE rather than carried in the sink because it selects
     /// the copy's *content*, not its routing. Ctrl, not Shift — Shift is the
     /// terminal's own selection-bypass and is frequently consumed before spyc sees
@@ -511,6 +514,9 @@ impl super::super::App {
             .modifiers
             .contains(crossterm::event::KeyModifiers::CONTROL);
         self.state.col_mut(side).cursor.index = idx;
+        if self.is_list_double_click(side, idx) {
+            return self.open_double_clicked_row();
+        }
         self.view.list_selection = Some(ListSelection {
             side,
             anchor: idx,
@@ -519,6 +525,41 @@ impl super::super::App {
         });
         self.view.mouse_selection = Some(MouseDragTarget::List(side));
         Vec::new()
+    }
+
+    /// Is this press on row `idx` of `side` the second of a double-click? Records
+    /// it as the last press when it is not.
+    fn is_list_double_click(&mut self, side: crate::app::state::Side, idx: usize) -> bool {
+        let Some(path) = self.state.col(side).rows.get(idx).map(|r| r.path.clone()) else {
+            return false;
+        };
+        let now = std::time::Instant::now();
+        let prev = self
+            .view
+            .last_list_click
+            .as_ref()
+            .map(|(s, p, at)| ((*s, p.as_path()), *at));
+        if super::is_double_click(prev, (side, path.as_path()), now) {
+            self.view.last_list_click = None;
+            return true;
+        }
+        self.view.last_list_click = Some((side, path, now));
+        false
+    }
+
+    /// Do what `Enter` does on the row under the cursor: go into a directory,
+    /// open a file in the pager. The press's column already has the keyboard,
+    /// and no drag starts, so the release copies nothing.
+    fn open_double_clicked_row(&mut self) -> Vec<Effect> {
+        self.view.list_selection = None;
+        self.view.mouse_selection = None;
+        match self.apply(&crate::keymap::Action::EnterOrDisplay) {
+            Ok(effects) => effects,
+            Err(e) => {
+                self.state.flash_error(format!("open: {e:#}"));
+                Vec::new()
+            }
+        }
     }
 
     /// Extend the row selection to the pointer, dragging the cursor with it.

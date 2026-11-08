@@ -151,6 +151,9 @@ takes, or keeps the hints for good, or turns them off
   while the pane still shows what you copied; new output or input clears it.
   Ctrl+click behaviour and host-terminal forwarding preferences are documented
   in [the selection caveats](../config/mouse.md#selecting-text).
+- **Double-click a file row to open it**, as `Enter` does: a directory is
+  gone into, and a file opens in the pager (an image full-screen). This works
+  in either column.
 - **Drag in the file list to select rows; release copies their names** — hold
   **Ctrl** while pressing to copy absolute paths instead. The highlight stays
   up after the copy. Distinct from picks: a drag never changes what the next
