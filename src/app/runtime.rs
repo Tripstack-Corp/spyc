@@ -234,6 +234,11 @@ pub(super) struct Runtime {
     /// held aside from its re-read until it is mounted again
     /// (`App::restore_late_edits`).
     pub(super) archive_held: std::collections::HashMap<std::path::PathBuf, super::archive::Held>,
+    /// Each mount's watch on its staging folder, by archive
+    /// (`App::note_staging_edits`). A mount without one is checked for
+    /// edits by statting every member it recorded.
+    pub(super) staging_watches:
+        std::collections::HashMap<std::path::PathBuf, super::archive::StagingWatch>,
     /// Where off-thread file operations land, each tagged with the project
     /// that started it (`App::spawn_file_op`).
     pub(super) file_results: Landing<(super::state::ProjectId, file_ops::FileOutcome)>,
@@ -361,6 +366,7 @@ impl Runtime {
             archive_reads: std::collections::HashMap::new(),
             archive_writes: std::collections::HashMap::new(),
             archive_held: std::collections::HashMap::new(),
+            staging_watches: std::collections::HashMap::new(),
             file_results: Landing::default(),
             clipboard_paste_results: Landing::default(),
             jump_default_results: Landing::default(),
