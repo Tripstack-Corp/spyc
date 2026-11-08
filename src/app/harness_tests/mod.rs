@@ -547,6 +547,7 @@ mod projects_open;
 mod projects_plumbing;
 mod projects_reopen;
 mod projects_switcher;
+mod prompt_nudge;
 mod prompt_templates;
 mod second_commander;
 mod send_selection;
