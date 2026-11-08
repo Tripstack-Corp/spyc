@@ -329,7 +329,7 @@ pub(super) fn is_blank_line(line: &Line<'static>) -> bool {
 /// the pane mounts because the slot's rect already defines the
 /// pager's footprint there. We could honour them later if a use
 /// case demands it.
-pub(super) fn pager_inner_area(area: Rect, view: &PagerView) -> Rect {
+pub fn pager_inner_area(area: Rect, view: &PagerView) -> Rect {
     match view.mount {
         Mount::Overlay => {
             if view.full_width {

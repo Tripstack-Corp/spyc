@@ -19,7 +19,6 @@ fn beside_the_box(app: &App) -> (u16, u16) {
 }
 
 #[test]
-#[ignore = "red: a click beside the pager is swallowed"]
 fn a_click_beside_the_pager_closes_it() {
     listing(|app, work| {
         viewing_notes(app, work);

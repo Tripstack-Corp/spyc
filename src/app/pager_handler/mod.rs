@@ -460,8 +460,8 @@ impl App {
     /// Answered from each pager's `last_content_area`, the rect the renderer
     /// actually drew it into — the same source of truth `PagerView::hit_test` uses,
     /// so "which pager did I click" and "which character did I click" can't
-    /// disagree. Content rect, not the whole box: beside a centred overlay the
-    /// user genuinely sees the list, and clicking there should reach the list.
+    /// disagree. Content rect, not the whole box: a press on the border or the
+    /// title starts no selection.
     ///
     /// Checked in paint order (topmost first). A slot holding a pager that is not
     /// currently drawn would carry a stale rect; in practice a pager is `take`n out

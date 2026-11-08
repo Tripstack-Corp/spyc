@@ -475,6 +475,9 @@ impl super::App {
             MouseSink::StderrLog => self.open_stderr_log(),
             MouseSink::TaskViewer => self.click_tasks(),
             MouseSink::Answer(code) => self.answer_by_click(code),
+            MouseSink::ClosePager => {
+                self.apply_pager_action(crate::app::pager_handler::PagerAction::Close)
+            }
             MouseSink::Project(action) => self.click_project(action),
             MouseSink::FocusPane => {
                 self.set_pane_focus(true);
@@ -546,6 +549,7 @@ impl super::App {
             region,
             pager_mount: self.focused_top_pager_mount(),
             covering_pager: self.pager_slot_at(ev.column, ev.row),
+            beside_modal_pager: self.beside_modal_pager(ev, frame),
             pane_wants_mouse: self.active_pane_wants_mouse(),
             // Same sources `route_input`'s snapshot uses (`route.rs`), so the
             // mouse and the keyboard can't disagree about what owns the screen.
@@ -574,6 +578,16 @@ impl super::App {
             over_chord_hint,
             chord_row,
         }
+    }
+
+    /// Whether a modal pager is open and `ev` is outside the box it draws.
+    fn beside_modal_pager(&self, ev: MouseEvent, frame: ratatui::layout::Rect) -> bool {
+        let Some(view) = self.view.project().pager.as_ref() else {
+            return false;
+        };
+        view.mount == crate::ui::pager::Mount::Overlay
+            && !crate::ui::pager::pager_inner_area(frame, view)
+                .contains(ratatui::layout::Position::new(ev.column, ev.row))
     }
 
     /// The file row a right-click is on, in a column listing a directory. Only
