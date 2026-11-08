@@ -123,6 +123,9 @@ pub enum MouseSink {
     /// Answer the open confirm prompt with this key, as typing it does: the
     /// pointer was on its `y` or its `n`.
     Answer(crossterm::event::KeyCode),
+    /// Close the modal pager, as `q` does: a left click landed beside its box.
+    /// The click does nothing else, so what is drawn beneath never hears it.
+    ClosePager,
     /// Open the task viewer, as `gB` does: the pointer was on the background
     /// tasks' indicator. Beats [`Self::SelectChrome`] for the reason
     /// [`Self::PaneTab`] does.
@@ -209,6 +212,9 @@ pub struct MouseSnapshot {
     /// wheel scrolled the agent behind a full-screen pager and a left click was
     /// forwarded into it.
     pub covering_pager: Option<PagerSlot>,
+    /// A modal pager is open and the pointer is outside its box, border and
+    /// all — not merely off its text, as `covering_pager` answers.
+    pub beside_modal_pager: bool,
     /// The pane's child requested mouse reporting (`mouse_protocol_mode != None`).
     /// When false, forwarding would type escape bytes into a prompt that never
     /// asked for them — the bracketed-paste bug (#170) in a new costume.
@@ -628,9 +634,13 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // selecting content in the pane "under" a pager the user is reading, which is
     // the POLA break reported against #228. Middle-click paste is kept (it targets
     // the pager's own search/jump prompt), and the wheel/left arms below still route
-    // to it when the pointer is actually over its content.
+    // to it when the pointer is actually over its content. A left click beside its
+    // box closes it, and reaches nothing else.
     if matches!(snap.pager_mount, Some(Mount::Overlay)) && !matches!(gesture, Gesture::Middle) {
-        return modal_pager_sink(gesture, snap.covering_pager);
+        // A question asked over the pager keeps it: the click must not put
+        // away what the question is about.
+        let beside = snap.beside_modal_pager && !snap.is_prompting;
+        return modal_pager_sink(gesture, snap.covering_pager, beside);
     }
 
     // A prompt owns the keyboard, so the only gesture that can mean anything is a
@@ -786,8 +796,15 @@ const fn right_click_sink(snap: MouseSnapshot) -> MouseSink {
 }
 
 /// A gesture while a full-frame modal pager is open, over its content when
-/// `covering` names the slot there.
-const fn modal_pager_sink(gesture: Gesture, covering: Option<PagerSlot>) -> MouseSink {
+/// `covering` names the slot there, or outside its box when `beside`.
+const fn modal_pager_sink(
+    gesture: Gesture,
+    covering: Option<PagerSlot>,
+    beside: bool,
+) -> MouseSink {
+    if beside && matches!(gesture, Gesture::Left) {
+        return MouseSink::ClosePager;
+    }
     match (gesture, covering) {
         (Gesture::Wheel, Some(slot)) => MouseSink::Pager(slot),
         (Gesture::Left, Some(slot)) => MouseSink::FocusAndSelect(slot),
@@ -914,6 +931,7 @@ mod tests {
             region,
             pager_mount: None,
             covering_pager: None,
+            beside_modal_pager: false,
             pane_wants_mouse: false,
             force_pane_selection: false,
             is_prompting: false,
@@ -1810,15 +1828,60 @@ mod tests {
     /// `route_input` hands it every key.
     ///
     /// Scoped to `Overlay` on purpose — see
-    /// `a_non_modal_pager_leaves_the_rest_of_the_frame_alone`.
+    /// `a_non_modal_pager_leaves_the_rest_of_the_frame_alone`. On the box but off
+    /// its text (the border, the title) it swallows; beside the box a left
+    /// click closes it — see `a_left_click_beside_a_modal_pagers_box_closes_it`.
     #[test]
-    fn a_modal_pager_swallows_input_beside_its_box() {
+    fn a_modal_pager_swallows_input_on_its_box_off_its_text() {
         let s = MouseSnapshot {
             pager_mount: Some(Mount::Overlay), // mounted...
             covering_pager: None,              // ...but not under THIS point
             ..snap(Some(Region::List))
         };
         assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+    }
+
+    /// A left click beside the modal pager's box closes it, as `q` does, and
+    /// does nothing else: the region beneath never hears it. The wheel and a
+    /// right click there still do nothing.
+    #[test]
+    fn a_left_click_beside_a_modal_pagers_box_closes_it() {
+        for region in [Region::List, Region::Pane, Region::Status] {
+            let s = MouseSnapshot {
+                pager_mount: Some(Mount::Overlay),
+                beside_modal_pager: true,
+                pane_wants_mouse: true,
+                ..snap(Some(region))
+            };
+            assert_eq!(
+                route_mouse(s, Gesture::Left),
+                MouseSink::ClosePager,
+                "{region:?}"
+            );
+            assert_eq!(
+                route_mouse(s, Gesture::Wheel),
+                MouseSink::Swallow,
+                "{region:?}"
+            );
+            assert_eq!(
+                route_mouse(s, Gesture::Right),
+                MouseSink::Swallow,
+                "{region:?}"
+            );
+        }
+    }
+
+    /// A question asked over the modal pager keeps it open: the click beside
+    /// its box must not put away what the question is about.
+    #[test]
+    fn a_question_over_a_modal_pager_keeps_it_on_a_click_beside_it() {
+        let s = MouseSnapshot {
+            pager_mount: Some(Mount::Overlay),
+            beside_modal_pager: true,
+            is_prompting: true,
+            ..snap(Some(Region::List))
+        };
         assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
     }
 
@@ -1843,16 +1906,18 @@ mod tests {
     ///
     /// Clicking beside its box used to reach whatever the layout said was
     /// underneath — starting a selection in the pane "under" a pager the user is
-    /// reading. Matches how `route_input` hands an Overlay every key.
+    /// reading. Matches how `route_input` hands an Overlay every key. A left
+    /// click there closes the pager and reaches nothing else.
     #[test]
     fn a_modal_pager_is_exclusive_even_where_it_does_not_cover() {
         let s = MouseSnapshot {
             pager_mount: Some(Mount::Overlay),
             covering_pager: None, // beside the box, over the pane's rect
+            beside_modal_pager: true,
             pane_wants_mouse: true,
             ..snap(Some(Region::Pane))
         };
-        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::Swallow);
+        assert_eq!(route_mouse(s, Gesture::Left), MouseSink::ClosePager);
         assert_eq!(route_mouse(s, Gesture::Wheel), MouseSink::Swallow);
         // Middle-click still pastes: it targets the pager's own search / jump prompt.
         assert_eq!(route_mouse(s, Gesture::Middle), MouseSink::Paste);

@@ -185,6 +185,10 @@ takes, or keeps the hints for good, or turns them off
   until you have learned it. A click on the agent segment gives the pane the
   keyboard.
   The rest of the bar is text to select.
+- **Click beside the pager to close it**, as `q` does, when it opens as a
+  box in the middle of the screen: a file you opened, `?` help, `:grep`, a
+  git view. The click only closes the pager; it doesn't also act on what's
+  beneath. A click on the box's border or title leaves it open.
 - **Click the status bar's `⚠N` to open `:stderr`**, the log of what spyc's
   stderr received.
 - **Click the `y` or the `n` of a prompt's `[y/N]` to answer it**, as

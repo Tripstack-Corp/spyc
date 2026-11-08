@@ -15,6 +15,7 @@ mod scroll_search;
 mod selection;
 
 pub use construct::{build_pager_help, build_scrollback_help};
+pub use layout::pager_inner_area;
 pub use layout::{centered_body_width, centered_col_width};
 pub use render::render;
 
