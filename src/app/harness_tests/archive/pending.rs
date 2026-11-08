@@ -1226,7 +1226,6 @@ fn watched_tarball(count: usize, test: impl FnOnce(&mut App, &Path)) {
 /// wake is noticed as it is saved, as a small archive's is: the staging
 /// folder is watched, and the watch names the member that changed.
 #[test]
-#[ignore = "red: past 256 extracted members an edit is only checked for by an `:archive` command or quitting"]
 fn an_edit_to_a_big_tarball_is_noticed_as_it_is_saved() {
     watched_tarball(300, |app, archive| {
         let staged = {
@@ -1259,7 +1258,6 @@ fn an_edit_to_a_big_tarball_is_noticed_as_it_is_saved() {
 /// `:archive` command there, each check for changes by statting what the
 /// watch named, not every member the tarball extracted.
 #[test]
-#[ignore = "red: the check stats every member a tarball extracted, which is all of them"]
 fn checking_a_watched_tarball_for_changes_skips_what_did_not_change() {
     watched_tarball(300, |app, archive| {
         app.settle_archive_edits();
@@ -1282,5 +1280,107 @@ fn checking_a_watched_tarball_for_changes_skips_what_did_not_change() {
         let _ = app.cmd_archive("info");
         let info = crate::app::archive::staged_stats_taken();
         assert!(info < 30, "`:archive info` statted {info} copies");
+    });
+}
+
+/// A watch that dropped events can no longer say what changed, so its mount
+/// goes back to statting every member it recorded: an edit the watch never
+/// named is still found by an `:archive` command.
+#[test]
+fn a_watch_that_lost_events_falls_back_to_checking_every_member() {
+    watched_tarball(300, |app, archive| {
+        let staged = {
+            let mount = app.state.mounts.get(archive).unwrap();
+            mount.staging_path(mount.index.get("file-7.txt").unwrap())
+        };
+        app.runtime
+            .staging_watches
+            .get(archive)
+            .expect("the mount is watched")
+            .inject(crate::app::archive::Seen::Lost);
+        app.settle_archive_edits();
+        assert!(
+            !app.runtime.staging_watches.contains_key(archive),
+            "the lost watch is still trusted"
+        );
+        std::fs::write(&staged, b"edited\n").unwrap();
+        let _ = crate::app::archive::staged_stats_taken();
+        let _ = app.cmd_archive("info");
+        assert!(
+            crate::app::archive::staged_stats_taken() >= 300,
+            "the check didn't go back to every member"
+        );
+        assert_eq!(
+            app.state
+                .mounts
+                .get(archive)
+                .unwrap()
+                .journal
+                .counts()
+                .badge(),
+            "~1"
+        );
+    });
+}
+
+/// A member spyc extracts into a watched staging folder is not an edit, even
+/// when the watch names it before the extraction has landed and been
+/// recorded.
+#[test]
+fn a_member_spyc_extracts_is_not_an_edit_when_the_watch_sees_it_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let archive = dir.join("pkg.zip");
+        build_zip(&archive);
+        let mut app = App::test_app(dir);
+        let (wake, _woken) = std::sync::mpsc::channel();
+        app.runtime.pane_wake_tx = Some(wake);
+        let fx = app.request_mount(&archive, false);
+        settle(&mut app, fx);
+        assert!(
+            app.runtime.staging_watches.contains_key(&archive),
+            "the mount isn't watched"
+        );
+        let fx = app.open_member(
+            &archive.join("README.md"),
+            crate::app::archive_ops::MaterializeThen::OpenPager(
+                crate::app::file_ops::PagerDest::Overlay { scroll: None },
+            ),
+        );
+        let outcomes: Vec<ArchiveOutcome> = fx
+            .into_iter()
+            .filter_map(|effect| match effect {
+                Effect::Archive(op) => Some(run_archive_op(op)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(outcomes.len(), 1, "no extraction started");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            app.note_staging_edits();
+            let named = app
+                .runtime
+                .staging_watches
+                .get(&archive)
+                .is_some_and(|w| w.touched().contains("README.md"));
+            if named {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the watch never named the extracted member"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            !app.settle_archive_edits(),
+            "spyc's own extraction read as an edit"
+        );
+        for outcome in outcomes {
+            app.file_archive_outcome(outcome);
+        }
+        let _ = app.apply_archive_outcomes();
+        assert!(!app.mount_is_dirty(&archive), "the extraction is pending");
     });
 }

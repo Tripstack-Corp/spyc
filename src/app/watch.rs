@@ -35,7 +35,7 @@ use super::{App, Message, RunCtx};
 /// / Remove event pass through.
 // SPYC-TRAP(fs-watch-readonly-access): dropping open/read events breaks a
 // self-sustaining inotify storm invisible on macOS (FSEvents has no opens).
-const fn is_readonly_access(kind: EventKind) -> bool {
+pub(super) const fn is_readonly_access(kind: EventKind) -> bool {
     matches!(
         kind,
         EventKind::Access(

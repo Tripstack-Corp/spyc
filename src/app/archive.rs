@@ -25,10 +25,11 @@ mod writes;
 
 pub(super) use writes::{Held, LateEdits, hold_late_edits};
 
+pub(super) use edits::StagingWatch;
+use edits::differs;
 pub(super) use edits::on_disk_stats;
 #[cfg(test)]
-pub(super) use edits::staged_stats_taken;
-use edits::{current_staged_stats, differs};
+pub(super) use edits::{Seen, staged_stats_taken};
 
 pub(super) use reads::Joined;
 
@@ -92,6 +93,7 @@ impl App {
             depth: 0,
             reset_staging: false,
             hold: None,
+            watch: self.runtime.pane_wake_tx.clone(),
         })]
     }
 
@@ -158,6 +160,7 @@ impl App {
             depth,
             reset_staging: false,
             hold: None,
+            watch: self.runtime.pane_wake_tx.clone(),
         })]
     }
 
@@ -208,6 +211,7 @@ impl App {
             depth,
             reset_staging: true,
             hold,
+            watch: self.runtime.pane_wake_tx.clone(),
         })]
     }
 
@@ -380,10 +384,12 @@ impl App {
                 warnings,
                 staging_root,
                 staged,
+                watch,
                 then,
                 depth,
             } => self.apply_mounted(
                 landed_mount(*index, capability, warnings, staging_root, staged, depth),
+                watch,
                 then,
             ),
             held @ ArchiveOutcome::HeldAside { .. } => {
@@ -477,6 +483,7 @@ impl App {
                 warnings,
                 staging_root,
                 staged,
+                watch,
                 depth,
                 then,
             } => {
@@ -484,14 +491,10 @@ impl App {
                     self.flash_held_back_dropped();
                 }
                 let archive = index.archive.clone();
-                let effects = self.record_mount(landed_mount(
-                    *index,
-                    capability,
-                    warnings,
-                    staging_root,
-                    staged,
-                    depth,
-                ));
+                let effects = self.record_mount(
+                    landed_mount(*index, capability, warnings, staging_root, staged, depth),
+                    watch,
+                );
                 self.restore_late_edits(&archive);
                 effects
             }
@@ -554,10 +557,15 @@ impl App {
 
     /// A mount landed: record it in the (global) mount table, then enter it,
     /// or hand back the effect that was waiting for it.
-    fn apply_mounted(&mut self, mount: ArchiveMount, then: Option<Box<Effect>>) -> Vec<Effect> {
+    fn apply_mounted(
+        &mut self,
+        mount: ArchiveMount,
+        watch: Option<Box<StagingWatch>>,
+        then: Option<Box<Effect>>,
+    ) -> Vec<Effect> {
         let archive = mount.archive().to_path_buf();
         let notes = mount_notes(&mount.capability, &mount.warnings);
-        let mut effects = self.record_mount(mount);
+        let mut effects = self.record_mount(mount, watch);
         // Enter it, then say what was odd about it — the flash outlives
         // the chdir, so the note is what the user is left reading. A
         // held-back effect names where to land instead, and re-running it
@@ -582,9 +590,24 @@ impl App {
         effects
     }
 
-    /// Record a landed mount in the (global) mount table, handing back the
-    /// clean-up of whatever it evicted.
-    fn record_mount(&mut self, mount: ArchiveMount) -> Vec<Effect> {
+    /// Record a landed mount in the (global) mount table, with the watch on
+    /// its staging folder when it has one, handing back the clean-up of
+    /// whatever it evicted. A watch left from an earlier mount of the same
+    /// archive goes either way: it names nothing about this one.
+    fn record_mount(
+        &mut self,
+        mount: ArchiveMount,
+        watch: Option<Box<StagingWatch>>,
+    ) -> Vec<Effect> {
+        let archive = mount.archive().to_path_buf();
+        match watch {
+            Some(watch) => {
+                self.runtime.staging_watches.insert(archive, *watch);
+            }
+            None => {
+                self.runtime.staging_watches.remove(&archive);
+            }
+        }
         let protected = self.protected_archives();
         clean_effects(self.state.mounts.insert(mount, &protected))
     }
