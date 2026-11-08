@@ -189,6 +189,11 @@ takes, or keeps the hints for good, or turns them off
   box in the middle of the screen: a file you opened, `?` help, `:grep`, a
   git view. The click only closes the pager; it doesn't also act on what's
   beneath. A click on the box's border or title leaves it open.
+- **Click a folder in the status bar's path to go up to it**, as `u` does
+  that many times, with the cursor on the folder you came from. A leading
+  `/` is the root and `~` your home. The folder you're in, and a name the
+  bar cut short to fit, go nowhere, and a drag that starts off a folder's
+  name still selects the bar's text.
 - **Click the status bar's `⚠N` to open `:stderr`**, the log of what spyc's
   stderr received.
 - **Click the `y` or the `n` of a prompt's `[y/N]` to answer it**, as

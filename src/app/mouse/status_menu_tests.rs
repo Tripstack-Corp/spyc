@@ -854,7 +854,8 @@ fn the_name_row_leaves_the_history_alone_until_the_line_runs() {
 
 /// The path is no object, nor the parting between two labels: a
 /// right-click on either still opens the leader, and a drag along the bar
-/// still selects and copies its text.
+/// still selects and copies its text, from off a folder's name (a press on
+/// one goes up to it).
 #[test]
 fn the_path_still_opens_the_leader_and_the_bar_still_selects() {
     with_mouse(|base| {
@@ -879,6 +880,12 @@ fn the_path_still_opens_the_leader_and_the_bar_still_selects() {
             "the leader is armed"
         );
         esc(&mut app);
+        // The `/` between the path's first two folders.
+        let (_, cells) = bar(&mut app);
+        let col = (usize::from(col) + 1..cells.len())
+            .find(|&x| cells[x].symbol() == "/")
+            .and_then(|x| u16::try_from(x).ok())
+            .expect("the path has a second `/`");
         press(&mut app, (col, row));
         assert_eq!(app.view.mouse_selection, Some(MouseDragTarget::Chrome));
         app.handle_mouse(at(MouseEventKind::Drag(MouseButton::Left), col + 3, row));

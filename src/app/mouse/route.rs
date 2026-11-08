@@ -123,6 +123,9 @@ pub enum MouseSink {
     /// Answer the open confirm prompt with this key, as typing it does: the
     /// pointer was on its `y` or its `n`.
     Answer(crossterm::event::KeyCode),
+    /// Go up this many levels from the focused column's directory, as `u` does
+    /// that many times: the pointer was on that folder in the status bar's path.
+    ClimbTo(usize),
     /// Pulse the border: a click answered nothing while a single-key confirm
     /// waits for its answer.
     NudgePrompt,
@@ -383,7 +386,10 @@ impl MouseSnapshot {
 const fn has_a_menu(segment: StatusSegment) -> bool {
     !matches!(
         segment,
-        StatusSegment::Projects | StatusSegment::Path | StatusSegment::Suffix
+        StatusSegment::Projects
+            | StatusSegment::Path
+            | StatusSegment::PathUp(_)
+            | StatusSegment::Suffix
     )
 }
 
@@ -419,6 +425,7 @@ const fn status_click(segment: Option<StatusSegment>) -> Option<MouseSink> {
         Some(StatusSegment::ProjectLabel(index)) => Some(MouseSink::Project(project_key(index))),
         Some(StatusSegment::ProjectCount) => Some(MouseSink::Project(ProjectAction::List)),
         Some(StatusSegment::Agent) => Some(MouseSink::FocusPane),
+        Some(StatusSegment::PathUp(levels)) => Some(MouseSink::ClimbTo(levels)),
         _ => None,
     }
 }

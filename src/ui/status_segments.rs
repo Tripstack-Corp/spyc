@@ -17,6 +17,8 @@ pub enum StatusSegment {
     ProjectCount,
     Session,
     Path,
+    /// A folder in the path, this many levels above the one the column is in.
+    PathUp(usize),
     Git,
     /// The active pane tab's agent.
     Agent,
@@ -43,9 +45,68 @@ pub fn segment_at(spans: &[SegmentSpan], col: usize) -> Option<StatusSegment> {
         .map(|s| s.segment)
 }
 
+/// Where each folder of `full` is drawn, as [`StatusSegment::PathUp`] spans,
+/// when the bar draws it as `drawn` from column `from`: `full` whole, or cut in
+/// its middle at `cut` (`ui::status::truncate_middle`), or only its tail. The
+/// folder the column is in has none, and nor does a name the cut shortened. A
+/// leading `/` is the root's.
+pub fn path_folder_spans(full: &str, drawn: &str, cut: &str, from: usize) -> Vec<SegmentSpan> {
+    // `full`'s bytes drawn whole before the cut (`..head`) and after it
+    // (`tail..`), and the column the part after the cut starts at.
+    let (head, tail, tail_col) = if drawn == full {
+        (full.len(), full.len(), 0)
+    } else if let Some((h, t)) = drawn
+        .split_once(cut)
+        .filter(|(h, t)| full.starts_with(h) && full.ends_with(t))
+    {
+        let (head, tail) = (h.len(), full.len() - t.len());
+        (
+            head,
+            tail,
+            super::display_width(h) + super::display_width(cut),
+        )
+    } else if full.ends_with(drawn) {
+        (0, full.len() - drawn.len(), 0)
+    } else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut at = 0;
+    for name in full.split('/') {
+        names.push((at, at + name.len()));
+        at += name.len() + 1;
+    }
+    let total = names.len();
+    let mut spans = Vec::new();
+    for (i, &(a, b)) in names.iter().enumerate() {
+        let up = total - 1 - i;
+        let (a, b) = match (a == b, i) {
+            (false, _) => (a, b),
+            (true, 0) if full.starts_with('/') => (0, 1),
+            (true, _) => continue,
+        };
+        let col = if b <= head {
+            super::display_width(&full[..a])
+        } else if a >= tail {
+            tail_col + super::display_width(&full[tail..a])
+        } else {
+            continue;
+        };
+        if up > 0 {
+            let start = from + col;
+            spans.push(SegmentSpan {
+                segment: StatusSegment::PathUp(up),
+                start,
+                end: start + super::display_width(&full[a..b]),
+            });
+        }
+    }
+    spans
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SegmentSpan, StatusSegment, segment_at};
+    use super::{SegmentSpan, StatusSegment, path_folder_spans, segment_at};
     use crate::ui::project_chips::{ProjectAttention, ProjectChip, ProjectChips};
     use crate::ui::status::StatusBar;
     use crate::ui::theme::Theme;
@@ -252,5 +313,65 @@ mod tests {
                 "mono={mono}"
             );
         }
+    }
+
+    /// Each folder's `(text, levels up)`, read back off `drawn` by its spans.
+    fn folders(full: &str, drawn: &str) -> Vec<(String, usize)> {
+        let cols: Vec<char> = drawn.chars().collect();
+        path_folder_spans(full, drawn, "...", 0)
+            .into_iter()
+            .map(|s| {
+                let StatusSegment::PathUp(up) = s.segment else {
+                    panic!("{s:?}")
+                };
+                (cols[s.start..s.end].iter().collect(), up)
+            })
+            .collect()
+    }
+
+    fn owned(want: &[(&str, usize)]) -> Vec<(String, usize)> {
+        want.iter().map(|(t, n)| ((*t).to_string(), *n)).collect()
+    }
+
+    /// Every folder but the last goes up as far as it is from the end; the
+    /// root is the leading `/`, and `~` is one folder however deep home is.
+    #[test]
+    fn each_folder_goes_up_as_far_as_it_is_from_the_end() {
+        let full = "/usr/local/lib";
+        assert_eq!(
+            folders(full, full),
+            owned(&[("/", 3), ("usr", 2), ("local", 1)])
+        );
+        let home = "~/src/spyc";
+        assert_eq!(folders(home, home), owned(&[("~", 2), ("src", 1)]));
+        assert_eq!(folders("~", "~"), owned(&[]));
+        assert_eq!(folders("<INVENTORY>", "<INVENTORY>"), owned(&[]));
+    }
+
+    /// Cut in the middle, the folders whole on either side of the cut keep
+    /// their levels, and the one the cut shortened has none.
+    #[test]
+    fn a_cut_path_keeps_the_folders_it_draws_whole() {
+        let full = "/alpha/bravo/charlie/delta/echo";
+        assert_eq!(
+            folders(full, "/alpha/br...ie/delta/echo"),
+            owned(&[("/", 5), ("alpha", 4), ("delta", 1)])
+        );
+        // Only the tail.
+        assert_eq!(folders(full, "lie/delta/echo"), owned(&[("delta", 1)]));
+        // A drawing that isn't `full` cut has none.
+        assert_eq!(folders(full, "/other/echo"), owned(&[]));
+    }
+
+    /// A wide name moves the columns of what follows it by its width.
+    #[test]
+    fn columns_are_display_columns() {
+        let full = "/日本/docs/x";
+        let spans = path_folder_spans(full, full, "...", 10);
+        let docs = spans
+            .iter()
+            .find(|s| s.segment == StatusSegment::PathUp(1))
+            .unwrap();
+        assert_eq!((docs.start, docs.end), (10 + 6, 10 + 10));
     }
 }

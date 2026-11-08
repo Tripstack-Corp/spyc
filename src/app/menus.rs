@@ -290,7 +290,10 @@ impl App {
             StatusSegment::Git => return self.open_git_menu().into_iter().collect(),
             StatusSegment::Session => return self.open_session_menu().into_iter().collect(),
             StatusSegment::Agent => return self.open_tab_menu(),
-            StatusSegment::Projects | StatusSegment::Path | StatusSegment::Suffix => {
+            StatusSegment::Projects
+            | StatusSegment::Path
+            | StatusSegment::PathUp(_)
+            | StatusSegment::Suffix => {
                 return Vec::new();
             }
         };
