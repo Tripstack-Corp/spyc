@@ -511,6 +511,7 @@ mod agent_spawn;
 mod agent_waiting;
 mod agy_live;
 mod archive;
+mod away_recap;
 mod blocked_label;
 mod branch_diff;
 mod claude_home;
