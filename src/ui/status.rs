@@ -95,6 +95,14 @@ impl Bar {
         }
     }
 
+    /// Mark each folder of `path`, drawn as `drawn` from column `from`.
+    fn mark_folders(&mut self, path: &str, drawn: &str, from: usize) {
+        self.segments
+            .extend(crate::ui::status_segments::path_folder_spans(
+                path, drawn, ELLIPSIS, from,
+            ));
+    }
+
     /// Push `chips`, each in `style` patched with its own, marking the labels
     /// and the count.
     fn push_chips(&mut self, chips: ChipSpans, style: Style) {
@@ -344,10 +352,8 @@ impl StatusBar<'_> {
         // path_budget = avail − (emoji + optional segments + path-sep).
         let fixed = emoji_w + project_w + session_w + git_w + agent_w + suffix_w + 1;
         let path_budget = avail.saturating_sub(fixed);
-        let path_text = format!(
-            " {} ",
-            truncate_middle(self.path, path_budget.saturating_sub(2))
-        );
+        let path_cut = truncate_middle(self.path, path_budget.saturating_sub(2));
+        let path_text = format!(" {path_cut} ");
 
         let path_next_bg = if git_text.is_some() {
             git_bg
@@ -382,6 +388,7 @@ impl StatusBar<'_> {
             Style::default().fg(path_bg).bg(path_next_bg),
         ));
         bar.mark(StatusSegment::Path, from);
+        bar.mark_folders(self.path, &path_cut, from + 1);
 
         if let Some(ref text) = git_text {
             let next_bg = if agent_text.is_some() {
@@ -470,6 +477,7 @@ impl StatusBar<'_> {
         };
 
         let from = bar.width;
+        bar.mark_folders(self.path, &path_disp, from);
         bar.push(Span::raw(path_disp));
         bar.mark(StatusSegment::Path, from);
         if !suffix_disp.is_empty() {

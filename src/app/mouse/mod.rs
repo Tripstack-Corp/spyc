@@ -475,6 +475,7 @@ impl super::App {
             MouseSink::StderrLog => self.open_stderr_log(),
             MouseSink::TaskViewer => self.click_tasks(),
             MouseSink::Answer(code) => self.answer_by_click(code),
+            MouseSink::ClimbTo(levels) => self.climb_to(levels),
             MouseSink::NudgePrompt => {
                 self.pulse_border();
                 Vec::new()
@@ -586,6 +587,25 @@ impl super::App {
             over_chord_hint,
             chord_row,
         }
+    }
+
+    /// Go up `levels` from the focused column's directory, the cursor on the
+    /// folder it came from, as `u` does.
+    fn climb_to(&self, levels: usize) -> Vec<Effect> {
+        let col = self.state.cur();
+        if levels == 0 || col.view != super::View::Dir {
+            return Vec::new();
+        }
+        let mut up = col.listing.dir.ancestors().skip(levels - 1);
+        let (Some(from), Some(to)) = (up.next(), up.next()) else {
+            return Vec::new();
+        };
+        vec![Effect::ChangeDir {
+            path: to.to_path_buf(),
+            focus: Some(from.to_path_buf()),
+            on_ok: None,
+            err_prefix: "chdir",
+        }]
     }
 
     /// Whether a modal pager is open and `ev` is outside the box it draws.
