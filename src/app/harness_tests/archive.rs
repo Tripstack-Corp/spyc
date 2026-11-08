@@ -45,6 +45,7 @@ pub(super) fn mount_inline(app: &mut App, archive: &Path, staging: &Path) -> Vec
         depth: 0,
         reset_staging: false,
         hold: None,
+        watch: None,
     });
     assert!(
         matches!(outcome, ArchiveOutcome::Mounted { .. }),

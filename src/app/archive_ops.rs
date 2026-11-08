@@ -80,6 +80,11 @@ pub enum ArchiveOp {
         /// planned are moved out of the tree before `reset_staging` empties
         /// it, on this thread, so one saved after the write landed is kept.
         hold: Option<Box<super::archive::LateEdits>>,
+        /// Watch the staging folder once it is read, waking the loop through
+        /// this sender on each change; `None` before the loop runs. The watch
+        /// starts before the read records the folder, so an edit after the
+        /// record is one the watch names.
+        watch: Option<std::sync::mpsc::Sender<super::Message>>,
     },
     /// Extract one member so something can read it.
     Materialize {
@@ -128,6 +133,9 @@ pub enum ArchiveOutcome {
         /// read extracts every member, so this is a stat per member, taken
         /// here rather than on the event loop.
         staged: StagedStats,
+        /// The watch on the staging folder, when the op asked for one and it
+        /// could be set up.
+        watch: Option<Box<super::archive::StagingWatch>>,
         /// The held-back effect from [`ArchiveOp::Mount`], to run now that the
         /// mount exists.
         then: Option<Box<super::Effect>>,
@@ -197,6 +205,7 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
             depth,
             reset_staging,
             hold,
+            watch,
         } => {
             // Before the read, on this thread — see `reset_staging` and `hold`.
             let held = hold.and_then(|late| super::archive::hold_late_edits(&late, &staging_root));
@@ -212,6 +221,7 @@ pub fn run_archive_op(op: ArchiveOp) -> ArchiveOutcome {
                         max_entries,
                         confirmed,
                         &cancel,
+                        watch,
                     ),
                     &path,
                     address,
@@ -314,6 +324,7 @@ fn readdress(
         warnings,
         staging_root,
         staged,
+        watch,
         then,
         ..
     } = outcome
@@ -330,6 +341,7 @@ fn readdress(
         warnings,
         staging_root,
         staged,
+        watch,
         then,
         depth,
     }
@@ -343,6 +355,7 @@ fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> Arch
             warnings,
             staging_root,
             staged,
+            watch,
             depth,
             ..
         } => ArchiveOutcome::Mounted {
@@ -351,6 +364,7 @@ fn carry_then(outcome: ArchiveOutcome, then: Option<Box<super::Effect>>) -> Arch
             warnings,
             staging_root,
             staged,
+            watch,
             then,
             // Carried, not reset: `readdress` ran first and it is what knows how
             // deep this mount is.
@@ -372,6 +386,7 @@ fn mount(
     max_entries: usize,
     confirmed: bool,
     cancel: &AtomicBool,
+    watch: Option<std::sync::mpsc::Sender<super::Message>>,
 ) -> ArchiveOutcome {
     let Some(format) = detect_at(path) else {
         return ArchiveOutcome::NotAnArchive {
@@ -419,6 +434,10 @@ fn mount(
 
     let capability = assess(&indexed.facts, format);
     let warnings = warnings(&indexed.facts, &indexed.index);
+    // The watch first: an edit after the record is then one it names.
+    let watch = watch
+        .and_then(|wake| super::archive::StagingWatch::start(staging_root, wake))
+        .map(Box::new);
     let staged = super::archive::on_disk_stats(&indexed.index, staging_root);
     ArchiveOutcome::Mounted {
         // `readdress` sets the real depth at the op boundary.
@@ -428,6 +447,7 @@ fn mount(
         warnings,
         staging_root: staging_root.to_path_buf(),
         staged,
+        watch,
         // `carry_then` attaches the held-back effect at the op boundary.
         then: None,
     }
@@ -552,6 +572,7 @@ mod tests {
             depth: 0,
             reset_staging: false,
             hold: None,
+            watch: None,
         })
     }
 
@@ -602,6 +623,7 @@ mod tests {
             depth: 0,
             reset_staging: true,
             hold: None,
+            watch: None,
         });
         assert!(matches!(out, ArchiveOutcome::Mounted { .. }), "got {out:?}");
         assert!(

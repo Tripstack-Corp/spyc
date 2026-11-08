@@ -78,7 +78,8 @@ they land in a session-scoped staging dir that is cleaned up on exit.
   the same question: what about this row isn't written yet. An edit made
   outside spyc — by your editor, or by an agent in the pane — counts as a change
   too, and shows in that badge: spyc compares each extracted file against what it
-  wrote. From outside the archive, where the badge isn't visible, `:archive info`
+  wrote, and watches the folder it extracts into, so the badge shows an edit as
+  it is saved, however many members the archive has. From outside the archive, where the badge isn't visible, `:archive info`
   and `:archive list` name every mount carrying unwritten changes.
 - **The archive is still a file** — where it lives, `pkg.zip` can be yanked,
   copied, renamed and deleted like anything else, mounted or not. Leaving one and

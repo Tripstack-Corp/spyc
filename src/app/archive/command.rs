@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{clean_effects, current_staged_stats, differs, display_name};
+use super::{clean_effects, differs, display_name};
 use crate::app::archive_ops::ArchiveOp;
 use crate::app::{App, Effect, Mode, Prompt, PromptKind};
 
@@ -381,7 +381,7 @@ impl App {
         // immutable read of the mount ends before the mutable borrow begins.
         let prepared = {
             let mount = self.state.mounts.get(archive)?;
-            let now = current_staged_stats(mount);
+            let now = self.staged_now(mount);
             if !mount.is_dirty() && !differs(&mount.staged, &now) {
                 None
             } else if let Some(why) =
