@@ -475,6 +475,10 @@ impl super::App {
             MouseSink::StderrLog => self.open_stderr_log(),
             MouseSink::TaskViewer => self.click_tasks(),
             MouseSink::Answer(code) => self.answer_by_click(code),
+            MouseSink::NudgePrompt => {
+                self.pulse_border();
+                Vec::new()
+            }
             MouseSink::ClosePager => {
                 self.apply_pager_action(crate::app::pager_handler::PagerAction::Close)
             }
@@ -559,6 +563,10 @@ impl super::App {
                     .contains(crossterm::event::KeyModifiers::CONTROL),
             is_prompting: matches!(self.state.mode, super::Mode::Prompting(_)),
             confirm_choice: self.confirm_choice_under(ev),
+            confirm_waiting: matches!(
+                &self.state.mode,
+                super::Mode::Prompting(p) if Self::answers_on_one_key(&p.kind)
+            ),
             has_scroll_pager: self.view.project().scroll_pager.is_some(),
             pane_closed: self.state.active_project().pane.pane_snapshot.is_closed,
             pane_scroll_keys: self.active_pane_wheel_scroll().is_some(),

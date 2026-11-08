@@ -196,7 +196,7 @@ takes, or keeps the hints for good, or turns them off
   project, removing files, mounting a large archive, and the other
   single-key confirms. A consent's pop-up takes a click on its `[y]` or
   `[n]`, and a startup-tab list's on `[Esc]`. A click anywhere else leaves
-  the prompt up. A prompt you finish with `Enter`, such as removing a
+  the prompt up and pulses the screen's border, so the question is seen. A prompt you finish with `Enter`, such as removing a
   worktree, still wants the keyboard.
 - **Click the background tasks' tags to open the task viewer**, as `gB`
   does, on the newest task: the `[N●]` tags on the divider, or the status

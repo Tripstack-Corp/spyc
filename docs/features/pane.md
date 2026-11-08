@@ -297,7 +297,8 @@ Multiple tabs, each running an independent pty:
   its saved tabs instead. Yours in `~/.spycrc.toml`, or in a project's own
   file under `~/.config/spyc/projects/`, open unasked. A
   project-local `.spycrc.toml` list runs only after you approve it in a
-  pop-up (`y` run, `n` never, `Esc` not now). The approval binds to the
+  pop-up (`y` run, `n` never, `Esc` not now); any other key or a click
+  pulses the screen's border. The approval binds to the
   exact commands and cwds, so an edited list asks again. `:startup-tabs`
   shows the answer, and `:startup-tabs forget` clears it. Reference:
   [Startup tabs](../../CONFIGURATION.md#startup-tabs--pane-tabs)

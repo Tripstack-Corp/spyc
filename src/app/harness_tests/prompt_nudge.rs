@@ -25,7 +25,6 @@ fn pulsing(app: &App) -> bool {
 }
 
 #[test]
-#[ignore = "red: a stray key only re-asks"]
 fn a_stray_key_at_the_skill_update_pulses_the_border() {
     listing(|app, _| {
         asking(app, skill_update());
@@ -38,7 +37,6 @@ fn a_stray_key_at_the_skill_update_pulses_the_border() {
 }
 
 #[test]
-#[ignore = "red: a stray key only re-asks"]
 fn a_stray_key_at_the_startup_tabs_consent_pulses_the_border() {
     listing(|app, work| {
         asking(
@@ -59,7 +57,6 @@ fn a_stray_key_at_the_startup_tabs_consent_pulses_the_border() {
 /// A click on a file row while the agent wiring pop-up asks answers nothing:
 /// the pop-up stays and the border pulses.
 #[test]
-#[ignore = "red: a click beside a question is swallowed"]
 fn a_click_away_from_a_question_pulses_the_border() {
     listing(|app, _| {
         let docs = drawn_at(app, "docs");

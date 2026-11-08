@@ -925,6 +925,16 @@ impl App {
         drawn.then(|| tabs.active_index())
     }
 
+    /// Start the border pulse now, whatever `[notify].visual` says: the caller
+    /// answers something the user just did. `settle_visual_bell` animates and
+    /// clears it, re-arming its own tick, so no `ctx` is needed here.
+    pub(super) fn pulse_border(&mut self) {
+        self.view.visual_bell = Some(VisualBell {
+            start: Instant::now(),
+            frame: 0,
+        });
+    }
+
     /// Advance / decay the P3-1 visual-bell border pulse (a `&mut` settle point,
     /// PRE-recv — the pure draw can't read the clock). Clears the flash once
     /// [`VISUAL_BELL_DURATION`] elapses (disarming the tick, so an idle pane

@@ -229,7 +229,8 @@ edits are at stake, the cautious warning wins. It only ever offers for an
 **already-installed** skill — install it explicitly once, and you're never
 nagged about a feature you didn't opt into. A decline is remembered against the
 skill's content, so spyc asks again when the skill itself changes, not on every
-version bump.
+version bump. The question waits for `y` or `n`: any other key, or a click,
+pulses the screen's border so it's seen.
 
 **Your edits are safe.** A `.spyc-skill.json` manifest records what spyc wrote,
 which is what lets it tell "spyc's copy moved on" from "you edited this." An
