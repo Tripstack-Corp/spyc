@@ -162,6 +162,10 @@ pub enum Wake {
     /// shape as `Graveyard`. One message for every producer: what the render
     /// *was* rides `ImageOrigin` on the outcome, not the wake.
     Image,
+    /// A tab's away recap (`Effect::AwayRecap`) landed on `runtime.away_recaps`.
+    /// Payloadless, same shape as `Image`; `apply_away_recaps` drains it in the
+    /// pre-recv scan.
+    AwayRecap,
     /// An off-thread archive op (`Effect::Archive`) finished and landed its
     /// outcome on `runtime.archive_results` — a mount, a materialized member,
     /// or a staging cleanup. Payloadless wake of the same shape as

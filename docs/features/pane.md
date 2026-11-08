@@ -63,7 +63,12 @@ image protocols or OSC 52 clipboard writes. How it answers:
   - a steady hot-red **`■`** when it's **blocked** on you, and a calm teal
     **`■`** when it's **done**: a square is a settled state, and your turn. A
     done that landed while you weren't looking at its tab stays teal until
-    you are, even after its report times out;
+    you are, even after its report times out. When you come back to it, the
+    status bar recaps what it did meanwhile until your next key: the turns
+    it finished, the tools it called by name (a Claude tab), the files that
+    changed in its worktree, and how long ago it finished,
+    `2 turns · 14 tools (Edit 6, Bash 5) · 6 files changed · done 12m ago`.
+    It never quotes the agent or says what a tool acted on;
   - a blue hollow **`○`** when it's **waiting** on background work it started
     (a CI run, a build) that will wake it. `:why-status` shows what it said it
     waits on, and entering `waiting` pings nothing;
