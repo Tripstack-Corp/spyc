@@ -18,13 +18,50 @@ BINARY   := spyc
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 DIST_DIR := dist
 
-# Where cargo actually writes build output. `target/` by default, but a shared
-# `CARGO_TARGET_DIR` / `[build] target-dir` redirects it — worth doing when a
-# worktree-per-PR layout would otherwise carry a ~4 GB `target/` each. Ask cargo
-# rather than assuming, or `make install` silently installs nothing. Recursive
-# `=`, so only the rules that need a built binary pay the `cargo metadata` call.
+# ---------- Build directories -----------------------------------------------
+
+# Each checkout builds into a directory of its own under ~/.cache, named for the
+# checkout and a hash of its path, so worktrees building at once never share
+# cargo's lock or each other's test binaries (a shared target directory puts
+# every checkout's at the same path). It overrides CARGO_TARGET_DIR from the
+# environment and `[build] target-dir`; SPYC_TARGET_DIR overrides it. For a
+# plain cargo, `export CARGO_TARGET_DIR=$(make -s target-dir)` first. CI keeps
+# cargo's own `target/`, which its cache restores. BUILD.md, "Build output and
+# disk", has the why and the cap below.
+SPYC_TARGET_ROOT ?= $(HOME)/.cache/spyc/target
+ifdef CI
+# Ask cargo rather than assuming, or `make install` silently installs nothing.
+# Recursive `=`, so only the rules that need a built binary pay the call.
 TARGET_DIR = $(or $(CARGO_TARGET_DIR),$(shell cargo metadata --no-deps --format-version 1 \
   | python3 -c 'import json,sys;print(json.load(sys.stdin)["target_directory"])' 2>/dev/null),target)
+else
+ifeq ($(origin SPYC_TARGET_DIR),undefined)
+SPYC_TARGET_DIR := $(SPYC_TARGET_ROOT)/$(notdir $(CURDIR))-$(shell printf '%s' '$(CURDIR)' \
+  | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-8)
+endif
+ENV_CARGO_TARGET_DIR := $(if $(filter environment,$(origin CARGO_TARGET_DIR)),$(CARGO_TARGET_DIR))
+export CARGO_TARGET_DIR := $(SPYC_TARGET_DIR)
+TARGET_DIR = $(SPYC_TARGET_DIR)
+endif
+
+# The cap on those directories, applied before every cargo target by
+# scripts/cargo_targets.py: a directory whose worktree is gone goes at once, one
+# unused for SPYC_TARGET_IDLE_DAYS goes, then the least recently used while they
+# total more than SPYC_TARGET_CAP_GIB or the disk has less than
+# SPYC_TARGET_MIN_FREE_GIB free. Never this checkout's, one cargo is building in,
+# or one used in the last SPYC_TARGET_GRACE_MIN minutes. Sized beside
+# fare-forecast's own 40 GiB cap on the same 460 GiB disk.
+SPYC_TARGET_CAP_GIB ?= 40
+SPYC_TARGET_IDLE_DAYS ?= 2
+SPYC_TARGET_GRACE_MIN ?= 60
+SPYC_TARGET_MIN_FREE_GIB ?= 20
+CARGO_TARGETS = python3 scripts/cargo_targets.py
+CARGO_TARGETS_ARGS = --root '$(SPYC_TARGET_ROOT)' --current '$(SPYC_TARGET_DIR)' \
+  --cap-gib $(SPYC_TARGET_CAP_GIB) --idle-days $(SPYC_TARGET_IDLE_DAYS) \
+  --grace-min $(SPYC_TARGET_GRACE_MIN) --min-free-gib $(SPYC_TARGET_MIN_FREE_GIB)
+TARGET_STAMP = $(SPYC_TARGET_DIR)/.spyc-checkout
+# A variable, not inline: the comma would split `$(if ...)`'s arguments.
+ENV_TARGET_NOTE = note: building in $(SPYC_TARGET_DIR), not CARGO_TARGET_DIR=$(ENV_CARGO_TARGET_DIR) from the environment
 
 # Rust flags shared across release builds.
 RELEASE_FLAGS := --locked --release
@@ -32,17 +69,17 @@ RELEASE_FLAGS := --locked --release
 # ---------- Development -----------------------------------------------------
 
 .PHONY: build
-build: ## Debug build (fast iteration)
+build: target-cap ## Debug build (fast iteration)
 	cargo build
 
 .PHONY: run
-run: ## Debug run
+run: target-cap ## Debug run
 	cargo run
 
 # ---------- Quality gate -----------------------------------------------------
 
 .PHONY: check
-check: fmt-check lint test ## Full quality gate (CI)
+check: fmt-check lint test test-scripts ## Full quality gate (CI)
 
 # `deny` is deliberately NOT in `check`. `check` is what the pre-commit hook
 # runs, and cargo-deny re-fetches the RUSTSEC advisory DB over the network on
@@ -71,11 +108,11 @@ check-ci: ## `check` ending in an unmissable verdict line — safe to pipe
 # `--locked` on test/lint/build forbids implicit Cargo.lock changes —
 # CI and dev builds use the committed lockfile or fail loudly.
 .PHONY: test
-test: ## Run all tests (--workspace: spyc-vt-sys is a member and must be gated too)
+test: target-cap ## Run all tests (--workspace: spyc-vt-sys is a member and must be gated too)
 	cargo test --locked --workspace --all-targets
 
 .PHONY: lint
-lint: ## Clippy with pedantic + nursery
+lint: target-cap ## Clippy with pedantic + nursery
 	cargo clippy --locked --workspace --all-targets -- -D warnings
 
 # Clippy for the Linux target, runnable from macOS via zig as the C
@@ -89,7 +126,7 @@ lint: ## Clippy with pedantic + nursery
 LINUX_LINT_TARGET := x86_64-unknown-linux-musl
 
 .PHONY: lint-linux
-lint-linux: ## Clippy for the Linux target (catches OS-gated lints; needs zig + cargo-zigbuild)
+lint-linux: target-cap ## Clippy for the Linux target (catches OS-gated lints; needs zig + cargo-zigbuild)
 	@command -v cargo-zigbuild >/dev/null 2>&1 || { \
 		echo "cargo-zigbuild not found — install with: cargo install cargo-zigbuild"; \
 		exit 1; \
@@ -174,7 +211,7 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 # instead of on the release. Needs network for the crates.io index. Refuses an
 # uncommitted tree unless ALLOW_DIRTY=1.
 .PHONY: package-check
-package-check: ## Package both crates and build them from the tarballs, as `cargo publish` will (ALLOW_DIRTY=1 for a dirty tree)
+package-check: target-cap ## Package both crates and build them from the tarballs, as `cargo publish` will (ALLOW_DIRTY=1 for a dirty tree)
 	cargo package --locked --workspace $(if $(ALLOW_DIRTY),--allow-dirty)
 
 # Re-record the README demo GIFs. On-demand: each one drives a real spyc for
@@ -211,7 +248,7 @@ demos: ## Re-record the README demo GIFs (vhs; agents needs tui-test, agg, rmatr
 	done
 
 .PHONY: fuzz
-fuzz: ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=archive_container|archive_name|dsl_parse|render_markdown|highlight|pane_engine|taskfile_make|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD, FUZZ_TRIPLE=<host triple>.
+fuzz: target-cap ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=archive_container|archive_name|dsl_parse|render_markdown|highlight|pane_engine|taskfile_make|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD, FUZZ_TRIPLE=<host triple>.
 	@command -v cargo-fuzz >/dev/null 2>&1 || { \
 		echo "cargo-fuzz not found — install with: cargo install cargo-fuzz"; \
 		exit 1; \
@@ -266,14 +303,14 @@ aislop-baseline: ## Regenerate .aislop/baseline.json from the current scan
 # ---------- Release builds ---------------------------------------------------
 
 .PHONY: release
-release: ## Optimized release for the current platform
+release: target-cap ## Optimized release for the current platform
 	@echo "building $(BINARY) v$(VERSION) (release — final crate is the linker, may take a moment)…"
 	cargo build $(RELEASE_FLAGS)
 	@echo "→ $(TARGET_DIR)/release/$(BINARY)"
 	@ls -lh $(TARGET_DIR)/release/$(BINARY)
 
 .PHONY: release-debug
-release-debug: ## Optimized build with debug symbols (for `sample`, `lldb`, `perf`)
+release-debug: target-cap ## Optimized build with debug symbols (for `sample`, `lldb`, `perf`)
 	@echo "building $(BINARY) v$(VERSION) (release-debug — symbols included)…"
 	cargo build --locked --profile release-debug
 	@echo "→ $(TARGET_DIR)/release-debug/$(BINARY)"
@@ -350,12 +387,12 @@ release-tag: ## Step 2 of 2, on main after the release PR merged: VERSION=x.y.z 
 # --- macOS ---
 
 .PHONY: release-macos-arm
-release-macos-arm: ## macOS Apple Silicon (aarch64)
+release-macos-arm: target-cap ## macOS Apple Silicon (aarch64)
 	cargo build $(RELEASE_FLAGS) --target aarch64-apple-darwin
 	@echo "→ target/aarch64-apple-darwin/release/$(BINARY)"
 
 .PHONY: release-macos-x86
-release-macos-x86: ## macOS Intel (x86_64)
+release-macos-x86: target-cap ## macOS Intel (x86_64)
 	cargo build $(RELEASE_FLAGS) --target x86_64-apple-darwin
 	@echo "→ target/x86_64-apple-darwin/release/$(BINARY)"
 
@@ -378,7 +415,7 @@ release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal 
 # context that didn't raise it (e.g. spyc's own `!` shell). Raise it on the
 # same shell line as the build so it applies to that subshell.
 .PHONY: release-linux-x86
-release-linux-x86: ## Linux x86_64 (static, musl)
+release-linux-x86: target-cap ## Linux x86_64 (static, musl)
 	@# Touch the main source so zigbuild always recompiles spyc itself
 	@# (zigbuild cache is separate from cargo build and can go stale).
 	@touch src/main.rs
@@ -387,7 +424,7 @@ release-linux-x86: ## Linux x86_64 (static, musl)
 	@ls -lh target/x86_64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: release-linux-arm
-release-linux-arm: ## Linux aarch64 (static, musl)
+release-linux-arm: target-cap ## Linux aarch64 (static, musl)
 	@touch src/main.rs
 	ulimit -n 8192; cargo zigbuild $(RELEASE_FLAGS) --target aarch64-unknown-linux-musl
 	@echo "→ target/aarch64-unknown-linux-musl/release/$(BINARY)"
@@ -571,14 +608,15 @@ doctor: ## Check build prerequisites
 
 # ---------- Clean ------------------------------------------------------------
 
-# A target dir outside the checkout is shared with every other worktree, and
-# `cargo clean` there deletes all of their builds, not this one's.
+# Only this checkout's build directory, unless SPYC_TARGET_DIR or CI's
+# CARGO_TARGET_DIR points outside it: then it may be shared, and `cargo clean`
+# there deletes every checkout's build, not this one's.
 .PHONY: clean
-clean: ## Remove build artifacts (refuses on a shared target dir; FORCE=1 overrides)
-	@case "$(abspath $(TARGET_DIR))/" in "$(CURDIR)/"*) ;; *) \
+clean: ## Remove this checkout's build directory and dist/ (refuses on a shared one; FORCE=1 overrides)
+	@case "$(abspath $(TARGET_DIR))/" in "$(CURDIR)/"*|"$(SPYC_TARGET_ROOT)/$(notdir $(CURDIR))-"*) ;; *) \
 		if [ -z "$(FORCE)" ]; then \
-			echo "refusing: $(TARGET_DIR) is outside this checkout, so it is shared:"; \
-			echo "  cargo clean would delete every worktree's build, not just this one's."; \
+			echo "refusing: $(TARGET_DIR) is not this checkout's own build directory, so it may be shared:"; \
+			echo "  cargo clean would delete every checkout's build there, not just this one's."; \
 			echo "  'make prune-target' drops only dead output; 'make clean FORCE=1' wipes it anyway."; \
 			exit 1; \
 		fi ;; \
@@ -586,14 +624,79 @@ clean: ## Remove build artifacts (refuses on a shared target dir; FORCE=1 overri
 	cargo clean
 	rm -rf $(DIST_DIR)
 
-# Safe on a shared target dir, where `cargo clean` would wipe every worktree's
-# build: this drops only output no build will read again (see the script).
+# The cap, then the stamp that tells it whose directory this is and when it was
+# last used. Cargo gives a workspace crate the same artifacts in every checkout
+# and rebuilds by mtime, so a directory last used from another checkout (only
+# possible when SPYC_TARGET_DIR points several at one) could hand this one stale
+# binaries: then this checkout's sources are touched so its crates rebuild, and
+# dependencies stay cached.
+.PHONY: target-cap
+target-cap:
+ifndef CI
+	@$(if $(filter-out $(SPYC_TARGET_DIR),$(ENV_CARGO_TARGET_DIR)),echo '$(ENV_TARGET_NOTE)' >&2)
+	@$(CARGO_TARGETS) enforce $(CARGO_TARGETS_ARGS)
+	@if [ "$$(cat '$(TARGET_STAMP)' 2>/dev/null)" != '$(CURDIR)' ]; then \
+		if [ -e '$(TARGET_STAMP)' ]; then \
+			echo "target-cap: $(SPYC_TARGET_DIR) was last used from another checkout; rebuilding this one's crates"; \
+			find src crates/spyc-vt-sys/src build.rs crates/spyc-vt-sys/build.rs -type f -exec touch {} +; \
+		fi; \
+		mkdir -p '$(SPYC_TARGET_DIR)' && echo '$(CURDIR)' > '$(TARGET_STAMP)'; \
+	fi; \
+	touch '$(TARGET_STAMP)'
+endif
+
+.PHONY: target-dir
+target-dir: ## Print this checkout's build directory (export it as CARGO_TARGET_DIR for a plain cargo)
+	@echo '$(TARGET_DIR)'
+
+.PHONY: target-usage
+target-usage: ## Every checkout's build directory: size, last use, and what the cap removes next
+	@$(CARGO_TARGETS) usage $(CARGO_TARGETS_ARGS)
+
+# The cap, verbose, then dead output inside every build directory it keeps
+# (stale build sets, and on macOS the debug objects no executable reads; see
+# scripts/prune-cargo-target.py), then spyc's own stale sets in the shared
+# directory a plain `cargo` still builds into. Third-party dependencies there
+# are never touched.
 PRUNE_DAYS ?= 3
 PRUNE_NICE = $(if $(shell command -v taskpolicy),taskpolicy -d utility,nice -n 10)
 
 .PHONY: prune-target
-prune-target: ## Drop stale worktree builds + unreferenced debug objects from the target dir (PRUNE_DAYS=3, DRY_RUN=1 to preview)
-	@$(PRUNE_NICE) python3 scripts/prune-cargo-target.py --days $(PRUNE_DAYS) $(if $(DRY_RUN),--dry-run)
+prune-target: ## Apply the build-directory cap now and drop dead output from every checkout's directory (PRUNE_DAYS=3, DRY_RUN=1 to preview)
+	@echo "prune-target: $$(date '+%Y-%m-%d %H:%M:%S') from $(CURDIR)"
+	@$(PRUNE_NICE) $(CARGO_TARGETS) enforce --verbose --prune-objects --prune-days $(PRUNE_DAYS) \
+		$(CARGO_TARGETS_ARGS) $(if $(DRY_RUN),--dry-run)
+	@$(PRUNE_NICE) python3 scripts/prune-cargo-target.py --shared --days $(PRUNE_DAYS) $(if $(DRY_RUN),--dry-run)
+
+# The cap also runs nightly, for days nobody builds: a launchd agent runs
+# `make prune-target PRUNE_DAYS=1` from the main checkout at 04:00 local.
+# Installed from the main checkout only, so the agent never points at a worktree
+# that is later removed. Logs to ~/Library/Logs/spyc-prune-target.log.
+PRUNE_AGENT_LABEL := dev.spyc.prune-target
+PRUNE_AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(PRUNE_AGENT_LABEL).plist
+
+.PHONY: prune-target-agent
+prune-target-agent: ## Install the nightly prune (launchd, 04:00) from the main checkout; ACTION=remove uninstalls
+ifeq ($(ACTION),remove)
+	-launchctl bootout gui/$$(id -u)/$(PRUNE_AGENT_LABEL) 2>/dev/null
+	rm -f '$(PRUNE_AGENT_PLIST)'
+	@echo "removed $(PRUNE_AGENT_LABEL)"
+else
+	@test "$$(git rev-parse --absolute-git-dir)" = "$$(cd "$$(git rev-parse --git-common-dir)" && pwd -P)" \
+		|| { echo "run this from the main checkout, not a worktree" >&2; exit 1; }
+	@mkdir -p '$(HOME)/Library/LaunchAgents' '$(HOME)/Library/Logs'
+	sed -e 's|@CHECKOUT@|$(CURDIR)|g' -e 's|@HOME@|$(HOME)|g' \
+		scripts/$(PRUNE_AGENT_LABEL).plist.in > '$(PRUNE_AGENT_PLIST)'
+	plutil -lint '$(PRUNE_AGENT_PLIST)'
+	-launchctl bootout gui/$$(id -u)/$(PRUNE_AGENT_LABEL) 2>/dev/null
+	launchctl bootstrap gui/$$(id -u) '$(PRUNE_AGENT_PLIST)'
+	@launchctl print gui/$$(id -u)/$(PRUNE_AGENT_LABEL) | grep -E '^\s+(state|program|path) =' | head -3
+endif
+
+# The build-directory scripts' own tests (Python's unittest; no dependencies).
+.PHONY: test-scripts
+test-scripts: ## Test scripts/cargo_targets.py
+	python3 -m unittest discover -s scripts -p 'test_*.py'
 
 # ---------- Help -------------------------------------------------------------
 

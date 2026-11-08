@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Prune this workspace's dead build output from its cargo target directory.
+"""Prune this workspace's dead build output from a cargo target directory.
+
+By default the directory is the one cargo resolves here, which under `make` is
+this checkout's own (`CARGO_TARGET_DIR`, see `scripts/cargo_targets.py`).
+`--target DIR` names one instead, as the nightly cap does for every checkout's.
+`--shared` takes the directory cargo would use without `CARGO_TARGET_DIR`, the
+shared `[build] target-dir` a plain `cargo` still builds into, and prunes only
+spyc's own build sets there.
 
 Two leaks, neither of which cargo ever cleans up:
 
@@ -30,10 +37,10 @@ import time
 OBJECT_GRACE_SECS = 3600
 
 
-def workspace(manifest_dir):
+def workspace(manifest_dir, env=None):
     meta = json.loads(subprocess.run(
         ["cargo", "metadata", "--no-deps", "--format-version", "1"],
-        cwd=manifest_dir, check=True, capture_output=True, text=True).stdout)
+        cwd=manifest_dir, check=True, capture_output=True, text=True, env=env).stdout)
     names = {
         t["name"].replace("-", "_")
         for p in meta["packages"] for t in p["targets"]
@@ -135,11 +142,26 @@ def main():
     parser.add_argument("--days", type=float, default=3,
                         help="delete build sets untouched for this long (default 3)")
     parser.add_argument("--dry-run", action="store_true", help="report, delete nothing")
+    where = parser.add_mutually_exclusive_group()
+    where.add_argument("--target", type=Path, help="prune this directory")
+    where.add_argument("--shared", action="store_true",
+                       help="prune the directory cargo uses without CARGO_TARGET_DIR")
     args = parser.parse_args()
     if args.days <= 0:
         parser.error("--days must be positive")
 
-    target, crates = workspace(Path(__file__).resolve().parent.parent)
+    checkout = Path(__file__).resolve().parent.parent
+    env = None
+    if args.shared:
+        env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
+    target, crates = workspace(checkout, env)
+    if args.target is not None:
+        target = args.target
+    elif args.shared and target.resolve() == (checkout / "target").resolve():
+        # No `[build] target-dir`: a plain cargo builds into the checkout, not a shared directory.
+        return 0
+    if not target.is_dir():
+        return 0
     names = "|".join(map(re.escape, crates))
     deps_pattern = re.compile(rf"^(?:lib)?({names})-([0-9a-f]{{16}})(?:\..*)?$")
     inc_pattern = re.compile(rf"^({names})-[0-9a-z]+$")

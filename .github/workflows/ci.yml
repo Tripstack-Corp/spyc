@@ -122,6 +122,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Tests
         run: make test
+      - name: Build-directory script tests
+        run: make test-scripts
 
   package:
     name: Package (cargo package --workspace)
