@@ -74,18 +74,25 @@ fn a_click_on_the_folder_you_are_in_stays_there() {
 }
 
 /// In a narrow bar the path is cut in its middle; the folders still drawn
-/// after the cut go where they say.
+/// after the cut go where they say. The two long folders make the path too
+/// long for the bar wherever the temporary directory is.
 #[test]
 fn a_click_after_the_cut_in_a_shortened_path_goes_up_to_that_folder() {
     listing(|app, work| {
-        deep(app, work, 50);
+        let docs = work
+            .join("a-long-folder-name-for-the-cut")
+            .join("another-long-folder-name")
+            .join("docs");
+        std::fs::create_dir_all(docs.join("inner")).unwrap();
+        app.view.term_size = (50, 24);
+        app.state.chdir(&docs.join("inner")).unwrap();
         let buf = drawn(app);
         let row: String = (0..buf.area.width).map(|x| buf[(x, 0)].symbol()).collect();
         assert!(row.contains("..."), "the path is cut: {row:?}");
 
         click_in_the_bar(app, "docs");
 
-        assert_eq!(app.state.cur().listing.dir, work.join("docs"));
+        assert_eq!(app.state.cur().listing.dir, docs);
     });
 }
 
