@@ -524,6 +524,7 @@ mod esc_guard;
 mod focused_column;
 mod history_editor;
 mod jump_default;
+mod list_double_click;
 mod manifest_v2;
 mod mcp;
 mod pane;
