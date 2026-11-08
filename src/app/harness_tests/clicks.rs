@@ -85,3 +85,19 @@ pub(super) fn double_click(app: &mut App, at: (u16, u16)) -> Vec<Effect> {
 pub(super) fn paged(app: &App) -> Option<PathBuf> {
     app.view.project().pager.as_ref()?.source_path.clone()
 }
+
+/// Run the directory changes in `effects` inline, as the executor does.
+pub(super) fn change_dirs(app: &mut App, effects: Vec<Effect>) {
+    for effect in effects {
+        if let Effect::ChangeDir {
+            path,
+            focus,
+            on_ok,
+            err_prefix,
+        } = effect
+        {
+            app.state
+                .change_dir(&path, focus.as_deref(), on_ok.as_deref(), err_prefix);
+        }
+    }
+}
