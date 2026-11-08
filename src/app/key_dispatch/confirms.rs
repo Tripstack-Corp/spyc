@@ -381,6 +381,7 @@ impl App {
                     suggestion,
                 });
                 self.state.flash_info("press y or n");
+                self.pulse_border();
                 return Vec::new();
             }
         }
@@ -436,6 +437,7 @@ impl App {
                     suggestion,
                 });
                 self.state.flash_info("press y or n (Esc: not now)");
+                self.pulse_border();
                 return Vec::new();
             }
         }

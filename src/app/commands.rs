@@ -350,12 +350,7 @@ pub(super) fn cmd_notify(app: &mut App, args: &str) -> Vec<Effect> {
         app.state.flash_info("usage: :notify test");
         return Vec::new();
     }
-    // Start the border pulse now; `settle_visual_bell` animates + clears it (it
-    // re-arms its own deadline, so the command doesn't need `ctx`).
-    app.view.visual_bell = Some(crate::app::VisualBell {
-        start: std::time::Instant::now(),
-        frame: 0,
-    });
+    app.pulse_border();
     app.state
         .flash_info("notify test: fired bell + visual + desktop (system + osc9)");
     vec![Effect::Notify {

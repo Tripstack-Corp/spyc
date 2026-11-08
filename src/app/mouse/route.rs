@@ -123,6 +123,9 @@ pub enum MouseSink {
     /// Answer the open confirm prompt with this key, as typing it does: the
     /// pointer was on its `y` or its `n`.
     Answer(crossterm::event::KeyCode),
+    /// Pulse the border: a click answered nothing while a single-key confirm
+    /// waits for its answer.
+    NudgePrompt,
     /// Close the modal pager, as `q` does: a left click landed beside its box.
     /// The click does nothing else, so what is drawn beneath never hears it.
     ClosePager,
@@ -231,6 +234,8 @@ pub struct MouseSnapshot {
     /// The key of the open confirm's answer the pointer is on, as drawn
     /// ([`super::ChoiceSpan`]): its `y` or its `n`.
     pub confirm_choice: Option<crossterm::event::KeyCode>,
+    /// The open prompt is a single-key confirm, waiting for its answer.
+    pub confirm_waiting: bool,
     /// A `^a v` scrollback pager owns the pane's rect, hiding the live child
     /// behind it.
     pub has_scroll_pager: bool,
@@ -637,10 +642,7 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // to it when the pointer is actually over its content. A left click beside its
     // box closes it, and reaches nothing else.
     if matches!(snap.pager_mount, Some(Mount::Overlay)) && !matches!(gesture, Gesture::Middle) {
-        // A question asked over the pager keeps it: the click must not put
-        // away what the question is about.
-        let beside = snap.beside_modal_pager && !snap.is_prompting;
-        return modal_pager_sink(gesture, snap.covering_pager, beside);
+        return modal_pager_sink(gesture, snap);
     }
 
     // A prompt owns the keyboard, so the only gesture that can mean anything is a
@@ -656,7 +658,7 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
     // prompt at all, via a focused full-frame pager, which is why this is a
     // snapshot field rather than a check on `Mode` at one call site.
     if snap.is_prompting {
-        return prompt_sink(gesture, snap.over_chrome_row, snap.confirm_choice);
+        return prompt_sink(gesture, snap);
     }
 
     // Middle and right are spyc's everywhere, never forwarded — otherwise the
@@ -795,17 +797,14 @@ const fn right_click_sink(snap: MouseSnapshot) -> MouseSink {
     }
 }
 
-/// A gesture while a full-frame modal pager is open, over its content when
-/// `covering` names the slot there, or outside its box when `beside`.
-const fn modal_pager_sink(
-    gesture: Gesture,
-    covering: Option<PagerSlot>,
-    beside: bool,
-) -> MouseSink {
-    if beside && matches!(gesture, Gesture::Left) {
+/// A gesture while a full-frame modal pager is open: over its content when
+/// `covering_pager` names the slot there, or beside its box. A question asked
+/// over the pager keeps it: the click must not put away what it is about.
+const fn modal_pager_sink(gesture: Gesture, snap: MouseSnapshot) -> MouseSink {
+    if snap.beside_modal_pager && !snap.is_prompting && matches!(gesture, Gesture::Left) {
         return MouseSink::ClosePager;
     }
-    match (gesture, covering) {
+    match (gesture, snap.covering_pager) {
         (Gesture::Wheel, Some(slot)) => MouseSink::Pager(slot),
         (Gesture::Left, Some(slot)) => MouseSink::FocusAndSelect(slot),
         // Its menu, which arms no chord: an open menu hears the keys before the
@@ -819,14 +818,12 @@ const fn modal_pager_sink(
 }
 
 /// A gesture while a prompt is open: a paste, the answer a confirm's drawn
-/// `y` or `n` stands for (`choice`), or a selection of the prompt row's own
-/// text (`over_chrome_row`).
-const fn prompt_sink(
-    gesture: Gesture,
-    over_chrome_row: bool,
-    choice: Option<crossterm::event::KeyCode>,
-) -> MouseSink {
-    match (gesture, choice) {
+/// `y` or `n` stands for (`confirm_choice`), or a selection of the prompt
+/// row's own text (`over_chrome_row`). Any other click at a single-key
+/// confirm (`confirm_waiting`) pulses the border, so the question is seen.
+const fn prompt_sink(gesture: Gesture, snap: MouseSnapshot) -> MouseSink {
+    let (over_chrome_row, confirm_waiting) = (snap.over_chrome_row, snap.confirm_waiting);
+    match (gesture, snap.confirm_choice) {
         (Gesture::Middle, _) => MouseSink::Paste,
         // Nothing above the prompt took the event, so the key it stands for,
         // typed, reaches the prompt too.
@@ -837,6 +834,7 @@ const fn prompt_sink(
         // A left drag arms nothing and never reaches the resolver, so
         // copying the command you just typed costs the guard nothing.
         (Gesture::Left, None) if over_chrome_row => MouseSink::SelectChrome,
+        (Gesture::Left | Gesture::Right, _) if confirm_waiting => MouseSink::NudgePrompt,
         (Gesture::Left | Gesture::Right | Gesture::Wheel, _) => MouseSink::Swallow,
     }
 }
@@ -936,6 +934,7 @@ mod tests {
             force_pane_selection: false,
             is_prompting: false,
             confirm_choice: None,
+            confirm_waiting: false,
             has_scroll_pager: false,
             pane_closed: false,
             pane_scroll_keys: false,
@@ -1334,6 +1333,35 @@ mod tests {
 
     /// A prompt still wins over starting a selection — the arm that keeps a
     /// right-click from latching a chord also covers left.
+    /// At a single-key confirm, a left or right click that answers nothing
+    /// pulses the border; a click on its `y` still answers, the wheel stays
+    /// inert and the middle button still pastes. A typed prompt only swallows.
+    #[test]
+    fn a_click_that_answers_nothing_at_a_confirm_pulses_the_border() {
+        let confirm = MouseSnapshot {
+            is_prompting: true,
+            confirm_waiting: true,
+            ..snap(Some(Region::List))
+        };
+        assert_eq!(route_mouse(confirm, Gesture::Left), MouseSink::NudgePrompt);
+        assert_eq!(route_mouse(confirm, Gesture::Right), MouseSink::NudgePrompt);
+        assert_eq!(route_mouse(confirm, Gesture::Wheel), MouseSink::Swallow);
+        assert_eq!(route_mouse(confirm, Gesture::Middle), MouseSink::Paste);
+        let on_yes = MouseSnapshot {
+            confirm_choice: Some(crossterm::event::KeyCode::Char('y')),
+            ..confirm
+        };
+        assert_eq!(
+            route_mouse(on_yes, Gesture::Left),
+            MouseSink::Answer(crossterm::event::KeyCode::Char('y'))
+        );
+        let typed = MouseSnapshot {
+            confirm_waiting: false,
+            ..confirm
+        };
+        assert_eq!(route_mouse(typed, Gesture::Left), MouseSink::Swallow);
+    }
+
     #[test]
     fn a_prompt_suppresses_selection() {
         let s = MouseSnapshot {
