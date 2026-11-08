@@ -124,11 +124,11 @@ make check-ci     # the same, ending in a verdict line that survives a pipe
 make lint-linux   # clippy for Linux-gated code
 make package-check  # package both crates + build from the tarballs, as `cargo publish` will
 make fuzz         # nightly + cargo-fuzz, on-demand (NOT in check)
-make prune-target # drop dead build output from a shared target dir; run nightly
+make prune-target # cap and prune every checkout's build dir; runs nightly
 make changelog    # preview the pending CHANGELOG section
 ```
 
-The crate is lib + bin: `src/lib.rs` owns every module and `run()`, so `fuzz/` (its own workspace) can link it through the `pub mod fuzz` facade. **Never `cargo clean` with a shared target dir** (`[build] target-dir` or `CARGO_TARGET_DIR`): it deletes every worktree's cache, so `make clean` refuses. `make prune-target` on a schedule is the cleanup. BUILD.md → "Build output and disk".
+The crate is lib + bin: `src/lib.rs` owns every module and `run()`, so `fuzz/` (its own workspace) can link it through the `pub mod fuzz` facade. **`make` builds each checkout in its own capped directory under `~/.cache/spyc/target`**; for a plain `cargo`, `export CARGO_TARGET_DIR=$(make -s target-dir)` first. BUILD.md → "Build output and disk".
 
 ## MCP tools (spyc integration)
 

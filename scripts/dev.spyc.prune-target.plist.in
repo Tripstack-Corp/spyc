@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- spyc's nightly build-directory cap and prune, installed by
+     `make prune-target-agent` from the main checkout, which fills in @CHECKOUT@
+     and @HOME@. Runs `make prune-target PRUNE_DAYS=1` at 04:00 local. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.spyc.prune-target</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/make</string>
+        <string>-C</string>
+        <string>@CHECKOUT@</string>
+        <string>prune-target</string>
+        <string>PRUNE_DAYS=1</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>@HOME@/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>4</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>@HOME@/Library/Logs/spyc-prune-target.log</string>
+    <key>StandardErrorPath</key>
+    <string>@HOME@/Library/Logs/spyc-prune-target.log</string>
+</dict>
+</plist>
