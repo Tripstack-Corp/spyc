@@ -25,6 +25,9 @@ mod writes;
 
 pub(super) use writes::{Held, LateEdits, hold_late_edits};
 
+pub(super) use edits::on_disk_stats;
+use edits::{current_staged_stats, differs};
+
 pub(super) use reads::Joined;
 
 impl App {
@@ -713,26 +716,6 @@ impl App {
         out
     }
 
-    /// Whether a mount has anything a write would change — the journal, or a
-    /// staged file that no longer matches what spyc wrote.
-    pub(super) fn mount_is_dirty(&self, archive: &Path) -> bool {
-        let Some(mount) = self.state.mounts.get(archive) else {
-            return false;
-        };
-        mount.is_dirty() || differs(&mount.staged, &current_staged_stats(mount))
-    }
-
-    /// Archives carrying changes nobody has written back. Read at quit time, so
-    /// the warning names them rather than counting silently.
-    pub(super) fn dirty_mounts(&self) -> Vec<PathBuf> {
-        self.state
-            .mounts
-            .iter()
-            .map(|m| m.archive().to_path_buf())
-            .filter(|a| self.mount_is_dirty(a))
-            .collect()
-    }
-
     /// Best-effort removal of every staging tree this process created. Called at
     /// teardown; the startup sweep is the backstop for a process that died.
     pub(super) fn clean_all_staging(&mut self) {
@@ -875,115 +858,6 @@ fn display_name(path: &Path) -> String {
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     )
-}
-
-/// Stat each member spyc extracted, keyed the same way the recorded stats are.
-/// The difference between the two is the only signal that an edit spyc didn't
-/// perform has happened. Only recorded members are read, so the check costs a
-/// stat per extracted member however large the archive.
-fn current_staged_stats(mount: &ArchiveMount) -> StagedStats {
-    stats_of(
-        &mount.staging_root,
-        mount
-            .staged
-            .keys()
-            .filter_map(|inner| mount.index.get(inner)),
-    )
-}
-
-/// Stat every member of `index` with a file in the staging tree `staging_root`,
-/// whoever put it there: what a new mount records as spyc's own, and what a
-/// write's re-read would otherwise wipe. Both run on the archive worker, as a
-/// stat per member is a walk of the whole archive. A tree with nothing in it,
-/// as a seekable mount's is when it is read, has no member to stat, and one
-/// look says so.
-pub(super) fn on_disk_stats(
-    index: &crate::archive::index::ArchiveIndex,
-    staging_root: &Path,
-) -> StagedStats {
-    if holds_nothing(staging_root) {
-        return StagedStats::new();
-    }
-    stats_of(staging_root, index.entries.iter())
-}
-
-/// Whether `dir` is missing or empty. A read that fails otherwise says
-/// neither, so the walk still runs.
-fn holds_nothing(dir: &Path) -> bool {
-    match std::fs::read_dir(dir) {
-        Ok(mut entries) => entries.next().is_none(),
-        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
-    }
-}
-
-fn stats_of<'a>(
-    staging_root: &Path,
-    entries: impl Iterator<Item = &'a crate::archive::IndexEntry>,
-) -> StagedStats {
-    let mut now = StagedStats::new();
-    for entry in entries {
-        let path = crate::archive::listing::staging_path(staging_root, entry);
-        let Ok(md) = std::fs::metadata(&path) else {
-            continue;
-        };
-        // Directories are skipped: a staging directory's mtime moves whenever
-        // *any* member inside it is written, so counting it would report a change
-        // to a member nobody touched.
-        if md.is_dir() {
-            continue;
-        }
-        now.insert(
-            entry.inner.clone(),
-            crate::archive::journal::StagedStat {
-                size: md.len(),
-                mtime: md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
-                is_dir: md.is_dir(),
-            },
-        );
-    }
-    now
-}
-
-/// How many staged members spyc will stat on every loop wake to notice an edit.
-///
-/// A handful of reads costs nothing; a streamed tarball's whole member list would
-/// cost tens of milliseconds per keypress.
-const AUTO_SCAN_MAX: usize = 256;
-
-/// Which of `candidates` has a staged copy that no longer matches what spyc
-/// recorded — skipping any already recorded as replaced.
-fn changed_among(mount: &ArchiveMount, candidates: &[String]) -> Vec<String> {
-    candidates
-        .iter()
-        .filter(|inner| !mount.journal.is_replaced(inner))
-        .filter(|inner| {
-            let Some(entry) = mount.index.get(inner) else {
-                return false;
-            };
-            let Ok(md) = std::fs::metadata(mount.staging_path(entry)) else {
-                return false;
-            };
-            if md.is_dir() {
-                return false;
-            }
-            let now = crate::archive::journal::StagedStat {
-                size: md.len(),
-                mtime: md.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH),
-                is_dir: false,
-            };
-            mount.staged.get(inner.as_str()) != Some(&now)
-        })
-        .cloned()
-        .collect()
-}
-
-/// Whether anything staged differs from what spyc recorded when it wrote it.
-fn differs(
-    recorded: &crate::archive::journal::StagedStats,
-    now: &crate::archive::journal::StagedStats,
-) -> bool {
-    now.iter()
-        .any(|(inner, current)| recorded.get(inner) != Some(current))
 }
 
 #[cfg(test)]
