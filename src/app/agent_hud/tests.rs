@@ -857,6 +857,19 @@ fn append_message(path: &Path, id: &str, cache_read: u64) {
 }
 
 fn wait_hud_line(app: &mut App, ctx: &mut RunCtx, row: usize, text: &str) -> Vec<String> {
+    wait_hud_row(app, ctx, row, &format!("{text:?}"), |line| {
+        line.contains(text)
+    })
+}
+
+/// Tick until HUD row `row` satisfies `holds`, described as `what`.
+fn wait_hud_row(
+    app: &mut App,
+    ctx: &mut RunCtx,
+    row: usize,
+    what: &str,
+    holds: impl Fn(&str) -> bool,
+) -> Vec<String> {
     let end = Instant::now() + Duration::from_secs(10);
     loop {
         tick(app, ctx);
@@ -869,12 +882,12 @@ fn wait_hud_line(app: &mut App, ctx: &mut RunCtx, row: usize, text: &str) -> Vec
             .iter()
             .map(ToString::to_string)
             .collect();
-        if lines.get(row).is_some_and(|line| line.contains(text)) {
+        if lines.get(row).is_some_and(|line| holds(line)) {
             return lines;
         }
         assert!(
             Instant::now() < end,
-            "HUD row {row} never showed {text:?}: {lines:?}"
+            "HUD row {row} never showed {what}: {lines:?}"
         );
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1662,9 +1675,18 @@ fn a_running_subagent_shows_its_type_and_the_tool_it_runs() {
         let dir = subagents_dir(&main);
         subagent_meta(&dir, "a1", "Explore", "toolu_a1", false);
         subagent_calls(&dir, "a1", "toolu_g1", "Grep");
-        let lines = wait_hud_line(&mut app, &mut ctx, 3, "Explore · Grep");
-        let words: Vec<&str> = lines[3].split_whitespace().collect();
-        assert!(words.windows(2).any(|w| w == ["agents", "1"]), "{lines:?}");
+        // The transcript and the subagents are two feeds, each landing on its
+        // own: the subagent can show before the `Agent` call is counted.
+        wait_hud_row(
+            &mut app,
+            &mut ctx,
+            3,
+            "the subagent with its call counted",
+            |row| {
+                let words: Vec<&str> = row.split_whitespace().collect();
+                row.contains("Explore · Grep") && words.windows(2).any(|w| w == ["agents", "1"])
+            },
+        );
 
         subagent_result(&dir, "a1", "toolu_g1");
         subagent_calls(&dir, "a1", "toolu_r1", "Read");
