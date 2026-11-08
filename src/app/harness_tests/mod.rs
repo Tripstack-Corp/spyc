@@ -531,6 +531,7 @@ mod mcp;
 mod pager_click_away;
 mod pane;
 mod pane_fork;
+mod path_clicks;
 mod per_column;
 mod pick_jump;
 mod picker_routing;
