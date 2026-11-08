@@ -187,21 +187,22 @@ impl ChromeSelection {
 /// read the host's own setting through a pty, so it picks the same number.
 pub const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
 
-/// Is a press on chrome row `y` at `now` the second half of a double-click?
+/// Is a press on `target` at `now` the second half of a double-click?
 ///
-/// `prev` is the previous chrome press — its row and when it happened. Only the
-/// ROW has to match, not the column: a double-click drifts a cell or two, and the
-/// gesture selects the whole row anyway, so requiring the same column would fail
-/// exactly the presses it is meant to catch.
+/// `prev` is the previous press — what it landed on and when. A chrome row's
+/// target is its screen row alone, not the column: a double-click drifts a cell
+/// or two, and the gesture selects the whole row anyway, so requiring the same
+/// column would fail exactly the presses it is meant to catch. A file row's is
+/// its column and path.
 ///
 /// Pure, and takes `now` rather than reading the clock, so the boundary is
 /// testable — see this module's tests.
-pub fn is_double_click(
-    prev: Option<(u16, std::time::Instant)>,
-    y: u16,
+pub fn is_double_click<T: PartialEq>(
+    prev: Option<(T, std::time::Instant)>,
+    target: T,
     now: std::time::Instant,
 ) -> bool {
-    prev.is_some_and(|(prev_y, at)| prev_y == y && now.duration_since(at) <= DOUBLE_CLICK)
+    prev.is_some_and(|(was, at)| was == target && now.duration_since(at) <= DOUBLE_CLICK)
 }
 
 /// A sustained same-direction wheel-scroll gesture over an agent's own view. See

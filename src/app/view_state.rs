@@ -499,6 +499,11 @@ pub struct ViewState {
     /// double-click needs — see [`mouse::is_double_click`]. Not reset on release,
     /// because the second press of the pair arrives after one.
     pub(super) last_chrome_click: Option<(u16, std::time::Instant)>,
+    /// The last press on a file row: its column, its path and when. A path, not
+    /// a row index, so a row that a refresh or a `chdir` put in the clicked
+    /// one's place starts a fresh click.
+    pub(super) last_list_click:
+        Option<(super::state::Side, std::path::PathBuf, std::time::Instant)>,
     /// What each chrome row actually rendered this frame, for a mouse copy.
     ///
     /// `RefCell` because the draw pass is `&self` and this is the renderer recording
@@ -638,6 +643,7 @@ impl ViewState {
             tasks_indicator: std::cell::RefCell::new(None),
             confirm_choices: std::cell::RefCell::new(Vec::new()),
             last_chrome_click: None,
+            last_list_click: None,
             pane_scroll_streak: None,
             pane_view_sent: None,
             transcript_show_tool_calls: true,

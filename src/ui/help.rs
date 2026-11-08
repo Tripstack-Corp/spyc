@@ -83,7 +83,7 @@ const SECTIONS: &[Section] = &[
         rows: &[
             (
                 "Enter",
-                "enter dir / open file in the in-app pager (an image previews full-screen)",
+                "enter dir / open file in the in-app pager (an image previews full-screen; or double-click it)",
             ),
             (
                 "e  v",

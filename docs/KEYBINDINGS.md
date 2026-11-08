@@ -387,6 +387,7 @@ focus.
 | Left drag | Select text: pager content, a non-mouse pane's held grid, any chrome row, or file-list rows. Release copies |
 | `Ctrl` + left drag (pane) | Select through spyc even when the child uses mouse reporting. The grid stays fixed during the drag; release copies it and resumes live output. The terminal must forward Ctrl+left events; see [selection caveats](config/mouse.md#selecting-text) |
 | `Ctrl` + left click (pane) | See [selection caveats](config/mouse.md#selecting-text) for click behaviour |
+| Double click on a file row | Do what `Enter` does: go into a directory, open a file in the pager |
 | Double click on a chrome row | Select and copy that whole row — the status line, the divider, a flashed error |
 | `Ctrl` + left drag (list) | Copy absolute paths instead of names |
 | Middle click | Paste the clipboard |

@@ -88,7 +88,6 @@ fn paged(app: &App) -> Option<PathBuf> {
 
 /// A double-click on a directory goes into it, as `Enter` does.
 #[test]
-#[ignore = "red: a double-click on a row only selects it"]
 fn double_clicking_a_directory_goes_into_it() {
     listing(|app, work| {
         let docs = drawn_at(app, "docs");
@@ -102,7 +101,6 @@ fn double_clicking_a_directory_goes_into_it() {
 /// A double-click on a file opens it in the pager, as `Enter` does, and the
 /// list stays where it was.
 #[test]
-#[ignore = "red: a double-click on a row only selects it"]
 fn double_clicking_a_file_opens_it_in_the_pager() {
     listing(|app, work| {
         let notes = drawn_at(app, "notes.txt");
@@ -117,7 +115,6 @@ fn double_clicking_a_file_opens_it_in_the_pager() {
 /// A double-click in the second column goes into the directory there, though
 /// the first column had the keyboard.
 #[test]
-#[ignore = "red: a double-click on a row only selects it"]
 fn double_clicking_a_directory_in_the_other_column_goes_into_it_there() {
     listing(|app, work| {
         let other = work.join("docs");
@@ -163,7 +160,6 @@ fn quick_clicks_on_two_rows_open_neither() {
 /// on whatever row the new listing drew there: it selects that row and does
 /// not open it.
 #[test]
-#[ignore = "red: a double-click on a row only selects it"]
 fn a_third_quick_click_after_going_into_a_directory_does_not_open_the_new_row() {
     listing(|app, work| {
         let docs = drawn_at(app, "docs");
