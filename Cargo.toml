@@ -231,7 +231,7 @@ strum = { version = "0.28", features = ["derive"] }
 # safe-wrapper `libproc` crate (no `unsafe` in our code; one kernel call, no
 # manual thread-array alloc/dealloc). macOS-only target dep.
 [target.'cfg(target_os = "macos")'.dependencies]
-libproc = "0.14"
+libproc = "0.15"
 
 [dev-dependencies]
 insta = "1"
