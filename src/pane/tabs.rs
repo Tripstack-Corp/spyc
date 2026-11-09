@@ -254,6 +254,9 @@ pub struct TabInfo {
     /// The latest statusline report from this tab's Claude Code (`spyc
     /// --statusline`), with when it arrived.
     pub claude_statusline: Option<(crate::agent::claude_statusline::Statusline, jiff::Timestamp)>,
+    /// Which credential this tab's Claude Code sends its requests with, as its
+    /// status hook last reported.
+    pub claude_credential: Option<crate::agent::claude_credential::Credential>,
     /// The conversation uuid this tab is known to be running, from either of the
     /// two sources that KNOW rather than guess: the exact `/resume <sid>` session
     /// restore injects, or the id an agent's status hook reported
@@ -463,6 +466,7 @@ impl TabInfo {
             codex_home: None,
             claude_home: None,
             claude_statusline: None,
+            claude_credential: None,
             live_session_id: None,
             scrape_status: None,
             scrape_waits_on: None,

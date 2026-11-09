@@ -14,6 +14,7 @@ fn report(app: &mut App, status: &str, event: Option<serde_json::Value>) {
         note: None,
         session_id: Some("session-1".into()),
         claude_home: None,
+        claude_credential: None,
         hook_event: event
             .as_ref()
             .and_then(crate::agent::status_hook::StatusHookEvent::from_value),

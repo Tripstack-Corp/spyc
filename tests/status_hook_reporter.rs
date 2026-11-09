@@ -40,7 +40,7 @@ fn run_reporter_for(state: &str, payload: &str) -> (Value, String) {
 /// [`run_reporter_for`], with the hook's `CLAUDE_CONFIG_DIR` set to `home`
 /// (`None` unsets it).
 fn run_reporter_in(state: &str, payload: &str, home: Option<&str>) -> (Value, String) {
-    run_reporter_with(state, payload, Trace::Arg, home)
+    run_reporter_with(state, payload, Trace::Arg, home, &[])
 }
 
 /// How a reporter run is told to trace.
@@ -53,16 +53,37 @@ enum Trace {
 }
 
 fn run_reporter_traced(state: &str, payload: &str, trace: Trace) -> (Value, String) {
-    run_reporter_with(state, payload, trace, None)
+    run_reporter_with(state, payload, trace, None, &[])
 }
 
-/// Every run names the hook's `CLAUDE_CONFIG_DIR`, so none inherits the
-/// developer's.
+/// What decides which credential claude uses, and so what the reporter says
+/// of it: removed from every run, so none inherits the developer's, and set
+/// only where a test sets it.
+const CREDENTIAL_ENV: [&str; 14] = [
+    "CLAUDECODE",
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    "CLAUDE_CODE_USE_MANTLE",
+    "CLAUDE_CODE_USE_GATEWAY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+];
+
+/// Every run names the hook's `CLAUDE_CONFIG_DIR` and its credentials, so
+/// none inherits the developer's; `env` sets more.
 fn run_reporter_with(
     state: &str,
     payload: &str,
     trace: Trace,
     claude_home: Option<&str>,
+    env: &[(&str, &str)],
 ) -> (Value, String) {
     warm_binary();
     let temp = tempfile::Builder::new()
@@ -132,6 +153,11 @@ fn run_reporter_with(
     if let Some(home) = claude_home {
         command.env("CLAUDE_CONFIG_DIR", home);
     }
+    for name in CREDENTIAL_ENV {
+        command.env_remove(name);
+    }
+    command.env_remove("CLAUDE_PROJECT_DIR");
+    command.envs(env.iter().copied());
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -214,6 +240,42 @@ fn the_reporter_sends_the_claude_home_it_runs_in_beside_the_session() {
     assert_eq!(args["claude_home"], home, "{args}");
     assert!(log.contains("claude_home=set"), "{log}");
     assert!(!log.contains(home), "the trace names the home: {log}");
+}
+
+/// Claude Code runs its hooks in its own environment, with `CLAUDECODE=1`, so
+/// the reporter tells spyc which credential claude sends requests with: an
+/// `ANTHROPIC_API_KEY` only once the user approved it, which outranks the
+/// saved login, and a provider over both. Neither the key nor the part of it
+/// that the approval is recorded under leaves the reporter, and a hook other
+/// than Claude Code's names no credential.
+#[test]
+fn the_reporter_names_the_credential_claude_sends_requests_with() {
+    const KEY: &str = "sk-ant-api03-test-only-key-0123456789abcdefghij";
+    const SUFFIX: &str = "0123456789abcdefghij";
+    let profile = tempfile::Builder::new()
+        .prefix("spyc-profile-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let home = profile.path().to_str().unwrap();
+    let payload = json!({"hook_event_name": "UserPromptSubmit", "session_id": "s-1"}).to_string();
+    let credential = |env: &[(&str, &str)]| {
+        let (request, log) = run_reporter_with("working", &payload, Trace::Arg, Some(home), env);
+        let sent = request.to_string();
+        assert!(!sent.contains(SUFFIX), "the key left the reporter: {sent}");
+        assert!(!log.contains(SUFFIX), "the trace names the key: {log}");
+        request["params"]["arguments"]["claude_credential"].clone()
+    };
+    let key = ("ANTHROPIC_API_KEY", KEY);
+    let claude = ("CLAUDECODE", "1");
+    assert_eq!(credential(&[key]), Value::Null, "not Claude Code's hook");
+    assert_eq!(credential(&[claude]), "login");
+    assert_eq!(credential(&[claude, key]), "login", "a key never approved");
+
+    let config = json!({"customApiKeyResponses": {"approved": [SUFFIX], "rejected": []}});
+    std::fs::write(profile.path().join(".claude.json"), config.to_string()).unwrap();
+    assert_eq!(credential(&[claude, key]), "api-key");
+    let bedrock = ("CLAUDE_CODE_USE_BEDROCK", "1");
+    assert_eq!(credential(&[claude, key, bedrock]), "bedrock");
 }
 
 /// Only an absolute `CLAUDE_CONFIG_DIR` names a place: a relative one depends on

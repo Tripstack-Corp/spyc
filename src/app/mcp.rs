@@ -29,6 +29,7 @@ struct StatusReport {
     note: Option<String>,
     session_id: Option<String>,
     claude_home: Option<std::path::PathBuf>,
+    claude_credential: Option<crate::agent::claude_credential::Credential>,
     hook_event: Option<crate::agent::status_hook::StatusHookEvent>,
 }
 
@@ -333,6 +334,7 @@ impl App {
                 note,
                 session_id,
                 claude_home,
+                claude_credential,
                 hook_event,
             } => self.apply_status_report(
                 pane_id.as_deref(),
@@ -343,6 +345,7 @@ impl App {
                     note,
                     session_id,
                     claude_home,
+                    claude_credential,
                     hook_event,
                 },
             ),
@@ -708,6 +711,7 @@ impl App {
             note,
             session_id,
             claude_home,
+            claude_credential,
             mut hook_event,
         } = report;
         let keep_detail = self.state.active_project().config.notify.blocked_detail;
@@ -785,11 +789,10 @@ impl App {
         // maintains it (and falls back to timing once it expires).
         if decision.is_ok() {
             entry.info.activity = activity;
+            let claude = (claude_home, claude_credential);
+            pin_live_session(&mut entry.info, kind, session_id, claude);
         } else if promoted && let Some(live) = &entry.info.reported {
             entry.info.activity = live.status;
-        }
-        if decision.is_ok() {
-            pin_live_session(&mut entry.info, kind, session_id, claude_home);
         }
         let pane_id = entry.info.id.clone();
         let label = entry.info.label.clone();
@@ -889,12 +892,17 @@ fn report_activity(status: &str) -> Option<crate::pane::AgentActivity> {
 /// spawn-proximity resolver at save time — route it to the id field for this
 /// tab's agent. claude reports `session_id` and agy `conversationId` (both
 /// land in `live_session_id`); codex has its own spawn-ordered rollout claim.
-/// A claude tab also pins the Claude home its hook ran in (#917).
+/// A claude tab also pins the Claude home its hook ran in (#917) and the
+/// credential its claude sends requests with; a report naming neither keeps
+/// the last.
 fn pin_live_session(
     info: &mut crate::pane::tabs::TabInfo,
     kind: crate::state::sessions::AgentKind,
     sid: Option<String>,
-    claude_home: Option<std::path::PathBuf>,
+    (claude_home, claude_credential): (
+        Option<std::path::PathBuf>,
+        Option<crate::agent::claude_credential::Credential>,
+    ),
 ) {
     use crate::state::sessions::AgentKind;
     match (kind, sid) {
@@ -904,6 +912,9 @@ fn pin_live_session(
     }
     if kind == AgentKind::Claude && claude_home.is_some() {
         info.claude_home = claude_home;
+    }
+    if kind == AgentKind::Claude && claude_credential.is_some() {
+        info.claude_credential = claude_credential;
     }
 }
 

@@ -124,6 +124,9 @@ pub enum McpCommand {
         /// `CLAUDE_CONFIG_DIR`, sent beside `session_id`: where a Claude tab's
         /// conversations are filed (#917). A direct agent call omits it.
         claude_home: Option<std::path::PathBuf>,
+        /// Which credential that claude sends its requests with, as its hook
+        /// decided in claude's environment. A direct agent call omits it.
+        claude_credential: Option<crate::agent::claude_credential::Credential>,
         hook_event: Option<crate::agent::status_hook::StatusHookEvent>,
     },
     /// P2 merge/scope coordination (`docs/archive/AGENT_AWARENESS_PLAN.md`): declare

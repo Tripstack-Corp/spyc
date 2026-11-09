@@ -46,6 +46,7 @@ fn agent_tab(dir: &std::path::Path, agent: &str, status: &str) -> App {
         note: Some("a build".into()),
         session_id: None,
         claude_home: None,
+        claude_credential: None,
         hook_event: None,
     });
     app.settle_agent_activity(std::time::Instant::now(), &mut RunCtx::for_test());

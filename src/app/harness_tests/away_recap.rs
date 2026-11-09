@@ -88,6 +88,7 @@ fn hook(app: &mut App, status: &str, payload: &serde_json::Value) {
         note: None,
         session_id: Some(SID.into()),
         claude_home: None,
+        claude_credential: None,
         hook_event: StatusHookEvent::from_payload(&kept),
     });
     assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");
