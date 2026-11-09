@@ -299,6 +299,12 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
         "subagent calls (Agent tool): {}; background calls (run_in_background): {}",
         s.subagent_calls, s.background_calls
     ));
+    out.push(format!(
+        "organization (oauthAccount in Claude Code's .claude.json): {}",
+        s.organization
+            .as_deref()
+            .unwrap_or("-- (not logged in, or an API key)")
+    ));
     out.extend(claude_tool_lines(s, tail_only));
     out
 }

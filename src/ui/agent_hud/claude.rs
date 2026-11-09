@@ -9,8 +9,8 @@ use jiff::Timestamp;
 use ratatui::text::Span;
 
 use super::{
-    AgentRows, Field, HudView, Metrics, Palette, Reported, Row, Tally, Trailer, resets,
-    short_count, tools_row,
+    AgentRows, Field, HudView, MAX_CELL, Metrics, Palette, Reported, Row, Tally, Trailer, resets,
+    safe_label, short_count, tools_row,
 };
 
 /// The most subagents the `agents` row names, room allowing; the rest it counts.
@@ -180,6 +180,20 @@ fn tools(s: &Snapshot, tail_only: bool, p: Palette) -> Row {
     }
     let label = if tail_only { "recent" } else { "tools" };
     tools_row(label, &tallies, Some(&running), p)
+}
+
+/// The organization the tab's Claude Code is logged into, after the health
+/// cells on a full HUD's `agents` row. Omitted, not `--`, without one: an
+/// API-key session has none.
+pub(super) fn organization(view: &HudView<'_>, p: Palette) -> Option<Field> {
+    let Metrics::Claude {
+        snapshot: Some(s), ..
+    } = view.metrics
+    else {
+        return None;
+    };
+    let name = s.organization.as_deref()?;
+    Some(p.pair("org", p.value(&safe_label(name))).clip(MAX_CELL))
 }
 
 /// The subagents a full HUD's `agents` row ends in: each one's type and the

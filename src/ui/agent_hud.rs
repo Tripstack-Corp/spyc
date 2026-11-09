@@ -224,6 +224,7 @@ pub fn lines(
         let mut mode_row = agent.mode;
         mode_row.cells.push(hooks(view.hooks, p));
         mode_row.cells.push(mcp(view.mcp_connections, p));
+        mode_row.cells.extend(claude::organization(view, p));
         mode_row.trailer = claude::subagents(view, p);
         rows.push(agent.tools);
         match thinking_row(view, p) {
@@ -977,6 +978,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The organization the session is logged into ends the full strip's
+    /// `agents` row, after the health cells, cut like any other cell; a strip
+    /// without one, or a compact one, has no `org`.
+    #[test]
+    fn the_logged_in_organization_ends_the_agents_row() {
+        let draw = |snapshot: &claude::Snapshot, mode| {
+            text(&lines(
+                &claude_view(snapshot, "main"),
+                mode,
+                160,
+                &Theme::default(),
+            ))
+        };
+        let (mut snapshot, _) = claude_session("main");
+        let rows = draw(&snapshot, AgentHudMode::Full);
+        assert!(!rows[3].contains("org "), "{rows:?}");
+
+        snapshot.organization = Some("Acme Corp".into());
+        let rows = draw(&snapshot, AgentHudMode::Full);
+        assert!(rows[3].trim_end().ends_with("org Acme Corp"), "{rows:?}");
+        assert!(x_of(&rows[3], "mcp") < x_of(&rows[3], "org"), "{rows:?}");
+        let compact = draw(&snapshot, AgentHudMode::Compact);
+        assert!(
+            compact.iter().all(|row| !row.contains("org ")),
+            "{compact:?}"
+        );
+
+        snapshot.organization = Some("An organization named at unusual length".into());
+        let rows = draw(&snapshot, AgentHudMode::Full);
+        let org = &rows[3][rows[3].find("org ").unwrap()..];
+        assert!(org.trim_end().ends_with('…'), "{rows:?}");
+        assert_eq!(display_width(org.trim_end()), MAX_CELL, "{rows:?}");
     }
 
     /// The repository and branch field is capped tighter than most cells, so an

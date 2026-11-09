@@ -8,6 +8,7 @@
 //! cache writes, which are separate and additive. That is why its usage is
 //! [`Usage`], from [`crate::agent::metrics`], and not `codex_metrics`'s `Tokens`.
 
+pub mod account;
 pub mod records;
 mod reducer;
 pub mod stream;
@@ -129,6 +130,9 @@ pub struct Snapshot {
     /// [`subagents::ENDED_SHOWN`], from the session's `subagents/` directory
     /// rather than this transcript.
     pub subagents: Vec<subagents::Subagent>,
+    /// The organization the session's Claude Code is logged into, from its
+    /// config file rather than this transcript ([`account`]).
+    pub organization: Option<String>,
 }
 
 #[cfg(test)]
