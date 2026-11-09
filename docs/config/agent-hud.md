@@ -79,10 +79,28 @@ to another organization or a logout as Claude Code saves it. It is
 read from it: `.claude.json` in the tab's configuration directory when
 `$CLAUDE_CONFIG_DIR` names one, else `~/.claude.json`, or a legacy
 `.config.json` there, which Claude Code also prefers. A session with no
-account login, an API key among them, has no `org` cell. An `ANTHROPIC_API_KEY`
-in the tab's environment outranks the login it shows, so the cell names the
-saved login, not necessarily the credential in use. Claude Code's own footer
-already shows its permission mode.
+account login has no `org` cell.
+
+The saved login is only one of the credentials Claude Code can send requests
+with, and the others outrank it. The tab's status hook runs in claude's own
+environment and tells spyc which one is in use, by name and never its value;
+when it isn't the login, the cell names it instead of an organization that
+isn't the one billed: `auth bedrock`, `vertex`, `foundry`, `aws`,
+`google cloud`, `mantle` or `gateway` for a `CLAUDE_CODE_USE_*` provider,
+`auth auth token` for `ANTHROPIC_AUTH_TOKEN`, `auth oauth token` for
+`CLAUDE_CODE_OAUTH_TOKEN` (a login, though maybe another account's), and
+`auth key helper` for an `apiKeyHelper` in your managed, user, project or
+local settings file. An `ANTHROPIC_API_KEY` reads `auth api key` once you have
+said yes to it at Claude Code's prompt; one you declined, or haven't answered
+yet, leaves the login in use. Claude Code records that answer under the key's
+last 20 characters, which the hook compares on its side and never sends. Until
+the first hook report the login is assumed, and with
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` set the hook can't see the credentials, so
+the cell reads `auth unknown`. Not followed: an `ant` CLI profile, settings
+given with `--settings` or served remotely, and `managed-settings.d` files;
+Claude Code's `/status` names the credential exactly. The dump's `credential`
+line says what the hook last reported. Claude Code's own footer already shows
+its permission mode.
 Only spyc's own MCP server keeps its name in a tool label, as `spyc:`; other
 servers' tools read `mcp`.
 

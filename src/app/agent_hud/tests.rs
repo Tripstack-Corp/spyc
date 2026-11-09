@@ -1395,6 +1395,7 @@ fn agent_hud_retries_missing_agy_transcript_on_status_report() {
             note: None,
             session_id: Some(AGY_SESSION.into()),
             claude_home: None,
+            claude_credential: None,
             hook_event: None,
         });
         assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
@@ -1553,6 +1554,7 @@ fn agent_hud_retries_missing_claude_transcript_on_status_report() {
             note: None,
             session_id: Some(SESSION.into()),
             claude_home: None,
+            claude_credential: None,
             hook_event: None,
         });
         assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
@@ -1717,6 +1719,66 @@ fn the_strip_names_the_organization_the_tab_is_logged_into() {
         wait_hud_row(&mut app, &mut ctx, 3, "no org once logged out", |row| {
             row.contains("hooks") && !row.contains("org ")
         });
+    });
+}
+
+/// A status report from Claude Code's hook that names a credential other
+/// than the saved login puts it in the organization's place on the strip and
+/// in the dump; one naming the login brings the organization back, and a
+/// report that names none leaves the last word standing.
+#[test]
+fn the_strip_names_another_credential_in_place_of_the_organization() {
+    use crate::agent::claude_credential::Credential;
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        std::fs::write(home.join(".claude.json"), claude_config("Acme Corp")).unwrap();
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        wait_hud_line(&mut app, &mut ctx, 3, "org Acme Corp");
+
+        let report = |app: &mut App, credential| {
+            let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::ReportStatus {
+                pane_id: None,
+                pane: None,
+                status: "working".into(),
+                ttl_ms: None,
+                note: None,
+                session_id: Some(SESSION.into()),
+                claude_home: None,
+                claude_credential: credential,
+                hook_event: None,
+            });
+            assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
+        };
+        report(&mut app, Some(Credential::ApiKey));
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, "auth api key");
+        assert!(!lines[3].contains("Acme"), "{lines:?}");
+        app.cmd_agent_hud("info");
+        let dump: Vec<String> = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            dump.iter()
+                .any(|line| line == "credential (status hook): api key"),
+            "{dump:?}"
+        );
+        app.cmd_agent_hud("full");
+
+        report(&mut app, None);
+        wait_hud_line(&mut app, &mut ctx, 3, "auth api key");
+        report(&mut app, Some(Credential::Login));
+        wait_hud_line(&mut app, &mut ctx, 3, "org Acme Corp");
     });
 }
 

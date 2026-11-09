@@ -104,8 +104,8 @@ pub enum Metrics<'a> {
     },
 }
 
-/// What Claude Code's statusline reported through `spyc --statusline`: its own
-/// figures, which its transcript doesn't carry.
+/// What Claude Code's statusline (through `spyc --statusline`) and its status
+/// hook reported: its own figures, which its transcript doesn't carry.
 #[derive(Clone, Copy, Default)]
 pub struct Reported<'a> {
     /// This session's share of its context window.
@@ -113,6 +113,8 @@ pub struct Reported<'a> {
     /// The plan's rate-limit windows: the newest report any tab sent, since the
     /// plan is the account's, not one session's.
     pub plan: Option<&'a crate::agent::claude_statusline::Statusline>,
+    /// Which credential this tab's Claude Code sends its requests with.
+    pub credential: Option<crate::agent::claude_credential::Credential>,
 }
 
 /// What the tab's status hooks have shown.
@@ -1012,6 +1014,41 @@ mod tests {
         let org = &rows[3][rows[3].find("org ").unwrap()..];
         assert!(org.trim_end().ends_with('…'), "{rows:?}");
         assert_eq!(display_width(org.trim_end()), MAX_CELL, "{rows:?}");
+    }
+
+    /// Once the status hook says another credential is in use, the cell names
+    /// it in place of the saved login's organization, which isn't the one
+    /// billed. Before any report, the login is assumed.
+    #[test]
+    fn another_credential_takes_the_organizations_place() {
+        use crate::agent::claude_credential::Credential;
+        let (mut snapshot, _) = claude_session("main");
+        snapshot.organization = Some("Acme Corp".into());
+        let draw = |credential| {
+            let mut view = claude_view(&snapshot, "main");
+            view.metrics = Metrics::Claude {
+                snapshot: Some(&snapshot),
+                tail_only: false,
+                reported: Reported {
+                    credential,
+                    ..Reported::default()
+                },
+            };
+            let rows = text(&lines(&view, AgentHudMode::Full, 160, &Theme::default()));
+            rows[3].trim_end().to_owned()
+        };
+        assert!(draw(Some(Credential::Login)).ends_with("org Acme Corp"));
+        assert!(draw(None).ends_with("org Acme Corp"));
+        for (credential, cell) in [
+            (Credential::ApiKey, "auth api key"),
+            (Credential::Bedrock, "auth bedrock"),
+            (Credential::OauthToken, "auth oauth token"),
+            (Credential::Unknown, "auth unknown"),
+        ] {
+            let row = draw(Some(credential));
+            assert!(row.ends_with(cell), "{row:?}");
+            assert!(!row.contains("Acme"), "{row:?}");
+        }
     }
 
     /// The repository and branch field is capped tighter than most cells, so an

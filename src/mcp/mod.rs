@@ -396,17 +396,11 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     // P1-3: piggyback the agent's live session id (from the same hook stdin) so
     // spyc can pin this pane's exact conversation for `-r` restore.
     let session_id = session_id_from_hook_payload(&payload);
-    // #917: the hook runs in claude's own environment, a wrapper's included,
-    // so this is the Claude home its conversation is filed under.
-    let claude_home = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .and_then(|dir| crate::agent::claude_home::from_config_dir(&dir));
+    let (claude_home, claude_credential) = claude_environment(&trace_log);
     if trace {
         trace_log(&format!("report-status: effective state={state}"));
         if session_id.is_some() {
             trace_log("report-status: session_id=set");
-        }
-        if claude_home.is_some() {
-            trace_log("report-status: claude_home=set");
         }
     }
     if pane_id.is_some() {
@@ -436,7 +430,8 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
             "name": "report_status",
             "arguments": {
                 "status": state, "pane_id": pane_id, "session_id": session_id,
-                "claude_home": claude_home, "hook_event": hook_event,
+                "claude_home": claude_home, "claude_credential": claude_credential,
+                "hook_event": hook_event,
             },
         },
     })
@@ -457,6 +452,29 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
     // Best-effort: a timeout/EOF here doesn't matter, the command is queued.
     let mut line = String::new();
     let _ = BufReader::new(stream).read_line(&mut line);
+}
+
+/// What the hook sees of claude's own environment, a wrapper's included, that
+/// spyc can't: the Claude home its conversation is filed under (#917), and,
+/// for one of Claude Code's hooks (run with `CLAUDECODE=1`), the credential
+/// its requests go out with. The trace names the credential, never the home.
+fn claude_environment(
+    trace_log: &dyn Fn(&str),
+) -> (
+    Option<PathBuf>,
+    Option<crate::agent::claude_credential::Credential>,
+) {
+    let home = std::env::var_os("CLAUDE_CONFIG_DIR")
+        .and_then(|dir| crate::agent::claude_home::from_config_dir(&dir));
+    let credential = (std::env::var("CLAUDECODE").as_deref() == Ok("1"))
+        .then(crate::agent::claude_credential::detect);
+    if home.is_some() {
+        trace_log("report-status: claude_home=set");
+    }
+    if let Some(credential) = credential {
+        trace_log(&format!("report-status: credential={}", credential.label()));
+    }
+    (home, credential)
 }
 
 /// Run the stdio MCP server, as [`route`] decides:

@@ -194,7 +194,8 @@ failures of its own or `✗<n>` when it does. For Claude Code, the mode row adds
 over total, with how many are in progress in brackets — once one of those tools
 has reported; named `todo`, not `plan`, since that already names the account's
 rate-limit windows on the row above. After the health cells it adds `org`, the
-organization its login belongs to, omitted rather than `--` without one. The full list is the dump's, which
+organization its login belongs to, or `auth` and the credential used in the
+login's place, omitted rather than `--` without either. The full list is the dump's, which
 `:agent hud dump` (or `info`) opens, and so does a double-click anywhere on the
 strip. The strip is spyc's text, never the child's input: a press there selects,
 a drag copies, and the wheel does nothing.

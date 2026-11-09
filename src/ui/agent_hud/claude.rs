@@ -2,6 +2,7 @@
 //! transcript carries no window size, and the statusline input that does is
 //! the user's.
 
+use crate::agent::claude_credential::Credential;
 use crate::agent::claude_metrics::subagents::{ENDED_SHOWN, Subagent};
 use crate::agent::claude_metrics::{Plan, Sample, Snapshot, ToolStatus};
 use jiff::Timestamp;
@@ -182,18 +183,25 @@ fn tools(s: &Snapshot, tail_only: bool, p: Palette) -> Row {
     tools_row(label, &tallies, Some(&running), p)
 }
 
-/// The organization the tab's Claude Code is logged into, after the health
-/// cells on a full HUD's `agents` row. Omitted, not `--`, without one: an
-/// API-key session has none.
+/// The account the tab's Claude Code sends its requests with, after the
+/// health cells on a full HUD's `agents` row: the saved login's organization,
+/// or, when its status hook says another credential is in use, that one
+/// (`auth api key`), since the login's organization isn't the one billed.
+/// Omitted, not `--`, with neither.
 pub(super) fn organization(view: &HudView<'_>, p: Palette) -> Option<Field> {
     let Metrics::Claude {
-        snapshot: Some(s), ..
+        snapshot, reported, ..
     } = view.metrics
     else {
         return None;
     };
-    let name = s.organization.as_deref()?;
-    Some(p.pair("org", p.value(&safe_label(name))).clip(MAX_CELL))
+    match reported.credential {
+        None | Some(Credential::Login) => {
+            let name = snapshot?.organization.as_deref()?;
+            Some(p.pair("org", p.value(&safe_label(name))).clip(MAX_CELL))
+        }
+        Some(other) => Some(p.pair("auth", p.value(other.label()))),
+    }
 }
 
 /// The subagents a full HUD's `agents` row ends in: each one's type and the
@@ -574,6 +582,7 @@ mod tests {
             reported: super::super::Reported {
                 context_percent: Some(55),
                 plan: Some(&plan),
+                credential: None,
             },
         };
         let line = lines(&v, AgentHudMode::Compact, 200, &theme).swap_remove(1);
@@ -634,6 +643,7 @@ mod tests {
             reported: super::super::Reported {
                 context_percent: None,
                 plan: Some(&plan),
+                credential: None,
             },
         };
         lines(&v, AgentHudMode::Compact, 200, &Theme::default())
