@@ -1,7 +1,8 @@
 //! One cancellable startup lookup and one exact-file subscription: a Codex
 //! rollout, a Claude Code transcript, or an Antigravity transcript. A Claude
 //! Code transcript's subscription comes with one to the subagents its session
-//! runs, and the two make one update. The
+//! runs, and one to the organization its configuration directory is logged
+//! into, and the three make one update. The
 //! lookup is bounded and happens once per binding. A missing rollout needs a
 //! new consumer; a missing Claude Code or agy transcript is looked up again on
 //! its tab's next status report.
@@ -26,30 +27,38 @@ enum Subscription {
     Agy(agy_metrics::watch::Subscription),
 }
 
-/// A Claude Code session's two feeds, its transcript and the subagents it
-/// runs, each keeping its latest so a change to either sends the whole.
+/// A Claude Code session's three feeds, its transcript, the subagents it runs
+/// and its account's organization, each keeping its latest so a change to any
+/// sends the whole.
 struct ClaudeFeeds {
     transcript: claude_metrics::watch::Subscription,
     subagents: claude_metrics::subagents::Subscription,
+    account: claude_metrics::account::Subscription,
     last: Option<claude_metrics::Update>,
     running: Vec<claude_metrics::subagents::Subagent>,
+    organization: Option<String>,
 }
 
 impl ClaudeFeeds {
     fn take(&mut self) -> Option<Update> {
         let transcript = self.transcript.take();
         let subagents = self.subagents.take();
-        if transcript.is_none() && subagents.is_none() {
+        let account = self.account.take();
+        if transcript.is_none() && subagents.is_none() && account.is_none() {
             return None;
         }
         if let Some(running) = subagents {
             self.running = running;
+        }
+        if let Some(organization) = account {
+            self.organization = organization;
         }
         if transcript.is_some() {
             self.last = transcript;
         }
         let mut update = self.last.clone()?;
         update.snapshot.subagents.clone_from(&self.running);
+        update.snapshot.organization.clone_from(&self.organization);
         Some(Update::Claude(Box::new(update)))
     }
 }
@@ -66,11 +75,15 @@ impl Subscription {
                     &path,
                     wake.clone(),
                 );
+                let account =
+                    claude_metrics::account::Subscription::start(&b.claude_home, wake.clone());
                 Self::Claude(Box::new(ClaudeFeeds {
                     transcript: claude_metrics::watch::Subscription::start(b, path, wake),
                     subagents,
+                    account,
                     last: None,
                     running: Vec::new(),
+                    organization: None,
                 }))
             }
             Binding::Agy(b) => Self::Agy(agy_metrics::watch::Subscription::start(b, path, wake)),

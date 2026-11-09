@@ -1656,6 +1656,70 @@ fn subagent_result(dir: &Path, id: &str, tool_id: &str) {
     );
 }
 
+/// Claude Code's account record for organization `org`, beside the history
+/// and identity the strip never reads.
+fn claude_config(org: &str) -> String {
+    json!({"numStartups": 3, "projects": {"/private-project": {"history": []}},
+        "oauthAccount": {"emailAddress": "private@example.com",
+            "organizationName": org, "organizationRole": "user"}})
+    .to_string()
+}
+
+/// The full strip names the organization the tab's Claude Code is logged
+/// into, read from its configuration directory, follows a `/login` to another
+/// and a logout, and never shows the rest of the file.
+#[test]
+fn the_strip_names_the_organization_the_tab_is_logged_into() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        let config = home.join(".claude.json");
+        std::fs::write(&config, claude_config("Acme Corp")).unwrap();
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        wait_hud_line(&mut app, &mut ctx, 3, "org Acme Corp");
+
+        // Claude Code replaces the file rather than writing it in place.
+        let replacement = home.join(".claude.json.tmp");
+        std::fs::write(&replacement, claude_config("Beta Labs")).unwrap();
+        std::fs::rename(&replacement, &config).unwrap();
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, "org Beta Labs");
+        assert!(
+            lines.iter().all(|line| !line.contains("private")),
+            "{lines:?}"
+        );
+        app.cmd_agent_hud("info");
+        let dump: Vec<String> = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            dump.iter()
+                .any(|line| line.starts_with("organization") && line.ends_with(": Beta Labs")),
+            "{dump:?}"
+        );
+        assert!(
+            dump.iter().all(|line| !line.contains("private")),
+            "{dump:?}"
+        );
+        app.cmd_agent_hud("full");
+
+        std::fs::write(&config, json!({"numStartups": 4}).to_string()).unwrap();
+        wait_hud_row(&mut app, &mut ctx, 3, "no org once logged out", |row| {
+            row.contains("hooks") && !row.contains("org ")
+        });
+    });
+}
+
 /// A running subagent shows on the full HUD's `agents` row as its type and the
 /// tool it runs now, follows it from tool to tool, and once it has finished
 /// says so. Its description, prompt and tool input never reach the strip.
