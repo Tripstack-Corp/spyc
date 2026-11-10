@@ -1,5 +1,12 @@
 # VT engine spike — vt100 vs. wezterm-term vs. libghostty-vt
 
+> **Archived (2026-11-10).** The spike is complete and its recommendation
+> adopted: libghostty-vt replaced vt100 for 2.2 (#465) and is pinned at 1.0.0
+> (#1067). It stays the evidence behind the libghostty-vt entries in the
+> decisions log and the snapshot figures the jar requirements
+> ([`JAR_PROTOCOL.md`](../drafts/JAR_PROTOCOL.md)) rely on, and is still appended to, never
+> rewritten.
+
 **Status:** spike complete; recommendation below is a proposal, not a decision.
 **Measured against:** `55e78bd` (`main`, `2.2.0-CURRENT`), macOS 26.6.2 / arm64,
 rustc 1.96.0.
@@ -780,7 +787,7 @@ crate. Everything else about it is secondary.
 
 > **VT engine for 3.0 durable sessions — libghostty-vt, deferred to 3.0 behind
 > `spyc-vt-sys`.** A three-way differential spike
-> (`docs/drafts/VT_ENGINE_SPIKE.md`, harness `spikes/vt-engine/`) measured
+> (`docs/archive/VT_ENGINE_SPIKE.md`, harness `spikes/vt-engine/`) measured
 > vt100 0.16.2, wezterm-term, and libghostty-vt 0.2.1 over a 26-case corpus,
 > 50,000 fuzz iterations, and a rehydration round trip. **wezterm-term is
 > excluded structurally:** it is unpublished on crates.io, so it can only be

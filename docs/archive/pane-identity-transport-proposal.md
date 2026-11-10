@@ -1,9 +1,13 @@
 # Pane identity for MCP tool dispatch — design proposal (C7)
 
+> **Archived (2026-11-10).** Shipped: option B, the pane id in the MCP
+> `initialize` handshake, landed in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)). Per-pane roots were
+> dropped (decisions log, 2026-09-30).
+
 **Status:** option B (pane id in the `initialize` handshake) shipped in #507,
 with capabilities 2 and 3 below. Capability 1, per-pane roots, is dropped; the
 ROADMAP decisions log (2026-09-30) says why. Scope and sequencing in
-[`V2_2_PLAN.md`](../archive/V2_2_PLAN.md).
+[`V2_2_PLAN.md`](V2_2_PLAN.md).
 **Measured against:** `6e087b3`.
 
 The same connection-scoped id is the attribution mechanism Projects (2.3)

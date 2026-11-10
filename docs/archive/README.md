@@ -18,5 +18,10 @@ roadmap is [`ROADMAP.md`](../../ROADMAP.md) at the repo root.
 | `2.2-release-notes.md` | The human-facing v2.2 notes, as written at tag time. |
 | `2.3-release-notes.md` | The human-facing v2.3 notes, as written at tag time. |
 | `2.4-release-notes.md` | The human-facing v2.4 notes, as written at tag time. |
+| `pane-identity-transport-proposal.md` | v2.2 — the pane id in the MCP `initialize` handshake (#507, [#491](https://github.com/Tripstack-Corp/spyc/issues/491)); per-pane roots dropped. |
+| `VT_ENGINE_SPIKE.md` | v2.2 — the engine spike behind libghostty-vt replacing vt100 (#465), with dated addenda through the 1.0.0 pin (#1067). Still appended to. |
+| `CODEX_SUPPORT_PLAN.md` | v2.2 — Codex parity (A1–A6) and the session HUD (B1–B3). Its open items moved to [#1108](https://github.com/Tripstack-Corp/spyc/issues/1108). |
+| `multi-question-bug-investigation.md` | Not shipped: the investigation record for an agent pane going deaf to input, an open bug tracked as [#1107](https://github.com/Tripstack-Corp/spyc/issues/1107). |
+| `AUTO_APPROVAL_PLAN.md` | Not built: auto-approval and an action log ([#57](https://github.com/Tripstack-Corp/spyc/issues/57), closed as not planned once Claude Code shipped its own auto mode). |
 | `CLICKABLE_MENUS_PLAN.md` | Not shipped on its own: absorbed into the 2.4 UX plan ([`UX_2_0_PLAN.md`](UX_2_0_PLAN.md)) as its slices 1–2 when that plan was approved. |
 | `UX_2_0_PLAN.md` | UX 2.0, on `main` for 2.4 (PRs #880–#962): a menu for each object spyc draws, opened with `.`, `^a .` or a right-click (⌃-right-click on iTerm2), each row showing its key and a clicked row's hint fading as the key is learned; the pager and a Makefile's targets as objects. |

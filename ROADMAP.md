@@ -126,7 +126,7 @@ Everything else already merged to `main` ships with it (decisions log,
   produced two fixes so far: an erased cell keeps its background under SGR
   (#470), and DEC mode 2027 is enabled, so an emoji cluster takes the width
   `ui::display_width` budgets for it (#485). Evidence and the gate addendum are
-  in [`docs/drafts/VT_ENGINE_SPIKE.md`](docs/drafts/VT_ENGINE_SPIKE.md).
+  in [`docs/archive/VT_ENGINE_SPIKE.md`](docs/archive/VT_ENGINE_SPIKE.md).
 - **[#58](https://github.com/Tripstack-Corp/spyc/issues/58): configurable
   startup pane tabs** (#482), per the now-archived
   [`docs/archive/PANE_STARTUP_TABS_PLAN.md`](docs/archive/PANE_STARTUP_TABS_PLAN.md).
@@ -162,7 +162,7 @@ Everything else already merged to `main` ships with it (decisions log,
   cursor.
 - **[#491](https://github.com/Tripstack-Corp/spyc/issues/491): pane-identity
   transport** (#507), option B of
-  [`docs/drafts/pane-identity-transport-proposal.md`](docs/drafts/pane-identity-transport-proposal.md).
+  [`docs/archive/pane-identity-transport-proposal.md`](docs/archive/pane-identity-transport-proposal.md).
   The `spyc --mcp` proxy sends its `$SPYC_PANE_ID` in `initialize` and the
   server binds that connection to the tab. `get_spyc_context` adds the caller's
   own tab as `pane`, and `report_status` and the scope tools default to it.
@@ -286,7 +286,7 @@ The user-facing words are **detach** and **attach**. "Session" stays an
 agent-conversation term — session forking, `/resume`, session pinning — and the
 durable thing gets no noun of its own: it is just spyc, still running.
 
-The VT-engine spike has reported (`docs/drafts/VT_ENGINE_SPIKE.md`), and its
+The VT-engine spike has reported (`docs/archive/VT_ENGINE_SPIKE.md`), and its
 recommendation moved forward rather than back: **the engine landed for 2.2**
 (#465), so it gets a full release of daily dogfood soak before a reattach
 depends on it.
@@ -464,7 +464,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   first.
 - **The VT engine becomes libghostty-vt, and it lands in 2.2 — not 3.0**
   (2026-09-04). A three-way differential spike
-  (`docs/drafts/VT_ENGINE_SPIKE.md`, harness `spikes/vt-engine/`) measured
+  (`docs/archive/VT_ENGINE_SPIKE.md`, harness `spikes/vt-engine/`) measured
   vt100 0.16.2, wezterm-term and libghostty-vt over a 26-case corpus, 50,000
   fuzz iterations and a rehydration round trip. **wezterm-term is excluded
   structurally:** unpublished on crates.io, so reachable only by a git
@@ -526,7 +526,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   one improved** (2026-09-04). The harness was re-run at ghostty
   `1f5bb5769fbb5e717546073d33d3985604a315b2` through `spyc-vt-sys` — the same
   bindings and vendored archive production links — and the results are appended
-  to `docs/drafts/VT_ENGINE_SPIKE.md` as a dated addendum. Zero panics over
+  to `docs/archive/VT_ENGINE_SPIKE.md` as a dated addendum. Zero panics over
   50,000 fuzz iterations (vt100: 1,437). Fidelity unchanged at 20/26 exact
   parity. The scrollback budget works at the shipped configuration: realistic
   content retains 9,658 of 10,000 rows against a floor of budget-minus-one-page,
@@ -771,16 +771,18 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/RELEASE_ENGINEERING.md` | The launch operating manual — release streams, CI, signing, Homebrew, org setup. |
 | `docs/BRAND.md` | Brand & identity — the name story, palette, voice. |
 | `docs/AGENT_ORCHESTRATION.md` | How the agent activity-dots / notifications / session-resume / scope registry fit together (living reference). |
-| `docs/drafts/CODEX_SUPPORT_PLAN.md` | Draft Codex parity remediation and opt-in session HUD: reproduced RC regressions, hook/image/navigation gaps, telemetry contracts, sequencing and validation. HUD scope is proposed and unscheduled, not an added RC gate. |
+| `docs/archive/CODEX_SUPPORT_PLAN.md` | Archived — Codex parity (A1–A6) and the session HUD (B1–B3), shipped for 2.2. Its open items moved to [#1108](https://github.com/Tripstack-Corp/spyc/issues/1108). |
 | `docs/archive/PROJECTS_PLAN.md` | Archived — the 2.3 Projects design, approved 2026-10-12 ([#492](https://github.com/Tripstack-Corp/spyc/issues/492)): the per-project state inventory, one MCP socket answering per project, the recovery manifest, the `Space` keys, the `projects` segment, attention across projects, and what an attach snapshot carries. #99 built all eight of its steps, and closed on 2026-10-21. |
 | `docs/archive/UX_2_0_PLAN.md` | Archived — the 2.4 UX design, approved 2026-10-26: one object model and hit-test, a menu per object projected from `Action` with each entry's key shown, Makefile targets run in the live pager, and fading key hints. Absorbed `CLICKABLE_MENUS_PLAN.md` as its slices 1–2. Its slices landed on `main` for 2.4, #880–#962. |
-| [`docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md`](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md) | Draft candidate for 2.3, unscheduled: connected Git review, project/worktree context, comparison semantics, MCP reads, delivery slices, and references. Git write operations are a separate assessment. |
-| `docs/drafts/pane-identity-transport-proposal.md` | Option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). It is also the attribution mechanism Projects extends. |
-| `docs/drafts/VT_ENGINE_SPIKE.md` | The engine spike report plus its dated gate addendum: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
+| [`docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md`](docs/drafts/GIT_REVIEW_WORKSPACE_PLAN.md) | Draft, unscheduled: connected Git review, project/worktree context, comparison semantics, MCP reads, delivery slices. Written as a 2.3 candidate; 2.4 shipped part of its Compare step (`gm`, `:diff` and `git_diff` since the base). |
+| `docs/archive/pane-identity-transport-proposal.md` | Archived — option B shipped in #507 ([#491](https://github.com/Tripstack-Corp/spyc/issues/491)): the pane id goes in the MCP `initialize` handshake. Per-pane roots are dropped (decisions log, 2026-09-30). |
+| `docs/archive/VT_ENGINE_SPIKE.md` | Archived — the engine spike report plus its dated addenda through the 1.0.0 pin: the evidence behind the libghostty-vt entries in the decisions log. Appended to, never rewritten. |
 | `docs/archive/CLICKABLE_MENUS_PLAN.md` | Archived — the proposal to make the which-key popup clickable (#478). Absorbed into `UX_2_0_PLAN.md` as its slices 1–2, and archived in its slice 0 when that plan was approved (#881). |
-| `docs/drafts/AUTO_APPROVAL_PLAN.md` | Pending design, unscheduled ([#57](https://github.com/Tripstack-Corp/spyc/issues/57)). |
+| `docs/archive/AUTO_APPROVAL_PLAN.md` | Archived, not built — [#57](https://github.com/Tripstack-Corp/spyc/issues/57) closed as not planned once Claude Code shipped its own auto mode. |
 | `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A shipped for 2.2 ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
-| `docs/drafts/multi-question-bug-investigation.md` | Open bug, parked without a repro — an agent pane going deaf to input. Not in the tracker; this is the record. |
+| [`docs/drafts/JAR_PROTOCOL.md`](docs/drafts/JAR_PROTOCOL.md) | Draft — the `spyc-jar` requirements before its protocol freezes ([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)): use cases, a verdict per requirement, sharing, fuzzing, and the owner's open decisions. |
+| [`docs/drafts/PANE_JAR_SPIKE.md`](docs/drafts/PANE_JAR_SPIKE.md) | Draft — the staged spike that proves the jar, with stage 0b's dtach findings. |
+| `docs/archive/multi-question-bug-investigation.md` | Archived — the investigation record for an agent pane going deaf to input, an open bug tracked as [#1107](https://github.com/Tripstack-Corp/spyc/issues/1107). |
 | `docs/archive/LAUNCH_PLAN_2_0.md` | Archived — the 2.0 distribution/launch plan, every gate closed, plus what never shipped. |
 | `docs/archive/PANE_STARTUP_TABS_PLAN.md` | Archived design: startup pane tabs, shipped on `main` for 2.2 (#482, closing [#58](https://github.com/Tripstack-Corp/spyc/issues/58)). Its deferred half, true multi-split, stays deferred. |
 | `docs/archive/ARCHIVE_BROWSING_PLAN.md` | Archived design — navigate into zip/tarballs with full editing; shipped v2.1.0, [#149](https://github.com/Tripstack-Corp/spyc/issues/149) closed. |
@@ -795,9 +797,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/COMPETITIVE_REVIEW.md` | Consolidated competitive review + GTM: the AI coding-agent-manager category (§1–§1c: herdr, psmux, claude-code-ide.el), the TUI file-manager lane (§1d: Yazi, folded 2026-07-02; §1e: lf), and the session layer beneath both (§1f: Superlogical, zmx). Refresh on a competitor's next major. (Standalone Yazi original archived at `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.) |
 | `docs/archive/` | Shipped plans, kept as historical record. |
 
-> **Note on pending plans:** `AUTO_APPROVAL_PLAN` and `PATH_HANDOFF_PLAN`
-> predate the MVU decomposition — their designs hold,
-> but `src/app/mod.rs:NNNN`-style file pointers resolve nowhere; re-resolve
-> against the current module layout when picking one up, and each carries that
-> warning in its own header. `V2_2_PLAN` and
-> `pane-identity-transport-proposal` are written against the current layout.
+> **Note on pending plans:** `PATH_HANDOFF_PLAN` predates the MVU
+> decomposition — its design holds, but `src/app/mod.rs:NNNN`-style file
+> pointers resolve nowhere; re-resolve them against the current module layout
+> when picking it up. It carries that warning in its own header.

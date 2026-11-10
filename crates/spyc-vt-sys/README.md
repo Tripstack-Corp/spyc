@@ -105,7 +105,7 @@ does nothing is worse than no step.)
 Deliberate, gated, never tracking `main` — the full procedure is on
 [`pin::BUMP_POLICY`](src/pin.rs). The short version: regenerate the bindings,
 rebuild every archive, re-run the spike harness in full, append a dated addendum
-to `docs/drafts/VT_ENGINE_SPIKE.md`, and re-measure the bytes-per-row constant
+to `docs/archive/VT_ENGINE_SPIKE.md`, and re-measure the bytes-per-row constant
 the byte ceiling is derived from. A bump that skips the harness re-run is the
 failure this crate exists to prevent.
 

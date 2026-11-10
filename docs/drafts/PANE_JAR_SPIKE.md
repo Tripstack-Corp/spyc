@@ -8,7 +8,7 @@ minimal jar and measures it; it reports when a measurement contradicts a
 verdict there, and never changes the verdict itself.
 **Gates:** `ROADMAP.md` → "The 3.0 horizon: Slow Cooker (durable sessions)".
 That horizon's scope doesn't commit until this report and
-[`VT_ENGINE_SPIKE.md`](VT_ENGINE_SPIKE.md) have both reported.
+[`VT_ENGINE_SPIKE.md`](../archive/VT_ENGINE_SPIKE.md) have both reported.
 **Shape:** stages 1 to 6, each ending in a stop for the owner, with a go or
 no-go after the minimal jar. Only stage 1 reaches `main`; everything else is
 built on a throwaway branch.

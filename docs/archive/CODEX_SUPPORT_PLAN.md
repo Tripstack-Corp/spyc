@@ -1,5 +1,10 @@
 # Codex Support and Session HUD Plan
 
+> **Archived (2026-11-10).** Shipped: the core A1–A6 changes and the B1–B3
+> session HUD. What it left open (fresh-trust onboarding, async-answer events,
+> further approval forms, native manual acceptance) moved to
+> [#1108](https://github.com/Tripstack-Corp/spyc/issues/1108).
+
 **Status:** The core A1–A6 changes and B1–B3 HUD delivery have shipped. Deferred
 native acceptance and remaining A3 onboarding/attention cases stay open.
 Async-question visible attention is implemented with native acceptance pending;
