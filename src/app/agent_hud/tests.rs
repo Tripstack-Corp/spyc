@@ -667,7 +667,8 @@ fn agent_hud_typing_and_paste_reach_the_child_unchanged() {
 }
 
 #[test]
-fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_cancel_owned_drags() {
+#[ignore = "red: a HUD geometry change cancels the drag, and a plain press reaches the agent at once"]
+fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_wait_for_owned_drags() {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     let _lock = crate::mouse_test_lock();
     struct Capture;
@@ -706,20 +707,32 @@ fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_cancel_owned_drag
             KeyModifiers::CONTROL,
         ));
         assert!(app.view.pane_selection_snapshot.is_some());
-        // Config reload and command changes share the same geometry and cancellation.
+        // Config reload and command changes share the same geometry, which
+        // waits for the drag's release (#1098).
         app.state.active_project_mut().config.pane.agent_hud = AgentHudMode::Compact;
-        let hud = paint(&mut app, 100, 32).0.agent_hud.unwrap();
-        assert!(app.view.pane_selection_snapshot.is_none());
+        let held = paint(&mut app, 100, 32).0;
+        assert_eq!(held.pane, Some(pane), "the strip waits for the release");
+        assert!(held.agent_hud.is_none());
+        let mut copied = None;
         for kind in [
             MouseEventKind::Drag(MouseButton::Left),
             MouseEventKind::Up(MouseButton::Left),
         ] {
             let effects = app.handle_mouse(event(kind, pane.x + 8, pane.y, KeyModifiers::NONE));
-            assert!(!effects.iter().any(|e| matches!(
-                e,
-                Effect::SendToPane { .. } | Effect::CopyToClipboard { .. }
-            )));
+            assert!(
+                !effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::SendToPane { .. }))
+            );
+            copied = copied.or_else(|| {
+                effects.into_iter().find_map(|e| match e {
+                    Effect::CopyToClipboard { text, .. } => Some(text),
+                    _ => None,
+                })
+            });
         }
+        assert_eq!(copied.as_deref(), Some("drag this"));
+        let hud = paint(&mut app, 100, 32).0.agent_hud.unwrap();
         for y in hud.y..hud.bottom() {
             for kind in [
                 MouseEventKind::Down(MouseButton::Left),
@@ -738,17 +751,22 @@ fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_cancel_owned_drag
         }
         app.view.chrome_selection = None;
         let child = app.frame_layout(Rect::new(0, 0, 100, 32)).pane.unwrap();
-        let effects = app.handle_mouse(event(
+        let mut sent = Vec::new();
+        for kind in [
             MouseEventKind::Down(MouseButton::Left),
-            child.x + 3,
-            child.y,
-            KeyModifiers::NONE,
-        ));
-        assert!(
-            effects
-                .iter()
-                .any(|e| matches!(e, Effect::SendToPane { .. })),
-            "ordinary child clicks still route to child"
+            MouseEventKind::Up(MouseButton::Left),
+        ] {
+            let effects = app.handle_mouse(event(kind, child.x + 3, child.y, KeyModifiers::NONE));
+            sent.push(
+                effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::SendToPane { .. })),
+            );
+        }
+        assert_eq!(
+            sent,
+            [false, true],
+            "an ordinary click reaches the agent on its release"
         );
     });
 }

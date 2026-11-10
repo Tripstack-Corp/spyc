@@ -207,6 +207,113 @@ fn normal_drag_still_forwards_the_whole_gesture_to_a_mouse_child() {
     });
 }
 
+/// The mouse fixture's child, hosted as a Claude tab.
+fn agent_fixture(dir: &std::path::Path) -> App {
+    let mut app = fixture(dir, true);
+    app.runtime
+        .project_mut()
+        .pane_tabs
+        .as_mut()
+        .expect("a tab")
+        .active_info_mut()
+        .agent_hint = Some(crate::state::sessions::AgentKind::Claude);
+    app
+}
+
+fn sent(effects: &[Effect]) -> Vec<u8> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::SendToPane {
+                input: crate::app::effect::PaneInput::Bytes(bytes),
+                ..
+            } => Some(bytes.as_slice()),
+            _ => None,
+        })
+        .flatten()
+        .copied()
+        .collect()
+}
+
+/// In an agent tab a plain drag is spyc's, as Ctrl+drag is elsewhere: the
+/// child hears none of it, the pane holds the text under the pointer while
+/// its output moves on, release copies what was there at the press, and the
+/// live grid comes back.
+#[test]
+#[ignore = "red: a plain press in an agent tab is forwarded to the child"]
+fn a_plain_drag_in_an_agent_tab_holds_and_copies_the_press_time_text() {
+    let _lock = crate::mouse_test_lock();
+    let _capture = Capture::new();
+    let dir = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = agent_fixture(dir.path());
+        let (pane, _) = render(&mut app);
+        let mut heard = Vec::new();
+        for (kind, col) in [
+            (MouseEventKind::Down(MouseButton::Left), 2),
+            (MouseEventKind::Drag(MouseButton::Left), LAST_COL),
+        ] {
+            heard.extend(sent(&app.handle_mouse(event(
+                pane,
+                kind,
+                col,
+                KeyModifiers::NONE,
+            ))));
+        }
+        repaint(&mut app);
+        assert!(
+            render(&mut app).1.contains(COMMAND),
+            "the held drag shows the text it selects, not the new output"
+        );
+        let release = app.handle_mouse(event(
+            pane,
+            MouseEventKind::Up(MouseButton::Left),
+            LAST_COL,
+            KeyModifiers::NONE,
+        ));
+        heard.extend(sent(&release));
+        assert!(heard.is_empty(), "the child heard the drag: {heard:?}");
+        assert_eq!(copied(&release), Some(COMMAND));
+        assert!(
+            render(&mut app).1.contains("replacement command"),
+            "release resumes the live view"
+        );
+    });
+}
+
+/// A plain click that never moves still reaches an agent tab's child, its
+/// press and its release both, once the release shows it wasn't a drag.
+#[test]
+#[ignore = "red: the press reaches the child at once, before the release decides"]
+fn a_plain_click_in_an_agent_tab_reaches_the_child_on_release() {
+    let _lock = crate::mouse_test_lock();
+    let _capture = Capture::new();
+    let dir = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = agent_fixture(dir.path());
+        let (pane, _) = render(&mut app);
+        let press = app.handle_mouse(event(
+            pane,
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            KeyModifiers::NONE,
+        ));
+        assert!(sent(&press).is_empty(), "the press waits: {press:?}");
+        let release = app.handle_mouse(event(
+            pane,
+            MouseEventKind::Up(MouseButton::Left),
+            2,
+            KeyModifiers::NONE,
+        ));
+        assert_eq!(
+            String::from_utf8(sent(&release)).unwrap(),
+            "\x1b[<0;3;3M\x1b[<0;3;3m",
+            "the click reaches the child whole"
+        );
+        assert!(copied(&release).is_none());
+    });
+}
+
 #[test]
 fn ctrl_click_copies_nothing_and_resumes_the_live_grid() {
     let _lock = crate::mouse_test_lock();
@@ -305,8 +412,11 @@ fn changing_tabs_cancels_the_old_panes_drag() {
     });
 }
 
+/// A change to the pane's rect while a drag is held waits for the release, so
+/// the text under the pointer stays put; the new rect follows it.
 #[test]
-fn changing_pane_geometry_cancels_the_drag() {
+#[ignore = "red: a geometry change cancels the held drag instead of waiting for it"]
+fn changing_pane_geometry_waits_for_the_drag() {
     let _lock = crate::mouse_test_lock();
     let _capture = Capture::new();
     let dir = tempfile::tempdir().unwrap();
@@ -326,14 +436,18 @@ fn changing_pane_geometry_cancels_the_drag() {
             KeyModifiers::CONTROL,
         ));
         app.state.active_project_mut().pane.pane_height_pct = 75;
-        render(&mut app);
+        let (held, row) = render(&mut app);
+        assert_eq!(held, pane, "the pane keeps its rect while the drag is held");
+        assert!(row.contains(COMMAND), "and its text: {row:?}");
         let release = app.handle_mouse(event(
             pane,
             MouseEventKind::Up(MouseButton::Left),
             LAST_COL,
             KeyModifiers::NONE,
         ));
-        assert!(copied(&release).is_none());
+        assert_eq!(copied(&release), Some(COMMAND));
+        let (after, _) = render(&mut app);
+        assert_ne!(after, pane, "the deferred geometry lands on release");
     });
 }
 
