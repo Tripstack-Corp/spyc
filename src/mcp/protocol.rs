@@ -248,6 +248,7 @@ fn report_status_command(
         claude_home: hook["claude_home"]
             .as_str()
             .and_then(|dir| crate::agent::claude_home::from_config_dir(dir.as_ref())),
+        claude_credential: serde_json::from_value(hook["claude_credential"].clone()).ok(),
         hook_event: crate::agent::status_hook::StatusHookEvent::from_value(&hook["hook_event"]),
     })
 }

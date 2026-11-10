@@ -1395,6 +1395,7 @@ fn agent_hud_retries_missing_agy_transcript_on_status_report() {
             note: None,
             session_id: Some(AGY_SESSION.into()),
             claude_home: None,
+            claude_credential: None,
             hook_event: None,
         });
         assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
@@ -1553,6 +1554,7 @@ fn agent_hud_retries_missing_claude_transcript_on_status_report() {
             note: None,
             session_id: Some(SESSION.into()),
             claude_home: None,
+            claude_credential: None,
             hook_event: None,
         });
         assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
@@ -1654,6 +1656,130 @@ fn subagent_result(dir: &Path, id: &str, tool_id: &str) {
             "message": {"content": [{"type": "tool_result", "tool_use_id": tool_id,
                 "content": "private-output"}]}}),
     );
+}
+
+/// Claude Code's account record for organization `org`, beside the history
+/// and identity the strip never reads.
+fn claude_config(org: &str) -> String {
+    json!({"numStartups": 3, "projects": {"/private-project": {"history": []}},
+        "oauthAccount": {"emailAddress": "private@example.com",
+            "organizationName": org, "organizationRole": "user"}})
+    .to_string()
+}
+
+/// The full strip names the organization the tab's Claude Code is logged
+/// into, read from its configuration directory, follows a `/login` to another
+/// and a logout, and never shows the rest of the file.
+#[test]
+fn the_strip_names_the_organization_the_tab_is_logged_into() {
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        let config = home.join(".claude.json");
+        std::fs::write(&config, claude_config("Acme Corp")).unwrap();
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        wait_hud_line(&mut app, &mut ctx, 3, "org Acme Corp");
+
+        // Claude Code replaces the file rather than writing it in place.
+        let replacement = home.join(".claude.json.tmp");
+        std::fs::write(&replacement, claude_config("Beta Labs")).unwrap();
+        std::fs::rename(&replacement, &config).unwrap();
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, "org Beta Labs");
+        assert!(
+            lines.iter().all(|line| !line.contains("private")),
+            "{lines:?}"
+        );
+        app.cmd_agent_hud("info");
+        let dump: Vec<String> = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            dump.iter()
+                .any(|line| line.starts_with("organization") && line.ends_with(": Beta Labs")),
+            "{dump:?}"
+        );
+        assert!(
+            dump.iter().all(|line| !line.contains("private")),
+            "{dump:?}"
+        );
+        app.cmd_agent_hud("full");
+
+        std::fs::write(&config, json!({"numStartups": 4}).to_string()).unwrap();
+        wait_hud_row(&mut app, &mut ctx, 3, "no org once logged out", |row| {
+            row.contains("hooks") && !row.contains("org ")
+        });
+    });
+}
+
+/// A status report from Claude Code's hook that names a credential other
+/// than the saved login puts it in the organization's place on the strip and
+/// in the dump; one naming the login brings the organization back, and a
+/// report that names none leaves the last word standing.
+#[test]
+fn the_strip_names_another_credential_in_place_of_the_organization() {
+    use crate::agent::claude_credential::Credential;
+    let _lock = crate::mouse_test_lock();
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let home = tmp.path().join("claude-home");
+        let main = transcript(&home);
+        append_message(&main, "msg-1", 100);
+        std::fs::write(home.join(".claude.json"), claude_config("Acme Corp")).unwrap();
+        let mut app = claude_app(tmp.path(), &home, "full");
+        let mut ctx = RunCtx::for_test();
+        wait_hud_line(&mut app, &mut ctx, 3, "org Acme Corp");
+
+        let report = |app: &mut App, credential| {
+            let resp = app.execute_mcp_command(crate::mcp_cmd::McpCommand::ReportStatus {
+                pane_id: None,
+                pane: None,
+                status: "working".into(),
+                ttl_ms: None,
+                note: None,
+                session_id: Some(SESSION.into()),
+                claude_home: None,
+                claude_credential: credential,
+                hook_event: None,
+            });
+            assert!(matches!(resp, crate::mcp_cmd::McpResponse::Ok { .. }));
+        };
+        report(&mut app, Some(Credential::ApiKey));
+        let lines = wait_hud_line(&mut app, &mut ctx, 3, "auth api key");
+        assert!(!lines[3].contains("Acme"), "{lines:?}");
+        app.cmd_agent_hud("info");
+        let dump: Vec<String> = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(
+            dump.iter()
+                .any(|line| line == "credential (status hook): api key"),
+            "{dump:?}"
+        );
+        app.cmd_agent_hud("full");
+
+        report(&mut app, None);
+        wait_hud_line(&mut app, &mut ctx, 3, "auth api key");
+        report(&mut app, Some(Credential::Login));
+        wait_hud_line(&mut app, &mut ctx, 3, "org Acme Corp");
+    });
 }
 
 /// A running subagent shows on the full HUD's `agents` row as its type and the

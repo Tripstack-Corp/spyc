@@ -261,7 +261,11 @@ has reported: completed over total, with how many are in progress. Its `agents`
 row ends in the subagents it runs: each one's type and the tool it runs now,
 `Explore · Grep`, or for a minute after it ends `done` or `failed`, as many as
 fit, at most four, and how many more (`+2 more`); the compact strip counts the
-ones running, `subagents 2`. While an
+ones running, `subagents 2`. After its health cells, the full strip names the
+organization the tab's Claude Code is logged into, `org Acme Corp`, and follows
+a `/login` to another; when the tab sends its requests with another credential,
+an approved `ANTHROPIC_API_KEY` or a cloud provider, it names that instead,
+`auth api key`. While an
 Antigravity (`agy`) tab is `working` and has recorded reasoning in this turn,
 its fourth row reads `thinking` and the reasoning's latest line, cut from the
 left with `…` so the newest words stay in view, and **`^a t`** pages the

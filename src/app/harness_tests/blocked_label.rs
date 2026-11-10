@@ -38,6 +38,7 @@ fn hook_to(app: &mut App, pane: Option<usize>, status: &str, payload: &serde_jso
         note: None,
         session_id: Some("session-1".into()),
         claude_home: None,
+        claude_credential: None,
         hook_event: StatusHookEvent::from_payload(&kept),
     });
     assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");
@@ -308,6 +309,7 @@ fn the_agents_own_note_stays_out_of_the_ping() {
             note: Some("private-note".into()),
             session_id: None,
             claude_home: None,
+            claude_credential: None,
             hook_event: None,
         });
         assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");
@@ -521,6 +523,7 @@ fn a_forms_label_goes_once_it_is_answered() {
             note: None,
             session_id: None,
             claude_home: None,
+            claude_credential: None,
             hook_event: None,
         });
         assert!(matches!(response, McpResponse::Ok { .. }), "{response:?}");

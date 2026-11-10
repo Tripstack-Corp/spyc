@@ -60,6 +60,7 @@ fn forget_agent(info: &mut TabInfo) {
     info.unseen_done = None;
     info.live_session_id = None;
     info.claude_statusline = None;
+    info.claude_credential = None;
     info.codex_session_id = None;
     info.codex_home = None;
     info.claude_home = None;

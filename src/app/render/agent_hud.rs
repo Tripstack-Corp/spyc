@@ -166,6 +166,7 @@ fn reported<'a>(
     Reported {
         context_percent,
         plan,
+        credential: info.claude_credential,
     }
 }
 

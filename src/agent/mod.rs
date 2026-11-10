@@ -15,6 +15,7 @@
 pub mod agy_approval;
 pub mod agy_metrics;
 pub mod chrome;
+pub mod claude_credential;
 pub mod claude_home;
 pub mod claude_metrics;
 mod claude_profile;

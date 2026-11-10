@@ -197,7 +197,10 @@ home, so the HUD, `^a v`, `^a g`, saves and `-r` read the one its claude runs
 with, a wrapper's included. Until its first report, a tab reads the
 `CLAUDE_CONFIG_DIR` its pane shell exported at launch, else spyc's own (its
 `CLAUDE_CONFIG_DIR`, else `~/.claude`). A save records a tab's own home, so `-r`
-resumes the conversation from it.
+resumes the conversation from it. A Claude Code hook, which claude runs with
+`CLAUDECODE=1`, also names the credential claude sends requests with as
+`claude_credential` (`login`, `api-key`, `bedrock`, …), decided in claude's own
+environment by `src/agent/claude_credential.rs`; no key leaves the reporter.
 The reporter streams the complete hook JSON and retains only a fixed set of
 root metadata fields; a large patch, heredoc or answer does not erase later ids.
 The 8 KiB limit applies to normalized metadata, not raw stdin. String capture is

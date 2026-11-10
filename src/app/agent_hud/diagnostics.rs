@@ -299,6 +299,10 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
         "subagent calls (Agent tool): {}; background calls (run_in_background): {}",
         s.subagent_calls, s.background_calls
     ));
+    out.push(format!(
+        "organization (oauthAccount in Claude Code's .claude.json): {}",
+        s.organization.as_deref().unwrap_or("-- (not logged in)")
+    ));
     out.extend(claude_tool_lines(s, tail_only));
     out
 }
@@ -432,6 +436,13 @@ fn agent_info_lines(
                     .agent_hud
                     .claude_home
                     .as_ref()
+            )
+        ));
+        out.push(format!(
+            "credential (status hook): {}",
+            info.claude_credential.map_or(
+                "-- (no hook report yet; the saved login is assumed)",
+                crate::agent::claude_credential::Credential::label
             )
         ));
         out.extend(statusline_lines(tabs, info));
