@@ -185,7 +185,9 @@ Stop with a recommendation between the two shapes.
 ## Stage 3: the jar upgrades itself
 
 R33: the jar has the new binary validate a versioned handover blob, `exec`s it
-only if it accepts, and keeps its PID, child, PTY and connections. And an old
+only if it accepts, and keeps its PID, child, PTY and connections. The blob's
+validator gets a fuzz target before this stage closes: a malformed blob that
+gets through takes over a live PTY. And an old
 jar runs under a new spyc. If this works, most of `JAR_PROTOCOL.md`'s
 "v1 or later" verdicts can become "later".
 
@@ -252,6 +254,8 @@ they're where a jar leads what herdr ships today.
   marked unverified.
 - A measurement that contradicts a verdict in `JAR_PROTOCOL.md` is reported,
   and the stage stops; the verdict is the owner's to change.
+- Every parser a stage adds has a fuzz target before the stage closes
+  (`JAR_PROTOCOL.md` → "Fuzzing").
 
 ## Out of scope
 
@@ -261,9 +265,43 @@ ruled out.
 
 ## Findings
 
-Not run yet. Each stage adds, here: a results table per question, what failed,
-what wasn't tested, and finally a recommended v1 requirement list split into
-freeze now, capability later, and never.
+Each stage adds, here: a results table per question, what failed, what wasn't
+tested, and finally a recommended v1 requirement list split into freeze now,
+capability later, and never.
+
+### Stage 0b: dtach as a stand-in jar
+
+[dtach](https://dtach.sourceforge.net/) 0.9 holds a program and its PTY and
+relays bytes without parsing, which is the dumb half of a jar, so it tested the
+riskiest assumptions before any jar code existed. It was a stand-in only:
+spyc will neither depend on it nor borrow from it (it is GPL-2.0-or-later).
+
+**Setup:** macOS, spyc 2.4.0 (`46146bf4`, the installed release), Claude Code
+from Homebrew in full-screen mode, dtach 0.9 from Homebrew. A Python harness on
+a pty played the terminal: it answered DA1, DSR, CPR, the kitty keyboard query,
+OSC 10/11, XTVERSION, DECRQM and window-size queries (or deliberately didn't),
+tracked the modes each program set, and rendered the screen with `pyte`. spyc
+ran with an isolated `HOME`, and Claude with its own `XDG_STATE_HOME`, so
+neither could reach the user's running spyc.
+
+| | Experiment | Result | What it settles |
+|---|---|---|---|
+| 1 | Keystroke echo through relays: a raw echo program, 400 single-byte round trips | Direct 9.3 µs median, 45 µs p99. One dtach hop 19.9 / 49 µs. Two hops 31 / 76 µs. | Q1: relaying is effectively free against a 16 ms frame. R8a (fd passing) becomes "never". |
+| 2 | Detach spyc | dtach prints `[detached]` and stops. The terminal is left on the alternate screen, with mouse reporting (`1000`, `1002`, `1006`) and bracketed paste on. | An attach client must send a fixed reset on detach (shape 2, point 4). |
+| 3 | Reattach spyc at a new size (30×100, a terminal without kitty keyboard support) | spyc repainted at the new size, but set none of its modes on the new terminal and sent no queries. | Mouse and paste are dead after an attach, and spyc draws on the main screen, until spyc is told it was attached (shape 2, point 2). |
+| 4 | Reattach spyc at the same size | `-r winch`: blank, nothing redrawn. `-r ctrl_l`: 7 rows drawn, possibly only ratatui's diff. | A `SIGWINCH` with no size change repaints nothing, so the attach signal must be an explicit event. |
+| 5 | Start spyc with no terminal (`dtach -n`), attach 6 s later | No hang on its unanswered startup queries. It drew on the first attach and handled keys. It never set its modes on that terminal, and its probes went unanswered, so it ran on default capabilities. | spyc doesn't block on a terminal's reply (shape 2, point 3), but capabilities must be probed on every attach. |
+| 6 | Claude in dtach, asked to print 1 to 400, detached at 63 | Claude kept running and finished the turn ("done") while nothing was attached. | An agent outlives its terminal, and its work goes on. |
+| 7 | Reattach Claude | Same size: blank. A changed size: a full repaint (371 to 400 and the prompt) with its mouse modes set again, though not the alternate screen. `-r ctrl_l` repainted it too. | `drop`'s redraw has to change the PTY's size and change it back. |
+
+**Not tested in stage 0b:**
+- macOS identity: Keychain, pasteboard and `~/Documents` access after the
+  launching terminal quits. It needs Terminal.app launched and quit, and may
+  raise a permission dialog, so it waits for the owner.
+- Claude in inline mode.
+- Leaked kitty keyboard flags: neither program pushed flags against the harness.
+- MCP after a spyc restart, already known from the code: the proxy keeps the old
+  PID's socket.
 
 ## Sources
 
