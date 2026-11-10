@@ -7,7 +7,9 @@
 //! Claiming is what diverts subsequent drags away from the pane's child, so a
 //! press that fails to anchor must not claim.
 
-use crossterm::event::MouseEvent;
+use std::time::Instant;
+
+use crossterm::event::{MouseButton, MouseEvent};
 use ratatui::layout::Rect;
 
 use super::super::Effect;
@@ -327,22 +329,19 @@ impl super::super::App {
     }
 
     /// Anchor a pane text selection where the pointer pressed.
-    pub(super) fn begin_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+    ///
+    /// With `click`, the press is kept: a release where it began hands it to the
+    /// child as a click ([`super::route::MouseSink::FocusAndHoldPress`]).
+    pub(super) fn begin_pane_selection(&mut self, ev: MouseEvent, click: bool) -> Vec<Effect> {
         let Some(cell) = self.pane_cell_at(ev) else {
             return Vec::new();
         };
         let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
-        let area = self
-            .frame_layout(Rect::new(
-                0,
-                0,
-                self.view.term_size.0,
-                self.view.term_size.1,
-            ))
-            .pane;
-        let Some(area) = area else {
+        let frame = Rect::new(0, 0, self.view.term_size.0, self.view.term_size.1);
+        let layout = self.frame_layout(frame);
+        let Some(area) = layout.pane else {
             return Vec::new();
         };
         let Some(screen) = tabs
@@ -361,6 +360,10 @@ impl super::super::App {
             term_size: self.view.term_size,
             area,
             screen,
+            frame,
+            layout,
+            click: click.then_some(ev),
+            last_event: std::time::Instant::now(),
         });
         self.view.pane_selection = Some((cell, cell));
         self.view.mouse_selection = Some(MouseDragTarget::Pane);
@@ -369,6 +372,9 @@ impl super::super::App {
 
     /// Extend it to the pointer.
     pub(super) fn extend_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        if let Some(held) = self.view.pane_selection_snapshot.as_mut() {
+            held.last_event = std::time::Instant::now();
+        }
         if let Some(cell) = self.pane_cell_at(ev)
             && let Some((_, focus)) = self.view.pane_selection.as_mut()
         {
@@ -380,7 +386,8 @@ impl super::super::App {
     /// Copy the selected grid text, keeping the highlight up.
     ///
     /// A press that never moved is a click, not a selection: the highlight is
-    /// dropped and the clipboard left alone, matching the pager. Ordering happens
+    /// dropped and the clipboard left alone, matching the pager, and a kept
+    /// press reaches the child with this release. Ordering happens
     /// here (`(row, col)` pairs, not per-axis) so a backwards drag copies the same
     /// text as the forward one.
     pub(super) fn finish_pane_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
@@ -390,18 +397,24 @@ impl super::super::App {
             self.clear_pane_selection();
             return Vec::new();
         }
-        self.view.mouse_selection = None;
+        // Hit-tested while the press-time layout still holds.
         if let Some(cell) = self.pane_cell_at(ev)
             && let Some((_, focus)) = self.view.pane_selection.as_mut()
         {
             *focus = cell;
         }
+        self.view.mouse_selection = None;
         let Some((a, b)) = self.view.pane_selection else {
             return Vec::new();
         };
         if a == b {
+            let click = self
+                .view
+                .pane_selection_snapshot
+                .as_ref()
+                .and_then(|held| held.click);
             self.clear_pane_selection();
-            return Vec::new();
+            return click.map_or_else(Vec::new, |press| self.click_through(press, ev));
         }
         let (start, end) = if a.0 < b.0 || (a.0 == b.0 && a.1 <= b.1) {
             (a, b)
@@ -429,6 +442,61 @@ impl super::super::App {
             text,
             ok: super::super::effect::ClipMsg::PaneLines,
         }]
+    }
+
+    /// Hand a kept press and its release to the child, as the click they were.
+    fn click_through(&mut self, press: MouseEvent, release: MouseEvent) -> Vec<Effect> {
+        let frame = Rect::new(0, 0, self.view.term_size.0, self.view.term_size.1);
+        let layout = self.frame_layout(frame);
+        let mut effects = self.forward_to_child(press, &layout);
+        effects.extend(self.forward_release(release, MouseButton::Left, frame));
+        effects
+    }
+
+    /// The layout a live pane drag was pressed in, for `frame`: whatever would
+    /// move or resize the pane waits for the release, so the text under the
+    /// pointer holds still (#1098). A resized terminal or another tab in front
+    /// ends the hold, and the drag with it ([`Self::pane_drag_screen`]).
+    pub(in crate::app) fn held_drag_layout(&self, frame: Rect) -> Option<crate::app::FrameLayout> {
+        if self.view.mouse_selection != Some(MouseDragTarget::Pane) {
+            return None;
+        }
+        let held = self.view.pane_selection_snapshot.as_ref()?;
+        let tabs = self.runtime.project().pane_tabs.as_ref()?;
+        (held.tab_id == tabs.active_info().id && held.frame == frame).then_some(held.layout)
+    }
+
+    /// Drop a live pane drag that has heard no mouse event for
+    /// [`super::HELD_DRAG_LIMIT`] by `now`. Returns whether it dropped one, and
+    /// else when to look again.
+    pub(in crate::app) fn expire_held_drag(&mut self, now: Instant) -> (bool, Option<Instant>) {
+        if self.view.mouse_selection != Some(MouseDragTarget::Pane) {
+            return (false, None);
+        }
+        let Some(held) = self.view.pane_selection_snapshot.as_ref() else {
+            return (false, None);
+        };
+        let due = held.last_event + super::HELD_DRAG_LIMIT;
+        if now < due {
+            return (false, Some(due));
+        }
+        self.clear_pane_selection();
+        (true, None)
+    }
+
+    /// [`Self::expire_held_drag`] on the loop's clock, arming its wake.
+    pub(in crate::app) fn settle_held_drag(
+        &mut self,
+        now: Instant,
+        ctx: &mut crate::app::run::RunCtx,
+    ) -> bool {
+        use crate::app::scheduler::Deadline;
+        let (dropped, due) = self.expire_held_drag(now);
+        match due {
+            Some(due) => ctx.scheduler.arm(Deadline::HeldDrag, due),
+            None => ctx.scheduler.disarm(Deadline::HeldDrag),
+        }
+        dropped
     }
 
     /// Retire the grid and its gesture together so a late release cannot copy.

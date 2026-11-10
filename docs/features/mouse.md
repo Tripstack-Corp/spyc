@@ -141,13 +141,15 @@ takes, or keeps the hints for good, or turns them off
 
 ## Selecting and copying
 
-- **Drag in a pane whose child ignores the mouse to select its text**; release
-  copies it. **Ctrl+drag selects through spyc in any live pane**, including
+- **Drag in an agent tab, or in a pane whose child ignores the mouse, to
+  select its text**; release copies it. The text stays put while you drag,
+  even with the agent streaming, and a click there still reaches the agent.
+  **Ctrl+drag selects through spyc in any live pane**, including
   Codex's queued questions and other surfaces whose child cannot select text.
   Hold Ctrl when pressing; spyc owns the whole gesture even if you release Ctrl
   first. The pane holds still while you drag, with its program running behind
   it, and catches up when you release and the text is copied. An ordinary drag
-  in a mouse-aware child keeps reaching the child. The highlight stays only
+  in any other mouse-aware child (vim, htop) keeps reaching the child. The highlight stays only
   while the pane still shows what you copied; new output or input clears it.
   Ctrl+click behaviour and host-terminal forwarding preferences are documented
   in [the selection caveats](../config/mouse.md#selecting-text).

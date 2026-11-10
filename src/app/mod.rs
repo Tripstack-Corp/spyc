@@ -60,6 +60,7 @@ const RESTORE_RESUME_VERIFY_TAIL: usize = 15;
 /// `pub` so the `pub fn compute_layout` (now in the `render` child
 /// module) doesn't expose a more-private return type; fields stay
 /// private — only `app` and its descendants read them.
+#[derive(Clone, Copy)]
 pub struct FrameLayout {
     status: ratatui::layout::Rect,
     list: ratatui::layout::Rect,

@@ -240,7 +240,6 @@ fn sent(effects: &[Effect]) -> Vec<u8> {
 /// its output moves on, release copies what was there at the press, and the
 /// live grid comes back.
 #[test]
-#[ignore = "red: a plain press in an agent tab is forwarded to the child"]
 fn a_plain_drag_in_an_agent_tab_holds_and_copies_the_press_time_text() {
     let _lock = crate::mouse_test_lock();
     let _capture = Capture::new();
@@ -284,7 +283,6 @@ fn a_plain_drag_in_an_agent_tab_holds_and_copies_the_press_time_text() {
 /// A plain click that never moves still reaches an agent tab's child, its
 /// press and its release both, once the release shows it wasn't a drag.
 #[test]
-#[ignore = "red: the press reaches the child at once, before the release decides"]
 fn a_plain_click_in_an_agent_tab_reaches_the_child_on_release() {
     let _lock = crate::mouse_test_lock();
     let _capture = Capture::new();
@@ -310,6 +308,43 @@ fn a_plain_click_in_an_agent_tab_reaches_the_child_on_release() {
             "\x1b[<0;3;3M\x1b[<0;3;3m",
             "the click reaches the child whole"
         );
+        assert!(copied(&release).is_none());
+    });
+}
+
+/// A live drag that hears nothing for `HELD_DRAG_LIMIT`, its release lost,
+/// lets the pane go: the live grid comes back and a late release copies
+/// nothing. Until then the hold stands, and the loop is told when to look.
+#[test]
+fn a_held_drag_with_no_release_lets_go_after_its_limit() {
+    let _lock = crate::mouse_test_lock();
+    let _capture = Capture::new();
+    let dir = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = agent_fixture(dir.path());
+        let (pane, _) = render(&mut app);
+        let start = Instant::now();
+        for (kind, col) in [
+            (MouseEventKind::Down(MouseButton::Left), 2),
+            (MouseEventKind::Drag(MouseButton::Left), LAST_COL),
+        ] {
+            app.handle_mouse(event(pane, kind, col, KeyModifiers::NONE));
+        }
+        repaint(&mut app);
+        let limit = super::HELD_DRAG_LIMIT;
+        let (dropped, due) = app.expire_held_drag(start);
+        assert!(!dropped);
+        assert!(due.is_some_and(|due| due >= start + limit), "{due:?}");
+        assert!(render(&mut app).1.contains(COMMAND), "still held");
+        let (dropped, due) = app.expire_held_drag(Instant::now() + limit);
+        assert!(dropped && due.is_none());
+        assert!(render(&mut app).1.contains("replacement command"));
+        let release = app.handle_mouse(event(
+            pane,
+            MouseEventKind::Up(MouseButton::Left),
+            LAST_COL,
+            KeyModifiers::NONE,
+        ));
         assert!(copied(&release).is_none());
     });
 }
@@ -415,7 +450,6 @@ fn changing_tabs_cancels_the_old_panes_drag() {
 /// A change to the pane's rect while a drag is held waits for the release, so
 /// the text under the pointer stays put; the new rect follows it.
 #[test]
-#[ignore = "red: a geometry change cancels the held drag instead of waiting for it"]
 fn changing_pane_geometry_waits_for_the_drag() {
     let _lock = crate::mouse_test_lock();
     let _capture = Capture::new();

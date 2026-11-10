@@ -384,7 +384,7 @@ focus.
 | Left click on the status bar's agent | Focus the pane |
 | Left click on the background tasks' tags (divider), or `bg:` (status bar) | Open the task viewer, as `gB` does |
 | Left click on a prompt's `y` or `n` (`[y/N]`), or a consent's `[y]` or `[n]` | Answer it, as the key does |
-| Left drag | Select text: pager content, a non-mouse pane's held grid, any chrome row, or file-list rows. Release copies |
+| Left drag | Select text: pager content, an agent tab's or a non-mouse pane's held grid, any chrome row, or file-list rows. Release copies |
 | `Ctrl` + left drag (pane) | Select through spyc even when the child uses mouse reporting. The grid stays fixed during the drag; release copies it and resumes live output. The terminal must forward Ctrl+left events; see [selection caveats](config/mouse.md#selecting-text) |
 | `Ctrl` + left click (pane) | See [selection caveats](config/mouse.md#selecting-text) for click behaviour |
 | Left click on a folder in the status bar's path | Go up to it, as `u` does that many times |

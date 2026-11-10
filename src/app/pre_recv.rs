@@ -270,6 +270,9 @@ impl App {
         if self.settle_visual_bell(now_pre, ctx) {
             ctx.draw.mark(3);
         }
+        if self.settle_held_drag(now_pre, ctx) {
+            ctx.draw.mark(3);
+        }
 
         // Lua runaway watchdog: while a Lua job is in-flight + un-prompted,
         // arm `LuaRunaway` at its soft threshold and raise the interactive

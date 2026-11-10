@@ -96,7 +96,9 @@ does. Section 3 is what does work.
 
 Ordinary text selection follows the same fork: a child that asked for mouse
 reporting owns the drag, and a child that didn't gets **spyc's** selection over the
-pane grid. **Ctrl+drag** explicitly gives spyc the gesture in either case, so text
+pane grid. A hosted agent is the exception (`AgentProfile::spyc_selects_drags`):
+its plain drag is spyc's, so streaming output can't move the text being selected,
+and a press released where it began reaches the agent as a click. **Ctrl+drag** explicitly gives spyc the gesture in either case, so text
 in Codex's queued-question view can be copied even when Codex cannot select it.
 Hold Ctrl on the press; releasing Ctrl mid-drag does not hand it back to the child.
 spyc holds the visible grid while you drag, then copies from it on release and
@@ -615,8 +617,9 @@ For a local acceptance round:
    rows before hiding; every visible strip leaves six child rows. Check Unicode
    repository/branch labels and monochrome attention.
 3. Type, paste, use the native question/composer and click in the child. HUD rows
-   never send mouse input to it. Start a Ctrl+drag and change the strip or resize:
-   the held grid cancels and its drag/release tail stays consumed.
+   never send mouse input to it. Start a drag and change the strip: the pane keeps
+   its rect until the release. Resize the terminal instead: the held grid cancels
+   and its drag/release tail stays consumed.
 4. Hide/close the pane, change to a different agent or open a fullscreen image.
    Collection stops; returning creates a fresh generation. `:agent hud info`
    reports the pinned home/thread, availability and per-source freshness. A

@@ -97,6 +97,9 @@ pub enum Deadline {
     /// stopping or exiting, a moment after its output. Armed only while a look
     /// is pending, so idle stays 0 dps. PRE-recv (`settle_shell_agents`).
     ShellAgentLook,
+    /// #1098: wake `HELD_DRAG_LIMIT` after a live pane drag's last mouse event
+    /// to drop it. Armed only while one is live. PRE-recv (`settle_held_drag`).
+    HeldDrag,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

@@ -104,9 +104,10 @@ Capture takes the terminal's own click-drag selection away. Where that leaves yo
 
 | | |
 |---|---|
-| **Inside a mouse-aware child** (claude, Codex, vim, htop) | An ordinary drag reaches the child. **Ctrl+drag** selects through spyc, including child surfaces that cannot select text. |
+| **Inside an agent tab** (claude, Codex, agy) | A drag selects through spyc, holding the pane still while the agent keeps streaming. A click that doesn't move still reaches the agent, when you release it. |
+| **Inside another mouse-aware child** (vim, htop) | An ordinary drag reaches the child. **Ctrl+drag** selects through spyc, including child surfaces that cannot select text. |
 | **spyc surfaces and non-mouse panes** | Drag normally; release copies the selected text or file names. Hold Ctrl in the file list to copy absolute paths. |
-| **Host terminal selection** | Hold **Shift** (Option/Fn on iTerm2), or use `:mouse off`. |
+| **Host terminal selection** | Hold **Shift** (Option/Fn on iTerm2), or use `:mouse off`. spyc never sees this drag, so it can't hold the pane still for it: streaming output can move the text under it. |
 | **Copying a diagnostic** | `:activity dump`, `:grep`, `:why-git` etc. open a pager — **`y`** yanks the source to the clipboard, **`Y`** the visible text. No mouse needed. |
 
 spyc holds a pane's visible grid during its own drag, while the child keeps running.
@@ -114,8 +115,13 @@ Release copies from that held grid and resumes live output. Hold Ctrl when press
 to claim a mouse-aware pane; the drag remains spyc's if Ctrl is released first.
 A Ctrl+click without movement leaves the clipboard alone and is consumed by spyc:
 the child receives neither press nor release. Child Ctrl+click actions, such as
-Vim's tag jump, are unavailable through this gesture while capture is on. A key,
-paste, wheel gesture, tab switch or layout change cancels the held pane drag.
+Vim's tag jump, are unavailable through this gesture while capture is on.
+
+While the drag lasts, nothing moves the pane: the agent HUD strip, a flash, the
+divider and the pane's size wait for the release, then catch up. A key, paste,
+wheel gesture, tab switch or terminal resize cancels the held pane drag, and so
+do 30 seconds with no mouse event at all, so a release your terminal never
+reported (you switched windows mid-drag) can't leave the pane frozen.
 Turning mouse capture off also cancels it.
 
 The terminal must report Ctrl+left mouse events to spyc. In iTerm2, enable
