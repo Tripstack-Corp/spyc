@@ -58,6 +58,13 @@ The protocol spec, with exact byte fixtures, is written from what stages 2,
   ([below](#how-spyc-outlives-its-terminal)).
 - **One program per jar.** A jar is born with its program and ends with it.
   Restarting a program, or running several, is spyc's business.
+- **A jar is local and same-user, forever.** It holds a PTY, and writing to a
+  PTY is running commands as its user, so it is the last thing that should
+  face another user or a network. Sharing with anyone else goes through a
+  separate gateway that is a client of the jars ([Sharing](#sharing)).
+- **The jar ships inside spyc, not as a tool of its own** (decision C). Its
+  protocol is private: versioned, with no stability promise to anything but
+  spyc.
 
 ## Use cases
 
@@ -77,6 +84,8 @@ The protocol spec, with exact byte fixtures, is written from what stages 2,
 | U12 | **Tasks and captures** survive too: a pane demoted to a task (`demote_pane_to_task`), a `!` capture still running | Everything `PtyHost` backs today runs in a jar ([below](#tasks-and-captures)). |
 | U13 | **Move a project between spycs:** detach one project from a spyc and attach it to another, in another terminal or over SSH | Every jar of the project changes owner, and its agents' MCP connections follow to the new spyc ([below](#projects)). |
 | U14 | **Fork a project:** a copy of its working set, each agent's conversation forked, perhaps into a new worktree | Nothing new: forking spawns new jars ([below](#projects)). |
+| U15 | **Share with another person,** another user on this machine or someone elsewhere: read-only by default, write only on an explicit, warned, expiring grant | Nothing: the gateway does it, as an ordinary client of the jars ([Sharing](#sharing)). |
+| U16 | **spyc in a browser,** from a laptop or a phone | Nothing beyond shape 2: the browser is one more attach client, through the gateway ([Sharing](#sharing)). |
 
 ## Requirements
 
@@ -101,7 +110,7 @@ without a new version. **v1 or later** depends on R33 and on decision D.
 |---|---|---|---|---|
 | R7 | Set the size in rows and columns **and pixels** | v1 | Kitty graphics and sixel need the cell size. spyc passes zero pixels today, but a field added later would break the freeze. | all |
 | R8 | Relay every byte over the connection | v1, mandatory | A forwarded socket can't carry a file descriptor, so relaying is the one path that works everywhere. | all |
-| R8a | Hand the PTY master's file descriptor to a local owner | later, optional | Only if the stage 2 latency measurement says the relay costs too much. | U1 |
+| R8a | Hand the PTY master's file descriptor to a local owner | never | Relaying costs about 10 µs a hop at the median and under 80 µs at p99 for two hops (`PANE_JAR_SPIKE.md`, stage 0b), against 16 ms for a frame. Not worth a second path. | U1 |
 
 ### The event log
 
@@ -182,7 +191,8 @@ in the output.
 
 Parsing terminal output. Answering terminal queries. Knowing about agents,
 hooks or MCP. Drawing anything. Reading a config file. Listening on the
-network (SSH does that). Logging output by default.
+network (SSH does that). Accepting a connection from another user. Logging
+output by default.
 
 ## Where the jar keeps its state
 
@@ -213,7 +223,7 @@ only follows it. `drop` is v1; `block` and `spill` are later (R12b).
 
 | Mode | When the ring is full | When an owner returns | For |
 |---|---|---|---|
-| **`drop`** (the default) | The program runs on at full speed. The jar discards the oldest events and marks the gap. | spyc loads the snapshot, sees the gap, and makes the program repaint by nudging the PTY's size (`SIGWINCH`). A full-screen program such as Claude Code redraws itself. | Agents, and anything whose durable record isn't the screen. |
+| **`drop`** (the default) | The program runs on at full speed. The jar discards the oldest events and marks the gap. | spyc loads the snapshot, sees the gap, and makes the program repaint by changing the PTY's size by a row and back. A `SIGWINCH` with no size change repaints nothing: neither Claude Code nor spyc redrew on one (stage 0b). A full-screen program such as Claude Code redraws itself on a real change. | Agents, and anything whose durable record isn't the screen. |
 | **`block`** | The jar stops reading the PTY; the program waits on its next write. Nothing is lost. | Everything replays; no redraw needed. | Panes where every byte matters more than progress while you're away. |
 | **`spill`** | The ring overflows into a file in the jar's `0700` directory, removed when the jar ends. | Everything replays from the ring and the file. | A log you want in full, knowing the file holds whatever the program printed. |
 
@@ -263,12 +273,13 @@ What shape 2 has to get right:
    PID, same PTY, the attached client untouched. The Model is rebuilt from the
    manifest and spyc reconnects to its pane jars. The manifest audit still
    matters, once per upgrade rather than once per attach.
-2. **Telling spyc it was attached.** dtach's `-r` redraw methods (`none`,
-   `ctrl_l`, `winch`) show the minimum: a spawn option to send `SIGWINCH` on
-   attach covers the repaint with no new message. A `SIGWINCH` can't tell a
-   resize from a new terminal, though, and only a new terminal needs its
-   capabilities probed again, which is where an explicit attach event earns its
-   place.
+2. **Telling spyc it was attached needs an explicit event.** dtach's `-r`
+   redraw methods (`none`, `ctrl_l`, `winch`) looked like the minimum, but
+   stage 0b measured otherwise: reattached at the same size, spyc redrew
+   nothing on `SIGWINCH`, and at any size it set none of its modes again and
+   sent no queries. Only a new terminal needs probing, and only spyc knows
+   what to set, so the attach event tells spyc to set its modes, probe the
+   terminal and repaint in full.
 3. **spyc's own terminal queries while nobody is attached.** Nothing answers
    them. spyc has history here: a cursor-position query over SSH crashed it,
    which is why it never calls ratatui's `Terminal::clear()`. Shape 2 needs an
@@ -293,7 +304,8 @@ What shape 2 asks of the protocol, **open until stage 2b reports:**
 - **Raw input from a single writer:** a relay can't split bytes into whole keys
   (R14) or tell a terminal's replies from keystrokes (R15) without parsing, so a
   single writer may send unframed bytes.
-- **An attach signal or event the jar's own program can see** (point 2).
+- **An attach event the jar's own program can see** (point 2). A signal alone
+  isn't enough.
 
 ## Projects
 
@@ -322,6 +334,69 @@ forks one today (`--fork-session` for Claude, `codex fork` for Codex), perhaps
 into a new worktree to try a second approach side by side. A running process
 can't be copied, so a fork spawns new jars and asks nothing new of them. It is
 spyc's business entirely, which keeps the jar from learning what a project is.
+
+## Sharing
+
+Everything that reaches beyond one user on one machine goes through a
+**gateway**: a separate process that is an ordinary client of the jars (of
+spyc's own jar in shape 2, or of a single pane's jar) and terminates the other
+side's authentication. A gateway that crashes or is compromised can do no
+more than its grants allow, and it can't take the jars down with it.
+
+**Grants.**
+
+- **Read-only by default.** Watching an agent, or the whole spyc, is the common
+  case (U6, U15).
+- **Write takes an explicit confirmation that says what it means,** in words
+  like: "They can type into this pane: run shell commands as you, and approve
+  this agent's tool calls." It is never a default, never inherited, and never
+  implied by read access.
+- **Every write grant expires** and can be revoked at once. Every grant, and
+  every write made under one, is logged.
+- **A grant names its scope:** one pane, one project, or the whole spyc.
+
+**Transports.**
+
+- **A terminal user elsewhere: SSH,** as the decision log already records
+  ("Remote support, when it comes, rides SSH rather than a custom protocol, so
+  SSH authenticates the client"). Someone who connects over SSH as you is you;
+  someone given a grant connects as themselves, through the gateway.
+- **A browser: WebSocket over TLS,** carrying the jar protocol's own frames
+  (decision F). It adds a transport, not a protocol.
+- **gRPC was considered and set aside.** Browsers can't speak it without a
+  grpc-web proxy; in Rust it means `tonic` on `tokio`, an async runtime the
+  house style rules out; and it is a large, fast-moving stack under a protocol
+  meant to change rarely.
+
+**The web viewer comes almost free with shape 2.** In shape 2 spyc's whole UI is
+the output of its own jar, so a browser is one more attach client rendering a
+terminal stream, with no web UI to write. It can use the engine spyc already
+uses: [ghostty-web](https://github.com/coder/ghostty-web) compiles Ghostty's VT
+parser to WASM (MIT, about 400 KB, a drop-in for xterm.js), and Restty and
+Vercel's wterm use libghostty-vt the same way. A read-only view on a phone is
+the cheapest first version. Open, and on the browser's side, not the jar's:
+inline images (kitty graphics), the clipboard through OSC 52, and latency over
+a real network.
+
+## Fuzzing
+
+Agents are already a same-user adversary, through prompt injection, and a
+gateway brings untrusted input closer still. Every parser is fuzzed before the
+protocol freezes:
+
+- **The frame parser,** on the jar's side and on spyc's.
+- **The `hello`** and capability negotiation.
+- **The handover blob a new jar binary validates before the jar `exec`s it**
+  (R33). The most dangerous parser in the design: a malformed blob that gets
+  through takes over a live PTY.
+- **The gateway's grant and authentication handling,** once it exists.
+- **Sequences across the roles,** as property tests: no sequence lets a reader
+  type, takes a lease without the token, splits a key frame, or answers a
+  replayed query.
+
+The protocol lives in its own crate under `#![forbid(unsafe_code)]`, its fuzz
+targets run in CI alongside spyc's existing ones, and spyc being public makes
+OSS-Fuzz an option later.
 
 ## Who may connect
 
@@ -371,6 +446,10 @@ an agent runs in a sandbox (Claude Code's, Codex's seatbelt profile), denying
 it the runtime directory is the stronger mitigation, and the spyc skill can say
 so.
 
+**Other users are outside the jar's model.** The jar refuses any peer that
+isn't its own user (R26), whatever token it holds. Another person reaches a
+jar only through a gateway grant ([Sharing](#sharing)).
+
 **Open: what the MCP proxy presents.** R30a has a pane's proxy, which runs
 inside the agent's own process tree, ask its jar where its owner is. Anything
 the proxy holds, the agent can read. So the lookup should need a credential
@@ -411,8 +490,12 @@ Open unless marked decided:
   decided by stage 2b. A separate MCP daemon was considered and rejected: the
   MCP tools are a view onto the Model, and splitting the Model in two would
   need a protocol between the halves.
-- **C. Is U10 in scope?** Jars started with no spyc make the protocol a public
-  interface.
+- **C. Decided: no standalone tool.** dtach, abduco, shpool and zmx already
+  keep a shell alive; this jar earns its place through spyc (snapshots, the
+  owner role, MCP routing, project moves). It is built in spyc's repository as
+  its own crate and binary and shipped with spyc. Its protocol stays private,
+  so U10 (jars started with no spyc) is out of scope. The crate boundary keeps
+  publishing it possible later.
 - **D. Readers and the keyboard lease: built in v1, or reserved capabilities?**
   The role field is v1 either way.
 - **E. `unsafe` in the jar.** The review asked whether `fork`, `setsid` and a
@@ -422,6 +505,11 @@ Open unless marked decided:
   program through `portable-pty` as `PtyHost` does today, whose `unsafe` sits
   in that dependency. The cost is the "`rustix` only" dependency target.
   Unverified until stage 2 builds it.
+
+- **F. WebSocket for the browser, next to SSH.** The decision log says remote
+  support rides SSH rather than a custom protocol. A WebSocket transport for
+  the browser adds a transport rather than a protocol, but it is still a
+  change to that entry.
 
 Smaller ones: the keyboard's idle gap (about a second is proposed); `spill`
 stays opt-in; R29, status for readers.
@@ -433,3 +521,11 @@ stays opt-in; R29, status for readers.
 - Which v1 requirement could be dropped without a breaking change later, and
   which **later** one couldn't be added as a capability?
 - Does anything here assume Linux or macOS in a way that breaks on the other?
+
+## Sources
+
+- [coder/ghostty-web](https://github.com/coder/ghostty-web), and its
+  [0.4.0 README](https://cdn.jsdelivr.net/npm/ghostty-web@0.4.0/README.md)
+- [Restty](https://gh.r-mj.com/wiedymi/restty)
+- [Vercel's wterm](https://p.codekk.com/detail/typescript/vercel-labs/wterm)
+- [dtach](https://dtach.sourceforge.net/), the stand-in for stage 0b
