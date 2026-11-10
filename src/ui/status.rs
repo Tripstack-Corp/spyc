@@ -433,11 +433,13 @@ impl StatusBar<'_> {
             spans.push(Span::styled(format!(" {home} "), bold), None);
             return Some((StatusSegment::Project, spans));
         };
-        spans.push(Span::raw(" "), None);
         // The logo, the padding and the separator.
         let most = avail.saturating_sub(4 + 3);
-        spans.append(chips.spans(chip_room(avail), most, self.theme));
-        spans.push(Span::raw(" "), None);
+        let drawn = chips.spans(chip_room(avail), most, self.theme);
+        let [before, after] = drawn.edges;
+        spans.push(Span::styled(" ", before), None);
+        spans.append(drawn);
+        spans.push(Span::styled(" ", after), None);
         Some((StatusSegment::Projects, spans))
     }
 
@@ -912,14 +914,28 @@ mod tests {
             .iter()
             .find(|s| s.content == "■")
             .expect("a glyph");
-        let label = line
+        let label = |name: &str| {
+            line.spans
+                .iter()
+                .find(|s| s.content == name)
+                .expect("a label")
+                .style
+        };
+        assert_eq!(glyph.style.fg, Some(BLOCKED_RED));
+        assert_eq!(glyph.style.bg, label("web").bg);
+        assert!(glyph.style.bg.is_some());
+        assert_eq!(label("spyc").bg, Some(project_chips::IN_VIEW_BG));
+        let after = line
             .spans
             .iter()
-            .find(|s| s.content == "spyc")
-            .expect("a label");
-        assert_eq!(glyph.style.fg, Some(BLOCKED_RED));
-        assert_eq!(glyph.style.bg, label.style.bg);
-        assert!(glyph.style.bg.is_some());
+            .position(|s| s.content == "spyc")
+            .and_then(|at| line.spans.get(at + 3))
+            .expect("the padding after the last chip");
+        assert_eq!(
+            (after.content.as_ref(), after.style.bg),
+            (" ", Some(project_chips::IN_VIEW_BG)),
+            "the highlight reaches the bar's padding"
+        );
     }
 
     /// However narrow the bar, the narrowest step's `■` and the segment's end
