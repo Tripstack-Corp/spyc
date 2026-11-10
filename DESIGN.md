@@ -49,8 +49,9 @@ These are the names. Use them in code and when writing.
   is cut, and then the path is shortened in the middle. While several
   projects are open, the **projects** segment takes the place of
   `PROJECT_HOME` and the session name: a chip per project, its label
-  (bold for the one in view, cut out of the segment on the dark behind the
-  bar, reversed in mono; dim for the others) and the tab dots' glyph for
+  (the one in view a tab in the list cursor's colours, bold, entered and
+  left by powerline's solid arrow, reversed in mono; the others dim, on a
+  deeper brown than one project's segment) and the tab dots' glyph for
   its most urgent agent, parted by powerline's thin chevron
   (`U+E0B1`; `|` in mono: `spyc ■ | web ● | api`). It gets a third of
   the bar and narrows in steps (the longer labels cut to one length

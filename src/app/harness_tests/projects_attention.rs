@@ -166,7 +166,7 @@ fn several_projects_show_in_the_bar_each_with_its_glyph() {
         t.reports(0, AgentActivity::Blocked);
         t.reports(2, AgentActivity::Done);
         t.reports(3, AgentActivity::Waiting);
-        let chips = "xproj ■ \u{e0b1} yproj   \u{e0b1} zproj ■ \u{e0b1} vproj ○";
+        let chips = "xproj ■ \u{e0b0} yproj   \u{e0b0} zproj ■ \u{e0b1} vproj ○";
         let buf = draw(&mut t.app, 160);
         assert!(row(&buf, 0).contains(chips), "{}", row(&buf, 0));
         let theme = crate::ui::theme::Theme::default();
@@ -187,7 +187,8 @@ fn several_projects_show_in_the_bar_each_with_its_glyph() {
 
         t.app.view.theme.mono = true;
         let mono = bar(&mut t.app, 160);
-        assert!(mono.contains(&chips.replace('\u{e0b1}', "|")), "{mono}");
+        let in_mono = chips.replace(['\u{e0b0}', '\u{e0b1}'], "|");
+        assert!(mono.contains(&in_mono), "{mono}");
     });
 }
 
@@ -200,7 +201,7 @@ fn the_session_name_leaves_the_bar_while_several_are_open() {
             t.app.view.theme.mono = mono;
             let text = bar(&mut t.app, 160);
             assert!(!text.contains(SESSION), "mono={mono}: {text}");
-            let parting = if mono { "|" } else { "\u{e0b1}" };
+            let parting = if mono { "|" } else { "\u{e0b0}" };
             let chips = format!("xproj   {parting} yproj");
             assert!(text.contains(&chips), "mono={mono}: {text}");
         }
@@ -272,7 +273,7 @@ fn a_narrow_bar_collapses_the_chips_together() {
     with_four(|t| {
         narrowing(t);
         let wide = bar(&mut t.app, 120);
-        let every = "xproj ■ \u{e0b1} yproj   \u{e0b1} zproj ● \u{e0b1} vproj";
+        let every = "xproj ■ \u{e0b0} yproj   \u{e0b0} zproj ● \u{e0b1} vproj";
         assert!(wide.contains(every), "{wide}");
         let text = bar(&mut t.app, 100);
         assert!(text.contains("yproj 2/4 ■"), "{text}");
