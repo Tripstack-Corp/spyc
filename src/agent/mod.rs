@@ -329,6 +329,14 @@ pub trait AgentProfile: Sync {
         None
     }
 
+    /// spyc, not the agent, owns a plain left drag over its pane, so the text
+    /// being selected holds still while the agent streams (#1098); a press
+    /// released where it began still reaches the agent, as a click. `false`
+    /// leaves every drag with a mouse-aware child (vim, htop).
+    fn spyc_selects_drags(&self) -> bool {
+        true
+    }
+
     /// Screen-scrape marker confirming this agent's OWN scrollback view is
     /// currently open — checked against [`crate::pane::Pane::visible_lines`]
     /// before deciding to auto-open it or escalate to [`Self::fast_wheel_scroll`].
@@ -914,6 +922,9 @@ impl AgentProfile for OtherProfile {
     }
     fn fork_mode(&self) -> ForkMode {
         ForkMode::Duplicate
+    }
+    fn spyc_selects_drags(&self) -> bool {
+        false
     }
 }
 

@@ -1217,7 +1217,10 @@ you are looking at rather than the thing that happens to be focused.
 list rows), each a `begin` + `extend` + `finish` triple. The press *claims* the
 drag; an unclaimed press leaves child-forwarding untouched, which is why an
 ordinary drag inside a mouse-aware child still reaches the child. Ctrl+left press
-claims the pane for spyc even when the child requested mouse reporting.
+claims the pane for spyc even when the child requested mouse reporting, and so
+does a plain press over an agent whose profile leaves its drags to spyc
+(`spyc_selects_drags`, #1098); that press is kept, and a release where it began
+forwards press and release to the child as the click it was.
 [Selection caveats](docs/config/mouse.md#selecting-text) define Ctrl+click behaviour.
 
 Pane selection owns a bounded `pane::snapshot::ScreenSnapshot` captured under the
@@ -1232,7 +1235,12 @@ release cannot put it over different text. The snapshot preserves the engine's
 soft-wrap boundaries, Unicode cells and empty-cell copy policy. Capture is capped
 at 262,144 cells and 16 MiB of text. Keys, paste, wheel and other button gestures
 retire the held selection; frame preparation also retires it when its tab id or
-pane geometry changes or mouse capture is disabled.
+the terminal's size changes or mouse capture is disabled. Within one terminal
+size the pane's geometry can't change under a live drag: `frame_layout` returns
+the layout captured at the press (`held_drag_layout`) until the release, so a HUD
+strip, a flash or a tab bar waits and the pty isn't resized mid-selection. A drag
+with no mouse event for `HELD_DRAG_LIMIT` (30 s) is dropped by
+`settle_held_drag`, since a release lost to a focus change never arrives.
 
 **`scroll.rs` — wheel for children that ignore mouse reports.** A tick becomes
 the agent's own verified scroll keybinding, and a sustained streak escalates to

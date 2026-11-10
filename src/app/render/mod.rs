@@ -229,6 +229,9 @@ impl App {
     /// `None` there and the whole right column hit-tested as the left one. Any
     /// future consumer would have had the same three chances to diverge.
     pub(crate) fn frame_layout(&self, area: ratatui::layout::Rect) -> FrameLayout {
+        if let Some(held) = self.held_drag_layout(area) {
+            return held;
+        }
         // Layout:
         //   - No pane: status (top row), list (middle), prompt (bottom row).
         //   - With pane: status (top row of the top *pane*), list (rest of

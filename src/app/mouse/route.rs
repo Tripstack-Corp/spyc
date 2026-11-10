@@ -147,6 +147,11 @@ pub enum MouseSink {
     /// visible grid — for a child that ignores mouse reports, so nothing else can
     /// do the selecting (codex's `^T` transcript, a plain shell).
     FocusAndSelectPane,
+    /// Give the keyboard to the pane AND anchor a spyc-side selection, keeping
+    /// the press: a drag selects, as [`Self::FocusAndSelectPane`] does, and a
+    /// release where it began hands the press and release to the child as a
+    /// click. For an agent that leaves its drags to spyc (#1098).
+    FocusAndHoldPress,
     /// Paste the system clipboard wherever a paste would land.
     Paste,
     /// Open the leader menu: a right-click on no object.
@@ -227,6 +232,9 @@ pub struct MouseSnapshot {
     pub pane_wants_mouse: bool,
     /// Ctrl+left press explicitly gives pane selection to spyc.
     pub force_pane_selection: bool,
+    /// The pane's agent leaves its plain drags to spyc
+    /// ([`crate::agent::AgentProfile::spyc_selects_drags`]).
+    pub pane_selects_drags: bool,
     /// A prompt is open (`Mode::Prompting`) — the `:` line, search, a rename, or
     /// any single-key confirm.
     ///
@@ -718,6 +726,9 @@ pub const fn route_mouse(snap: MouseSnapshot, gesture: Gesture) -> MouseSink {
                 return MouseSink::FocusAndSelectPane;
             }
             if matches!(region, Region::Pane) && snap.can_forward_to_child() {
+                if snap.pane_selects_drags {
+                    return MouseSink::FocusAndHoldPress;
+                }
                 return MouseSink::FocusAndForward;
             }
             // A live child that ignores mouse reports: nothing else can do the
@@ -939,6 +950,7 @@ mod tests {
             beside_modal_pager: false,
             pane_wants_mouse: false,
             force_pane_selection: false,
+            pane_selects_drags: false,
             is_prompting: false,
             confirm_choice: None,
             confirm_waiting: false,
@@ -2561,6 +2573,46 @@ mod tests {
             ..snap(Some(Region::Pane))
         };
         assert_eq!(route_mouse(s, Gesture::Left), MouseSink::FocusAndForward);
+    }
+
+    /// An agent that leaves its drags to spyc gets a held press, not a forwarded
+    /// one, and only where forwarding would have gone (#1098): Ctrl still makes
+    /// it a plain selection, and a dead or hidden pane is held by no one.
+    #[test]
+    fn an_agent_pane_holds_a_plain_press_where_it_would_forward() {
+        let agent = MouseSnapshot {
+            pane_wants_mouse: true,
+            pane_selects_drags: true,
+            ..snap(Some(Region::Pane))
+        };
+        assert_eq!(
+            route_mouse(agent, Gesture::Left),
+            MouseSink::FocusAndHoldPress
+        );
+        let ctrl = MouseSnapshot {
+            force_pane_selection: true,
+            ..agent
+        };
+        assert_eq!(
+            route_mouse(ctrl, Gesture::Left),
+            MouseSink::FocusAndSelectPane
+        );
+        let quiet = MouseSnapshot {
+            pane_wants_mouse: false,
+            ..agent
+        };
+        assert_eq!(
+            route_mouse(quiet, Gesture::Left),
+            MouseSink::FocusAndSelectPane
+        );
+        for (closed, covered) in [(true, false), (false, true)] {
+            let s = MouseSnapshot {
+                pane_closed: closed,
+                has_scroll_pager: covered,
+                ..agent
+            };
+            assert_ne!(route_mouse(s, Gesture::Left), MouseSink::FocusAndHoldPress);
+        }
     }
 
     /// No selecting text off a dead or hidden grid — the same two guards forwarding

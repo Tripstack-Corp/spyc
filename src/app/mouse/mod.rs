@@ -227,7 +227,18 @@ pub(super) struct PaneSelectionSnapshot {
     pub term_size: (u16, u16),
     pub area: ratatui::layout::Rect,
     pub screen: crate::pane::snapshot::ScreenSnapshot,
+    /// The frame and its layout at the press, held while the drag is live.
+    pub frame: ratatui::layout::Rect,
+    pub layout: FrameLayout,
+    /// The press, when a release where it began hands it to the child as a click.
+    pub click: Option<MouseEvent>,
+    /// The drag's last press or motion, for [`HELD_DRAG_LIMIT`].
+    pub last_event: std::time::Instant,
 }
+
+/// How long a live pane drag holds with no mouse event before it is dropped:
+/// a release lost to a focus change mustn't freeze the pane for good.
+pub(super) const HELD_DRAG_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// One chrome line as drawn, recorded by the renderer for a later mouse copy.
 ///
@@ -469,7 +480,16 @@ impl super::App {
             }
             MouseSink::FocusAndSelectPane => {
                 self.focus_region(region);
-                self.begin_pane_selection(ev)
+                self.begin_pane_selection(ev, false)
+            }
+            MouseSink::FocusAndHoldPress => {
+                self.focus_region(region);
+                let effects = self.begin_pane_selection(ev, true);
+                if self.view.mouse_selection == Some(MouseDragTarget::Pane) {
+                    effects
+                } else {
+                    self.forward_to_child(ev, &layout)
+                }
             }
             MouseSink::SelectChrome => self.begin_chrome_selection(ev),
             MouseSink::StderrLog => self.open_stderr_log(),
@@ -556,6 +576,12 @@ impl super::App {
             covering_pager: self.pager_slot_at(ev.column, ev.row),
             beside_modal_pager: self.beside_modal_pager(ev, frame),
             pane_wants_mouse: self.active_pane_wants_mouse(),
+            pane_selects_drags: self
+                .runtime
+                .project()
+                .pane_tabs
+                .as_ref()
+                .is_some_and(|t| t.active_info().agent().spyc_selects_drags()),
             // Same sources `route_input`'s snapshot uses (`route.rs`), so the
             // mouse and the keyboard can't disagree about what owns the screen.
             force_pane_selection: matches!(gesture, Gesture::Left)

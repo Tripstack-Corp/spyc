@@ -667,7 +667,6 @@ fn agent_hud_typing_and_paste_reach_the_child_unchanged() {
 }
 
 #[test]
-#[ignore = "red: a HUD geometry change cancels the drag, and a plain press reaches the agent at once"]
 fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_wait_for_owned_drags() {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     let _lock = crate::mouse_test_lock();
