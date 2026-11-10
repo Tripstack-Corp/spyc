@@ -13,6 +13,10 @@ use crate::ui::theme::Theme;
 /// A blocked agent's red, on its tab's dot and on its project's chip.
 pub const BLOCKED_RED: Color = Color::Rgb(0xF7, 0x76, 0x8E);
 
+/// What the chip in view is drawn on while every chip shows: the dark behind
+/// the bar, cut into the segment, which every glyph is drawn to read on.
+pub const IN_VIEW_BG: Color = Color::Rgb(0x1a, 0x1b, 0x26);
+
 /// What a project's agents most need from the user, least urgent first. A
 /// project whose agents are all idle, or that has none, has none of these.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -66,6 +70,10 @@ pub struct ChipSpans {
     /// One per span: [`StatusSegment::ProjectLabel`] or
     /// [`StatusSegment::ProjectCount`], else `None`.
     pub parts: Vec<Option<StatusSegment>>,
+    /// The style of the padding the bar draws before and after the spans:
+    /// the chip in view's when it is the first or the last, so its highlight
+    /// reaches as far either side.
+    pub edges: [Style; 2],
 }
 
 impl ChipSpans {
@@ -74,7 +82,8 @@ impl ChipSpans {
         self.parts.push(part);
     }
 
-    /// `other`'s spans after these, with their parts.
+    /// `other`'s spans after these, with their parts; `other`'s edges are
+    /// dropped.
     pub fn append(&mut self, other: Self) {
         self.spans.extend(other.spans);
         self.parts.extend(other.parts);
@@ -138,16 +147,37 @@ impl ProjectChips {
 
     /// Every chip as `label glyph`, each label in at most `cap` columns,
     /// [`PARTING`]s between them: the one in view bold, the others dim, and
-    /// the parting neither, to stand out from both.
+    /// the parting neither, to stand out from both. The one in view is drawn
+    /// on [`in_view`]'s highlight, out to the spaces either side of it, its
+    /// parting's or the bar's padding ([`ChipSpans::edges`]).
     fn every_chip(&self, cap: usize, theme: &Theme) -> ChipSpans {
         let mut spans = ChipSpans::default();
+        let last = self.chips.len().saturating_sub(1);
+        let mut before = Style::default();
         for (i, chip) in self.chips.iter().enumerate() {
+            let pill = if chip.active {
+                in_view(theme)
+            } else {
+                Style::default()
+            };
             if i > 0 {
-                spans.push(Span::raw(parting(theme)), None);
+                let mark = parting(theme).trim();
+                spans.push(Span::styled(" ", before), None);
+                spans.push(Span::raw(mark), None);
+                spans.push(Span::styled(" ", pill), None);
+            } else {
+                spans.edges[0] = pill;
             }
-            spans.push(label(chip, cap), Some(StatusSegment::ProjectLabel(i)));
-            spans.push(Span::raw(" "), None);
-            spans.push(cell(chip.attention, self.pulse, theme), None);
+            let drawn = label(chip, cap);
+            let drawn = Span::styled(drawn.content, pill.patch(drawn.style));
+            spans.push(drawn, Some(StatusSegment::ProjectLabel(i)));
+            spans.push(Span::styled(" ", pill), None);
+            let glyph = cell(chip.attention, self.pulse, theme);
+            spans.push(Span::styled(glyph.content, pill.patch(glyph.style)), None);
+            if i == last {
+                spans.edges[1] = pill;
+            }
+            before = pill;
         }
         spans
     }
@@ -203,6 +233,16 @@ impl ProjectChips {
 
     fn others(&self) -> impl Iterator<Item = &ProjectChip> {
         self.chips.iter().filter(|c| !c.active)
+    }
+}
+
+/// The highlight the chip in view is drawn on: [`IN_VIEW_BG`], or reversed
+/// in mono, which draws no colours.
+fn in_view(theme: &Theme) -> Style {
+    if theme.mono {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default().bg(IN_VIEW_BG)
     }
 }
 
@@ -488,6 +528,51 @@ mod tests {
             ..Theme::default()
         };
         assert_eq!(text(&c.spans(100, 100, &mono)), "web \u{25a0} | spyc  ");
+    }
+
+    /// While every chip shows, the one in view, and only it, is drawn on
+    /// the highlight, out to the spaces either side of it, its glyph keeping
+    /// its colour; in mono it is reversed. Collapsed or alone, the one label
+    /// shown needs nothing to set it apart.
+    #[test]
+    fn the_chip_in_view_is_drawn_on_the_highlight() {
+        let theme = Theme::default();
+        let c = chips(&[
+            ("web", Some(Blocked), false),
+            ("spyc", Some(Blocked), true),
+            ("api", None, false),
+        ]);
+        let drawn = c.spans(100, 100, &theme);
+        let lit: String = drawn
+            .iter()
+            .filter(|s| s.style.bg == Some(IN_VIEW_BG))
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(lit, " spyc ■ ");
+        let glyphs: Vec<_> = drawn.iter().filter(|s| s.content == "■").collect();
+        assert!(glyphs.iter().all(|g| g.style.fg == Some(BLOCKED_RED)));
+        assert_eq!(drawn.edges, [Style::default(); 2]);
+
+        let first = chips(&[("spyc", None, true), ("web", None, false)]);
+        let edges = first.spans(100, 100, &theme).edges;
+        assert_eq!(edges, [in_view(&theme), Style::default()]);
+
+        let mono = Theme {
+            mono: true,
+            ..Theme::default()
+        };
+        let reversed: String = c
+            .spans(100, 100, &mono)
+            .iter()
+            .filter(|s| s.style.add_modifier.contains(Modifier::REVERSED))
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(reversed, " spyc ■ ");
+
+        for room in [11, 0] {
+            let drawn = c.spans(room, 100, &theme);
+            assert!(drawn.iter().all(|s| s.style.bg.is_none()), "room={room}");
+        }
     }
 
     /// The order the segment ranks by: the user's turn above the agent's.
