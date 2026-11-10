@@ -197,7 +197,9 @@ fn push_suffix(bar: &mut Bar, text: &str, short: bool, fg: Color, bg: Color, nex
 }
 
 /// [`push_segment`] for a segment of styled spans: each drawn on `bg`, in `fg`
-/// unless it has a colour of its own.
+/// unless it has a colour of its own; the projects segment on its own deeper
+/// brown. The separator leaves the last span's background, the tab in view's
+/// when it ends the segment.
 fn push_spans(
     bar: &mut Bar,
     segment: StatusSegment,
@@ -207,8 +209,14 @@ fn push_spans(
     next_bg: Color,
 ) {
     let from = bar.width;
+    let bg = if segment == StatusSegment::Projects {
+        project_chips::SEGMENT_BG
+    } else {
+        bg
+    };
+    let end = spans.last().and_then(|s| s.style.bg).unwrap_or(bg);
     bar.push_chips(spans, Style::default().fg(fg).bg(bg));
-    bar.push(Span::styled(PL_SEP, Style::default().fg(bg).bg(next_bg)));
+    bar.push(Span::styled(PL_SEP, Style::default().fg(end).bg(next_bg)));
     bar.mark(segment, from);
 }
 
@@ -907,7 +915,7 @@ mod tests {
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains(" web ■ \u{e0b1} spyc "), "{text}");
+        assert!(text.contains(" web ■ \u{e0b0} spyc "), "{text}");
         assert!(!text.contains("SAFFRON_CUMIN"), "{text}");
         let glyph = line
             .spans
@@ -924,17 +932,25 @@ mod tests {
         assert_eq!(glyph.style.fg, Some(BLOCKED_RED));
         assert_eq!(glyph.style.bg, label("web").bg);
         assert!(glyph.style.bg.is_some());
-        assert_eq!(label("spyc").bg, Some(project_chips::IN_VIEW_BG));
-        let after = line
+        assert_eq!(label("web").bg, Some(project_chips::SEGMENT_BG));
+        let tab = Some(theme.cursor_bg);
+        assert_eq!(label("spyc").bg, tab);
+        let at = line
             .spans
             .iter()
             .position(|s| s.content == "spyc")
-            .and_then(|at| line.spans.get(at + 3))
-            .expect("the padding after the last chip");
+            .expect("the tab");
+        let after = &line.spans[at + 3];
         assert_eq!(
             (after.content.as_ref(), after.style.bg),
-            (" ", Some(project_chips::IN_VIEW_BG)),
-            "the highlight reaches the bar's padding"
+            (" ", tab),
+            "the tab reaches the bar's padding"
+        );
+        let sep = &line.spans[at + 4];
+        assert_eq!(
+            (sep.content.as_ref(), sep.style.fg),
+            (PL_SEP, tab),
+            "and the segment ends from the tab's colour"
         );
     }
 

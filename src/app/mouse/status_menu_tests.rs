@@ -860,7 +860,7 @@ fn the_name_row_leaves_the_history_alone_until_the_line_runs() {
 fn the_path_still_opens_the_leader_and_the_bar_still_selects() {
     with_mouse(|base| {
         let (mut app, _) = projects(base, &["alpha", "bravo"], 120);
-        let parting = on_bar(&mut app, "\u{e0b1}");
+        let parting = on_bar(&mut app, "\u{e0b0}");
 
         right_click(&mut app, parting);
 
@@ -928,9 +928,14 @@ fn a_label_no_longer_drawn_is_no_target() {
 /// Each project label as drawn: a run of bold or dim cells in the projects
 /// segment, the cells before its powerline separator. `(first, end)` columns.
 fn drawn_labels(cells: &[Cell]) -> (usize, Vec<(usize, usize)>) {
+    // The tab in view's arrows are drawn on the segment's colours; the
+    // separator, on the next segment's.
+    let tab = crate::ui::theme::Theme::default().cursor_bg;
     let end = cells
         .iter()
-        .position(|c| c.symbol() == "\u{e0b0}")
+        .position(|c| {
+            c.symbol() == "\u{e0b0}" && c.bg != crate::ui::project_chips::SEGMENT_BG && c.bg != tab
+        })
         .expect("the projects segment's separator");
     let label = |c: &Cell| c.modifier.intersects(Modifier::BOLD | Modifier::DIM);
     let mut runs = Vec::new();

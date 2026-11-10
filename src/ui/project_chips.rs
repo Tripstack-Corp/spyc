@@ -13,9 +13,10 @@ use crate::ui::theme::Theme;
 /// A blocked agent's red, on its tab's dot and on its project's chip.
 pub const BLOCKED_RED: Color = Color::Rgb(0xF7, 0x76, 0x8E);
 
-/// What the chip in view is drawn on while every chip shows: the dark behind
-/// the bar, cut into the segment, which every glyph is drawn to read on.
-pub const IN_VIEW_BG: Color = Color::Rgb(0x1a, 0x1b, 0x26);
+/// The segment's background while several projects are open: deeper than the
+/// one project's brown, so the tab in view, in the list cursor's colours,
+/// stands out and the others recede.
+pub const SEGMENT_BG: Color = Color::Rgb(0x52, 0x33, 0x27);
 
 /// What a project's agents most need from the user, least urgent first. A
 /// project whose agents are all idle, or that has none, has none of these.
@@ -103,6 +104,10 @@ impl std::ops::Deref for ChipSpans {
 const PARTING: &str = " \u{e0b1} ";
 const MONO_PARTING: &str = " | ";
 
+/// Powerline's solid arrow, into and out of the tab in view in place of the
+/// chevron, as wide.
+const TAB_EDGE: &str = "\u{e0b0}";
+
 impl ProjectChips {
     /// The segment in at most `room` columns, the first that fits of: every
     /// chip; every chip with the longer labels cut to one length, no shorter
@@ -147,9 +152,10 @@ impl ProjectChips {
 
     /// Every chip as `label glyph`, each label in at most `cap` columns,
     /// [`PARTING`]s between them: the one in view bold, the others dim, and
-    /// the parting neither, to stand out from both. The one in view is drawn
-    /// on [`in_view`]'s highlight, out to the spaces either side of it, its
-    /// parting's or the bar's padding ([`ChipSpans::edges`]).
+    /// the parting neither, to stand out from both. The one in view is a tab
+    /// in [`in_view`]'s colours, out to the spaces either side of it, its
+    /// parting's or the bar's padding ([`ChipSpans::edges`]), entered and left
+    /// by [`TAB_EDGE`]s in colour.
     fn every_chip(&self, cap: usize, theme: &Theme) -> ChipSpans {
         let mut spans = ChipSpans::default();
         let last = self.chips.len().saturating_sub(1);
@@ -161,9 +167,8 @@ impl ProjectChips {
                 Style::default()
             };
             if i > 0 {
-                let mark = parting(theme).trim();
                 spans.push(Span::styled(" ", before), None);
-                spans.push(Span::raw(mark), None);
+                spans.push(edge(before, pill, theme), None);
                 spans.push(Span::styled(" ", pill), None);
             } else {
                 spans.edges[0] = pill;
@@ -236,13 +241,27 @@ impl ProjectChips {
     }
 }
 
-/// The highlight the chip in view is drawn on: [`IN_VIEW_BG`], or reversed
-/// in mono, which draws no colours.
+/// The tab in view's colours: the list cursor's, or reversed in mono, which
+/// draws no colours. Only its label is bold, as a label is ([`label`]).
 fn in_view(theme: &Theme) -> Style {
     if theme.mono {
         Style::default().add_modifier(Modifier::REVERSED)
     } else {
-        Style::default().bg(IN_VIEW_BG)
+        Style::default().bg(theme.cursor_bg).fg(theme.cursor_fg)
+    }
+}
+
+/// What parts a chip drawn in `before` from one in `after`: a [`TAB_EDGE`]
+/// from the segment's colour into the tab's or out of it, else the parting.
+fn edge(before: Style, after: Style, theme: &Theme) -> Span<'static> {
+    let mark = parting(theme).trim();
+    if theme.mono {
+        return Span::raw(mark);
+    }
+    match (before.bg, after.bg) {
+        (None, Some(tab)) => Span::styled(TAB_EDGE, Style::default().fg(SEGMENT_BG).bg(tab)),
+        (Some(tab), None) => Span::styled(TAB_EDGE, Style::default().fg(tab).bg(SEGMENT_BG)),
+        _ => Span::raw(mark),
     }
 }
 
@@ -331,15 +350,15 @@ mod tests {
             ("delta", None, false),
         ]);
         let at = |room| text(&c.spans(room, 100, &theme));
-        let p = "\u{e0b1}";
-        let every = format!("alpha ■ {p} bravo   {p} charlie ● {p} delta  ");
+        let (p, t) = ("\u{e0b1}", TAB_EDGE);
+        let every = format!("alpha ■ {t} bravo   {t} charlie ● {p} delta  ");
         assert_eq!(at(100), every);
         assert_eq!(at(39), every);
         assert_eq!(
             at(38),
-            format!("alpha ■ {p} bravo   {p} c…rlie ● {p} delta  ")
+            format!("alpha ■ {t} bravo   {t} c…rlie ● {p} delta  ")
         );
-        assert_eq!(at(33), format!("a…ha ■ {p} b…vo   {p} c…ie ● {p} d…ta  "));
+        assert_eq!(at(33), format!("a…ha ■ {t} b…vo   {t} c…ie ● {p} d…ta  "));
         assert_eq!(at(32), "bravo 2/4 ■");
         assert_eq!(at(11), "bravo 2/4 ■");
         assert_eq!(at(10), "b…vo 2/4 ■");
@@ -495,13 +514,13 @@ mod tests {
             ("fika", Some(Working), false),
         ]);
         let at = |room| text(&c.spans(room, 100, &theme));
-        let p = "\u{e0b1}";
+        let t = TAB_EDGE;
         assert_eq!(
             at(38),
-            format!("spyc ■ {p} tripstack_platform   {p} fika ●")
+            format!("spyc ■ {t} tripstack_platform   {t} fika ●")
         );
-        assert_eq!(at(30), format!("spyc ■ {p} tri\u{2026}atform   {p} fika ●"));
-        assert_eq!(at(24), format!("spyc ■ {p} t\u{2026}rm   {p} fika ●"));
+        assert_eq!(at(30), format!("spyc ■ {t} tri\u{2026}atform   {t} fika ●"));
+        assert_eq!(at(24), format!("spyc ■ {t} t\u{2026}rm   {t} fika ●"));
         assert_eq!(at(23), "trips\u{2026}ck_platform 2/3 ■");
         let siblings = chips(&[
             ("web-api", None, false),
@@ -509,33 +528,41 @@ mod tests {
             ("docs", None, false),
         ]);
         let cut = text(&siblings.spans(25, 100, &theme));
-        assert_eq!(cut, format!("w\u{2026}pi   {p} w\u{2026}pp   {p} docs  "));
+        assert_eq!(cut, format!("w\u{2026}pi   {t} w\u{2026}pp   {t} docs  "));
     }
 
     /// Projects are parted by a chevron, powerline's own between the parts of
-    /// one segment, or by a bar in mono, where the bar draws no powerline
-    /// glyphs.
+    /// one segment, but for the tab in view's solid arrows, or by a bar in
+    /// mono, where the bar draws no powerline glyphs.
     #[test]
     fn the_chips_are_parted_by_a_chevron() {
-        let c = chips(&[("web", Some(Blocked), false), ("spyc", None, true)]);
+        let c = chips(&[
+            ("web", Some(Blocked), false),
+            ("api", None, false),
+            ("spyc", None, true),
+        ]);
         let theme = Theme::default();
         assert_eq!(
             text(&c.spans(100, 100, &theme)),
-            "web \u{25a0} \u{e0b1} spyc  "
+            "web \u{25a0} \u{e0b1} api   \u{e0b0} spyc  "
         );
         let mono = Theme {
             mono: true,
             ..Theme::default()
         };
-        assert_eq!(text(&c.spans(100, 100, &mono)), "web \u{25a0} | spyc  ");
+        assert_eq!(
+            text(&c.spans(100, 100, &mono)),
+            "web \u{25a0} | api   | spyc  "
+        );
     }
 
-    /// While every chip shows, the one in view, and only it, is drawn on
-    /// the highlight, out to the spaces either side of it, its glyph keeping
-    /// its colour; in mono it is reversed. Collapsed or alone, the one label
-    /// shown needs nothing to set it apart.
+    /// While every chip shows, the one in view, and only it, is a tab in the
+    /// list cursor's colours, out to the spaces either side of it, entered
+    /// and left by solid arrows from and to the segment's colour, its glyph
+    /// keeping its own; in mono it is reversed and parted as the others are.
+    /// Collapsed or alone, the one label shown needs nothing to set it apart.
     #[test]
-    fn the_chip_in_view_is_drawn_on_the_highlight() {
+    fn the_chip_in_view_is_drawn_as_a_tab() {
         let theme = Theme::default();
         let c = chips(&[
             ("web", Some(Blocked), false),
@@ -543,12 +570,22 @@ mod tests {
             ("api", None, false),
         ]);
         let drawn = c.spans(100, 100, &theme);
+        let tab = Some(theme.cursor_bg);
         let lit: String = drawn
             .iter()
-            .filter(|s| s.style.bg == Some(IN_VIEW_BG))
+            .filter(|s| s.style.bg == tab)
             .map(|s| s.content.as_ref())
             .collect();
-        assert_eq!(lit, " spyc ■ ");
+        assert_eq!(lit, format!("{TAB_EDGE} spyc ■ "));
+        let arrows: Vec<_> = drawn
+            .iter()
+            .filter(|s| s.content == TAB_EDGE)
+            .map(|s| (s.style.fg, s.style.bg))
+            .collect();
+        assert_eq!(arrows, [(Some(SEGMENT_BG), tab), (tab, Some(SEGMENT_BG))]);
+        let label = drawn.iter().find(|s| s.content == "spyc").expect("a label");
+        assert_eq!(label.style.fg, Some(theme.cursor_fg));
+        assert!(label.style.add_modifier.contains(Modifier::BOLD));
         let glyphs: Vec<_> = drawn.iter().filter(|s| s.content == "■").collect();
         assert!(glyphs.iter().all(|g| g.style.fg == Some(BLOCKED_RED)));
         assert_eq!(drawn.edges, [Style::default(); 2]);
@@ -561,13 +598,14 @@ mod tests {
             mono: true,
             ..Theme::default()
         };
-        let reversed: String = c
-            .spans(100, 100, &mono)
+        let in_mono = c.spans(100, 100, &mono);
+        let reversed: String = in_mono
             .iter()
             .filter(|s| s.style.add_modifier.contains(Modifier::REVERSED))
             .map(|s| s.content.as_ref())
             .collect();
         assert_eq!(reversed, " spyc ■ ");
+        assert_eq!(text(&in_mono), "web ■ | spyc ■ | api  ");
 
         for room in [11, 0] {
             let drawn = c.spans(room, 100, &theme);
