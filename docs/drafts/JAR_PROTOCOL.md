@@ -141,6 +141,7 @@ in the output.
 | R12 | **While no owner is connected**, drop the oldest events when the ring fills (`drop`) | v1 | A crash window must never stall an agent. | U2 |
 | R12b | The `block` and `spill` modes ([below](#when-the-ring-fills-with-no-owner)) | later | Moved to later by decision B: with no long ownerless stretches, they only matter if a crashed spyc isn't relaunched. | U2 |
 | R12a | Mark a gap with the offsets it spans | v1 | A spyc that finds a gap forces a redraw rather than trusting a broken replay. | U2, U3 |
+| R12c | **Across a gap,** spyc starts from the newest snapshot under it, applies the bytes after the gap, then makes the program repaint | v1 | Stage 4 (Q7): a repaint redraws the screen but sets no mode again. From an empty engine a full-screen Claude came back without the alternate screen, mouse reporting or bracketed paste; from the snapshot every mode matched a run that lost nothing, and the history before the gap stayed. | U2 |
 | R13 | Ring, spill and snapshot sizes set per jar, with a report of what each holds | v1 | Many jars run at once; memory has to be visible and bounded. | all |
 
 ### Input and the program's questions
@@ -191,9 +192,9 @@ in the output.
 |---|---|---|---|---|
 | R30 | **An instance id** for every spyc, naming its MCP socket (`spyc/<instance>/mcp.sock`). **A jar id** for every jar, naming its socket in one directory per user (`spyc/jars/<jar-id>.sock`), not under the instance that spawned it. Both under `$XDG_RUNTIME_DIR` (`$TMPDIR` on macOS), `0700`, within the 104-byte path limit. | v1 | The MCP socket keyed by PID today is what strands agents on an upgrade. A jar can change owner, even to another spyc instance when its project moves (U13), so its name can't belong to the instance that spawned it. | U1, U2, U13 |
 | R30a | **The jar records its owner's MCP socket,** and a pane's MCP proxy asks its own jar where to reconnect | v1 | The jar is the one rendezvous that outlives every spyc. A proxy that finds its owner through its jar follows an upgrade, a crash and a project move alike, without being told the new path. Which credential the proxy needs to ask is open ([threat model](#threat-model)). | U1, U2, U13 |
-| R31 | A jar describes itself: id, instance, created time, jar version, child PID, overflow mode, linger policy | v1 | `spyc --jars` lists them, and a spyc after a crash finds them. | U2, U10 |
+| R31 | A jar describes itself: id, instance, created time, jar version, child PID, overflow mode, linger policy | v1 | `spyc --jars` lists them, and a spyc after a crash finds them. Built in stage 4 as `key`, `value` pairs, so a newer jar adds keys an older spyc can still show; its instance and start time survive an upgrade. | U2, U10 |
 | R32 | A stale socket (its jar gone) is recognized and removed | v1 | A crash of the jar itself mustn't leave a path that looks alive. | U2 |
-| R32a | **A linger policy per pane:** how long the jar keeps its program running with no owner: until an owner returns, for a set time, or not at all | v1 | With decision B, no owner means a crash. Each pane says whether its program should wait for a new spyc or end with the old one. | U2 |
+| R32a | **A linger policy per pane:** how long the jar keeps its program running with no owner: until an owner returns, for a set time, or not at all | v1 | With decision B, no owner means a crash. Each pane says whether its program should wait for a new spyc or end with the old one. Built in stage 4: at the end of its linger the program gets `SIGHUP`, as from a closed terminal, then `SIGKILL` two seconds later. A jar with a finite linger gives its first owner ten seconds to connect. | U2 |
 
 ### The jar itself
 
@@ -241,7 +242,7 @@ only follows it. `drop` is v1; `block` and `spill` are later (R12b).
 
 | Mode | When the ring is full | When an owner returns | For |
 |---|---|---|---|
-| **`drop`** (the default) | The program runs on at full speed. The jar discards the oldest events and marks the gap. | spyc loads the snapshot, sees the gap, and makes the program repaint by changing the PTY's size by a row and back. A `SIGWINCH` with no size change repaints nothing: neither Claude Code nor spyc redrew on one (stage 0b). A full-screen program such as Claude Code redraws itself on a real change. | Agents, and anything whose durable record isn't the screen. |
+| **`drop`** (the default) | The program runs on at full speed. The jar discards the oldest events and marks the gap. | spyc starts from the newest snapshot under the gap, applies the bytes after it, and makes the program repaint by changing the PTY's size by a row and back (R12c). The repaint redraws the screen; the modes come back from the snapshot. A `SIGWINCH` with no size change repaints nothing: neither Claude Code nor spyc redrew on one (stage 0b). A full-screen program such as Claude Code redraws itself on a real change. | Agents, and anything whose durable record isn't the screen. |
 | **`block`** | The jar stops reading the PTY; the program waits on its next write. Nothing is lost. | Everything replays; no redraw needed. | Panes where every byte matters more than progress while you're away. |
 | **`spill`** | The ring overflows into a file in the jar's `0700` directory, removed when the jar ends. | Everything replays from the ring and the file. | A log you want in full, knowing the file holds whatever the program printed. |
 
