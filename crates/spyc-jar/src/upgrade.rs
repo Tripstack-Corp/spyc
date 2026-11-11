@@ -5,7 +5,7 @@
 //!    its writer between batches, the acceptor and the child waiter.
 //! 2. The jar's state is encoded as a [`handover`](crate::handover) blob, and
 //!    the new binary must accept it (`validate-handover`) within a deadline.
-//! 3. The blob is sealed with ChaCha20-Poly1305 under a fresh key and goes
+//! 3. The blob is sealed with AES-256-GCM under a fresh key and goes
 //!    into an unlinked file (a `memfd` on Linux), so only ciphertext can reach
 //!    a disk (R19). That file, the listener, the PTY master and every
 //!    connection travel as `SCM_RIGHTS` over a socketpair whose other end
@@ -131,21 +131,21 @@ fn try_run(shared: &Shared, binary: &str) -> anyhow::Result<Never> {
 
 /// The blob sealed under a fresh random key and nonce, used once.
 fn seal(blob: &[u8]) -> anyhow::Result<([u8; 32], [u8; 12], Vec<u8>)> {
-    use chacha20poly1305::aead::{Aead, KeyInit};
+    use aes_gcm::aead::{Aead, KeyInit};
     let mut key = [0u8; 32];
     let mut nonce = [0u8; 12];
     let mut rng = std::fs::File::open("/dev/urandom").context("open /dev/urandom")?;
     rng.read_exact(&mut key)?;
     rng.read_exact(&mut nonce)?;
-    let sealed = chacha20poly1305::ChaCha20Poly1305::new((&key).into())
+    let sealed = aes_gcm::Aes256Gcm::new((&key).into())
         .encrypt((&nonce).into(), blob)
         .map_err(|_| anyhow!("seal the handover blob"))?;
     Ok((key, nonce, sealed))
 }
 
 fn open_sealed(sealed: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> anyhow::Result<Vec<u8>> {
-    use chacha20poly1305::aead::{Aead, KeyInit};
-    chacha20poly1305::ChaCha20Poly1305::new(key.into())
+    use aes_gcm::aead::{Aead, KeyInit};
+    aes_gcm::Aes256Gcm::new(key.into())
         .decrypt(nonce.into(), sealed)
         .map_err(|_| anyhow!("the handover blob doesn't open with its key"))
 }
