@@ -447,6 +447,7 @@ impl Resolver {
                 KeyCode::Char('D') => ResolverOutcome::Action(Action::GitDiffCached),
                 KeyCode::Char('u') => ResolverOutcome::Action(Action::GitDiffUnstaged),
                 KeyCode::Char('m') => ResolverOutcome::Action(Action::GitDiffBranch),
+                KeyCode::Char('M') => ResolverOutcome::Action(Action::GitDiffWholeBranch),
                 KeyCode::Char('b') => ResolverOutcome::Action(Action::GitBlame),
                 KeyCode::Char('r') => ResolverOutcome::Action(Action::GitRestore),
                 KeyCode::Char('f') => ResolverOutcome::Action(Action::GotoFile),

@@ -105,13 +105,15 @@ characters that differ, `"word"` marks the whole changed token the way
   branch left it at. A file renamed in one of the branch's commits shows
   as a deletion and an addition, and one you've put back as it was when
   the branch forked isn't listed
-- **`:diff [<base>]`** — the same for the whole repository, from anywhere
+- **gM** — the same for the whole repository, wherever the cursor is:
+  "what has this branch changed since it left its base?"
+- **`:diff [<base>]`** — `gM` against a base you name, from anywhere
   in it: "what has this branch changed?" `<base>` is any branch, tag or
   commit (`:diff origin/main`, `:diff HEAD~3`); with none, the repo's base
   branch. A local branch that has an `origin/` copy is compared with both,
   and the later fork wins, so a branch rebased onto `origin/main` doesn't
   show other people's work that local `main` hasn't pulled yet. The git
-  segment's menu (right-click the branch on the status bar) runs it too
+  segment's menu (right-click the branch on the status bar) offers `gM`
 - **gb** — blame the cursor file (selection ignored)
 - **|** inside a diff / show view toggles **side-by-side ⇄ unified**
   layout. Side-by-side is the default, falling back to unified when

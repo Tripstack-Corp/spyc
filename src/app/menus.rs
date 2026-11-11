@@ -105,18 +105,9 @@ impl App {
             .collect()
     }
 
-    /// The git segment's menu: the repo's rows, then `:diff`, which runs as
-    /// typing it does, and which a mount refuses as it refuses `gm`.
+    /// The git segment's menu: the repo's rows, `gM` among them.
     fn open_git_menu(&mut self) -> Option<Effect> {
-        let mut rows = self.menu_rows(self.git_target());
-        let branch = crate::keymap::Action::GitDiffBranch;
-        if self.state.mount_refusal(&branch).is_none() {
-            rows.push((
-                ":diff".to_string(),
-                "git diff of the branch since it left its base".to_string(),
-                HintEntry::Command(Some(CommandRow::Typed("diff".to_string()))),
-            ));
-        }
+        let rows = self.menu_rows(self.git_target());
         self.show_menu("git · ? all keys".to_string(), rows)
     }
 

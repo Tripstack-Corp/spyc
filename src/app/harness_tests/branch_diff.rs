@@ -1,5 +1,5 @@
-//! A branch's changes since it left its base: `gm` over the selection and
-//! `:diff [<base>]` over the whole repository, each pressed or typed as keys
+//! A branch's changes since it left its base: `gm` over the selection, and
+//! `gM` or `:diff [<base>]` over the whole repository, each pressed or typed as keys
 //! and waited on until the diff lands as the loop's drain lands it.
 
 use super::*;
@@ -113,6 +113,34 @@ fn gm_with_picks_shows_only_the_picks() {
 
         let (_, text) = diff_opened(&mut app, "gm");
         assert_eq!(files_in(&text), ["alpha", "delta"], "{text}");
+    });
+}
+
+/// `gM` answers for the whole branch wherever the cursor is: from a directory
+/// none of its changes are in, where `gm` over the cursor finds nothing.
+#[test]
+fn g_shift_m_from_a_subdirectory_shows_the_whole_branch() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let repo = branch_repo(tmp.path());
+        let mut app = app_in(&repo.join("other"));
+
+        press(&mut app, "gm");
+        let scoped = app.land_git_view().map(|(_, text)| files_in(&text));
+        assert!(
+            scoped.as_deref().is_none_or(<[&str]>::is_empty),
+            "premise: gm over the cursor here shows none of the branch: {scoped:?}"
+        );
+
+        press(&mut app, "gM");
+
+        let (title, text) = diff_opened(&mut app, "gM");
+        assert_eq!(
+            files_in(&text),
+            ["alpha", "bravo", "charlie", "delta"],
+            "{text}"
+        );
+        assert!(title.contains("main"), "the default base: {title}");
     });
 }
 

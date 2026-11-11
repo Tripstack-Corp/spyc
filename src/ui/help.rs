@@ -282,6 +282,10 @@ const SECTIONS: &[Section] = &[
                 "g m",
                 "git diff since the branch left its base (+ uncommitted)",
             ),
+            (
+                "g M",
+                "the same for the whole branch, wherever the cursor is",
+            ),
             ("g b", "git blame (cursor file)"),
             ("g r", "restore a deleted (struck-through) file from git"),
             ("] g", "cursor to next git-changed entry (wraps)"),

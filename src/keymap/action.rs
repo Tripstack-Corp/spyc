@@ -199,6 +199,7 @@ pub enum Action {
     GitDiffCached, // g D — staged (cached) diff
     GitDiffUnstaged, // g u — unstaged diff (index vs worktree — plain `git diff`)
     GitDiffBranch, // g m — the selection's diff since the branch left its base (+ uncommitted)
+    GitDiffWholeBranch, // g M — the whole branch's diff since it left its base (+ uncommitted)
     GitBlame,      // g b — git blame on cursor file
     GitRestore,    // g r — restore a deleted (struck-through) file from index/HEAD
 
@@ -459,12 +460,12 @@ impl Action {
             Self::HarpoonAppend => "harpoon — append cursor file",
             Self::HarpoonRemove => "harpoon — remove cursor file",
             Self::HarpoonOpenMenu | Self::ContextMenu | Self::PaneContextMenu => self.menu_label(),
-            Self::WorktreeList | Self::WorktreeNew | Self::WorktreeDelete | Self::MakeMenu => {
-                self.describe_workspace()
-            }
+            Self::WorktreeList | Self::WorktreeNew | Self::WorktreeDelete => self.worktree_label(),
+            Self::MakeMenu => "make target …",
             Self::GitDiff | Self::GitDiffCached | Self::GitDiffUnstaged | Self::GitDiffBranch => {
                 self.describe_git_diff()
             }
+            Self::GitDiffWholeBranch => "the whole branch's diff since its base (+ uncommitted)",
             Self::GitBlame => "git blame (cursor file)",
             Self::GitRestore => "restore deleted file (struck-through row) from git",
             Self::GotoFile | Self::GotoFileLine => self.describe_goto(),
@@ -630,13 +631,13 @@ impl Action {
             Self::HarpoonRemove => "harpoon_remove",
             Self::HarpoonOpenMenu | Self::ContextMenu | Self::PaneContextMenu => self.menu_name(),
             // Git worktree, and make.
-            Self::WorktreeList | Self::WorktreeNew | Self::WorktreeDelete | Self::MakeMenu => {
-                self.workspace_name()
-            }
+            Self::WorktreeList | Self::WorktreeNew | Self::WorktreeDelete => self.workspace_name(),
+            Self::MakeMenu => "make_menu",
             // Git diff / blame / restore.
             Self::GitDiff | Self::GitDiffCached | Self::GitDiffUnstaged | Self::GitDiffBranch => {
                 self.git_diff_name()
             }
+            Self::GitDiffWholeBranch => "git_diff_whole_branch",
             Self::GitBlame => "git_blame",
             Self::GitRestore => "git_restore",
             // Path references.
@@ -703,18 +704,28 @@ impl Action {
         }
     }
 
-    /// The worktree and make arm of [`Self::describe`], which is at its length
-    /// pin.
-    const fn describe_workspace(&self) -> &'static str {
+    /// The worktree arm of [`Self::describe`], which is at its length pin.
+    const fn worktree_label(&self) -> &'static str {
         match self {
             Self::WorktreeList => "list git worktrees",
             Self::WorktreeNew => "new git worktree",
-            Self::WorktreeDelete => "delete git worktree",
-            _ => "make target …",
+            _ => "delete git worktree",
         }
     }
 
     /// The git diffs' arm of [`Self::describe`], which is at its length pin.
+    /// One of the `g` diffs: `gd`, `gD`, `gu`, `gm`, `gM`.
+    pub const fn is_git_diff(&self) -> bool {
+        matches!(
+            self,
+            Self::GitDiff
+                | Self::GitDiffCached
+                | Self::GitDiffUnstaged
+                | Self::GitDiffBranch
+                | Self::GitDiffWholeBranch
+        )
+    }
+
     const fn describe_git_diff(&self) -> &'static str {
         match self {
             Self::GitDiffCached => "git diff --cached (staged)",
@@ -776,14 +787,13 @@ impl Action {
         }
     }
 
-    /// The worktree and make arm of [`Self::canonical_name`], which is at its
-    /// length pin.
+    /// The worktree arm of [`Self::canonical_name`], which is at its length
+    /// pin.
     const fn workspace_name(&self) -> &'static str {
         match self {
             Self::WorktreeList => "worktree_list",
             Self::WorktreeNew => "worktree_new",
-            Self::WorktreeDelete => "worktree_delete",
-            _ => "make_menu",
+            _ => "worktree_delete",
         }
     }
 

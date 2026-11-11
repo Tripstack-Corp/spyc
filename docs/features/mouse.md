@@ -66,8 +66,8 @@ quick-select and `y` in the pager are the mouse-free yank paths.
     project) opens the open projects' rows alone.
   - **The git segment** offers the worktree list, a new worktree and, at the
     root of a clean linked worktree no session has claimed, deleting it
-    (`Space w l`, `n`, `d`), `gd` while the repo has changes, and `:diff`,
-    the branch's changes since it left its base ([Pager](pager.md)).
+    (`Space w l`, `n`, `d`), `gd` while the repo has changes, and `gM`,
+    the whole branch's changes since it left its base ([Pager](pager.md)).
   - **The agent segment** gives the pane the keyboard and opens its active
     tab's menu, as `^a .` does.
   - **The session segment** offers the session's info (`Space s`) and

@@ -269,6 +269,7 @@ fn git_rows(g: GitFacts) -> Vec<ChordEntry> {
         (true, "Space w n", A::WorktreeNew),
         (g.removable, "Space w d", A::WorktreeDelete),
         (g.changes, "gd", A::GitDiff),
+        (true, "gM", A::GitDiffWholeBranch),
     ])
 }
 
