@@ -1,0 +1,23 @@
+[package]
+name = "spyc-jar"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Stage 2 spike: a process that holds one pane's program and its PTY, and outlives spyc"
+license = "BSD-3-Clause"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "spyc-jar"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+portable-pty = "0.9"
+rustix = { version = "1.1.4", features = ["process", "fs"] }
+
+[dev-dependencies]
+tempfile = "3"
+rustix = { version = "1.1.4", features = ["process"] }

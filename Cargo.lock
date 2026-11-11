@@ -4525,6 +4525,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "spyc-jar"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "portable-pty",
+ "rustix 1.1.6",
+ "tempfile",
+]
+
+[[package]]
 name = "spyc-vt-sys"
 version = "0.2.0"
 
