@@ -636,6 +636,78 @@ and a forged count that must not allocate.
   can add them.
 - R19 needs a macOS answer, or an exception for the instant of a handover.
 
+### Stage 4: overflow and lifetime
+
+**Recommendation: go, with one change to restoring across a gap (R12c).**
+Built on `spike/jar-stage-2` (`8e5828d1`, `80f0b3c6`).
+
+**Q7: a repaint alone isn't enough after `drop`.** In `q7.py`:
+- Claude prints 1 to 600 while spyc is dead, its jar's ring cut to 8 KB.
+- A restored spyc then makes it repaint.
+- That restore is compared with one from a ring big enough to lose nothing.
+
+Inline, Claude printed about 89 KB for those 600 lines, and the jar lost
+about 80 KB. Full-screen, it printed about 23 KB, and the jar lost about
+12 KB.
+
+| Claude | Restored | Screen after the repaint | Modes | History |
+|---|---|---|---|---|
+| Full-screen | Nothing lost | 600 shown, new prompt answered | Alternate screen, mouse reporting, bracketed paste | (Claude's own) |
+| Full-screen | Lost, from an empty engine | The same | **None of the three** | (Claude's own) |
+| Full-screen | Lost, from the snapshot under the gap | The same | All three | (Claude's own) |
+| Inline | Nothing lost | 600 shown, new prompt answered | Bracketed paste | From the launch command on |
+| Inline | Lost, from an empty engine | The same | **No bracketed paste** | From 557 on |
+| Inline | Lost, from the snapshot under the gap | The same | Bracketed paste | From the launch command on, then the gap, then from 549 |
+
+- **The repaint redraws the screen but sets no mode again.** Claude sets its
+  modes once, at launch, in the oldest bytes, which overflow drops first.
+- **From an empty engine,** spyc treats a full-screen Claude as one that
+  wants no mouse, keeps its screen in the pane's scrollback, and sends a
+  multi-line paste as separate lines.
+- **From the newest snapshot under the gap,** every mode came back. The
+  snapshot is older than the gap, so the bytes after the gap are applied on
+  top of it before the repaint. That is now the default.
+  `SPYC_JAR_GAP=blank` keeps the empty engine for comparison.
+- **What can still go wrong:** a mode the program changes inside the lost
+  bytes stays as the snapshot had it until the program sets it again. spyc
+  takes snapshots after a second of quiet, so through a long stream the newest
+  one predates the stream. A snapshot every few seconds even while output
+  flows would narrow that, at about 6 ms of the pane's lock each.
+
+**Q6: how a jar ends.** Three ways, each tested on macOS and Linux:
+
+1. **Its program exits,** and an owner collects the exit, or nobody does
+   within a minute.
+2. **No owner within its linger (R32a).** `--linger-ownerless-ms`: the
+   program gets `SIGHUP`, as from a closed terminal, then `SIGKILL` two
+   seconds later. A program that ignores the hangup ends too. Without a
+   linger, the jar waits for an owner however long; a new owner gets it. A
+   jar with a finite linger gives its first owner ten seconds to connect.
+3. **The user closes the tab:** spyc sends the jar `Kill`, as before.
+
+**R31: a jar describes itself.** `Describe` answers `key`, `value` pairs:
+- the id, the instance and its start time;
+- the jar's version and binary;
+- the program and its pid;
+- its size, overflow mode, linger, owner, log and snapshots.
+
+A newer jar can add keys that an older spyc still shows. The instance and the
+start time survive an upgrade. `spyc-jar describe SOCKET` prints one jar, and
+`spyc --jars` lists them all, a stale socket as stale without waiting on it.
+
+`drop` with no owner has worked since stage 2. `block` and `spill` stay later
+(R12b), unbuilt.
+
+**What stage 4 asks of the requirements,** for the owner:
+
+- R12c as v1: across a gap, the snapshot under it, then what follows, then the
+  repaint.
+- Whether spyc takes snapshots on a timer while output flows, not only after
+  a quiet second.
+- The linger each kind of tab gets. The draft gives a pane "until an owner
+  returns" and a capture a short one; the spike's knob is
+  `SPYC_JAR_LINGER_MS`.
+
 ## Sources
 
 - [zmx: session persistence for terminal processes](https://erock.prose.sh/zmx-session-persistence)
