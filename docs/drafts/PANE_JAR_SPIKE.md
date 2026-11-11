@@ -319,7 +319,7 @@ neither could reach the user's running spyc.
 would notice, and survives a crash of spyc with the pane intact.
 
 **Built,** on the throwaway branch `spike/jar-stage-2` (commits `6764e999` to
-`929633e7`, never merged):
+`cc9ddbe0`, never merged):
 
 - **A `crates/spyc-jar` crate.** The protocol has length-prefixed frames, a
   critical flag and its own signal numbers (macOS and Linux number signals
@@ -343,6 +343,15 @@ would notice, and survives a crash of spyc with the pane intact.
 - **Every jarred tab has a pane id,** so a tab running anything is adopted on
   restore, and an adopted agent skips restore's queued `/resume` text, which
   would otherwise queue a prompt in it.
+- **R32, stale sockets.** A socket counts as stale only when nothing answers
+  on it; the jar directory is swept on a spyc's first jar, so a plain spyc
+  never looks. A live jar that refuses to be adopted (another spyc owns it) is
+  left alone, where the first version deleted its socket and would have made
+  it unreachable.
+- **R17b, a portable snapshot.** The jar keeps the latest snapshot of each
+  format. The engine also encodes the VT formatter's emit, scrollback
+  included. On adoption spyc uses the binary snapshot when this build decodes
+  it, else the portable one, else the full log.
 - **The snapshot loop.** The pane's parser worker counts the bytes it parses
   and, after a second of quiet, stores libghostty's binary snapshot in the jar
   at that offset. On adoption spyc fetches it, checks this build decodes it,
@@ -370,6 +379,10 @@ fidelity and R15a checks; its figures follow the table.
 | Snapshot loop | A tab printed about 17 KB against an 8 KB log, then spyc crashed and was restored. With snapshots the restored history starts at the original command; without, at line 1694 (1676 on Linux), the oldest the log still held. | The log can be small: history comes from the snapshot. |
 | A streaming Claude tab | Claude (the owner's login, spyc's state isolated) printing 1 to 300 in a jarred tab; spyc killed at 44. After `spyc -r`: the same Claude process, its turn finished (279 to 300 and "done"), a clean input box, and it answered a new prompt. | The spike's goal, for an agent. |
 | macOS identity | A jar started from Terminal.app, then Terminal.app killed. The program in it still read `~/Documents`, the pasteboard and a Keychain item, and delivered a notification; the jar was reparented to launchd. | herdr #808's loss doesn't happen here. |
+| R17b | A restoring spyc playing a different build (it refuses the binary snapshot). From the portable snapshot the restored history is whole. With only a binary snapshot it is empty: the jar had trimmed its log to that snapshot, so nothing was left to replay. | The portable form is what makes a build change lossless, and it has to exist before the handover. Linux gives the same three results. |
+| A `SIGSTOP`ped spyc | spyc frozen past the jar's 10 s deadline: the jar handed the lease to a new owner and the program kept running. Resumed, spyc showed a stale pane, not marked exited and never reconnecting, though the jar was free. | R21 holds; a resumed spyc must win its jar back. |
+| R32 | A sweep removes a socket nothing answers on and keeps a live one; the test fails when a refused connection is taken as live. | — |
+| Startup | Release spyc with a startup tab: first frame 25 ms without jars, 39 ms with; the pane's shell prompt 183 ms against 191 ms. With no tabs no jar starts, so a plain spyc pays nothing. | The plain-spyc principle holds. |
 | R4 | An interactive shell in a jar: the jar reports the shell's process group, then a job's while it runs. The test fails when the jar stops tracking changes. | R4 works without spyc reaching the master. |
 
 On **Linux**: echo through a jar 137 µs p50 and 290 µs p99 (direct 76 and
@@ -408,15 +421,28 @@ jar, 19 MB for 30.
   start, and log trimming that could drop a resize at offset 0 before it was
   sent.
 
-**Not done in stage 2:**
+**`exec`-in-place, compared without building it.** Both ways a restore costs
+spyc's own startup and restore, about 25 to 40 ms to a first frame. The jar
+adds a socket connect and a replay, at most 25 ms for a 4 MB log and less
+with a snapshot. For those milliseconds the jar also survives a crash and a
+hang, and is what makes detaching possible, none of which `exec`-in-place
+can do: its program dies with spyc. Building it would have measured the
+small difference, not changed the choice.
 
-- **`exec`-in-place,** for comparison: not built.
-- **R32:** stale sockets aren't cleaned up.
-- **R17b,** the portable formatter snapshot for an upgrade across a pin bump:
-  only the binary snapshot is built, so such an upgrade falls back to the
-  full log.
-- **A `SIGSTOP`ped spyc** (the jar's deadline is tested; spyc's side isn't),
-  and memory and snapshot CPU at 30 panes inside spyc.
+**What stage 2 asks of the requirements,** for the owner (`JAR_PROTOCOL.md`'s
+verdicts are unchanged here):
+
+- **A spyc that loses its lease takes it back** when the jar is free, and marks
+  the pane detached when another spyc holds it. The same reconnect serves a
+  dropped connection.
+- **A crash followed by a build change.** With only the binary snapshot kept,
+  that restore is empty. Either a portable snapshot is kept alongside the
+  binary one, at some cost per snapshot, or the jar keeps its log back to
+  the last portable snapshot.
+- **The jar handles its own `setsid` failing,** by forking first or refusing.
+
+**Not done in stage 2:** memory and snapshot CPU at 30 panes inside spyc.
+**Recommendation:** go, and on to stage 2b.
 
 ## Sources
 
