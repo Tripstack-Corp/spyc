@@ -52,9 +52,12 @@ impl GhosttyEngine {
         let emit: ffi::GhosttyFormatterFormat::Type =
             ffi::GhosttyFormatterFormat::GHOSTTY_FORMATTER_FORMAT_VT;
         let off = false;
+        // Logical lines, so the restoring terminal wraps them again and its
+        // rows keep their soft-wrap flags.
+        let unwrap = true;
         let set: [(FOpt::Type, *const std::ffi::c_void); 4] = [
             (FOpt::GHOSTTY_FORMATTER_OPT_EMIT, (&raw const emit).cast()),
-            (FOpt::GHOSTTY_FORMATTER_OPT_UNWRAP, (&raw const off).cast()),
+            (FOpt::GHOSTTY_FORMATTER_OPT_UNWRAP, (&raw const unwrap).cast()),
             (FOpt::GHOSTTY_FORMATTER_OPT_TRIM, (&raw const off).cast()),
             (
                 FOpt::GHOSTTY_FORMATTER_OPT_EXTRAS,
@@ -86,6 +89,89 @@ impl GhosttyEngine {
             buf.truncate(wrote);
             buf
         })
+    }
+
+    /// The whole portable form, made from a binary snapshot in a scratch
+    /// engine, so the pane's own engine stays unlocked meanwhile. The
+    /// formatter writes only the screen showing, so under a full-screen
+    /// program it writes the primary screen and its history first, then the
+    /// alternate screen, whose emit opens by switching to it. The cursor
+    /// shape, which no extra carries, comes from asking the scratch engine.
+    pub fn portable_from_binary(blob: &[u8], rows: u16, cols: u16) -> Option<Vec<u8>> {
+        use crate::pane::engine::{Engine, TerminalScreen};
+        let mut e = <Self as Engine>::new(rows, cols, 10_000);
+        if !e.restore_snapshot(blob, rows, cols) {
+            return None;
+        }
+        const ASK_SHAPE: &[u8] = b"\x1bP$q q\x1b\\";
+        e.process(ASK_SHAPE);
+        let shape = cursor_shape(&e.take_replies());
+        let mut fresh = <Self as Engine>::new(1, 1, 0);
+        fresh.process(ASK_SHAPE);
+        let shape = shape.filter(|n| Some(*n) != cursor_shape(&fresh.take_replies()));
+        let title = e.title();
+        let mut out = if e.inner.alternate_screen() {
+            let alt = e.encode_portable()?;
+            let alt_saved = e.saved_cursor();
+            e.process(b"\x1b[?1049l");
+            let primary = e.encode_portable()?;
+            let mut out = with_saved(primary, &e.saved_cursor());
+            out.extend(with_saved(alt, &alt_saved));
+            out
+        } else {
+            let emit = e.encode_portable()?;
+            with_saved(emit, &e.saved_cursor())
+        };
+        if let Some(n) = shape {
+            out.extend(format!("\x1b[{n} q").into_bytes());
+        }
+        if !title.is_empty() && !title.contains(|c: char| c.is_control()) {
+            out.extend(format!("\x1b]2;{title}\x07").into_bytes());
+        }
+        Some(out)
+    }
+
+    /// What DECSC saved on the screen showing, as sequences that save it
+    /// again; empty when it is the default a DECRC would find. No extra
+    /// carries it. It asks the engine with DECRC, which moves its cursor, so
+    /// it comes after the screen's emit is taken.
+    fn saved_cursor(&mut self) -> Vec<u8> {
+        use crate::pane::engine::{Engine, TerminalScreen};
+        self.process(b"\x1b8\x1bP$qm\x1b\\");
+        let pen = sgr(&self.take_replies());
+        let (y, x) = self.inner.cursor_position();
+        if (y, x) == (0, 0) && pen.as_deref().is_none_or(|p| p == "0") {
+            return Vec::new();
+        }
+        format!(
+            "\x1b[{}m\x1b[{};{}H\x1b7\x1b[0m",
+            pen.as_deref().unwrap_or("0"),
+            y + 1,
+            x + 1
+        )
+        .into_bytes()
+    }
+
+    /// The title the program set, if any.
+    fn title(&self) -> String {
+        let mut s = ffi::GhosttyString {
+            ptr: std::ptr::null(),
+            len: 0,
+        };
+        // SAFETY: `t` is live and TITLE writes a `GhosttyString`, whose bytes
+        // stay valid until the terminal next changes; they are copied at once.
+        let ok = unsafe {
+            ffi::ghostty_terminal_get(
+                self.inner.t,
+                super::Data::GHOSTTY_TERMINAL_DATA_TITLE,
+                (&raw mut s).cast(),
+            )
+        };
+        if ok != spyc_vt_sys::SUCCESS || s.ptr.is_null() {
+            return String::new();
+        }
+        // SAFETY: as above, `len` readable bytes at `ptr`.
+        String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(s.ptr, s.len) }).into_owned()
     }
 
     /// The engine's size in rows and columns.
@@ -139,6 +225,31 @@ impl GhosttyEngine {
         self.inner.synchronized = false;
         true
     }
+}
+
+/// The cursor shape in a DECRQSS reply (`DCS 1 $ r N SP q ST`).
+fn cursor_shape(reply: &[u8]) -> Option<u8> {
+    let s = std::str::from_utf8(reply).ok()?;
+    s.split_once("$r")?.1.split_once(" q")?.0.parse().ok()
+}
+
+/// `saved` ahead of a screen's `emit`, so the emit's own cursor and pen come
+/// after it; for the alternate screen, just after the switch it opens with,
+/// since switching saves the cursor too.
+fn with_saved(emit: Vec<u8>, saved: &[u8]) -> Vec<u8> {
+    const ALT: &[u8] = b"\x1b[?1049h";
+    let at = if emit.starts_with(ALT) { ALT.len() } else { 0 };
+    let mut out = emit[..at].to_vec();
+    out.extend_from_slice(saved);
+    out.extend_from_slice(&emit[at..]);
+    out
+}
+
+/// The parameters in a DECRQSS reply for SGR (`DCS 1 $ r Ps m ST`).
+fn sgr(reply: &[u8]) -> Option<String> {
+    let s = std::str::from_utf8(reply).ok()?;
+    let p = s.split_once("$r")?.1.split_once('m')?.0;
+    Some(if p.is_empty() { "0".into() } else { p.to_owned() })
 }
 
 /// Whether `blob` decodes, without keeping what it decodes to.
@@ -300,9 +411,8 @@ mod bench {
                 // binary snapshot, in a scratch engine.
                 let mut via_bin = Vec::new();
                 let off_lock = median_ms(|| {
-                    let mut f = <GhosttyEngine as Engine>::new(ROWS, COLS, 10_000);
-                    assert!(f.restore_snapshot(&bin, ROWS, COLS));
-                    via_bin = f.encode_portable().expect("portable from binary");
+                    via_bin = GhosttyEngine::portable_from_binary(&bin, ROWS, COLS)
+                        .expect("portable from binary");
                 });
                 let mut again = <GhosttyEngine as Engine>::new(ROWS, COLS, 10_000);
                 again.process(&port);
@@ -338,9 +448,7 @@ mod bench {
                     let t0 = Instant::now();
                     let bin = e.encode_snapshot().expect("binary");
                     let locked = t0.elapsed();
-                    let mut f = <GhosttyEngine as Engine>::new(ROWS, COLS, 10_000);
-                    assert!(f.restore_snapshot(&bin, ROWS, COLS));
-                    let port = f.encode_portable().expect("portable");
+                    let port = GhosttyEngine::portable_from_binary(&bin, ROWS, COLS).expect("portable");
                     (locked, t0.elapsed(), bin.len() + port.len())
                 })
             })

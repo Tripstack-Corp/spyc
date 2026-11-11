@@ -789,10 +789,12 @@ fn parser_worker(
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let (rows, cols) = p.size();
             let binary = p.encode_snapshot();
-            // Spike: the portable form, which production stores only on a
-            // planned handover, when `SPYC_JAR_PORTABLE` asks for it.
-            let portable = std::env::var_os("SPYC_JAR_PORTABLE").and_then(|_| p.encode_portable());
             drop(p);
+            // Decision I (option 2): every pane keeps the portable form too,
+            // made from the binary one here, off the parser's lock.
+            let portable = binary.as_deref().and_then(|b| {
+                crate::pane::engine_ghostty::GhosttyEngine::portable_from_binary(b, rows, cols)
+            });
             if let Some(blob) = binary {
                 sink.store(spyc_jar::proto::SNAPSHOT_BINARY, parsed, rows, cols, blob);
             }
