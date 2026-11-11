@@ -777,6 +777,7 @@ fn parser_worker(
     // once output has been quiet for a second.
     let mut parsed: u64 = 0;
     let mut snapshotted: u64 = 0;
+    let mut last_snapshot = std::time::Instant::now();
     let mut last_bytes = std::time::Instant::now();
     // Stage 4, Q7: the modes the pane's engine holds a few seconds in, which
     // after a gap may have lost what the program set before it.
@@ -796,11 +797,18 @@ fn parser_worker(
                 s.hide_cursor()
             ));
         }
+        // A snapshot after a second of quiet, and every five seconds while
+        // output flows, so a gap during a long stream (R12c) restores from a
+        // recent one. A few panes at a time (R17d): thirty at once held each
+        // pane's lock ten times as long.
         if let Some(sink) = &opts.snapshots
             && parsed != snapshotted
             && sync_opened.is_none()
-            && last_bytes.elapsed() >= std::time::Duration::from_secs(1)
+            && (last_bytes.elapsed() >= std::time::Duration::from_secs(1)
+                || last_snapshot.elapsed() >= std::time::Duration::from_secs(5))
+            && let Some(_turn) = SnapshotTurn::take()
         {
+            last_snapshot = std::time::Instant::now();
             let p = parser
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1013,3 +1021,25 @@ fn preview_bytes(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// One of the few snapshots that may be taken at once (R17d); `None` when
+/// they're all in use, and the pane tries again on its next pass.
+struct SnapshotTurn;
+
+static SNAPSHOTS_RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const SNAPSHOTS_AT_ONCE: usize = 2;
+
+impl SnapshotTurn {
+    fn take() -> Option<Self> {
+        SNAPSHOTS_RUNNING
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < SNAPSHOTS_AT_ONCE).then_some(n + 1))
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for SnapshotTurn {
+    fn drop(&mut self) {
+        SNAPSHOTS_RUNNING.fetch_sub(1, Ordering::AcqRel);
+    }
+}

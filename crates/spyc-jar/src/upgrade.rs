@@ -5,10 +5,13 @@
 //!    its writer between batches, the acceptor and the child waiter.
 //! 2. The jar's state is encoded as a [`handover`](crate::handover) blob, and
 //!    the new binary must accept it (`validate-handover`) within a deadline.
-//! 3. The blob goes into an unlinked file. That file, the listener, the PTY
-//!    master and every connection travel as `SCM_RIGHTS` over a socketpair
-//!    whose other end becomes the new image's standard input, so the new
-//!    image receives them as owned descriptors with nothing `unsafe`.
+//! 3. The blob is sealed with ChaCha20-Poly1305 under a fresh key and goes
+//!    into an unlinked file (a `memfd` on Linux), so only ciphertext can reach
+//!    a disk (R19). That file, the listener, the PTY master and every
+//!    connection travel as `SCM_RIGHTS` over a socketpair whose other end
+//!    becomes the new image's standard input, with the key and nonce in the
+//!    same message, so the new image receives them as owned descriptors with
+//!    nothing `unsafe`.
 //! 4. The jar `exec`s `BINARY resume-handover`: same PID, same session, same
 //!    child. In-flight descriptors keep the PTY and the connections open
 //!    across the moment the old image's own copies close.
@@ -102,7 +105,8 @@ fn try_run(shared: &Shared, binary: &str) -> anyhow::Result<Never> {
     let blob = handover::encode_parts(&shared.cfg, shared.child_pid, &st, &states);
     validate(binary, &blob)?;
 
-    let blob_file = blob_file(shared, &blob)?;
+    let (key, nonce, sealed) = seal(&blob)?;
+    let blob_file = blob_file(shared, &sealed)?;
     let (ours, theirs) = UnixStream::pair().context("socketpair")?;
     let mut fds: Vec<BorrowedFd<'_>> = vec![blob_file.as_fd(), shared.listener.as_fd(), shared.master.as_fd()];
     fds.extend(outs.iter().map(|s| s.as_fd()));
@@ -111,7 +115,8 @@ fn try_run(shared: &Shared, binary: &str) -> anyhow::Result<Never> {
     if !control.push(SendAncillaryMessage::ScmRights(&fds)) {
         bail!("the descriptors don't fit one message");
     }
-    rustix::net::sendmsg(&ours, &[IoSlice::new(FDS_TAG)], &mut control, SendFlags::empty())
+    let iov = [IoSlice::new(FDS_TAG), IoSlice::new(&key), IoSlice::new(&nonce)];
+    rustix::net::sendmsg(&ours, &iov, &mut control, SendFlags::empty())
         .context("send the descriptors")?;
     drop(ours);
     let err = Command::new(binary)
@@ -122,6 +127,27 @@ fn try_run(shared: &Shared, binary: &str) -> anyhow::Result<Never> {
     drop(conns);
     drop(st);
     Err(anyhow!("exec {binary}: {err}"))
+}
+
+/// The blob sealed under a fresh random key and nonce, used once.
+fn seal(blob: &[u8]) -> anyhow::Result<([u8; 32], [u8; 12], Vec<u8>)> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    let mut key = [0u8; 32];
+    let mut nonce = [0u8; 12];
+    let mut rng = std::fs::File::open("/dev/urandom").context("open /dev/urandom")?;
+    rng.read_exact(&mut key)?;
+    rng.read_exact(&mut nonce)?;
+    let sealed = chacha20poly1305::ChaCha20Poly1305::new((&key).into())
+        .encrypt((&nonce).into(), blob)
+        .map_err(|_| anyhow!("seal the handover blob"))?;
+    Ok((key, nonce, sealed))
+}
+
+fn open_sealed(sealed: &[u8], key: &[u8; 32], nonce: &[u8; 12]) -> anyhow::Result<Vec<u8>> {
+    use chacha20poly1305::aead::{Aead, KeyInit};
+    chacha20poly1305::ChaCha20Poly1305::new(key.into())
+        .decrypt(nonce.into(), sealed)
+        .map_err(|_| anyhow!("the handover blob doesn't open with its key"))
 }
 
 /// Wait until every thread that may hold bytes in flight has parked.
@@ -207,10 +233,10 @@ fn blob_file(_shared: &Shared, blob: &[u8]) -> anyhow::Result<std::fs::File> {
 }
 
 /// macOS has no `memfd`, and its POSIX shared memory can't be written, only
-/// mapped: the blob goes in a file only this process can reach, created
-/// beside the socket in the jar's `0700` directory, readable by the owner
-/// alone, and unlinked before it's handed on. It may still reach the disk
-/// through the page cache, which R19 forbids: a gap stage 3 reports.
+/// mapped: the sealed blob goes in a file only this process can reach,
+/// created beside the socket in the jar's `0700` directory, readable by the
+/// owner alone, and unlinked before it's handed on. Whatever of it reaches
+/// the disk is ciphertext, its key only ever in the socket's buffer.
 #[cfg(not(target_os = "linux"))]
 fn blob_file(shared: &Shared, blob: &[u8]) -> anyhow::Result<std::fs::File> {
     let path = shared.cfg.socket.with_extension("handover");
@@ -245,19 +271,25 @@ pub fn validate_stdin() -> anyhow::Result<()> {
 pub fn resume() -> anyhow::Result<()> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags};
     let sock = UnixStream::from(std::io::stdin().as_fd().try_clone_to_owned()?);
-    let mut tag = [0u8; 8];
+    let mut head = [0u8; 52];
     let mut space = vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(handover::MAX_CONNS + 3))];
     let mut control = RecvAncillaryBuffer::new(&mut space);
     let got = rustix::net::recvmsg(
         &sock,
-        &mut [std::io::IoSliceMut::new(&mut tag)],
+        &mut [std::io::IoSliceMut::new(&mut head)],
         &mut control,
         RecvFlags::empty(),
     )
     .context("receive the descriptors")?;
-    if got.bytes != tag.len() || &tag != FDS_TAG {
+    let mut sock = sock;
+    if got.bytes < head.len() {
+        sock.read_exact(&mut head[got.bytes..]).context("the handover's key")?;
+    }
+    if &head[..8] != FDS_TAG {
         bail!("no handover on standard input");
     }
+    let key: [u8; 32] = head[8..40].try_into().expect("32 bytes");
+    let nonce: [u8; 12] = head[40..52].try_into().expect("12 bytes");
     let mut fds: Vec<OwnedFd> = Vec::new();
     for m in control.drain() {
         if let RecvAncillaryMessage::ScmRights(r) = m {
@@ -269,10 +301,11 @@ pub fn resume() -> anyhow::Result<()> {
         rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
     }
     let mut fds = fds.into_iter();
-    let mut blob = Vec::new();
+    let mut sealed = Vec::new();
     std::fs::File::from(fds.next().context("no blob")?)
         .take(1 << 30)
-        .read_to_end(&mut blob)?;
+        .read_to_end(&mut sealed)?;
+    let blob = open_sealed(&sealed, &key, &nonce)?;
     let h = handover::decode(&blob)?;
     let listener = std::os::unix::net::UnixListener::from(fds.next().context("no listener")?);
     let master = fds.next().context("no PTY master")?;
@@ -285,4 +318,30 @@ pub fn resume() -> anyhow::Result<()> {
     }
     let conns = h.conns.into_iter().zip(streams).collect();
     crate::jar::start(h.cfg, h.state, h.child_pid, master, listener, conns)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_sealed_blob_hides_its_bytes_and_opens_only_whole_with_its_key() {
+        let blob = handover::sample_blob();
+        let (key, nonce, sealed) = seal(&blob).expect("seal");
+        for plain in [&handover::MAGIC[..], b"echo hi", b"/tmp/spyc/jars/sample.sock"] {
+            assert!(
+                !sealed.windows(plain.len()).any(|w| w == plain),
+                "{:?} is readable in what reaches a file",
+                String::from_utf8_lossy(plain)
+            );
+            assert!(blob.windows(plain.len()).any(|w| w == plain), "the check would see it");
+        }
+        assert_eq!(open_sealed(&sealed, &key, &nonce).expect("open"), blob);
+        let mut tampered = sealed.clone();
+        tampered[20] ^= 1;
+        assert!(open_sealed(&tampered, &key, &nonce).is_err(), "a changed byte is refused");
+        let mut other = key;
+        other[0] ^= 1;
+        assert!(open_sealed(&sealed, &other, &nonce).is_err(), "another key is refused");
+    }
 }
