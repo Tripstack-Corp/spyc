@@ -319,7 +319,7 @@ neither could reach the user's running spyc.
 would notice, and survives a crash of spyc with the pane intact.
 
 **Built,** on the throwaway branch `spike/jar-stage-2` (commits `6764e999` to
-`5a65715b`, never merged):
+`929633e7`, never merged):
 
 - **A `crates/spyc-jar` crate.** The protocol has length-prefixed frames, a
   critical flag and its own signal numbers (macOS and Linux number signals
@@ -343,6 +343,10 @@ would notice, and survives a crash of spyc with the pane intact.
 - **Every jarred tab has a pane id,** so a tab running anything is adopted on
   restore, and an adopted agent skips restore's queued `/resume` text, which
   would otherwise queue a prompt in it.
+- **The snapshot loop.** The pane's parser worker counts the bytes it parses
+  and, after a second of quiet, stores libghostty's binary snapshot in the jar
+  at that offset. On adoption spyc fetches it, checks this build decodes it,
+  starts the pane's engine from it, and replays only what came after.
 - **A Linux run,** `spikes/jar-stage-2/run-linux.sh`: the jar tests and the
   terminal harness in an Alpine Rust container under podman, using the musl
   target the vendored libghostty archives cover.
@@ -363,6 +367,9 @@ fidelity and R15a checks; its figures follow the table.
 | Crash and restore | `kill -9` of spyc, then `spyc -r`. A shell tab came back as the same process (a variable set before the crash still set), with its screen; the same jar, nothing respawned. | The spike's goal. |
 | Fidelity and gap | `less` paged to line 79: pane content back 0.06 s after picking the session, all 27 pane rows identical. Without jars, a fresh prompt. | Q3 and Q5, with the full log; no snapshot yet. |
 | R15a | A probe asked DA1 before the crash and read again after the restore. With the gate it read nothing stale; with the gate held open it read `ESC[?62;22c`, a replayed query's answer arriving as keystrokes. | R15a is a real hazard, and the gate closes it. |
+| Snapshot loop | A tab printed about 17 KB against an 8 KB log, then spyc crashed and was restored. With snapshots the restored history starts at the original command; without, at line 1694 (1676 on Linux), the oldest the log still held. | The log can be small: history comes from the snapshot. |
+| A streaming Claude tab | Claude (the owner's login, spyc's state isolated) printing 1 to 300 in a jarred tab; spyc killed at 44. After `spyc -r`: the same Claude process, its turn finished (279 to 300 and "done"), a clean input box, and it answered a new prompt. | The spike's goal, for an agent. |
+| macOS identity | A jar started from Terminal.app, then Terminal.app killed. The program in it still read `~/Documents`, the pasteboard and a Keychain item, and delivered a notification; the jar was reparented to launchd. | herdr #808's loss doesn't happen here. |
 | R4 | An interactive shell in a jar: the jar reports the shell's process group, then a job's while it runs. The test fails when the jar stops tracking changes. | R4 works without spyc reaching the master. |
 
 On **Linux**: echo through a jar 137 µs p50 and 290 µs p99 (direct 76 and
@@ -383,6 +390,17 @@ jar, 19 MB for 30.
   before its owner connected is sent whatever the window, and the jar may run
   one PTY read past it; the Linux PTY's larger reads showed both. The test
   now checks that delivery stops growing with no acknowledgements.
+- **The jar's `setsid` can fail and it carries on.** Started as a background
+  job (`&`) from an interactive shell, the jar leads its process group, so
+  `setsid` fails and it stays in the terminal's session. spyc never starts it
+  that way, but the jar should fork first or refuse.
+- **Four spike functions are over the 100-line limit** (the jar's `serve` is
+  179 lines); production would split them. With jars off, the rest of the
+  suite passes unchanged.
+- **Two harness traps,** for whoever runs these again: answer `spyc -r`'s
+  session picker only once it's drawn, and keep reading a killed spyc's
+  terminal while reaping it, since a dying process can block closing a
+  terminal whose output nobody reads.
 - **A plain `cargo build` at the workspace root doesn't build `spyc-jar`.**
   Measuring with a stale jar briefly sent the R15a check the wrong way; use
   `cargo build --workspace`.
@@ -392,14 +410,13 @@ jar, 19 MB for 30.
 
 **Not done in stage 2:**
 
-- **A streaming Claude tab.** It needs Claude's real login inside an isolated
-  spyc, which touches the owner's Claude config, so it waits for the owner.
 - **`exec`-in-place,** for comparison: not built.
-- **The snapshot loop.** The screen is rebuilt from the full log, which works
-  only while the log fits its ring.
 - **R32:** stale sockets aren't cleaned up.
+- **R17b,** the portable formatter snapshot for an upgrade across a pin bump:
+  only the binary snapshot is built, so such an upgrade falls back to the
+  full log.
 - **A `SIGSTOP`ped spyc** (the jar's deadline is tested; spyc's side isn't),
-  memory and snapshot CPU at 30 panes inside spyc, and macOS identity.
+  and memory and snapshot CPU at 30 panes inside spyc.
 
 ## Sources
 
