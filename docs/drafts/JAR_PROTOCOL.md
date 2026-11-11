@@ -42,6 +42,19 @@ The protocol spec, with exact byte fixtures, is written from what stages 2,
 
 ## Principles
 
+- **A plain `spyc` stays plain** (decided by the owner). Someone who only
+  wants a file commander types `spyc` and gets exactly what they get today,
+  until they use a feature that needs more. All of the jar machinery is
+  hidden from them:
+  - **launching** brings no new prompt, no daemon and no measurable startup
+    cost;
+  - **jars exist only when there is a program to hold:** a session with no
+    pane tabs has no jars, sockets or background processes;
+  - **quitting** leaves no process, socket or file behind;
+  - **if the jar machinery fails,** spyc hosts the pane itself, as it does
+    today, and notes it in `:stderr` rather than prompting;
+  - **the new verbs** (`spyc attach`, `:detach`, sharing) cost nothing until
+    someone uses them.
 - **Mechanism in the jar, policy in spyc.** The jar does what it's told: how
   big the ring is, what to do when it fills, how long it lingers alone. spyc
   decides all of them.
@@ -324,7 +337,10 @@ elsewhere and pick it back up.
 | `^D`, `Q`, `ZZ`, `:q` | **Quit.** End this spyc's jars, and spyc with them. Asks first while an agent or task is running, as quitting does today. Jars owned by another spyc are untouched. |
 
 `^d` quits today, alongside `Q`, `ZZ` and `:q`; detaching takes it over, and
-the other three stay a full quit.
+the other three stay a full quit. **`^d` detaches only when something is
+running that's worth keeping:** an agent, a tab or a task. With nothing
+running it quits exactly as it does today, so a file-commander user who
+presses `^d` from habit never leaves a spyc running out of sight.
 
 **`^D` needs the kitty keyboard protocol.** `^d` and `^D` are the same byte
 (`0x04`) unless the terminal reports Shift with a control key, as Ghostty,
