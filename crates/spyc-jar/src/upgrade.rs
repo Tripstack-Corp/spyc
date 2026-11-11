@@ -194,8 +194,24 @@ fn validate(binary: &str, blob: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The blob in a file only this process can reach: created beside the
-/// socket, readable by the owner alone, and unlinked before it's handed on.
+/// The blob in memory only (R19): a `memfd`, which never has a name on any
+/// filesystem.
+#[cfg(target_os = "linux")]
+fn blob_file(_shared: &Shared, blob: &[u8]) -> anyhow::Result<std::fs::File> {
+    let fd = rustix::fs::memfd_create("spyc-jar-handover", rustix::fs::MemfdFlags::CLOEXEC)
+        .context("memfd_create")?;
+    let mut f = std::fs::File::from(fd);
+    f.write_all(blob).context("write the handover blob")?;
+    std::io::Seek::rewind(&mut f)?;
+    Ok(f)
+}
+
+/// macOS has no `memfd`, and its POSIX shared memory can't be written, only
+/// mapped: the blob goes in a file only this process can reach, created
+/// beside the socket in the jar's `0700` directory, readable by the owner
+/// alone, and unlinked before it's handed on. It may still reach the disk
+/// through the page cache, which R19 forbids: a gap stage 3 reports.
+#[cfg(not(target_os = "linux"))]
 fn blob_file(shared: &Shared, blob: &[u8]) -> anyhow::Result<std::fs::File> {
     let path = shared.cfg.socket.with_extension("handover");
     let _ = std::fs::remove_file(&path);
