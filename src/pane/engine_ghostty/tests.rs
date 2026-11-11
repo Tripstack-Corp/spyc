@@ -126,7 +126,7 @@ mod seam_contract {
 /// turned out to be, each pinned against the shipped engine.
 ///
 /// The spike found these by differential against the incumbent and named them
-/// in `docs/drafts/VT_ENGINE_SPIKE.md`; the bytes here are its fixtures. They
+/// in `docs/archive/VT_ENGINE_SPIKE.md`; the bytes here are its fixtures. They
 /// are asserted in-crate rather than in `spikes/vt-engine/`, which is excluded
 /// from the workspace and so runs only when someone remembers — a defect that
 /// took an engine swap to fix deserves a test that runs on every push.

@@ -1,5 +1,9 @@
 # Agent pane goes deaf to input after focus round-trip
 
+> **Archived (2026-11-10).** The bug is still open, now tracked as
+> [#1107](https://github.com/Tripstack-Corp/spyc/issues/1107). This is its
+> investigation record: read it the next time a pane goes deaf.
+
 **Status:** PARKED (2026-08-07) — did not reproduce under deliberate attempt.
 **Still open.** It has bitten at least twice in ordinary use, and the reporter's
 "probably PEBCAK" is a hypothesis, not a finding. Candidate A is ruled out;

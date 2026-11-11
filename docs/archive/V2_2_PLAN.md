@@ -36,14 +36,14 @@ load-bearing.
 
 | # | Item | Kind | Tracking | Status |
 |---|---|---|---|---|
-| 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](../drafts/pane-identity-transport-proposal.md) | shipped (#507); per-pane roots dropped |
+| 1 | Pane-identity transport (option B) | prep | [#491](https://github.com/Tripstack-Corp/spyc/issues/491), [proposal](pane-identity-transport-proposal.md) | shipped (#507); per-pane roots dropped |
 | 2 | One spyc per agent — abstract the column references | prep | [#40](https://github.com/Tripstack-Corp/spyc/issues/40) | shipped (#504) |
 | 3 | Configurable startup pane tabs | prep + feature | [#58](https://github.com/Tripstack-Corp/spyc/issues/58), [plan](PANE_STARTUP_TABS_PLAN.md) | shipped (#482) |
 | 4 | Session forking (`^a F`) | feature | [#8](https://github.com/Tripstack-Corp/spyc/issues/8) | shipped (#516) |
 | 5 | Prompt templates in `.spycrc.toml` | feature | [#71](https://github.com/Tripstack-Corp/spyc/issues/71) | shipped (#517) |
 | 6 | The daily-driver bug set | fix | [#326](https://github.com/Tripstack-Corp/spyc/issues/326), [#327](https://github.com/Tripstack-Corp/spyc/issues/327), [#9](https://github.com/Tripstack-Corp/spyc/issues/9), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#22](https://github.com/Tripstack-Corp/spyc/issues/22), [#11](https://github.com/Tripstack-Corp/spyc/issues/11) | shipped: #326 (#464), #452 (#457), #34 (#465), #327 (#500), #9, #22 + #11 (#509) |
 | 7 | Author `docs/drafts/PROJECTS_PLAN.md` | design | [#492](https://github.com/Tripstack-Corp/spyc/issues/492), this doc, §7 | approved 2026-10-12 |
-| 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](../drafts/VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) | shipped (PRs 10–16: #457–#462, #465); the vt100 deletion (#453) is the first commit after the tag |
+| 8 | The VT engine — libghostty-vt replaces vt100 | prep + fix | [spike](VT_ENGINE_SPIKE.md), [#34](https://github.com/Tripstack-Corp/spyc/issues/34), [#452](https://github.com/Tripstack-Corp/spyc/issues/452), [#453](https://github.com/Tripstack-Corp/spyc/issues/453) | shipped (PRs 10–16: #457–#462, #465); the vt100 deletion (#453) is the first commit after the tag |
 
 ---
 
@@ -56,7 +56,7 @@ nothing and would reject the worktrees an agent creates (ROADMAP decisions log,
 2026-09-30).
 
 Implement **option B** from
-[`pane-identity-transport-proposal.md`](../drafts/pane-identity-transport-proposal.md):
+[`pane-identity-transport-proposal.md`](pane-identity-transport-proposal.md):
 the `spyc --mcp` proxy reads `$SPYC_PANE_ID` from its own environment and
 sends it in the `initialize` handshake; the server binds it to that connection
 for the connection's lifetime.
@@ -463,7 +463,7 @@ plan does not answer them.
 
 ## 8. The VT engine — libghostty-vt replaces vt100
 
-Full evidence in [`VT_ENGINE_SPIKE.md`](../drafts/VT_ENGINE_SPIKE.md); this section is the
+Full evidence in [`VT_ENGINE_SPIKE.md`](VT_ENGINE_SPIKE.md); this section is the
 staging, the gate, and the decisions the stages are allowed to make.
 
 **Why it is here and not in 3.0**, which is what the spike recommended: #34's
@@ -796,7 +796,7 @@ plus a `SPYC-TRAP` rationale section if the unsafe option wins, since the anchor
 and its section share a slug. `CONFIGURATION.md` and `--print-config` take nothing:
 `[pane] engine` was dropped rather than built (decisions log). `deny.toml` documents the vendored archives and
 `SECURITY.md` the pin and its checksum verification (PR 12). The MSRV did not
-move (§8), so `INSTALL.md` took nothing. `docs/drafts/VT_ENGINE_SPIKE.md` takes the dated addendum
+move (§8), so `INSTALL.md` took nothing. `docs/archive/VT_ENGINE_SPIKE.md` takes the dated addendum
 (PR 13) — appended, never rewritten. `CHANGELOG.md` is generated, so what
 matters is that each engine PR's **title** is typed for the section it belongs
 in: `fix(pane)` for the adapter half, `feat(pane)` for the flip, `chore` for the

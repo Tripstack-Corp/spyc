@@ -1,5 +1,10 @@
 # spyc auto-approval & action log
 
+> **Archived (2026-11-10), not built.** [#57](https://github.com/Tripstack-Corp/spyc/issues/57) closed as not
+> planned: Claude Code's own auto mode covers most of what it asked for. Kept
+> in case any of it is wanted again; its file pointers predate the MVU
+> decomposition.
+
 **Status:** plan, not yet implemented. Tracking issue: [#57](https://github.com/Tripstack-Corp/spyc/issues/57). Original note:
 > feature to allow spyc to approve certain Claude CLI actions automatically and keep a log
 

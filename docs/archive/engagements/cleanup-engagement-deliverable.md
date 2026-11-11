@@ -11,7 +11,7 @@
 > one data point — and `deny` has since left `make check` for `audit.yml`),
 > and **item 7** (`pick_best_rollout`'s two-unclaimed-panes residual, still
 > noted on #230). C7 became
-> [`docs/drafts/pane-identity-transport-proposal.md`](../../drafts/pane-identity-transport-proposal.md),
+> [`docs/archive/pane-identity-transport-proposal.md`](../../archive/pane-identity-transport-proposal.md),
 > accepted for 2.2.
 
 Brief: the C1–C7 cleanup engagement, plus C8 and C9 added mid-flight.
@@ -94,7 +94,7 @@ though the exit code cannot.
 wait-then-retry loop actually used. It bit all twelve PRs of the previous
 engagement and every one of this one.
 
-**C7 — pane identity.** `docs/drafts/pane-identity-transport-proposal.md`.
+**C7 — pane identity.** `docs/archive/pane-identity-transport-proposal.md`.
 Recommends the `initialize` handshake over a per-pane socket, and reaches a
 conclusion the brief's framing did not anticipate — see findings below.
 

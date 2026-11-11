@@ -43,7 +43,7 @@ pub const REQUIRED_ZIG: &str = "0.17.0";
 ///    rather than returning nonsense.
 /// 2. Rebuild every vendored archive at the new pin and refresh `CHECKSUMS`.
 /// 3. Re-run the spike harness (`spikes/vt-engine/`) in full and append a dated
-///    addendum to `docs/drafts/VT_ENGINE_SPIKE.md`. Scrollback retention,
+///    addendum to `docs/archive/VT_ENGINE_SPIKE.md`. Scrollback retention,
 ///    panic count, rehydration fidelity and throughput are all pin-dependent
 ///    and none of them are assumed to carry over.
 /// 4. Re-measure `scrollback::BYTES_PER_ROW_HEAVY` the same way, since the

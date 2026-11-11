@@ -1,6 +1,6 @@
 # `spikes/vt-engine` — VT engine differential harness
 
-Evidence for [`docs/drafts/VT_ENGINE_SPIKE.md`](../../docs/drafts/VT_ENGINE_SPIKE.md).
+Evidence for [`docs/archive/VT_ENGINE_SPIKE.md`](../../docs/archive/VT_ENGINE_SPIKE.md).
 Nothing here is production code: this crate declares its own empty
 `[workspace]`, so cargo never walks up into spyc's manifest and `make check` on
 `main` is untouched. `cargo package` on spyc already excludes it (a nested

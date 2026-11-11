@@ -1,7 +1,10 @@
-# Git review workspace proposal for spyc 2.3
+# Git review workspace proposal
 
-**Status: draft for review.** Candidate scope for 2.3, alongside Projects;
-unscheduled and not a release commitment. Written 2026-10-06 against `main`
+**Status: draft for review, unscheduled.** Written as candidate scope for 2.3,
+which shipped without it. 2.4 shipped part of its Compare step: `gm` and
+`:diff` show a branch's changes since it left its base (#1042), and MCP
+`git_diff` takes a `base` (#1044). The rest is unscheduled and not a release
+commitment. Written 2026-10-06 against `main`
 at `e1b714a62412a37f998a486161eac38d3c4f0f3f`. This proposal introduces no
 implemented commands, tools, bindings, or configuration.
 
