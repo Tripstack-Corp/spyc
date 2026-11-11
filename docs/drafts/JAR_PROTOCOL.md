@@ -307,6 +307,38 @@ What shape 2 asks of the protocol, **open until stage 2b reports:**
 - **An attach event the jar's own program can see** (point 2). A signal alone
   isn't enough.
 
+## Detaching, attaching and quitting
+
+Decided by the owner: two ways to leave spyc, and verbs to take part of it
+elsewhere and pick it back up.
+
+| Key or command | What it does |
+|---|---|
+| `^d`, `:detach` | **Detach.** spyc leaves the terminal. Every jar keeps running, and spyc stays their owner (decision B). |
+| `:detach project [name]` | Detach one project: the one in view, or the one named. Its jars keep running, ready to be attached elsewhere (U13). |
+| `:detach tab [n]` | Detach one tab: the active one, or tab `n`. |
+| `:attach` | List what is detached (whole spycs, projects and tabs) and pick one to attach. |
+| `:attach project [name]`, `:attach tab [id]` | Attach a detached project, or a detached tab into the project in view, so this spyc owns it. |
+| `spyc attach [name]`, from a shell | Reattach a terminal to a detached spyc. |
+| `^D`, `Q`, `ZZ`, `:q` | **Quit.** End this spyc's jars, and spyc with them. Asks first while an agent or task is running, as quitting does today. Jars owned by another spyc are untouched. |
+
+`^d` quits today, alongside `Q`, `ZZ` and `:q`; detaching takes it over, and
+the other three stay a full quit.
+
+**`^D` needs the kitty keyboard protocol.** `^d` and `^D` are the same byte
+(`0x04`) unless the terminal reports Shift with a control key, as Ghostty,
+Kitty and WezTerm do through the kitty keyboard protocol (the same limit as
+`Shift-Esc` for the `Esc` guard). Elsewhere `^D` arrives as `^d` and detaches.
+The fallback is the harmless one, and `Q`, `ZZ` and `:q` quit on every
+terminal.
+
+**A detached project or tab still has an owner.** With decision B nothing is
+left ownerless except by a crash, so detaching a project or a tab hands its
+jars to a spyc started for it: in shape 2 a spyc in its own outer jar, in
+shape 1 a headless one. `:attach` takes them from that spyc, which ends once
+it owns nothing. Which spyc that is gets decided with the shape (stage 2b);
+moving a project is stage 6.
+
 ## Projects
 
 spyc holds several projects, each with its own columns, tabs and agents. Two
