@@ -128,6 +128,7 @@ toml = { version = "1", default-features = false, features = ["parse", "display"
 serde_ignored = "0.1"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 portable-pty = "0.9"
+spyc-jar = { path = "crates/spyc-jar" }
 # The version is what crates.io resolves; `path` is dropped from the packaged
 # manifest. Bump it with the crate's own version (RELEASE_ENGINEERING.md §5a).
 spyc-vt-sys = { version = "0.2.0", path = "crates/spyc-vt-sys" }

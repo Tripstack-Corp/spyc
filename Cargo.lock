@@ -4503,6 +4503,7 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "shlex 2.0.1",
+ "spyc-jar",
  "spyc-vt-sys",
  "strip-ansi-escapes",
  "strum",

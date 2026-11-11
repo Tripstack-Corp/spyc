@@ -199,14 +199,6 @@ impl PtyHost {
     /// Same machinery that `Pane::spawn_with_env` and `spawn_capture`
     /// used pre-v1.5; consumers now share it.
     pub fn spawn(spec: PtySpec) -> anyhow::Result<Self> {
-        let pty_system = native_pty_system();
-        let pair = pty_system.openpty(PtySize {
-            rows: spec.rows,
-            cols: spec.cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-
         let (shell, mut shell_args) =
             crate::shell::pane_invocation(spec.command, spec.exec_replace);
         let launch_env = if spec.capture_launch_env && !spec.command.trim().is_empty() {
@@ -214,31 +206,46 @@ impl PtyHost {
         } else {
             None
         };
-        let mut cmd = CommandBuilder::new(&shell);
-        cmd.args(shell_args.iter().map(String::as_str));
-        cmd.cwd(spec.cwd);
         // Runtime `:s` overrides (formerly applied by mutating the
         // process env, which children inherited). Applied before the
         // caller's env so spec keys (TERM/COLUMNS/LINES/…) still win on
         // collision, matching the old inherit-then-override order.
-        for (k, v) in crate::envset::overrides() {
-            cmd.env(k, v);
-        }
-        cmd.env("TERM", spec.term);
-        cmd.env("COLUMNS", spec.cols.to_string());
-        cmd.env("LINES", spec.rows.to_string());
-        for (k, v) in spec.env {
-            cmd.env(k, v);
-        }
+        let mut env = crate::envset::overrides();
+        env.push(("TERM".into(), spec.term.into()));
+        env.push(("COLUMNS".into(), spec.cols.to_string()));
+        env.push(("LINES".into(), spec.rows.to_string()));
+        env.extend(spec.env.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())));
 
-        // Start the writer before spawning the child, so a failed worker spawn
-        // cannot strand a running child. No child input exists at this point.
-        let reader = pair.master.try_clone_reader()?;
-        let input = InputWriter::new(pair.master.take_writer()?)?;
-        let child = pair.slave.spawn_command(cmd)?;
-        // We don't need our own handle on the slave — once the child
-        // exits, the master read side will see EOF.
-        drop(pair.slave);
+        let (master, reader, input, child) = if super::jar_backend::enabled() {
+            let mut argv = vec![shell];
+            argv.extend(shell_args);
+            let jarred = super::jar_backend::spawn(&argv, spec.cwd, spec.rows, spec.cols, &env)?;
+            let reader = jarred.master.try_clone_reader()?;
+            let input = InputWriter::new(jarred.master.take_writer()?)?;
+            (jarred.master, reader, input, jarred.child)
+        } else {
+            let pair = native_pty_system().openpty(PtySize {
+                rows: spec.rows,
+                cols: spec.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })?;
+            let mut cmd = CommandBuilder::new(&shell);
+            cmd.args(shell_args.iter().map(String::as_str));
+            cmd.cwd(spec.cwd);
+            for (k, v) in &env {
+                cmd.env(k, v);
+            }
+            // Start the writer before spawning the child, so a failed worker
+            // spawn cannot strand a running child. No child input exists yet.
+            let reader = pair.master.try_clone_reader()?;
+            let input = InputWriter::new(pair.master.take_writer()?)?;
+            let child = pair.slave.spawn_command(cmd)?;
+            // We don't need our own handle on the slave — once the child
+            // exits, the master read side will see EOF.
+            drop(pair.slave);
+            (pair.master, reader, input, child)
+        };
 
         // Background thread pumps reader → channel. The render loop
         // drains the channel without blocking on child output. The channel is
@@ -257,7 +264,7 @@ impl PtyHost {
         if spec.nudge_winch {
             // Send SIGWINCH so rc-file shells re-query the pty size
             // and render their first prompt at the right geometry.
-            let _ = pair.master.resize(PtySize {
+            let _ = master.resize(PtySize {
                 rows: spec.rows,
                 cols: spec.cols,
                 pixel_width: 0,
@@ -268,7 +275,7 @@ impl PtyHost {
         Ok(Self {
             launch_env,
             wake,
-            master: pair.master,
+            master,
             input,
             child,
             event_rx: Some(event_rx),

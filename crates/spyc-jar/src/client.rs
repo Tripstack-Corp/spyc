@@ -73,4 +73,41 @@ impl Client {
     pub fn drop_connection(self) {
         let _ = self.read.shutdown(std::net::Shutdown::Both);
     }
+
+    /// Split into the receiving half, for one reading thread, and a sending
+    /// half any thread may clone.
+    pub fn split(self) -> (Receiver, Sender) {
+        let write = self_write(&self);
+        (Receiver(self), Sender(write))
+    }
+}
+
+fn self_write(c: &Client) -> Arc<Mutex<UnixStream>> {
+    Arc::clone(&c.write)
+}
+
+/// The receiving half of a [`Client`].
+pub struct Receiver(Client);
+
+impl Receiver {
+    pub fn recv(&mut self, wait: Duration) -> anyhow::Result<Option<Msg>> {
+        self.0.recv(wait)
+    }
+}
+
+/// The sending half of a [`Client`].
+#[derive(Clone, Debug)]
+pub struct Sender(Arc<Mutex<UnixStream>>);
+
+impl Sender {
+    pub fn send(&self, msg: &Msg) -> io::Result<()> {
+        let mut w = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        proto::write_msg(&mut *w, msg)
+    }
+
+    /// Close the connection, which ends the receiving half too.
+    pub fn close(&self) {
+        let w = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let _ = w.shutdown(std::net::Shutdown::Both);
+    }
 }

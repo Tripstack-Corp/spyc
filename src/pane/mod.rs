@@ -26,6 +26,7 @@ pub use widget::{PaneWidget, cell_style};
 
 // Shared pty kernel that `Pane`, `PendingCapture` and `BackgroundTask`
 // all wrap.
+pub mod jar_backend;
 pub mod launch_env;
 pub mod pty_host;
 
