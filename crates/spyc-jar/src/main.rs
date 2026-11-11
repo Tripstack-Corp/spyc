@@ -25,7 +25,14 @@ fn main() -> anyhow::Result<()> {
         window: 1 << 20,
         deadline: Duration::from_secs(10),
         linger_after_exit: Duration::from_secs(60),
+        attach_signal: false,
     };
+    if std::env::args().nth(1).as_deref() == Some("attach") {
+        let socket = std::env::args()
+            .nth(2)
+            .context("usage: spyc-jar attach SOCKET")?;
+        return spyc_jar::attach::run(std::path::Path::new(&socket));
+    }
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().with_context(|| format!("{name} needs a value"));
         match a.as_str() {
@@ -38,6 +45,7 @@ fn main() -> anyhow::Result<()> {
             "--deadline-ms" => {
                 cfg.deadline = Duration::from_millis(value("--deadline-ms")?.parse()?)
             }
+            "--attach-signal" => cfg.attach_signal = true,
             "--linger-ms" => {
                 cfg.linger_after_exit = Duration::from_millis(value("--linger-ms")?.parse()?);
             }
@@ -53,7 +61,13 @@ fn main() -> anyhow::Result<()> {
     }
     // Leave the session that started us, so closing that terminal or the end of
     // the spyc that spawned us reaches neither the jar nor its program.
-    let _ = rustix::process::setsid();
+    // A jar that can't leave its session would die with that terminal, which
+    // is the one thing it exists not to do, so it refuses to start rather than
+    // run in an indeterminate state. (`setsid` fails for a process group
+    // leader, such as a job a shell started with `&`.)
+    rustix::process::setsid().context(
+        "spyc-jar: can't start its own session (started as a process group leader?); refusing to run",
+    )?;
 
     if let Some(dir) = cfg.socket.parent() {
         std::fs::DirBuilder::new()

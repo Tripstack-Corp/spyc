@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 portable-pty = "0.9"
-rustix = { version = "1.1.4", features = ["process", "fs"] }
+rustix = { version = "1.1.4", features = ["process", "fs", "termios"] }
 
 [dev-dependencies]
 tempfile = "3"

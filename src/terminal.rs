@@ -147,6 +147,24 @@ static MOUSE_CAPTURE_ON: AtomicBool = AtomicBool::new(false);
 /// `AtomicBool` for the same cross-function reason as `MOUSE_CAPTURE_ON`.
 static KEYBOARD_ENHANCEMENT_SUPPORTED: AtomicBool = AtomicBool::new(false);
 
+/// Jar spike (stage 2b): a client attached to spyc's outer jar, which says so
+/// with `SIGUSR1`. Set by the handler, taken by the run loop's next resize
+/// (the client also nudges the size, so one always follows).
+static ATTACHED: AtomicBool = AtomicBool::new(false);
+
+/// Jar spike: whether a client attached since the last call.
+pub fn take_attached() -> bool {
+    ATTACHED.swap(false, Ordering::Relaxed)
+}
+
+/// Jar spike: a new terminal is on the other end of spyc's outer jar. Set every
+/// mode again on it and repaint, as returning from `^z` does; mouse reporting
+/// comes back through `settle_mouse_mode`.
+pub fn reattach(terminal: &mut Tui) -> Result<()> {
+    MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
+    resume_tui(terminal)
+}
+
 /// Read the terminal's actual mouse-reporting state. The `settle_mouse_mode`
 /// reconcile compares this against what the user asked for.
 pub fn mouse_capture_is_on() -> bool {
@@ -248,6 +266,11 @@ fn terminal_restore_seq() -> String {
 #[allow(clippy::missing_const_for_fn)]
 extern "C" fn signal_noop(_: libc::c_int) {}
 
+/// Async-signal-safe: one atomic store.
+extern "C" fn signal_attached(_: libc::c_int) {
+    ATTACHED.store(true, Ordering::Relaxed);
+}
+
 /// Restore the terminal, then die, for signals that mean "terminate": SIGTERM
 /// (`pkill spyc`, a service manager, an OOM-adjacent kill) and SIGHUP (the
 /// terminal closed, or a logout).
@@ -342,6 +365,9 @@ pub fn install_signal_handlers() {
         let t = signal_terminate as *const () as libc::sighandler_t;
         libc::signal(libc::SIGTERM, t);
         libc::signal(libc::SIGHUP, t);
+        // Jar spike: an outer jar's client attached.
+        let a = signal_attached as *const () as libc::sighandler_t;
+        libc::signal(libc::SIGUSR1, a);
     }
 }
 

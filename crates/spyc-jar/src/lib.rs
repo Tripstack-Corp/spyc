@@ -5,9 +5,11 @@
 //! - [`proto`]: the frames on the jar's socket.
 //! - [`jar`]: the jar itself — the program, the event log, the owner's lease.
 //! - [`client`]: the owner's end, for spyc and the tests.
+//! - [`attach`]: stage 2b's attach client, a raw relay to a real terminal.
 
 #![forbid(unsafe_code)]
 
+pub mod attach;
 pub mod client;
 pub mod jar;
 pub mod proto;

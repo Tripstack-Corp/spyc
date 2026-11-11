@@ -338,7 +338,14 @@ impl App {
                         let effects = self.handle_paste(text);
                         self.run_effects(effects, terminal, foreground_exec);
                     }
-                    Event::Resize(cols, rows) => self.handle_resize(cols, rows),
+                    Event::Resize(cols, rows) => {
+                        // Jar spike (stage 2b): a new terminal attached to
+                        // spyc's outer jar; set its modes and repaint.
+                        if crate::terminal::take_attached() {
+                            let _ = crate::terminal::reattach(terminal);
+                        }
+                        self.handle_resize(cols, rows);
+                    }
                     // Only arrives while `[mouse] capture` is on — with it off the
                     // terminal sends DEC 1007 arrow keys instead. The decision is
                     // pure and lives in `mouse.rs`; this arm is the wire.

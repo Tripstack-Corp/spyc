@@ -40,6 +40,9 @@ pub struct Config {
     pub deadline: Duration,
     /// How long an ended program's jar waits for an owner to collect the exit.
     pub linger_after_exit: Duration,
+    /// Stage 2b: send the program `SIGUSR1` when an owner connects, so a spyc
+    /// running in this jar knows a new terminal attached.
+    pub attach_signal: bool,
 }
 
 enum Event {
@@ -329,6 +332,13 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         let id = st.next_conn;
         st.next_conn += 1;
         if role == Role::Owner {
+            if shared.cfg.attach_signal
+                && let Some(pid) = i32::try_from(shared.child_pid)
+                    .ok()
+                    .and_then(rustix::process::Pid::from_raw)
+            {
+                let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
+            }
             st.owner = Some(id);
             st.ownerless_since = None;
             st.acked = st.log.base.max(st.acked.min(st.log.head));
