@@ -161,7 +161,7 @@ in the output.
 | R24 | The keyboard lease: taken by the first input frame when free, kept while input keeps coming, freed after an idle gap the owner sets | v1 or later | Decision D. | U7 |
 | R25 | A label on every connection | v1 or later | Decision D. | U7 |
 | R26 | The connecting peer is the same user (`SO_PEERCRED` / `getpeereid`) **and presents the jar's token** for owner or keyboard ([threat model](#threat-model)) | v1 | Same-uid alone lets any agent type into any other agent. | all |
-| R27 | Ping and pong, which carry the liveness deadline | v1 | R21 needs a heartbeat. | U2, U4 |
+| R27 | Ping and pong, which carry the liveness deadline | v1 | R21 needs a heartbeat, and the same frames keep an idle forwarded connection alive ([Keep-alive](#keep-alive)). | U2, U4 |
 
 ### Events
 
@@ -191,7 +191,8 @@ in the output.
 
 Parsing terminal output. Answering terminal queries. Knowing about agents,
 hooks or MCP. Drawing anything. Reading a config file. Listening on the
-network (SSH does that). Accepting a connection from another user. Logging
+network (SSH does that). Accepting a connection from another user. Sending
+a program anything a client didn't send it, keep-alive bytes included. Logging
 output by default.
 
 ## Where the jar keeps its state
@@ -409,6 +410,35 @@ Vercel's wterm use libghostty-vt the same way. A read-only view on a phone is
 the cheapest first version. Open, and on the browser's side, not the jar's:
 inline images (kitty graphics), the clipboard through OSC 52, and latency over
 a real network.
+
+## Keep-alive
+
+An idle network connection can be dropped by a NAT, a firewall or a proxy that
+sees no traffic. Each link keeps itself alive with its own mechanism, and none
+of them puts a byte in the terminal stream:
+
+| Link | Keep-alive |
+|---|---|
+| A client and a jar, locally or over a forwarded socket | R27's ping and pong. They are protocol frames, so they never reach the program or the screen. |
+| A laptop and the host running `spyc attach`, over SSH | SSH's own: `ServerAliveInterval` on the client, or `ClientAliveInterval` on the server. These are SSH messages, invisible to the terminal, and this is the link most likely to die idle. The attach docs will recommend `ServerAliveInterval 30`. |
+| A browser and the gateway | WebSocket's ping and pong control frames (RFC 6455). |
+
+**Why no keep-alive byte in the terminal stream:**
+
+- **Towards the program there is no safe byte.** NUL is a keystroke,
+  `Ctrl+@` (`Ctrl+Space` on most keyboards): readline and emacs bind it to set
+  the mark, and an agent would read a keypress.
+- **Towards the terminal NUL is only nearly safe.** ECMA-48 calls it time-fill
+  that a terminal *may* ignore, and most do. A relay that doesn't parse can't
+  tell where escape sequences begin and end, so a byte it injects can land
+  inside one and corrupt it.
+
+**The one in-band fallback is spyc's, not the jar's.** If a path ever needed
+traffic in the terminal stream itself, spyc knows where its own frames start
+and end, and at an idle frame boundary could send an empty synchronized update,
+`ESC[?2026h` then `ESC[?2026l`. A terminal that supports mode 2026 draws an
+empty frame, and one that doesn't ignores an unknown private mode. It isn't
+built unless a real path needs it.
 
 ## Fuzzing
 
