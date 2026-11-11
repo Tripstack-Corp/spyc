@@ -186,6 +186,11 @@ struct Cli {
     )]
     install_agents: Option<String>,
 
+    /// Jar spike (R31): list this user's pane jars as each describes itself,
+    /// and exit.
+    #[arg(long, hide = true)]
+    jars: bool,
+
     /// Remove what `--install-agents` wrote, leaving the rest of each file, and
     /// exit.
     #[arg(
@@ -241,6 +246,9 @@ fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
     }
     if cli.install_skill {
         return Some(install_skill());
+    }
+    if cli.jars {
+        return Some(crate::pane::jar_backend::list_jars());
     }
     if let Some(list) = cli.install_agents.as_deref() {
         return Some(wiring::run_cli(true, list));

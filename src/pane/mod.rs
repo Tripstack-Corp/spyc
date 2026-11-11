@@ -778,7 +778,24 @@ fn parser_worker(
     let mut parsed: u64 = 0;
     let mut snapshotted: u64 = 0;
     let mut last_bytes = std::time::Instant::now();
+    // Stage 4, Q7: the modes the pane's engine holds a few seconds in, which
+    // after a gap may have lost what the program set before it.
+    let started = std::time::Instant::now();
+    let mut modes_traced = opts.snapshots.is_none();
     loop {
+        if !modes_traced && started.elapsed() >= std::time::Duration::from_secs(5) {
+            modes_traced = true;
+            let p = parser.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let s = p.screen();
+            crate::pane::jar_backend::trace(&format!(
+                "modes: alt={} mouse={:?} paste={} app_cursor={} hidden_cursor={}",
+                s.alternate_screen(),
+                s.mouse_protocol(),
+                s.bracketed_paste(),
+                s.application_cursor(),
+                s.hide_cursor()
+            ));
+        }
         if let Some(sink) = &opts.snapshots
             && parsed != snapshotted
             && sync_opened.is_none()

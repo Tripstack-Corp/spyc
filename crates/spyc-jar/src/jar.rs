@@ -52,7 +52,18 @@ pub struct Config {
     /// Stage 2b: send the program `SIGUSR1` when an owner connects, so a spyc
     /// running in this jar knows a new terminal attached.
     pub attach_signal: bool,
+    /// R32a: how long the program runs on with no owner before the jar ends
+    /// it, as a closed terminal would; `None` waits for an owner however long.
+    pub linger: Option<Duration>,
+    /// R31: this jar's instance, random at its start and kept across
+    /// upgrades, and when it started, in seconds since the epoch.
+    pub instance: u64,
+    pub created: u64,
 }
+
+/// How long a jar with a finite linger waits for its first owner: the spyc
+/// that spawned it connects within milliseconds.
+const FIRST_OWNER_GRACE: Duration = Duration::from_secs(10);
 
 pub(crate) enum Event {
     Out(u64, Vec<u8>),
@@ -143,6 +154,8 @@ pub(crate) struct State {
     pub(crate) ownerless_since: Option<Instant>,
     /// The PTY's foreground process group, 0 until read.
     pub(crate) fg: u32,
+    /// Whether any owner has connected yet.
+    pub(crate) had_owner: bool,
 }
 
 /// What a connection is, apart from its socket: enough to resume it.
@@ -254,6 +267,7 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
         next_conn: 1,
         ownerless_since: Some(Instant::now()),
         fg: 0,
+        had_owner: false,
     };
     start(cfg, state, child_pid, master, listener, Vec::new())
 }
@@ -412,6 +426,12 @@ fn reap(shared: &Shared) {
             st.fg = fg;
             shared.cv.notify_all();
         }
+        if st.exit.is_none() && !shared.upgrading() && lingered(shared, &st) {
+            drop(st);
+            end_program(shared);
+            st = shared.lock();
+            continue;
+        }
         if st.exit.is_some() && !shared.upgrading() {
             let alone_too_long = st
                 .ownerless_since
@@ -427,6 +447,71 @@ fn reap(shared: &Shared) {
             .unwrap_or_else(PoisonError::into_inner)
             .0;
     }
+}
+
+/// Whether the program has been without an owner for longer than its linger
+/// policy allows (R32a).
+fn lingered(shared: &Shared, st: &State) -> bool {
+    let (Some(linger), Some(since)) = (shared.cfg.linger, st.ownerless_since) else {
+        return false;
+    };
+    let allowed = if st.had_owner {
+        linger
+    } else {
+        linger.max(FIRST_OWNER_GRACE)
+    };
+    since.elapsed() >= allowed
+}
+
+/// End the program as closing its terminal would: `SIGHUP` to its process
+/// group, then `SIGKILL` if it hasn't gone within two seconds. The reaper ends
+/// the jar once the exit is recorded, no owner being there to collect it.
+fn end_program(shared: &Shared) {
+    use rustix::process::Signal;
+    let Some(pid) = i32::try_from(shared.child_pid).ok().and_then(Pid::from_raw) else {
+        return;
+    };
+    let _ = rustix::process::kill_process_group(pid, Signal::HUP);
+    let until = Instant::now() + Duration::from_secs(2);
+    while shared.lock().exit.is_none() && Instant::now() < until {
+        thread::sleep(Duration::from_millis(20));
+    }
+    if shared.lock().exit.is_none() {
+        let _ = rustix::process::kill_process_group(pid, Signal::KILL);
+    }
+    // No owner will come for the exit: don't linger for one.
+    shared.lock().exit_acked = true;
+}
+
+/// R31: what this jar is, for `spyc --jars` and a spyc looking for its jars.
+fn describe(shared: &Shared) -> Vec<(String, String)> {
+    let st = shared.lock();
+    let id = shared
+        .cfg
+        .socket
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut f = vec![
+        ("id", id),
+        ("instance", format!("{:016x}", shared.cfg.instance)),
+        ("created", shared.cfg.created.to_string()),
+        ("jar", format!("{} {}", env!("CARGO_PKG_VERSION"), std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
+        ("pid", std::process::id().to_string()),
+        ("program", shared.cfg.argv.join(" ")),
+        ("program_pid", shared.child_pid.to_string()),
+        ("cwd", shared.cfg.cwd.as_ref().map(|p| p.display().to_string()).unwrap_or_default()),
+        ("size", format!("{}x{}", st.rows, st.cols)),
+        ("overflow", "drop".into()),
+        ("linger", shared.cfg.linger.map_or("until an owner returns".into(), |d| format!("{} ms", d.as_millis()))),
+        ("owner", if st.owner.is_some() { "connected".into() } else { st.ownerless_since.map_or("none".into(), |t| format!("none for {} s", t.elapsed().as_secs())) }),
+        ("log", format!("{} of {} bytes held, {} printed, from {}", st.log.held, st.log.cap, st.log.head, st.log.base)),
+        ("snapshots", st.snapshots.iter().map(|s| format!("{}@{}", s.format, s.offset)).collect::<Vec<_>>().join(" ")),
+    ];
+    if let Some((code, signaled)) = st.exit {
+        f.push(("exit", if signaled { "signal".into() } else { code.to_string() }));
+    }
+    f.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
 
 fn send_on(out: &Mutex<UnixStream>, msg: &Msg) -> std::io::Result<()> {
@@ -482,6 +567,7 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
             let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
         }
         st.owner = Some(id);
+        st.had_owner = true;
         st.ownerless_since = None;
         st.acked = st.log.base.max(st.acked.min(st.log.head));
     }
@@ -581,6 +667,11 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
                 let _ = send(&Msg::Snapshot(None));
             }
             Msg::Upgrade { binary } => crate::upgrade::begin(shared, Arc::clone(&conn.out), binary),
+            Msg::Describe => {
+                let _ = send(&Msg::Description {
+                    fields: describe(shared),
+                });
+            }
             _ if !owner => {
                 let _ = send(&Msg::Refused {
                     why: "a reader can only watch".into(),

@@ -116,6 +116,14 @@ pub fn spawn(
                 .map(|n| vec!["--ring".to_string(), n])
                 .unwrap_or_default(),
         )
+        // R32a: a pane waits for its owner however long; this spike knob
+        // gives every pane a finite linger instead.
+        .args(
+            std::env::var("SPYC_JAR_LINGER_MS")
+                .ok()
+                .map(|n| vec!["--linger-ownerless-ms".to_string(), n])
+                .unwrap_or_default(),
+        )
         .arg("--")
         .args(argv)
         .stdin(Stdio::null())
@@ -174,7 +182,22 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     let portable = fetched
         .iter()
         .find(|s| s.format == spyc_jar::proto::SNAPSHOT_VT && usable(s));
-    let snapshot = binary.or(portable).cloned();
+    let mut snapshot = binary.or(portable).cloned();
+    // Stage 4, Q7: across a gap no snapshot is usable, since the bytes after
+    // it are gone. `SPYC_JAR_GAP=stale` starts from the newest one anyway and
+    // applies what's left after the gap, keeping the history before it.
+    let gap = snapshot.is_none() && base > 0;
+    if gap && std::env::var("SPYC_JAR_GAP").is_ok_and(|v| v == "stale") {
+        let decodes = |s: &&spyc_jar::proto::Snapshot| {
+            s.format != spyc_jar::proto::SNAPSHOT_BINARY
+                || (!refuse_binary && crate::pane::engine_ghostty::snapshot_decodes(&s.blob))
+        };
+        snapshot = fetched
+            .iter()
+            .filter(decodes)
+            .max_by_key(|s| (s.offset, s.format == spyc_jar::proto::SNAPSHOT_BINARY))
+            .cloned();
+    }
     trace(&format!(
         "attach: snapshots {:?}, using {:?}",
         fetched
@@ -183,7 +206,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
             .collect::<Vec<_>>(),
         snapshot.as_ref().map(|s| (s.format, s.offset))
     ));
-    let replay_from = snapshot.as_ref().map_or(base, |s| s.offset);
+    let replay_from = snapshot.as_ref().map_or(base, |s| s.offset.max(base));
     let (mut rx, tx) = client.split();
     tx.send(&Msg::Replay { from: replay_from })?;
     // Fit the jar to this pane. When the log has lost its oldest bytes the
@@ -196,7 +219,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
         px_w: 0,
         px_h: 0,
     };
-    if base > 0 && snapshot.is_none() && rows > 1 {
+    if gap && rows > 1 {
         tx.send(&resize(rows - 1))?;
         tx.send(&resize(rows))?;
     } else if (had_rows, had_cols) != (rows, cols) {
@@ -599,8 +622,59 @@ fn sweep_once() {
     });
 }
 
+/// `spyc --jars`: every jar in this user's jar directory, as each describes
+/// itself (R31), and the sockets whose jars are gone.
+pub fn list_jars() -> anyhow::Result<()> {
+    let dir = socket_path(None)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let mut socks: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|r| {
+            r.filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "sock"))
+                .collect()
+        })
+        .unwrap_or_default();
+    socks.sort();
+    println!("jars in {}:", dir.display());
+    if socks.is_empty() {
+        println!("  none");
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    for sock in socks {
+        let name = sock.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        if socket_state(&sock) == SocketState::Stale {
+            println!("  {name}  stale: its jar is gone");
+            continue;
+        }
+        match spyc_jar::client::describe(&sock) {
+            Ok(f) => {
+                let get = |k: &str| f.iter().find(|(key, _)| key == k).map_or("", |(_, v)| v.as_str());
+                let age = get("created").parse::<u64>().map_or(String::new(), |c| {
+                    let s = now.saturating_sub(c);
+                    format!("{}h{:02}m", s / 3600, s / 60 % 60)
+                });
+                println!(
+                    "  {name}  {}  pid {}  up {age}  owner {}  linger {}  log {}",
+                    get("program"),
+                    get("program_pid"),
+                    get("owner"),
+                    get("linger"),
+                    get("log")
+                );
+            }
+            Err(e) => println!("  {name}  no answer ({e:#})"),
+        }
+    }
+    Ok(())
+}
+
 /// Jar spike diagnostics: append `line` to `$SPYC_JAR_TRACE`.
-fn trace(line: &str) {
+pub(crate) fn trace(line: &str) {
     if let Some(path) = std::env::var_os("SPYC_JAR_TRACE")
         && let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)

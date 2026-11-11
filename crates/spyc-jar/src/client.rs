@@ -100,6 +100,20 @@ fn self_write(c: &Client) -> Arc<Mutex<UnixStream>> {
     Arc::clone(&c.write)
 }
 
+/// R31: connect to the jar at `socket` as a reader and ask it to describe
+/// itself.
+pub fn describe(socket: &Path) -> anyhow::Result<Vec<(String, String)>> {
+    let (mut c, _) = Client::connect(socket, Role::Reader, Duration::from_secs(2))?;
+    c.send(&Msg::Describe)?;
+    let until = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < until {
+        if let Some(Msg::Description { fields }) = c.recv(Duration::from_millis(200))? {
+            return Ok(fields);
+        }
+    }
+    anyhow::bail!("{} didn't describe itself", socket.display())
+}
+
 /// The receiving half of a [`Client`].
 pub struct Receiver(Client);
 

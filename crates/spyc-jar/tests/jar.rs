@@ -581,3 +581,69 @@ fn a_jar_upgrades_again_after_an_upgrade() {
     seen.text.extend(more.text);
     assert_unbroken(&seen);
 }
+
+// Stage 4: how a jar ends (R32a), and how it describes itself (R31).
+
+fn field(fields: &[(String, String)], key: &str) -> String {
+    fields
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.clone())
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_finite_linger_ends_the_program_once_its_owner_has_gone() {
+    for (program, why) in [
+        ("sleep 1000", "a program that ends on a hangup"),
+        ("trap '' HUP; while :; do sleep 1; done", "a program that ignores it"),
+    ] {
+        let mut jar = Jar::start(&["--linger-ownerless-ms", "300"], &sh(program));
+        let owner = jar.connect(Role::Owner);
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(jar.process.try_wait().expect("try_wait").is_none(), "{why}: alive while owned");
+        owner.drop_connection();
+        assert!(jar.ended_within(Duration::from_secs(6)), "{why}: the jar ended after its linger");
+        let pid = jar.program.and_then(|p| i32::try_from(p).ok()).and_then(rustix::process::Pid::from_raw);
+        assert!(
+            pid.is_some_and(|p| rustix::process::test_kill_process(p).is_err()),
+            "{why}: the program is gone too"
+        );
+    }
+}
+
+#[test]
+fn without_a_linger_the_program_waits_for_an_owner() {
+    let mut jar = Jar::start(&[], &sh("sleep 1000"));
+    jar.connect(Role::Owner).drop_connection();
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(jar.process.try_wait().expect("try_wait").is_none(), "the jar waits");
+    let (_again, welcome) = jar.welcome(Role::Owner);
+    assert!(matches!(welcome, Msg::Welcome { .. }), "and a new owner gets it");
+}
+
+#[test]
+fn a_jar_describes_itself_and_keeps_its_identity_across_an_upgrade() {
+    let mut jar = Jar::start(&["--linger-ownerless-ms", "60000"], &sh("sleep 1000"));
+    let _owner = jar.connect(Role::Owner);
+    let before = spyc_jar::client::describe(&jar.socket).expect("describe");
+    assert_eq!(field(&before, "program_pid"), jar.program.expect("pid").to_string());
+    assert_eq!(field(&before, "linger"), "60000 ms");
+    assert_eq!(field(&before, "overflow"), "drop");
+    assert_eq!(field(&before, "owner"), "connected");
+    assert_eq!(field(&before, "pid"), jar.process.id().to_string());
+
+    let next = next_binary(jar._dir.path());
+    let (mut asker, _) = Client::connect(&jar.socket, Role::Reader, WAIT).expect("connect");
+    asker
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .expect("upgrade");
+    read_until(&mut asker, false, |s| s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. })));
+    let after = spyc_jar::client::describe(&jar.socket).expect("describe");
+    for key in ["instance", "created", "pid", "program_pid", "linger"] {
+        assert_eq!(field(&before, key), field(&after, key), "{key} survives the upgrade");
+    }
+    assert!(field(&after, "jar").ends_with("jar-next"));
+}

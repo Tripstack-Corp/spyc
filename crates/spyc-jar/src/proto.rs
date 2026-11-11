@@ -157,6 +157,13 @@ pub enum Msg {
     Upgraded {
         build: String,
     },
+    /// R31: ask the jar to describe itself. Any role may.
+    Describe,
+    /// The jar's answer: `key`, `value` pairs, so a newer jar can add keys an
+    /// older client shows without understanding.
+    Description {
+        fields: Vec<(String, String)>,
+    },
 }
 
 #[derive(Debug)]
@@ -200,6 +207,7 @@ const PING: u8 = 9;
 const ACK_EXIT: u8 = 10;
 const REPLY: u8 = 11;
 const UPGRADE: u8 = 12;
+const DESCRIBE: u8 = 13;
 const WELCOME: u8 = 64;
 const OUTPUT: u8 = 65;
 const RESIZED: u8 = 66;
@@ -211,6 +219,7 @@ const REFUSED: u8 = 71;
 const UNSUPPORTED: u8 = 72;
 const FOREGROUND: u8 = 73;
 const UPGRADED: u8 = 74;
+const DESCRIPTION: u8 = 75;
 
 /// Every kind this version knows is critical: a reader that doesn't know one
 /// can't safely carry on without it.
@@ -324,6 +333,16 @@ fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
         Msg::Upgraded { build } => {
             p.extend(build.as_bytes());
             UPGRADED
+        }
+        Msg::Describe => DESCRIBE,
+        Msg::Description { fields } => {
+            for (k, v) in fields {
+                for s in [k, v] {
+                    p.extend(u32::try_from(s.len()).unwrap_or(u32::MAX).to_be_bytes());
+                    p.extend(s.as_bytes());
+                }
+            }
+            DESCRIPTION
         }
         Msg::Unsupported { kind } => {
             p.push(*kind);
@@ -449,6 +468,25 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
         UPGRADED => Msg::Upgraded {
             build: String::from_utf8_lossy(&c.rest()).into_owned(),
         },
+        DESCRIBE => Msg::Describe,
+        DESCRIPTION => {
+            let mut fields = Vec::new();
+            while !c.0.is_empty() {
+                let mut text = || -> Result<String, ReadError> {
+                    let n = c.u32()? as usize;
+                    if n > c.0.len() {
+                        return Err(ReadError::Malformed("description field"));
+                    }
+                    let (s, rest) = c.0.split_at(n);
+                    c.0 = rest;
+                    Ok(String::from_utf8_lossy(s).into_owned())
+                };
+                let k = text()?;
+                let v = text()?;
+                fields.push((k, v));
+            }
+            Msg::Description { fields }
+        }
         FOREGROUND => Msg::Foreground { pgid: c.u32()? },
         other if flags & CRITICAL != 0 => return Err(ReadError::UnknownCritical(other)),
         _ => return Ok(None),

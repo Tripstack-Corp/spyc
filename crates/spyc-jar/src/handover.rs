@@ -77,6 +77,9 @@ pub(crate) fn encode_parts(cfg: &Config, child_pid: u32, st: &State, conns: &[Co
     put_u64(&mut w, millis(c.deadline));
     put_u64(&mut w, millis(c.linger_after_exit));
     w.push(u8::from(c.attach_signal));
+    put_opt_u64(&mut w, c.linger.map(millis));
+    put_u64(&mut w, c.instance);
+    put_u64(&mut w, c.created);
     put_u32(&mut w, child_pid);
 
     put_u64(&mut w, st.log.next_seq);
@@ -124,6 +127,7 @@ pub(crate) fn encode_parts(cfg: &Config, child_pid: u32, st: &State, conns: &[Co
     put_u64(&mut w, st.next_conn);
     put_opt_u64(&mut w, st.ownerless_since.map(|t| millis(t.elapsed())));
     put_u32(&mut w, st.fg);
+    w.push(u8::from(st.had_owner));
 
     put_u32(&mut w, u32::try_from(conns.len()).unwrap_or(u32::MAX));
     for c in conns {
@@ -169,6 +173,9 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     let deadline = Duration::from_millis(r.u64()?);
     let linger_after_exit = Duration::from_millis(r.u64()?);
     let attach_signal = r.flag()?;
+    let linger = r.opt_u64()?.map(Duration::from_millis);
+    let instance = r.u64()?;
+    let created = r.u64()?;
     let child_pid = r.u32()?;
     if child_pid == 0 || i32::try_from(child_pid).is_err() {
         return Err(Invalid("program pid"));
@@ -247,6 +254,7 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     let next_conn = r.u64()?;
     let ownerless = r.opt_u64()?;
     let fg = r.u32()?;
+    let had_owner = r.flag()?;
 
     let n_conns = r.count(15)?;
     if n_conns > MAX_CONNS {
@@ -302,6 +310,9 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
         deadline,
         linger_after_exit,
         attach_signal,
+        linger,
+        instance,
+        created,
     };
     let now = std::time::Instant::now();
     let state = State {
@@ -324,6 +335,7 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
         next_conn,
         ownerless_since: ownerless.map(|ms| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now)),
         fg,
+        had_owner,
     };
     Ok(Handover {
         cfg,
@@ -432,6 +444,9 @@ pub fn sample_blob() -> Vec<u8> {
         deadline: Duration::from_secs(10),
         linger_after_exit: Duration::from_secs(60),
         attach_signal: false,
+        linger: Some(Duration::from_secs(300)),
+        instance: 0x1234_5678_9abc_def0,
+        created: 1_794_000_000,
     };
     let mut events = std::collections::VecDeque::new();
     events.push_back((3, Event::Out(100, b"hello ".to_vec())));
@@ -473,6 +488,7 @@ pub fn sample_blob() -> Vec<u8> {
         next_conn: 4,
         ownerless_since: None,
         fg: 4242,
+        had_owner: true,
     };
     let conns = vec![
         ConnState {

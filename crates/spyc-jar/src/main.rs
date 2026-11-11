@@ -26,6 +26,11 @@ fn main() -> anyhow::Result<()> {
         deadline: Duration::from_secs(10),
         linger_after_exit: Duration::from_secs(60),
         attach_signal: false,
+        linger: None,
+        instance: instance(),
+        created: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
     };
     match std::env::args().nth(1).as_deref() {
         Some("pty-child") => {
@@ -34,6 +39,13 @@ fn main() -> anyhow::Result<()> {
         }
         Some("validate-handover") => return spyc_jar::upgrade::validate_stdin(),
         Some("resume-handover") => return spyc_jar::upgrade::resume(),
+        Some("describe") => {
+            let socket = std::env::args().nth(2).context("usage: spyc-jar describe SOCKET")?;
+            for (k, v) in spyc_jar::client::describe(std::path::Path::new(&socket))? {
+                println!("{k}: {v}");
+            }
+            return Ok(());
+        }
         Some("upgrade") => {
             let mut a = std::env::args().skip(2);
             let (Some(socket), Some(binary)) = (a.next(), a.next()) else {
@@ -62,6 +74,11 @@ fn main() -> anyhow::Result<()> {
                 cfg.deadline = Duration::from_millis(value("--deadline-ms")?.parse()?)
             }
             "--attach-signal" => cfg.attach_signal = true,
+            // R32a: end the program after this long with no owner; 0 ends it
+            // as soon as its owner goes.
+            "--linger-ownerless-ms" => {
+                cfg.linger = Some(Duration::from_millis(value("--linger-ownerless-ms")?.parse()?));
+            }
             "--linger-ms" => {
                 cfg.linger_after_exit = Duration::from_millis(value("--linger-ms")?.parse()?);
             }
@@ -122,4 +139,13 @@ fn upgrade(socket: &std::path::Path, binary: String) -> anyhow::Result<()> {
             None => bail!("no answer within 10 s"),
         }
     }
+}
+
+/// A random instance id, from the kernel's randomness by way of std's hasher
+/// seed: nothing secret rides on it, it only tells two jars apart.
+fn instance() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u32(std::process::id());
+    h.finish()
 }
