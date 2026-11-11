@@ -93,7 +93,7 @@ The protocol spec, with exact byte fixtures, is written from what stages 2,
 | U8 | **Recording and replay** | Output with timestamps, numbered so nothing is missed or doubled. |
 | U9 | **The away recap** from what the program did while you were gone | Timestamps and byte counts, readable after the fact. |
 | U10 | **A jar started with no spyc at all,** say an agent run from a script, attached to later | A jar can't assume a spyc spawned it or is listening (decision C). |
-| U11 | **spyc on a newer engine** than the one that took the snapshot | The snapshot says what format it's in, and a portable form exists for a planned handover. |
+| U11 | **spyc on a newer engine** than the one that took the snapshot | The snapshot says what format it's in, and a portable form is always kept beside it (decision I). |
 | U12 | **Tasks and captures** survive too: a pane demoted to a task (`demote_pane_to_task`), a `!` capture still running | Everything `PtyHost` backs today runs in a jar ([below](#tasks-and-captures)). |
 | U13 | **Move a project between spycs:** detach one project from a spyc and attach it to another, in another terminal or over SSH | Every jar of the project changes owner, and its agents' MCP connections follow to the new spyc ([below](#projects)). |
 | U14 | **Fork a project:** a copy of its working set, each agent's conversation forked, perhaps into a new worktree | Nothing new: forking spawns new jars ([below](#projects)). |
@@ -158,8 +158,10 @@ in the output.
 | | Requirement | Verdict | Why | For |
 |---|---|---|---|---|
 | R17 | A snapshot slot holding opaque bytes, a **format tag**, the offset it was taken at, and the **rows and columns at capture** | v1 | A snapshot has to say what it is and what size it describes before anything can load it. | U1, U2, U11 |
-| R17a | Two formats: libghostty's **binary snapshot**, valid only for the same build and pin, and its **VT formatter emit**, portable across versions | v1 | The engine spike settled that snapshots are "transport-only — same binary, same pin — and never at-rest persistence across an upgrade". At 1.0.0 both are exact over the engine spike's 26-case corpus: 100% of rows, cell text, attributes and scrollback (`docs/archive/VT_ENGINE_SPIKE.md` → "Rehydration: both mechanisms are now exact"). The formatter's one-row offset and 99.9% scrollback belonged to the earlier `1f5bb576` pin. An exact portable form is what makes an upgrade across a pin bump lossless. | U1, U11 |
-| R17b | On a **planned handover**, the outgoing spyc stores the formatter emit as well as its binary snapshot, and the incoming spyc loads the binary one only if its build matches | v1 | An upgrade is exactly when the pin moves. Without the portable form, a pin-bump release would fall back to a redraw and lose shell and inline-agent scrollback. | U1 |
+| R17a | Two formats: libghostty's **binary snapshot**, valid only for the same build and pin, and its **VT formatter emit**, portable across versions | v1 | The engine spike settled that snapshots are "transport-only — same binary, same pin — and never at-rest persistence across an upgrade". At 1.0.0 both are exact over the engine spike's 26-case corpus: 100% of rows, cell text, attributes and scrollback (`docs/archive/VT_ENGINE_SPIKE.md` → "Rehydration: both mechanisms are now exact"). The formatter's one-row offset and 99.9% scrollback belonged to the earlier `1f5bb576` pin. An exact portable form is what makes an upgrade across a pin bump lossless. The corpus didn't exercise everything: R17c lists what the raw emit misses. | U1, U11 |
+| R17b | **Every snapshot stores both forms,** in every jar with an engine behind it: the binary one taken under the pane's parser lock, the portable one made from it in a scratch engine, off the lock. A restoring spyc loads the binary one when its build decodes it, else the portable one | v1 | Decision I. A crash followed by a build change otherwise leaves a pane empty, and the user did nothing wrong. Off the lock, the portable form costs the pane's own thread about 40 ms at a full scrollback, and the lock is held only for the binary encode, about 6 ms. | U1, U2, U11 |
+| R17c | The portable form is the formatter's emit **plus what its extras don't carry:** the primary screen and its history under a full-screen program (the formatter writes only the screen showing), soft wraps (an unwrapped emit, so the restoring engine wraps again), the saved cursor (DECSC), a cursor shape other than the default, and the title. It is checked against the binary form as a control, case by case | v1 | Measured on the spike (`PANE_JAR_SPIKE.md` → "Decision I: what a portable snapshot costs and loses"): with these, 24 of 26 cases come back exact. The two that don't are kitty keyboard flags below the top of their stack and DECSCA protection, and spyc reads neither. | U1, U11 |
+| R17d | Panes **take turns snapshotting:** a few at a time, not every pane at once | v1 | Thirty full panes snapshotting together held each pane's lock for 46 to 62 ms against 6 ms alone, enough to drop a frame. | all |
 | R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. | U2, U10, U12 |
 | R19 | Keep all of it in memory, never on disk, except in `spill` mode | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). | all |
 
@@ -223,9 +225,11 @@ In its own memory, and nowhere else unless a pane asked for `spill`.
   past. Memory behind a `0700` directory exposes far less than a file left
   behind.
 
-The sizes are bounded: a snapshot is a few MB at most (1.23 MB for the engine
-spike's whole 26-case corpus), and while an owner is connected the ring only
-holds what the owner hasn't acknowledged yet (R11).
+The sizes are bounded: at spyc's full 10,000-row scrollback, a pane's two
+snapshots come to about 1.4 MB for plain text, 4.5 MB for a coloured shell
+and 6.4 MB for an inline agent, and
+while an owner is connected the ring only holds what the owner hasn't
+acknowledged yet (R11).
 
 ## When the ring fills with no owner
 
@@ -611,21 +615,17 @@ Open unless marked decided:
 - **H. Decided: a jar refuses to start when it can't leave its session**
   (`setsid` failing, as for a process group leader), rather than run in an
   indeterminate state that would die with its terminal.
-- **I. Open: which snapshots each kind of jar keeps.** Stage 2 found that a
-  crash followed by a build change leaves a pane empty when the jar holds only
-  a binary snapshot. What that costs differs by kind:
-  - **An agent's pane** (Claude, Codex, agy): its durable record is its
-    transcript, and a full-screen agent repaints on a resize. Losing its
-    terminal history costs little, so the binary snapshot is enough, with a
-    redraw when it can't be used.
-  - **A shell's pane:** its history lives only in the terminal. A portable
-    snapshot kept alongside, refreshed less often than the binary one, or a
-    log kept back to the last portable snapshot, is what keeps it.
-  - **A task or capture:** its output is the point. `block` and a log that
-    keeps it whole matter more than snapshots.
-  - **spyc's outer jar:** it holds no engine and stores no snapshot; spyc
-    repaints on attach. On a planned upgrade spyc stores portable snapshots in
-    its pane jars before it hands over, which is cheap because it is planned.
+- **I. Decided: every pane keeps both snapshot forms** (R17b to R17d). Stage 2
+  found that a crash followed by a build change leaves a pane empty when the
+  jar holds only a binary snapshot. A policy by kind of jar (binary only for
+  agents, portable too for shells) was weighed and rejected: a tab's kind
+  isn't fixed, since an agent can be started from a shell, and the owner wants
+  no case where the way someone launched an agent costs them their history.
+  The measurement made one rule affordable: the portable form costs the
+  pane's own thread about 40 ms at a full scrollback, off the parser's lock,
+  and is smaller than the binary form for real output (2.2 MB against 4.2 MB
+  for an inline agent). spyc's outer jar is the exception: it holds no engine
+  and stores no snapshot, and spyc repaints on attach.
 
 Smaller ones: the keyboard's idle gap (about a second is proposed); `spill`
 stays opt-in; R29, status for readers.
