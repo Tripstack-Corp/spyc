@@ -31,6 +31,63 @@ impl GhosttyEngine {
         Some(out)
     }
 
+    /// The engine's state as VT sequences any version can replay (R17a's
+    /// portable form): the formatter's emit, scrollback included. The palette
+    /// and working directory are left out, as the engine spike's rehydration
+    /// did: they describe the client, not the terminal.
+    pub fn encode_portable(&self) -> Option<Vec<u8>> {
+        use ffi::GhosttyFormatterOption as FOpt;
+        let extras = ffi::GHOSTTY_FORMATTER_EXTRAS_ALL
+            & !ffi::GHOSTTY_FORMATTER_EXTRA_PALETTE
+            & !ffi::GHOSTTY_FORMATTER_EXTRA_PWD;
+        let mut f: ffi::GhosttyFormatter = std::ptr::null_mut();
+        // SAFETY: `t` is live; a null allocator selects the default one, and
+        // `f` is a writable slot.
+        if unsafe {
+            ffi::ghostty_formatter_terminal_new(std::ptr::null(), &raw mut f, self.inner.t)
+        } != spyc_vt_sys::SUCCESS
+        {
+            return None;
+        }
+        let emit: ffi::GhosttyFormatterFormat::Type =
+            ffi::GhosttyFormatterFormat::GHOSTTY_FORMATTER_FORMAT_VT;
+        let off = false;
+        let set: [(FOpt::Type, *const std::ffi::c_void); 4] = [
+            (FOpt::GHOSTTY_FORMATTER_OPT_EMIT, (&raw const emit).cast()),
+            (FOpt::GHOSTTY_FORMATTER_OPT_UNWRAP, (&raw const off).cast()),
+            (FOpt::GHOSTTY_FORMATTER_OPT_TRIM, (&raw const off).cast()),
+            (
+                FOpt::GHOSTTY_FORMATTER_OPT_EXTRAS,
+                (&raw const extras).cast(),
+            ),
+        ];
+        let mut ok = true;
+        for (opt, v) in set {
+            // SAFETY: `f` is live, and each option reads its value during the call.
+            ok &= unsafe { ffi::ghostty_formatter_set(f, opt, v) } == spyc_vt_sys::SUCCESS;
+        }
+        let mut need: usize = 0;
+        let mut buf = Vec::new();
+        let mut wrote: usize = 0;
+        if ok {
+            // SAFETY: a null buffer of length 0 asks only for the size.
+            let _ = unsafe {
+                ffi::ghostty_formatter_format_buf(f, std::ptr::null_mut(), 0, &raw mut need)
+            };
+            buf = vec![0u8; need.max(1)];
+            // SAFETY: `buf` is writable for its length.
+            ok = unsafe {
+                ffi::ghostty_formatter_format_buf(f, buf.as_mut_ptr(), buf.len(), &raw mut wrote)
+            } == spyc_vt_sys::SUCCESS;
+        }
+        // SAFETY: `f` is live and freed once.
+        unsafe { ffi::ghostty_formatter_free(f) };
+        ok.then(|| {
+            buf.truncate(wrote);
+            buf
+        })
+    }
+
     /// The engine's size in rows and columns.
     pub const fn size(&self) -> (u16, u16) {
         (self.inner.rows, self.inner.cols)

@@ -119,7 +119,9 @@ struct State {
     log: Log,
     owner: Option<u64>,
     acked: u64,
-    snapshot: Option<Snapshot>,
+    /// The latest snapshot of each format (R17a): the binary one for the same
+    /// build, the portable one for an upgrade across a pin bump.
+    snapshots: Vec<Snapshot>,
     exit: Option<(i32, bool)>,
     exit_acked: bool,
     pty_eof: bool,
@@ -181,7 +183,7 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
             },
             owner: None,
             acked: 0,
-            snapshot: None,
+            snapshots: Vec::new(),
             exit: None,
             exit_acked: false,
             pty_eof: false,
@@ -246,8 +248,7 @@ fn pump_pty(shared: &Shared, mut reader: Box<dyn Read + Send>) {
         }
         let at = st.log.head;
         st.log.push(Event::Out(at, buf[..n].to_vec()));
-        if let Some(s) = &st.snapshot {
-            let keep = s.offset;
+        if let Some(keep) = st.snapshots.iter().map(|s| s.offset).min() {
             st.log.trim(keep);
         }
         shared.cv.notify_all();
@@ -391,9 +392,13 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
             Msg::Ping { n } => {
                 let _ = send(&Msg::Pong { n });
             }
+            // Every snapshot held, then `Snapshot(None)` to end the list.
             Msg::FetchSnapshot => {
-                let snap = shared.lock().snapshot.clone();
-                let _ = send(&Msg::Snapshot(snap));
+                let snaps = shared.lock().snapshots.clone();
+                for s in snaps {
+                    let _ = send(&Msg::Snapshot(Some(s)));
+                }
+                let _ = send(&Msg::Snapshot(None));
             }
             _ if !owner => {
                 let _ = send(&Msg::Refused {
@@ -455,8 +460,11 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
             Msg::Signal { signal } => deliver(shared.child_pid, signal),
             Msg::StoreSnapshot(snap) => {
                 let mut st = shared.lock();
-                let keep = snap.offset.min(st.log.head);
-                st.snapshot = Some(snap);
+                st.snapshots.retain(|s| s.format != snap.format);
+                st.snapshots.push(snap);
+                // Keep the bytes after the oldest snapshot: either may be used.
+                let keep = st.snapshots.iter().map(|s| s.offset).min().unwrap_or(0);
+                let keep = keep.min(st.log.head);
                 st.log.trim(keep);
             }
             Msg::AckExit => {

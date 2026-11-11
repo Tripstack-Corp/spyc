@@ -182,10 +182,16 @@ impl Pane {
         let mut parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
         // Jar spike: an adopted pane starts from its jar's snapshot, and the
         // replay brings it up to date.
-        if let Some((r, c, blob)) = host.take_adopted_snapshot()
-            && !parser.restore_snapshot(&blob, r, c)
-        {
-            crate::spyc_debug!("jar snapshot did not restore; the pane starts blank");
+        if let Some(s) = host.take_adopted_snapshot() {
+            if s.format == spyc_jar::proto::SNAPSHOT_VT {
+                // The portable form is VT: replay it into an engine of its size.
+                // Its replies are dropped, as the replayed tail's are.
+                parser = <PaneEngine as engine::Engine>::new(s.rows, s.cols, 10_000);
+                engine::Engine::process(&mut parser, &s.blob);
+                let _ = engine::Engine::take_replies(&mut parser);
+            } else if !parser.restore_snapshot(&s.blob, s.rows, s.cols) {
+                crate::spyc_debug!("jar snapshot did not restore; the pane starts blank");
+            }
         }
         Ok(Self::adopt(host, parser, wake))
     }
@@ -782,9 +788,16 @@ fn parser_worker(
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let (rows, cols) = p.size();
-            if let Some(blob) = p.encode_snapshot() {
-                drop(p);
-                sink.store(parsed, rows, cols, blob);
+            let binary = p.encode_snapshot();
+            // Spike: the portable form, which production stores only on a
+            // planned handover, when `SPYC_JAR_PORTABLE` asks for it.
+            let portable = std::env::var_os("SPYC_JAR_PORTABLE").and_then(|_| p.encode_portable());
+            drop(p);
+            if let Some(blob) = binary {
+                sink.store(spyc_jar::proto::SNAPSHOT_BINARY, parsed, rows, cols, blob);
+            }
+            if let Some(blob) = portable {
+                sink.store(spyc_jar::proto::SNAPSHOT_VT, parsed, rows, cols, blob);
             }
             snapshotted = parsed;
         }

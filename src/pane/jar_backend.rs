@@ -32,8 +32,8 @@ pub struct Jarred {
     pub replies: Box<dyn Write + Send>,
     /// A running program taken over, not a new one started.
     pub adopted: bool,
-    /// On adoption, the snapshot the replay starts after: rows, cols, blob.
-    pub snapshot: Option<(u16, u16, Vec<u8>)>,
+    /// On adoption, the snapshot the replay starts after.
+    pub snapshot: Option<spyc_jar::proto::Snapshot>,
     /// Where the pane stores new snapshots.
     pub snapshots: SnapshotSink,
 }
@@ -48,9 +48,9 @@ pub struct SnapshotSink {
 
 impl SnapshotSink {
     /// `parsed` is how many bytes the pane has parsed since `start`.
-    pub fn store(&self, parsed: u64, rows: u16, cols: u16, blob: Vec<u8>) {
+    pub fn store(&self, format: u16, parsed: u64, rows: u16, cols: u16, blob: Vec<u8>) {
         let _ = self.tx.send(&Msg::StoreSnapshot(spyc_jar::proto::Snapshot {
-            format: spyc_jar::proto::SNAPSHOT_BINARY,
+            format,
             offset: self.start + parsed,
             rows,
             cols,
@@ -150,21 +150,39 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     };
     let mut client = client;
     client.send(&Msg::FetchSnapshot)?;
-    let fetched = loop {
+    let mut fetched = Vec::new();
+    loop {
         match client.recv(Duration::from_secs(5))? {
-            Some(Msg::Snapshot(s)) => break s,
+            Some(Msg::Snapshot(Some(s))) => fetched.push(s),
+            Some(Msg::Snapshot(None)) => break,
             Some(_) => {}
-            None => anyhow::bail!("the jar sent no snapshot"),
+            None => anyhow::bail!("the jar sent no snapshot list"),
         }
-    };
-    // Replay after the snapshot when this build can decode it; otherwise from
-    // the oldest byte the jar holds.
-    let snapshot = fetched.filter(|s| {
+    }
+    // Replay after a snapshot when there is one this build can use: the binary
+    // one if it decodes here (same build), else the portable one; otherwise
+    // from the oldest byte the jar holds. `SPYC_JAR_REFUSE_BINARY` plays a
+    // different build, for the spike.
+    let usable = |s: &spyc_jar::proto::Snapshot| s.offset >= base && s.offset <= head;
+    let refuse_binary = std::env::var_os("SPYC_JAR_REFUSE_BINARY").is_some();
+    let binary = fetched.iter().find(|s| {
         s.format == spyc_jar::proto::SNAPSHOT_BINARY
-            && s.offset >= base
-            && s.offset <= head
+            && usable(s)
+            && !refuse_binary
             && crate::pane::engine_ghostty::snapshot_decodes(&s.blob)
     });
+    let portable = fetched
+        .iter()
+        .find(|s| s.format == spyc_jar::proto::SNAPSHOT_VT && usable(s));
+    let snapshot = binary.or(portable).cloned();
+    trace(&format!(
+        "attach: snapshots {:?}, using {:?}",
+        fetched
+            .iter()
+            .map(|s| (s.format, s.offset))
+            .collect::<Vec<_>>(),
+        snapshot.as_ref().map(|s| (s.format, s.offset))
+    ));
     let replay_from = snapshot.as_ref().map_or(base, |s| s.offset);
     let (mut rx, tx) = client.split();
     tx.send(&Msg::Replay { from: replay_from })?;
@@ -267,7 +285,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
             gate,
         }),
         adopted: false,
-        snapshot: snapshot.map(|s| (s.rows, s.cols, s.blob)),
+        snapshot,
         snapshots: SnapshotSink {
             tx: tx.clone(),
             start: replay_from,

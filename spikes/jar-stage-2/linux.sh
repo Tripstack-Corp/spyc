@@ -24,7 +24,7 @@ for mode in jars nojars; do
   echo "== fidelity ($mode)"; python3 fidelity.py $mode 2>&1 | tail -3
   pkill -f 'spyc-jar --socket' || true; pkill -f 'less long.txt' || true; rm -f /tmp/spyc/jars/*.sock
 done
-for mode in snap nosnap; do
+for mode in snap portable refused nosnap; do
   rm -rf $H/home6/.local/state
   echo "== snapshots ($mode)"; python3 snap.py $mode 2>&1 | tail -2
   pkill -f 'spyc-jar --socket' || true; rm -f /tmp/spyc/jars/*.sock

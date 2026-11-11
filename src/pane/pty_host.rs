@@ -124,7 +124,7 @@ pub struct PtyHost {
     /// Jar spike: the program was already running in a jar and was adopted.
     adopted: bool,
     /// Jar spike: the snapshot an adopted pane's engine starts from.
-    adopted_snapshot: Option<(u16, u16, Vec<u8>)>,
+    adopted_snapshot: Option<spyc_jar::proto::Snapshot>,
     /// Jar spike: where a jarred pane stores its snapshots.
     snapshots: Option<super::jar_backend::SnapshotSink>,
     pub master: Box<dyn MasterPty + Send>,
@@ -518,7 +518,7 @@ impl PtyHost {
     /// wrapper, which is a DIFFERENT group than [`Self::process_id`] (the
     /// wrapper shell). Used to suspend/resume the actual agent, not the shell.
     /// Jar spike: the snapshot an adopted pane's engine should start from.
-    pub const fn take_adopted_snapshot(&mut self) -> Option<(u16, u16, Vec<u8>)> {
+    pub const fn take_adopted_snapshot(&mut self) -> Option<spyc_jar::proto::Snapshot> {
         self.adopted_snapshot.take()
     }
 
