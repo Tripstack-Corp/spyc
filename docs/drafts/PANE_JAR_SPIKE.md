@@ -164,7 +164,8 @@ and the same harness.
 A foreground job leads its process group, so `setsid` fails in it and spyc
 can't daemonize in place. Shape 1 starts a new spyc and hands over instead.
 
-**Shape 2, spyc in its own jar.** The minimum: `spyc attach`, a raw relay that
+**Shape 2, spyc in its own jar.** The minimum: `spyc attach` (with `^d` and
+`:detach` to leave), a raw relay that
 sets up and restores the real terminal, and an attach signal or event that has
 spyc set its terminal modes again, probe capabilities again, and repaint.
 Measured, beyond shape 1's items 3 to 6 where they apply:
@@ -206,7 +207,9 @@ Readers, the keyboard lease and taking over, only if the owner keeps them in v1
 
 A project's jars change owner from one spyc to another together, with its part
 of the manifest, its scope claims and its attention roll-up, and its agents'
-MCP proxies find the new owner through their jars (R30a). Forking a project
+MCP proxies find the new owner through their jars (R30a). Driven by the verbs
+in `JAR_PROTOCOL.md` → "Detaching, attaching and quitting": `:detach project`,
+`:attach project`, and the same for a single tab. Forking a project
 asks nothing of the jar, so it isn't part of the spike.
 
 ## Questions it answers
