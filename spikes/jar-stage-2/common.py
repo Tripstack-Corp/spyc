@@ -18,3 +18,19 @@ def wait_for(t, text, secs=30):
     while text not in t.text():
         assert time.monotonic() < end, f"never saw {text!r}:\n{t.text()}"
         t.pump(0.2)
+
+def kill_and_reap(t, secs=15):
+    """SIGKILL `t`'s program and reap it, reading its output meanwhile: a
+    process exiting can block closing a terminal whose output nobody reads."""
+    os.kill(t.pid, 9)
+    end = time.monotonic() + secs
+    while time.monotonic() < end:
+        try:
+            os.read(t.fd, 65536)
+        except OSError:
+            pass
+        pid, _ = os.waitpid(t.pid, os.WNOHANG)
+        if pid:
+            return
+        time.sleep(0.05)
+    raise TimeoutError("the killed program never exited")
