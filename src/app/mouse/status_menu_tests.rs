@@ -524,7 +524,7 @@ fn the_git_segments_menu_offers_delete_at_a_clean_linked_worktree() {
     });
 }
 
-/// The git segment's menu runs `:diff`: its row opens the whole branch's
+/// The git segment's menu offers `gM`: its row opens the whole branch's
 /// changes since it left `main`, from a directory none of them are in.
 #[test]
 fn the_git_segments_diff_row_opens_the_branchs_diff() {
@@ -537,7 +537,7 @@ fn the_git_segments_diff_row_opens_the_branchs_diff() {
         let segment = on_bar(&mut app, "\u{e0a0}");
         right_click(&mut app, segment);
 
-        let row = menu_row(&mut app, "git", ":diff");
+        let row = menu_row(&mut app, "git", "gM");
         click(&mut app, row);
 
         let (title, text) = app

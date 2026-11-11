@@ -390,10 +390,7 @@ impl App {
 
             Action::WorktreeList => self.worktree_list(),
 
-            Action::GitDiff
-            | Action::GitDiffCached
-            | Action::GitDiffUnstaged
-            | Action::GitDiffBranch => self.git_diff_action(action),
+            a if a.is_git_diff() => self.git_diff_action(a),
             Action::GitBlame => {
                 if self.state.cur().git.info.is_none() {
                     self.state.flash_error("not in a git repository");

@@ -176,6 +176,7 @@ impl App {
         }
         match action {
             Action::GitDiffBranch => self.open_branch_diff(),
+            Action::GitDiffWholeBranch => self.open_whole_branch_diff(None),
             Action::GitDiffCached => self.open_git_diff(DiffScope::Cached),
             Action::GitDiffUnstaged => self.open_git_diff(DiffScope::IndexToWorktree),
             _ => self.open_git_diff(DiffScope::HeadToWorktree),
@@ -232,13 +233,18 @@ impl App {
             self.state.flash_error(why);
             return Vec::new();
         }
+        self.open_whole_branch_diff((!base.is_empty()).then(|| base.to_string()));
+        Vec::new()
+    }
+
+    /// `gM`, and `:diff`'s body: the whole repository's changes since the
+    /// branch left `base`, or the repo's default base, wherever the cursor is.
+    fn open_whole_branch_diff(&mut self, base: Option<String>) {
         let Some(repo_root) = self.state.cur().git_cache.current_repo_root.clone() else {
             self.state.flash_error("git diff: not a git repository");
-            return Vec::new();
+            return;
         };
-        let base = (!base.is_empty()).then(|| base.to_string());
         self.open_since_base(repo_root, Vec::new(), base);
-        Vec::new()
     }
 
     /// Build the diff since the branch left `base` off-thread. Only the worker
