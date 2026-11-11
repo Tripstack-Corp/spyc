@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use portable_pty::{Child, ChildKiller, ExitStatus, MasterPty, PtySize};
@@ -28,7 +28,8 @@ pub fn enabled() -> bool {
 pub struct Jarred {
     pub master: Box<dyn MasterPty + Send>,
     pub child: Box<dyn Child + Send + Sync>,
-    pub socket: PathBuf,
+    /// Where the terminal's replies to the program's queries go (R15).
+    pub replies: Box<dyn Write + Send>,
 }
 
 /// Take over the pane's jar when one still answers on its socket (a restored
@@ -43,7 +44,10 @@ pub fn spawn(
     cols: u16,
     env: &[(String, String)],
 ) -> anyhow::Result<Jarred> {
-    let pane_id = env.iter().find(|(k, _)| k == "SPYC_PANE_ID").map(|(_, v)| v.as_str());
+    let pane_id = env
+        .iter()
+        .find(|(k, _)| k == "SPYC_PANE_ID")
+        .map(|(_, v)| v.as_str());
     let socket = socket_path(pane_id);
     if socket.exists() {
         match attach(&socket, rows, cols) {
@@ -83,7 +87,15 @@ pub fn spawn(
 /// byte it still holds.
 pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     let (client, welcome) = Client::connect(socket, Role::Owner, Duration::from_secs(5))?;
-    let Msg::Welcome { child_pid, base, rows: had_rows, cols: had_cols, .. } = welcome else {
+    let Msg::Welcome {
+        child_pid,
+        base,
+        head,
+        rows: had_rows,
+        cols: had_cols,
+        ..
+    } = welcome
+    else {
         anyhow::bail!("expected a welcome");
     };
     let (mut rx, tx) = client.split();
@@ -92,7 +104,12 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     // replay can't rebuild the screen, so make the program repaint: a resize
     // to the size it already has repaints nothing (stage 0b), so change it
     // by a row and back.
-    let resize = |r: u16| Msg::Resize { rows: r, cols, px_w: 0, px_h: 0 };
+    let resize = |r: u16| Msg::Resize {
+        rows: r,
+        cols,
+        px_w: 0,
+        px_h: 0,
+    };
     if base > 0 && rows > 1 {
         tx.send(&resize(rows - 1))?;
         tx.send(&resize(rows))?;
@@ -100,11 +117,20 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
         tx.send(&resize(rows))?;
     }
 
+    // R15a: replaying a tail makes the engine see the program's old queries
+    // again. Its answers are dropped until the tail has been handed over, and
+    // a grace for the parser after that. A fresh jar has no tail: open at once.
+    let gate = Arc::new(ReplayGate {
+        live_from: head,
+        fresh: head == base,
+        caught_up: Mutex::new(None),
+    });
     let (bytes_tx, bytes_rx) = mpsc::sync_channel::<Vec<u8>>(64);
     let exit: Arc<ExitSlot> = Arc::new((Mutex::new(None), Condvar::new()));
     {
         let tx = tx.clone();
         let exit = Arc::clone(&exit);
+        let gate = Arc::clone(&gate);
         std::thread::spawn(move || {
             let mut pings = 0u64;
             loop {
@@ -114,6 +140,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
                         if bytes_tx.send(bytes).is_err() {
                             break;
                         }
+                        gate.handed_over(end);
                         let _ = tx.send(&Msg::Ack { offset: end });
                     }
                     Ok(Some(Msg::Exited { code, signaled })) => {
@@ -136,7 +163,12 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
                     Err(_) => break,
                 }
             }
-            if exit.0.lock().unwrap_or_else(PoisonError::into_inner).is_none() {
+            if exit
+                .0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_none()
+            {
                 set_exit(&exit, ExitStatus::with_signal("jar connection lost"));
             }
         });
@@ -144,12 +176,83 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     Ok(Jarred {
         master: Box::new(JarMaster {
             tx: tx.clone(),
-            size: Mutex::new(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }),
-            reader: Mutex::new(Some(JarReader { rx: bytes_rx, buf: Vec::new(), pos: 0 })),
+            size: Mutex::new(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            }),
+            reader: Mutex::new(Some(JarReader {
+                rx: bytes_rx,
+                buf: Vec::new(),
+                pos: 0,
+            })),
         }),
-        child: Box::new(JarChild { pid: child_pid, exit, tx }),
-        socket: socket.to_path_buf(),
+        replies: Box::new(JarReplies {
+            tx: tx.clone(),
+            gate,
+        }),
+        child: Box::new(JarChild {
+            pid: child_pid,
+            exit,
+            tx,
+        }),
     })
+}
+
+/// How long after the replayed tail is handed over its queries may still be
+/// in the parser.
+const REPLY_GRACE: Duration = Duration::from_millis(500);
+
+struct ReplayGate {
+    /// The jar's head when this spyc took over: bytes before it are replay.
+    live_from: u64,
+    /// Nothing to replay: open from the start.
+    fresh: bool,
+    /// When the tail was handed over in full.
+    caught_up: Mutex<Option<Instant>>,
+}
+
+impl ReplayGate {
+    fn handed_over(&self, end: u64) {
+        let mut at = self
+            .caught_up
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if at.is_none() && end >= self.live_from {
+            *at = Some(Instant::now());
+        }
+    }
+
+    fn open(&self) -> bool {
+        self.fresh
+            || self
+                .caught_up
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some_and(|t| t.elapsed() >= REPLY_GRACE)
+    }
+}
+
+/// The terminal's replies, as `Reply` frames, dropped while a replayed tail
+/// is still being parsed.
+struct JarReplies {
+    tx: Sender,
+    gate: Arc<ReplayGate>,
+}
+
+impl Write for JarReplies {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.gate.open() {
+            self.tx.send(&Msg::Reply {
+                bytes: buf.to_vec(),
+            })?;
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 type ExitSlot = (Mutex<Option<ExitStatus>>, Condvar);
@@ -181,7 +284,12 @@ fn socket_path(pane_id: Option<&str>) -> PathBuf {
                 .map_or(0, |d| d.as_nanos());
             format!("{:x}{:x}", std::process::id(), nanos & 0xffff_ffff)
         },
-        |id| id.chars().filter(char::is_ascii_hexdigit).take(16).collect(),
+        |id| {
+            id.chars()
+                .filter(char::is_ascii_hexdigit)
+                .take(16)
+                .collect()
+        },
     );
     root.join("spyc").join("jars").join(format!("{id}.sock"))
 }
@@ -216,7 +324,9 @@ struct JarWriter {
 
 impl Write for JarWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.tx.send(&Msg::Input { bytes: buf.to_vec() })?;
+        self.tx.send(&Msg::Input {
+            bytes: buf.to_vec(),
+        })?;
         Ok(buf.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -245,11 +355,17 @@ impl MasterPty for JarMaster {
         Ok(*self.size.lock().unwrap_or_else(PoisonError::into_inner))
     }
     fn try_clone_reader(&self) -> anyhow::Result<Box<dyn Read + Send>> {
-        let reader = self.reader.lock().unwrap_or_else(PoisonError::into_inner).take();
+        let reader = self
+            .reader
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         Ok(Box::new(reader.context("a jar's output has one reader")?))
     }
     fn take_writer(&self) -> anyhow::Result<Box<dyn Write + Send>> {
-        Ok(Box::new(JarWriter { tx: self.tx.clone() }))
+        Ok(Box::new(JarWriter {
+            tx: self.tx.clone(),
+        }))
     }
     fn process_group_leader(&self) -> Option<libc::pid_t> {
         None
@@ -276,7 +392,9 @@ impl std::fmt::Debug for JarChild {
 
 impl ChildKiller for JarChild {
     fn kill(&mut self) -> io::Result<()> {
-        self.tx.send(&Msg::Signal { signal: JarSignal::Kill as i32 })
+        self.tx.send(&Msg::Signal {
+            signal: JarSignal::Kill as i32,
+        })
     }
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         Box::new(JarKiller(self.tx.clone()))
@@ -285,7 +403,12 @@ impl ChildKiller for JarChild {
 
 impl Child for JarChild {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        Ok(self.exit.0.lock().unwrap_or_else(PoisonError::into_inner).clone())
+        Ok(self
+            .exit
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone())
     }
     fn wait(&mut self) -> io::Result<ExitStatus> {
         let mut slot = self.exit.0.lock().unwrap_or_else(PoisonError::into_inner);
@@ -293,7 +416,11 @@ impl Child for JarChild {
             if let Some(s) = slot.clone() {
                 return Ok(s);
             }
-            slot = self.exit.1.wait(slot).unwrap_or_else(PoisonError::into_inner);
+            slot = self
+                .exit
+                .1
+                .wait(slot)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
     fn process_id(&self) -> Option<u32> {
@@ -306,7 +433,9 @@ struct JarKiller(Sender);
 
 impl ChildKiller for JarKiller {
     fn kill(&mut self) -> io::Result<()> {
-        self.0.send(&Msg::Signal { signal: JarSignal::Kill as i32 })
+        self.0.send(&Msg::Signal {
+            signal: JarSignal::Kill as i32,
+        })
     }
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         Box::new(Self(self.0.clone()))

@@ -382,7 +382,22 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
                     why: "a reader can only watch".into(),
                 });
             }
-            Msg::Input { bytes } => {
+            Msg::Input { bytes } | Msg::Reply { bytes } => {
+                if let Some(path) = std::env::var_os("SPYC_JAR_TRACE") {
+                    use std::io::Write as _;
+                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                    {
+                        let _ = writeln!(
+                            f,
+                            "{} {:?}",
+                            shared.child_pid,
+                            String::from_utf8_lossy(&bytes)
+                        );
+                    }
+                }
                 let mut w = shared.input.lock().unwrap_or_else(PoisonError::into_inner);
                 let _ = w.write_all(&bytes);
                 let _ = w.flush();

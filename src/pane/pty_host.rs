@@ -214,14 +214,19 @@ impl PtyHost {
         env.push(("TERM".into(), spec.term.into()));
         env.push(("COLUMNS".into(), spec.cols.to_string()));
         env.push(("LINES".into(), spec.rows.to_string()));
-        env.extend(spec.env.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())));
+        env.extend(
+            spec.env
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string())),
+        );
 
         let (master, reader, input, child) = if super::jar_backend::enabled() {
             let mut argv = vec![shell];
             argv.extend(shell_args);
             let jarred = super::jar_backend::spawn(&argv, spec.cwd, spec.rows, spec.cols, &env)?;
             let reader = jarred.master.try_clone_reader()?;
-            let input = InputWriter::new(jarred.master.take_writer()?)?;
+            let input =
+                InputWriter::with_replies(jarred.master.take_writer()?, Some(jarred.replies))?;
             (jarred.master, reader, input, jarred.child)
         } else {
             let pair = native_pty_system().openpty(PtySize {

@@ -21,12 +21,14 @@ pub struct ReplyWriter {
 
 impl ReplyWriter {
     pub fn send(&self, bytes: Vec<u8>) -> io::Result<()> {
-        send(&self.tx, &self.outstanding, bytes, false)
+        send(&self.tx, &self.outstanding, bytes, false, true)
     }
 }
 
 struct Batch {
     bytes: Vec<u8>,
+    /// An answer to one of the child's queries, not a keystroke.
+    reply: bool,
     outstanding: Arc<AtomicUsize>,
 }
 
@@ -38,7 +40,17 @@ impl Drop for Batch {
 }
 
 impl InputWriter {
-    pub(super) fn new(mut writer: Box<dyn Write + Send>) -> io::Result<Self> {
+    pub(super) fn new(writer: Box<dyn Write + Send>) -> io::Result<Self> {
+        Self::with_replies(writer, None)
+    }
+
+    /// As [`Self::new`], with replies to the child's queries written to
+    /// `replies` instead of with the input, when given: a jarred pane sends
+    /// them as their own frame.
+    pub(super) fn with_replies(
+        mut writer: Box<dyn Write + Send>,
+        mut replies: Option<Box<dyn Write + Send>>,
+    ) -> io::Result<Self> {
         let (tx, rx) = mpsc::sync_channel::<Batch>(MAX_BATCHES);
         // Only this worker owns the OS writer, including its destructor, which
         // portable-pty may implement by writing EOF. Dropping a host never joins
@@ -48,8 +60,11 @@ impl InputWriter {
             .name("pty-input".into())
             .spawn(move || {
                 while let Ok(batch) = rx.recv() {
-                    if let Err(error) = writer.write_all(&batch.bytes).and_then(|()| writer.flush())
-                    {
+                    let out: &mut Box<dyn Write + Send> = match replies.as_mut() {
+                        Some(r) if batch.reply => r,
+                        _ => &mut writer,
+                    };
+                    if let Err(error) = out.write_all(&batch.bytes).and_then(|()| out.flush()) {
                         crate::spyc_debug!("pty input write failed: {error}");
                         return;
                     }
@@ -88,7 +103,7 @@ impl InputWriter {
 
     #[allow(clippy::needless_pass_by_ref_mut)]
     fn enqueue_owned(&mut self, bytes: Vec<u8>, confirmed: bool) -> io::Result<()> {
-        send(&self.tx, &self.outstanding, bytes, confirmed)
+        send(&self.tx, &self.outstanding, bytes, confirmed, false)
     }
 }
 
@@ -97,6 +112,7 @@ fn send(
     outstanding: &Arc<AtomicUsize>,
     bytes: Vec<u8>,
     confirmed: bool,
+    reply: bool,
 ) -> io::Result<()> {
     if bytes.is_empty() {
         return Ok(());
@@ -115,6 +131,7 @@ fn send(
         .map_err(|_| queue_full())?;
     let batch = Batch {
         bytes,
+        reply,
         outstanding: Arc::clone(outstanding),
     };
     match tx.try_send(batch) {

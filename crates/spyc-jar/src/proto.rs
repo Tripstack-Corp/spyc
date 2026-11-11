@@ -69,6 +69,12 @@ pub enum Msg {
     Input {
         bytes: Vec<u8>,
     },
+    /// The owner's answer to one of the program's terminal queries (R15):
+    /// written to the PTY as input is, but its own kind, so a replayed query
+    /// is never answered by mistake.
+    Reply {
+        bytes: Vec<u8>,
+    },
     Resize {
         rows: u16,
         cols: u16,
@@ -175,6 +181,7 @@ const STORE_SNAPSHOT: u8 = 7;
 const FETCH_SNAPSHOT: u8 = 8;
 const PING: u8 = 9;
 const ACK_EXIT: u8 = 10;
+const REPLY: u8 = 11;
 const WELCOME: u8 = 64;
 const OUTPUT: u8 = 65;
 const RESIZED: u8 = 66;
@@ -198,6 +205,10 @@ fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
         Msg::Input { bytes } => {
             p.extend(bytes);
             INPUT
+        }
+        Msg::Reply { bytes } => {
+            p.extend(bytes);
+            REPLY
         }
         Msg::Resize {
             rows,
@@ -350,6 +361,7 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
             Msg::Hello { version, role }
         }
         INPUT => Msg::Input { bytes: c.rest() },
+        REPLY => Msg::Reply { bytes: c.rest() },
         RESIZE => Msg::Resize {
             rows: c.u16()?,
             cols: c.u16()?,
@@ -467,6 +479,9 @@ mod tests {
             },
             Msg::Input {
                 bytes: b"\x1b[A".to_vec(),
+            },
+            Msg::Reply {
+                bytes: b"\x1b[?62c".to_vec(),
             },
             Msg::Resize {
                 rows: 40,
