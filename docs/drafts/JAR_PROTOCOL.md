@@ -165,7 +165,7 @@ in the output.
 | R17d | Panes **take turns snapshotting:** a few at a time, not every pane at once | v1 | Thirty full panes snapshotting together held each pane's lock for 46 to 62 ms against 6 ms alone, enough to drop a frame. The spike lets two run at once. | all |
 | R17e | **A snapshot every five seconds while output flows,** as well as after a second of quiet | v1 | Decided by the owner after stage 4. Through a long stream the snapshot under a gap (R12c) would otherwise predate the stream, losing its start and any mode it changed. Each costs the pane's lock about 6 ms; the spike showed none during a 14-second stream without it, and one every five seconds with it. | U2 |
 | R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. | U2, U10, U12 |
-| R19 | Keep all of it in memory, never on disk, except in `spill` mode. An upgrade's blob is sealed (ChaCha20-Poly1305, a fresh key that travels with the descriptors), so where it has to touch a file only ciphertext does | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). The seal is the owner's choice for macOS, which has no `memfd`; the spike seals on every platform. | all |
+| R19 | Keep all of it in memory, never on disk, except in `spill` mode. An upgrade's blob is sealed (AES-256-GCM, a fresh key that travels with the descriptors), so where it has to touch a file only ciphertext does | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). The seal is the owner's choice for macOS, which has no `memfd`; the spike seals on every platform. AES rather than ChaCha20-Poly1305 because it is FIPS-approved, at the company security manager's suggestion: for one key used once, the two are equally safe. | all |
 
 ### Connections
 
@@ -615,7 +615,7 @@ Open unless marked decided:
   `exec`s it, all safe calls. An upgrade's descriptors arrive as `SCM_RIGHTS`,
   which hands them over as owned descriptors; adopting inherited descriptor
   numbers instead would need `unsafe`. **Decided: no `unsafe` in the jar.** It
-  depends on `anyhow`, `rustix` and `chacha20poly1305` (R19's seal).
+  depends on `anyhow`, `rustix` and `aes-gcm` (R19's seal).
 
 - **F. WebSocket for the browser, next to SSH.** The decision log says remote
   support rides SSH rather than a custom protocol. A WebSocket transport for
