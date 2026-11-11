@@ -278,7 +278,11 @@ manifest, so anything the manifest doesn't carry resets daily.
 jar. Detaching and attaching are a client disconnecting and reconnecting, as
 with tmux or dtach. The Model never moves, MCP connections never drop, and an
 SSH connection that dies kills only its relay. Panes are jars, and spyc is a
-jar of jars. The leaning is towards this shape, untested.
+jar of jars. **Decided after stage 2b: this shape, entered lazily.** A bare
+launch stays a plain spyc in its terminal; the first detach hands spyc over,
+once, to a spyc running in an outer jar, through the manifest and the
+pane-jar adoption stage 2 proved (`PANE_JAR_SPIKE.md` → "Stage 2b: how spyc
+outlives its terminal" has the measurements).
 
 What shape 2 has to get right:
 
@@ -297,7 +301,12 @@ What shape 2 has to get right:
 3. **spyc's own terminal queries while nobody is attached.** Nothing answers
    them. spyc has history here: a cursor-position query over SSH crashed it,
    which is why it never calls ratatui's `Terminal::clear()`. Shape 2 needs an
-   audit that spyc never blocks waiting on a terminal's reply.
+   audit that spyc never blocks waiting on a terminal's reply, and that no
+   query's reader outlives its timeout. Stage 2b found one that does: the
+   image-protocol probe at launch gives up after its timeout, but its thread
+   stays blocked on standard input and takes the first keys a later terminal
+   sends. Probes belong to the attach (point 2), each with a reader that ends
+   when its probe does.
 4. **The real terminal is restored on detach.** The attach client can't parse,
    so it can't know which modes spyc set. On detach it sends a fixed reset:
    leave the alternate screen, end mouse reporting and bracketed paste, pop the
@@ -311,15 +320,20 @@ What shape 2 has to get right:
 6. **Two relays per keystroke.** Each local hop should cost microseconds, but
    latency is measured end to end through both.
 
-What shape 2 asks of the protocol, **open until stage 2b reports:**
+What shape 2 asks of the protocol, as stage 2b built it:
 
 - **An owner with no engine,** which stores no snapshot and relies on its
-  program repainting on attach.
+  program repainting on attach. The attach client is one, and spyc repainted
+  every time.
 - **Raw input from a single writer:** a relay can't split bytes into whole keys
   (R14) or tell a terminal's replies from keystrokes (R15) without parsing, so a
-  single writer may send unframed bytes.
+  single writer may send unframed bytes. The attach client sends what it reads,
+  as it reads it.
 - **An attach event the jar's own program can see** (point 2). A signal alone
-  isn't enough.
+  isn't enough: a signal handler can only set a flag, and spyc's loop wakes on
+  messages. The spike's jar sends `SIGUSR1` and the client then changes the
+  size by a row and back, so the resize wakes the loop and finds the flag. The
+  protocol should carry the attach as an event of its own.
 
 ## Detaching, attaching and quitting
 
@@ -563,9 +577,10 @@ Open unless marked decided:
   jar without an owner, so MCP, the hooks' target and the scope registry stay
   up while you're away, and a jar is ownerless only after a crash. Moved to
   later as a result: R10 (timestamps, the recap from the jar) and R12b
-  (`block` and `spill`); R32a's linger now covers crash windows only. Still
-  open: which shape ([How spyc outlives its terminal](#how-spyc-outlives-its-terminal)),
-  decided by stage 2b. A separate MCP daemon was considered and rejected: the
+  (`block` and `spill`); R32a's linger now covers crash windows only. The
+  shape is decided too, after stage 2b: **shape 2, spyc in its own jar,
+  entered lazily** ([How spyc outlives its terminal](#how-spyc-outlives-its-terminal)).
+  A separate MCP daemon was considered and rejected: the
   MCP tools are a view onto the Model, and splitting the Model in two would
   need a protocol between the halves.
 - **C. Decided: no standalone tool.** dtach, abduco, shpool and zmx already
@@ -588,6 +603,29 @@ Open unless marked decided:
   support rides SSH rather than a custom protocol. A WebSocket transport for
   the browser adds a transport rather than a protocol, but it is still a
   change to that entry.
+
+- **G. Decided: a spyc that loses its lease takes it back** when the jar is
+  free, and marks the pane detached when another spyc holds it. The same
+  reconnect serves a dropped connection (stage 2 found a resumed spyc showing
+  a stale pane instead).
+- **H. Decided: a jar refuses to start when it can't leave its session**
+  (`setsid` failing, as for a process group leader), rather than run in an
+  indeterminate state that would die with its terminal.
+- **I. Open: which snapshots each kind of jar keeps.** Stage 2 found that a
+  crash followed by a build change leaves a pane empty when the jar holds only
+  a binary snapshot. What that costs differs by kind:
+  - **An agent's pane** (Claude, Codex, agy): its durable record is its
+    transcript, and a full-screen agent repaints on a resize. Losing its
+    terminal history costs little, so the binary snapshot is enough, with a
+    redraw when it can't be used.
+  - **A shell's pane:** its history lives only in the terminal. A portable
+    snapshot kept alongside, refreshed less often than the binary one, or a
+    log kept back to the last portable snapshot, is what keeps it.
+  - **A task or capture:** its output is the point. `block` and a log that
+    keeps it whole matter more than snapshots.
+  - **spyc's outer jar:** it holds no engine and stores no snapshot; spyc
+    repaints on attach. On a planned upgrade spyc stores portable snapshots in
+    its pane jars before it hands over, which is cheap because it is planned.
 
 Smaller ones: the keyboard's idle gap (about a second is proposed); `spill`
 stays opt-in; R29, status for readers.
