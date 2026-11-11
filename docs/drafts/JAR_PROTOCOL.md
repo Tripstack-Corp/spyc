@@ -199,8 +199,8 @@ in the output.
 
 | | Requirement | Verdict | Why | For |
 |---|---|---|---|---|
-| R33 | **Upgrade in place:** the jar asks the new binary to validate a versioned handover blob, and only if it accepts does the jar `exec` it, keeping its PID, child, PTY and connections. The ring, snapshot and leases cross in a file descriptor. | v1 | The escape hatch for every change this document gets wrong. A validation that fails leaves the old jar running. | all |
-| R34 | A `hello` that lists capabilities, and messages flagged critical or ancillary ([below](#how-the-protocol-grows)) | v1 | How every later requirement arrives without a new version. | all |
+| R33 | **Upgrade in place:** the jar asks the new binary to validate a versioned handover blob, and only if it accepts does the jar `exec` it, keeping its PID, child, PTY and connections. The blob, the listener, the PTY master and every connection cross as descriptors over a socketpair that becomes the new image's standard input | v1, and only v1 | The escape hatch for every change this document gets wrong. A validation that fails leaves the old jar running. Stage 3 built it (`PANE_JAR_SPIKE.md` → "Stage 3: the jar upgrades itself"). It can't arrive later: a jar that doesn't know the request can never be upgraded, so the first released jar has to carry it. | all |
+| R34 | A `hello` that lists capabilities, and messages flagged critical or ancillary ([below](#how-the-protocol-grows)) | v1 | How every later requirement arrives without a new version. Stage 3 found the first `hello` already reads the fields it knows and ignores what follows, so capabilities can follow them; that rule is part of what freezes. | all |
 
 ### Never in the jar
 
@@ -596,12 +596,13 @@ Open unless marked decided:
 - **D. Readers and the keyboard lease: built in v1, or reserved capabilities?**
   The role field is v1 either way.
 - **E. `unsafe` in the jar.** The review asked whether `fork`, `setsid` and a
-  controlling terminal need it. As far as this revision found, they don't:
-  rustix 1.1.6 has a safe `setsid()` and `ioctl_tiocsctty()`, spyc can start
-  the jar with `std::process::Command` (no `fork`), and the jar can spawn its
-  program through `portable-pty` as `PtyHost` does today, whose `unsafe` sits
-  in that dependency. The cost is the "`rustix` only" dependency target.
-  Unverified until stage 2 builds it.
+  controlling terminal need it. **Stage 3 built the jar with none**, and
+  without `portable-pty`: rustix opens the PTY, and the program starts through
+  `spyc-jar pty-child`, which calls `setsid` and `ioctl_tiocsctty` and then
+  `exec`s it, all safe calls. An upgrade's descriptors arrive as `SCM_RIGHTS`,
+  which hands them over as owned descriptors; adopting inherited descriptor
+  numbers instead would need `unsafe`. The jar depends on `anyhow` and `rustix`
+  alone. Open only until the owner closes it.
 
 - **F. WebSocket for the browser, next to SSH.** The decision log says remote
   support rides SSH rather than a custom protocol. A WebSocket transport for

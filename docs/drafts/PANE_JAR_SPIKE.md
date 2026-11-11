@@ -553,6 +553,89 @@ way that matters, because spyc draws palette indices with its own colours.
 a restore that refuses the binary snapshot): the restored history now starts
 at line 1, where stage 2 left it empty.
 
+### Stage 3: the jar upgrades itself
+
+**Recommendation: go.** R33 works on macOS and Linux: a jar replaces its own
+binary while its program runs on, keeps every connection, and runs on
+unchanged when the new binary refuses. What has to freeze is what the plan
+hoped: the `hello` and the handover blob. Built on `spike/jar-stage-2`
+(`23c8f218`, `03f4fdcd`).
+
+How an upgrade runs (`crates/spyc-jar/src/upgrade.rs`):
+
+1. Every thread that may hold bytes in flight parks at a safe point: the PTY
+   reader between reads, each connection's reader between frames and its
+   writer between batches, the acceptor, and the child waiter.
+2. The jar encodes itself as a versioned blob: its configuration, program,
+   log, snapshots, leases and each connection's place in the log.
+3. The new binary validates the blob (`spyc-jar validate-handover`). Any
+   failure up to here unparks everything and refuses the upgrade.
+4. The blob, the listener, the PTY master and every connection go as
+   `SCM_RIGHTS` over a socketpair that becomes the new image's standard input,
+   and the jar `exec`s `BINARY resume-handover`: same PID, same session, same
+   program.
+
+| | Result (macOS and Linux) |
+|---|---|
+| An upgrade under a program counting as fast as it can | The same jar process and program; the count runs on with nothing lost or repeated. Bite-checked: a PTY reader that doesn't park loses bytes, in 3 runs of 3. |
+| Connections | The owner's and a reader's both cross, the listener takes new ones, and input and resizes reach the program afterwards. |
+| Three upgrades in a row | Each one as clean as the first. |
+| A binary that refuses the blob, or doesn't exist | Refused with its reason; the old jar runs on, with the count unbroken. |
+| A streaming Claude tab in spyc (macOS, `claude_upgrade.py`) | Three upgrades mid-turn: the same jar process, now running the new binary, and the same Claude. The turn finished, and a new prompt got an answer. spyc noticed nothing. |
+| Time, debug build | 344 ms to a binary never run before, which includes macOS's first-run scan of it; about 110 ms after that. Most of the 110 ms is threads noticing within their 100 ms poll; waking them directly would cut it. |
+
+**Q4, an old jar under a new spyc.** The jar from before stage 3
+(`381b8276`, built by `old_jar.sh`), driven by the new client
+(`tests/compat.rs`):
+
+- **A longer `hello` is welcomed.** Version 1 reads the fields it knows and
+  ignores the rest, so capabilities (R34) can follow them. That rule is part
+  of what freezes.
+- **An unknown critical message** gets `Unsupported`, and the connection
+  carries on. An unknown ancillary one is skipped. A new jar's own notice
+  after an upgrade is ancillary, so an old client skips it.
+- **An old jar can't be upgraded:** to it, the request is an unknown critical
+  message. So R33 can't arrive later. The first released jar has to carry it.
+
+**Decision E, answered by building it: no `unsafe`.** The jar no longer uses
+`portable-pty`. rustix opens the PTY, and the program starts through
+`spyc-jar pty-child`, which calls `setsid` and `ioctl_tiocsctty`, then `exec`s
+it. Two other routes fail:
+- **Adopting inherited descriptor numbers** after `exec` would need `unsafe`.
+- **Reopening a PTY master through `/proc/self/fd`** allocates a new PTY on
+  Linux.
+
+`SCM_RIGHTS` avoids both. The jar depends on `anyhow` and `rustix` alone.
+
+**Fuzzing.** `fuzz/fuzz_targets/jar_handover.rs` (the blob) and `jar_frame.rs`
+(the frame parser, both sides) ran 3 minutes each: 23.8 million and 16.3
+million inputs, with no crash. A first run of the frame target overran its
+time limit and was stopped. A rerun with a 5-second limit on each input found
+none slower. Unit tests add a round trip, every truncation, 50,000 mutations
+and a forged count that must not allocate.
+
+**Gaps:**
+
+- **R19 on macOS.** On Linux the blob is a `memfd`, in memory only. macOS has
+  no `memfd`, and its POSIX shared memory can only be mapped, which needs
+  `unsafe`. There the blob is an unlinked file in the jar's `0700` directory,
+  which may reach the disk through the page cache.
+- **Nothing rolls back after `exec`.** A resume that fails ends the jar and
+  its program. The new binary has just validated the same bytes, so only what
+  validation can't see is left, such as a descriptor that didn't arrive.
+- **A connection still in its `hello`** when the upgrade starts isn't carried.
+  It closes, and its client reconnects, as decision G already requires.
+- **Who may ask.** The spike takes an upgrade from any connection. The real
+  jar takes it from the owner, with the token.
+
+**What stage 3 asks of the requirements,** for the owner:
+
+- R33 stays v1, for good: it can't arrive later.
+- The verdicts marked **v1 or later** (R16, R20's readers and keyboard, R23,
+  R24 and R25, all decision D's roles) can become **later**: an upgraded jar
+  can add them.
+- R19 needs a macOS answer, or an exception for the instant of a handover.
+
 ## Sources
 
 - [zmx: session persistence for terminal processes](https://erock.prose.sh/zmx-session-persistence)
