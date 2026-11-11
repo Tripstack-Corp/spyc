@@ -322,6 +322,10 @@ impl App {
         let mut extra_env: Vec<(&str, &str)> = match (is_agent || shell, sock_str.as_deref()) {
             (true, Some(sock)) => vec![("SPYC_MCP_SOCK", sock), ("SPYC_PANE_ID", pane_id.as_str())],
             (true, None) => vec![("SPYC_PANE_ID", pane_id.as_str())],
+            // Jar spike: every tab needs an id to be adopted on restore.
+            (false, _) if crate::pane::jar_backend::enabled() => {
+                vec![("SPYC_PANE_ID", pane_id.as_str())]
+            }
             (false, _) => Vec::new(),
         };
         if let Some(home) = home {

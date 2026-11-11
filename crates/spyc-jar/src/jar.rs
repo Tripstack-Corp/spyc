@@ -127,6 +127,8 @@ struct State {
     cols: u16,
     next_conn: u64,
     ownerless_since: Option<Instant>,
+    /// The PTY's foreground process group, 0 until read.
+    fg: u32,
 }
 
 struct Shared {
@@ -187,6 +189,7 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
             cols: cfg.cols,
             next_conn: 1,
             ownerless_since: Some(Instant::now()),
+            fg: 0,
         }),
         cv: Condvar::new(),
         master: Mutex::new(pair.master),
@@ -256,6 +259,19 @@ fn pump_pty(shared: &Shared, mut reader: Box<dyn Read + Send>) {
 fn reap(shared: &Shared) {
     let mut st = shared.lock();
     loop {
+        // R4: the foreground process group, read here because only the
+        // master's holder can. A job starting needn't print anything.
+        let fg = shared
+            .master
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .process_group_leader()
+            .and_then(|p| u32::try_from(p).ok())
+            .unwrap_or(0);
+        if fg != st.fg {
+            st.fg = fg;
+            shared.cv.notify_all();
+        }
         if st.exit.is_some() {
             let alone_too_long = st
                 .ownerless_since
@@ -500,6 +516,7 @@ fn stream_log(
     closed: &std::sync::atomic::AtomicBool,
 ) {
     let mut exit_sent = false;
+    let mut fg_sent = 0u32;
     loop {
         let mut st = shared.lock();
         let batch = loop {
@@ -510,8 +527,15 @@ fn stream_log(
             if let Some((seq, from)) = pos {
                 let pending = seq < st.log.next_seq;
                 let exit_due = !exit_sent && st.exit.is_some() && st.pty_eof && !pending;
-                if pending || exit_due {
-                    break collect(&st, seq, from, exit_due.then(|| st.exit).flatten());
+                let fg_due = st.fg != fg_sent;
+                if pending || exit_due || fg_due {
+                    let (mut frames, next) =
+                        collect(&st, seq, from, exit_due.then(|| st.exit).flatten());
+                    if fg_due {
+                        frames.insert(0, Msg::Foreground { pgid: st.fg });
+                        fg_sent = st.fg;
+                    }
+                    break (frames, next);
                 }
             }
             st = shared

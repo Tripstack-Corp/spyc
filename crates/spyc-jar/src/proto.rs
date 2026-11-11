@@ -140,6 +140,11 @@ pub enum Msg {
     Unsupported {
         kind: u8,
     },
+    /// The PTY's foreground process group changed (R4): `tcgetpgrp`, which
+    /// only the master's holder can read.
+    Foreground {
+        pgid: u32,
+    },
 }
 
 #[derive(Debug)]
@@ -191,6 +196,7 @@ const PONG: u8 = 69;
 const EXITED: u8 = 70;
 const REFUSED: u8 = 71;
 const UNSUPPORTED: u8 = 72;
+const FOREGROUND: u8 = 73;
 
 /// Every kind this version knows is critical: a reader that doesn't know one
 /// can't safely carry on without it.
@@ -301,6 +307,10 @@ fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
             p.push(*kind);
             UNSUPPORTED
         }
+        Msg::Foreground { pgid } => {
+            p.extend(pgid.to_be_bytes());
+            FOREGROUND
+        }
     };
     (kind, p)
 }
@@ -410,6 +420,7 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
             why: String::from_utf8_lossy(&c.rest()).into_owned(),
         },
         UNSUPPORTED => Msg::Unsupported { kind: c.u8()? },
+        FOREGROUND => Msg::Foreground { pgid: c.u32()? },
         other if flags & CRITICAL != 0 => return Err(ReadError::UnknownCritical(other)),
         _ => return Ok(None),
     };
@@ -525,6 +536,7 @@ mod tests {
                 why: "an owner is connected".into(),
             },
             Msg::Unsupported { kind: 200 },
+            Msg::Foreground { pgid: 4242 },
         ]
     }
 

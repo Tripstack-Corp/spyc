@@ -366,3 +366,30 @@ fn ping_is_answered() {
     owner.send(&Msg::Ping { n: 41 }).unwrap();
     assert_eq!(owner.recv(WAIT).unwrap(), Some(Msg::Pong { n: 41 }));
 }
+
+/// R4: the jar reports the PTY's foreground process group, which only it can
+/// read: the shell's at first, then a job's while the shell runs one.
+#[test]
+fn the_foreground_process_group_is_reported_as_it_changes() {
+    let mut jar = Jar::start(&[], &["/bin/sh", "-i"]);
+    let (mut owner, welcome) = jar.welcome(Role::Owner);
+    let Msg::Welcome { child_pid, .. } = welcome else {
+        unreachable!()
+    };
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let shell = read_until(&mut owner, true, |s| {
+        s.frames.contains(&Msg::Foreground { pgid: child_pid })
+    });
+    assert!(!shell.frames.is_empty());
+    owner
+        .send(&Msg::Input {
+            bytes: b"sleep 3\n".to_vec(),
+        })
+        .unwrap();
+    let job = read_until(&mut owner, true, |s| {
+        s.frames
+            .iter()
+            .any(|f| matches!(f, Msg::Foreground { pgid } if *pgid != child_pid))
+    });
+    assert!(!job.frames.is_empty());
+}

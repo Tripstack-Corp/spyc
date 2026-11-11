@@ -6,8 +6,8 @@
 //! The owner's end: output arrives as frames and is acknowledged once it is
 //! handed to `PtyHost`'s reader, whose bounded channel is what paces the
 //! program (R11). An idle connection pings so the jar's liveness deadline
-//! holds. Not served yet: the foreground process group (R4), so
-//! [`MasterPty::process_group_leader`] answers `None`.
+//! holds. The foreground process group (R4) arrives as `Foreground` frames
+//! and is cached, so [`MasterPty::process_group_leader`] never waits.
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -126,11 +126,13 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
         caught_up: Mutex::new(None),
     });
     let (bytes_tx, bytes_rx) = mpsc::sync_channel::<Vec<u8>>(64);
+    let fg = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let exit: Arc<ExitSlot> = Arc::new((Mutex::new(None), Condvar::new()));
     {
         let tx = tx.clone();
         let exit = Arc::clone(&exit);
         let gate = Arc::clone(&gate);
+        let fg = Arc::clone(&fg);
         std::thread::spawn(move || {
             let mut pings = 0u64;
             loop {
@@ -152,6 +154,9 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
                         set_exit(&exit, status);
                         let _ = tx.send(&Msg::AckExit);
                         break;
+                    }
+                    Ok(Some(Msg::Foreground { pgid })) => {
+                        fg.store(pgid, std::sync::atomic::Ordering::Relaxed);
                     }
                     Ok(Some(_)) => {}
                     Ok(None) => {
@@ -182,6 +187,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
                 pixel_width: 0,
                 pixel_height: 0,
             }),
+            fg: Arc::clone(&fg),
             reader: Mutex::new(Some(JarReader {
                 rx: bytes_rx,
                 buf: Vec::new(),
@@ -336,6 +342,8 @@ impl Write for JarWriter {
 
 struct JarMaster {
     tx: Sender,
+    /// The foreground process group the jar last reported (R4); 0 unknown.
+    fg: Arc<std::sync::atomic::AtomicU32>,
     size: Mutex<PtySize>,
     reader: Mutex<Option<JarReader>>,
 }
@@ -368,7 +376,10 @@ impl MasterPty for JarMaster {
         }))
     }
     fn process_group_leader(&self) -> Option<libc::pid_t> {
-        None
+        match self.fg.load(std::sync::atomic::Ordering::Relaxed) {
+            0 => None,
+            pgid => libc::pid_t::try_from(pgid).ok(),
+        }
     }
     fn as_raw_fd(&self) -> Option<std::os::fd::RawFd> {
         None
