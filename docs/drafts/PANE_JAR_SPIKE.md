@@ -444,6 +444,67 @@ verdicts are unchanged here):
 **Not done in stage 2:** memory and snapshot CPU at 30 panes inside spyc.
 **Recommendation:** go, and on to stage 2b.
 
+### Stage 2b: how spyc outlives its terminal
+
+**Recommendation: shape 2, spyc in its own jar, entered lazily.** A bare
+launch stays a plain spyc in its terminal (the principle). The first detach
+hands spyc over, once, to a new spyc running in an outer jar, through the
+session manifest and the pane-jar adoption stage 2 proved. From then on,
+detaching and attaching are a client coming and going, and the Model never
+moves again.
+
+**Shape 2, built and measured** (`spike/jar-stage-2`, `3700ea8a`,
+`bcd6f4ea` and `87763ae1`):
+
+- `spyc-jar attach SOCKET`: a raw relay to a real terminal, `^\` to detach,
+  and a fixed reset on the way out.
+- With `--attach-signal`, a jar sends its program `SIGUSR1` when an owner
+  connects. spyc takes it, at the resize the client's one-row nudge causes,
+  as a new terminal: it sets its modes again and repaints, as returning from
+  `^z` does.
+
+| | Result (`spikes/jar-stage-2/shape2.py`, macOS and Linux alike) |
+|---|---|
+| Attach | spyc set its modes on the new terminal: alternate screen, mouse reporting, bracketed paste. |
+| Typing through two relays | Reached the pane's shell and came back. |
+| Detach | The real terminal was left clean (only the cursor shown, as the reset intends). |
+| Reattach elsewhere | A terminal of another size, without the kitty keyboard protocol: modes set again, repainted at the new size, the pane's content intact. |
+| A client killed (`kill -9`, an SSH drop) | spyc and the pane's program ran on; the next client found the loop four seconds further on. |
+| Echo, end to end | Median through the outer jar and the pane's jar against spyc run directly: 6.5 against 6.4 ms on macOS, 9.7 against 9.3 ms on Linux. Inside spyc's render cadence. |
+
+**Found on Linux: a probe that steals keys.** At launch spyc asks the
+terminal which image protocol it speaks, through `ratatui-image`, whose reader
+thread gives up after a timeout but stays blocked reading standard input. A
+spyc started with nothing attached gets no answer, and that thread later takes
+the first keys a terminal sends: there, the `^a j` that should have focused
+the pane, so the command typed after it landed in the file view. Two readers
+race for the bytes, so macOS passed by luck. The spike's outer jar marks its
+program, and spyc skips the probe there; with that, every row above passes on
+both platforms. The requirement (`JAR_PROTOCOL.md`, shape 2's point 3):
+probes run at each attach, and no reader outlives its probe.
+
+Not covered: spyc probes the kitty keyboard protocol only at launch, so a
+spyc started with nothing attached never uses it; an attach should probe
+again, along with the image protocol. An upgrade by `exec` inside the outer
+jar wasn't built.
+
+**Shape 1, assessed from the code rather than built.** A headless handover
+on every detach and attach needs:
+
+- **A run loop with no terminal.** `run.rs` and `terminal.rs` assume one:
+  raw mode and the alternate screen at setup, `crossterm`'s input thread,
+  resize events, the image-protocol probe, OSC 52 clipboard writes, the
+  window title, and `suspend_tui`/`resume_tui` around foreground commands.
+  Headless, `$EDITOR`, `;` and `$` can't run at all.
+- **A handover through the manifest each time.** It saves each project's
+  directories, split, pane size and focus, tabs and HUD mode. Everything else
+  resets on every attach: cursors, picks, filters and sort, open pagers
+  (`^a v` included), archive mounts, the list of background tasks, the last
+  search, an open prompt or message, and the stderr log.
+
+Shape 2 keeps all of that, costs nothing measurable per keystroke, and its
+handover happens once, at the first detach, where shape 1 pays it every time.
+
 ## Sources
 
 - [zmx: session persistence for terminal processes](https://erock.prose.sh/zmx-session-persistence)
