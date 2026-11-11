@@ -75,26 +75,31 @@ pub fn spawn(
         .iter()
         .find(|(k, _)| k == "SPYC_PANE_ID")
         .map(|(_, v)| v.as_str());
-    let socket = socket_path(pane_id);
+    sweep_once();
+    let mut socket = socket_path(pane_id);
+    let state = socket_state(&socket);
     trace(&format!(
-        "spawn: pane {pane_id:?} socket {} exists {}",
-        socket.display(),
-        socket.exists()
+        "spawn: pane {pane_id:?} socket {} {state:?}",
+        socket.display()
     ));
-    if socket.exists() {
-        let attached = attach(&socket, rows, cols);
-        if let Err(e) = &attached {
-            trace(&format!("spawn: attach failed: {e:#}"));
-        }
-        match attached {
+    match state {
+        SocketState::Live => match attach(&socket, rows, cols) {
             Ok(mut adopted) => {
                 adopted.adopted = true;
                 return Ok(adopted);
             }
-            Err(_) => {
-                let _ = std::fs::remove_file(&socket);
+            // A live jar that won't take us (another spyc owns it) is left
+            // alone; deleting its socket would make it unreachable. This pane
+            // gets a jar of its own under a fresh name.
+            Err(e) => {
+                trace(&format!("spawn: attach refused: {e:#}"));
+                socket = socket_path(None);
             }
+        },
+        SocketState::Stale => {
+            let _ = std::fs::remove_file(&socket);
         }
+        SocketState::Missing => {}
     }
     let mut cmd = Command::new(jar_binary()?);
     cmd.arg("--socket")
@@ -522,6 +527,60 @@ impl ChildKiller for JarKiller {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum SocketState {
+    /// Something answers: a jar, alive.
+    Live,
+    /// The file is there but nothing listens: its jar is gone (R32).
+    Stale,
+    Missing,
+}
+
+/// Whether a jar answers at `socket`. Only a refused connection or a vanished
+/// file counts as stale; any other error is treated as live, so a jar is never
+/// cut off by a transient failure.
+fn socket_state(socket: &Path) -> SocketState {
+    if !socket.exists() {
+        return SocketState::Missing;
+    }
+    let refused = std::os::unix::net::UnixStream::connect(socket).is_err_and(|e| {
+        matches!(
+            e.kind(),
+            io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+        )
+    });
+    if refused {
+        SocketState::Stale
+    } else {
+        SocketState::Live
+    }
+}
+
+/// Remove the sockets in `dir` whose jars are gone (R32); how many.
+fn sweep_dir(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "sock"))
+        .filter(|p| socket_state(p) == SocketState::Stale && std::fs::remove_file(p).is_ok())
+        .count()
+}
+
+/// Sweep the jar directory once per spyc, on its first jar: a spyc that never
+/// runs one never looks.
+fn sweep_once() {
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    SWEPT.call_once(|| {
+        if let Some(dir) = socket_path(None).parent() {
+            let n = sweep_dir(dir);
+            trace(&format!("sweep: {n} stale socket(s) removed"));
+        }
+    });
+}
+
 /// Jar spike diagnostics: append `line` to `$SPYC_JAR_TRACE`.
 fn trace(line: &str) {
     if let Some(path) = std::env::var_os("SPYC_JAR_TRACE")
@@ -531,5 +590,34 @@ fn trace(line: &str) {
             .open(path)
     {
         let _ = writeln!(f, "spyc {} {line}", std::process::id());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+
+    /// R32: a socket with a live listener is kept, one whose listener is gone
+    /// is removed, and anything else in the directory is left alone.
+    #[test]
+    fn a_sweep_removes_only_the_sockets_nothing_answers() {
+        let dir = tempfile::Builder::new()
+            .prefix("jsw")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let live = dir.path().join("live.sock");
+        let dead = dir.path().join("dead.sock");
+        let other = dir.path().join("notes.txt");
+        let _listening = UnixListener::bind(&live).unwrap();
+        drop(UnixListener::bind(&dead).unwrap());
+        std::fs::write(&other, "x").unwrap();
+        assert_eq!(socket_state(&dead), SocketState::Stale, "premise");
+
+        assert_eq!(sweep_dir(dir.path()), 1);
+        assert!(live.exists(), "a live jar's socket is kept");
+        assert!(!dead.exists(), "a dead jar's socket is removed");
+        assert!(other.exists(), "only sockets are swept");
+        assert_eq!(socket_state(&dead), SocketState::Missing);
     }
 }
