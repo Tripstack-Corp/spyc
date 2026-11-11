@@ -145,6 +145,18 @@ pub enum Msg {
     Foreground {
         pgid: u32,
     },
+    /// Stage 3 (R33): replace the jar's binary with the one at `binary`, which
+    /// must first accept the jar's handover blob. A spike knob: any connection
+    /// may ask; a real jar would take it only from its owner, with the token.
+    Upgrade {
+        binary: String,
+    },
+    /// Sent to every connection by a jar that has just taken over from its
+    /// previous binary: `build` names the binary now running. Ancillary, so a
+    /// client that doesn't know it skips it.
+    Upgraded {
+        build: String,
+    },
 }
 
 #[derive(Debug)]
@@ -187,6 +199,7 @@ const FETCH_SNAPSHOT: u8 = 8;
 const PING: u8 = 9;
 const ACK_EXIT: u8 = 10;
 const REPLY: u8 = 11;
+const UPGRADE: u8 = 12;
 const WELCOME: u8 = 64;
 const OUTPUT: u8 = 65;
 const RESIZED: u8 = 66;
@@ -197,6 +210,7 @@ const EXITED: u8 = 70;
 const REFUSED: u8 = 71;
 const UNSUPPORTED: u8 = 72;
 const FOREGROUND: u8 = 73;
+const UPGRADED: u8 = 74;
 
 /// Every kind this version knows is critical: a reader that doesn't know one
 /// can't safely carry on without it.
@@ -303,6 +317,14 @@ fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
             p.extend(why.as_bytes());
             REFUSED
         }
+        Msg::Upgrade { binary } => {
+            p.extend(binary.as_bytes());
+            UPGRADE
+        }
+        Msg::Upgraded { build } => {
+            p.extend(build.as_bytes());
+            UPGRADED
+        }
         Msg::Unsupported { kind } => {
             p.push(*kind);
             UNSUPPORTED
@@ -330,7 +352,8 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
     let mut out = Vec::with_capacity(payload.len() + 6);
     out.extend(len.to_be_bytes());
     out.push(kind);
-    out.push(CRITICAL);
+    // Everything is critical but the notice a newer jar sends unasked.
+    out.push(if kind == UPGRADED { 0 } else { CRITICAL });
     out.extend(payload);
     out
 }
@@ -420,6 +443,12 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
             why: String::from_utf8_lossy(&c.rest()).into_owned(),
         },
         UNSUPPORTED => Msg::Unsupported { kind: c.u8()? },
+        UPGRADE => Msg::Upgrade {
+            binary: String::from_utf8(c.rest()).map_err(|_| ReadError::Malformed("binary path"))?,
+        },
+        UPGRADED => Msg::Upgraded {
+            build: String::from_utf8_lossy(&c.rest()).into_owned(),
+        },
         FOREGROUND => Msg::Foreground { pgid: c.u32()? },
         other if flags & CRITICAL != 0 => return Err(ReadError::UnknownCritical(other)),
         _ => return Ok(None),

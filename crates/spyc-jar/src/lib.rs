@@ -6,10 +6,16 @@
 //! - [`jar`]: the jar itself — the program, the event log, the owner's lease.
 //! - [`client`]: the owner's end, for spyc and the tests.
 //! - [`attach`]: stage 2b's attach client, a raw relay to a real terminal.
+//! - [`pty`]: the program's PTY, opened and spawned without `unsafe`.
+//! - [`handover`] and [`upgrade`]: stage 3, the jar replacing its own binary
+//!   (R33).
 
 #![forbid(unsafe_code)]
 
 pub mod attach;
 pub mod client;
+pub mod handover;
 pub mod jar;
 pub mod proto;
+pub mod pty;
+pub mod upgrade;

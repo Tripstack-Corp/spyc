@@ -27,6 +27,22 @@ fn main() -> anyhow::Result<()> {
         linger_after_exit: Duration::from_secs(60),
         attach_signal: false,
     };
+    match std::env::args().nth(1).as_deref() {
+        Some("pty-child") => {
+            let argv: Vec<String> = std::env::args().skip(3).collect();
+            return spyc_jar::pty::child(&argv);
+        }
+        Some("validate-handover") => return spyc_jar::upgrade::validate_stdin(),
+        Some("resume-handover") => return spyc_jar::upgrade::resume(),
+        Some("upgrade") => {
+            let mut a = std::env::args().skip(2);
+            let (Some(socket), Some(binary)) = (a.next(), a.next()) else {
+                bail!("usage: spyc-jar upgrade SOCKET BINARY");
+            };
+            return upgrade(std::path::Path::new(&socket), binary);
+        }
+        _ => {}
+    }
     if std::env::args().nth(1).as_deref() == Some("attach") {
         let socket = std::env::args()
             .nth(2)
@@ -85,4 +101,25 @@ fn main() -> anyhow::Result<()> {
         .with_context(|| format!("bind {}", cfg.socket.display()))?;
     std::fs::set_permissions(&cfg.socket, std::fs::Permissions::from_mode(0o600))?;
     jar::run(cfg, listener)
+}
+
+/// `spyc-jar upgrade SOCKET BINARY`: ask the jar at `SOCKET` to replace its
+/// binary with `BINARY`, and report how long its program went unserved.
+fn upgrade(socket: &std::path::Path, binary: String) -> anyhow::Result<()> {
+    use spyc_jar::client::Client;
+    use spyc_jar::proto::{Msg, Role};
+    let (mut c, _) = Client::connect(socket, Role::Reader, Duration::from_secs(5))?;
+    let t0 = std::time::Instant::now();
+    c.send(&Msg::Upgrade { binary })?;
+    loop {
+        match c.recv(Duration::from_secs(10))? {
+            Some(Msg::Upgraded { build }) => {
+                println!("upgraded in {:.1} ms to {build}", t0.elapsed().as_secs_f64() * 1000.0);
+                return Ok(());
+            }
+            Some(Msg::Refused { why }) => bail!("{why}"),
+            Some(_) => {}
+            None => bail!("no answer within 10 s"),
+        }
+    }
 }

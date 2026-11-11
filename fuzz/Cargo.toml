@@ -23,6 +23,9 @@ libfuzzer-sys = "0.4"
 [dependencies.spyc]
 path = ".."
 
+[dependencies.spyc-jar]
+path = "../crates/spyc-jar"
+
 [[bin]]
 name = "dsl_parse"
 path = "fuzz_targets/dsl_parse.rs"
@@ -92,6 +95,20 @@ bench = false
 [[bin]]
 name = "taskfile_make"
 path = "fuzz_targets/taskfile_make.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jar_handover"
+path = "fuzz_targets/jar_handover.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "jar_frame"
+path = "fuzz_targets/jar_frame.rs"
 test = false
 doc = false
 bench = false

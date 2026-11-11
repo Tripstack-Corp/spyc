@@ -51,6 +51,15 @@ impl Client {
         proto::write_msg(&mut *w, msg)
     }
 
+    /// Bytes written as they are: a frame this version can't build, as a
+    /// newer client would send it.
+    pub fn send_raw(&self, bytes: &[u8]) -> io::Result<()> {
+        use std::io::Write as _;
+        let mut w = self.write.lock().unwrap_or_else(PoisonError::into_inner);
+        w.write_all(bytes)?;
+        w.flush()
+    }
+
     /// The next frame, or `None` when `wait` passes first.
     pub fn recv(&mut self, wait: Duration) -> anyhow::Result<Option<Msg>> {
         if self.timeout != Some(wait) {

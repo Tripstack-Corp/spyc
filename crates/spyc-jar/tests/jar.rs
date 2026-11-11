@@ -405,3 +405,179 @@ fn the_foreground_process_group_is_reported_as_it_changes() {
     });
     assert!(!job.frames.is_empty());
 }
+
+// Stage 3 (R33): the jar replaces its own binary under a running program.
+
+/// A program that counts forever and echoes back each line it's sent, so a
+/// lost or repeated byte shows as a broken count and input as `got=`.
+fn counter() -> Vec<&'static str> {
+    vec![
+        "/bin/sh",
+        "-c",
+        "(i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.005; done) & while read l; do echo got=$l; done",
+    ]
+}
+
+/// The counts seen, which must run 1, 2, 3… with nothing missing or doubled.
+fn counts(seen: &Seen) -> Vec<u64> {
+    String::from_utf8_lossy(&seen.text)
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("n=")?.parse().ok())
+        .collect()
+}
+
+fn assert_unbroken(seen: &Seen) {
+    let c = counts(seen);
+    assert!(!c.is_empty());
+    for w in c.windows(2) {
+        assert_eq!(w[1], w[0] + 1, "the count runs on unbroken");
+    }
+}
+
+/// A copy of the jar's binary under another name, so the upgrade can be seen
+/// to have run it.
+fn next_binary(dir: &std::path::Path) -> PathBuf {
+    let next = dir.join("jar-next");
+    std::fs::copy(env!("CARGO_BIN_EXE_spyc-jar"), &next).expect("copy the jar binary");
+    next
+}
+
+#[test]
+fn an_upgrade_keeps_the_program_its_pty_and_every_connection() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    let mut reader = jar.connect(Role::Reader);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    reader.send(&Msg::Replay { from: 0 }).expect("replay");
+    let next = next_binary(jar._dir.path());
+    let mut seen = read_until(&mut owner, true, |s| counts(s).last().is_some_and(|n| *n >= 30));
+    let before = jar.process.id();
+
+    owner
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .expect("upgrade");
+    let until = Instant::now() + WAIT;
+    while !seen.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. })) {
+        assert!(Instant::now() < until, "no Upgraded; frames {:?}", seen.frames);
+        if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+            seen.take(m);
+            if let Some(next) = seen.next_offset {
+                owner.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+    }
+    let build = seen.frames.iter().find_map(|f| match f {
+        Msg::Upgraded { build } => Some(build.clone()),
+        _ => None,
+    });
+    assert!(build.is_some_and(|b| b.ends_with("jar-next")), "the new binary runs");
+    assert!(jar.process.try_wait().expect("try_wait").is_none(), "the jar's process lives on");
+    assert_eq!(jar.process.id(), before);
+
+    // The same program, counting on from where it was, still reading input.
+    owner.send(&Msg::Input { bytes: b"after\n".to_vec() }).expect("input");
+    let at = counts(&seen).last().copied().unwrap_or(0);
+    loop {
+        assert!(
+            Instant::now() < until + WAIT,
+            "the program went quiet: last count {:?}, got: {}, tail {:?}, frames {:?}",
+            counts(&seen).last(),
+            seen.contains("got=after"),
+            String::from_utf8_lossy(&seen.text[seen.text.len().saturating_sub(120)..]),
+            seen.frames
+        );
+        if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+            seen.take(m);
+            if let Some(next) = seen.next_offset {
+                owner.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+        if seen.contains("got=after") && counts(&seen).last().is_some_and(|n| *n >= at + 30) {
+            break;
+        }
+    }
+    assert_unbroken(&seen);
+
+    // The reader's connection crossed too, and the listener takes new ones.
+    let r = read_until(&mut reader, false, |s| s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. })));
+    assert!(r.first_offset == Some(0));
+    let (_late, welcome) = jar.welcome(Role::Reader);
+    assert!(matches!(welcome, Msg::Welcome { .. }));
+
+    // A resize after the upgrade reaches the PTY.
+    owner
+        .send(&Msg::Resize { rows: 33, cols: 99, px_w: 0, px_h: 0 })
+        .expect("resize");
+    let s = read_until(&mut owner, true, |s| {
+        s.frames.iter().any(|f| matches!(f, Msg::Resized { rows: 33, cols: 99, .. }))
+    });
+    assert!(!s.frames.is_empty());
+}
+
+#[test]
+fn an_upgrade_the_new_binary_refuses_leaves_the_old_jar_running() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut seen = read_until(&mut owner, true, |s| counts(s).last().is_some_and(|n| *n >= 10));
+    for binary in ["/usr/bin/false", "/nonexistent/spyc-jar"] {
+        owner
+            .send(&Msg::Upgrade {
+                binary: binary.into(),
+            })
+            .expect("upgrade");
+        let until = Instant::now() + WAIT;
+        loop {
+            assert!(Instant::now() < until, "no refusal for {binary}");
+            if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+                if let Msg::Refused { why } = &m {
+                    assert!(why.contains("upgrade refused"), "{why}");
+                    break;
+                }
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    owner.send(&Msg::Ack { offset: next }).expect("ack");
+                }
+            }
+        }
+    }
+    let at = counts(&seen).last().copied().unwrap_or(0);
+    let mut more = read_until(&mut owner, true, |s| counts(s).last().is_some_and(|n| *n >= at + 20));
+    assert!(!seen.frames.iter().chain(&more.frames).any(|f| matches!(f, Msg::Upgraded { .. })));
+    more.text.splice(0..0, seen.text.clone());
+    assert_unbroken(&more);
+}
+
+#[test]
+fn a_jar_upgrades_again_after_an_upgrade() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let next = next_binary(jar._dir.path());
+    let mut seen = read_until(&mut owner, true, |s| counts(s).last().is_some_and(|n| *n >= 5));
+    for _ in 0..3 {
+        let upgrades = |s: &Seen| s.frames.iter().filter(|f| matches!(f, Msg::Upgraded { .. })).count();
+        let had = upgrades(&seen);
+        owner
+            .send(&Msg::Upgrade {
+                binary: next.display().to_string(),
+            })
+            .expect("upgrade");
+        let until = Instant::now() + WAIT;
+        while upgrades(&seen) == had {
+            assert!(Instant::now() < until, "no Upgraded; frames {:?}", seen.frames);
+            if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    owner.send(&Msg::Ack { offset: next }).expect("ack");
+                }
+            }
+        }
+    }
+    let at = counts(&seen).last().copied().unwrap_or(0);
+    let more = read_until(&mut owner, true, |s| counts(s).last().is_some_and(|n| *n >= at + 10));
+    seen.text.extend(more.text);
+    assert_unbroken(&seen);
+}
