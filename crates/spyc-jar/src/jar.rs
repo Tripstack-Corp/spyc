@@ -168,6 +168,11 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
     if let Some(cwd) = &cfg.cwd {
         cmd.cwd(cwd);
     }
+    // An outer jar's program may start with no terminal attached, so nothing
+    // answers its terminal queries.
+    if cfg.attach_signal {
+        cmd.env("SPYC_JAR_OUTER", "1");
+    }
     let reader = pair.master.try_clone_reader().context("PTY reader")?;
     let input = pair.master.take_writer().context("PTY writer")?;
     let mut child = pair.slave.spawn_command(cmd).context("spawn the program")?;

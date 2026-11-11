@@ -5,6 +5,8 @@ J = f"{T}/debug/spyc-jar"
 SPYC = f"{T}/debug/spyc"
 env = env_for(f"{D}/home9")
 env.update(SPYC_JARS="1", SPYC_JAR_BIN=J)
+if os.environ.get("SHAPE2_DEBUG"):
+    env.update(SPYC_KEY_TRACE="1", SPYC_JAR_TRACE=f"{D}/jartrace.log")
 S = os.path.join(os.environ.get("TMPDIR", "/tmp"), "spyc", "outer.sock")
 if os.path.exists(S):
     os.remove(S)
@@ -23,8 +25,15 @@ def last_number(t):
 
 a = attach(40, 120)
 print("A attached:", "menu" in a.text(), "| modes set on A:", a.set_modes())
-a.send(b"\x01j"); a.pump(0.8); a.send(b"echo shape2-$((6*7))\r"); a.pump(2)
+def dbg(t, what):
+    if os.environ.get("SHAPE2_DEBUG"):
+        print(f"--- {what}"); print("\n".join(l for l in t.text().splitlines() if l.strip()))
+dbg(a, "A before ^a j")
+a.send(b"\x01j"); a.pump(0.8)
+dbg(a, "A after ^a j")
+a.send(b"echo shape2-$((6*7))\r"); a.pump(2)
 print("A: typed through two relays:", "shape2-42" in a.text())
+dbg(a, "A after typing")
 a.send(b"\x1c"); a.pump(1.5)
 print("A detached; modes left on A's terminal:", a.set_modes(), "| client exited:", a.reap() is not None)
 

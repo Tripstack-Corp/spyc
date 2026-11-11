@@ -451,7 +451,12 @@ pub fn run() -> Result<()> {
     // font cell size) for inline diagram rendering — ONCE, here, before the
     // input reader spawns, because `from_query_stdio` reads stdin/cursor
     // responses (the #444 no-live-cursor-read rule). Best-effort.
-    app.set_picker(detect_image_picker());
+    // Jar spike, stage 2b: in an outer jar nothing may be attached to answer
+    // the probe, and its reader thread outlives the timeout, blocked on stdin,
+    // stealing the first keys a later terminal sends.
+    if std::env::var_os("SPYC_JAR_OUTER").is_none() {
+        app.set_picker(detect_image_picker());
+    }
     app.set_shift_esc(crate::terminal::keyboard_enhancement_supported());
     let result = app.run(&mut terminal);
     mcp::cleanup_socket();
