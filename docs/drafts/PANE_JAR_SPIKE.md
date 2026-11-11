@@ -505,6 +505,54 @@ on every detach and attach needs:
 Shape 2 keeps all of that, costs nothing measurable per keystroke, and its
 handover happens once, at the first detach, where shape 1 pays it every time.
 
+### Decision I: what a portable snapshot costs and loses
+
+The question was whether every pane can afford the portable form beside the
+binary one, so a crash followed by a build change loses nothing. It can.
+Measured on `spike/jar-stage-2` (`695c9b25`, `381b8276`): a release build,
+120×40 panes, spyc's 10,000-row scrollback full.
+
+| Output | Binary size | Binary encode | Portable size | Portable, made off the lock | Portable restore |
+|---|---|---|---|---|---|
+| Plain text | 0.70 MB | 0.9 ms | 0.69 MB | 6 ms | 0.9 ms |
+| A coloured shell | 2.81 MB | 3.2 ms | 1.67 MB | 36 ms | 8 ms |
+| An inline agent (truecolour, emoji, CJK) | 4.20 MB | 5.4 ms | 2.22 MB | 36 ms | 13 ms |
+| Every cell its own colours | 3.90 MB | 7.6 ms | 6.06 MB | 40 ms | 32 ms |
+
+- **Smaller for real output.** The portable form is larger only when every
+  cell has its own colours.
+- **Off the lock.** The pane's parser lock, which the draw pass also takes,
+  covers only the binary encode. The portable form is made from the binary
+  snapshot in a scratch engine on the pane's own thread, byte for byte the
+  same as encoding it under the lock.
+- **Thirty full agent panes at once** (a broadcast going quiet everywhere):
+  every snapshot was done within about 125 ms, but contention stretched the
+  binary encode under each lock to 46–62 ms. That's enough to drop a frame,
+  with or without the portable form, so panes take turns (R17d).
+
+**Fidelity.** `jar_fidelity` sets up 26 pieces of terminal state and compares
+what spyc and the program can observe after a restore and after the same
+continuation, with the binary form as the control, which came back exact in
+every case. The formatter's emit on its own lost 9:
+
+| Lost by the raw emit | Carried by spyc's conversion |
+|---|---|
+| The primary screen and its history under a full-screen program: the formatter writes only the screen showing | The primary screen first, then the alternate screen, whose emit opens by switching to it |
+| Soft wraps: each row came back as its own line | An unwrapped emit, so the restoring engine wraps the lines again |
+| The saved cursor (DECSC), in either screen | Asked of a scratch engine with DECRC and DECRQSS, saved again ahead of the screen's emit |
+| A cursor shape such as vim's bar | Asked with DECRQSS, written when it isn't the default |
+| The title | Read from the engine and set again |
+
+With those, 24 of 26 come back exact on macOS and Linux. The two that don't are
+pinned in the test: kitty keyboard flags below the top of their stack, and
+DECSCA protection. spyc reads neither: it never encodes keys with the kitty
+flags, and almost nothing uses DECSCA. A program-set palette survives in the
+way that matters, because spyc draws palette indices with its own colours.
+
+**The crash followed by a build change** (`snap.py refused`: spyc killed, then
+a restore that refuses the binary snapshot): the restored history now starts
+at line 1, where stage 2 left it empty.
+
 ## Sources
 
 - [zmx: session persistence for terminal processes](https://erock.prose.sh/zmx-session-persistence)
