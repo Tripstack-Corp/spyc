@@ -47,7 +47,10 @@ use spyc_vt_sys::{ffi, scrollback};
 
 use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};
 
+mod jar_snapshot;
 mod replies;
+
+pub use jar_snapshot::snapshot_decodes;
 
 /// DEC mode 2027 — grapheme clustering. See `GhosttyEngine::new` for why spyc
 /// turns it on, and ARCHITECTURE.md → "Grapheme clustering (DEC mode 2027)".

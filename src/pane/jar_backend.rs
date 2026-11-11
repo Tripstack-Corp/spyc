@@ -32,6 +32,31 @@ pub struct Jarred {
     pub replies: Box<dyn Write + Send>,
     /// A running program taken over, not a new one started.
     pub adopted: bool,
+    /// On adoption, the snapshot the replay starts after: rows, cols, blob.
+    pub snapshot: Option<(u16, u16, Vec<u8>)>,
+    /// Where the pane stores new snapshots.
+    pub snapshots: SnapshotSink,
+}
+
+/// Stores the pane's engine state in its jar, at the jar offset it reflects.
+#[derive(Clone)]
+pub struct SnapshotSink {
+    tx: Sender,
+    /// The jar offset of the first byte this pane parsed.
+    start: u64,
+}
+
+impl SnapshotSink {
+    /// `parsed` is how many bytes the pane has parsed since `start`.
+    pub fn store(&self, parsed: u64, rows: u16, cols: u16, blob: Vec<u8>) {
+        let _ = self.tx.send(&Msg::StoreSnapshot(spyc_jar::proto::Snapshot {
+            format: spyc_jar::proto::SNAPSHOT_BINARY,
+            offset: self.start + parsed,
+            rows,
+            cols,
+            blob,
+        }));
+    }
 }
 
 /// Take over the pane's jar when one still answers on its socket (a restored
@@ -80,6 +105,12 @@ pub fn spawn(
         .arg(rows.to_string())
         .arg("--cols")
         .arg(cols.to_string())
+        .args(
+            std::env::var("SPYC_JAR_RING")
+                .ok()
+                .map(|n| vec!["--ring".to_string(), n])
+                .unwrap_or_default(),
+        )
         .arg("--")
         .args(argv)
         .stdin(Stdio::null())
@@ -112,8 +143,26 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     else {
         anyhow::bail!("expected a welcome");
     };
+    let mut client = client;
+    client.send(&Msg::FetchSnapshot)?;
+    let fetched = loop {
+        match client.recv(Duration::from_secs(5))? {
+            Some(Msg::Snapshot(s)) => break s,
+            Some(_) => {}
+            None => anyhow::bail!("the jar sent no snapshot"),
+        }
+    };
+    // Replay after the snapshot when this build can decode it; otherwise from
+    // the oldest byte the jar holds.
+    let snapshot = fetched.filter(|s| {
+        s.format == spyc_jar::proto::SNAPSHOT_BINARY
+            && s.offset >= base
+            && s.offset <= head
+            && crate::pane::engine_ghostty::snapshot_decodes(&s.blob)
+    });
+    let replay_from = snapshot.as_ref().map_or(base, |s| s.offset);
     let (mut rx, tx) = client.split();
-    tx.send(&Msg::Replay { from: base })?;
+    tx.send(&Msg::Replay { from: replay_from })?;
     // Fit the jar to this pane. When the log has lost its oldest bytes the
     // replay can't rebuild the screen, so make the program repaint: a resize
     // to the size it already has repaints nothing (stage 0b), so change it
@@ -124,7 +173,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
         px_w: 0,
         px_h: 0,
     };
-    if base > 0 && rows > 1 {
+    if base > 0 && snapshot.is_none() && rows > 1 {
         tx.send(&resize(rows - 1))?;
         tx.send(&resize(rows))?;
     } else if (had_rows, had_cols) != (rows, cols) {
@@ -213,6 +262,11 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
             gate,
         }),
         adopted: false,
+        snapshot: snapshot.map(|s| (s.rows, s.cols, s.blob)),
+        snapshots: SnapshotSink {
+            tx: tx.clone(),
+            start: replay_from,
+        },
         child: Box::new(JarChild {
             pid: child_pid,
             exit,

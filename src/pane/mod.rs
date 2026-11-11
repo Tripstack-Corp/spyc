@@ -178,7 +178,15 @@ impl Pane {
             exec_replace: true,
             capture_launch_env: !extra_env.is_empty(),
         })?;
-        let parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
+        let mut host = host;
+        let mut parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
+        // Jar spike: an adopted pane starts from its jar's snapshot, and the
+        // replay brings it up to date.
+        if let Some((r, c, blob)) = host.take_adopted_snapshot()
+            && !parser.restore_snapshot(&blob, r, c)
+        {
+            crate::spyc_debug!("jar snapshot did not restore; the pane starts blank");
+        }
         Ok(Self::adopt(host, parser, wake))
     }
 
@@ -207,6 +215,9 @@ impl Pane {
             debug_dump: host.debug_dump,
             sync_timeout: SYNC_TIMEOUT,
             replies: Some(host.reply_writer()),
+            snapshots: host
+                .snapshot_sink()
+                .filter(|_| std::env::var_os("SPYC_JAR_NO_SNAPSHOT").is_none()),
         };
         let parser_clone = Arc::clone(&parser);
         let gen_clone = Arc::clone(&parser_gen);
@@ -704,6 +715,8 @@ struct WorkerOpts {
     debug_dump: bool,
     sync_timeout: std::time::Duration,
     replies: Option<pty_host::ReplyWriter>,
+    /// Jar spike: where to store snapshots of the engine when output is quiet.
+    snapshots: Option<jar_backend::SnapshotSink>,
 }
 
 fn parser_worker(
@@ -754,7 +767,27 @@ fn parser_worker(
     // published until it closes: the screen would only present the frame
     // before it anyway.
     let mut sync_opened: Option<std::time::Instant> = None;
+    // Jar spike: bytes parsed, and when the last arrived, for snapshots taken
+    // once output has been quiet for a second.
+    let mut parsed: u64 = 0;
+    let mut snapshotted: u64 = 0;
+    let mut last_bytes = std::time::Instant::now();
     loop {
+        if let Some(sink) = &opts.snapshots
+            && parsed != snapshotted
+            && sync_opened.is_none()
+            && last_bytes.elapsed() >= std::time::Duration::from_secs(1)
+        {
+            let p = parser
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let (rows, cols) = p.size();
+            if let Some(blob) = p.encode_snapshot() {
+                drop(p);
+                sink.store(parsed, rows, cols, blob);
+            }
+            snapshotted = parsed;
+        }
         if stop.load(Ordering::Acquire) {
             return;
         }
@@ -765,6 +798,8 @@ fn parser_worker(
             .recv_timeout(std::time::Duration::from_millis(50))
         {
             Ok(PtyEvent::Bytes(bytes)) => {
+                parsed += bytes.len() as u64;
+                last_bytes = std::time::Instant::now();
                 if opts.debug_dump {
                     append_pty_debug(&bytes);
                 }

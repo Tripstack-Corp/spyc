@@ -123,6 +123,10 @@ pub struct PtyHost {
     launch_env: Option<super::launch_env::RecordFile>,
     /// Jar spike: the program was already running in a jar and was adopted.
     adopted: bool,
+    /// Jar spike: the snapshot an adopted pane's engine starts from.
+    adopted_snapshot: Option<(u16, u16, Vec<u8>)>,
+    /// Jar spike: where a jarred pane stores its snapshots.
+    snapshots: Option<super::jar_backend::SnapshotSink>,
     pub master: Box<dyn MasterPty + Send>,
     input: InputWriter,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -223,11 +227,15 @@ impl PtyHost {
         );
 
         let mut adopted = false;
+        let mut adopted_snapshot = None;
+        let mut snapshots = None;
         let (master, reader, input, child) = if super::jar_backend::enabled() {
             let mut argv = vec![shell];
             argv.extend(shell_args);
             let jarred = super::jar_backend::spawn(&argv, spec.cwd, spec.rows, spec.cols, &env)?;
             adopted = jarred.adopted;
+            adopted_snapshot = jarred.snapshot;
+            snapshots = Some(jarred.snapshots);
             let reader = jarred.master.try_clone_reader()?;
             let input =
                 InputWriter::with_replies(jarred.master.take_writer()?, Some(jarred.replies))?;
@@ -284,6 +292,8 @@ impl PtyHost {
         Ok(Self {
             launch_env,
             adopted,
+            adopted_snapshot,
+            snapshots,
             wake,
             master,
             input,
@@ -507,6 +517,16 @@ impl PtyHost {
     /// the *agent's* job when the pane is an interactive `zsh -i -c <agent>`
     /// wrapper, which is a DIFFERENT group than [`Self::process_id`] (the
     /// wrapper shell). Used to suspend/resume the actual agent, not the shell.
+    /// Jar spike: the snapshot an adopted pane's engine should start from.
+    pub const fn take_adopted_snapshot(&mut self) -> Option<(u16, u16, Vec<u8>)> {
+        self.adopted_snapshot.take()
+    }
+
+    /// Jar spike: where this pane's snapshots go, when it runs in a jar.
+    pub fn snapshot_sink(&self) -> Option<super::jar_backend::SnapshotSink> {
+        self.snapshots.clone()
+    }
+
     /// Jar spike: whether the program was adopted from a jar, not started.
     pub const fn adopted(&self) -> bool {
         self.adopted

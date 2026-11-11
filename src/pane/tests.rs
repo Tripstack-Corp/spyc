@@ -101,6 +101,7 @@ fn quiet(sync_timeout: std::time::Duration) -> super::WorkerOpts {
         debug_dump: false,
         sync_timeout,
         replies: None,
+        snapshots: None,
     }
 }
 
