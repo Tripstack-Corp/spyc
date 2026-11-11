@@ -229,7 +229,7 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
 /// Copy the program's output into the log, pausing while a live owner is a
 /// window behind.
 fn pump_pty(shared: &Shared, mut reader: Box<dyn Read + Send>) {
-    let mut buf = vec![0u8; 8192];
+    let mut buf = vec![0u8; 65536];
     loop {
         let n = match reader.read(&mut buf) {
             Ok(0) | Err(_) => break,
@@ -528,14 +528,17 @@ fn stream_log(
                 *c = Some(next);
             }
         }
-        let mut s = out.lock().unwrap_or_else(PoisonError::into_inner);
+        // One write for the whole batch.
+        let mut bytes = Vec::new();
         for f in &frames {
             if let Msg::Exited { .. } = f {
                 exit_sent = true;
             }
-            if proto::write_msg(&mut *s, f).is_err() {
-                return;
-            }
+            bytes.extend(proto::encode(f));
+        }
+        let mut s = out.lock().unwrap_or_else(PoisonError::into_inner);
+        if s.write_all(&bytes).and_then(|()| s.flush()).is_err() {
+            return;
         }
     }
 }
@@ -556,10 +559,19 @@ fn collect(st: &State, seq: u64, from: u64, exit: Option<(i32, bool)>) -> (Vec<M
                     continue;
                 }
                 let skip = usize::try_from(at.saturating_sub(*o)).unwrap_or(0);
-                frames.push(Msg::Output {
-                    offset: at.max(*o),
-                    bytes: b[skip..].to_vec(),
-                });
+                // Adjacent output goes out as one frame: a PTY hands over
+                // small chunks, and a frame each costs the reader syscalls.
+                if let Some(Msg::Output { offset, bytes }) = frames.last_mut()
+                    && *offset + bytes.len() as u64 == at.max(*o)
+                    && bytes.len() < 1 << 20
+                {
+                    bytes.extend_from_slice(&b[skip..]);
+                } else {
+                    frames.push(Msg::Output {
+                        offset: at.max(*o),
+                        bytes: b[skip..].to_vec(),
+                    });
+                }
                 at = end;
             }
             Event::Resized(o, rows, cols) => {

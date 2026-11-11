@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use crate::proto::{self, Msg, Role};
 
 pub struct Client {
-    read: UnixStream,
+    read: std::io::BufReader<UnixStream>,
+    timeout: Option<Duration>,
     write: Arc<Mutex<UnixStream>>,
 }
 
@@ -30,7 +31,8 @@ impl Client {
             }
         };
         let mut client = Self {
-            read: stream.try_clone()?,
+            read: std::io::BufReader::with_capacity(1 << 16, stream.try_clone()?),
+            timeout: None,
             write: Arc::new(Mutex::new(stream)),
         };
         client.send(&Msg::Hello {
@@ -51,7 +53,10 @@ impl Client {
 
     /// The next frame, or `None` when `wait` passes first.
     pub fn recv(&mut self, wait: Duration) -> anyhow::Result<Option<Msg>> {
-        self.read.set_read_timeout(Some(wait))?;
+        if self.timeout != Some(wait) {
+            self.read.get_ref().set_read_timeout(Some(wait))?;
+            self.timeout = Some(wait);
+        }
         loop {
             match proto::read_msg(&mut self.read) {
                 Ok(Some(m)) => return Ok(Some(m)),
@@ -71,7 +76,7 @@ impl Client {
 
     /// Close both directions, as a crash would.
     pub fn drop_connection(self) {
-        let _ = self.read.shutdown(std::net::Shutdown::Both);
+        let _ = self.read.get_ref().shutdown(std::net::Shutdown::Both);
     }
 
     /// Split into the receiving half, for one reading thread, and a sending
