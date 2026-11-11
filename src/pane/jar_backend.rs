@@ -183,11 +183,14 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
         .iter()
         .find(|s| s.format == spyc_jar::proto::SNAPSHOT_VT && usable(s));
     let mut snapshot = binary.or(portable).cloned();
-    // Stage 4, Q7: across a gap no snapshot is usable, since the bytes after
-    // it are gone. `SPYC_JAR_GAP=stale` starts from the newest one anyway and
-    // applies what's left after the gap, keeping the history before it.
+    // Stage 4, Q7: across a gap no snapshot is current, since the bytes after
+    // it are gone. Start from the newest one anyway and apply what's left
+    // after the gap: the program's repaint redraws the screen but doesn't set
+    // its modes again, so the snapshot is where alternate screen, mouse
+    // reporting and bracketed paste come back from, and the history before
+    // the gap too. `SPYC_JAR_GAP=blank` starts from an empty engine instead.
     let gap = snapshot.is_none() && base > 0;
-    if gap && std::env::var("SPYC_JAR_GAP").is_ok_and(|v| v == "stale") {
+    if gap && !std::env::var("SPYC_JAR_GAP").is_ok_and(|v| v == "blank") {
         let decodes = |s: &&spyc_jar::proto::Snapshot| {
             s.format != spyc_jar::proto::SNAPSHOT_BINARY
                 || (!refuse_binary && crate::pane::engine_ghostty::snapshot_decodes(&s.blob))
