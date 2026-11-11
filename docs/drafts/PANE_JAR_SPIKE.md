@@ -313,6 +313,94 @@ neither could reach the user's running spyc.
 - MCP after a spyc restart, already known from the code: the proxy keeps the old
   PID's socket.
 
+### Stage 2: a minimal jar
+
+**Recommendation: go.** A jar per pane works inside spyc, at a cost no user
+would notice, and survives a crash of spyc with the pane intact.
+
+**Built,** on the throwaway branch `spike/jar-stage-2` (commits `6764e999` to
+`5a65715b`, never merged):
+
+- **A `crates/spyc-jar` crate.** The protocol has length-prefixed frames, a
+  critical flag and its own signal numbers (macOS and Linux number signals
+  differently). The jar has an event log of output and resizes at byte
+  offsets, owner acknowledgements that pace the program, replay with gap
+  markers, a snapshot slot, a liveness deadline and exit collection. 14 tests
+  drive the real binary with no spyc involved.
+- **`src/pane/jar_backend.rs`, behind `SPYC_JARS=1`.** It implements
+  `portable-pty`'s `MasterPty` and `Child` traits over the jar's socket, so
+  `PtyHost` runs a jarred program without other changes.
+- **Adoption with no manifest change.** A jar's socket is named after its
+  pane's `SPYC_PANE_ID`, which the session manifest already saves and a
+  restored tab takes back. A restored tab whose jar still answers is adopted
+  instead of spawned.
+- **R15's `Reply` frame.** The input queue tags replies, and a jarred pane
+  sends them on a writer of their own. They are dropped while an adopted
+  jar's tail is replayed, and for 500 ms after.
+- **R4, the foreground process group.** The jar reads `tcgetpgrp` about every
+  200 ms and sends a `Foreground` frame when it changes; spyc caches it, so
+  `foreground_pgrp` never waits on the socket.
+- **Every jarred tab has a pane id,** so a tab running anything is adopted on
+  restore, and an adopted agent skips restore's queued `/resume` text, which
+  would otherwise queue a prompt in it.
+- **A Linux run,** `spikes/jar-stage-2/run-linux.sh`: the jar tests and the
+  terminal harness in an Alpine Rust container under podman, using the musl
+  target the vendored libghostty archives cover.
+
+**Measured on macOS** (arm64): the jar figures with release builds and
+`examples/measure.rs`, three runs each; the spyc figures with debug spyc in the
+stage 0b harness (`spikes/jar-stage-2/` on the branch). **Linux** (arm64, in
+podman's VM on the same Mac) passes the same tests and the same crash,
+fidelity and R15a checks; its figures follow the table.
+
+| | Result | Settles |
+|---|---|---|
+| Keystroke echo, 1000 round trips | Direct PTY 13–15 µs p50, 23–40 µs p99. Through a jar 40–49 µs p50, 90–137 µs p99. | Q1: relaying every byte costs under 0.15 ms against a 16 ms frame. Passing the fd stays "never" (R8a). |
+| Throughput, 100 MB | Direct PTY 109–112 MB/s; through a jar 71–76 MB/s. spyc's engine parses about 490 MiB/s, so on a firehose the jar is the bottleneck: a `cat` of 100 MB takes about 1.35 s instead of 0.9 s. Batching writes, larger PTY reads, merged frames and buffered client reads each changed nothing; handoffs between the jar's threads are the likely cost. | An optimization to make before the freeze, not a blocker. |
+| Replay | A full 4 MB log in 21–24 ms. | Q5, for the jar's part of the gap. |
+| Memory | 2.0 MB resident per idle jar; 58 MB for 30. | Q2, with the binary size below. |
+| Binary | Release `spyc-jar` 0.58 MB; release spyc 23.6 MB. | Q2: a separate small binary. |
+| Crash and restore | `kill -9` of spyc, then `spyc -r`. A shell tab came back as the same process (a variable set before the crash still set), with its screen; the same jar, nothing respawned. | The spike's goal. |
+| Fidelity and gap | `less` paged to line 79: pane content back 0.06 s after picking the session, all 27 pane rows identical. Without jars, a fresh prompt. | Q3 and Q5, with the full log; no snapshot yet. |
+| R15a | A probe asked DA1 before the crash and read again after the restore. With the gate it read nothing stale; with the gate held open it read `ESC[?62;22c`, a replayed query's answer arriving as keystrokes. | R15a is a real hazard, and the gate closes it. |
+| R4 | An interactive shell in a jar: the jar reports the shell's process group, then a job's while it runs. The test fails when the jar stops tracking changes. | R4 works without spyc reaching the master. |
+
+On **Linux**: echo through a jar 137 µs p50 and 290 µs p99 (direct 76 and
+212 µs, both slower in the VM); throughput 130 MB/s through a jar against
+166 MB/s direct, about 78%; a 4 MB replay in 9 ms; 0.67 MB resident per idle
+jar, 19 MB for 30.
+
+**Found along the way:**
+
+- **Only shell and agent tabs have a pane id,** so only they are adopted on
+  restore; a tab running `htop` or `tail -f` would be respawned. Every tab needs
+  one.
+- **On Linux spyc's "is that session still running" check counts a zombie as
+  running.** The harness never reaped the spyc it killed, so the restore was
+  treated as a copy and adopted nothing. A real crash's parent shell reaps it
+  at once, but the check should still look past a zombie.
+- **The window bounds the program, not delivery.** What a program printed
+  before its owner connected is sent whatever the window, and the jar may run
+  one PTY read past it; the Linux PTY's larger reads showed both. The test
+  now checks that delivery stops growing with no acknowledgements.
+- **A plain `cargo build` at the workspace root doesn't build `spyc-jar`.**
+  Measuring with a stale jar briefly sent the R15a check the wrong way; use
+  `cargo build --workspace`.
+- **Two bugs the jar's own tests caught:** a gap marker that named the wrong
+  start, and log trimming that could drop a resize at offset 0 before it was
+  sent.
+
+**Not done in stage 2:**
+
+- **A streaming Claude tab.** It needs Claude's real login inside an isolated
+  spyc, which touches the owner's Claude config, so it waits for the owner.
+- **`exec`-in-place,** for comparison: not built.
+- **The snapshot loop.** The screen is rebuilt from the full log, which works
+  only while the log fits its ring.
+- **R32:** stale sockets aren't cleaned up.
+- **A `SIGSTOP`ped spyc** (the jar's deadline is tested; spyc's side isn't),
+  memory and snapshot CPU at 30 panes inside spyc, and macOS identity.
+
 ## Sources
 
 - [zmx: session persistence for terminal processes](https://erock.prose.sh/zmx-session-persistence)
