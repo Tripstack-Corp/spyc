@@ -365,6 +365,11 @@ impl Pane {
         self.host.process_id()
     }
 
+    /// Jar spike: whether the program was adopted from a live jar.
+    pub const fn adopted(&self) -> bool {
+        self.host.adopted()
+    }
+
     /// The pty's foreground process group (`tcgetpgrp`) — the *agent's* job
     /// when the pane wraps it in an interactive shell, distinct from the
     /// wrapper-shell `process_id`. Used by the `^z` suspend to stop the agent.

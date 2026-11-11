@@ -30,6 +30,8 @@ pub struct Jarred {
     pub child: Box<dyn Child + Send + Sync>,
     /// Where the terminal's replies to the program's queries go (R15).
     pub replies: Box<dyn Write + Send>,
+    /// A running program taken over, not a new one started.
+    pub adopted: bool,
 }
 
 /// Take over the pane's jar when one still answers on its socket (a restored
@@ -49,9 +51,21 @@ pub fn spawn(
         .find(|(k, _)| k == "SPYC_PANE_ID")
         .map(|(_, v)| v.as_str());
     let socket = socket_path(pane_id);
+    trace(&format!(
+        "spawn: pane {pane_id:?} socket {} exists {}",
+        socket.display(),
+        socket.exists()
+    ));
     if socket.exists() {
-        match attach(&socket, rows, cols) {
-            Ok(adopted) => return Ok(adopted),
+        let attached = attach(&socket, rows, cols);
+        if let Err(e) = &attached {
+            trace(&format!("spawn: attach failed: {e:#}"));
+        }
+        match attached {
+            Ok(mut adopted) => {
+                adopted.adopted = true;
+                return Ok(adopted);
+            }
             Err(_) => {
                 let _ = std::fs::remove_file(&socket);
             }
@@ -198,6 +212,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
             tx: tx.clone(),
             gate,
         }),
+        adopted: false,
         child: Box::new(JarChild {
             pid: child_pid,
             exit,
@@ -450,5 +465,17 @@ impl ChildKiller for JarKiller {
     }
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         Box::new(Self(self.0.clone()))
+    }
+}
+
+/// Jar spike diagnostics: append `line` to `$SPYC_JAR_TRACE`.
+fn trace(line: &str) {
+    if let Some(path) = std::env::var_os("SPYC_JAR_TRACE")
+        && let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+    {
+        let _ = writeln!(f, "spyc {} {line}", std::process::id());
     }
 }

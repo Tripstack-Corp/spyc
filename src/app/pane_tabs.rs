@@ -480,6 +480,11 @@ impl App {
                     info.codex_session_id =
                         crate::state::codex_transcript::resume_uuid_from_command(cmd);
                 }
+                // Jar spike: an adopted agent is still in its conversation;
+                // typing `/resume` into it would queue a prompt.
+                if p.adopted() {
+                    info.pending_resume_send = None;
+                }
                 let entry = TabEntry::new(p, info);
                 if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
                     tabs.replace_at(tab_idx, entry);

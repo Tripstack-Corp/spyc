@@ -172,11 +172,23 @@ fn a_live_owner_paces_the_program_and_loses_nothing() {
             stalled.take(m);
         }
     }
-    let got = stalled.text.len() as u64;
+    // What the program printed before the owner connected is sent whatever
+    // the window; the window stops the program, so with no acks delivery
+    // stops growing.
+    let mut more = Seen::default();
+    let until = Instant::now() + Duration::from_millis(800);
+    while Instant::now() < until {
+        if let Some(m) = owner.recv(Duration::from_millis(50)).unwrap() {
+            more.take(m);
+        }
+    }
     assert!(
-        got <= window + 8192,
-        "without acks the jar sent {got} bytes, past its window"
+        more.text.is_empty(),
+        "with no acks the program kept printing: {} more bytes",
+        more.text.len()
     );
+    let got = stalled.text.len() as u64;
+    assert!(got < 2_000_000, "the program was paused before it finished");
 
     owner.send(&Msg::Ack { offset: got }).unwrap();
     let mut rest = read_until(&mut owner, true, |s| s.contains("END"));

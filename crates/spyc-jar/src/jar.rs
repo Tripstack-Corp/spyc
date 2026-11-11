@@ -232,7 +232,9 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
 /// Copy the program's output into the log, pausing while a live owner is a
 /// window behind.
 fn pump_pty(shared: &Shared, mut reader: Box<dyn Read + Send>) {
-    let mut buf = vec![0u8; 65536];
+    // The window is checked before each read, so a live owner can be a
+    // window plus one read behind: keep reads small.
+    let mut buf = vec![0u8; 8192];
     loop {
         let n = match reader.read(&mut buf) {
             Ok(0) | Err(_) => break,

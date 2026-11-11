@@ -121,6 +121,8 @@ pub use super::launch_env::LaunchEnvironment;
 /// differs.
 pub struct PtyHost {
     launch_env: Option<super::launch_env::RecordFile>,
+    /// Jar spike: the program was already running in a jar and was adopted.
+    adopted: bool,
     pub master: Box<dyn MasterPty + Send>,
     input: InputWriter,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -220,10 +222,12 @@ impl PtyHost {
                 .map(|(k, v)| ((*k).to_string(), (*v).to_string())),
         );
 
+        let mut adopted = false;
         let (master, reader, input, child) = if super::jar_backend::enabled() {
             let mut argv = vec![shell];
             argv.extend(shell_args);
             let jarred = super::jar_backend::spawn(&argv, spec.cwd, spec.rows, spec.cols, &env)?;
+            adopted = jarred.adopted;
             let reader = jarred.master.try_clone_reader()?;
             let input =
                 InputWriter::with_replies(jarred.master.take_writer()?, Some(jarred.replies))?;
@@ -279,6 +283,7 @@ impl PtyHost {
 
         Ok(Self {
             launch_env,
+            adopted,
             wake,
             master,
             input,
@@ -502,6 +507,11 @@ impl PtyHost {
     /// the *agent's* job when the pane is an interactive `zsh -i -c <agent>`
     /// wrapper, which is a DIFFERENT group than [`Self::process_id`] (the
     /// wrapper shell). Used to suspend/resume the actual agent, not the shell.
+    /// Jar spike: whether the program was adopted from a jar, not started.
+    pub const fn adopted(&self) -> bool {
+        self.adopted
+    }
+
     pub fn foreground_pgrp(&self) -> Option<u32> {
         self.master
             .process_group_leader()
