@@ -181,6 +181,13 @@ Measured, beyond shape 1's items 3 to 6 where they apply:
 attach gap, a client killed mid-turn (an SSH drop), attaching from a different
 terminal emulator, and what Model state survives.
 
+**A plain `spyc` stays plain** (`JAR_PROTOCOL.md` → "Principles"), which is a
+pass bar here: a launch with no pane tabs matches today's startup time,
+process count and open sockets, and quitting leaves nothing behind. Shape 1
+keeps a plain launch plain by construction, since spyc runs straight in the
+terminal until it detaches. Shape 2 passes only if its outer jar starts
+lazily, never on a bare launch, and that weighs on the recommendation.
+
 Stop with a recommendation between the two shapes.
 
 ## Stage 3: the jar upgrades itself
