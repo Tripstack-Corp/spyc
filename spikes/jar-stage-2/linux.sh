@@ -13,7 +13,7 @@ cp /linux/*.py /linux/probe.sh $H/; chmod +x $H/probe.sh
 echo "$CARGO_TARGET_DIR" > $H/target_dir.txt
 seq 1 400 | sed 's/^/line number /' > $H/work/long.txt
 echo hello > $H/work/README.md
-for h in home2 home3 home4 home6; do mkdir -p $H/$h; printf '[pane]\ntabs = ["zsh"]\n' > $H/$h/.spycrc.toml; : > $H/$h/.zshrc; done
+for h in home2 home3 home4 home6 home9; do mkdir -p $H/$h; printf '[pane]\ntabs = ["zsh"]\n' > $H/$h/.spycrc.toml; : > $H/$h/.zshrc; done
 cd $H
 echo "== crash and restore (jar3)"; python3 jar3.py 2>&1 | tail -5
 pkill -f 'spyc-jar --socket' || true; rm -f /tmp/spyc/jars/*.sock
@@ -29,3 +29,5 @@ for mode in snap portable refused nosnap; do
   echo "== snapshots ($mode)"; python3 snap.py $mode 2>&1 | tail -2
   pkill -f 'spyc-jar --socket' || true; rm -f /tmp/spyc/jars/*.sock
 done
+echo "== shape 2: spyc in an outer jar"; python3 shape2.py 2>&1 | tail -8
+pkill -f 'spyc-jar --socket' || true
