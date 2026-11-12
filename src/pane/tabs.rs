@@ -556,6 +556,11 @@ pub fn strip_exit_suffix(label: &str) -> String {
     {
         return base.to_string();
     }
+    for jar in [" [jar lost]", " [detached]"] {
+        if let Some(base) = label.strip_suffix(jar) {
+            return base.to_string();
+        }
+    }
     label.to_string()
 }
 
@@ -791,14 +796,20 @@ impl PaneTabs {
     pub fn mark_exited(&mut self) -> bool {
         let mut changed = false;
         for entry in &mut self.tabs {
-            if entry.pane.is_closed() && !entry.info.label.contains("[exited") {
+            if entry.pane.is_closed() && strip_exit_suffix(&entry.info.label) == entry.info.label {
                 // Retry exit status harvest if drain_output missed it.
                 entry.pane.try_harvest_exit_status();
-                let code = entry
-                    .pane
-                    .exit_status()
-                    .map_or_else(|| "?".to_string(), |s| s.exit_code().to_string());
-                entry.info.label = format!("{} [exited {}]", entry.info.label, code);
+                let status = entry.pane.exit_status();
+                // Jar spike: a pane whose jar is gone, or another spyc's now,
+                // says so rather than giving an exit code.
+                let suffix = match status.as_ref().and_then(|s| s.signal()) {
+                    Some(s @ ("jar lost" | "detached")) => s.to_string(),
+                    _ => format!(
+                        "exited {}",
+                        status.map_or_else(|| "?".to_string(), |s| s.exit_code().to_string())
+                    ),
+                };
+                entry.info.label = format!("{} [{suffix}]", entry.info.label);
                 changed = true;
             }
         }

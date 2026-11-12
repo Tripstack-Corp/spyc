@@ -1,4 +1,4 @@
-//! `spyc-jar --socket PATH [options] -- PROGRAM [ARGS…]`
+//! `spyc-jar --socket PATH [options] -- PROGRAM [ARGS…] < TOKEN`
 //!
 //! Options: `--cwd DIR`, `--rows N`, `--cols N`, `--ring BYTES`,
 //! `--window BYTES`, `--deadline-ms N`, `--linger-ms N`.
@@ -39,8 +39,11 @@ fn main() -> anyhow::Result<()> {
         }
         Some("validate-handover") => return spyc_jar::upgrade::validate_stdin(),
         Some("resume-handover") => return spyc_jar::upgrade::resume(),
+        Some("hold-handover") => return spyc_jar::upgrade::hold_stdin(),
         Some("describe") => {
-            let socket = std::env::args().nth(2).context("usage: spyc-jar describe SOCKET")?;
+            let socket = std::env::args()
+                .nth(2)
+                .context("usage: spyc-jar describe SOCKET")?;
             for (k, v) in spyc_jar::client::describe(std::path::Path::new(&socket))? {
                 println!("{k}: {v}");
             }
@@ -48,18 +51,20 @@ fn main() -> anyhow::Result<()> {
         }
         Some("upgrade") => {
             let mut a = std::env::args().skip(2);
-            let (Some(socket), Some(binary)) = (a.next(), a.next()) else {
-                bail!("usage: spyc-jar upgrade SOCKET BINARY");
+            let (Some(socket), Some(token), Some(binary)) = (a.next(), a.next(), a.next()) else {
+                bail!("usage: spyc-jar upgrade SOCKET TOKEN_FILE BINARY");
             };
-            return upgrade(std::path::Path::new(&socket), binary);
+            let token = spyc_jar::client::read_token_file(std::path::Path::new(&token))?;
+            return upgrade(std::path::Path::new(&socket), &token, binary);
         }
         _ => {}
     }
     if std::env::args().nth(1).as_deref() == Some("attach") {
-        let socket = std::env::args()
-            .nth(2)
-            .context("usage: spyc-jar attach SOCKET")?;
-        return spyc_jar::attach::run(std::path::Path::new(&socket));
+        let (Some(socket), Some(token)) = (std::env::args().nth(2), std::env::args().nth(3)) else {
+            bail!("usage: spyc-jar attach SOCKET TOKEN_FILE");
+        };
+        let token = spyc_jar::client::read_token_file(std::path::Path::new(&token))?;
+        return spyc_jar::attach::run(std::path::Path::new(&socket), &token);
     }
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().with_context(|| format!("{name} needs a value"));
@@ -77,7 +82,9 @@ fn main() -> anyhow::Result<()> {
             // R32a: end the program after this long with no owner; 0 ends it
             // as soon as its owner goes.
             "--linger-ownerless-ms" => {
-                cfg.linger = Some(Duration::from_millis(value("--linger-ownerless-ms")?.parse()?));
+                cfg.linger = Some(Duration::from_millis(
+                    value("--linger-ownerless-ms")?.parse()?,
+                ));
             }
             "--linger-ms" => {
                 cfg.linger_after_exit = Duration::from_millis(value("--linger-ms")?.parse()?);
@@ -98,6 +105,7 @@ fn main() -> anyhow::Result<()> {
     // is the one thing it exists not to do, so it refuses to start rather than
     // run in an indeterminate state. (`setsid` fails for a process group
     // leader, such as a job a shell started with `&`.)
+    let token = read_token()?;
     rustix::process::setsid().context(
         "spyc-jar: can't start its own session (started as a process group leader?); refusing to run",
     )?;
@@ -117,21 +125,42 @@ fn main() -> anyhow::Result<()> {
     let listener = UnixListener::bind(&cfg.socket)
         .with_context(|| format!("bind {}", cfg.socket.display()))?;
     std::fs::set_permissions(&cfg.socket, std::fs::Permissions::from_mode(0o600))?;
-    jar::run(cfg, listener)
+    jar::run(cfg, listener, token)
 }
 
-/// `spyc-jar upgrade SOCKET BINARY`: ask the jar at `SOCKET` to replace its
-/// binary with `BINARY`, and report how long its program went unserved.
-fn upgrade(socket: &std::path::Path, binary: String) -> anyhow::Result<()> {
+/// R26: the token its starter hands the jar on stdin, never in argv or the
+/// environment, which other processes can read. A jar without one refuses to
+/// run: every client but a lookup would be refused.
+fn read_token() -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    std::io::stdin()
+        .take(1024)
+        .read_to_end(&mut buf)
+        .context("spyc-jar: reading its token from stdin")?;
+    let token = buf.trim_ascii().to_vec();
+    if token.len() < 16 {
+        bail!("spyc-jar: no token on stdin (16 bytes or more); refusing to run");
+    }
+    Ok(token)
+}
+
+/// `spyc-jar upgrade SOCKET TOKEN_FILE BINARY`: ask the jar at `SOCKET` to
+/// replace its binary with `BINARY`, and report how long its program went
+/// unserved.
+fn upgrade(socket: &std::path::Path, token: &[u8], binary: String) -> anyhow::Result<()> {
     use spyc_jar::client::Client;
     use spyc_jar::proto::{Msg, Role};
-    let (mut c, _) = Client::connect(socket, Role::Reader, Duration::from_secs(5))?;
+    let (mut c, _) = Client::connect(socket, Role::Reader, Duration::from_secs(5), token)?;
     let t0 = std::time::Instant::now();
     c.send(&Msg::Upgrade { binary })?;
     loop {
         match c.recv(Duration::from_secs(10))? {
             Some(Msg::Upgraded { build }) => {
-                println!("upgraded in {:.1} ms to {build}", t0.elapsed().as_secs_f64() * 1000.0);
+                println!(
+                    "upgraded in {:.1} ms to {build}",
+                    t0.elapsed().as_secs_f64() * 1000.0
+                );
                 return Ok(());
             }
             Some(Msg::Refused { why }) => bail!("{why}"),

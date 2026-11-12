@@ -248,7 +248,8 @@ fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
         return Some(install_skill());
     }
     if cli.jars {
-        return Some(crate::pane::jar_backend::list_jars());
+        crate::pane::jar_backend::list_jars();
+        return Some(Ok(()));
     }
     if let Some(list) = cli.install_agents.as_deref() {
         return Some(wiring::run_cli(true, list));

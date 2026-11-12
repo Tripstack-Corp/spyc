@@ -12,9 +12,16 @@
 //!    becomes the new image's standard input, with the key and nonce in the
 //!    same message, so the new image receives them as owned descriptors with
 //!    nothing `unsafe`.
-//! 4. The jar `exec`s `BINARY resume-handover`: same PID, same session, same
-//!    child. In-flight descriptors keep the PTY and the connections open
-//!    across the moment the old image's own copies close.
+//! 4. `BINARY hold-handover` takes copies of the listener and every
+//!    connection, and holds them until the new image has its own. macOS
+//!    flushes a unix socket whose every reference is in flight, as these are
+//!    from the `exec` until the new image receives them, whenever its
+//!    collector runs (any unix socket closing anywhere sets it off), and both
+//!    ends then read end-of-file. The collector looks only at sockets that
+//!    were once in flight themselves, so the socketpair that carries them
+//!    doesn't count as holding them; the holder's copies do.
+//! 5. The jar `exec`s `BINARY resume-handover`: same PID, same session, same
+//!    child. It takes its descriptors, then ends the holder and reaps it.
 //!
 //! Any failure before the `exec` unparks everything and refuses the upgrade:
 //! the old jar runs on as if nothing happened.
@@ -38,18 +45,29 @@ use crate::proto::{self, Msg};
 
 /// The message that travels with the descriptors.
 pub(crate) const FDS_TAG: &[u8; 8] = b"SPYCJARF";
+/// The tag, the key, the nonce, and the holder's pid.
+const HEAD: usize = 8 + 32 + 12 + 4;
+/// How long a holder waits for the new image before it gives up.
+const HOLD_LIMIT: Duration = Duration::from_secs(30);
 const PARK_DEADLINE: Duration = Duration::from_secs(3);
 const VALIDATE_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Start an upgrade to `binary`, asked for on the connection writing to
 /// `reply`, which hears why if it fails. On success nothing is sent from here:
 /// the new image announces itself with `Upgraded` on every connection.
-pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Mutex<std::os::unix::net::UnixStream>>, binary: String) {
+pub(crate) fn begin(
+    shared: &Arc<Shared>,
+    reply: Arc<Mutex<std::os::unix::net::UnixStream>>,
+    binary: String,
+) {
     if shared.upgrading.swap(true, Ordering::SeqCst) {
         let mut s = reply.lock().unwrap_or_else(PoisonError::into_inner);
-        let _ = proto::write_msg(&mut *s, &Msg::Refused {
-            why: "an upgrade is already under way".into(),
-        });
+        let _ = proto::write_msg(
+            &mut *s,
+            &Msg::Refused {
+                why: "an upgrade is already under way".into(),
+            },
+        );
         return;
     }
     let shared = Arc::clone(shared);
@@ -59,9 +77,12 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Mutex<std::os::unix::net::U
         shared.park_cv.notify_all();
         shared.cv.notify_all();
         let mut s = reply.lock().unwrap_or_else(PoisonError::into_inner);
-        let _ = proto::write_msg(&mut *s, &Msg::Refused {
-            why: format!("upgrade refused: {err:#}"),
-        });
+        let _ = proto::write_msg(
+            &mut *s,
+            &Msg::Refused {
+                why: format!("upgrade refused: {err:#}"),
+            },
+        );
     });
 }
 
@@ -108,25 +129,117 @@ fn try_run(shared: &Shared, binary: &str) -> anyhow::Result<Never> {
     let (key, nonce, sealed) = seal(&blob)?;
     let blob_file = blob_file(shared, &sealed)?;
     let (ours, theirs) = UnixStream::pair().context("socketpair")?;
-    let mut fds: Vec<BorrowedFd<'_>> = vec![blob_file.as_fd(), shared.listener.as_fd(), shared.master.as_fd()];
+    let listener = shared
+        .listener
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let sockets: Vec<BorrowedFd<'_>> = std::iter::once(listener.as_fd())
+        .chain(outs.iter().map(|s| s.as_fd()))
+        .collect();
+    let mut holder = hold(binary, &sockets)?;
+    let mut fds: Vec<BorrowedFd<'_>> =
+        vec![blob_file.as_fd(), listener.as_fd(), shared.master.as_fd()];
     fds.extend(outs.iter().map(|s| s.as_fd()));
-    let mut space = vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(fds.len()))];
+    let mut space =
+        vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(fds.len()))];
     let mut control = SendAncillaryBuffer::new(&mut space);
     if !control.push(SendAncillaryMessage::ScmRights(&fds)) {
         bail!("the descriptors don't fit one message");
     }
-    let iov = [IoSlice::new(FDS_TAG), IoSlice::new(&key), IoSlice::new(&nonce)];
-    rustix::net::sendmsg(&ours, &iov, &mut control, SendFlags::empty())
-        .context("send the descriptors")?;
+    let pid = holder.id().to_be_bytes();
+    let iov = [
+        IoSlice::new(FDS_TAG),
+        IoSlice::new(&key),
+        IoSlice::new(&nonce),
+        IoSlice::new(&pid),
+    ];
+    if let Err(e) = rustix::net::sendmsg(&ours, &iov, &mut control, SendFlags::empty()) {
+        let _ = holder.kill();
+        let _ = holder.wait();
+        bail!("send the descriptors: {e}");
+    }
     drop(ours);
     let err = Command::new(binary)
         .arg("resume-handover")
         .stdin(Stdio::from(OwnedFd::from(theirs)))
         .exec();
+    let _ = holder.kill();
+    let _ = holder.wait();
     drop(outs);
     drop(conns);
     drop(st);
     Err(anyhow!("exec {binary}: {err}"))
+}
+
+/// Start `binary` holding copies of `sockets` (step 4), once it says it has
+/// them.
+fn hold(binary: &str, sockets: &[BorrowedFd<'_>]) -> anyhow::Result<std::process::Child> {
+    let (ours, theirs) = UnixStream::pair().context("socketpair")?;
+    let mut child = Command::new(binary)
+        .arg("hold-handover")
+        .stdin(Stdio::from(OwnedFd::from(theirs)))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("run {binary} hold-handover"))?;
+    let held = (|| -> anyhow::Result<()> {
+        let mut space =
+            vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(sockets.len()))];
+        let mut control = SendAncillaryBuffer::new(&mut space);
+        if !control.push(SendAncillaryMessage::ScmRights(sockets)) {
+            bail!("the sockets don't fit one message");
+        }
+        rustix::net::sendmsg(
+            &ours,
+            &[IoSlice::new(b"h")],
+            &mut control,
+            SendFlags::empty(),
+        )?;
+        ours.set_read_timeout(Some(VALIDATE_DEADLINE))?;
+        let mut ack = [0u8; 1];
+        (&ours)
+            .read_exact(&mut ack)
+            .context("no word from the holder")?;
+        Ok(())
+    })();
+    if let Err(e) = held {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e.context(format!("{binary} didn't hold the sockets")));
+    }
+    Ok(child)
+}
+
+/// `spyc-jar hold-handover`: take the sockets on standard input, say so, and
+/// keep them until the new image ends this process, or [`HOLD_LIMIT`].
+pub fn hold_stdin() -> anyhow::Result<()> {
+    use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags};
+    let sock = UnixStream::from(std::io::stdin().as_fd().try_clone_to_owned()?);
+    let mut space = vec![
+        std::mem::MaybeUninit::uninit();
+        rustix::cmsg_space!(ScmRights(handover::MAX_CONNS + 1))
+    ];
+    let mut control = RecvAncillaryBuffer::new(&mut space);
+    let mut byte = [0u8; 1];
+    rustix::net::recvmsg(
+        &sock,
+        &mut [std::io::IoSliceMut::new(&mut byte)],
+        &mut control,
+        RecvFlags::empty(),
+    )
+    .context("receive the sockets")?;
+    let held: Vec<OwnedFd> = control
+        .drain()
+        .filter_map(|m| match m {
+            RecvAncillaryMessage::ScmRights(r) => Some(r.collect::<Vec<_>>()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    (&sock).write_all(b"k").context("answer")?;
+    std::thread::sleep(HOLD_LIMIT);
+    drop(held);
+    Ok(())
 }
 
 /// The blob sealed under a fresh random key and nonce, used once.
@@ -271,8 +384,11 @@ pub fn validate_stdin() -> anyhow::Result<()> {
 pub fn resume() -> anyhow::Result<()> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags};
     let sock = UnixStream::from(std::io::stdin().as_fd().try_clone_to_owned()?);
-    let mut head = [0u8; 52];
-    let mut space = vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(handover::MAX_CONNS + 3))];
+    let mut head = [0u8; HEAD];
+    let mut space = vec![
+        std::mem::MaybeUninit::uninit();
+        rustix::cmsg_space!(ScmRights(handover::MAX_CONNS + 3))
+    ];
     let mut control = RecvAncillaryBuffer::new(&mut space);
     let got = rustix::net::recvmsg(
         &sock,
@@ -283,13 +399,15 @@ pub fn resume() -> anyhow::Result<()> {
     .context("receive the descriptors")?;
     let mut sock = sock;
     if got.bytes < head.len() {
-        sock.read_exact(&mut head[got.bytes..]).context("the handover's key")?;
+        sock.read_exact(&mut head[got.bytes..])
+            .context("the handover's key")?;
     }
     if &head[..8] != FDS_TAG {
         bail!("no handover on standard input");
     }
     let key: [u8; 32] = head[8..40].try_into().expect("32 bytes");
     let nonce: [u8; 12] = head[40..52].try_into().expect("12 bytes");
+    let holder = u32::from_be_bytes(head[52..56].try_into().expect("4 bytes"));
     let mut fds: Vec<OwnedFd> = Vec::new();
     for m in control.drain() {
         if let RecvAncillaryMessage::ScmRights(r) = m {
@@ -299,6 +417,14 @@ pub fn resume() -> anyhow::Result<()> {
     drop(sock);
     for fd in &fds {
         rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
+    }
+    // Every socket is ours now: the holder can go.
+    if let Some(pid) = i32::try_from(holder)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
+        let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
     }
     let mut fds = fds.into_iter();
     let mut sealed = Vec::new();
@@ -314,7 +440,11 @@ pub fn resume() -> anyhow::Result<()> {
     }
     let streams: Vec<UnixStream> = fds.map(UnixStream::from).collect();
     if streams.len() != h.conns.len() {
-        bail!("{} connections in the blob, {} descriptors", h.conns.len(), streams.len());
+        bail!(
+            "{} connections in the blob, {} descriptors",
+            h.conns.len(),
+            streams.len()
+        );
     }
     let conns = h.conns.into_iter().zip(streams).collect();
     crate::jar::start(h.cfg, h.state, h.child_pid, master, listener, conns)
@@ -328,20 +458,33 @@ mod tests {
     fn a_sealed_blob_hides_its_bytes_and_opens_only_whole_with_its_key() {
         let blob = handover::sample_blob();
         let (key, nonce, sealed) = seal(&blob).expect("seal");
-        for plain in [&handover::MAGIC[..], b"echo hi", b"/tmp/spyc/jars/sample.sock"] {
+        for plain in [
+            &handover::MAGIC[..],
+            b"echo hi",
+            b"/tmp/spyc/jars/sample.sock",
+        ] {
             assert!(
                 !sealed.windows(plain.len()).any(|w| w == plain),
                 "{:?} is readable in what reaches a file",
                 String::from_utf8_lossy(plain)
             );
-            assert!(blob.windows(plain.len()).any(|w| w == plain), "the check would see it");
+            assert!(
+                blob.windows(plain.len()).any(|w| w == plain),
+                "the check would see it"
+            );
         }
         assert_eq!(open_sealed(&sealed, &key, &nonce).expect("open"), blob);
         let mut tampered = sealed.clone();
         tampered[20] ^= 1;
-        assert!(open_sealed(&tampered, &key, &nonce).is_err(), "a changed byte is refused");
+        assert!(
+            open_sealed(&tampered, &key, &nonce).is_err(),
+            "a changed byte is refused"
+        );
         let mut other = key;
         other[0] ^= 1;
-        assert!(open_sealed(&sealed, &other, &nonce).is_err(), "another key is refused");
+        assert!(
+            open_sealed(&sealed, &other, &nonce).is_err(),
+            "another key is refused"
+        );
     }
 }

@@ -786,16 +786,23 @@ fn parser_worker(
     loop {
         if !modes_traced && started.elapsed() >= std::time::Duration::from_secs(5) {
             modes_traced = true;
-            let p = parser.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-            let s = p.screen();
-            crate::pane::jar_backend::trace(&format!(
-                "modes: alt={} mouse={:?} paste={} app_cursor={} hidden_cursor={}",
-                s.alternate_screen(),
-                s.mouse_protocol(),
-                s.bracketed_paste(),
-                s.application_cursor(),
-                s.hide_cursor()
-            ));
+            let line = {
+                let p = parser
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let s = p.screen();
+                let line = format!(
+                    "modes: alt={} mouse={:?} paste={} app_cursor={} hidden_cursor={}",
+                    s.alternate_screen(),
+                    s.mouse_protocol(),
+                    s.bracketed_paste(),
+                    s.application_cursor(),
+                    s.hide_cursor()
+                );
+                drop(p);
+                line
+            };
+            crate::pane::jar_backend::trace(&line);
         }
         // A snapshot after a second of quiet, and every five seconds while
         // output flows, so a gap during a long stream (R12c) restores from a
@@ -1032,7 +1039,9 @@ const SNAPSHOTS_AT_ONCE: usize = 2;
 impl SnapshotTurn {
     fn take() -> Option<Self> {
         SNAPSHOTS_RUNNING
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < SNAPSHOTS_AT_ONCE).then_some(n + 1))
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < SNAPSHOTS_AT_ONCE).then_some(n + 1)
+            })
             .ok()
             .map(|_| Self)
     }

@@ -18,6 +18,9 @@ pub const CRITICAL: u8 = 0x80;
 pub enum Role {
     Owner = 1,
     Reader = 2,
+    /// R30a: asks only `Describe` and `Ping`, and needs no token: what a
+    /// jar says of itself reveals nothing to type into or watch it with.
+    Lookup = 3,
 }
 
 /// The signals a client may ask the jar to deliver to its program's group.
@@ -65,10 +68,11 @@ pub enum Msg {
     Hello {
         version: u16,
         role: Role,
-        /// Stage 6 (R22): the token a released jar is held for, presented by
-        /// its named successor. Empty for none. It follows the fields version
-        /// 1 defines, which a version 1 jar reads and ignores what follows.
-        claim: Vec<u8>,
+        /// R26: the jar's token, which every role but [`Role::Lookup`] must
+        /// present. On the wire it is length-prefixed (`u16`), and whatever
+        /// follows it is left for capabilities (R34), which a jar that knows
+        /// none reads past.
+        token: Vec<u8>,
     },
     Input {
         bytes: Vec<u8>,
@@ -150,8 +154,8 @@ pub enum Msg {
         pgid: u32,
     },
     /// Stage 3 (R33): replace the jar's binary with the one at `binary`, which
-    /// must first accept the jar's handover blob. A spike knob: any connection
-    /// may ask; a real jar would take it only from its owner, with the token.
+    /// must first accept the jar's handover blob. Only a connection that
+    /// presented the token may ask.
     Upgrade {
         binary: String,
     },
@@ -161,11 +165,11 @@ pub enum Msg {
     Upgraded {
         build: String,
     },
-    /// R31: ask the jar to describe itself. Any role may.
+    /// R31: ask the jar to describe itself. Any role may, [`Role::Lookup`]
+    /// included.
     Describe,
-    /// Stage 6 (R22): the owner hands the jar on. The jar ends this
-    /// connection and holds the owner's lease for whoever presents `token`
-    /// in its `hello`, for a minute.
+    /// R22: the owner hands the jar on. The jar ends this connection and
+    /// `token` becomes its token: the old one opens nothing from then on.
     Release {
         token: Vec<u8>,
     },
@@ -248,11 +252,12 @@ fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
         Msg::Hello {
             version,
             role,
-            claim,
+            token,
         } => {
             p.extend(version.to_be_bytes());
             p.push(*role as u8);
-            p.extend(claim);
+            p.extend(u16::try_from(token.len()).unwrap_or(u16::MAX).to_be_bytes());
+            p.extend(token.iter().take(usize::from(u16::MAX)));
             HELLO
         }
         Msg::Release { token } => {
@@ -442,12 +447,20 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
             let role = match c.u8()? {
                 1 => Role::Owner,
                 2 => Role::Reader,
+                3 => Role::Lookup,
                 _ => return Err(ReadError::Malformed("unknown role")),
             };
             Msg::Hello {
                 version,
                 role,
-                claim: c.rest(),
+                token: {
+                    let n = usize::from(c.u16()?);
+                    // What follows the token is for capabilities (R34).
+                    let (t, _) =
+                        c.0.split_at_checked(n)
+                            .ok_or(ReadError::Malformed("hello token"))?;
+                    t.to_vec()
+                },
             }
         }
         RELEASE => Msg::Release { token: c.rest() },
@@ -600,12 +613,17 @@ mod tests {
             Msg::Hello {
                 version: VERSION,
                 role: Role::Owner,
-                claim: Vec::new(),
+                token: Vec::new(),
             },
             Msg::Hello {
                 version: VERSION,
                 role: Role::Reader,
-                claim: b"token".to_vec(),
+                token: b"token".to_vec(),
+            },
+            Msg::Hello {
+                version: VERSION,
+                role: Role::Lookup,
+                token: Vec::new(),
             },
             Msg::Release {
                 token: b"token".to_vec(),

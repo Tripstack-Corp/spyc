@@ -50,6 +50,7 @@ try:
     ours = claude_pids() - before
     [(jar_pid, line)] = [j for j in jars() if j[0] not in old_jars]
     socket = line.split(" --socket ")[1].split()[0]
+    tok = token_file(f"{D}/home5", socket)
     print("claude up:", ours, "| its jar:", jar_pid)
     a.send(b"Print the integers from 1 to 300, one per line, with no other text.")
     a.pump(0.5); a.send(b"\r")
@@ -60,12 +61,12 @@ try:
         if n and max(n) >= 30:
             break
     print("upgrading mid-turn; highest number on screen:", max(numbers(a) or [0]))
-    r = subprocess.run([J, "upgrade", socket, NEXT], capture_output=True, text=True, timeout=30)
+    r = subprocess.run([J, "upgrade", socket, tok, NEXT], capture_output=True, text=True, timeout=30)
     print("upgrade to a binary never run before:", (r.stdout or r.stderr).strip())
     a.pump(1)
-    r = subprocess.run([J, "upgrade", socket, J], capture_output=True, text=True, timeout=30)
+    r = subprocess.run([J, "upgrade", socket, tok, J], capture_output=True, text=True, timeout=30)
     print("upgrade back to a binary already run:", (r.stdout or r.stderr).strip())
-    r = subprocess.run([J, "upgrade", socket, NEXT], capture_output=True, text=True, timeout=30)
+    r = subprocess.run([J, "upgrade", socket, tok, NEXT], capture_output=True, text=True, timeout=30)
     print("and to jar-next again:", (r.stdout or r.stderr).strip())
     after = jars()
     mine = [l for p, l in after if p == jar_pid]

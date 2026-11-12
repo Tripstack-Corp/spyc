@@ -47,9 +47,9 @@ use spyc_vt_sys::{ffi, scrollback};
 
 use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};
 
-mod jar_snapshot;
 #[cfg(test)]
 mod jar_fidelity;
+mod jar_snapshot;
 mod replies;
 
 pub use jar_snapshot::snapshot_decodes;

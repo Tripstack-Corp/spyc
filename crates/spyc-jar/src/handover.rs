@@ -53,7 +53,12 @@ pub fn encode(h: &Handover) -> Vec<u8> {
     encode_parts(&h.cfg, h.child_pid, &h.state, &h.conns)
 }
 
-pub(crate) fn encode_parts(cfg: &Config, child_pid: u32, st: &State, conns: &[ConnState]) -> Vec<u8> {
+pub(crate) fn encode_parts(
+    cfg: &Config,
+    child_pid: u32,
+    st: &State,
+    conns: &[ConnState],
+) -> Vec<u8> {
     let mut w = Vec::new();
     w.extend(MAGIC);
     put_u16(&mut w, VERSION);
@@ -85,7 +90,10 @@ pub(crate) fn encode_parts(cfg: &Config, child_pid: u32, st: &State, conns: &[Co
     put_u64(&mut w, st.log.next_seq);
     put_u64(&mut w, st.log.head);
     put_u64(&mut w, st.log.base);
-    put_u32(&mut w, u32::try_from(st.log.events.len()).unwrap_or(u32::MAX));
+    put_u32(
+        &mut w,
+        u32::try_from(st.log.events.len()).unwrap_or(u32::MAX),
+    );
     for (seq, e) in &st.log.events {
         put_u64(&mut w, *seq);
         match e {
@@ -104,7 +112,10 @@ pub(crate) fn encode_parts(cfg: &Config, child_pid: u32, st: &State, conns: &[Co
     }
     put_opt_u64(&mut w, st.owner);
     put_u64(&mut w, st.acked);
-    put_u32(&mut w, u32::try_from(st.snapshots.len()).unwrap_or(u32::MAX));
+    put_u32(
+        &mut w,
+        u32::try_from(st.snapshots.len()).unwrap_or(u32::MAX),
+    );
     for s in &st.snapshots {
         put_u16(&mut w, s.format);
         put_u64(&mut w, s.offset);
@@ -128,6 +139,7 @@ pub(crate) fn encode_parts(cfg: &Config, child_pid: u32, st: &State, conns: &[Co
     put_opt_u64(&mut w, st.ownerless_since.map(|t| millis(t.elapsed())));
     put_u32(&mut w, st.fg);
     w.push(u8::from(st.had_owner));
+    put_bytes(&mut w, &st.token);
     put_u32(&mut w, u32::try_from(st.info.len()).unwrap_or(u32::MAX));
     for (k, v) in &st.info {
         put_bytes(&mut w, k.as_bytes());
@@ -165,7 +177,9 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     if argc == 0 {
         return Err(Invalid("no program"));
     }
-    let argv = (0..argc).map(|_| r.string()).collect::<Result<Vec<_>, _>>()?;
+    let argv = (0..argc)
+        .map(|_| r.string())
+        .collect::<Result<Vec<_>, _>>()?;
     let cwd = match r.u8()? {
         0 => None,
         1 => Some(PathBuf::from(r.string()?)),
@@ -209,7 +223,9 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
                 if o != at {
                     return Err(Invalid("output offset"));
                 }
-                at = o.checked_add(b.len() as u64).ok_or(Invalid("output offset"))?;
+                at = o
+                    .checked_add(b.len() as u64)
+                    .ok_or(Invalid("output offset"))?;
                 held += b.len();
                 Event::Out(o, b)
             }
@@ -260,6 +276,10 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     let ownerless = r.opt_u64()?;
     let fg = r.u32()?;
     let had_owner = r.flag()?;
+    let token = r.bytes()?;
+    if token.is_empty() {
+        return Err(Invalid("no token"));
+    }
     let n_info = r.count(8)?;
     let info = (0..n_info)
         .map(|_| Ok((r.string()?, r.string()?)))
@@ -278,6 +298,7 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
         let role = match r.u8()? {
             1 => Role::Owner,
             2 => Role::Reader,
+            3 => Role::Lookup,
             _ => return Err(Invalid("connection role")),
         };
         let cursor = match r.u8()? {
@@ -342,11 +363,11 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
         rows: st_rows,
         cols: st_cols,
         next_conn,
-        ownerless_since: ownerless.map(|ms| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now)),
+        ownerless_since: ownerless
+            .map(|ms| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now)),
         fg,
         had_owner,
-        // A release's reservation doesn't cross an upgrade: a spike gap.
-        reserved: None,
+        token,
         info,
     };
     Ok(Handover {
@@ -388,7 +409,10 @@ struct Reader<'a>(&'a [u8]);
 
 impl Reader<'_> {
     fn take<const N: usize>(&mut self) -> Result<[u8; N], Invalid> {
-        let (head, rest) = self.0.split_first_chunk::<N>().ok_or(Invalid("truncated"))?;
+        let (head, rest) = self
+            .0
+            .split_first_chunk::<N>()
+            .ok_or(Invalid("truncated"))?;
         self.0 = rest;
         Ok(*head)
     }
@@ -501,7 +525,7 @@ pub fn sample_blob() -> Vec<u8> {
         ownerless_since: None,
         fg: 4242,
         had_owner: true,
-        reserved: None,
+        token: b"0123456789abcdef".to_vec(),
         info: vec![("owner_mcp".into(), "/tmp/spyc/mcp.sock".into())],
     };
     let conns = vec![
@@ -578,7 +602,10 @@ mod tests {
         let at = 8 + 2 + 4 + "/tmp/spyc/jars/sample.sock".len();
         let mut b = blob;
         b[at..at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
-        assert!(matches!(decode(&b), Err(Invalid("count larger than the blob"))));
+        assert!(matches!(
+            decode(&b),
+            Err(Invalid("count larger than the blob"))
+        ));
     }
 
     #[test]

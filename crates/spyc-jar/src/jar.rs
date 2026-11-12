@@ -156,15 +156,12 @@ pub(crate) struct State {
     pub(crate) fg: u32,
     /// Whether any owner has connected yet.
     pub(crate) had_owner: bool,
-    /// R22: the token a released jar is held for, and until when.
-    pub(crate) reserved: Option<(Vec<u8>, Instant)>,
+    /// R26: what a `hello` must present for any role but `Lookup`. Its
+    /// starter hands it over on stdin; a release (R22) replaces it.
+    pub(crate) token: Vec<u8>,
     /// R18: the owner's key/value store.
     pub(crate) info: Vec<(String, String)>,
 }
-
-/// How long a released jar waits for its named successor before any owner
-/// may take it.
-const SUCCESSOR_WAIT: Duration = Duration::from_secs(60);
 
 /// What a connection is, apart from its socket: enough to resume it.
 pub(crate) struct ConnState {
@@ -202,7 +199,8 @@ pub(crate) struct Shared {
     pub(crate) cv: Condvar,
     pub(crate) master: OwnedFd,
     pub(crate) input: Mutex<File>,
-    pub(crate) listener: UnixListener,
+    /// Replaced when its path goes missing ([`keep_socket`]).
+    pub(crate) listener: Mutex<UnixListener>,
     pub(crate) child_pid: u32,
     pub(crate) cfg: Config,
     pub(crate) conns: Mutex<HashMap<u64, Arc<Conn>>>,
@@ -241,7 +239,10 @@ impl Shared {
 
 /// Whether `fd` has something to read within `wait`.
 fn readable(fd: impl AsFd, wait: Duration) -> bool {
-    let mut fds = [rustix::event::PollFd::new(&fd, rustix::event::PollFlags::IN)];
+    let mut fds = [rustix::event::PollFd::new(
+        &fd,
+        rustix::event::PollFlags::IN,
+    )];
     let ts = rustix::event::Timespec {
         tv_sec: 0,
         tv_nsec: i64::try_from(wait.as_nanos()).unwrap_or(0),
@@ -253,7 +254,7 @@ const TICK: Duration = Duration::from_millis(100);
 
 /// Spawn the program and serve the socket until the jar ends. Never returns
 /// on success: the reaper ends the process.
-pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
+pub fn run(cfg: Config, listener: UnixListener, token: Vec<u8>) -> anyhow::Result<()> {
     let (master, child_pid) = crate::pty::spawn(&cfg)?;
     let state = State {
         log: Log {
@@ -276,7 +277,7 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
         ownerless_since: Some(Instant::now()),
         fg: 0,
         had_owner: false,
-        reserved: None,
+        token,
         info: Vec::new(),
     };
     start(cfg, state, child_pid, master, listener, Vec::new())
@@ -301,7 +302,7 @@ pub(crate) fn start(
         cv: Condvar::new(),
         master,
         input: Mutex::new(input),
-        listener,
+        listener: Mutex::new(listener),
         child_pid,
         cfg,
         conns: Mutex::new(HashMap::new()),
@@ -337,21 +338,67 @@ pub(crate) fn start(
         let shared = Arc::clone(&shared);
         thread::spawn(move || reap(&shared));
     }
-    shared.listener.set_nonblocking(true)?;
+    shared
+        .listener
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .set_nonblocking(true)?;
+    let mut checked = Instant::now();
     loop {
         if shared.upgrading() {
             shared.park(Who::Acceptor);
             continue;
         }
-        if !readable(&shared.listener, TICK) {
+        if checked.elapsed() >= SOCKET_CHECK {
+            checked = Instant::now();
+            keep_socket(&shared);
+        }
+        let listener = shared
+            .listener
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !readable(&*listener, TICK) {
             continue;
         }
-        let Ok((stream, _)) = shared.listener.accept() else {
+        let accepted = listener.accept();
+        drop(listener);
+        let Ok((stream, _)) = accepted else {
             continue;
         };
         let _ = stream.set_nonblocking(false);
         let shared = Arc::clone(&shared);
         thread::spawn(move || serve(&shared, stream));
+    }
+}
+
+/// How often the jar checks that its socket's path is still there.
+const SOCKET_CHECK: Duration = Duration::from_secs(2);
+
+/// The socket's path is the jar's one address, and a cleaner may delete it:
+/// macOS removes what's left untouched in `$TMPDIR` for days, and a
+/// listening socket's file is never touched. A jar whose path has gone binds
+/// a new socket there; one whose path holds something else leaves it be.
+fn keep_socket(shared: &Shared) {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    let path = &shared.cfg.socket;
+    if path.symlink_metadata().is_ok() {
+        return;
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir);
+    }
+    let Ok(fresh) = UnixListener::bind(path) else {
+        return;
+    };
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    if fresh.set_nonblocking(true).is_ok() {
+        *shared
+            .listener
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = fresh;
     }
 }
 
@@ -506,23 +553,74 @@ fn describe(shared: &Shared) -> Vec<(String, String)> {
         ("id", id),
         ("instance", format!("{:016x}", shared.cfg.instance)),
         ("created", shared.cfg.created.to_string()),
-        ("jar", format!("{} {}", env!("CARGO_PKG_VERSION"), std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_default())),
+        (
+            "jar",
+            format!(
+                "{} {}",
+                env!("CARGO_PKG_VERSION"),
+                std::env::current_exe()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            ),
+        ),
         ("pid", std::process::id().to_string()),
         ("program", shared.cfg.argv.join(" ")),
         ("program_pid", shared.child_pid.to_string()),
-        ("cwd", shared.cfg.cwd.as_ref().map(|p| p.display().to_string()).unwrap_or_default()),
+        (
+            "cwd",
+            shared
+                .cfg
+                .cwd
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+        ),
         ("size", format!("{}x{}", st.rows, st.cols)),
         ("overflow", "drop".into()),
-        ("linger", shared.cfg.linger.map_or("until an owner returns".into(), |d| format!("{} ms", d.as_millis()))),
-        ("owner", if st.owner.is_some() { "connected".into() } else { st.ownerless_since.map_or("none".into(), |t| format!("none for {} s", t.elapsed().as_secs())) }),
-        ("log", format!("{} of {} bytes held, {} printed, from {}", st.log.held, st.log.cap, st.log.head, st.log.base)),
-        ("snapshots", st.snapshots.iter().map(|s| format!("{}@{}", s.format, s.offset)).collect::<Vec<_>>().join(" ")),
+        (
+            "linger",
+            shared
+                .cfg
+                .linger
+                .map_or("until an owner returns".into(), |d| {
+                    format!("{} ms", d.as_millis())
+                }),
+        ),
+        (
+            "owner",
+            if st.owner.is_some() {
+                "connected".into()
+            } else {
+                st.ownerless_since.map_or("none".into(), |t| {
+                    format!("none for {} s", t.elapsed().as_secs())
+                })
+            },
+        ),
+        (
+            "log",
+            format!(
+                "{} of {} bytes held, {} printed, from {}",
+                st.log.held, st.log.cap, st.log.head, st.log.base
+            ),
+        ),
+        (
+            "snapshots",
+            st.snapshots
+                .iter()
+                .map(|s| format!("{}@{}", s.format, s.offset))
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
     ];
     if let Some((code, signaled)) = st.exit {
-        f.push(("exit", if signaled { "signal".into() } else { code.to_string() }));
-    }
-    if st.reserved.as_ref().is_some_and(|(_, until)| Instant::now() < *until) {
-        f.push(("held", "for the spyc it was handed to".into()));
+        f.push((
+            "exit",
+            if signaled {
+                "signal".into()
+            } else {
+                code.to_string()
+            },
+        ));
     }
     let mut f: Vec<(String, String)> = f.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     f.extend(st.info.iter().cloned());
@@ -562,7 +660,7 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
     let Ok(Some(Msg::Hello {
         version,
         role,
-        claim,
+        token,
     })) = proto::read_msg(&mut read_half)
     else {
         refuse("expected a hello".into());
@@ -573,19 +671,14 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         return;
     }
     let mut st = shared.lock();
+    if role != Role::Lookup && !same_token(&st.token, &token) {
+        drop(st);
+        refuse("wrong token".into());
+        return;
+    }
     if role == Role::Owner && st.owner.is_some() {
         drop(st);
         refuse("the jar already has an owner".into());
-        return;
-    }
-    if role == Role::Owner
-        && let Some((token, until)) = st.reserved.take()
-        && Instant::now() < until
-        && token != claim
-    {
-        st.reserved = Some((token, until));
-        drop(st);
-        refuse("the jar is held for the spyc it was handed to".into());
         return;
     }
     let id = st.next_conn;
@@ -639,6 +732,7 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
     // frames is timed by `last_heard` instead.
     let _ = read_half.set_read_timeout(Some(Duration::from_secs(5)));
     let owner = conn.role == Role::Owner;
+    let lookup = conn.role == Role::Lookup;
     let writer = {
         let shared = Arc::clone(shared);
         let conn = Arc::clone(conn);
@@ -672,6 +766,12 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             Err(_) => break,
         };
         last_heard = Instant::now();
+        if lookup && !matches!(msg, Msg::Describe | Msg::Ping { .. }) {
+            let _ = send(&Msg::Refused {
+                why: "a lookup can only ask the jar to describe itself".into(),
+            });
+            continue;
+        }
         match msg {
             Msg::Replay { from: asked } => {
                 let st = shared.lock();
@@ -698,9 +798,16 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             }
             Msg::Upgrade { binary } => crate::upgrade::begin(shared, Arc::clone(&conn.out), binary),
             Msg::Release { token } if owner => {
-                let mut st = shared.lock();
-                st.reserved = Some((token, Instant::now() + SUCCESSOR_WAIT));
-                drop(st);
+                shared.lock().token = token;
+                // The old token's holders go with it: every reader is closed.
+                for (other, c) in shared.conns().iter() {
+                    if *other != id && c.role == Role::Reader {
+                        c.closed.store(true, Ordering::SeqCst);
+                        if let Ok(s) = c.out.lock() {
+                            let _ = s.shutdown(std::net::Shutdown::Both);
+                        }
+                    }
+                }
                 // Nothing this connection sends after its release may act on
                 // the jar: whatever follows, a `Kill` from its tab closing
                 // among them, is never read.
@@ -722,19 +829,18 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
                 });
             }
             Msg::Input { bytes } | Msg::Reply { bytes } => {
-                if let Some(path) = std::env::var_os("SPYC_JAR_TRACE") {
-                    if let Ok(mut f) = std::fs::OpenOptions::new()
+                if let Some(path) = std::env::var_os("SPYC_JAR_TRACE")
+                    && let Ok(mut f) = std::fs::OpenOptions::new()
                         .create(true)
                         .append(true)
                         .open(path)
-                    {
-                        let _ = writeln!(
-                            f,
-                            "{} {:?}",
-                            shared.child_pid,
-                            String::from_utf8_lossy(&bytes)
-                        );
-                    }
+                {
+                    let _ = writeln!(
+                        f,
+                        "{} {:?}",
+                        shared.child_pid,
+                        String::from_utf8_lossy(&bytes)
+                    );
                 }
                 let mut w = shared.input.lock().unwrap_or_else(PoisonError::into_inner);
                 let _ = w.write_all(&bytes);
@@ -794,6 +900,11 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
     release(shared, id);
     shared.cv.notify_all();
     let _ = writer.join();
+}
+
+/// Compare tokens in time that doesn't depend on where they first differ.
+fn same_token(want: &[u8], got: &[u8]) -> bool {
+    want.len() == got.len() && want.iter().zip(got).fold(0u8, |d, (a, b)| d | (a ^ b)) == 0
 }
 
 /// A connection ended: it leaves the registry, and if it owned the jar, the

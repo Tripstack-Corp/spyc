@@ -5,6 +5,8 @@
 //! binary form is the control: it must come back exact everywhere, or the
 //! comparison itself is noisy. `cargo test --lib jar_fidelity -- --nocapture`.
 
+use std::fmt::Write as _;
+
 use super::{Data, GhosttyEngine, ffi};
 use crate::pane::engine::{Engine, TerminalScreen};
 
@@ -24,7 +26,11 @@ fn title(e: &GhosttyEngine) -> String {
     // SAFETY: `t` is live and TITLE writes a `GhosttyString`, whose bytes stay
     // valid until the terminal next changes; they are copied at once.
     let ok = unsafe {
-        ffi::ghostty_terminal_get(e.inner.t, Data::GHOSTTY_TERMINAL_DATA_TITLE, (&raw mut s).cast())
+        ffi::ghostty_terminal_get(
+            e.inner.t,
+            Data::GHOSTTY_TERMINAL_DATA_TITLE,
+            (&raw mut s).cast(),
+        )
     };
     if ok != spyc_vt_sys::SUCCESS || s.ptr.is_null() {
         return String::new();
@@ -38,7 +44,10 @@ fn observe(e: &mut GhosttyEngine) -> Vec<String> {
     let s = &e.inner;
     let mut out = vec![
         format!("cursor {:?}", s.cursor_position()),
-        format!("pending wrap {:?}", s.get_bool(Data::GHOSTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP)),
+        format!(
+            "pending wrap {:?}",
+            s.get_bool(Data::GHOSTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP)
+        ),
         format!("hidden cursor {}", s.hide_cursor()),
         format!("alternate screen {}", s.alternate_screen()),
         format!("bracketed paste {}", s.bracketed_paste()),
@@ -56,11 +65,21 @@ fn observe(e: &mut GhosttyEngine) -> Vec<String> {
             line.push_str(if t.is_empty() { " " } else { &t });
             styles.push(s.cell_style(row, col));
         }
-        out.push(format!("row {row:2} wrapped={} {:?}", s.row_wrapped(row), line.trim_end()));
+        out.push(format!(
+            "row {row:2} wrapped={} {:?}",
+            s.row_wrapped(row),
+            line.trim_end()
+        ));
         out.push(format!("row {row:2} styles {styles:?}"));
     }
-    out.push(format!("whole history, re-emitted, {} bytes", e.encode_portable().map_or(0, |v| v.len())));
-    out.push(format!("history text {:?}", e.encode_portable().map(|v| text_only(&v))));
+    out.push(format!(
+        "whole history, re-emitted, {} bytes",
+        e.encode_portable().map_or(0, |v| v.len())
+    ));
+    out.push(format!(
+        "history text {:?}",
+        e.encode_portable().map(|v| text_only(&v))
+    ));
     e.process(PROBES);
     let replies = e.take_replies();
     out.push(format!("replies {:?}", String::from_utf8_lossy(&replies)));
@@ -87,11 +106,22 @@ fn diff(a: &[String], b: &[String], max: usize) -> Vec<String> {
 }
 
 fn clip(s: &str) -> String {
-    if s.chars().count() > 150 { format!("{}…", s.chars().take(150).collect::<String>()) } else { s.to_owned() }
+    if s.chars().count() > 150 {
+        format!("{}…", s.chars().take(150).collect::<String>())
+    } else {
+        s.to_owned()
+    }
 }
 
 fn history(n: usize) -> String {
-    (0..n).map(|i| format!("\x1b[3{}mline {i}\x1b[0m of the shell's history\r\n", i % 7 + 1)).collect()
+    (0..n).fold(String::new(), |mut s, i| {
+        let _ = write!(
+            s,
+            "\x1b[3{}mline {i}\x1b[0m of the shell's history\r\n",
+            i % 7 + 1
+        );
+        s
+    })
 }
 
 /// `(name, setup, continuation)`.
@@ -118,12 +148,15 @@ fn cases() -> Vec<(&'static str, String, String)> {
         ("cursor shape", "\x1b[5 q".into(), String::new()),
         ("alternate screen over history", format!("{}\x1b[?1049h\x1b[2J\x1b[Hfull-screen program", history(300)), "\x1b[?1049lback on the shell\r\n".into()),
         ("hyperlinks", "\x1b]8;;https://example.com/a\x1b\\link\x1b]8;;\x1b\\ after\r\n\x1b]8;;https://example.com/open\x1b\\".into(), "linked?".into()),
-        ("graphemes and wide", "family 👨\u{200d}👩\u{200d}👧 e\u{301} 漢字 ❤\u{fe0f}\r\n".into(), format!("\x1b[1;{}H漢", COLS)),
+        ("graphemes and wide", "family 👨\u{200d}👩\u{200d}👧 e\u{301} 漢字 ❤\u{fe0f}\r\n".into(), format!("\x1b[1;{COLS}H漢")),
         ("underline styles, strike, overline", "\x1b[4:3;58;2;255;0;0mcurly\x1b[0m \x1b[9mstrike\x1b[0m \x1b[53mover\x1b[0m \x1b[5mblink\x1b[8mhidden\x1b[0m".into(), String::new()),
         ("protected cells", "\x1b[1\"qkeep\x1b[0\"q erase".into(), "\x1b[1;1H\x1b[?2K".into()),
         ("title", "\x1b]2;a title\x07".into(), String::new()),
         ("palette and default colours set by the program", "\x1b]4;1;rgb:12/34/56\x1b\\\x1b]10;rgb:aa/bb/cc\x1b\\\x1b]11;rgb:01/02/03\x1b\\\x1b[31mred".into(), String::new()),
-        ("long wrapped lines in history", (0..80).map(|i| format!("{i} {}\r\n", "w".repeat(250))).collect(), "tail\r\n".into()),
+        ("long wrapped lines in history", (0..80).fold(String::new(), |mut s, i| {
+            let _ = write!(s, "{i} {}\r\n", "w".repeat(250));
+            s
+        }), "tail\r\n".into()),
     ]
 }
 
@@ -137,7 +170,11 @@ fn portable_snapshot_fidelity() {
         let bin = orig.encode_snapshot().expect("binary");
         let whole = GhosttyEngine::portable_from_binary(&bin, ROWS, COLS).expect("whole portable");
         let mut via_port = fresh();
-        via_port.process(if std::env::var_os("FIDELITY_RAW").is_some() { &port } else { &whole });
+        via_port.process(if std::env::var_os("FIDELITY_RAW").is_some() {
+            &port
+        } else {
+            &whole
+        });
         let _ = via_port.take_replies();
         let mut via_bin = fresh();
         assert!(via_bin.restore_snapshot(&bin, ROWS, COLS));
@@ -151,7 +188,11 @@ fn portable_snapshot_fidelity() {
             let o = observe(&mut orig);
             let b = diff(&o, &observe(&mut via_bin), 3);
             let p = diff(&o, &observe(&mut via_port), 4);
-            assert!(b.is_empty(), "{name}: the binary control differs {when}:\n{}", b.join("\n"));
+            assert!(
+                b.is_empty(),
+                "{name}: the binary control differs {when}:\n{}",
+                b.join("\n")
+            );
             if !p.is_empty() {
                 report.push(format!("    {when}:\n{}", p.join("\n")));
             }
@@ -172,4 +213,3 @@ fn portable_snapshot_fidelity() {
         "the portable form lost more than it is known to"
     );
 }
-

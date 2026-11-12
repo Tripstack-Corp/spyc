@@ -16,20 +16,14 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connect to the jar at `socket` as `role`, retrying until `wait` passes
-    /// so a jar still starting is waited for. Returns the jar's `Welcome`, or
-    /// its refusal as an error.
-    pub fn connect(socket: &Path, role: Role, wait: Duration) -> anyhow::Result<(Self, Msg)> {
-        Self::connect_claiming(socket, role, wait, &[])
-    }
-
-    /// [`Client::connect`] presenting `claim`, the token a released jar is
-    /// held for (R22).
-    pub fn connect_claiming(
+    /// Connect to the jar at `socket` as `role`, presenting its `token`
+    /// (R26), and retrying until `wait` passes so a jar still starting is
+    /// waited for. Returns the jar's `Welcome`, or its refusal as an error.
+    pub fn connect(
         socket: &Path,
         role: Role,
         wait: Duration,
-        claim: &[u8],
+        token: &[u8],
     ) -> anyhow::Result<(Self, Msg)> {
         let until = Instant::now() + wait;
         let stream = loop {
@@ -49,7 +43,7 @@ impl Client {
         client.send(&Msg::Hello {
             version: proto::VERSION,
             role,
-            claim: claim.to_vec(),
+            token: token.to_vec(),
         })?;
         match client.recv(Duration::from_secs(5))? {
             Some(w @ Msg::Welcome { .. }) => Ok((client, w)),
@@ -112,10 +106,10 @@ fn self_write(c: &Client) -> Arc<Mutex<UnixStream>> {
     Arc::clone(&c.write)
 }
 
-/// R31: connect to the jar at `socket` as a reader and ask it to describe
-/// itself.
+/// R31: ask the jar at `socket` to describe itself, as a [`Role::Lookup`],
+/// which needs no token.
 pub fn describe(socket: &Path) -> anyhow::Result<Vec<(String, String)>> {
-    let (mut c, _) = Client::connect(socket, Role::Reader, Duration::from_secs(2))?;
+    let (mut c, _) = Client::connect(socket, Role::Lookup, Duration::from_secs(2), &[])?;
     c.send(&Msg::Describe)?;
     let until = Instant::now() + Duration::from_secs(2);
     while Instant::now() < until {
@@ -140,6 +134,21 @@ impl Receiver {
 pub struct Sender(Arc<Mutex<UnixStream>>);
 
 impl Sender {
+    /// Send over `client`'s connection from now on, every clone of this
+    /// sender included, and return its receiving half: a reconnect that the
+    /// rest of the client never sees.
+    pub fn rebind(&self, client: Client) -> io::Result<Receiver> {
+        let stream = client
+            .write
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .try_clone()?;
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = stream;
+        Ok(Receiver(client))
+    }
+}
+
+impl Sender {
     pub fn send(&self, msg: &Msg) -> io::Result<()> {
         let mut w = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         proto::write_msg(&mut *w, msg)
@@ -150,4 +159,11 @@ impl Sender {
         let w = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         let _ = w.shutdown(std::net::Shutdown::Both);
     }
+}
+
+/// A jar's token as a file holds it: the text, without surrounding
+/// whitespace.
+pub fn read_token_file(path: &Path) -> anyhow::Result<Vec<u8>> {
+    let text = std::fs::read(path).map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
+    Ok(text.trim_ascii().to_vec())
 }

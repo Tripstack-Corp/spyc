@@ -27,6 +27,9 @@ struct Move {
     project: SavedProject,
     /// Each moved tab's pane id, and the token its jar is held for.
     tokens: BTreeMap<String, String>,
+    /// The scope claims the project's agents hold: they go with them.
+    #[serde(default)]
+    claims: Vec<crate::state::scope_registry::ScopeClaim>,
 }
 
 fn moves_dir() -> Option<PathBuf> {
@@ -37,23 +40,29 @@ fn moves_dir() -> Option<PathBuf> {
 /// claim the jar.
 fn token() -> Option<String> {
     let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom").ok()?.read_exact(&mut b).ok()?;
-    Some(b.iter().map(|x| format!("{x:02x}")).collect())
+    std::fs::File::open("/dev/urandom")
+        .ok()?
+        .read_exact(&mut b)
+        .ok()?;
+    Some(crate::pane::jar_backend::hex(&b))
 }
 
 impl App {
     /// `:detach project`.
     pub(super) fn detach_project(&mut self) {
         if !crate::pane::jar_backend::enabled() {
-            self.state.flash_error("detaching a project needs its tabs in jars (SPYC_JARS=1)");
+            self.state
+                .flash_error("detaching a project needs its tabs in jars (SPYC_JARS=1)");
             return;
         }
         if self.state.open_projects().nth(1).is_none() {
-            self.state.flash_error("the last project can't be detached: open another first");
+            self.state
+                .flash_error("the last project can't be detached: open another first");
             return;
         }
         let Some(dir) = moves_dir() else {
-            self.state.flash_error("no state directory to leave the project in");
+            self.state
+                .flash_error("no state directory to leave the project in");
             return;
         };
         let id = self.state.active;
@@ -67,16 +76,30 @@ impl App {
             }
         }
         crate::mcp::mark_moved(tokens.keys().cloned());
+        let owners: std::collections::HashSet<&str> = snapshot
+            .project
+            .tabs
+            .iter()
+            .map(|t| t.claim_owner.as_str())
+            .collect();
+        let (claims, kept) = std::mem::take(&mut self.state.scope_registry)
+            .into_iter()
+            .partition(|c| owners.contains(c.owner.as_str()));
+        self.state.scope_registry = kept;
         let moved = Move {
             from_pid: std::process::id(),
             at_secs: crate::sysinfo::epoch_secs(),
             project: snapshot.project.clone(),
             tokens,
+            claims,
         };
         let written = (|| -> anyhow::Result<PathBuf> {
             use std::io::Write as _;
             use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&dir)?;
             let path = dir.join(format!("{}-{}.json", moved.at_secs, std::process::id()));
             let mut f = std::fs::File::options()
                 .write(true)
@@ -97,9 +120,9 @@ impl App {
                 "detached project {label}: {} tab(s) wait for another spyc's :attach project",
                 moved.tokens.len()
             )),
-            Err(e) => self
-                .state
-                .flash_error(format!("detached project {label}, but its move wasn't saved: {e:#}")),
+            Err(e) => self.state.flash_error(format!(
+                "detached project {label}, but its move wasn't saved: {e:#}"
+            )),
         }
     }
 
@@ -128,17 +151,33 @@ impl App {
             }
         };
         for (pane, t) in &moved.tokens {
-            crate::pane::jar_backend::expect_claim(pane, t.clone().into_bytes());
+            crate::pane::jar_backend::expect_claim(pane, t.as_bytes());
         }
         // The moved tabs adopt their running agents, so no conversation is
         // held against them.
         let held = crate::state::sessions::Held::default();
         let Some(opened) = self.restore_out_of_view(&moved.project, false, &held) else {
-            self.state.flash_error("the detached project could not be opened here");
+            self.state
+                .flash_error("the detached project could not be opened here");
             return;
         };
         self.switch_project(opened.id);
         self.record_open_roots();
+        // Each claim keeps its id, which its agent may release it by, unless
+        // a claim here already has it.
+        for mut claim in moved.claims.clone() {
+            if self.state.scope_registry.iter().any(|c| c.id == claim.id) {
+                claim.id = self
+                    .state
+                    .scope_registry
+                    .iter()
+                    .map(|c| c.id)
+                    .max()
+                    .unwrap_or(0)
+                    + 1;
+            }
+            self.state.scope_registry.push(claim);
+        }
         // The move file goes only once this spyc's own session holds the
         // project: at every moment one of the two says where its jars belong,
         // so a spyc that dies right after attaching leaves `spyc -r` a way

@@ -315,7 +315,10 @@ fn relocate(
                     read_lsp_message(&mut reader).ok()?;
                 }
             }
-            mcp_log(&format!("proxy: pane moved; now proxying to {}", path.display()));
+            mcp_log(&format!(
+                "proxy: pane moved; now proxying to {}",
+                path.display()
+            ));
             return Some((writer, reader));
         }
         if std::time::Instant::now() >= until {
@@ -450,7 +453,10 @@ pub(super) fn proxy_io(
         let parsed = serde_json::from_str::<Value>(msg).ok();
         let is_request = parsed.as_ref().is_none_or(|v| v.get("id").is_some()); // assume request if parse fails
 
-        let method = parsed.as_ref().and_then(|v| v["method"].as_str()).unwrap_or("");
+        let method = parsed
+            .as_ref()
+            .and_then(|v| v["method"].as_str())
+            .unwrap_or("");
         if matches!(method, "initialize" | "notifications/initialized") {
             binding.push(msg.to_owned());
         }
@@ -468,7 +474,14 @@ pub(super) fn proxy_io(
             });
             match got {
                 Err(_) if !relocated => {
-                    let Some((w, r)) = relocate(pane_id, &binding[..binding.len().saturating_sub(usize::from(matches!(method, "initialize" | "notifications/initialized")))], io_timeout) else {
+                    let Some((w, r)) = relocate(
+                        pane_id,
+                        &binding[..binding.len().saturating_sub(usize::from(matches!(
+                            method,
+                            "initialize" | "notifications/initialized"
+                        )))],
+                        io_timeout,
+                    ) else {
                         break got;
                     };
                     sock_writer = w;

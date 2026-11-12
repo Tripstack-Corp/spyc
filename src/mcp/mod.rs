@@ -492,7 +492,7 @@ pub fn mark_moved(pane_ids: impl IntoIterator<Item = String>) {
     moved().extend(pane_ids);
 }
 
-pub(crate) fn is_moved(pane_id: &str) -> bool {
+pub fn is_moved(pane_id: &str) -> bool {
     moved().contains(pane_id)
 }
 

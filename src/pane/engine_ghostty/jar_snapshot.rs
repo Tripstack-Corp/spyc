@@ -57,7 +57,10 @@ impl GhosttyEngine {
         let unwrap = true;
         let set: [(FOpt::Type, *const std::ffi::c_void); 4] = [
             (FOpt::GHOSTTY_FORMATTER_OPT_EMIT, (&raw const emit).cast()),
-            (FOpt::GHOSTTY_FORMATTER_OPT_UNWRAP, (&raw const unwrap).cast()),
+            (
+                FOpt::GHOSTTY_FORMATTER_OPT_UNWRAP,
+                (&raw const unwrap).cast(),
+            ),
             (FOpt::GHOSTTY_FORMATTER_OPT_TRIM, (&raw const off).cast()),
             (
                 FOpt::GHOSTTY_FORMATTER_OPT_EXTRAS,
@@ -249,7 +252,11 @@ fn with_saved(emit: Vec<u8>, saved: &[u8]) -> Vec<u8> {
 fn sgr(reply: &[u8]) -> Option<String> {
     let s = std::str::from_utf8(reply).ok()?;
     let p = s.split_once("$r")?.1.split_once('m')?.0;
-    Some(if p.is_empty() { "0".into() } else { p.to_owned() })
+    Some(if p.is_empty() {
+        "0".into()
+    } else {
+        p.to_owned()
+    })
 }
 
 /// Whether `blob` decodes, without keeping what it decodes to.
@@ -300,7 +307,10 @@ mod bench {
     struct Lcg(u64);
     impl Lcg {
         fn next(&mut self) -> u32 {
-            self.0 = self.0.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             (self.0 >> 33) as u32
         }
         fn pick<'a>(&mut self, from: &[&'a str]) -> &'a str {
@@ -309,8 +319,22 @@ mod bench {
     }
 
     const WORDS: &[&str] = &[
-        "src/pane/mod.rs", "the", "jar", "snapshot", "cargo", "build", "warning:",
-        "unused", "variable", "fn", "let", "Ok(())", "->", "42", "commit", "main",
+        "src/pane/mod.rs",
+        "the",
+        "jar",
+        "snapshot",
+        "cargo",
+        "build",
+        "warning:",
+        "unused",
+        "variable",
+        "fn",
+        "let",
+        "Ok(())",
+        "->",
+        "42",
+        "commit",
+        "main",
     ];
 
     /// One kind of output, `lines` lines of it.
@@ -331,8 +355,8 @@ mod bench {
                 "shell" => {
                     let _ = write!(s, "\x1b[33m{:08x}\x1b[0m ", r.next());
                     for _ in 0..(r.next() % 8 + 4) {
-                        let c = 31 + r.next() % 7;
-                        let _ = write!(s, "\x1b[{c}m{}\x1b[0m {} ", r.pick(WORDS), r.pick(WORDS));
+                        let fg = 31 + r.next() % 7;
+                        let _ = write!(s, "\x1b[{fg}m{}\x1b[0m {} ", r.pick(WORDS), r.pick(WORDS));
                     }
                 }
                 // An inline agent: truecolour, bold and dim, box drawing,
@@ -340,10 +364,14 @@ mod bench {
                 "agent" => {
                     s.push_str("\x1b[38;2;120;120;140m│\x1b[0m ");
                     for _ in 0..(r.next() % 10 + 6) {
-                        let (a, b, c) = (r.next() % 256, r.next() % 256, r.next() % 256);
+                        let (red, green, blue) = (r.next() % 256, r.next() % 256, r.next() % 256);
                         let attr = ["1", "2", "3", "0"][r.next() as usize % 4];
-                        let _ = write!(s, "\x1b[{attr};38;2;{a};{b};{c}m{}\x1b[0m ", r.pick(WORDS));
-                        if r.next() % 9 == 0 {
+                        let _ = write!(
+                            s,
+                            "\x1b[{attr};38;2;{red};{green};{blue}m{}\x1b[0m ",
+                            r.pick(WORDS)
+                        );
+                        if r.next().is_multiple_of(9) {
                             s.push_str(r.pick(&["✅ ", "⏺ ", "漢字 ", "🌶 ", "→ "]));
                         }
                     }
@@ -354,8 +382,12 @@ mod bench {
                         let _ = write!(
                             s,
                             "\x1b[38;2;{};{};{};48;2;{};{};{}m{}",
-                            r.next() % 256, r.next() % 256, r.next() % 256,
-                            r.next() % 256, r.next() % 256, r.next() % 256,
+                            r.next() % 256,
+                            r.next() % 256,
+                            r.next() % 256,
+                            r.next() % 256,
+                            r.next() % 256,
+                            r.next() % 256,
                             char::from(b'a' + (col % 26) as u8)
                         );
                     }
@@ -384,8 +416,15 @@ mod bench {
     fn snapshot_costs() {
         println!(
             "{:<6} {:>6} {:>9} | {:>8} {:>9} {:>9} | {:>8} {:>9} {:>10}",
-            "kind", "lines", "history", "bin MB", "bin enc", "bin rest",
-            "port MB", "port enc", "port rest"
+            "kind",
+            "lines",
+            "history",
+            "bin MB",
+            "bin enc",
+            "bin rest",
+            "port MB",
+            "port enc",
+            "port rest"
         );
         for lines in [1_000, 12_000] {
             for kind in ["plain", "shell", "agent", "worst"] {
@@ -424,7 +463,9 @@ mod bench {
                 let mb = |n: usize| n as f64 / 1_048_576.0;
                 println!(
                     "{kind:<6} {lines:>6} {history:>9} | {:>8.2} {bin_enc:>7.1}ms {bin_rest:>7.1}ms | {:>8.2} {port_enc:>7.1}ms {port_rest:>8.1}ms  (portable restores {port_history} history rows; log was {:.2} MB)",
-                    mb(bin.len()), mb(port.len()), mb(bytes.len())
+                    mb(bin.len()),
+                    mb(port.len()),
+                    mb(bytes.len())
                 );
             }
         }
@@ -438,6 +479,8 @@ mod bench {
     fn thirty_panes_at_once() {
         let bytes = std::sync::Arc::new(workload("agent", 12_000));
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(30));
+        // Collected: every pane starts before any is joined.
+        #[allow(clippy::needless_collect)]
         let handles: Vec<_> = (0..30)
             .map(|_| {
                 let (bytes, barrier) = (bytes.clone(), barrier.clone());
@@ -448,12 +491,16 @@ mod bench {
                     let t0 = Instant::now();
                     let bin = e.encode_snapshot().expect("binary");
                     let locked = t0.elapsed();
-                    let port = GhosttyEngine::portable_from_binary(&bin, ROWS, COLS).expect("portable");
+                    let port =
+                        GhosttyEngine::portable_from_binary(&bin, ROWS, COLS).expect("portable");
                     (locked, t0.elapsed(), bin.len() + port.len())
                 })
             })
             .collect();
-        let r: Vec<_> = handles.into_iter().map(|h| h.join().expect("pane thread")).collect();
+        let r: Vec<_> = handles
+            .into_iter()
+            .map(|h| h.join().expect("pane thread"))
+            .collect();
         let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
         let worst_lock = r.iter().map(|x| ms(x.0)).fold(0.0, f64::max);
         let worst_all = r.iter().map(|x| ms(x.1)).fold(0.0, f64::max);

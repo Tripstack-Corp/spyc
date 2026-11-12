@@ -84,6 +84,8 @@ fn direct_latency() -> Vec<Duration> {
     out
 }
 
+const TOKEN: &[u8] = b"measure-token-0123456";
+
 fn start_jar(bin: &Path, dir: &Path, name: &str, argv: &[&str]) -> (Child, PathBuf) {
     let socket = dir.join(name);
     let child = Command::new(bin)
@@ -91,11 +93,13 @@ fn start_jar(bin: &Path, dir: &Path, name: &str, argv: &[&str]) -> (Child, PathB
         .arg(&socket)
         .args(["--window", "8388608", "--ring", "8388608", "--"])
         .args(argv)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
+    let mut child = child;
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), TOKEN).unwrap();
     (child, socket)
 }
 
@@ -108,7 +112,7 @@ fn finish(mut jar: Child, client: &Client) {
 
 fn jar_latency(bin: &Path, dir: &Path) -> Vec<Duration> {
     let (jar, socket) = start_jar(bin, dir, "lat.sock", &["python3", "-c", ECHO]);
-    let (mut c, _) = Client::connect(&socket, Role::Owner, Duration::from_secs(5)).unwrap();
+    let (mut c, _) = Client::connect(&socket, Role::Owner, Duration::from_secs(5), TOKEN).unwrap();
     c.send(&Msg::Replay { from: 0 }).unwrap();
     std::thread::sleep(Duration::from_millis(500));
     while c.recv(Duration::from_millis(50)).unwrap().is_some() {}
@@ -166,7 +170,7 @@ fn direct_throughput() -> f64 {
 fn jar_throughput(bin: &Path, dir: &Path) -> f64 {
     let (jar, socket) = start_jar(bin, dir, "tp.sock", &["/bin/sh", "-c", FIREHOSE]);
     let t = Instant::now();
-    let (mut c, _) = Client::connect(&socket, Role::Owner, Duration::from_secs(5)).unwrap();
+    let (mut c, _) = Client::connect(&socket, Role::Owner, Duration::from_secs(5), TOKEN).unwrap();
     c.send(&Msg::Replay { from: 0 }).unwrap();
     let mut total = 0u64;
     loop {
@@ -200,7 +204,8 @@ fn replay(bin: &Path, dir: &Path) -> (u64, Duration) {
     );
     std::thread::sleep(Duration::from_secs(2));
     let t = Instant::now();
-    let (mut c, welcome) = Client::connect(&socket, Role::Owner, Duration::from_secs(5)).unwrap();
+    let (mut c, welcome) =
+        Client::connect(&socket, Role::Owner, Duration::from_secs(5), TOKEN).unwrap();
     let Msg::Welcome { head, base, .. } = welcome else {
         unreachable!()
     };
@@ -225,7 +230,7 @@ fn thirty_jars(bin: &Path, dir: &Path) -> (u64, u64) {
     let clients: Vec<Client> = jars
         .iter()
         .map(|(_, s)| {
-            Client::connect(s, Role::Owner, Duration::from_secs(5))
+            Client::connect(s, Role::Owner, Duration::from_secs(5), TOKEN)
                 .unwrap()
                 .0
         })

@@ -34,3 +34,8 @@ def kill_and_reap(t, secs=15):
             return
         time.sleep(0.05)
     raise TimeoutError("the killed program never exited")
+
+def token_file(home, socket, state=None):
+    """Where spyc keeps the token of the jar at `socket` (R26)."""
+    root = os.path.join(state, "spyc") if state else os.path.join(home, ".local", "state", "spyc")
+    return os.path.join(root, "jar-tokens", os.path.splitext(os.path.basename(socket))[0])

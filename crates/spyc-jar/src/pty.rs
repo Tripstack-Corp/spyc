@@ -43,7 +43,9 @@ pub(crate) fn spawn(cfg: &Config) -> anyhow::Result<(OwnedFd, u32)> {
     .context("size the PTY")?;
     let mut cmd = Command::new(std::env::current_exe().context("the jar's own binary")?);
     cmd.arg("pty-child").arg("--").args(&cfg.argv);
-    cmd.stdin(slave.try_clone()?).stdout(slave.try_clone()?).stderr(slave);
+    cmd.stdin(slave.try_clone()?)
+        .stdout(slave.try_clone()?)
+        .stderr(slave);
     if let Some(cwd) = &cfg.cwd {
         cmd.current_dir(cwd);
     }

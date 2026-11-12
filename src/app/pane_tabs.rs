@@ -356,6 +356,19 @@ impl App {
                 self.state.active_project_mut().focus = state::Focus::Pane;
                 self.state
                     .flash_info(format!("pane: {cmd} (^W k for list)"));
+                if crate::pane::jar_backend::enabled() {
+                    let project = self.state.active_project();
+                    crate::pane::jar_backend::describe_pane(
+                        &info.id,
+                        &[
+                            ("is", "pane".to_string()),
+                            ("label", info.label.clone()),
+                            ("agent", format!("{kind:?}").to_lowercase()),
+                            ("project", project.label()),
+                            ("project_home", project.anchor().display().to_string()),
+                        ],
+                    );
+                }
                 let entry = TabEntry::new(p, info);
                 match (self.runtime.project_mut().pane_tabs.as_mut(), slot) {
                     (Some(tabs), TabSlot::Replace(idx)) => tabs.replace_at(idx, entry),

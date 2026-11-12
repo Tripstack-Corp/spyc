@@ -10,12 +10,17 @@ if os.environ.get("SHAPE2_DEBUG"):
 S = os.path.join(os.environ.get("TMPDIR", "/tmp"), "spyc", "outer.sock")
 if os.path.exists(S):
     os.remove(S)
+TOK = f"{D}/outer.token"
+with open(TOK, "w") as f:
+    f.write(os.urandom(32).hex())
+os.chmod(TOK, 0o600)
 outer = subprocess.Popen([J, "--socket", S, "--attach-signal", "--cwd", f"{D}/work", "--rows", "40", "--cols", "120", "--", SPYC],
-                         env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+outer.stdin.write(open(TOK, "rb").read()); outer.stdin.close()
 time.sleep(4)  # spyc starts with nothing attached
 
 def attach(rows, cols, kitty=True):
-    t = Term([J, "attach", S], env, f"{D}/work", rows=rows, cols=cols, kitty=kitty)
+    t = Term([J, "attach", S, TOK], env, f"{D}/work", rows=rows, cols=cols, kitty=kitty)
     t.pump(4)
     return t
 
@@ -69,6 +74,17 @@ def echo_latency(t, n=30):
 c.send(b"\x01j"); c.pump(0.5)
 m2 = echo_latency(c)
 print(f"echo through spyc in an outer jar: median {m2[0]:.1f} ms, max {m2[1]:.1f} ms")
+
+# The outer jar replaces its own binary (R33) while C is attached: spyc, its
+# tab and C's connection go on.
+import shutil
+NEXT = f"{D}/jar-next-outer"
+shutil.copy(J, NEXT)
+r = subprocess.run([J, "upgrade", S, TOK, NEXT], capture_output=True, text=True, timeout=30)
+print("outer jar upgraded with C attached:", (r.stdout or r.stderr).strip())
+c.pump(1)
+c.send(b"echo outer-$((6*7))\r"); c.pump(2)
+print("C typed through the upgraded outer jar:", "outer-42" in c.text(), "| the outer jar's process lives on:", outer.poll() is None)
 c.send(b"\x1c"); c.pump(1)
 outer.kill(); outer.wait()
 direct = Term([SPYC], env, f"{D}/work", rows=40, cols=120)

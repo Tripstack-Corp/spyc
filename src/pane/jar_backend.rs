@@ -126,13 +126,22 @@ pub fn spawn(
         )
         .arg("--")
         .args(argv)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     for (k, v) in env {
         cmd.env(k, v);
     }
+    // R26: a fresh token, kept where a spyc after a crash finds it, and
+    // handed to the jar on its stdin.
+    let token = new_token()?;
+    save_token(&socket, &token)?;
     let mut jar = cmd.spawn().context("start spyc-jar")?;
+    jar.stdin
+        .take()
+        .context("the jar's stdin")?
+        .write_all(&token)
+        .context("hand the jar its token")?;
     // Reap the jar if it ends while spyc runs; if spyc ends first, it is
     // reparented and goes on.
     std::thread::spawn(move || {
@@ -144,11 +153,8 @@ pub fn spawn(
 /// Take the jar at `socket` as its owner and stream its log from the oldest
 /// byte it still holds.
 pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
-    // Stage 6: a jar handed to this spyc is held for the token that came with
-    // it (R22).
-    let claim = claims().remove(socket).unwrap_or_default();
-    let (client, welcome) =
-        Client::connect_claiming(socket, Role::Owner, Duration::from_secs(5), &claim)?;
+    let token = load_token(socket).unwrap_or_default();
+    let (client, welcome) = Client::connect(socket, Role::Owner, Duration::from_secs(5), &token)?;
     let Msg::Welcome {
         child_pid,
         base,
@@ -215,14 +221,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     ));
     let replay_from = snapshot.as_ref().map_or(base, |s| s.offset.max(base));
     let (mut rx, tx) = client.split();
-    // R30a: tell the jar where this spyc's MCP socket is, so a pane's proxy
-    // and hooks can find their owner after a move, an upgrade or a crash.
-    if let Some(mcp) = crate::mcp::socket_path() {
-        let _ = tx.send(&Msg::SetInfo {
-            key: "owner_mcp".into(),
-            value: mcp.display().to_string(),
-        });
-    }
+    announce(&tx);
     owned().insert(socket.to_path_buf(), (tx.clone(), child_pid));
     tx.send(&Msg::Replay { from: replay_from })?;
     // Fit the jar to this pane. When the log has lost its oldest bytes the
@@ -258,8 +257,10 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
         let exit = Arc::clone(&exit);
         let gate = Arc::clone(&gate);
         let fg = Arc::clone(&fg);
+        let socket = socket.to_path_buf();
         std::thread::spawn(move || {
             let mut pings = 0u64;
+            let mut parsed = replay_from;
             loop {
                 match rx.recv(Duration::from_secs(2)) {
                     Ok(Some(Msg::Output { offset, bytes })) => {
@@ -267,6 +268,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
                         if bytes_tx.send(bytes).is_err() {
                             break;
                         }
+                        parsed = end;
                         gate.handed_over(end);
                         let _ = tx.send(&Msg::Ack { offset: end });
                     }
@@ -286,11 +288,31 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
                     Ok(Some(_)) => {}
                     Ok(None) => {
                         pings += 1;
-                        if tx.send(&Msg::Ping { n: pings }).is_err() {
+                        let _ = tx.send(&Msg::Ping { n: pings });
+                    }
+                    // The connection ended with no exit reported. A jar this
+                    // spyc handed on is left be.
+                    Err(_) if is_released(child_pid) => break,
+                    Err(e) => match reconnect(&socket, &tx, parsed, rows, cols) {
+                        Ok(next) => {
+                            trace(&format!(
+                                "reader: reconnected to {} after {e:#}",
+                                socket.display()
+                            ));
+                            rx = next;
+                        }
+                        Err(lost) => {
+                            trace(&format!(
+                                "reader: {} {lost:?} after {e:#}",
+                                socket.display()
+                            ));
+                            // Its program now answers to another spyc, or to
+                            // none: closing this tab mustn't signal it.
+                            released().insert(child_pid);
+                            set_exit(&exit, ExitStatus::with_signal(lost.label()));
                             break;
                         }
-                    }
-                    Err(_) => break,
+                    },
                 }
             }
             if exit
@@ -299,7 +321,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
                 .unwrap_or_else(PoisonError::into_inner)
                 .is_none()
             {
-                set_exit(&exit, ExitStatus::with_signal("jar connection lost"));
+                set_exit(&exit, ExitStatus::with_signal(Lost::Gone.label()));
             }
         });
     }
@@ -335,6 +357,84 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
             tx,
         }),
     })
+}
+
+/// R30a: tell the jar where this spyc's MCP socket is, so a pane's proxy and
+/// hooks can find their owner after a move, an upgrade or a crash. The jar
+/// forgets it when its owner goes.
+fn announce(tx: &Sender) {
+    if let Some(mcp) = crate::mcp::socket_path() {
+        let _ = tx.send(&Msg::SetInfo {
+            key: "owner_mcp".into(),
+            value: mcp.display().to_string(),
+        });
+    }
+}
+
+/// Why a pane's jar can't be taken back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lost {
+    /// Another spyc owns it (decision G): the pane is detached here.
+    Held,
+    /// The jar is gone, and its program with it.
+    Gone,
+}
+
+impl Lost {
+    /// What the pane's exit status carries, and its tab shows.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Held => "detached",
+            Self::Gone => "jar lost",
+        }
+    }
+}
+
+/// Decision G: a spyc whose connection to a pane's jar ended (it was stopped
+/// past the jar's deadline, say) takes the jar back when no one else has, and
+/// resumes from the first byte its pane hasn't parsed. `tx`, which every
+/// half of the pane shares, sends on the new connection from then on.
+fn reconnect(
+    socket: &Path,
+    tx: &Sender,
+    parsed: u64,
+    rows: u16,
+    cols: u16,
+) -> Result<spyc_jar::client::Receiver, Lost> {
+    if socket_state(socket) != SocketState::Live {
+        return Err(Lost::Gone);
+    }
+    let token = load_token(socket).ok_or(Lost::Held)?;
+    let (client, welcome) = Client::connect(socket, Role::Owner, Duration::from_secs(2), &token)
+        .map_err(|e| {
+            if socket_state(socket) == SocketState::Live {
+                trace(&format!("reconnect: refused: {e:#}"));
+                Lost::Held
+            } else {
+                Lost::Gone
+            }
+        })?;
+    let Msg::Welcome { base, .. } = welcome else {
+        return Err(Lost::Gone);
+    };
+    let rx = tx.rebind(client).map_err(|_| Lost::Gone)?;
+    announce(tx);
+    let _ = tx.send(&Msg::Replay {
+        from: parsed.max(base),
+    });
+    // Bytes the jar dropped meanwhile can't be parsed: make the program
+    // repaint, by a row and back.
+    if base > parsed && rows > 1 {
+        for r in [rows - 1, rows] {
+            let _ = tx.send(&Msg::Resize {
+                rows: r,
+                cols,
+                px_w: 0,
+                px_h: 0,
+            });
+        }
+    }
+    Ok(rx)
 }
 
 /// How long after the replayed tail is handed over its queries may still be
@@ -623,6 +723,7 @@ fn sweep_dir(dir: &Path) -> usize {
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "sock"))
         .filter(|p| socket_state(p) == SocketState::Stale && std::fs::remove_file(p).is_ok())
+        .inspect(|p| forget_token(p))
         .count()
 }
 
@@ -648,14 +749,61 @@ fn owned() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, 
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Stage 6: the tokens jars handed to this spyc are held for, by socket.
-fn claims() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, Vec<u8>>> {
-    static CLAIMS: std::sync::OnceLock<Mutex<std::collections::HashMap<PathBuf, Vec<u8>>>> =
-        std::sync::OnceLock::new();
-    CLAIMS
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
+/// R26: where the token of the jar at `socket` is kept: one `0600` file per
+/// jar in spyc's state directory, which a spyc after a crash reads to take
+/// its jars back. Not beside the socket: the runtime directory is the one an
+/// agent's sandbox may be denied, and the tokens are what it guards.
+fn token_path(socket: &Path) -> Option<PathBuf> {
+    let name = socket.file_stem()?;
+    Some(crate::state::state_root()?.join("jar-tokens").join(name))
+}
+
+/// `bytes` as lowercase hex.
+pub fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
+}
+
+/// 32 random bytes, as hex.
+fn new_token() -> anyhow::Result<Vec<u8>> {
+    let mut raw = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut raw))
+        .context("read a jar token from /dev/urandom")?;
+    Ok(hex(&raw).into_bytes())
+}
+
+fn save_token(socket: &Path, token: &[u8]) -> anyhow::Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let path = token_path(socket).context("no state directory for jar tokens")?;
+    if let Some(dir) = path.parent() {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+    }
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)
+        .with_context(|| format!("write {}", path.display()))?;
+    f.write_all(token)?;
+    Ok(())
+}
+
+fn load_token(socket: &Path) -> Option<Vec<u8>> {
+    spyc_jar::client::read_token_file(&token_path(socket)?).ok()
+}
+
+fn forget_token(socket: &Path) {
+    if let Some(p) = token_path(socket) {
+        let _ = std::fs::remove_file(p);
+    }
 }
 
 /// The socket of pane `pane_id`'s jar.
@@ -671,6 +819,8 @@ pub fn release(pane_id: &str, token: &[u8]) -> bool {
         return false;
     };
     released().insert(pid);
+    // The jar's token becomes `token`; this spyc's opens nothing from now on.
+    forget_token(&socket);
     tx.send(&Msg::Release {
         token: token.to_vec(),
     })
@@ -692,10 +842,26 @@ fn released() -> std::sync::MutexGuard<'static, std::collections::HashSet<u32>> 
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Stage 6: the token pane `pane_id`'s jar was handed to this spyc with, for
-/// its tab's adoption to present.
-pub fn expect_claim(pane_id: &str, token: Vec<u8>) {
-    claims().insert(socket_for_pane(pane_id), token);
+/// Stage 6: the token pane `pane_id`'s jar was handed to this spyc with,
+/// kept as this spyc's own for the jar, for its tab's adoption to present.
+pub fn expect_claim(pane_id: &str, token: &[u8]) {
+    if let Err(e) = save_token(&socket_for_pane(pane_id), token) {
+        trace(&format!("expect_claim: {e:#}"));
+    }
+}
+
+/// R18: what pane `pane_id`'s jar is, as this spyc knows it, kept in the jar
+/// so a spyc that finds it with no session describing it can say. The jar
+/// keeps these when its owner goes.
+pub fn describe_pane(pane_id: &str, fields: &[(&str, String)]) {
+    if let Some((tx, _)) = owned().get(&socket_for_pane(pane_id)) {
+        for (key, value) in fields {
+            let _ = tx.send(&Msg::SetInfo {
+                key: (*key).to_string(),
+                value: value.clone(),
+            });
+        }
+    }
 }
 
 /// R30a: where pane `pane_id`'s owner's MCP socket is, as its jar says;
@@ -714,7 +880,7 @@ pub fn owner_mcp(pane_id: &str) -> Option<PathBuf> {
 
 /// `spyc --jars`: every jar in this user's jar directory, as each describes
 /// itself (R31), and the sockets whose jars are gone.
-pub fn list_jars() -> anyhow::Result<()> {
+pub fn list_jars() {
     let dir = socket_path(None)
         .parent()
         .map(Path::to_path_buf)
@@ -736,21 +902,31 @@ pub fn list_jars() -> anyhow::Result<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     for sock in socks {
-        let name = sock.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = sock
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if socket_state(&sock) == SocketState::Stale {
             println!("  {name}  stale: its jar is gone");
             continue;
         }
         match spyc_jar::client::describe(&sock) {
             Ok(f) => {
-                let get = |k: &str| f.iter().find(|(key, _)| key == k).map_or("", |(_, v)| v.as_str());
+                let get = |k: &str| {
+                    f.iter()
+                        .find(|(key, _)| key == k)
+                        .map_or("", |(_, v)| v.as_str())
+                };
                 let age = get("created").parse::<u64>().map_or(String::new(), |c| {
                     let s = now.saturating_sub(c);
                     format!("{}h{:02}m", s / 3600, s / 60 % 60)
                 });
+                let what = match get("label") {
+                    "" => get("program").to_string(),
+                    label => format!("{label} ({} in {})", get("agent"), get("project")),
+                };
                 println!(
-                    "  {name}  {}  pid {}  up {age}  owner {}  linger {}  log {}",
-                    get("program"),
+                    "  {name}  {what}  pid {}  up {age}  owner {}  linger {}  log {}",
                     get("program_pid"),
                     get("owner"),
                     get("linger"),
@@ -760,11 +936,10 @@ pub fn list_jars() -> anyhow::Result<()> {
             Err(e) => println!("  {name}  no answer ({e:#})"),
         }
     }
-    Ok(())
 }
 
 /// Jar spike diagnostics: append `line` to `$SPYC_JAR_TRACE`.
-pub(crate) fn trace(line: &str) {
+pub fn trace(line: &str) {
     if let Some(path) = std::env::var_os("SPYC_JAR_TRACE")
         && let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -794,7 +969,13 @@ mod tests {
         let _listening = UnixListener::bind(&live).unwrap();
         drop(UnixListener::bind(&dead).unwrap());
         std::fs::write(&other, "x").unwrap();
-        assert_eq!(socket_state(&dead), SocketState::Stale, "premise");
+        // A child another test forks meanwhile holds a copy of the listener
+        // until it `exec`s.
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while socket_state(&dead) != SocketState::Stale {
+            assert!(std::time::Instant::now() < until, "premise: nothing answers");
+            std::thread::sleep(Duration::from_millis(20));
+        }
 
         assert_eq!(sweep_dir(dir.path()), 1);
         assert!(live.exists(), "a live jar's socket is kept");

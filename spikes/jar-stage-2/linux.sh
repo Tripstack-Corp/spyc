@@ -29,5 +29,18 @@ for mode in snap portable refused nosnap; do
   echo "== snapshots ($mode)"; python3 snap.py $mode 2>&1 | tail -2
   pkill -f 'spyc-jar --socket' || true; rm -f /tmp/spyc/jars/*.sock
 done
-echo "== shape 2: spyc in an outer jar"; python3 shape2.py 2>&1 | tail -8
+echo "== shape 2: spyc in an outer jar"; python3 shape2.py 2>&1 | tail -10
+pkill -f 'spyc-jar --socket' || true
+# Before the freeze: decision G, a lost jar's label, R18, and scope claims
+# moving with a project.
+for mode in free held; do
+  echo "== decision G ($mode)"; python3 g.py $mode 2>&1 | tail -6
+  pkill -f 'spyc-jar --socket' || true; pkill -f resume-handover || true
+done
+echo "== kill -9 of a jar"; python3 passing.py jar 2>&1 | tail -2
+pkill -f 'spyc-jar --socket' || true
+echo "== R18"; python3 r18.py 2>&1 | tail -1
+pkill -f 'spyc-jar --socket' || true
+mkdir -p $H/q11_other $H/q11_b
+echo "== scope claims move"; python3 scopes.py 2>&1 | tail -4
 pkill -f 'spyc-jar --socket' || true

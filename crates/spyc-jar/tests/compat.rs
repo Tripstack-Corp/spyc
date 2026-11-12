@@ -15,7 +15,10 @@ use spyc_jar::proto::{self, Msg, Role};
 const WAIT: Duration = Duration::from_secs(10);
 
 fn frame(kind: u8, flags: u8, payload: &[u8]) -> Vec<u8> {
-    let mut f = u32::try_from(payload.len() + 2).expect("small").to_be_bytes().to_vec();
+    let mut f = u32::try_from(payload.len() + 2)
+        .expect("small")
+        .to_be_bytes()
+        .to_vec();
     f.push(kind);
     f.push(flags);
     f.extend(payload);
@@ -39,7 +42,10 @@ fn until(client: &mut Client, mut want: impl FnMut(&Msg) -> bool) -> Msg {
 #[ignore = "needs SPYC_JAR_OLD_BIN, a jar built from an earlier commit"]
 fn a_new_client_drives_an_old_jar() {
     let old = std::env::var("SPYC_JAR_OLD_BIN").expect("SPYC_JAR_OLD_BIN names an old jar binary");
-    let dir = tempfile::Builder::new().prefix("jar").tempdir_in("/tmp").expect("tempdir");
+    let dir = tempfile::Builder::new()
+        .prefix("jar")
+        .tempdir_in("/tmp")
+        .expect("tempdir");
     let socket = dir.path().join("j.sock");
     let mut jar = Command::new(&old)
         .arg("--socket")
@@ -60,19 +66,33 @@ fn a_new_client_drives_an_old_jar() {
         }
         std::thread::sleep(Duration::from_millis(20));
     };
-    raw.write_all(&frame(1, proto::CRITICAL, &[0, 1, 2, b'c', b'a', b'p', b's'])).expect("hello");
+    raw.write_all(&frame(
+        1,
+        proto::CRITICAL,
+        &[0, 1, 2, b'c', b'a', b'p', b's'],
+    ))
+    .expect("hello");
     let mut head = [0u8; 6];
     raw.set_read_timeout(Some(WAIT)).expect("timeout");
-    raw.read_exact(&mut head).expect("an answer to a longer hello");
-    assert_eq!(head[4], 64, "the old jar welcomes a hello with extra fields");
+    raw.read_exact(&mut head)
+        .expect("an answer to a longer hello");
+    assert_eq!(
+        head[4], 64,
+        "the old jar welcomes a hello with extra fields"
+    );
     drop(raw);
 
-    let (mut owner, welcome) = Client::connect(&socket, Role::Owner, WAIT).expect("connect");
+    let (mut owner, welcome) =
+        Client::connect(&socket, Role::Owner, WAIT, b"an-old-jar-ignores-this").expect("connect");
     let Msg::Welcome { child_pid, .. } = welcome else {
         panic!("expected a welcome");
     };
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    owner.send(&Msg::Input { bytes: b"one\n".to_vec() }).expect("input");
+    owner
+        .send(&Msg::Input {
+            bytes: b"one\n".to_vec(),
+        })
+        .expect("input");
     let mut text = Vec::new();
     until(&mut owner, |m| {
         if let Msg::Output { bytes, .. } = m {
@@ -88,14 +108,22 @@ fn a_new_client_drives_an_old_jar() {
             binary: "/nonexistent".into(),
         })
         .expect("upgrade");
-    let m = until(&mut owner, |m| matches!(m, Msg::Unsupported { .. } | Msg::Refused { .. }));
+    let m = until(&mut owner, |m| {
+        matches!(m, Msg::Unsupported { .. } | Msg::Refused { .. })
+    });
     assert!(matches!(m, Msg::Unsupported { kind: 12 }), "{m:?}");
 
     // An ancillary one it doesn't know: skipped without a word.
-    owner.send_raw(&frame(60, 0, b"a future notice")).expect("ancillary");
+    owner
+        .send_raw(&frame(60, 0, b"a future notice"))
+        .expect("ancillary");
     owner.send(&Msg::Ping { n: 7 }).expect("ping");
     until(&mut owner, |m| matches!(m, Msg::Pong { n: 7 }));
-    owner.send(&Msg::Input { bytes: b"two\n".to_vec() }).expect("input");
+    owner
+        .send(&Msg::Input {
+            bytes: b"two\n".to_vec(),
+        })
+        .expect("input");
     until(&mut owner, |m| {
         if let Msg::Output { bytes, .. } = m {
             text.extend(bytes);
@@ -103,7 +131,10 @@ fn a_new_client_drives_an_old_jar() {
         String::from_utf8_lossy(&text).contains("got=two")
     });
 
-    if let Some(pid) = i32::try_from(child_pid).ok().and_then(rustix::process::Pid::from_raw) {
+    if let Some(pid) = i32::try_from(child_pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
         let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
     }
 }

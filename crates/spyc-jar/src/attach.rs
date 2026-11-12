@@ -1,4 +1,4 @@
-//! Stage 2b's attach client: `spyc-jar attach SOCKET` relays a real terminal to
+//! Stage 2b's attach client: `spyc-jar attach SOCKET TOKEN_FILE` relays a real terminal to
 //! a jar, as a terminal or `ssh host spyc-jar attach …` would reach spyc's outer
 //! jar. It puts the terminal in raw mode, sends what is typed as input, writes
 //! output back, and on detach (`^\`) or the program's exit sends a fixed reset:
@@ -23,13 +23,13 @@ const RESET: &[u8] =
     b"\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1007l\x1b[?2004l\x1b[<10u\x1b[?25h\x1b[0m";
 
 /// Attach this terminal to the jar at `socket` until detach or exit.
-pub fn run(socket: &Path) -> anyhow::Result<()> {
+pub fn run(socket: &Path, token: &[u8]) -> anyhow::Result<()> {
     let stdin = std::io::stdin();
     let saved = termios::tcgetattr(stdin.as_fd())?;
     let mut raw = saved.clone();
     raw.make_raw();
     termios::tcsetattr(stdin.as_fd(), OptionalActions::Now, &raw)?;
-    let ended = relay(socket);
+    let ended = relay(socket, token);
     let mut out = std::io::stdout();
     let _ = out.write_all(RESET);
     let _ = out.flush();
@@ -44,8 +44,8 @@ fn size() -> (u16, u16) {
 }
 
 /// Relay until detach, exit or a lost connection; why it ended.
-fn relay(socket: &Path) -> anyhow::Result<&'static str> {
-    let (client, welcome) = Client::connect(socket, Role::Owner, Duration::from_secs(5))?;
+fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
+    let (client, welcome) = Client::connect(socket, Role::Owner, Duration::from_secs(5), token)?;
     let Msg::Welcome { head, .. } = welcome else {
         anyhow::bail!("expected a welcome");
     };
