@@ -660,7 +660,7 @@ Open unless marked decided:
   for an inline agent). spyc's outer jar is the exception: it holds no engine
   and stores no snapshot, and spyc repaints on attach.
 
-- **J. Proposed: a lookup needs no token.** R30a's proxy asks as a lookup,
+- **J. Decided: a lookup needs no token.** R30a's proxy asks as a lookup,
   which may only describe and ping ([threat model](#threat-model)). The
   alternative, a second credential that opens only the lookup, gives the
   agent something to hold and leak for no gain: what it would protect is

@@ -748,7 +748,7 @@ its agents running, and their spyc tools follow them. Built on
 
 ### Before the freeze
 
-**Recommendation: the protocol can freeze once the owner settles decision J.**
+**Recommendation: the protocol can freeze.** The owner decided J as proposed.
 Each gap stage 6 left is closed, and one it hadn't listed (R26) changed the
 `hello`. Built on `spike/jar-stage-2` (`c8f42f6f`).
 
@@ -768,7 +768,7 @@ Each gap stage 6 left is closed, and one it hadn't listed (R26) changed the
   the jar's own, and every reader that came in on the old one is closed. The
   spyc a project left can't come back in. Stage 6's minute-long hold goes, and
   so does its gap: the hold didn't survive an upgrade, and the token does.
-- **The proxy's credential: none (decision J, proposed).** A new role,
+- **The proxy's credential: none (decision J, decided).** A new role,
   **lookup**, may ask the jar to describe itself and ping, with no token;
   anything else it sends is refused. What a jar describes is readable by the
   user's processes already, and never includes the token.
@@ -828,7 +828,8 @@ Each gap stage 6 left is closed, and one it hadn't listed (R26) changed the
   spyc's next key.
 - **Also found:**
   - spyc redraws after an outside `SIGCONT` only on its next input, with jars
-    or without. `g.py` sends a key it ignores.
+    or without. `g.py` sends a key it ignores. The owner deferred it, and the
+    Linux `[jar lost]` label that waits the same way.
   - Two tests waited on a clock and now wait on state: an ownerless jar's
     drop, and the stale-socket sweep. The sweep's dead socket answered
     because a child another test forked held a copy of its listener until it
@@ -861,14 +862,13 @@ Every check passes on macOS and Linux except those only macOS has (Keychain,
 pasteboard) and the Claude ones, which ran on macOS.
 
 **Before the protocol freezes,** what the spike leaves:
-- decision J (a lookup needs no token);
 - R26's same-user check on the connecting peer, on top of the `0700`
   directory;
 - the notice of orphaned jars at spyc's start that the linger decision asked
   for;
 - what the receiving spyc's attention roll-up shows after a move.
 
-The first three change nothing on the wire; the last is spyc's alone.
+The first two change nothing on the wire; the last is spyc's alone.
 
 ## Sources
 
