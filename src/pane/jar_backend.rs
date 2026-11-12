@@ -878,6 +878,36 @@ pub fn owner_mcp(pane_id: &str) -> Option<PathBuf> {
         .map(|(_, v)| PathBuf::from(v))
 }
 
+/// The live jars with no owner that this spyc didn't start or take, each by
+/// its label (R18), else its program.
+pub fn orphans() -> Vec<String> {
+    let Some(dir) = socket_path(None).parent().map(Path::to_path_buf) else {
+        return Vec::new();
+    };
+    let mine: std::collections::HashSet<PathBuf> = owned().keys().cloned().collect();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<String> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "sock") && !mine.contains(p))
+        .filter(|p| socket_state(p) == SocketState::Live)
+        .filter_map(|p| spyc_jar::client::describe(&p).ok())
+        .filter(|f| f.iter().any(|(k, v)| k == "owner" && v.starts_with("none")))
+        .map(|f| {
+            let get = |k: &str| f.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
+            match (get("label"), get("project")) {
+                (Some(l), Some(p)) => format!("{l} in {p}"),
+                (Some(l), None) => l,
+                _ => get("program").unwrap_or_default(),
+            }
+        })
+        .collect();
+    found.sort();
+    found
+}
+
 /// `spyc --jars`: every jar in this user's jar directory, as each describes
 /// itself (R31), and the sockets whose jars are gone.
 pub fn list_jars() {
@@ -973,7 +1003,10 @@ mod tests {
         // until it `exec`s.
         let until = std::time::Instant::now() + Duration::from_secs(5);
         while socket_state(&dead) != SocketState::Stale {
-            assert!(std::time::Instant::now() < until, "premise: nothing answers");
+            assert!(
+                std::time::Instant::now() < until,
+                "premise: nothing answers"
+            );
             std::thread::sleep(Duration::from_millis(20));
         }
 

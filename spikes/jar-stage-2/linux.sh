@@ -39,8 +39,12 @@ for mode in free held; do
 done
 echo "== kill -9 of a jar"; python3 passing.py jar 2>&1 | tail -2
 pkill -f 'spyc-jar --socket' || true
-echo "== R18"; python3 r18.py 2>&1 | tail -1
+echo "== R18 and the orphan notice"; python3 r18.py 2>&1 | grep -E "notice|names the"
 pkill -f 'spyc-jar --socket' || true
 mkdir -p $H/q11_other $H/q11_b
 echo "== scope claims move"; python3 scopes.py 2>&1 | tail -4
 pkill -f 'spyc-jar --socket' || true
+for mode in direct shell; do
+  echo "== attention after a move ($mode)"; python3 attn.py $mode 2>&1 | tail -3
+  pkill -f 'spyc-jar --socket' || true
+done

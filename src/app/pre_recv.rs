@@ -121,6 +121,9 @@ impl App {
         if self.apply_closed_rows() {
             ctx.draw.mark(3);
         }
+        if self.apply_jar_orphans() {
+            ctx.draw.mark(3);
+        }
         // A make menu's Makefile was read (woke via `Wake::Makefile`).
         if self.apply_makefile_reads(terminal, foreground_exec) {
             ctx.draw.mark(3);

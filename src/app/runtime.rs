@@ -261,6 +261,8 @@ pub(super) struct Runtime {
     /// Drained by `apply_closed_rows`, which keeps only the rows for
     /// `closed_rows_seq`, the switcher opened last.
     pub(super) closed_rows_results: Landing<super::recently_closed::ClosedRows>,
+    /// Jar spike: the labels of the jars no spyc owned a few seconds in.
+    pub(super) jar_orphans: Landing<Vec<String>>,
     /// The switcher opened last; rows read for any other are stale.
     pub(super) closed_rows_seq: u64,
     /// Where a make menu's Makefile read lands (`Effect::ReadMakefile`),
@@ -376,6 +378,7 @@ impl Runtime {
             jump_default_results: Landing::default(),
             jump_default_seq: 0,
             closed_rows_results: Landing::default(),
+            jar_orphans: Landing::default(),
             make_results: Landing::default(),
             make_request: 0,
             closed_rows_seq: 0,

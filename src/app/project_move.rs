@@ -30,6 +30,14 @@ struct Move {
     /// The scope claims the project's agents hold: they go with them.
     #[serde(default)]
     claims: Vec<crate::state::scope_registry::ScopeClaim>,
+    /// Each moved tab's live status report and its note: an agent blocked
+    /// before the move says nothing more until it is answered.
+    #[serde(default)]
+    statuses: BTreeMap<String, (String, Option<String>)>,
+    /// The agent each moved shell tab runs: its kind, pid and start. A shell
+    /// tab learns it from its output, and a blocked agent prints nothing.
+    #[serde(default)]
+    running: BTreeMap<String, (crate::state::sessions::AgentKind, u32, u64)>,
 }
 
 fn moves_dir() -> Option<PathBuf> {
@@ -68,6 +76,41 @@ impl App {
         let id = self.state.active;
         let label = self.state.label_of(id).unwrap_or_default();
         let snapshot = self.closed_snapshot(id);
+        let running: BTreeMap<String, (crate::state::sessions::AgentKind, u32, u64)> = self
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map(|tabs| {
+                tabs.tabs()
+                    .iter()
+                    .filter_map(|e| {
+                        let r = e.info.running?;
+                        Some((e.info.id.clone(), (r.kind, r.pid, r.started_epoch_secs)))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let statuses: BTreeMap<String, (String, Option<String>)> = self
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map(|tabs| {
+                tabs.tabs()
+                    .iter()
+                    .filter_map(|e| {
+                        let r = e.info.reported.as_ref()?;
+                        r.retired_reason.is_none().then(|| {
+                            (
+                                e.info.id.clone(),
+                                (r.status.name().to_string(), r.note.clone()),
+                            )
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut tokens = BTreeMap::new();
         for tab in &snapshot.project.tabs {
             let Some(t) = token() else { continue };
@@ -92,6 +135,8 @@ impl App {
             project: snapshot.project.clone(),
             tokens,
             claims,
+            statuses,
+            running,
         };
         let written = (|| -> anyhow::Result<PathBuf> {
             use std::io::Write as _;
@@ -177,6 +222,22 @@ impl App {
                     + 1;
             }
             self.state.scope_registry.push(claim);
+        }
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
+            for e in tabs.tabs_mut() {
+                if let Some(&(kind, pid, started_epoch_secs)) = moved.running.get(&e.info.id) {
+                    e.info.running = Some(crate::pane::RunningAgent {
+                        kind,
+                        pid,
+                        started_epoch_secs,
+                        backgrounded: false,
+                        on_shared_daemon: false,
+                    });
+                }
+            }
+        }
+        for (pane, (status, note)) in &moved.statuses {
+            self.carry_status(pane, status, note.clone());
         }
         // The move file goes only once this spyc's own session holds the
         // project: at every moment one of the two says where its jars belong,

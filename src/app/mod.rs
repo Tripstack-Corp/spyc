@@ -137,6 +137,7 @@ mod harpoon;
 mod image_gallery;
 pub mod image_ops;
 mod inventory_ops;
+mod jar_orphans;
 mod jump_default;
 mod key_dispatch;
 mod landing;

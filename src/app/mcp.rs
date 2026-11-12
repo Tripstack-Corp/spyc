@@ -696,6 +696,25 @@ impl App {
     /// `report_status`: record the report on its tab and apply it to the dot,
     /// unless the Codex question model or a live `waiting` holds it back, or
     /// it is the agent's own `waiting` sent before its turn has ended.
+    /// Jar spike: a moved tab's last report, given again in the spyc it moved
+    /// to, so an agent blocked before the move still needs you after it.
+    pub(super) fn carry_status(&mut self, pane_id: &str, status: &str, note: Option<String>) {
+        let said = self.apply_status_report(
+            Some(pane_id),
+            None,
+            StatusReport {
+                status: status.to_string(),
+                ttl_ms: None,
+                note,
+                session_id: None,
+                claude_home: None,
+                claude_credential: None,
+                hook_event: None,
+            },
+        );
+        crate::pane::jar_backend::trace(&format!("carry_status {pane_id} {status}: {said:?}"));
+    }
+
     fn apply_status_report(
         &mut self,
         pane_id: Option<&str>,

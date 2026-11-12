@@ -646,8 +646,38 @@ fn register(shared: &Shared, id: u64, role: Role, stream: UnixStream) -> anyhow:
     Ok(conn)
 }
 
+/// R26: the user at the other end of `stream`.
+#[cfg(target_os = "linux")]
+fn peer_uid(stream: &UnixStream) -> std::io::Result<u32> {
+    Ok(rustix::net::sockopt::socket_peercred(stream)?.uid.as_raw())
+}
+
+/// R26: the user at the other end of `stream`.
+#[cfg(target_os = "macos")]
+fn peer_uid(stream: &UnixStream) -> std::io::Result<u32> {
+    Ok(nix::unistd::getpeereid(stream)?.0.as_raw())
+}
+
+/// R26: no way to tell who connected, so nobody may.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn peer_uid(_stream: &UnixStream) -> std::io::Result<u32> {
+    Err(std::io::Error::other(
+        "no peer credentials on this platform",
+    ))
+}
+
+/// R26: whether the peer on `stream` is `uid`. One that can't be told is not.
+pub(crate) fn peer_is(stream: &UnixStream, uid: u32) -> bool {
+    peer_uid(stream).is_ok_and(|p| p == uid)
+}
+
 /// One new connection: its `hello`, then [`run_conn`].
 fn serve(shared: &Arc<Shared>, stream: UnixStream) {
+    // Another user's process is refused before a byte of it is read, whatever
+    // token it holds; the jar's directory being `0700` is the first fence.
+    if !peer_is(&stream, rustix::process::geteuid().as_raw()) {
+        return;
+    }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let mut read_half = match stream.try_clone() {
         Ok(s) => s,
@@ -1046,4 +1076,17 @@ fn collect(st: &State, seq: u64, from: u64, exit: Option<(i32, bool)>) -> (Vec<M
         frames.push(Msg::Exited { code, signaled });
     }
     (frames, (st.log.next_seq, at))
+}
+
+#[cfg(test)]
+mod peer_tests {
+    use super::*;
+
+    #[test]
+    fn a_peer_is_known_by_its_user() {
+        let (a, _b) = UnixStream::pair().expect("socketpair");
+        let me = rustix::process::geteuid().as_raw();
+        assert!(peer_is(&a, me), "this process's own socket is this user's");
+        assert!(!peer_is(&a, me.wrapping_add(1)), "and no other user's");
+    }
 }
