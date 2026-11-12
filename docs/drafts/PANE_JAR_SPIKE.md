@@ -1,8 +1,9 @@
 # Pane jar spike: upgrade spyc without killing its agents
 
-**Status:** scoped, not started
-([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)), revised after a
-design review. Its report replaces the "Findings" section stage by stage.
+**Status:** done
+([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)), and the protocol
+froze on 2026-11-12 ("The freeze", below). Its report is the "Findings"
+section, stage by stage.
 **Requirements:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md). This spike builds a
 minimal jar and measures it; it reports when a measurement contradicts a
 verdict there, and never changes the verdict itself.
@@ -891,6 +892,27 @@ items", below).
   pass the same way. The shell case wasn't shown there: the harness's
   stand-in agent isn't recognized in a Linux shell tab, so the sending spyc
   had nothing to carry.
+
+### The freeze
+
+The owner froze the protocol on 2026-11-12. Writing the spec down
+(`JAR_PROTOCOL.md` → "Version 1 on the wire") took three more things on
+`spike/jar-stage-2` (`9bec55f2`):
+
+- **The wire, pinned.** `tests/wire_v1.rs` holds one frame of every kind and
+  the sample handover blob as hex, and the encoder and decoder must match
+  them. Flagging `upgraded` critical, or flipping one flag in the blob, fails
+  it.
+- **A newer client is welcomed.** A version-1 jar refused any `hello` but
+  version 1, so a later spyc would have had to be refused and try again just
+  to learn the jar was old. The `hello` now names the highest version its
+  client speaks and the `welcome` the one the connection speaks. A test sends
+  a version-2 `hello` with capabilities after its token and owns the jar at
+  version 1; before the change the jar refused it.
+- **The parsers fuzzed again,** since the token changed the `hello` and the
+  blob after stage 3's runs. Three minutes each, with a 5-second limit on
+  any one input: 14.1 million frames and 18.3 million blobs, no crash and
+  none slow.
 
 ## Sources
 
