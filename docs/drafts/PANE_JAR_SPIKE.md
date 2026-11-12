@@ -746,33 +746,129 @@ its agents running, and their spyc tools follow them. Built on
 - **Not built:** moving the project's scope claims, which are dropped. Also
   untested: what the receiving spyc's attention roll-up shows.
 
+### Before the freeze
+
+**Recommendation: the protocol can freeze.** The owner decided J as proposed.
+Each gap stage 6 left is closed, and one it hadn't listed (R26) changed the
+`hello`. Built on `spike/jar-stage-2` (`c8f42f6f`).
+
+- **R26 had never been built.** Any process of the user could connect to any
+  jar as a reader and watch its screen, or send `Upgrade` and have the jar
+  `exec` a binary it named. Now:
+  - spyc makes 32 random bytes for each jar and hands them over on the jar's
+    standard input, never in argv or the environment; a jar given none refuses
+    to run;
+  - the owner and readers present the token in their `hello`, length-prefixed,
+    so capabilities can still follow it (R34);
+  - spyc keeps each token `0600` in its state directory (`jar-tokens/`), where
+    a spyc after a crash finds it;
+  - an upgrade needs the token, and the token crosses the upgrade in the
+    sealed blob.
+- **A release now changes the token (R22).** The token in `Release` becomes
+  the jar's own, and every reader that came in on the old one is closed. The
+  spyc a project left can't come back in. Stage 6's minute-long hold goes, and
+  so does its gap: the hold didn't survive an upgrade, and the token does.
+- **The proxy's credential: none (decision J, decided).** A new role,
+  **lookup**, may ask the jar to describe itself and ping, with no token;
+  anything else it sends is refused. What a jar describes is readable by the
+  user's processes already, and never includes the token.
+- **On macOS, an upgrade under load cut every connection (R33).** Running the
+  jar tests over and over failed upgrade tests in several runs of ten, on the
+  stage 3 code as well:
+  - At the new image's first read, every socket it was handed already read
+    end-of-file, though the jar process lived on.
+  - macOS flushes a unix socket whose every reference is in flight, as the
+    jar's connections are between the `exec` and the new image receiving
+    them, whenever its collector runs. Any unix socket closing anywhere on the
+    machine runs it while descriptors are in flight. As far as the
+    kernel's source reads, the collector starts only from sockets that were
+    once in flight themselves, so the socketpair that carries them, though it
+    is the new image's standard input, doesn't count as holding them; the
+    measurements below don't depend on that reading.
+  - With a loop closing socketpairs in the background, every upgrade test
+    failed (10 runs of 10); with the old image's copies inherited across the
+    `exec` instead, none did (0 of 10).
+  - Inherited copies would have to be closed by number in the new image, which
+    takes `unsafe` (decision E). So the new binary first runs as a **holder**
+    (`spyc-jar hold-handover`): it receives copies of the listener and every
+    connection, says so, and keeps them until the new image has its own and
+    ends it, or 30 s pass.
+  - With the holder: 0 failures in 10 runs under the same background loop,
+    and 0 in 20 full runs of the jar tests. A test that closes sockets through
+    three upgrades fails 5 runs of 5 without the holder. A warm upgrade takes
+    about 130 ms, 20 ms more than stage 3's.
+  - The validator's and the holder's command lines are part of what freezes:
+    an old jar runs the new binary's.
+- **Decision G is built** (`g.py`). A spyc stopped 12 s, past the 10 s
+  deadline, loses its jar's lease:
+  - with the jar free, `SIGCONT` takes it back, and the pane then holds what
+    the program printed meanwhile;
+  - with another owner holding the jar, the tab reads `[detached]`, and
+    closing it leaves the program running for the other owner.
+- **A lost jar says so.** After a `kill -9` of a pane's jar, the tab reads
+  `[jar lost]` rather than `[exited 1]` (`passing.py jar`).
+- **`$TMPDIR` cleanup (R32), answered by design rather than waited out.**
+  Every 2 s a jar checks that its socket's path is there, and binds a new
+  socket at it when it isn't. A test deletes a live jar's socket and its
+  directory: both are back within 5 s, the directory `0700`; a new connection
+  gets in; the connections already open are untouched.
+- **R18.** spyc writes `is`, `label`, `agent`, `project` and `project_home`
+  into each jar as it opens the tab. After a `kill -9` of spyc, `spyc --jars`
+  lists an orphaned tab as `zsh (other in work)` rather than by its launch
+  command (`r18.py`).
+- **Scope claims move with a project** (`scopes.py`). A tab registers a claim
+  through `spyc --mcp`; after `:detach project` the spyc it left lists none,
+  and the moved tab in the receiving spyc lists it (3 runs of 3). A claim keeps
+  its id unless the receiving spyc already uses that one.
+- **spyc's outer jar upgrades in place** (`shape2.py`). With a client
+  attached, `spyc-jar upgrade` to a binary never run before took 405 ms on
+  macOS and 142 ms on Linux, and what was typed afterwards reached spyc's tab.
+- **Everything above ran on Linux too** (`run-linux.sh`), the jar tests
+  included, with the same results; a lost jar's `[jar lost]` waited there for
+  spyc's next key.
+- **Also found:**
+  - spyc redraws after an outside `SIGCONT` only on its next input, with jars
+    or without. `g.py` sends a key it ignores. The owner deferred it, and the
+    Linux `[jar lost]` label that waits the same way.
+  - Two tests waited on a clock and now wait on state: an ownerless jar's
+    drop, and the stale-socket sweep. The sweep's dead socket answered
+    because a child another test forked held a copy of its listener until it
+    `exec`ed.
+  - The spike fails spyc's file-size, function-size, documentation and
+    fuzz-registration guards, as it has since stage 6. Production splits
+    those files and documents its commands.
+
 ### The passing checklist
 
-Against "Passing" above, after stage 6:
+Against "Passing" above, after the work before the freeze:
 
 | Check | Where it's shown | Platforms |
 |---|---|---|
 | An upgrade, across a pin bump too | Stage 2 (a crash then a build change, from the portable snapshot); stage 3 (the jar replaces its binary, under a Claude tab) | macOS and Linux; Claude on macOS |
 | `kill -9` of spyc | Stage 2: the same program, its state and screen | macOS and Linux |
-| A `SIGSTOP`ped spyc | Half: the deadline frees the lease (stage 2), but a resumed spyc doesn't take it back yet. Decision G is decided, unbuilt. | macOS and Linux |
-| `kill -9` of the jar | Its program ended at once, and spyc marked the tab `[exited 1]` and kept answering (`passing.py jar`). The tab should say its jar was lost, not give an exit code. | macOS |
+| A `SIGSTOP`ped spyc | The deadline frees the lease (stage 2); resumed, spyc takes its jar back, or marks the tab `[detached]` when another owner holds it (decision G, `g.py`) | macOS and Linux |
+| `kill -9` of the jar | Its program ended at once, and spyc marked the tab `[jar lost]` and kept answering (`passing.py jar`). On Linux the label waited for the next key. | macOS and Linux |
 | A resize during the gap | The jar logs it at its offset (stage 2); a reattach at another size repaints at that size (stage 2b) | macOS and Linux |
 | A terminal query during the gap | R15a's gate (stage 2) | macOS and Linux |
 | A firehose with the owner attached | Nothing lost (stage 2) | macOS and Linux |
 | Memory and snapshot CPU at 30 panes | Stage 2 and decision I | macOS and Linux |
 | Keychain and pasteboard after the terminal quits | Stage 2 | macOS |
-| A socket surviving `$TMPDIR` cleanup | **Unverified**: macOS removes old files there after days, which a short run can't show | — |
+| A socket surviving `$TMPDIR` cleanup | A jar whose socket and directory are deleted makes both again within 5 s, and new connections get in (R32). macOS's cleanup itself, days away, wasn't waited for. | macOS and Linux |
 | `get_spyc_context` afterwards, the agent not restarted | After a move (stage 6), and after `kill -9` of spyc and `spyc -r` (`passing.py mcp`) | macOS |
 
 Q8 (roles) wasn't run: decision D made them later.
 
+Every check passes on macOS and Linux except those only macOS has (Keychain,
+pasteboard) and the Claude ones, which ran on macOS.
+
 **Before the protocol freezes,** what the spike leaves:
-- decision G (a spyc that lost its lease takes it back);
-- the `$TMPDIR` check;
-- moving scope claims;
-- what R18 holds;
-- the credential a proxy needs to ask its jar;
-- an upgrade by `exec` of spyc's own outer jar (stage 2b).
+- R26's same-user check on the connecting peer, on top of the `0700`
+  directory;
+- the notice of orphaned jars at spyc's start that the linger decision asked
+  for;
+- what the receiving spyc's attention roll-up shows after a move.
+
+The first two change nothing on the wire; the last is spyc's alone.
 
 ## Sources
 
