@@ -50,12 +50,13 @@ def describe(sock):
 
 def ask_pid(t, label):
     t.send(f"Call the {tool} tool and reply with only pid= followed by its pid field, as in pid=NNN.".encode())
+    seen = len(re.findall(r"pid=(\d{3,7})\b", t.text()))
     t.pump(0.5); t.send(b"\r")
     end = time.monotonic() + 90
     while time.monotonic() < end:
         t.pump(0.5)
         m = re.findall(r"pid=(\d{3,7})\b", t.text())
-        if m:
+        if len(m) > seen:
             return int(m[-1])
     print(f"{label}: no pid answer; screen tail:", [l for l in t.text().splitlines() if l.strip()][-6:])
     return None
