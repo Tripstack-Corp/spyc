@@ -144,7 +144,11 @@ pub fn spawn(
 /// Take the jar at `socket` as its owner and stream its log from the oldest
 /// byte it still holds.
 pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
-    let (client, welcome) = Client::connect(socket, Role::Owner, Duration::from_secs(5))?;
+    // Stage 6: a jar handed to this spyc is held for the token that came with
+    // it (R22).
+    let claim = claims().remove(socket).unwrap_or_default();
+    let (client, welcome) =
+        Client::connect_claiming(socket, Role::Owner, Duration::from_secs(5), &claim)?;
     let Msg::Welcome {
         child_pid,
         base,
@@ -211,6 +215,15 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
     ));
     let replay_from = snapshot.as_ref().map_or(base, |s| s.offset.max(base));
     let (mut rx, tx) = client.split();
+    // R30a: tell the jar where this spyc's MCP socket is, so a pane's proxy
+    // and hooks can find their owner after a move, an upgrade or a crash.
+    if let Some(mcp) = crate::mcp::socket_path() {
+        let _ = tx.send(&Msg::SetInfo {
+            key: "owner_mcp".into(),
+            value: mcp.display().to_string(),
+        });
+    }
+    owned().insert(socket.to_path_buf(), tx.clone());
     tx.send(&Msg::Replay { from: replay_from })?;
     // Fit the jar to this pane. When the log has lost its oldest bytes the
     // replay can't rebuild the screen, so make the program repaint: a resize
@@ -623,6 +636,64 @@ fn sweep_once() {
             trace(&format!("sweep: {n} stale socket(s) removed"));
         }
     });
+}
+
+/// Stage 6: the jars this spyc owns, by socket, for handing them on.
+fn owned() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, Sender>> {
+    static OWNED: std::sync::OnceLock<Mutex<std::collections::HashMap<PathBuf, Sender>>> =
+        std::sync::OnceLock::new();
+    OWNED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Stage 6: the tokens jars handed to this spyc are held for, by socket.
+fn claims() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, Vec<u8>>> {
+    static CLAIMS: std::sync::OnceLock<Mutex<std::collections::HashMap<PathBuf, Vec<u8>>>> =
+        std::sync::OnceLock::new();
+    CLAIMS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The socket of pane `pane_id`'s jar.
+pub fn socket_for_pane(pane_id: &str) -> PathBuf {
+    socket_path(Some(pane_id))
+}
+
+/// Stage 6 (R22): hand pane `pane_id`'s jar on, held for `token`. `false`
+/// when this spyc doesn't own a jar for it.
+pub fn release(pane_id: &str, token: &[u8]) -> bool {
+    let socket = socket_for_pane(pane_id);
+    let Some(tx) = owned().remove(&socket) else {
+        return false;
+    };
+    tx.send(&Msg::Release {
+        token: token.to_vec(),
+    })
+    .is_ok()
+}
+
+/// Stage 6: the token pane `pane_id`'s jar was handed to this spyc with, for
+/// its tab's adoption to present.
+pub fn expect_claim(pane_id: &str, token: Vec<u8>) {
+    claims().insert(socket_for_pane(pane_id), token);
+}
+
+/// R30a: where pane `pane_id`'s owner's MCP socket is, as its jar says;
+/// `None` while it has no owner, or no jar answers.
+pub fn owner_mcp(pane_id: &str) -> Option<PathBuf> {
+    let socket = socket_for_pane(pane_id);
+    if socket_state(&socket) != SocketState::Live {
+        return None;
+    }
+    spyc_jar::client::describe(&socket)
+        .ok()?
+        .into_iter()
+        .find(|(k, v)| k == "owner_mcp" && !v.is_empty())
+        .map(|(_, v)| PathBuf::from(v))
 }
 
 /// `spyc --jars`: every jar in this user's jar directory, as each describes

@@ -156,7 +156,15 @@ pub(crate) struct State {
     pub(crate) fg: u32,
     /// Whether any owner has connected yet.
     pub(crate) had_owner: bool,
+    /// R22: the token a released jar is held for, and until when.
+    pub(crate) reserved: Option<(Vec<u8>, Instant)>,
+    /// R18: the owner's key/value store.
+    pub(crate) info: Vec<(String, String)>,
 }
+
+/// How long a released jar waits for its named successor before any owner
+/// may take it.
+const SUCCESSOR_WAIT: Duration = Duration::from_secs(60);
 
 /// What a connection is, apart from its socket: enough to resume it.
 pub(crate) struct ConnState {
@@ -268,6 +276,8 @@ pub fn run(cfg: Config, listener: UnixListener) -> anyhow::Result<()> {
         ownerless_since: Some(Instant::now()),
         fg: 0,
         had_owner: false,
+        reserved: None,
+        info: Vec::new(),
     };
     start(cfg, state, child_pid, master, listener, Vec::new())
 }
@@ -511,7 +521,12 @@ fn describe(shared: &Shared) -> Vec<(String, String)> {
     if let Some((code, signaled)) = st.exit {
         f.push(("exit", if signaled { "signal".into() } else { code.to_string() }));
     }
-    f.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    if st.reserved.as_ref().is_some_and(|(_, until)| Instant::now() < *until) {
+        f.push(("held", "for the spyc it was handed to".into()));
+    }
+    let mut f: Vec<(String, String)> = f.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    f.extend(st.info.iter().cloned());
+    f
 }
 
 fn send_on(out: &Mutex<UnixStream>, msg: &Msg) -> std::io::Result<()> {
@@ -544,7 +559,12 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         let mut s = &stream;
         let _ = proto::write_msg(&mut s, &Msg::Refused { why });
     };
-    let Ok(Some(Msg::Hello { version, role })) = proto::read_msg(&mut read_half) else {
+    let Ok(Some(Msg::Hello {
+        version,
+        role,
+        claim,
+    })) = proto::read_msg(&mut read_half)
+    else {
         refuse("expected a hello".into());
         return;
     };
@@ -556,6 +576,16 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
     if role == Role::Owner && st.owner.is_some() {
         drop(st);
         refuse("the jar already has an owner".into());
+        return;
+    }
+    if role == Role::Owner
+        && let Some((token, until)) = st.reserved.take()
+        && Instant::now() < until
+        && token != claim
+    {
+        st.reserved = Some((token, until));
+        drop(st);
+        refuse("the jar is held for the spyc it was handed to".into());
         return;
     }
     let id = st.next_conn;
@@ -667,6 +697,20 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
                 let _ = send(&Msg::Snapshot(None));
             }
             Msg::Upgrade { binary } => crate::upgrade::begin(shared, Arc::clone(&conn.out), binary),
+            Msg::Release { token } if owner => {
+                let mut st = shared.lock();
+                st.reserved = Some((token, Instant::now() + SUCCESSOR_WAIT));
+                drop(st);
+                // Nothing this connection sends after its release may act on
+                // the jar: whatever follows, a `Kill` from its tab closing
+                // among them, is never read.
+                break;
+            }
+            Msg::SetInfo { key, value } if owner => {
+                let mut st = shared.lock();
+                st.info.retain(|(k, _)| *k != key);
+                st.info.push((key, value));
+            }
             Msg::Describe => {
                 let _ = send(&Msg::Description {
                     fields: describe(shared),
@@ -760,6 +804,7 @@ fn release(shared: &Shared, id: u64) {
     if st.owner == Some(id) {
         st.owner = None;
         st.ownerless_since = Some(Instant::now());
+        st.info.retain(|(k, _)| k != "owner_mcp");
     }
     shared.cv.notify_all();
     shared.park_cv.notify_all();

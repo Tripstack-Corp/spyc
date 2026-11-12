@@ -128,6 +128,11 @@ pub(crate) fn encode_parts(cfg: &Config, child_pid: u32, st: &State, conns: &[Co
     put_opt_u64(&mut w, st.ownerless_since.map(|t| millis(t.elapsed())));
     put_u32(&mut w, st.fg);
     w.push(u8::from(st.had_owner));
+    put_u32(&mut w, u32::try_from(st.info.len()).unwrap_or(u32::MAX));
+    for (k, v) in &st.info {
+        put_bytes(&mut w, k.as_bytes());
+        put_bytes(&mut w, v.as_bytes());
+    }
 
     put_u32(&mut w, u32::try_from(conns.len()).unwrap_or(u32::MAX));
     for c in conns {
@@ -255,6 +260,10 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     let ownerless = r.opt_u64()?;
     let fg = r.u32()?;
     let had_owner = r.flag()?;
+    let n_info = r.count(8)?;
+    let info = (0..n_info)
+        .map(|_| Ok((r.string()?, r.string()?)))
+        .collect::<Result<Vec<_>, Invalid>>()?;
 
     let n_conns = r.count(15)?;
     if n_conns > MAX_CONNS {
@@ -336,6 +345,9 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
         ownerless_since: ownerless.map(|ms| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now)),
         fg,
         had_owner,
+        // A release's reservation doesn't cross an upgrade: a spike gap.
+        reserved: None,
+        info,
     };
     Ok(Handover {
         cfg,
@@ -489,6 +501,8 @@ pub fn sample_blob() -> Vec<u8> {
         ownerless_since: None,
         fg: 4242,
         had_owner: true,
+        reserved: None,
+        info: vec![("owner_mcp".into(), "/tmp/spyc/mcp.sock".into())],
     };
     let conns = vec![
         ConnState {

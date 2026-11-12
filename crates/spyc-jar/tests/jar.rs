@@ -647,3 +647,46 @@ fn a_jar_describes_itself_and_keeps_its_identity_across_an_upgrade() {
     }
     assert!(field(&after, "jar").ends_with("jar-next"));
 }
+
+// Stage 6: a jar handed to a named successor (R22), and where its owner's MCP
+// socket is (R18, R30a).
+
+#[test]
+fn a_released_jar_waits_for_its_named_successor() {
+    let mut jar = Jar::start(&[], &sh("sleep 1000"));
+    let first = jar.connect(Role::Owner);
+    first
+        .send(&Msg::SetInfo {
+            key: "owner_mcp".into(),
+            value: "/tmp/spyc/a.sock".into(),
+        })
+        .expect("set info");
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(field(&spyc_jar::client::describe(&jar.socket).expect("describe"), "owner_mcp"), "/tmp/spyc/a.sock");
+
+    // The release, then the Kill a closing tab sends, on the same connection.
+    first.send(&Msg::Release { token: b"secret".to_vec() }).expect("release");
+    let _ = first.send(&Msg::Signal {
+        signal: spyc_jar::proto::JarSignal::Kill as i32,
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let pid = jar.program.and_then(|p| i32::try_from(p).ok()).and_then(rustix::process::Pid::from_raw).expect("pid");
+    assert!(rustix::process::test_kill_process(pid).is_ok(), "the Kill after a release never acts");
+    let held = spyc_jar::client::describe(&jar.socket).expect("describe");
+    assert_eq!(field(&held, "owner_mcp"), "", "the old owner's socket is forgotten");
+    assert!(!field(&held, "held").is_empty());
+
+    let refused = Client::connect(&jar.socket, Role::Owner, WAIT);
+    assert!(refused.is_err_and(|e| e.to_string().contains("held for")), "no token, no jar");
+    let wrong = Client::connect_claiming(&jar.socket, Role::Owner, WAIT, b"guess");
+    assert!(wrong.is_err(), "the wrong token, no jar");
+    let (next, welcome) = Client::connect_claiming(&jar.socket, Role::Owner, WAIT, b"secret").expect("successor");
+    assert!(matches!(welcome, Msg::Welcome { .. }));
+    next.send(&Msg::SetInfo {
+        key: "owner_mcp".into(),
+        value: "/tmp/spyc/b.sock".into(),
+    })
+    .expect("set info");
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(field(&spyc_jar::client::describe(&jar.socket).expect("describe"), "owner_mcp"), "/tmp/spyc/b.sock");
+}

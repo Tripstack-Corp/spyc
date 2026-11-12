@@ -65,6 +65,10 @@ pub enum Msg {
     Hello {
         version: u16,
         role: Role,
+        /// Stage 6 (R22): the token a released jar is held for, presented by
+        /// its named successor. Empty for none. It follows the fields version
+        /// 1 defines, which a version 1 jar reads and ignores what follows.
+        claim: Vec<u8>,
     },
     Input {
         bytes: Vec<u8>,
@@ -159,6 +163,19 @@ pub enum Msg {
     },
     /// R31: ask the jar to describe itself. Any role may.
     Describe,
+    /// Stage 6 (R22): the owner hands the jar on. The jar ends this
+    /// connection and holds the owner's lease for whoever presents `token`
+    /// in its `hello`, for a minute.
+    Release {
+        token: Vec<u8>,
+    },
+    /// R18: one entry in the jar's key/value store, which the owner writes.
+    /// `owner_mcp` is where the owner's MCP socket is (R30a); the jar forgets
+    /// it when the owner goes.
+    SetInfo {
+        key: String,
+        value: String,
+    },
     /// The jar's answer: `key`, `value` pairs, so a newer jar can add keys an
     /// older client shows without understanding.
     Description {
@@ -208,6 +225,8 @@ const ACK_EXIT: u8 = 10;
 const REPLY: u8 = 11;
 const UPGRADE: u8 = 12;
 const DESCRIBE: u8 = 13;
+const RELEASE: u8 = 14;
+const SET_INFO: u8 = 15;
 const WELCOME: u8 = 64;
 const OUTPUT: u8 = 65;
 const RESIZED: u8 = 66;
@@ -226,10 +245,25 @@ const DESCRIPTION: u8 = 75;
 fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
     let mut p = Vec::new();
     let kind = match msg {
-        Msg::Hello { version, role } => {
+        Msg::Hello {
+            version,
+            role,
+            claim,
+        } => {
             p.extend(version.to_be_bytes());
             p.push(*role as u8);
+            p.extend(claim);
             HELLO
+        }
+        Msg::Release { token } => {
+            p.extend(token);
+            RELEASE
+        }
+        Msg::SetInfo { key, value } => {
+            p.extend(u32::try_from(key.len()).unwrap_or(u32::MAX).to_be_bytes());
+            p.extend(key.as_bytes());
+            p.extend(value.as_bytes());
+            SET_INFO
         }
         Msg::Input { bytes } => {
             p.extend(bytes);
@@ -410,7 +444,23 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
                 2 => Role::Reader,
                 _ => return Err(ReadError::Malformed("unknown role")),
             };
-            Msg::Hello { version, role }
+            Msg::Hello {
+                version,
+                role,
+                claim: c.rest(),
+            }
+        }
+        RELEASE => Msg::Release { token: c.rest() },
+        SET_INFO => {
+            let n = c.u32()? as usize;
+            if n > c.0.len() {
+                return Err(ReadError::Malformed("info key"));
+            }
+            let (k, v) = c.0.split_at(n);
+            Msg::SetInfo {
+                key: String::from_utf8_lossy(k).into_owned(),
+                value: String::from_utf8_lossy(v).into_owned(),
+            }
         }
         INPUT => Msg::Input { bytes: c.rest() },
         REPLY => Msg::Reply { bytes: c.rest() },
@@ -550,10 +600,19 @@ mod tests {
             Msg::Hello {
                 version: VERSION,
                 role: Role::Owner,
+                claim: Vec::new(),
             },
             Msg::Hello {
                 version: VERSION,
                 role: Role::Reader,
+                claim: b"token".to_vec(),
+            },
+            Msg::Release {
+                token: b"token".to_vec(),
+            },
+            Msg::SetInfo {
+                key: "owner_mcp".into(),
+                value: "/tmp/spyc/mcp.sock".into(),
             },
             Msg::Input {
                 bytes: b"\x1b[A".to_vec(),

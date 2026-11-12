@@ -20,6 +20,17 @@ impl Client {
     /// so a jar still starting is waited for. Returns the jar's `Welcome`, or
     /// its refusal as an error.
     pub fn connect(socket: &Path, role: Role, wait: Duration) -> anyhow::Result<(Self, Msg)> {
+        Self::connect_claiming(socket, role, wait, &[])
+    }
+
+    /// [`Client::connect`] presenting `claim`, the token a released jar is
+    /// held for (R22).
+    pub fn connect_claiming(
+        socket: &Path,
+        role: Role,
+        wait: Duration,
+        claim: &[u8],
+    ) -> anyhow::Result<(Self, Msg)> {
         let until = Instant::now() + wait;
         let stream = loop {
             match UnixStream::connect(socket) {
@@ -38,6 +49,7 @@ impl Client {
         client.send(&Msg::Hello {
             version: proto::VERSION,
             role,
+            claim: claim.to_vec(),
         })?;
         match client.recv(Duration::from_secs(5))? {
             Some(w @ Msg::Welcome { .. }) => Ok((client, w)),
