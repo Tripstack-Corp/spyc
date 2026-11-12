@@ -164,7 +164,7 @@ in the output.
 | R17c | The portable form is the formatter's emit **plus what its extras don't carry:** the primary screen and its history under a full-screen program (the formatter writes only the screen showing), soft wraps (an unwrapped emit, so the restoring engine wraps again), the saved cursor (DECSC), a cursor shape other than the default, and the title. It is checked against the binary form as a control, case by case | v1 | Measured on the spike (`PANE_JAR_SPIKE.md` → "Decision I: what a portable snapshot costs and loses"): with these, 24 of 26 cases come back exact. The two that don't are kitty keyboard flags below the top of their stack and DECSCA protection, and spyc reads neither. | U1, U11 |
 | R17d | Panes **take turns snapshotting:** a few at a time, not every pane at once | v1 | Thirty full panes snapshotting together held each pane's lock for 46 to 62 ms against 6 ms alone, enough to drop a frame. The spike lets two run at once. | all |
 | R17e | **A snapshot every five seconds while output flows,** as well as after a second of quiet | v1 | Decided by the owner after stage 4. Through a long stream the snapshot under a gap (R12c) would otherwise predate the stream, losing its start and any mode it changed. Each costs the pane's lock about 6 ms; the spike showed none during a 14-second stream without it, and one every five seconds with it. | U2 |
-| R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. | U2, U10, U12 |
+| R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. Stage 6 found it needed for a jar no session describes: `spyc --jars` can show only its launch command. The owner should write the tab's label, agent kind and project. | U2, U10, U12 |
 | R19 | Keep all of it in memory, never on disk, except in `spill` mode. An upgrade's blob is sealed (AES-256-GCM, a fresh key that travels with the descriptors), so where it has to touch a file only ciphertext does | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). The seal is the owner's choice for macOS, which has no `memfd`; the spike seals on every platform. AES rather than ChaCha20-Poly1305 because it is FIPS-approved, at the company security manager's suggestion: for one key used once, the two are equally safe. | all |
 
 ### Connections
@@ -173,7 +173,7 @@ in the output.
 |---|---|---|---|---|
 | R20 | Roles in the `hello`: **owner**, **keyboard**, **reader** ([below](#who-may-connect)) | the field, the owner and a read-only reader v1; the keyboard later | The role field has to exist from the first byte. A reader that only watches and describes is v1 because `spyc --jars` and an upgrade request already use it (decision D). | U5, U6, U7 |
 | R21 | The owner's lease ends when its connection drops **or** it misses a liveness deadline | v1 | A dead process closes its socket, but a hung or `SIGSTOP`ped spyc doesn't, and neither does a forwarded socket whose far end vanished. | U2, U4 |
-| R22 | The owner hands its lease to a named successor | v1 | An upgrade is a handover, not a race. | U1 |
+| R22 | The owner hands its lease to a named successor | v1 | An upgrade is a handover, not a race. Built in stage 6: `Release` ends the owner's connection, so nothing it sends afterwards acts (a closing tab's `Kill` among them), and the jar is held for a minute for the `hello` that presents the token. | U1 |
 | R23 | Taking over: a connection asks for the owner's lease; the current owner is told and drops to reader | later | Decision D. | U5 |
 | R24 | The keyboard lease: taken by the first input frame when free, kept while input keeps coming, freed after an idle gap the owner sets | later | Decision D. | U7 |
 | R25 | A label on every connection | later | Decision D. | U7 |
@@ -192,7 +192,7 @@ in the output.
 | | Requirement | Verdict | Why | For |
 |---|---|---|---|---|
 | R30 | **An instance id** for every spyc, naming its MCP socket (`spyc/<instance>/mcp.sock`). **A jar id** for every jar, naming its socket in one directory per user (`spyc/jars/<jar-id>.sock`), not under the instance that spawned it. Both under `$XDG_RUNTIME_DIR` (`$TMPDIR` on macOS), `0700`, within the 104-byte path limit. | v1 | The MCP socket keyed by PID today is what strands agents on an upgrade. A jar can change owner, even to another spyc instance when its project moves (U13), so its name can't belong to the instance that spawned it. | U1, U2, U13 |
-| R30a | **The jar records its owner's MCP socket,** and a pane's MCP proxy asks its own jar where to reconnect | v1 | The jar is the one rendezvous that outlives every spyc. A proxy that finds its owner through its jar follows an upgrade, a crash and a project move alike, without being told the new path. Which credential the proxy needs to ask is open ([threat model](#threat-model)). | U1, U2, U13 |
+| R30a | **The jar records its owner's MCP socket,** and a pane's MCP proxy asks its own jar where to reconnect | v1 | The jar is the one rendezvous that outlives every spyc. A proxy that finds its owner through its jar follows an upgrade, a crash and a project move alike, without being told the new path. Which credential the proxy needs to ask is open ([threat model](#threat-model)). Built in stage 6 for the MCP proxy and the status hooks: after a project moved, and after a `kill -9` of spyc and `spyc -r`, a Claude tab's spyc tools answered from the new spyc without the agent restarting. Today any connection of the same user can read the socket's path. | U1, U2, U13 |
 | R31 | A jar describes itself: id, instance, created time, jar version, child PID, overflow mode, linger policy | v1 | `spyc --jars` lists them, and a spyc after a crash finds them. Built in stage 4 as `key`, `value` pairs, so a newer jar adds keys an older spyc can still show; its instance and start time survive an upgrade. | U2, U10 |
 | R32 | A stale socket (its jar gone) is recognized and removed | v1 | A crash of the jar itself mustn't leave a path that looks alive. | U2 |
 | R32a | **A linger policy per pane:** how long the jar keeps its program running with no owner: until an owner returns, for a set time, or not at all | v1 | With decision B, no owner means a crash. Each pane says whether its program should wait for a new spyc or end with the old one. Built in stage 4: at the end of its linger the program gets `SIGHUP`, as from a closed terminal, then `SIGKILL` two seconds later. A jar with a finite linger gives its first owner ten seconds to connect. | U2 |
@@ -401,9 +401,12 @@ keeps per project. Three things follow:
   afterwards. A proxy that asks its own jar where its owner is now (R30a)
   follows a move with no new mechanism, and the same lookup serves an upgrade
   and a crash.
-- **The project's scope claims and its attention roll-up move with it.** Open:
-  whether the handover is all or nothing, and what a half-moved project looks
-  like when the receiving spyc dies partway.
+- **The project's scope claims and its attention roll-up move with it.**
+- **Stage 6 settled how a move survives a receiving spyc that dies partway.**
+  The handover is per jar, and the project is never described nowhere. A move
+  file keeps the project and its jars' tokens until the receiving spyc's own
+  session is saved. Whenever that spyc dies, either the move file or its
+  session says where the jars belong.
 
 **Forking a project (U14).** A copy of the project's working set (columns,
 picks, inventory, tabs), with each agent tab's conversation forked as `^a F`
