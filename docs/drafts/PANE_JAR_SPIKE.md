@@ -709,6 +709,71 @@ start time survive an upgrade. `spyc-jar describe SOCKET` prints one jar, and
   returns" and a capture a short one; the spike's knob is
   `SPYC_JAR_LINGER_MS`.
 
+### Stage 6: a project moves between spycs
+
+**Recommendation: go.** A project moves from one running spyc to another with
+its agents running, and their spyc tools follow them. Built on
+`spike/jar-stage-2` (`7d0b42f1`, `e63d3a83`).
+
+- **`:detach project`** hands each of the project's jars on (R22):
+  - the jar is held for a token, and A's connection to it ends;
+  - the project and its tokens go into a move file in spyc's state directory;
+  - A's MCP server stops answering the project's agents, closing a moved
+    pane's connection at its next request, unanswered;
+  - the project leaves A without its programs being signalled.
+- **`:attach project`** in another spyc opens the newest move:
+  - each tab presents its jar's token as it adopts the jar;
+  - the jar records the new owner's MCP socket.
+- **An agent's MCP proxy and its status hook ask the pane's jar** where its
+  owner is now (R30a). The proxy reconnects there, replays `initialize`, and
+  sends the request again.
+
+| | Result (macOS, `spikes/jar-stage-2/q11.py`) |
+|---|---|
+| A Claude tab, mid-turn, moved from spyc A to spyc B | The same jar and the same Claude; the turn finished on B's screen. B owned the jar 0.1 s after `:attach project`. A ran on with its other project. |
+| Claude's spyc tools | Before the move `get_spyc_context` answered with A's pid; after it, with B's, and the agent never restarted. A closed the moved pane's connection, and the proxy followed the jar to B. |
+| The receiving spyc killed before it claims the jars | The move file and the jars' holds survive; another spyc's `:attach project` took the project. |
+| Killed after it attached | Its saved session holds the project: `spyc -r` from that session took the jars back. Without the change below, nothing described the project, and its jars were left with no owner. |
+
+- **The move file goes only once the receiving spyc's session is saved.**
+  The first version removed it as soon as the project opened, so a spyc that
+  died a second later left jars nothing described. Now at every moment one of
+  the two says where they belong.
+- **A tab's close signals its program directly.** `PtyHost` sends `SIGTERM`,
+  then `SIGKILL`, to the program's process group, not through the jar. A
+  detach has to skip that for a released jar, or the leaving spyc kills the
+  agent it just handed on.
+- **Not built:** moving the project's scope claims, which are dropped. Also
+  untested: what the receiving spyc's attention roll-up shows.
+
+### The passing checklist
+
+Against "Passing" above, after stage 6:
+
+| Check | Where it's shown | Platforms |
+|---|---|---|
+| An upgrade, across a pin bump too | Stage 2 (a crash then a build change, from the portable snapshot); stage 3 (the jar replaces its binary, under a Claude tab) | macOS and Linux; Claude on macOS |
+| `kill -9` of spyc | Stage 2: the same program, its state and screen | macOS and Linux |
+| A `SIGSTOP`ped spyc | Half: the deadline frees the lease (stage 2), but a resumed spyc doesn't take it back yet. Decision G is decided, unbuilt. | macOS and Linux |
+| `kill -9` of the jar | Its program ended at once, and spyc marked the tab `[exited 1]` and kept answering (`passing.py jar`). The tab should say its jar was lost, not give an exit code. | macOS |
+| A resize during the gap | The jar logs it at its offset (stage 2); a reattach at another size repaints at that size (stage 2b) | macOS and Linux |
+| A terminal query during the gap | R15a's gate (stage 2) | macOS and Linux |
+| A firehose with the owner attached | Nothing lost (stage 2) | macOS and Linux |
+| Memory and snapshot CPU at 30 panes | Stage 2 and decision I | macOS and Linux |
+| Keychain and pasteboard after the terminal quits | Stage 2 | macOS |
+| A socket surviving `$TMPDIR` cleanup | **Unverified**: macOS removes old files there after days, which a short run can't show | — |
+| `get_spyc_context` afterwards, the agent not restarted | After a move (stage 6), and after `kill -9` of spyc and `spyc -r` (`passing.py mcp`) | macOS |
+
+Q8 (roles) wasn't run: decision D made them later.
+
+**Before the protocol freezes,** what the spike leaves:
+- decision G (a spyc that lost its lease takes it back);
+- the `$TMPDIR` check;
+- moving scope claims;
+- what R18 holds;
+- the credential a proxy needs to ask its jar;
+- an upgrade by `exec` of spyc's own outer jar (stage 2b).
+
 ## Sources
 
 - [zmx: session persistence for terminal processes](https://erock.prose.sh/zmx-session-persistence)
