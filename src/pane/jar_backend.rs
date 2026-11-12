@@ -223,7 +223,7 @@ pub fn attach(socket: &Path, rows: u16, cols: u16) -> anyhow::Result<Jarred> {
             value: mcp.display().to_string(),
         });
     }
-    owned().insert(socket.to_path_buf(), tx.clone());
+    owned().insert(socket.to_path_buf(), (tx.clone(), child_pid));
     tx.send(&Msg::Replay { from: replay_from })?;
     // Fit the jar to this pane. When the log has lost its oldest bytes the
     // replay can't rebuild the screen, so make the program repaint: a resize
@@ -639,8 +639,8 @@ fn sweep_once() {
 }
 
 /// Stage 6: the jars this spyc owns, by socket, for handing them on.
-fn owned() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, Sender>> {
-    static OWNED: std::sync::OnceLock<Mutex<std::collections::HashMap<PathBuf, Sender>>> =
+fn owned() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, (Sender, u32)>> {
+    static OWNED: std::sync::OnceLock<Mutex<std::collections::HashMap<PathBuf, (Sender, u32)>>> =
         std::sync::OnceLock::new();
     OWNED
         .get_or_init(Default::default)
@@ -667,13 +667,29 @@ pub fn socket_for_pane(pane_id: &str) -> PathBuf {
 /// when this spyc doesn't own a jar for it.
 pub fn release(pane_id: &str, token: &[u8]) -> bool {
     let socket = socket_for_pane(pane_id);
-    let Some(tx) = owned().remove(&socket) else {
+    let Some((tx, pid)) = owned().remove(&socket) else {
         return false;
     };
+    released().insert(pid);
     tx.send(&Msg::Release {
         token: token.to_vec(),
     })
     .is_ok()
+}
+
+/// Whether the program `pid` runs in a jar this spyc handed on: closing its
+/// tab here mustn't signal it, as closing a tab otherwise does.
+pub fn is_released(pid: u32) -> bool {
+    released().contains(&pid)
+}
+
+fn released() -> std::sync::MutexGuard<'static, std::collections::HashSet<u32>> {
+    static RELEASED: std::sync::OnceLock<Mutex<std::collections::HashSet<u32>>> =
+        std::sync::OnceLock::new();
+    RELEASED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Stage 6: the token pane `pane_id`'s jar was handed to this spyc with, for

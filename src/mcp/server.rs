@@ -287,6 +287,45 @@ pub(super) fn inert_reply(msg: &str) -> Option<Value> {
     Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
 }
 
+/// Stage 6 (R30a): the spyc that owns pane `pane_id` now, as its jar says,
+/// connected and bound again by replaying `binding`, the `initialize` and
+/// `initialized` this session began with. Waits up to a minute, the time a
+/// moved project or a restarted spyc may take to adopt the pane's jar.
+fn relocate(
+    pane_id: Option<&str>,
+    binding: &[String],
+    io_timeout: std::time::Duration,
+) -> Option<(UnixStream, io::BufReader<UnixStream>)> {
+    let pane_id = pane_id.filter(|p| !p.is_empty())?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        if let Some(path) = crate::pane::jar_backend::owner_mcp(pane_id)
+            && let Ok(stream) = UnixStream::connect(&path)
+        {
+            let _ = stream.set_read_timeout(Some(io_timeout));
+            let _ = stream.set_write_timeout(Some(io_timeout));
+            let mut reader = io::BufReader::new(stream.try_clone().ok()?);
+            let mut writer = stream;
+            for msg in binding {
+                send_message(&mut writer, msg).ok()?;
+                let is_request = serde_json::from_str::<Value>(msg)
+                    .ok()
+                    .is_some_and(|v| v.get("id").is_some());
+                if is_request {
+                    read_lsp_message(&mut reader).ok()?;
+                }
+            }
+            mcp_log(&format!("proxy: pane moved; now proxying to {}", path.display()));
+            return Some((writer, reader));
+        }
+        if std::time::Instant::now() >= until {
+            mcp_log("proxy: pane's jar named no owner within a minute");
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
 /// `msg` with this proxy's `pane_id` and `cwd` under `params._meta` when it is
 /// an `initialize` request, so the server can bind the connection to its pane,
 /// or with no pane to the project holding its cwd (#99). Anything else, or
@@ -369,6 +408,9 @@ pub(super) fn proxy_io(
     let mut sock_reader = io::BufReader::new(sock_clone);
     let mut sock_writer = stream;
     mcp_log("proxy: ready, waiting for stdin");
+    // Stage 6 (R30a): what bound this session, replayed to the spyc it moves
+    // to.
+    let mut binding: Vec<String> = Vec::new();
 
     loop {
         // Read a JSON-RPC message from stdin. Claude Code uses newline-
@@ -408,15 +450,36 @@ pub(super) fn proxy_io(
         let parsed = serde_json::from_str::<Value>(msg).ok();
         let is_request = parsed.as_ref().is_none_or(|v| v.get("id").is_some()); // assume request if parse fails
 
-        // Forward to socket (Content-Length framed for the socket server).
-        send_message(&mut sock_writer, msg)?;
-
-        // Only read a response for requests (notifications get no reply).
+        let method = parsed.as_ref().and_then(|v| v["method"].as_str()).unwrap_or("");
+        if matches!(method, "initialize" | "notifications/initialized") {
+            binding.push(msg.to_owned());
+        }
+        let wait = super::deadline::proxy_wait(parsed.as_ref().unwrap_or(&Value::Null), io_timeout);
+        let mut relocated = false;
+        let outcome = loop {
+            // Forward to socket (Content-Length framed for the socket server),
+            // and read a response only for a request: notifications get none.
+            let got = send_message(&mut sock_writer, msg).and_then(|()| {
+                if !is_request {
+                    return Ok(None);
+                }
+                let _ = sock_reader.get_ref().set_read_timeout(Some(wait));
+                read_lsp_message(&mut sock_reader).map(Some)
+            });
+            match got {
+                Err(_) if !relocated => {
+                    let Some((w, r)) = relocate(pane_id, &binding[..binding.len().saturating_sub(usize::from(matches!(method, "initialize" | "notifications/initialized")))], io_timeout) else {
+                        break got;
+                    };
+                    sock_writer = w;
+                    sock_reader = r;
+                    relocated = true;
+                }
+                other => break other,
+            }
+        };
         if is_request {
-            let wait =
-                super::deadline::proxy_wait(parsed.as_ref().unwrap_or(&Value::Null), io_timeout);
-            let _ = sock_reader.get_ref().set_read_timeout(Some(wait));
-            let response = match read_lsp_message(&mut sock_reader) {
+            let response = match outcome.map(Option::unwrap_or_default) {
                 Ok(r) => r,
                 Err(e) => {
                     // Timeout or socket error waiting for the server. Reply to
@@ -618,6 +681,13 @@ fn serve_connection(
                 break;
             }
         };
+        // Stage 6: a pane this spyc handed to another isn't answered for; its
+        // connection closes unanswered, and the proxy finds the new owner
+        // through the pane's jar and asks again there (R30a).
+        if caller.pane_id().is_some_and(super::is_moved) {
+            mcp_log("socket: closing a moved pane's connection");
+            break;
+        }
         dispatch_for(writer, &msg, ctx_path, Some(cmd_tx), caller)?;
     }
     Ok(())

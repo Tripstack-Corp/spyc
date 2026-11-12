@@ -199,6 +199,26 @@ pub(super) fn cmd_date(app: &mut App, _args: &str) -> Vec<Effect> {
 
 /// `:about` — open the about page (`docs/ABOUT.md`, bundled) in the pager.
 /// Same target as the `Space a` binding.
+/// Jar spike, stage 6: `:detach project`.
+pub(super) fn cmd_detach(app: &mut App, args: &str) -> Vec<Effect> {
+    if args.trim() == "project" {
+        app.detach_project();
+    } else {
+        app.state.flash_error("usage: :detach project");
+    }
+    Vec::new()
+}
+
+/// Jar spike, stage 6: `:attach project`.
+pub(super) fn cmd_attach(app: &mut App, args: &str) -> Vec<Effect> {
+    if args.trim() == "project" {
+        app.attach_project();
+    } else {
+        app.state.flash_error("usage: :attach project");
+    }
+    Vec::new()
+}
+
 pub(super) fn cmd_about(app: &mut App, _args: &str) -> Vec<Effect> {
     let _ = app.apply(&Action::About);
     Vec::new()

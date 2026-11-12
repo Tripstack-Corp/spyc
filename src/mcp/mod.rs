@@ -262,6 +262,15 @@ fn report_stream(env_sock: &str, pane_id: Option<&str>, cwd: &Path) -> Option<Un
     if env_sock.is_empty() {
         return None;
     }
+    // Stage 6 (R30a): the pane's jar knows its owner now, which a move, an
+    // upgrade or a crash may have changed since the agent's env was set.
+    if let Some(stream) = pane_id
+        .filter(|id| !id.is_empty())
+        .and_then(crate::pane::jar_backend::owner_mcp)
+        .and_then(|path| UnixStream::connect(path).ok())
+    {
+        return Some(stream);
+    }
     UnixStream::connect(env_sock).ok().or_else(|| {
         pane_id
             .is_some_and(|id| !id.is_empty())
@@ -475,6 +484,25 @@ fn claude_environment(
         trace_log(&format!("report-status: credential={}", credential.label()));
     }
     (home, credential)
+}
+
+/// Stage 6: the panes this spyc handed to another spyc. Their MCP connections
+/// close at their next request instead of being answered here.
+pub fn mark_moved(pane_ids: impl IntoIterator<Item = String>) {
+    moved().extend(pane_ids);
+}
+
+pub(crate) fn is_moved(pane_id: &str) -> bool {
+    moved().contains(pane_id)
+}
+
+fn moved() -> std::sync::MutexGuard<'static, std::collections::HashSet<String>> {
+    static MOVED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    MOVED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Run the stdio MCP server, as [`route`] decides:

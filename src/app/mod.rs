@@ -173,6 +173,7 @@ mod proc;
 mod process_cwd;
 mod project_switch;
 mod projects;
+mod project_move;
 mod prompt;
 mod prompt_templates;
 mod quick_select;

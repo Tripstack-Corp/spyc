@@ -88,6 +88,11 @@ pub(super) struct Caller {
 }
 
 impl Caller {
+    /// The pane this connection bound to at `initialize`.
+    pub(super) fn pane_id(&self) -> Option<&str> {
+        self.pane_id.as_deref()
+    }
+
     pub(super) fn connection(conn: u64) -> Self {
         Self {
             conn: Some(conn),

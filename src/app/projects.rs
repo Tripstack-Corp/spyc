@@ -555,7 +555,7 @@ impl App {
 
     /// Where the user lands as project `id`, the one in view, closes: the
     /// project they were in last, else the next one, else the one before.
-    fn landing_after(&self, id: ProjectId) -> Option<ProjectId> {
+    pub(super) fn landing_after(&self, id: ProjectId) -> Option<ProjectId> {
         let ids: Vec<ProjectId> = self.state.open_projects().map(|p| p.id).collect();
         let here = ids.iter().position(|p| *p == id)?;
         self.state

@@ -571,6 +571,11 @@ impl PtyHost {
             self.closed = true;
             return;
         };
+        // Jar spike, stage 6: a program whose jar went to another spyc lives on.
+        if crate::pane::jar_backend::is_released(pid) {
+            self.closed = true;
+            return;
+        }
 
         #[cfg(unix)]
         kill_group(pid, rustix::process::Signal::TERM);
@@ -615,7 +620,12 @@ const LINGER_NARRATE_AFTER: std::time::Duration = std::time::Duration::from_mill
 
 impl Drop for PtyHost {
     fn drop(&mut self) {
-        if self.closed {
+        if self.closed
+            || self
+                .child
+                .process_id()
+                .is_some_and(crate::pane::jar_backend::is_released)
+        {
             return;
         }
         if let Some(pid) = self.child.process_id() {
