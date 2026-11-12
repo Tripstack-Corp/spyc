@@ -17,8 +17,8 @@ version 1 does it, leaves room for it, or never does it.
 its own binary without its program noticing only needs to freeze two things
 for good: the `hello` that opens every connection, and the blob one jar hands
 the next across that `exec`. Everything else can arrive as a capability. That
-is why the spike proves R33 early, and why several verdicts below are marked
-**v1 or later**: they're v1 only if R33 fails.
+is why the spike proved R33 early (stage 3). With it working, the verdicts once
+marked **v1 or later** became **later** (decision D).
 
 The path to the freeze runs in stages, each ending in a stop for the owner:
 
@@ -103,8 +103,8 @@ The protocol spec, with exact byte fixtures, is written from what stages 2,
 ## Requirements
 
 **v1** means the first release. **Later** means a new capability, added
-without a new version. **v1 or later** depends on R33 and on decision D.
-**Never** means it stays out of the jar for good.
+without a new version, or by a jar upgrading itself (R33). **Never** means it
+stays out of the jar for good.
 
 ### The program
 
@@ -141,7 +141,7 @@ in the output.
 | R12 | **While no owner is connected**, drop the oldest events when the ring fills (`drop`) | v1 | A crash window must never stall an agent. | U2 |
 | R12b | The `block` and `spill` modes ([below](#when-the-ring-fills-with-no-owner)) | later | Moved to later by decision B: with no long ownerless stretches, they only matter if a crashed spyc isn't relaunched. | U2 |
 | R12a | Mark a gap with the offsets it spans | v1 | A spyc that finds a gap forces a redraw rather than trusting a broken replay. | U2, U3 |
-| R12c | **Across a gap,** spyc starts from the newest snapshot under it, applies the bytes after the gap, then makes the program repaint | v1 | Stage 4 (Q7): a repaint redraws the screen but sets no mode again. From an empty engine a full-screen Claude came back without the alternate screen, mouse reporting or bracketed paste; from the snapshot every mode matched a run that lost nothing, and the history before the gap stayed. | U2 |
+| R12c | **Across a gap,** spyc starts from the newest snapshot under it, applies the bytes after the gap, then makes the program repaint | v1 | Stage 4 (Q7): a repaint redraws the screen but sets no mode again. From an empty engine a full-screen Claude came back without the alternate screen, mouse reporting or bracketed paste; from the snapshot every mode matched a run that lost nothing, and the history before the gap stayed. Decided v1 by the owner. | U2 |
 | R13 | Ring, spill and snapshot sizes set per jar, with a report of what each holds | v1 | Many jars run at once; memory has to be visible and bounded. | all |
 
 ### Input and the program's questions
@@ -152,7 +152,7 @@ in the output.
 | R15 | Replies to the program's terminal queries are their own frame type, sent only by the owner, never held up by the keyboard lease | v1 | Programs ask the terminal for the cursor position (DSR), its identity (DA1), colours (OSC 10/11) and keyboard modes; spyc's engine answers (`ReplyWriter`). One answer per question, from the owner, even while someone else types. | U5, U7 |
 | R15a | **A replayed tail never answers anything.** spyc parses replayed events with replies suppressed, and answers only queries that arrive live. | v1 | Replaying a tail makes the engine see old questions again. Answering them now would feed the program stale replies it reads as keystrokes. | U1, U2 |
 | R15b | **Queries asked while no owner is connected go unanswered,** and the jar never answers on spyc's behalf, since it would have to parse to do so | v1 | What a program does with an unanswered query (time out, wait, misbehave) is measured in stage 2, not assumed. | U2, U3 |
-| R16 | Refuse input from a connection that doesn't hold the keyboard, with a reason; never queue it | v1 or later | Only matters once there can be two writers (decision D). | U7 |
+| R16 | Refuse input from a connection that doesn't hold the keyboard, with a reason; never queue it | later | Only matters once there can be two writers (decision D). | U7 |
 
 ### Stored state
 
@@ -162,20 +162,21 @@ in the output.
 | R17a | Two formats: libghostty's **binary snapshot**, valid only for the same build and pin, and its **VT formatter emit**, portable across versions | v1 | The engine spike settled that snapshots are "transport-only — same binary, same pin — and never at-rest persistence across an upgrade". At 1.0.0 both are exact over the engine spike's 26-case corpus: 100% of rows, cell text, attributes and scrollback (`docs/archive/VT_ENGINE_SPIKE.md` → "Rehydration: both mechanisms are now exact"). The formatter's one-row offset and 99.9% scrollback belonged to the earlier `1f5bb576` pin. An exact portable form is what makes an upgrade across a pin bump lossless. The corpus didn't exercise everything: R17c lists what the raw emit misses. | U1, U11 |
 | R17b | **Every snapshot stores both forms,** in every jar with an engine behind it: the binary one taken under the pane's parser lock, the portable one made from it in a scratch engine, off the lock. A restoring spyc loads the binary one when its build decodes it, else the portable one | v1 | Decision I. A crash followed by a build change otherwise leaves a pane empty, and the user did nothing wrong. Off the lock, the portable form costs the pane's own thread about 40 ms at a full scrollback, and the lock is held only for the binary encode, about 6 ms. | U1, U2, U11 |
 | R17c | The portable form is the formatter's emit **plus what its extras don't carry:** the primary screen and its history under a full-screen program (the formatter writes only the screen showing), soft wraps (an unwrapped emit, so the restoring engine wraps again), the saved cursor (DECSC), a cursor shape other than the default, and the title. It is checked against the binary form as a control, case by case | v1 | Measured on the spike (`PANE_JAR_SPIKE.md` → "Decision I: what a portable snapshot costs and loses"): with these, 24 of 26 cases come back exact. The two that don't are kitty keyboard flags below the top of their stack and DECSCA protection, and spyc reads neither. | U1, U11 |
-| R17d | Panes **take turns snapshotting:** a few at a time, not every pane at once | v1 | Thirty full panes snapshotting together held each pane's lock for 46 to 62 ms against 6 ms alone, enough to drop a frame. | all |
+| R17d | Panes **take turns snapshotting:** a few at a time, not every pane at once | v1 | Thirty full panes snapshotting together held each pane's lock for 46 to 62 ms against 6 ms alone, enough to drop a frame. The spike lets two run at once. | all |
+| R17e | **A snapshot every five seconds while output flows,** as well as after a second of quiet | v1 | Decided by the owner after stage 4. Through a long stream the snapshot under a gap (R12c) would otherwise predate the stream, losing its start and any mode it changed. Each costs the pane's lock about 6 ms; the spike showed none during a 14-second stream without it, and one every five seconds with it. | U2 |
 | R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. | U2, U10, U12 |
-| R19 | Keep all of it in memory, never on disk, except in `spill` mode | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). | all |
+| R19 | Keep all of it in memory, never on disk, except in `spill` mode. An upgrade's blob is sealed (AES-256-GCM, a fresh key that travels with the descriptors), so where it has to touch a file only ciphertext does | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). The seal is the owner's choice for macOS, which has no `memfd`; the spike seals on every platform. AES rather than ChaCha20-Poly1305 because it is FIPS-approved, at the company security manager's suggestion: for one key used once, the two are equally safe. | all |
 
 ### Connections
 
 | | Requirement | Verdict | Why | For |
 |---|---|---|---|---|
-| R20 | Roles in the `hello`: **owner**, **keyboard**, **reader** ([below](#who-may-connect)) | the field v1; readers and keyboard v1 or later | The role field has to exist from the first byte. Whether more than the owner is implemented in v1 is decision D. | U5, U6, U7 |
+| R20 | Roles in the `hello`: **owner**, **keyboard**, **reader** ([below](#who-may-connect)) | the field, the owner and a read-only reader v1; the keyboard later | The role field has to exist from the first byte. A reader that only watches and describes is v1 because `spyc --jars` and an upgrade request already use it (decision D). | U5, U6, U7 |
 | R21 | The owner's lease ends when its connection drops **or** it misses a liveness deadline | v1 | A dead process closes its socket, but a hung or `SIGSTOP`ped spyc doesn't, and neither does a forwarded socket whose far end vanished. | U2, U4 |
 | R22 | The owner hands its lease to a named successor | v1 | An upgrade is a handover, not a race. | U1 |
-| R23 | Taking over: a connection asks for the owner's lease; the current owner is told and drops to reader | v1 or later | Decision D. | U5 |
-| R24 | The keyboard lease: taken by the first input frame when free, kept while input keeps coming, freed after an idle gap the owner sets | v1 or later | Decision D. | U7 |
-| R25 | A label on every connection | v1 or later | Decision D. | U7 |
+| R23 | Taking over: a connection asks for the owner's lease; the current owner is told and drops to reader | later | Decision D. | U5 |
+| R24 | The keyboard lease: taken by the first input frame when free, kept while input keeps coming, freed after an idle gap the owner sets | later | Decision D. | U7 |
+| R25 | A label on every connection | later | Decision D. | U7 |
 | R26 | The connecting peer is the same user (`SO_PEERCRED` / `getpeereid`) **and presents the jar's token** for owner or keyboard ([threat model](#threat-model)) | v1 | Same-uid alone lets any agent type into any other agent. | all |
 | R27 | Ping and pong, which carry the liveness deadline | v1 | R21 needs a heartbeat, and the same frames keep an idle forwarded connection alive ([Keep-alive](#keep-alive)). | U2, U4 |
 
@@ -264,9 +265,17 @@ host a program:
 - **A pane** gets `drop` and lingers until an owner returns.
 - **A task** keeps the jar it had as a pane when demoted; the owner rewrites its
   key/value entry from pane to task. Its mode and linger stay as they were.
-- **A capture** lingers only briefly: a capture nobody comes back for is
-  cleaned up. Its output is the point, so it should get `block` once R12b
-  lands; until then a crash window can drop part of it.
+- **A capture** lingers a minute: a capture nobody comes back for is cleaned
+  up, since a restored session doesn't reopen it. Its output is the point, so
+  it should get `block` once R12b lands; until then a crash window can drop
+  part of it.
+- **spyc's outer jar** lingers until a terminal attaches again.
+
+Decided by the owner after stage 4. Lingering matters only after a crash (or
+a detach, for the outer jar), since quitting closes a spyc's jars. A pane that
+waits for an owner however long can be forgotten, so a spyc that starts and
+finds jars no spyc owns says how many, and offers to restore or discard them;
+`spyc --jars` lists them.
 
 ## How spyc outlives its terminal
 
@@ -594,16 +603,19 @@ Open unless marked decided:
   its own crate and binary and shipped with spyc. Its protocol stays private,
   so U10 (jars started with no spyc) is out of scope. The crate boundary keeps
   publishing it possible later.
-- **D. Readers and the keyboard lease: built in v1, or reserved capabilities?**
-  The role field is v1 either way.
-- **E. `unsafe` in the jar.** The review asked whether `fork`, `setsid` and a
+- **D. Decided: the owner and a read-only reader in v1; the rest later.** A
+  reader watches and describes; `spyc --jars` and an upgrade request already
+  use one. The keyboard lease, taking over, labels and refusing input (R16,
+  R23 to R25) are later, since a jar gains them by upgrading itself (R33), so
+  the spike's stage 5 isn't built.
+- **E. Decided: no `unsafe` in the jar.** The review asked whether `fork`, `setsid` and a
   controlling terminal need it. **Stage 3 built the jar with none**, and
   without `portable-pty`: rustix opens the PTY, and the program starts through
   `spyc-jar pty-child`, which calls `setsid` and `ioctl_tiocsctty` and then
   `exec`s it, all safe calls. An upgrade's descriptors arrive as `SCM_RIGHTS`,
   which hands them over as owned descriptors; adopting inherited descriptor
-  numbers instead would need `unsafe`. The jar depends on `anyhow` and `rustix`
-  alone. Open only until the owner closes it.
+  numbers instead would need `unsafe`. **Decided: no `unsafe` in the jar.** It
+  depends on `anyhow`, `rustix` and `aes-gcm` (R19's seal).
 
 - **F. WebSocket for the browser, next to SSH.** The decision log says remote
   support rides SSH rather than a custom protocol. A WebSocket transport for

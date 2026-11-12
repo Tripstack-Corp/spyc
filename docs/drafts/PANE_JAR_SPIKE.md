@@ -207,8 +207,9 @@ that verdict changes.
 
 ## Stage 5: roles
 
-Readers, the keyboard lease and taking over, only if the owner keeps them in v1
-(decision D).
+Not built: decision D made the keyboard lease, taking over and labels
+**later**, added by a jar upgrading itself. The read-only reader v1 keeps
+already exists (`spyc --jars`, an upgrade request).
 
 ## Stage 6: projects move between spycs
 
