@@ -26,7 +26,14 @@ open(f"{fake}/claude", "w").write(f"""#!/bin/sh
 echo fake-claude-waiting
 exec {home}/sleeper/claude 1000
 """)
-os.makedirs(f"{home}/sleeper"); os.symlink(shutil.which("sleep"), f"{home}/sleeper/claude")
+os.makedirs(f"{home}/sleeper")
+if sys.platform == "darwin":
+    os.symlink(shutil.which("sleep"), f"{home}/sleeper/claude")
+else:
+    # busybox and uutils pick their command by argv[0]: a symlink named
+    # `claude` to them isn't `sleep`. A script keeps the name on Linux.
+    open(f"{home}/sleeper/claude", "w").write("#!/bin/sh\nwhile :; do sleep 1; done\n")
+    os.chmod(f"{home}/sleeper/claude", 0o755)
 os.chmod(f"{fake}/claude", 0o755)
 env["PATH"] = fake + ":" + env["PATH"]
 
