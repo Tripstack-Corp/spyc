@@ -28,6 +28,7 @@
 
 use std::io::{IoSlice, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+#[cfg(not(target_os = "linux"))]
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;

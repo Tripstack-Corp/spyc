@@ -15,6 +15,7 @@ open(f"{home}/.spycrc.toml", "w").write('[pane]\ntabs = ["zsh"]\n'); open(f"{hom
 state = os.path.join(os.environ.get("TMPDIR", "/tmp"), "spass")
 shutil.rmtree(state, ignore_errors=True); os.makedirs(state)
 env = env_for(home); env.update(SPYC_JARS="1", SPYC_JAR_BIN=J, XDG_STATE_HOME=state)
+if os.environ.get("PASS_TRACE"): env["SPYC_JAR_TRACE"] = os.environ["PASS_TRACE"]
 tool = "mcp__spyc__get_spyc_context"
 
 def jars():
@@ -73,6 +74,7 @@ try:
             a.pump(0.1)
         gone = time.monotonic() - t0
         a.pump(2)
+        a.send(b"\x1b"); a.pump(1)
         tail = [l.strip()[:100] for l in a.text().splitlines() if l.strip()]
         print(f"jar killed: its program gone in {gone:.1f} s:", gone < 5)
         print("spyc still answers keys:", a.reap() is None, "| the tab bar:", [l for l in tail if "─[" in l][-1:])
