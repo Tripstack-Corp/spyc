@@ -696,7 +696,9 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         refuse("expected a hello".into());
         return;
     };
-    if version != proto::VERSION {
+    // A hello names the highest version its client speaks; the welcome
+    // answers with the one this connection speaks.
+    if version == 0 {
         refuse(format!("jar speaks version {}", proto::VERSION));
         return;
     }
@@ -725,7 +727,7 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         st.acked = st.log.base.max(st.acked.min(st.log.head));
     }
     let welcome = Msg::Welcome {
-        version: proto::VERSION,
+        version: version.min(proto::VERSION),
         child_pid: shared.child_pid,
         head: st.log.head,
         base: st.log.base,

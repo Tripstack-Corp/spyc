@@ -407,6 +407,48 @@ fn ping_is_answered() {
     assert_eq!(owner.recv(WAIT).unwrap(), Some(Msg::Pong { n: 41 }));
 }
 
+/// A `hello` names the highest version its client speaks, and the welcome the
+/// one the connection speaks: a newer client, capabilities after its token,
+/// learns from the welcome that this jar is version 1, with no refusal and
+/// no second try. Version 0 is no version.
+#[test]
+fn a_newer_client_is_welcomed_at_version_1() {
+    use spyc_jar::proto;
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    drop(jar.connect(Role::Reader));
+    let hello = |version: u16| {
+        let mut p = version.to_be_bytes().to_vec();
+        p.push(Role::Owner as u8);
+        p.extend(u16::try_from(TOKEN.len()).unwrap().to_be_bytes());
+        p.extend(TOKEN);
+        p.extend(b"\x00\x02caps from a later version");
+        let mut f = u32::try_from(p.len() + 2).unwrap().to_be_bytes().to_vec();
+        f.extend([1, proto::CRITICAL]);
+        f.extend(p);
+        f
+    };
+    let mut s = std::os::unix::net::UnixStream::connect(&jar.socket).unwrap();
+    s.set_read_timeout(Some(WAIT)).unwrap();
+    s.write_all(&hello(2)).unwrap();
+    let welcome = proto::read_msg(&mut s).unwrap();
+    assert!(
+        matches!(welcome, Some(Msg::Welcome { version: 1, .. })),
+        "{welcome:?}"
+    );
+    // It owns the jar: the owner's frames come back to it.
+    proto::write_msg(&mut s, &Msg::Ping { n: 9 }).unwrap();
+    while proto::read_msg(&mut s).unwrap() != Some(Msg::Pong { n: 9 }) {}
+    drop(s);
+
+    let mut zero = std::os::unix::net::UnixStream::connect(&jar.socket).unwrap();
+    zero.set_read_timeout(Some(WAIT)).unwrap();
+    zero.write_all(&hello(0)).unwrap();
+    assert!(matches!(
+        proto::read_msg(&mut zero).unwrap(),
+        Some(Msg::Refused { .. })
+    ));
+}
+
 /// R4: the jar reports the PTY's foreground process group, which only it can
 /// read: the shell's at first, then a job's while the shell runs one.
 #[test]
