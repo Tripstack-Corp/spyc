@@ -234,9 +234,9 @@ extends to project attribution.
 Deferred, and not part of Projects v1: frame mirroring, input forwarding,
 cross-process discovery, headless *peers* (a second spyc that another spyc
 discovers, mirrors or forwards to) and CounterTop. They may be revisited later.
-The daemonized *monolith* is a different thing: it returns in 3.0, and it is not
-a peer. It is one process with nothing mirrored, and its client is a renderer
-rather than an instance. See "The 3.0 horizon" below.
+Durable sessions are a different thing: they return in 3.0 as a jar per pane,
+and a jar is not a peer. It holds one program's PTY and nothing of the Model,
+so nothing is mirrored. See "The 3.0 horizon" below.
 [`docs/archive/PROJECTS_PLAN.md`](docs/archive/PROJECTS_PLAN.md), a 2.2
 deliverable approved on 2026-10-12, is the design. Tracked as
 [#99](https://github.com/Tripstack-Corp/spyc/issues/99), closed on 2026-10-21
@@ -267,12 +267,21 @@ The goal is that spyc stops needing tmux underneath it. Detach, close the
 laptop, let the agents keep working; `spyc -a` restores the client and
 everything is where you left it.
 
-The shape is the daemonized monolith. One headless spyc owns the PTYs, the
-agent children and the Model; a thin client attaches over the existing unix
-socket and renders. One attached client at a time. Explicitly not a
-general-purpose multiplexer, not multi-client, no cross-machine protocols, and
-no binary state-replication ambitions — that is Superlogical's fight and
-zellij's category, and neither is ours.
+The shape is a jar per pane. Each pane's program runs in its own `spyc-jar`,
+a small process that owns the PTY and outlives spyc; spyc owns each jar over a
+unix socket, one owner at a time, and read-only readers may watch. spyc itself
+runs in a jar of its own, entered lazily, so it outlives its terminal: detach,
+and MCP, the hooks and the scope registry stay up while you're away. A jar
+replaces its own binary in place, so an upgrade or a crash of spyc no longer
+ends an agent's turn, and a project's jars can move to another spyc. spyc
+stays one MVU process; the jar holds a PTY, not the Model. Explicitly not a
+general-purpose multiplexer, no cross-machine protocols (remote rides SSH),
+and no binary state-replication ambitions — that is Superlogical's fight and
+zellij's category, and neither is ours. The protocol is private to spyc and
+froze at version 1 on 2026-11-12
+([`docs/drafts/JAR_PROTOCOL.md`](docs/drafts/JAR_PROTOCOL.md), proved by
+[`docs/drafts/PANE_JAR_SPIKE.md`](docs/drafts/PANE_JAR_SPIKE.md),
+[#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)).
 
 The architecture already affords it. MVU's single message channel means every
 inter-message tick is a quiescent, mutation-safe snapshot boundary, so state
@@ -292,16 +301,17 @@ recommendation moved forward rather than back: **the engine landed for 2.2**
 depends on it.
 That closes the engine question this horizon was waiting on — screen
 reconstruction fidelity is load-bearing the moment a client reattaches, and the
-incumbent reconstructs 0% of scrollback. It does **not** commit 3.0's own scope:
-detach/attach, the daemon lifecycle and the client protocol are still
-uncommitted, and the known-hard bug class the spike priced only in part —
+incumbent reconstructs 0% of scrollback. It did **not** commit 3.0's own scope; the
+jar's decisions since have settled detach and attach, the jar's lifecycle and
+its protocol (above). The known-hard bug class the spike priced only in part —
 reattaching into a *different* terminal emulator, where cell size, kitty/sixel
 capability and colour depth all change mid-session — is where that scope has to
 start. The spike settled the text half (the engine's emit is parameterized by
 target capability, 13 independent toggles) and explicitly left in-pane graphics
 reconstruction unpriced, flagging it for `PROJECTS_PLAN.md` to answer as a
-"serializes or is rebuilt client-side" question. Tracked as a `3.0` milestone
-once issues exist; none are created yet.
+"serializes or is rebuilt client-side" question. Tracked in
+[#1099](https://github.com/Tripstack-Corp/spyc/issues/1099), on the `3.0`
+milestone.
 
 
 ## Backlog & roadmap
@@ -353,7 +363,8 @@ and the roadmap committing to that saves a lot of drift.
 - **A general-purpose multiplexer.** Multi-client attach, cross-machine
   session protocols, multiplayer, production-ops surfaces — the funded
   players can have that category. The durability work in 3.0 is scoped to
-  one user, one machine, one attached client, and stops there.
+  one user and one machine, with one owner per pane and read-only readers,
+  and stops there.
 - **tmux command compatibility.** We have our own bindings.
 - **Persistent search index** (tantivy/ctags). Ripgrep on a 100K-file
   repo is sub-second cold; the maintenance burden isn't worth it.
@@ -753,6 +764,23 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   project or reopens one closed lately. It is the largest change since 2.0, and
   daily users soaking it in a release candidate is worth more than another
   design on top of it before the tag.
+- **3.0's durable sessions are a jar per pane, not the daemonized monolith**
+  (2026-11-12), superseding the 2026-09-04 entry's shape, which stays as
+  written. The monolith kept every PTY in one long-lived spyc, so upgrading
+  or crashing that spyc still ended every program. A `spyc-jar` per pane owns
+  one PTY and outlives spyc; it replaces its own binary in place, so neither
+  an upgrade of spyc nor of the jar ends an agent's turn. spyc runs in a jar of
+  its own to outlive its terminal, and stays one MVU process: a separate MCP
+  daemon was rejected, since splitting the Model needs a protocol between the
+  halves. "One attached client" becomes one owner per pane, with read-only
+  readers (the keyboard lease, taking over and sharing come later, through the
+  jar upgrading itself). The jar is spyc's own crate and binary, shipped with
+  it, with a private protocol and no standalone tool. Version 1 froze on this
+  date after a six-stage spike measured it on macOS and Linux
+  (`docs/drafts/JAR_PROTOCOL.md`, `docs/drafts/PANE_JAR_SPIKE.md`). The
+  competitive review's "resilient autosave, not a daemon" is superseded with
+  it: the objection was a daemon fighting the single-process MVU core, and a
+  jar leaves that core whole.
 
 ## Doc map
 
@@ -780,8 +808,8 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/archive/CLICKABLE_MENUS_PLAN.md` | Archived — the proposal to make the which-key popup clickable (#478). Absorbed into `UX_2_0_PLAN.md` as its slices 1–2, and archived in its slice 0 when that plan was approved (#881). |
 | `docs/archive/AUTO_APPROVAL_PLAN.md` | Archived, not built — [#57](https://github.com/Tripstack-Corp/spyc/issues/57) closed as not planned once Claude Code shipped its own auto mode. |
 | `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A shipped for 2.2 ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
-| [`docs/drafts/JAR_PROTOCOL.md`](docs/drafts/JAR_PROTOCOL.md) | Draft — the `spyc-jar` requirements before its protocol freezes ([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)): use cases, a verdict per requirement, sharing, fuzzing, and the owner's open decisions. |
-| [`docs/drafts/PANE_JAR_SPIKE.md`](docs/drafts/PANE_JAR_SPIKE.md) | Draft — the staged spike that proves the jar, with stage 0b's dtach findings. |
+| [`docs/drafts/JAR_PROTOCOL.md`](docs/drafts/JAR_PROTOCOL.md) | Draft — the `spyc-jar` requirements and its protocol, version 1, frozen 2026-11-12 ([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)): use cases, a verdict per requirement, the wire format with byte fixtures, sharing, fuzzing, and the owner's decisions. |
+| [`docs/drafts/PANE_JAR_SPIKE.md`](docs/drafts/PANE_JAR_SPIKE.md) | Draft — the staged spike that proved the jar, stages 0b to 6, and the freeze. |
 | `docs/archive/multi-question-bug-investigation.md` | Archived — the investigation record for an agent pane going deaf to input, an open bug tracked as [#1107](https://github.com/Tripstack-Corp/spyc/issues/1107). |
 | `docs/archive/LAUNCH_PLAN_2_0.md` | Archived — the 2.0 distribution/launch plan, every gate closed, plus what never shipped. |
 | `docs/archive/PANE_STARTUP_TABS_PLAN.md` | Archived design: startup pane tabs, shipped on `main` for 2.2 (#482, closing [#58](https://github.com/Tripstack-Corp/spyc/issues/58)). Its deferred half, true multi-split, stays deferred. |

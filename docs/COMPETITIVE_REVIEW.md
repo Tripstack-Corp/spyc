@@ -36,6 +36,10 @@ brought to that standard on 2026-11-03.
 > in §6, and herdr's star count in §1. The same pass appended dated updates to
 > §1a (herdr's relicence, funding and desktop app) and §1f (Rex's beta and OSC
 > 7501), bringing §1f to the mine-and-verify standard.
+>
+> **Fifth pass (2026-11-12)** recorded spyc's own change of answer: 3.0's
+> durable sessions are a jar per pane (ROADMAP's decisions log, 2026-11-12),
+> so "not a daemon" in §1a, §3 and §6 is corrected, with a dated update in §1a.
 
 ---
 
@@ -201,8 +205,9 @@ demand for "which agent needs me" is now proven, not hypothetical.
 **Where herdr beats spyc (be honest):**
 - **Persistent detach/reattach of *running* processes** (daemon + live handoff).
   spyc is single-process; `-r` restores tabs + agent conversations, not live
-  PTYs. This is a structural advantage we cannot claim parity on — and **should
-  not chase**: a daemon fights spyc's single-process MVU/sync core (see §6).
+  PTYs. A structural advantage until spyc's 3.0 jars ship: a process per pane
+  that owns its PTY and replaces its own binary in place, which leaves spyc's
+  single-process MVU core whole (update below).
 - **A live, multi-pane agent-status panel shipped.** spyc's is still on the
   backlog. This is a shared gap where herdr is ahead in *ambition*.
 
@@ -284,10 +289,27 @@ spyc's moat beside the file manager are each half taken. herdr has review and
 file browsing (in a desktop app, not the terminal) and a plugin that returns
 review notes to the agent. Its weakness hasn't changed: Claude and Codex status
 still rests on reading the screen, and the bug cluster grew with its users.
-"Should not chase" a daemon still stands. "Single maintainer" doesn't: herdr is
+"Should not chase" a daemon still stood then (see the next update). "Single
+maintainer" doesn't: herdr is
 a funded company with a desktop product, the category's incumbent more than
 spyc's twin, and what stays spyc's alone is the file manager and review inside
 the terminal, git in-process, and MCP grounded in the user's working set.
+
+### Update (2026-11-12): spyc's answer to the daemon changed
+
+"Should not chase" rested on one objection: a daemon owning the PTYs and the
+Model fights spyc's single-process MVU core. spyc's 3.0 answer avoids it
+rather than paying for it. A `spyc-jar` per pane owns that pane's PTY and
+nothing else, outlives spyc, and replaces its own binary in place by passing
+its descriptors across an `exec`, herdr's live handoff done per pane. spyc
+stays one process holding the Model, in a jar of its own when it has to outlive
+its terminal. The protocol froze at version 1 after a staged spike on macOS
+and Linux (`docs/drafts/JAR_PROTOCOL.md`, `docs/drafts/PANE_JAR_SPIKE.md`);
+nothing of it has shipped. Until it does, herdr's lead in persistence stands.
+herdr's handoff bug ([#808](https://github.com/ogulcancelik/herdr/issues/808),
+macOS responsible-process loss) is one the spike checked: with the terminal
+that started a jar killed, its program still read `~/Documents`, the pasteboard
+and a Keychain item, and a jar keeps its PID across its own upgrade.
 
 ---
 
@@ -1172,10 +1194,12 @@ client close and even a binary upgrade (live handoff via FD-passing). That's a
 genuine advantage we can't claim parity on — but adopting a daemon would fight
 spyc's single-process MVU/sync core, and herdr pays for it (macOS responsible-
 process/TCC loss on handoff, [#808](https://github.com/ogulcancelik/herdr/issues/808);
-a 7.8k-line headless server). **spyc's answer stays "resilient autosave, not a
-daemon":** make periodic state saves recovery-sufficient against `SIGKILL`, and
-capture richer layout + per-pane cwd so `-r` rebuilds faithfully. Win the 80%
-(state survives) without the daemon's complexity tax. (Explicitly out of scope in §6.)
+a 7.8k-line headless server). **spyc's answer was "resilient autosave, not a
+daemon"** until 2026-11-12: make periodic state saves recovery-sufficient
+against `SIGKILL`, and capture richer layout + per-pane cwd so `-r` rebuilds
+faithfully. **It is now a jar per pane in 3.0** (§1a's update of that date): a
+process per pane keeps its PTY through an upgrade or a crash of spyc, and
+spyc's single-process core stays whole. Autosave still matters for a reboot.
 
 ### 5. Resource awareness at scale *(demand: medium · effort: medium · asset: process-stat tracking)*
 
@@ -1393,10 +1417,11 @@ the reliable (MCP/hook) way**, not herdr's fragile scrape.
 3. **Ship the worktree-bootstrap story** *(highest unmet demand; design spike
    first).* Make "new worktree carries your untracked files / runs your setup
    hook" first-class. Nobody owns it; spyc's graveyard machinery is the start.
-4. **Resilient session autosave (NOT a daemon)** *(herdr beats us architecturally
-   — pick the cheaper win).* Make periodic saves `SIGKILL`-recovery-sufficient
-   and capture richer layout + per-pane cwd for `-r`. Explicitly **do not** build
-   a detach/reattach daemon — it fights spyc's single-process MVU/sync core.
+4. **Resilient session autosave** *(herdr beats us architecturally — pick the
+   cheaper win).* Make periodic saves `SIGKILL`-recovery-sufficient and capture
+   richer layout + per-pane cwd for `-r`. The detach/reattach half is no longer
+   ruled out: 3.0's jar per pane answers it without a daemon holding the Model
+   (§1a's update of 2026-11-12).
 5. **Land the discovery PRs + Terminal Trove** *(low effort; demo GIF ready).*
    awesome-ratatui, awesome-tuis, Terminal Trove. Permanent, on-audience, before
    any HN attempt.

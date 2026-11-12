@@ -3,7 +3,7 @@
 **Status:** version 1 **frozen** on 2026-11-12, on the owner's word, after
 the spike built every v1 verdict below.
 [Version 1 on the wire](#version-1-on-the-wire) is the format, byte for byte.
-Decision A, the roadmap's decision-log entry, is still open.
+Every decision a freeze needed is made.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099).
 **Tested by:** [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md), which builds a minimal
 jar, measures it, and reports which of these requirements survive.
@@ -781,13 +781,12 @@ and an exit not yet collected:
 
 Open unless marked decided:
 
-- **A. Replace the daemonized monolith in the decision log.** `ROADMAP.md` →
-  "The 3.0 horizon: Slow Cooker (durable sessions)" describes one headless spyc,
-  "One attached client at a time", and "no cross-machine protocols", and
-  `docs/COMPETITIVE_REVIEW.md` keeps "resilient autosave, not a daemon" as
-  spyc's answer to herdr. A jar per pane, with readers and SSH among its use
-  cases, changes all three, and needs a decision-log entry before anything
-  freezes.
+- **A. Decided: the decision log replaces the daemonized monolith** with a
+  jar per pane (2026-11-12). `ROADMAP.md` → "The 3.0 horizon: Slow Cooker
+  (durable sessions)" described one headless spyc and "One attached client at
+  a time", and `docs/COMPETITIVE_REVIEW.md` kept "resilient autosave, not a
+  daemon" as spyc's answer to herdr. Both now describe the jar: one owner per
+  pane with read-only readers, remote over SSH, and spyc still one process.
 - **B. Decided: spyc outlives its terminal.** Detaching never leaves a pane
   jar without an owner, so MCP, the hooks' target and the scope registry stay
   up while you're away, and a jar is ownerless only after a crash. Moved to
