@@ -861,14 +861,36 @@ Q8 (roles) wasn't run: decision D made them later.
 Every check passes on macOS and Linux except those only macOS has (Keychain,
 pasteboard) and the Claude ones, which ran on macOS.
 
-**Before the protocol freezes,** what the spike leaves:
-- R26's same-user check on the connecting peer, on top of the `0700`
-  directory;
-- the notice of orphaned jars at spyc's start that the linger decision asked
-  for;
-- what the receiving spyc's attention roll-up shows after a move.
+**Before the protocol freezes,** nothing the spike found is left ("The last
+items", below).
 
-The first two change nothing on the wire; the last is spyc's alone.
+### The last items
+
+**Recommendation: freeze the protocol.** Built on `spike/jar-stage-2`
+(`3cfe5ca4`); none of it changed the wire.
+
+- **R26's peer check.** A jar refuses a peer of another user before it reads
+  the `hello`: `SO_PEERCRED` on Linux, `getpeereid` on macOS through `nix`
+  (rustix reads a peer only on Linux, and `nix` is already in spyc's build
+  through `portable-pty`), and on any other platform no peer at all. Comparing
+  against the wrong user in a test refuses every connection.
+- **The notice of orphaned jars.** A few seconds into its start, once restored
+  tabs have adopted theirs, a spyc lists the live jars with no owner it didn't
+  start or take, and flashes them: after a `kill -9` of spyc, a new one (not
+  restoring) says `1 jar(s) no spyc owns: zsh in work (spyc --jars)`
+  (`r18.py`).
+- **Attention after a move was wrong.** An agent blocked before
+  `:detach project` doesn't report again until it's answered, and the
+  receiving spyc's `Space !` said nothing needed you (`attn.py`). The move
+  file now carries each tab's live status report, replayed as the tab is
+  adopted, and the agent a shell tab runs: a shell tab learns that from its
+  output, and a blocked agent prints none. With both, the receiving spyc goes
+  to the blocked agent, for an agent in a tab of its own and one started in a
+  shell. Without the replay it says nothing needs you.
+- **On Linux** the peer check, the notice and the agent in a tab of its own
+  pass the same way. The shell case wasn't shown there: the harness's
+  stand-in agent isn't recognized in a Linux shell tab, so the sending spyc
+  had nothing to carry.
 
 ## Sources
 

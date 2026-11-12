@@ -177,7 +177,7 @@ in the output.
 | R23 | Taking over: a connection asks for the owner's lease; the current owner is told and drops to reader | later | Decision D. | U5 |
 | R24 | The keyboard lease: taken by the first input frame when free, kept while input keeps coming, freed after an idle gap the owner sets | later | Decision D. | U7 |
 | R25 | A label on every connection | later | Decision D. | U7 |
-| R26 | The connecting peer is the same user (`SO_PEERCRED` / `getpeereid`) **and presents the jar's token** for every role but a lookup ([threat model](#threat-model)) | v1 | Same-uid alone lets any agent type into any other agent, or watch it. The spike had built neither: any process of the user could read any jar's screen, or ask it to `exec` a binary of its choosing. Built before the freeze: spyc makes 32 random bytes per jar, hands them over on the jar's standard input, and keeps them `0600` in its state directory; a jar with no token refuses to run. The `hello` carries the token length-prefixed. The peer-uid check isn't built: the spike leans on the `0700` directory. | all |
+| R26 | The connecting peer is the same user (`SO_PEERCRED` / `getpeereid`) **and presents the jar's token** for every role but a lookup ([threat model](#threat-model)) | v1 | Same-uid alone lets any agent type into any other agent, or watch it. The spike had built neither: any process of the user could read any jar's screen, or ask it to `exec` a binary of its choosing. Built before the freeze: spyc makes 32 random bytes per jar, hands them over on the jar's standard input, and keeps them `0600` in its state directory; a jar with no token refuses to run. The `hello` carries the token length-prefixed. Its peer check came last: a jar refuses a peer of another user before reading its `hello`, by `SO_PEERCRED` on Linux and `getpeereid` on macOS (through `nix`, since rustix has it on Linux only), and on any other platform it accepts nobody. | all |
 | R27 | Ping and pong, which carry the liveness deadline | v1 | R21 needs a heartbeat, and the same frames keep an idle forwarded connection alive ([Keep-alive](#keep-alive)). | U2, U4 |
 
 ### Events
@@ -262,7 +262,9 @@ captures (`spawn_capture`), and `demote_pane_to_task` moves a pane's host into
 a task. The proposal is that all three run in jars, so there is one way to
 host a program:
 
-- **A pane** gets `drop` and lingers until an owner returns.
+- **A pane** gets `drop` and lingers until an owner returns. So that one no
+  spyc takes back doesn't run on unseen, a spyc's start notes the live jars
+  with no owner, by label and project (built before the freeze).
 - **A task** keeps the jar it had as a pane when demoted; the owner rewrites its
   key/value entry from pane to task. Its mode and linger stay as they were.
 - **A capture** lingers a minute: a capture nobody comes back for is cleaned
@@ -403,8 +405,11 @@ keeps per project. Three things follow:
   and a crash.
 - **The project's scope claims and its attention roll-up move with it.** The
   claims do since before the freeze: they travel in the move file, keeping
-  their ids unless the receiving spyc already uses one. What the roll-up
-  shows in the receiving spyc is untested.
+  their ids unless the receiving spyc already uses one. So does each tab's
+  live status, which the agent won't send again: a Claude blocked on a prompt
+  reports nothing until it's answered. Without it the receiving spyc said
+  nothing needed you. A shell tab's running agent goes too, since a shell tab
+  learns it from output, and a blocked agent prints none.
 - **Stage 6 settled how a move survives a receiving spyc that dies partway.**
   The handover is per jar, and the project is never described nowhere. A move
   file keeps the project and its jars' tokens until the receiving spyc's own
@@ -631,7 +636,7 @@ Open unless marked decided:
   are kept alive across the `exec` by a holder process (R33) rather than by
   inheriting them: inherited copies would then have to be closed by number.
   **Decided: no `unsafe` in the jar.** It depends on `anyhow`, `rustix` and
-  `aes-gcm` (R19's seal).
+  `aes-gcm` (R19's seal), and on macOS `nix`, for `getpeereid` (R26).
 
 - **F. WebSocket for the browser, next to SSH.** The decision log says remote
   support rides SSH rather than a custom protocol. A WebSocket transport for
