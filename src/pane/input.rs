@@ -403,8 +403,11 @@ mod mouse_tests {
             release: true,
             ..wheel_up()
         };
-        assert!(encode_mouse(release, Mode::Press, Enc::Sgr).is_empty());
-        assert!(!encode_mouse(wheel_up(), Mode::Press, Enc::Sgr).is_empty());
+        assert_eq!(encode_mouse(release, Mode::Press, Enc::Sgr), [] as [u8; 0]);
+        assert_ne!(
+            encode_mouse(wheel_up(), Mode::Press, Enc::Sgr),
+            [] as [u8; 0]
+        );
     }
 
     /// Coordinates are 1-based on the wire; ours are 0-based pane-relative.

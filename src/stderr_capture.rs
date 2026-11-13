@@ -27,7 +27,7 @@ struct Redirect {
 static REDIRECT: OnceLock<Redirect> = OnceLock::new();
 
 /// How long a finished run's log is kept.
-const KEEP: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const KEEP: Duration = Duration::from_hours(168);
 
 /// Where the logs live: `<state_root>/stderr`, one `<pid>.log` per run.
 fn dir() -> Option<PathBuf> {

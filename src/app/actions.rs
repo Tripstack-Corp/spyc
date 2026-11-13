@@ -99,8 +99,7 @@ impl App {
             .col(side)
             .harpoon
             .as_ref()
-            .map(|h| h.ancestor_set().clone())
-            .unwrap_or_default();
+            .map_or_default(|h| h.ancestor_set().clone());
         self.state.col_mut(side).harpoon_filter_set = set;
     }
 

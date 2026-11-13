@@ -6,7 +6,7 @@ edition = "2024"
 # libghostty-vt crates declare 1.90, but spyc does not depend on them — their
 # bindings are ABI-incompatible with this pin's constructor, which is why the
 # bindings here are generated from the pin's own headers instead.
-rust-version = "1.88"
+rust-version = "1.100"
 description = "Vendored FFI bindings to libghostty-vt at a spyc-owned pinned commit"
 license = "BSD-3-Clause"
 repository = "https://github.com/Tripstack-Corp/spyc"
@@ -32,6 +32,13 @@ include = [
 ]
 # `links` claims the native library globally, so two crates cannot both link it.
 links = "ghostty-vt"
+
+[lints.rust]
+# The vendored libghostty-vt.a defines `memset` twice (Zig's compiler_rt and
+# the ghostty unit); `ld` keeps the first, as it always has, and since Rust
+# 1.97 says so on every link. Restore the default once the archive is
+# rebuilt with one (#1129).
+linker_messages = "allow"
 
 [lints.clippy]
 # The generated bindings are not ours to restyle.

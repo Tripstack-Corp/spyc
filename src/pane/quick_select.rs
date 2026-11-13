@@ -414,7 +414,7 @@ mod tests {
         // q is the exit key; j/k are reflexive vi motions we want
         // to leave inert during the mode. Verify they aren't in
         // the label alphabet.
-        for c in [b'q', b'j', b'k'] {
+        for c in *b"qjk" {
             assert!(
                 !ALPHABET.contains(&c),
                 "{} is in the label alphabet",

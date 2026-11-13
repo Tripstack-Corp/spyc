@@ -297,9 +297,7 @@ fn with_worker_panics<R>(f: impl FnOnce(&mut Vec<String>) -> R) -> R {
 /// Note a panic on `thread` at `location`, to say once spyc can.
 fn note_worker_panic(thread: Option<&str>, location: Option<String>, message: &str) {
     let thread = thread.unwrap_or("a background thread");
-    let at = location
-        .map(|location| format!(" at {location}"))
-        .unwrap_or_default();
+    let at = location.map_or_default(|location| format!(" at {location}"));
     with_worker_panics(|notes| notes.push(format!("{thread} panicked{at}: {message}")));
 }
 
@@ -494,7 +492,7 @@ mod worker_panic_tests {
                 "a background thread panicked: bang".to_string(),
             ]
         );
-        assert!(super::take_worker_panics().is_empty());
+        assert_eq!(super::take_worker_panics(), [] as [String; 0]);
     }
 }
 

@@ -146,7 +146,7 @@ fn ctrl_d_deletes_the_selected_command_from_history() {
 fn deleting_the_last_command_closes_the_popup() {
     editing_history(&["only"], |app| {
         ctrl(app, 'd');
-        assert!(history(app).is_empty());
+        assert_eq!(history(app), [] as [String; 0]);
         assert!(!popup_open(app));
         assert_eq!(app.flash_text(), Some("history is empty"));
     });
@@ -429,7 +429,7 @@ fn ctrl_d_deletes_from_the_command_history_only() {
         assert_eq!(rows(app), ["    1  sort size"]);
         assert_eq!(editing(app), "sort size");
         ctrl(app, 'd');
-        assert!(command_history(app).is_empty());
+        assert_eq!(command_history(app), [] as [String; 0]);
         assert!(!popup_open(app), "deleting the last closes the popup");
         assert_eq!(history(app), ["echo shell"]);
     });

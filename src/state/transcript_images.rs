@@ -519,12 +519,18 @@ mod tests {
     /// "nothing to show", not errors.
     #[test]
     fn absent_or_broken_input_yields_no_images() {
-        assert!(index(Path::new("/nonexistent/session.jsonl")).is_empty());
+        assert_eq!(
+            index(Path::new("/nonexistent/session.jsonl")),
+            [] as [crate::state::transcript_images::TranscriptImage; 0]
+        );
         let (_d, path) = write(&[
             serde_json::json!({"type": "user", "message": {"content": "plain text"}}).to_string(),
             "{ not json at all \"type\":\"image\"".to_string(),
         ]);
-        assert!(index(&path).is_empty());
+        assert_eq!(
+            index(&path),
+            [] as [crate::state::transcript_images::TranscriptImage; 0]
+        );
     }
 
     /// Loading against an index whose line no longer holds that image reports

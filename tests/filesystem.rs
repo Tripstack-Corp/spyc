@@ -75,7 +75,7 @@ fn executable_bit_is_set() {
     assert!(md.permissions().mode() & 0o111 != 0);
 
     let md = fs::metadata(tmp.path().join("readme.txt")).unwrap();
-    assert!(md.permissions().mode() & 0o111 == 0);
+    assert_eq!(md.permissions().mode() & 0o111, 0);
 }
 
 #[test]

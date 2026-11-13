@@ -484,8 +484,8 @@ mod tests {
             panic!("added not text");
         };
         assert_eq!(origin_texts(hunks, LineOrigin::Add), vec!["new1", "new2"]);
-        assert!(origin_texts(hunks, LineOrigin::Remove).is_empty());
-        assert!(origin_texts(hunks, LineOrigin::Context).is_empty());
+        assert_eq!(origin_texts(hunks, LineOrigin::Remove), [] as [&str; 0]);
+        assert_eq!(origin_texts(hunks, LineOrigin::Context), [] as [&str; 0]);
 
         // Deleted file: status Deleted, no new path.
         let deleted = model
@@ -695,12 +695,13 @@ mod tests {
         run_git(&root, &["add", "f.txt"]);
 
         // Staged-vs-HEAD and everything-vs-HEAD both see the staged change…
-        assert!(!diff_cached(&root, &[]).expect("cached").files.is_empty());
-        assert!(
-            !diff_head_to_worktree(&root, &[])
-                .expect("working")
-                .files
-                .is_empty()
+        assert_ne!(
+            diff_cached(&root, &[]).expect("cached").files,
+            [] as [crate::git::model::FileDiff; 0]
+        );
+        assert_ne!(
+            diff_head_to_worktree(&root, &[]).expect("working").files,
+            [] as [crate::git::model::FileDiff; 0]
         );
         // …but the plain `git diff` (index↔worktree) is clean.
         let unstaged = diff_index_to_worktree(&root, &[]).expect("unstaged");
@@ -764,7 +765,7 @@ mod tests {
         assert_eq!(meta.id.len(), 40);
         assert_eq!(meta.short_id.len(), 7);
         assert!(meta.id.starts_with(&meta.short_id));
-        assert!(!meta.time.is_empty());
+        assert_ne!(meta.time, "");
         // Cross-check the full id against git.
         let git_head = run_git(&root, &["rev-parse", "HEAD"]).trim().to_string();
         assert_eq!(meta.id, git_head);
@@ -797,7 +798,7 @@ mod tests {
             origin_texts(hunks, LineOrigin::Add),
             vec!["a", "b", "c", "d", "e"]
         );
-        assert!(origin_texts(hunks, LineOrigin::Remove).is_empty());
+        assert_eq!(origin_texts(hunks, LineOrigin::Remove), [] as [&str; 0]);
     }
 
     #[test]

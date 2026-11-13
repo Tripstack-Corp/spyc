@@ -73,6 +73,9 @@ mod tests {
     #[test]
     fn recent_empty_for_non_repo() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(recent(tmp.path(), 10).is_empty());
+        assert_eq!(
+            recent(tmp.path(), 10),
+            [] as [crate::git::model::CommitMeta; 0]
+        );
     }
 }

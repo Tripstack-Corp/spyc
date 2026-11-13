@@ -511,7 +511,7 @@ mod tests {
                     }
                     assert_eq!(
                         resolver.feed(*last, &UserKeymap::default()),
-                        ResolverOutcome::Action(action.clone()),
+                        ResolverOutcome::Action(action),
                         "{keys} fires what its row does"
                     );
                 }

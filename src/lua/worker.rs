@@ -636,7 +636,10 @@ mod tests {
 
         let outcomes = worker.drain_outcomes();
         assert!(outcomes[0].error.is_some());
-        assert!(outcomes[0].requests.is_empty());
+        assert_eq!(
+            outcomes[0].requests,
+            [] as [crate::lua::bridge::LuaRequest; 0]
+        );
     }
 
     /// Spawn a worker, submit `job`, and drain the single outcome it produces.
@@ -748,7 +751,7 @@ mod tests {
             event: None,
         });
         assert!(outcome.error.is_some());
-        assert!(outcome.requests.is_empty());
+        assert_eq!(outcome.requests, [] as [crate::lua::bridge::LuaRequest; 0]);
     }
 
     /// A `spyc.on` event hook receives the event payload as its argument: load

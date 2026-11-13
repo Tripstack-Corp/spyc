@@ -137,8 +137,7 @@ fn lower_pane() -> PagerStreamMount {
 }
 
 fn text_of(view: Option<&PagerView>) -> Vec<String> {
-    view.map(|v| v.lines.iter().map(ToString::to_string).collect())
-        .unwrap_or_default()
+    view.map_or_default(|v| v.lines.iter().map(ToString::to_string).collect())
 }
 
 /// Drain the project in view's streams until its pager (or, with `scroll`,

@@ -284,7 +284,7 @@ impl App {
             pane_tabs.switch_to(0);
         }
         self.state.active_project_mut().focus = state::Focus::FileList;
-        let lead = note.map(|n| format!("{n}; ")).unwrap_or_default();
+        let lead = note.map_or_default(|n| format!("{n}; "));
         let summary = format!(
             "{lead}opened {opened}/{} startup tab(s) — ^a 1..9 to jump",
             tabs.len()
@@ -480,7 +480,7 @@ mod app_tests {
             // The rc gained a command since the approval: ask, run nothing.
             let edited = launch(tmp.path(), &[], &["cat", "cat", "cat -u"]);
             assert!(asking(&edited));
-            assert!(opened(&edited).is_empty());
+            assert_eq!(opened(&edited), [] as [String; 0]);
         });
     }
 
@@ -551,7 +551,7 @@ mod app_tests {
             });
             app.start_startup_tabs(true);
             assert!(!asking(&app));
-            assert!(opened(&app).is_empty());
+            assert_eq!(opened(&app), [] as [String; 0]);
         });
     }
 }

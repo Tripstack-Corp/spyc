@@ -1089,12 +1089,7 @@ mod suspend_action_tests {
             app.handle_key(key('X')).unwrap();
 
             assert!(!suspended(&app), "the shell keeps running");
-            let flash = app
-                .state
-                .flash
-                .as_ref()
-                .map(|f| f.text.clone())
-                .unwrap_or_default();
+            let flash = app.state.flash.as_ref().map_or_default(|f| f.text.clone());
             assert!(flash.contains("shell"), "the refusal says why: {flash:?}");
         });
     }

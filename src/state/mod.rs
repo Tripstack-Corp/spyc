@@ -701,7 +701,7 @@ mod tests {
             "",
             ratatui::style::Style::default(),
         );
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [ratatui::prelude::Line<'_>; 0]);
         assert!(!last_was_blank);
     }
 

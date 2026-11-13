@@ -988,12 +988,7 @@ pub(super) mod menu_action_tests {
             app.dispatch_command("exec");
 
             assert!(app.runtime.pending_capture.is_none(), "nothing ran");
-            let flash = app
-                .state
-                .flash
-                .as_ref()
-                .map(|f| f.text.clone())
-                .unwrap_or_default();
+            let flash = app.state.flash.as_ref().map_or_default(|f| f.text.clone());
             assert!(
                 flash.contains("notes.txt") && flash.contains("not executable"),
                 "the refusal names the file: {flash:?}"

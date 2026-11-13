@@ -108,7 +108,7 @@ fn check_paired_dir(
         // One `stat` per entry, reused for both the corrupt check and the size
         // total. `DirEntry::metadata` does not follow symlinks and on most
         // platforms is served from the directory read itself.
-        let len = entry.metadata().map(|m| m.len()).unwrap_or_default();
+        let len = entry.metadata().map_or_default(|m| m.len());
         total_bytes += len;
         if let Some(stem) = name.strip_suffix(".json") {
             if len == 0 {
@@ -315,7 +315,7 @@ mod tests {
     fn empty_state_dir_is_healthy() {
         let tmp = tempfile::tempdir().unwrap();
         let report = check(tmp.path());
-        assert!(report.warnings.is_empty());
+        assert_eq!(report.warnings, [] as [String; 0]);
         assert_eq!(report.cleaned, 0);
     }
 

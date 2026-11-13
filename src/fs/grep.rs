@@ -154,10 +154,7 @@ fn search_one(
             batch = Vec::with_capacity(STREAM_BATCH);
         }
     }
-    if !batch.is_empty() && tx.send(batch).is_err() {
-        return false;
-    }
-    true
+    batch.is_empty() || tx.send(batch).is_ok()
 }
 
 /// Sink that pushes each match into a shared batch buffer. The

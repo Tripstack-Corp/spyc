@@ -155,8 +155,7 @@ fn member_names(member: &crate::proc_group::Member) -> Vec<String> {
     let base = |s: &str| {
         std::path::Path::new(s)
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default()
+            .map_or_default(|n| n.to_string_lossy().into_owned())
     };
     let mut names = vec![base(&member.comm)];
     if let Some(argv0) = member.argv.first() {

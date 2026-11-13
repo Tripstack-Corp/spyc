@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn no_tabs_means_no_hits() {
         let spans = tab_spans(0, 80, &[]);
-        assert!(spans.is_empty());
+        assert_eq!(spans, [] as [crate::app::mouse::tab_hit::TabSpan; 0]);
         assert_eq!(tab_at(0, &spans), None);
     }
 
@@ -414,6 +414,9 @@ mod tests {
     /// swallows the whole row.
     #[test]
     fn zero_width_yields_nothing() {
-        assert!(tab_spans(0, 0, &[4]).is_empty());
+        assert_eq!(
+            tab_spans(0, 0, &[4]),
+            [] as [crate::app::mouse::tab_hit::TabSpan; 0]
+        );
     }
 }

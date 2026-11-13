@@ -1047,9 +1047,9 @@ mod tests {
         // cleanly with the current schema — every option is commented
         // out so the parsed FileConfig equals FileConfig::default().
         let file: FileConfig = toml::from_str(super::DEFAULT_TEMPLATE).unwrap();
-        assert!(file.keymap.is_empty());
+        assert_eq!(file.keymap, [] as [String; 0]);
         assert!(file.colors.dir.is_none());
-        assert!(file.ignore_masks.is_empty());
+        assert_eq!(file.ignore_masks, [] as [crate::config::IgnoreMask; 0]);
         assert!(file.layout.status_position.is_none());
         assert!(file.pane.default_command.is_none());
         assert!(file.pane.new_tab_cwd.is_none());
@@ -1577,7 +1577,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let cfg = Config::load_from(&[Some(&tmp.path().join("nope.toml"))]).unwrap();
         assert!(cfg.bindings.is_empty());
-        assert!(cfg.sources.is_empty());
+        assert_eq!(cfg.sources, [] as [std::path::PathBuf; 0]);
     }
 
     #[test]

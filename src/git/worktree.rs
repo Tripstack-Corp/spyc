@@ -46,8 +46,7 @@ pub struct Worktree {
 /// default width used by the porcelain `HEAD` line truncation.
 fn head_short(repo: &gix::Repository) -> String {
     repo.head_id()
-        .map(|id| id.to_hex_with_len(7).to_string())
-        .unwrap_or_default()
+        .map_or_default(|id| id.to_hex_with_len(7).to_string())
 }
 
 /// Branch display for a repo's HEAD: the short branch name (`main`) for an
@@ -985,10 +984,7 @@ mod tests {
         // dir — a relative `gitdir:` (which git resolves against the
         // worktree, not the repo) is the failure mode we're guarding.
         let gf = std::fs::read_to_string(target.join(".git")).unwrap_or_default();
-        let admin = gf
-            .strip_prefix("gitdir:")
-            .map(str::trim)
-            .unwrap_or_default();
+        let admin = gf.strip_prefix("gitdir:").map_or_default(str::trim);
         assert!(
             Path::new(admin).is_absolute() && Path::new(admin).is_dir(),
             "broken gitfile: {gf:?} (admin abs={}, exists={}); cwd={:?}",
@@ -1281,8 +1277,11 @@ mod tests {
         };
         let removal = remove_inner_with(&target, false, &flaky, &[0]).expect("remove");
         assert_eq!(attempts.get(), 2);
-        assert!(removal.leftovers.is_empty());
-        assert!(aside_copies(target.parent().unwrap()).is_empty());
+        assert_eq!(removal.leftovers, [] as [std::path::PathBuf; 0]);
+        assert_eq!(
+            aside_copies(target.parent().unwrap()),
+            [] as [std::path::PathBuf; 0]
+        );
         assert!(!target.exists());
     }
 

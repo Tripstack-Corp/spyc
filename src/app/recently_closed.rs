@@ -102,8 +102,7 @@ impl App {
         std::thread::spawn(move || {
             let saved: Vec<(Manifest, bool)> = dir
                 .as_deref()
-                .map(crate::state::sessions::load_manifests_in)
-                .unwrap_or_default()
+                .map_or_default(crate::state::sessions::load_manifests_in)
                 .into_iter()
                 .map(|manifest| {
                     let running = manifest.running();
@@ -219,14 +218,17 @@ mod tests {
     fn a_file_naming_no_pid_adds_nothing() {
         let mut old = session(2, 90, &["/a"], &[("/b", 80)]);
         old.pid = None;
-        assert!(list(&[], &[(old, false)]).is_empty());
+        assert_eq!(
+            list(&[], &[(old, false)]),
+            [] as [(std::path::PathBuf, u64); 0]
+        );
     }
 
     /// This spyc's own file is older than its own state, so it adds nothing.
     #[test]
     fn this_spycs_own_file_is_skipped() {
         let saved = [(session(1, 90, &["/a"], &[("/b", 80)]), false)];
-        assert!(list(&[], &saved).is_empty());
+        assert_eq!(list(&[], &saved), [] as [(std::path::PathBuf, u64); 0]);
     }
 
     /// The newest close of an anchor is the one listed, even when a newer one

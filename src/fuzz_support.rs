@@ -24,7 +24,7 @@ impl<'a> Script<'a> {
         Self { bytes, pos: 0 }
     }
 
-    fn byte(&mut self) -> u8 {
+    const fn byte(&mut self) -> u8 {
         if self.bytes.is_empty() {
             return 0;
         }
@@ -33,7 +33,7 @@ impl<'a> Script<'a> {
         b
     }
 
-    fn below(&mut self, n: u8) -> u8 {
+    const fn below(&mut self, n: u8) -> u8 {
         if n == 0 { 0 } else { self.byte() % n }
     }
 
@@ -162,7 +162,7 @@ mod tests {
     /// invisible — the fuzz target would pass on every input.
     #[test]
     fn a_nonempty_script_produces_a_nonempty_stream() {
-        assert!(!escape_stream(&[1, 2, 3, 4, 5, 6, 7, 8]).is_empty());
+        assert_ne!(escape_stream(&[1, 2, 3, 4, 5, 6, 7, 8]), [] as [u8; 0]);
     }
 
     /// Bounded in both directions: an empty script stops immediately, and a

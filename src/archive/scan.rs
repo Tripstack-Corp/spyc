@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn an_unremarkable_archive_warns_about_nothing() {
         let index = empty_index();
-        assert!(warnings(&zip_facts(), &index).is_empty());
+        assert_eq!(warnings(&zip_facts(), &index), [] as [String; 0]);
     }
 
     #[test]

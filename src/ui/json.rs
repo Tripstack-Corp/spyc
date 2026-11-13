@@ -58,7 +58,7 @@ mod tests {
         // The pretty output spans multiple lines and re-indents.
         assert!(pretty.contains('\n'));
         assert!(pretty.contains("  \"a\": 1"));
-        assert!(pretty != minified);
+        assert_ne!(pretty, minified);
     }
 
     #[test]

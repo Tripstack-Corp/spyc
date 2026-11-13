@@ -83,8 +83,7 @@ fn verdict(e: &TabEntry) -> Vec<String> {
     };
     let note = live_report(e)
         .and_then(|r| r.note.as_deref())
-        .map(|note| format!(" — {note}"))
-        .unwrap_or_default();
+        .map_or_default(|note| format!(" — {note}"));
     let mut out = vec![format!("{} ({source}){note}", info.activity.name()), age];
     if info
         .running

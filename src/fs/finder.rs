@@ -120,10 +120,7 @@ fn walk_one(
             }
         }
     }
-    if !batch.is_empty() && tx.send(batch).is_err() {
-        return false;
-    }
-    true
+    batch.is_empty() || tx.send(batch).is_ok()
 }
 
 /// Scan `root`'s subtree (without gitignore filtering) for
@@ -395,7 +392,10 @@ mod tests {
     #[test]
     fn rank_limit_zero_returns_empty() {
         let candidates = vec![PathBuf::from("foo.rs")];
-        assert!(rank(&candidates, "foo", 0).is_empty());
+        assert_eq!(
+            rank(&candidates, "foo", 0),
+            [] as [(std::path::PathBuf, u32); 0]
+        );
     }
 
     #[test]

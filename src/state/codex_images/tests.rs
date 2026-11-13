@@ -242,7 +242,10 @@ fn assistant_and_tool_images_are_not_user_attachments() {
         json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[inline(PNG)]}}).to_string(),
         json!({"type":"event_msg","payload":{"type":"item_completed","item":{"type":"AgentMessage","content":[inline(PNG)]}}}).to_string(),
     ].join("\n"));
-    assert!(index(&path).is_empty());
+    assert_eq!(
+        index(&path),
+        [] as [crate::state::transcript_images::TranscriptImage; 0]
+    );
 }
 
 #[test]

@@ -941,7 +941,7 @@ mod tests {
             None,
             true,
         );
-        assert!(lines.is_empty());
+        assert_eq!(lines, [] as [ratatui::prelude::Line<'_>; 0]);
     }
 
     /// A pinned `conversationId` addresses the transcript directly. The

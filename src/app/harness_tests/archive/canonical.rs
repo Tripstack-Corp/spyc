@@ -138,8 +138,7 @@ fn cursor_row(app: &App) -> String {
     let c = app.state.cur();
     c.rows
         .get(c.cursor.index)
-        .map(|r| r.display.clone())
-        .unwrap_or_default()
+        .map_or_default(|r| r.display.clone())
 }
 
 /// The painted line of the listing row that shows `name`.
@@ -158,11 +157,7 @@ fn painted_row(app: &mut App, name: &str) -> String {
 }
 
 fn flashed(app: &App) -> String {
-    app.state
-        .flash
-        .as_ref()
-        .map(|f| f.text.clone())
-        .unwrap_or_default()
+    app.state.flash.as_ref().map_or_default(|f| f.text.clone())
 }
 
 /// Climbing out of an archive entered by another spelling of its path puts

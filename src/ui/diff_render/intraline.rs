@@ -182,7 +182,7 @@ fn push_span(out: &mut Vec<Range<usize>>, toks: &[Range<usize>], span: &Range<u3
 
 /// Whether `ranges` (disjoint, ascending, already fused where touching) cover
 /// all of `0..len`. An empty side is trivially covered.
-fn spans_whole(ranges: &[Range<usize>], len: usize) -> bool {
+const fn spans_whole(ranges: &[Range<usize>], len: usize) -> bool {
     len == 0 || matches!(ranges, [only] if only.start == 0 && only.end == len)
 }
 
