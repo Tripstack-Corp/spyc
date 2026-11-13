@@ -107,6 +107,22 @@ class Unexport(unittest.TestCase):
             with self.subTest(build.__name__), self.assertRaises(SystemExit):
                 tool.names_to_localize(self.symbols_of(build, SYMBOLS), listed, macho, "x.o")
 
+    def test_another_object_gives_up_only_the_listed_names_it_exports(self):
+        ghostty = [("ghostty_terminal_new", "global"), ("memset", "global"), ("strlen", "undef")]
+        for build, macho in ((macho_obj, True), (elf, False)):
+            with self.subTest(build.__name__):
+                before = self.symbols_of(build, ghostty)
+                names = tool.listed_exports(before, tool.listed(), macho)
+                self.assertEqual(names, [b"_memset" if macho else b"memset"])
+                after = self.symbols_of(build, [(n, "local" if n == "memset" else k) for n, k in ghostty])
+                tool.check(before, after, names, "ghostty.o")
+
+    def test_an_object_with_no_listed_export_gives_up_nothing(self):
+        for build, macho in ((macho_obj, True), (elf, False)):
+            with self.subTest(build.__name__):
+                before = self.symbols_of(build, [("ghostty_terminal_new", "global"), ("memset", "undef")])
+                self.assertEqual(tool.listed_exports(before, tool.listed(), macho), [])
+
     def test_the_committed_list_reads(self):
         names = tool.listed()
         self.assertIn("memset", names)
@@ -118,20 +134,21 @@ class Unexport(unittest.TestCase):
         for build in (macho_obj, elf):
             with self.subTest(build.__name__):
                 before = self.symbols_of(build, SYMBOLS)
-                tool.check(before, self.symbols_of(build, self.localized(gone)), "x.o")
+                tool.check(before, self.symbols_of(build, self.localized(gone)), tool.libc_names(before), "x.o")
 
     def test_the_check_stops_on_a_c_library_name_left_exported(self):
         for build in (macho_obj, elf):
             with self.subTest(build.__name__), self.assertRaises(SystemExit):
                 before = self.symbols_of(build, SYMBOLS)
-                tool.check(before, self.symbols_of(build, self.localized({"__stack_chk_guard"})), "x.o")
+                tool.check(before, self.symbols_of(build, self.localized({"__stack_chk_guard"})),
+                           tool.libc_names(before), "x.o")
 
     def test_the_check_stops_when_a_compiler_helper_went_local(self):
         gone = {"memset", "__stack_chk_guard", "__memcpy_chk", "__udivti3"}
         for build in (macho_obj, elf):
             with self.subTest(build.__name__), self.assertRaises(SystemExit):
                 before = self.symbols_of(build, SYMBOLS)
-                tool.check(before, self.symbols_of(build, self.localized(gone)), "x.o")
+                tool.check(before, self.symbols_of(build, self.localized(gone)), tool.libc_names(before), "x.o")
 
 
 if __name__ == "__main__":

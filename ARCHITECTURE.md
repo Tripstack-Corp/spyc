@@ -699,7 +699,8 @@ ghostty pin and on the vendoring recipe:
   llvm/llvm-project#229283), so up to libghostty-vt 1.0.0 the archive defined
   `memset` twice, `ld` warned of a duplicate, and spyc ran compiler_rt's
   byte-at-a-time copy. ghostty stopped exporting it on Darwin in `9899c07`,
-  first in `vt-1.0.1`.
+  first in `vt-1.0.1`; it still does on `aarch64-unknown-linux-musl`, where the
+  recipe localizes it like compiler_rt's (`unexport-libc.py --listed-only`).
 
 A pin before `9899c07`, a ghostty that exports another C library function, or
 a recipe that skips the localization brings one back.

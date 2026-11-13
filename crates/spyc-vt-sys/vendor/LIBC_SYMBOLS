@@ -1,8 +1,8 @@
 # The C library functions Zig's compiler_rt.o defines, one per line, without
 # Mach-O's leading underscore: its exports with a plain lowercase name, plus
 # the stack-protector and fortify family. scripts/unexport-libc.py localizes
-# exactly these during vendoring and stops if compiler_rt.o's exports no
-# longer match them; tests/libsystem_binding.rs (through
+# exactly these in compiler_rt.o during vendoring, and stops if its exports no
+# longer match them, and any of them another member exports; tests/libsystem_binding.rs (through
 # scripts/check-libsystem-binding.sh) and scripts/test_vendored_archives.py
 # check that none is defined where it shouldn't be.
 __chk_fail

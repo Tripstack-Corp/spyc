@@ -109,6 +109,12 @@ class VendoredArchives(unittest.TestCase):
         for target, objs in self.archives.items():
             self.assertEqual(sorted(names.intersection(exported(objs["compiler_rt.o"]))), [], target)
 
+    def test_no_archive_member_exports_a_listed_name(self):
+        names = listed()
+        for target, objs in self.archives.items():
+            for member, obj in sorted(objs.items()):
+                self.assertEqual(sorted(names.intersection(exported(obj))), [], f"{target} {member}")
+
     def test_no_darwin_archive_exports_a_listed_name(self):
         names = listed()
         for target, objs in self.archives.items():
