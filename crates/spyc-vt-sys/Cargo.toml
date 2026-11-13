@@ -33,6 +33,11 @@ include = [
 # `links` claims the native library globally, so two crates cannot both link it.
 links = "ghostty-vt"
 
+[lints.cargo]
+# A dependency no target uses fails `make lint` (the clippy pass checks
+# `[dependencies]` and `[build-dependencies]`; `[dev-dependencies]` it can't).
+unused_dependencies = "deny"
+
 [lints.rust]
 # The vendored libghostty-vt.a defines `memset` twice (Zig's compiler_rt and
 # the ghostty unit); `ld` keeps the first, as it always has, and since Rust

@@ -1,0 +1,8 @@
+# Dependency cooldown (Cargo 1.100): when this checkout resolves a version
+# not already in Cargo.lock (`cargo add`, `cargo update`, a new dependency),
+# a release younger than this is passed over. A compromised release is
+# usually caught and yanked within days; this keeps it out of the lockfile
+# meanwhile. Dependabot keeps the same delay (.github/dependabot.yml).
+# `cargo install` doesn't read it; `--locked` builds are unaffected.
+[registry]
+global-min-publish-age = "7 days"
