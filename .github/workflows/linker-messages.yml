@@ -1,0 +1,52 @@
+# Report every linker message from a macOS link of spyc and its tests. Never
+# fails a check: it lists what the linker said, in the job summary, and flags
+# the kinds that have meant a real defect (`scripts/linker-messages.py`).
+#
+# rustc files linker output under `linker_messages` (warn) and `linker_info`
+# (allow), and cargo caps both for dependencies; `--force-warn` turns both on
+# for every link, build scripts and proc-macros included. Only Apple's `ld` has
+# reported anything for spyc (the duplicate `_memset` of #1129 among it), and no
+# other job links on macOS, so this runs on a Mac, when a change can alter what
+# gets linked.
+name: Linker messages
+
+on:
+  pull_request:
+    paths:
+      - "crates/spyc-vt-sys/**"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "build.rs"
+      - ".cargo/**"
+      - "scripts/vendor-ghostty.sh"
+      - "scripts/unexport-libc.py"
+      - "scripts/linker-messages.py"
+      - ".github/workflows/linker-messages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Linker messages (macOS, report only)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: rustc --version && ld -v 2>&1 | head -1 && xcrun --show-sdk-version
+      # Its own cache: RUSTFLAGS differ from every other job's.
+      - uses: Swatinem/rust-cache@v2
+      - name: Link spyc and its tests with every linker message on
+        env:
+          RUSTFLAGS: "--force-warn linker_messages --force-warn linker_info"
+        run: |
+          set +e
+          cargo build --locked --all-targets > build.log 2>&1
+          status=$?
+          tail -n 3 build.log
+          echo "cargo build exit status: $status"
+          exit 0
+      - name: Summarize
+        if: always()
+        run: python3 scripts/linker-messages.py build.log | tee -a "$GITHUB_STEP_SUMMARY"

@@ -380,6 +380,19 @@ Invariants no linter can infer — like that action needing
 `include-hidden-files: true` — are pinned as guard tests in `src/lib.rs`
 instead.
 
+**Linker messages are reported, not gated** (`.github/workflows/linker-messages.yml`).
+On a PR that can change what gets linked (the vendored archives, `Cargo.lock`,
+the toolchain, the build scripts), a macOS job links spyc and its tests with
+`--force-warn linker_messages --force-warn linker_info`, and
+`scripts/linker-messages.py` lists everything the linker said in the job
+summary, flagging a duplicate or undefined symbol with an annotation. It never
+fails: Apple's `ld` also prints informational output that moves with the SDK,
+such as which macOS version an object was built for. It is the only job that
+links spyc itself on macOS. A silent link is not a clean one: the vendored archive
+displaced the C library's `memset` on Linux without a word from the linker,
+which is what the symbol checks in `scripts/test_vendored_archives.py` and
+`scripts/check-libsystem-binding.sh` are for.
+
 **Supply chain lives in `.github/workflows/audit.yml`**, not the PR gate: weekly
 plus `workflow_dispatch`, running the full `make deny` (advisories, bans,
 licenses, sources) against a freshly fetched RUSTSEC DB. It was taken off the PR
