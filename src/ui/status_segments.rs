@@ -11,7 +11,8 @@ pub enum StatusSegment {
     Project,
     /// Every open project's chip, while several are.
     Projects,
-    /// Open project `n`'s label among the chips, 0-based in switcher order.
+    /// Open project `n`'s chip, its label and the spaces and glyph out to its
+    /// partings, 0-based in switcher order.
     ProjectLabel(usize),
     /// The collapsed chips' place of the project in view (`2/4`).
     ProjectCount,
@@ -180,8 +181,9 @@ mod tests {
 
     /// At every width the chips narrow through (every chip whole, the labels
     /// cut, collapsed to `1/4`, the project in view alone), in colour and in
-    /// mono, each label's span covers its label as drawn, no more and no
-    /// less, and the count's covers `1/4`; the git, agent and session
+    /// mono, each label's span covers its label as drawn and, while every
+    /// chip shows, the rest of its chip out to the partings, and the count's
+    /// covers `1/4`; the git, agent and session
     /// segments' spans hold their text.
     #[test]
     fn each_span_covers_exactly_what_is_drawn_there() {
@@ -212,21 +214,28 @@ mod tests {
                 let text = |s: &SegmentSpan| cells[s.start..s.end].concat();
                 let row = cells.concat();
                 let mut shape = (0, false);
+                let every = spans
+                    .iter()
+                    .filter(|s| matches!(s.segment, StatusSegment::ProjectLabel(_)))
+                    .count()
+                    > 1;
                 for span in &spans {
                     match span.segment {
                         StatusSegment::ProjectLabel(i) => {
                             shape.0 += 1;
+                            let held = text(span);
+                            let mut words = held.split_whitespace();
                             assert!(
-                                is_label(&text(span), labels[i]),
-                                "mono={mono} width={width}: {span:?} holds {:?}: {row:?}",
-                                text(span)
+                                words.next().is_some_and(|w| is_label(w, labels[i]))
+                                    && words.all(|w| w == "\u{25a0}"),
+                                "mono={mono} width={width}: {span:?} holds {held:?}: {row:?}"
                             );
                             let before = cells[span.start - 1].as_str();
-                            let after = cells.get(span.end).map_or(" ", String::as_str);
-                            assert_eq!(
-                                (before, after),
-                                (" ", " "),
-                                "mono={mono} width={width}: {span:?} ends at the label: {row:?}"
+                            let after = cells.get(span.end).map_or("", String::as_str);
+                            let parted = (i == 0 || before != " ") && after != " ";
+                            assert!(
+                                !every || parted,
+                                "mono={mono} width={width}: {span:?} reaches its partings: {row:?}"
                             );
                         }
                         StatusSegment::ProjectCount => {

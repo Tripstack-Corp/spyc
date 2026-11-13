@@ -54,7 +54,7 @@ quick-select and `y` in the pager are the mouse-free yank paths.
   quick select, harpoon, the image views) keep the right-click to
   themselves.
 - **On the status bar:**
-  - **A project's label** goes to that project, as a left click does, and
+  - **A project**, between its chevrons, goes to that project, as a left click does, and
     opens its menu: close it (`Space x`, while another is open), jump to its
     home (`Space p`, once it has one), make the current directory its home
     (`Space P`), then the open projects' rows: the list (`Space j`), a new
@@ -181,8 +181,8 @@ takes, or keeps the hints for good, or turns them off
 ## Clicking and scrolling
 
 - **Click a pane tab to switch to it.**
-- **Click a project's label on the status bar to go to that project**, as
-  `Space N` does, or the collapsed count (`2/4`) to list the projects, as
+- **Click a project on the status bar to go to that project**, as
+  `Space N` does, anywhere between the chevrons either side of its label, or the collapsed count (`2/4`) to list the projects, as
   `Space j` does; the prompt row names that key, as a menu row's click does,
   until you have learned it. A click on the agent segment gives the pane the
   keyboard.

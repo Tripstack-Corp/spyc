@@ -84,9 +84,15 @@ impl Bar {
         self.spans.push(span);
     }
 
-    /// Mark what was pushed since column `from` as `segment`.
+    /// Mark what was pushed since column `from` as `segment`, one span with
+    /// the `segment` marked last when it ends at `from`.
     fn mark(&mut self, segment: StatusSegment, from: usize) {
-        if self.width > from {
+        if let Some(last) = self.segments.last_mut()
+            && last.segment == segment
+            && last.end == from
+        {
+            last.end = self.width;
+        } else if self.width > from {
             self.segments.push(SegmentSpan {
                 segment,
                 start: from,
@@ -103,7 +109,7 @@ impl Bar {
             ));
     }
 
-    /// Push `chips`, each in `style` patched with its own, marking the labels
+    /// Push `chips`, each in `style` patched with its own, marking each chip
     /// and the count.
     fn push_chips(&mut self, chips: ChipSpans, style: Style) {
         for (span, part) in chips.spans.into_iter().zip(chips.parts) {
@@ -445,9 +451,10 @@ impl StatusBar<'_> {
         let most = avail.saturating_sub(4 + 3);
         let drawn = chips.spans(chip_room(avail), most, self.theme);
         let [before, after] = drawn.edges;
-        spans.push(Span::styled(" ", before), None);
+        let [first, last] = drawn.edge_parts();
+        spans.push(Span::styled(" ", before), first);
         spans.append(drawn);
-        spans.push(Span::styled(" ", after), None);
+        spans.push(Span::styled(" ", after), last);
         Some((StatusSegment::Projects, spans))
     }
 
