@@ -178,6 +178,42 @@ fn a_click_on_a_project_label_goes_to_that_project() {
     });
 }
 
+/// A chip is the whole of what lies between its partings: a click on the
+/// space before its label, on its glyph's cell or on the space after it goes
+/// to that project, the first chip's and the last's out to the bar's padding.
+/// A parting goes nowhere.
+#[test]
+fn a_click_anywhere_between_the_partings_goes_to_that_project() {
+    with_mouse(|base| {
+        let (mut app, ids) = projects(base, &["alpha", "bravo", "charlie"], 120);
+        let at = |app: &mut App, label: &str, offset: i32| {
+            let (x, y) = on_bar(app, label);
+            (u16::try_from(i32::from(x) + offset).unwrap(), y)
+        };
+        // `·alpha·□·`, `·bravo·□·` and `·charlie·□·`, each `□` a glyph's cell.
+        for (label, index, offsets) in [
+            ("bravo", 1, [-1, 5, 6, 7]),
+            ("charlie", 2, [-1, 7, 8, 9]),
+            ("alpha", 0, [-1, 5, 6, 7]),
+        ] {
+            for offset in offsets {
+                let away = if index == 0 { "bravo" } else { "alpha" };
+                let label_away = on_bar(&mut app, away);
+                click(&mut app, label_away);
+                let cell = at(&mut app, label, offset);
+
+                click(&mut app, cell);
+
+                assert_eq!(app.state.active, ids[index], "{label} at {offset}");
+            }
+        }
+
+        let parting = at(&mut app, "bravo", 8);
+        click(&mut app, parting);
+        assert_eq!(app.state.active, ids[0], "the parting goes nowhere");
+    });
+}
+
 /// A right-click on a label goes to that project first, as a click on it
 /// would, then opens its menu: no switch, since it is in view now, but close,
 /// and the projects rows. Its close closes the project the label named.
@@ -956,12 +992,14 @@ fn drawn_labels(cells: &[Cell]) -> (usize, Vec<(usize, usize)>) {
 
 /// At every width the segment narrows through (every chip whole, the labels
 /// cut, collapsed to `1/4`, the project in view alone), a press on any cell
-/// of a drawn label goes to the project it names, a press on the count opens
+/// of a drawn label, or the padding before it, goes to the project it names,
+/// and while every chip shows so does any cell out to its partings; a press
+/// on the count opens
 /// the project list, and a press anywhere else in the segment starts a text
 /// selection: where a click lands and what is drawn there agree, cell for
 /// cell.
 #[test]
-fn every_cell_of_a_drawn_label_goes_to_its_project_and_no_other_does() {
+fn every_cell_of_a_drawn_chip_goes_to_its_project_and_no_other_does() {
     with_mouse(|base| {
         let names = ["alpha", "bravo", "charlie", "delta"];
         for (width, collapsed) in [(160, false), (120, false), (60, true), (30, false)] {
@@ -989,9 +1027,28 @@ fn every_cell_of_a_drawn_label_goes_to_its_project_and_no_other_does() {
                 width >= 120,
                 "width {width}: every chip drawn: {text:?}"
             );
+            let partings: Vec<usize> = (0..end)
+                .filter(|&x| matches!(cells[x].symbol(), "\u{e0b1}" | "\u{e0b0}"))
+                .collect();
+            let chips: Vec<(usize, usize)> = labels
+                .iter()
+                .map(|&(a, b)| {
+                    let from = partings
+                        .iter()
+                        .rev()
+                        .find(|&&p| p < a)
+                        .map_or(a - 1, |p| p + 1);
+                    let to = if several {
+                        partings.iter().copied().find(|&p| p >= b).unwrap_or(end)
+                    } else {
+                        b
+                    };
+                    (from, to)
+                })
+                .collect();
             for x in 0..end {
                 let point = (u16::try_from(x).unwrap(), y);
-                let on_label = labels.iter().position(|&(a, b)| (a..b).contains(&x));
+                let on_label = chips.iter().position(|&(a, b)| (a..b).contains(&x));
                 let on_count = count.is_some_and(|(a, b)| (a..b).contains(&x));
                 press(&mut app, point);
                 let to = on_label.map(|k| if several { ids[k] } else { ids[0] });
@@ -1000,7 +1057,7 @@ fn every_cell_of_a_drawn_label_goes_to_its_project_and_no_other_does() {
                         assert_eq!(app.state.active, id, "width {width}, column {x}: {text:?}");
                         assert_eq!(
                             app.view.mouse_selection, None,
-                            "width {width}, column {x}: a label is no text to select"
+                            "width {width}, column {x}: a chip is no text to select"
                         );
                     }
                     (None, true) => {
