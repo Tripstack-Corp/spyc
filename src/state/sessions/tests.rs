@@ -657,7 +657,10 @@ fn prune_never_selects_the_file_just_written() {
         (PathBuf::from("3.json"), at(3)),
     ];
     let keep = std::path::Path::new("1.json");
-    assert!(prune_victims(files.clone(), keep, 3).is_empty());
+    assert_eq!(
+        prune_victims(files.clone(), keep, 3),
+        [] as [std::path::PathBuf; 0]
+    );
     assert_eq!(prune_victims(files, keep, 2), vec![PathBuf::from("2.json")]);
 }
 
@@ -800,7 +803,10 @@ fn legacy_session_json_without_name_or_project_home_loads() {
     );
     // P2 fields predate this save too: both must default, not fail to parse.
     assert_eq!(p.tabs[0].claim_owner, "");
-    assert!(s.scope_claims.is_empty());
+    assert_eq!(
+        s.scope_claims,
+        [] as [crate::state::scope_registry::ScopeClaim; 0]
+    );
 }
 
 /// Wire-format guarantee: a tab with no session id omits the

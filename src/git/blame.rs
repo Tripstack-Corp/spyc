@@ -103,8 +103,7 @@ fn commit_meta(repo: &gix::Repository, id: gix::ObjectId) -> (Arc<str>, Arc<str>
             let date: Arc<str> = sig
                 .time()
                 .ok()
-                .map(crate::git::diff_model::format_git_time)
-                .unwrap_or_default()
+                .map_or_default(crate::git::diff_model::format_git_time)
                 .into();
             (name, date)
         }

@@ -256,14 +256,13 @@ fn tool_result_preview(block: &serde_json::Value) -> Option<String> {
     let content = &block["content"];
     let text: String = if let Some(s) = content.as_str() {
         s.to_string()
-    } else if let Some(parts) = content.as_array() {
+    } else {
+        let parts = content.as_array()?;
         parts
             .iter()
             .filter_map(|p| p["text"].as_str())
             .collect::<Vec<_>>()
             .join("\n")
-    } else {
-        return None;
     };
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     let first = lines.next()?.trim();
@@ -298,7 +297,7 @@ mod tests {
             None,
             true,
         );
-        assert!(lines.is_empty());
+        assert_eq!(lines, [] as [ratatui::prelude::Line<'_>; 0]);
     }
 
     fn render_to_flat(content: &str) -> Vec<String> {

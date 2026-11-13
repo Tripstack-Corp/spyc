@@ -701,8 +701,7 @@ a;b: ## A semicolon
                 .view
                 .chord_hint
                 .as_ref()
-                .map(|h| h.rows.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>())
-                .unwrap_or_default();
+                .map_or_default(|h| h.rows.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>());
             assert_eq!(row_keys.get(i), Some(&key), "row {i}: {row_keys:?}");
 
             app.fire_chord_row(i);

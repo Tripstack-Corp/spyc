@@ -826,6 +826,6 @@ mod tests {
 
     #[test]
     fn an_ordinary_mount_has_nothing_to_say() {
-        assert!(mount_notes(&Capability::ReadWrite, &[]).is_empty());
+        assert_eq!(mount_notes(&Capability::ReadWrite, &[]), [] as [String; 0]);
     }
 }

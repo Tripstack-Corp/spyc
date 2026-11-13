@@ -104,7 +104,7 @@ fn send(
     // Include the in-flight batch. A confirmed oversized pipe must be the
     // only outstanding batch; it cannot accumulate behind a stuck child.
     outstanding
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
             if confirmed && bytes.len() > MAX_BYTES {
                 (used == 0).then_some(bytes.len())
             } else {

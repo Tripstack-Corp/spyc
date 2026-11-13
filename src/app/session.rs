@@ -347,7 +347,7 @@ impl App {
             .project_mut()
             .pane_tabs
             .as_mut()
-            .map(|pt| {
+            .map_or_default(|pt| {
                 pt.tabs_mut()
                     .iter_mut()
                     .map(|t| {
@@ -417,7 +417,6 @@ impl App {
                     })
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// Persist the open vertical split's shape + its content key: a

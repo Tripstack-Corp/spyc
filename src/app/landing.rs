@@ -155,7 +155,7 @@ mod tests {
         b.send(2).unwrap();
         landing.land(3);
         assert_eq!(landing.drain(), vec![1, 2, 3]);
-        assert!(landing.drain().is_empty());
+        assert_eq!(landing.drain(), [] as [i32; 0]);
     }
 
     #[test]

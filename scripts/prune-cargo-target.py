@@ -10,14 +10,18 @@ spyc's own build sets there.
 
 Two leaks, neither of which cargo ever cleans up:
 
-* Every worktree path hashes into a new build set (`<crate>-<hash>.*`), and
-  removing the worktree leaves its set behind. A set none of whose files were
-  touched in `--days` is deleted whole.
+* Every worktree path hashes into a new build set, and removing the worktree
+  leaves its set behind. A set none of whose files were touched in `--days` is
+  deleted whole. Before Rust 1.100 a set is the `<crate>-<hash>.*` files in a
+  profile's `deps`; since, cargo gives each its own directory,
+  `<profile>/build/<package>/<hash>/`, and its files are under that `out/`.
 * macOS keeps debug info in loose per-codegen-unit `.rcgu.o` files beside each
   executable, and every incremental rebuild writes a fresh set under new names.
   The executable's debug map (its `OSO` stabs) lists the objects it still
   reads; any other object of that set over an hour old is deleted. One test
   binary had accumulated 131k objects while referencing 256.
+
+Both layouts are pruned: a shared directory holds sets from either toolchain.
 
 Third-party dependencies are never touched, so nothing has to recompile them.
 Ages use the later of mtime and ctime: rustc hardlinks reused objects out of the
@@ -46,7 +50,8 @@ def workspace(manifest_dir, env=None):
         for p in meta["packages"] for t in p["targets"]
         if "custom-build" not in t["kind"]
     }
-    return Path(meta["target_directory"]), sorted(names)
+    packages = sorted(p["name"] for p in meta["packages"])
+    return Path(meta["target_directory"]), sorted(names), packages
 
 
 def touched(st):
@@ -125,6 +130,75 @@ def prune_deps(deps, pattern, cutoff, dry):
     return tally
 
 
+UNIT_HASH = re.compile(r"^[0-9a-f]{16}$")
+
+
+def unit_files(unit):
+    """Every file under a build unit's directory, with its stat."""
+    found = []
+    for dirpath, _, files in os.walk(unit):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            try:
+                found.append((path, os.stat(path, follow_symlinks=False)))
+            except FileNotFoundError:
+                pass
+    return found
+
+
+def prune_unit_objects(out, now, dry, tally):
+    """The unreferenced-object rule, for the executables in one unit's `out`."""
+    with os.scandir(out) as it:
+        entries = [e for e in it if not e.is_dir(follow_symlinks=False)]
+    objects = [e for e in entries if e.name.endswith(".rcgu.o")]
+    exes = [e for e in entries if "." not in e.name and os.access(e.path, os.X_OK)]
+    if not objects or len(exes) != 1:
+        return
+    refs = referenced_objects(exes[0].path)
+    if not refs or not any(e.name in refs for e in objects):
+        return
+    for e in objects:
+        try:
+            st = e.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            continue
+        if e.name not in refs and touched(st) < now - OBJECT_GRACE_SECS:
+            tally.objects += 1
+            tally.take(e, st, dry)
+
+
+def units_of(build, package):
+    """The build units cargo keeps for `package` under `build`."""
+    try:
+        with os.scandir(build / package) as it:
+            return [e.path for e in it
+                    if e.is_dir(follow_symlinks=False) and UNIT_HASH.match(e.name)]
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+
+
+def prune_units(build, packages, cutoff, dry):
+    """Rust 1.100's layout: `build/<package>/<hash>/`, one build set each, for
+    this workspace's packages only."""
+    now, tally = time.time(), Tally()
+    for package in packages:
+        for unit in units_of(build, package):
+            files = unit_files(unit)
+            if files and max(touched(st) for _, st in files) >= cutoff:
+                out = Path(unit) / "out"
+                if out.is_dir():
+                    prune_unit_objects(out, now, dry, tally)
+                continue
+            tally.sets += 1
+            for _, st in files:
+                tally.files += 1
+                if st.st_nlink == 1:
+                    tally.freed += st.st_blocks * 512
+            if not dry:
+                shutil.rmtree(unit, ignore_errors=True)
+    return tally
+
+
 def prune_incremental(inc, pattern, cutoff, dry):
     removed = 0
     with os.scandir(inc) as it:
@@ -154,7 +228,7 @@ def main():
     env = None
     if args.shared:
         env = {k: v for k, v in os.environ.items() if k != "CARGO_TARGET_DIR"}
-    target, crates = workspace(checkout, env)
+    target, crates, packages = workspace(checkout, env)
     if args.target is not None:
         target = args.target
     elif args.shared and target.resolve() == (checkout / "target").resolve():
@@ -175,6 +249,12 @@ def main():
         total += t.freed
         if t.files:
             print(f"  {deps.relative_to(target)}: {t.sets} stale sets, {t.objects} "
+                  f"unreferenced objects, {t.files} files; {verb} {t.freed / 2**30:.1f} GiB")
+    for build in sorted(target.glob("*/build")) + sorted(target.glob("*/*/build")):
+        t = prune_units(build, packages, cutoff, args.dry_run)
+        total += t.freed
+        if t.files:
+            print(f"  {build.relative_to(target)}: {t.sets} stale sets, {t.objects} "
                   f"unreferenced objects, {t.files} files; {verb} {t.freed / 2**30:.1f} GiB")
     for inc in sorted(target.glob("*/incremental")) + sorted(target.glob("*/*/incremental")):
         n = prune_incremental(inc, inc_pattern, cutoff, args.dry_run)

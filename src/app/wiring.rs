@@ -129,9 +129,8 @@ impl App {
             return;
         };
         let name = wiring::name(kind);
-        let file = wiring::hooks_file(kind, &env)
-            .map(|f| crate::paths::display_tilde(&f))
-            .unwrap_or_default();
+        let file =
+            wiring::hooks_file(kind, &env).map_or_default(|f| crate::paths::display_tilde(&f));
         let restart = if kind == AgentKind::Codex {
             " Restart codex afterwards, and approve the hooks in /hooks."
         } else {

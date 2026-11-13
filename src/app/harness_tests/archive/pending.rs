@@ -224,13 +224,12 @@ fn archive_info_outside_a_mount_reports_what_is_mounted() {
             .project()
             .pager
             .as_ref()
-            .map(|p| {
+            .map_or_default(|p| {
                 p.lines
                     .iter()
                     .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
                     .collect::<Vec<_>>()
             })
-            .unwrap_or_default()
             .join("");
         assert!(shown.contains("pkg.zip"), "names the archive: {shown}");
         assert!(shown.contains("-1"), "and its pending change: {shown}");

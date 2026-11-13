@@ -256,7 +256,7 @@ fn notification_is_silent() {
         None,
     )
     .unwrap();
-    assert!(output.is_empty());
+    assert_eq!(output, [] as [u8; 0]);
 }
 
 #[test]
@@ -826,7 +826,10 @@ fn collect_pids_never_sees_a_sibling_project() {
     std::fs::create_dir_all(&project_a).unwrap();
     std::fs::create_dir_all(&project_b).unwrap();
     touch_root_marker(state.path(), 99, &project_b);
-    assert!(collect_project_pids_in(&project_a, state.path()).is_empty());
+    assert_eq!(
+        collect_project_pids_in(&project_a, state.path()),
+        [] as [u32; 0]
+    );
 }
 
 /// The attack the in-tree marker invited: a cloned repo ships
@@ -839,7 +842,10 @@ fn collect_pids_ignores_a_marker_planted_in_the_tree() {
     let state = tempfile::tempdir().unwrap();
     touch_context(clone.path(), 4242);
     touch_root_marker(state.path(), 4242, real.path());
-    assert!(collect_project_pids_in(clone.path(), state.path()).is_empty());
+    assert_eq!(
+        collect_project_pids_in(clone.path(), state.path()),
+        [] as [u32; 0]
+    );
 }
 
 /// No sidecar, no spyc: a marker in the tree on its own isn't evidence of one.
@@ -848,7 +854,10 @@ fn collect_pids_requires_a_root_sidecar() {
     let tmp = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     touch_context(tmp.path(), 55);
-    assert!(collect_project_pids_in(tmp.path(), state.path()).is_empty());
+    assert_eq!(
+        collect_project_pids_in(tmp.path(), state.path()),
+        [] as [u32; 0]
+    );
 }
 
 /// A sidecar is the root's only record, so when a spyc's root moves (a
@@ -864,7 +873,10 @@ fn collect_pids_follows_a_rewritten_root() {
     touch_root_marker(state.path(), 9, &launch);
     touch_root_marker(state.path(), 9, &restored);
     assert_eq!(collect_project_pids_in(&restored, state.path()), vec![9]);
-    assert!(collect_project_pids_in(&launch, state.path()).is_empty());
+    assert_eq!(
+        collect_project_pids_in(&launch, state.path()),
+        [] as [u32; 0]
+    );
 }
 
 /// A spyc that died without tearing down leaves its sidecar and socket. They
@@ -1529,7 +1541,7 @@ fn a_member_of_an_archive_outside_the_root_is_refused() {
         super::readers::read_member_content(&archive.join("README.md"), &ctx_path, &elsewhere)
             .expect("recognised")
             .expect("and served");
-    assert!(!allowed.is_empty());
+    assert_ne!(allowed, "");
 }
 
 /// `spyc --status-trace` turns tracing on for every reporter while it runs, and

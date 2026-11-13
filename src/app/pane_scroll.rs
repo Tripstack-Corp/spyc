@@ -221,7 +221,7 @@ impl App {
             .project()
             .pane_tabs
             .as_ref()
-            .map(|tabs| {
+            .map_or_default(|tabs| {
                 tabs.tabs()
                     .iter()
                     .filter_map(|e| {
@@ -231,7 +231,6 @@ impl App {
                     })
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// Drop parked pager streams whose owning tab no longer exists. A scrollback
@@ -408,8 +407,7 @@ impl App {
                             claude_home: claude_home.as_deref(),
                         };
                         let doc = resolve(query)
-                            .map(|path| render(&path, &theme, width, show_tool_calls))
-                            .unwrap_or_default();
+                            .map_or_default(|path| render(&path, &theme, width, show_tool_calls));
                         let _ = tx.send(doc);
                     },
                     |id, rx| Box::new(TranscriptStream { id, rx, miss }),
@@ -608,11 +606,11 @@ impl App {
                     codex_home: None,
                     claude_home: None,
                 };
-                let doc = crate::state::agy_transcript::resolve_active_jsonl(query)
-                    .map(|path| {
+                let doc = crate::state::agy_transcript::resolve_active_jsonl(query).map_or_default(
+                    |path| {
                         crate::state::agy_transcript::render_thinking_history(&path, &theme, width)
-                    })
-                    .unwrap_or_default();
+                    },
+                );
                 let _ = tx.send(doc);
             },
             |id, rx| Box::new(TranscriptStream { id, rx, miss }),

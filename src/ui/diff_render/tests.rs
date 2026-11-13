@@ -417,7 +417,7 @@ fn intra_change_ranges_pure_insertion_is_empty_on_old_side() {
     // (Was "ab" → "aXb"; with word tokens that pair is a single changed token
     // spanning both whole lines, which is the deliberate no-highlight case.)
     let (old_r, new_r) = super::intraline::intra_change_ranges_word("a b", "a X b");
-    assert!(old_r.is_empty());
+    assert_eq!(old_r, [] as [std::ops::Range<usize>; 0]);
     assert_eq!(picks("a X b", &new_r), vec!["X"]);
 }
 

@@ -300,14 +300,11 @@ fn wait_for_scope_clear_command(
 
 /// The strings in `value`, a JSON array; none when it isn't one.
 fn strings(value: &Value) -> Vec<String> {
-    value
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default()
+    value.as_array().map_or_default(|a| {
+        a.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    })
 }
 
 /// The tab a targeting call (`report_status`, the scope tools) acts for, as
@@ -797,14 +794,11 @@ fn handle_tools_call(
                     McpCommand::SetFilter { pattern }
                 }
                 "pick_files" => {
-                    let patterns: Vec<String> = args["patterns"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let patterns: Vec<String> = args["patterns"].as_array().map_or_default(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    });
                     if patterns.is_empty() {
                         return send_tool_error(w, id, "missing required parameter: patterns");
                     }

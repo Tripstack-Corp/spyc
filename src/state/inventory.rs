@@ -438,7 +438,7 @@ mod tests {
             let (count, removed, err) = inv.put_to(&dest);
             assert_eq!(count, 1);
             assert!(err.is_none());
-            assert!(!removed.is_empty());
+            assert_ne!(removed, [] as [String; 0]);
             assert!(dest.join("src.txt").exists());
             assert_eq!(
                 std::fs::read_to_string(dest.join("src.txt")).unwrap(),

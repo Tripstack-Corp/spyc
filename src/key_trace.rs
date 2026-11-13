@@ -100,8 +100,7 @@ pub fn log_tx(msg: &str) {
         let elapsed_ms = (now - state.start).as_millis();
         let suffix = state
             .last_rx_at
-            .map(|t| format!(" [+{}ms since RX]", (now - t).as_millis()))
-            .unwrap_or_default();
+            .map_or_default(|t| format!(" [+{}ms since RX]", (now - t).as_millis()));
         let _ = writeln!(state.file, "[{elapsed_ms:>8}ms] TX {msg}{suffix}");
     }
 }

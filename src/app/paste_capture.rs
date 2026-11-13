@@ -177,6 +177,6 @@ mod tests {
             snap(crate::agent::detect("agy").image_paste_keys(), true),
             alt_v
         ));
-        assert!(crate::agent::detect("zsh").image_paste_keys().is_empty());
+        assert_eq!(crate::agent::detect("zsh").image_paste_keys(), []);
     }
 }

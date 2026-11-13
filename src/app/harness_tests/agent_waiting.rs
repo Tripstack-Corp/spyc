@@ -606,11 +606,11 @@ fn waiting_holds_for_an_hour() {
 
         let at = reported(&app).unwrap().at;
         assert_eq!(
-            settle(&mut app, at + Duration::from_secs(59 * 60)).0,
+            settle(&mut app, at + Duration::from_mins(59)).0,
             AgentActivity::Waiting
         );
         assert_eq!(
-            settle(&mut app, at + Duration::from_secs(61 * 60)).0,
+            settle(&mut app, at + Duration::from_mins(61)).0,
             AgentActivity::Idle
         );
     });

@@ -148,8 +148,7 @@ pub fn project_bytes(input: &[u8]) -> Statusline {
     serde_json::from_slice::<Value>(input)
         .ok()
         .filter(Value::is_object)
-        .map(|payload| project(&payload))
-        .unwrap_or_default()
+        .map_or_default(|payload| project(&payload))
 }
 
 fn window(value: &Value) -> Option<RateWindow> {

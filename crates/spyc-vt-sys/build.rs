@@ -124,17 +124,15 @@ fn main() {
          Add one with `make vendor-ghostty` (needs zig {}) and refresh vendor/CHECKSUMS.\n\
          Note the CI test host is x86_64-unknown-linux-gnu, which is NOT a release\n\
          target — it still needs an archive or the gate cannot build this crate.",
-        std::fs::read_dir(&vendor)
-            .map(|rd| {
-                let mut v: Vec<String> = rd
-                    .filter_map(Result::ok)
-                    .filter(|e| e.path().is_dir())
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .collect();
-                v.sort();
-                v.join(", ")
-            })
-            .unwrap_or_default(),
+        std::fs::read_dir(&vendor).map_or_default(|rd| {
+            let mut v: Vec<String> = rd
+                .filter_map(Result::ok)
+                .filter(|e| e.path().is_dir())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            v.sort();
+            v.join(", ")
+        }),
         include_str!("REQUIRED_ZIG").trim(),
     );
 

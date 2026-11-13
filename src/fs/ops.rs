@@ -316,9 +316,7 @@ pub fn file_type_label(path: &Path) -> String {
         return "directory".to_string();
     }
     if ft.is_symlink() {
-        let tgt = fs::read_link(path)
-            .map(|p| p.display().to_string())
-            .unwrap_or_default();
+        let tgt = fs::read_link(path).map_or_default(|p| p.display().to_string());
         return if tgt.is_empty() {
             "symbolic link".to_string()
         } else {

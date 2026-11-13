@@ -242,7 +242,7 @@ fn subagents_and_background_work_count_calls_not_records() {
     ]);
     assert_eq!(snapshot.subagent_calls, 2);
     assert_eq!(snapshot.background_calls, 2);
-    assert!(snapshot.tools.iter().filter(|t| t.background).count() == 2);
+    assert_eq!(snapshot.tools.iter().filter(|t| t.background).count(), 2);
 }
 
 #[test]

@@ -183,7 +183,7 @@ impl Resolver {
     }
 
     pub fn pending_display(&self) -> Option<String> {
-        let prefix = self.count.map(|n| n.to_string()).unwrap_or_default();
+        let prefix = self.count.map_or_default(|n| n.to_string());
         let seq = match self.pending {
             PendingSeq::Normal if self.count.is_some() => "",
             PendingSeq::Normal => return None,

@@ -667,7 +667,7 @@ fn selection_returns_picks_when_present() {
 #[test]
 fn selection_empty_when_no_rows() {
     let s = test_state();
-    assert!(s.selection_paths().is_empty());
+    assert_eq!(s.selection_paths(), [] as [&std::path::Path; 0]);
 }
 
 // ── expand_selection_percent ──────────────────────────────────

@@ -359,10 +359,7 @@ impl App {
             // hit-test lays the bar out from that same list, and any drift
             // between the two puts clicks on the wrong tab. See the module
             // doc on `mouse::tab_hit`.
-            let label_text = tab_layout
-                .get(i)
-                .map(|c| c.label_text.clone())
-                .unwrap_or_default();
+            let label_text = tab_layout.get(i).map_or_default(|c| c.label_text.clone());
             let tab_len = tab_layout.get(i).map_or(0, |c| c.width) as usize;
             if used + tab_len > bar_width as usize {
                 break;
@@ -990,7 +987,7 @@ mod tests {
         for (k, &milli) in super::BREATH_COSINE.iter().enumerate() {
             let exact = (1.0 - (std::f64::consts::TAU * k as f64 / n as f64).cos()) / 2.0;
             assert!(
-                (f64::from(milli) - exact * 1000.0).abs() <= 0.5,
+                exact.mul_add(-1000.0, f64::from(milli)).abs() <= 0.5,
                 "frame {k}: {milli} for {exact}"
             );
         }
@@ -1056,6 +1053,9 @@ mod tests {
             "the oldest goes first"
         );
         assert_eq!(texts(fit_task_tags(tags(), 9)), [" [three\u{25cf}]"]);
-        assert!(fit_task_tags(tags(), 8).is_empty());
+        assert_eq!(
+            fit_task_tags(tags(), 8),
+            [] as [(String, crate::app::render::chrome::TaskTone); 0]
+        );
     }
 }

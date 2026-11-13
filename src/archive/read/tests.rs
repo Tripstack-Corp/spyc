@@ -111,7 +111,10 @@ fn a_zip_indexes_its_members_and_the_directories_they_imply() {
         ["README.md", "src", "src/main.rs", "src/run.sh"]
     );
     assert_eq!(indexed.index.get("README.md").unwrap().size, 7);
-    assert!(indexed.index.get("src").unwrap().kind == ArchiveEntryKind::Dir);
+    assert_eq!(
+        indexed.index.get("src").unwrap().kind,
+        ArchiveEntryKind::Dir
+    );
     assert_eq!(indexed.index.total_uncompressed, 7 + 12 + 10);
     assert!(indexed.index.get("src/main.rs").unwrap().mtime.is_some());
 }

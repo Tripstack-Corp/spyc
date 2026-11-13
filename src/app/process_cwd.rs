@@ -43,8 +43,7 @@ impl App {
     pub(super) fn settle_process_cwd(&self) -> Vec<Effect> {
         let actual = std::env::current_dir().ok();
         owed_chdir(self.desired_process_cwd(), actual.as_deref())
-            .map(|dir| vec![Effect::SetProcessCwd { dir }])
-            .unwrap_or_default()
+            .map_or_default(|dir| vec![Effect::SetProcessCwd { dir }])
     }
 }
 

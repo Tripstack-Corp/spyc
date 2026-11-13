@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(implied_names("..", ".."), ["../"]);
         assert_eq!(implied_names("src/..", ".."), ["../"]);
         assert_eq!(implied_names("~", "~"), ["~/"]);
-        assert!(implied_names("~/", "").is_empty());
+        assert_eq!(implied_names("~/", ""), [] as [String; 0]);
         assert!(implied_names(".", ".").is_empty(), "`.` completes dotfiles");
     }
 

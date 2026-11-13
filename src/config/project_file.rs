@@ -40,8 +40,7 @@ impl Entry {
     fn stem(&self) -> String {
         self.path
             .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default()
+            .map_or_default(|s| s.to_string_lossy().into_owned())
     }
 
     fn name(&self) -> String {
@@ -62,7 +61,7 @@ pub fn dir() -> Option<PathBuf> {
 /// Every `*.toml` directly in [`dir`], sorted by name, with what each names.
 /// Empty when the directory doesn't exist.
 pub fn scan() -> Vec<Entry> {
-    dir().map(|d| scan_dir(&d)).unwrap_or_default()
+    dir().map_or_default(|d| scan_dir(&d))
 }
 
 /// [`scan`] of `dir`.

@@ -338,7 +338,7 @@ mod tests {
         let root = fresh_root();
         crate::state::with_state_root(root.path(), || {
             let h = Harpoon::load(Path::new("/tmp/never-saved"));
-            assert!(h.slots.is_empty());
+            assert_eq!(h.slots, [] as [std::path::PathBuf; 0]);
             assert_eq!(h.project, Path::new("/tmp/never-saved"));
         });
     }

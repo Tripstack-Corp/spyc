@@ -85,13 +85,12 @@ fn saved(app: &mut App, state_root: &Path) -> Value {
 fn closed_homes(saved: &Value) -> Vec<Value> {
     saved["closed_projects"]
         .as_array()
-        .map(|closed| {
+        .map_or_default(|closed| {
             closed
                 .iter()
                 .map(|c| c["project"]["home"].clone())
                 .collect()
         })
-        .unwrap_or_default()
 }
 
 /// A `cat` tab in project `id`, so quitting saves the session, with the
@@ -112,8 +111,7 @@ fn commands(app: &App) -> Vec<String> {
         .project()
         .pane_tabs
         .as_ref()
-        .map(|tabs| tabs.tabs().iter().map(|t| t.info.command.clone()).collect())
-        .unwrap_or_default()
+        .map_or_default(|tabs| tabs.tabs().iter().map(|t| t.info.command.clone()).collect())
 }
 
 /// `Space x`, then `Space j`: the closed project is listed after the open

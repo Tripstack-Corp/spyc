@@ -597,7 +597,7 @@ mod child_queries {
         let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
         e.process(b"\x1b[5n");
         assert_eq!(e.take_replies(), b"\x1b[0n");
-        assert!(e.take_replies().is_empty());
+        assert_eq!(e.take_replies(), [] as [u8; 0]);
     }
 
     /// Each of these has an answer libghostty-vt could give that would be

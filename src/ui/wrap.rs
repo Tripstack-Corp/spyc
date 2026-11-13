@@ -72,7 +72,7 @@ pub fn word_wrap_ranges(text: &str, width: usize) -> Vec<(usize, usize)> {
 /// Walk back from `end` past trailing ASCII spaces. Used so wrap
 /// boundaries don't carry visible trailing whitespace into yanked
 /// text or the rendered display.
-fn trim_trailing_space_end(text: &str, end: usize) -> usize {
+const fn trim_trailing_space_end(text: &str, end: usize) -> usize {
     let bytes = text.as_bytes();
     let mut e = end;
     while e > 0 && bytes[e - 1] == b' ' {

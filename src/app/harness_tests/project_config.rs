@@ -36,8 +36,7 @@ fn tab_commands(app: &App) -> Vec<String> {
         .project()
         .pane_tabs
         .as_ref()
-        .map(|tabs| tabs.tabs().iter().map(|t| t.info.command.clone()).collect())
-        .unwrap_or_default()
+        .map_or_default(|tabs| tabs.tabs().iter().map(|t| t.info.command.clone()).collect())
 }
 
 fn asks_consent(app: &App) -> bool {

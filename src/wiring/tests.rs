@@ -330,7 +330,7 @@ fn managed_settings_can_block_either_half() {
     assert!(matches!(st.hooks, Part::Blocked(_)), "{st:?}");
     assert!(matches!(st.mcp, Part::Blocked(_)), "{st:?}");
     assert!(!s.home(".claude/settings.json").exists());
-    assert!(s.claude_calls().is_empty());
+    assert_eq!(s.claude_calls(), [] as [String; 0]);
 }
 
 /// An MCP server named `spyc` that runs something else isn't spyc's to replace
@@ -358,7 +358,7 @@ fn a_foreign_server_named_spyc_is_never_touched() {
     ] {
         assert!(matches!(st.mcp, Part::Blocked(_)), "{st:?}");
     }
-    assert!(s.claude_calls().is_empty());
+    assert_eq!(s.claude_calls(), [] as [String; 0]);
     assert_eq!(std::fs::read_to_string(&agy_mcp).unwrap(), foreign);
 }
 
