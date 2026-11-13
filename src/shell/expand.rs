@@ -81,7 +81,7 @@ pub fn pane_path_payload(paths: &[PanePath], cwd: Option<&Path>) -> String {
 /// One path of a [`pane_path_payload`], anchored and quoted the same way.
 pub fn pane_path(p: &PanePath, cwd: Option<&Path>) -> String {
     let shown = match cwd.and_then(|c| p.path.strip_prefix(c).ok()) {
-        Some(rel) if rel.as_os_str().is_empty() => Path::new("."),
+        Some(rel) if rel.is_empty() => Path::new("."),
         Some(rel) => rel,
         None => &p.path,
     };
@@ -141,7 +141,7 @@ pub fn expand_percent(
 /// an option, which an absolute path never could be.
 fn command_path<'a>(p: &'a Path, cwd: Option<&Path>) -> Cow<'a, Path> {
     match cwd.and_then(|c| p.strip_prefix(c).ok()) {
-        Some(rel) if rel.as_os_str().is_empty() => Cow::Borrowed(Path::new(".")),
+        Some(rel) if rel.is_empty() => Cow::Borrowed(Path::new(".")),
         Some(rel) if rel.as_os_str().as_encoded_bytes().starts_with(b"-") => {
             Cow::Owned(Path::new(".").join(rel))
         }

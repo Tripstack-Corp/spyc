@@ -139,8 +139,8 @@ fn codex_pin_window_open(
 /// direction (the rollout's `session_meta` cwd vs the tab's canonicalized cwd).
 fn cwd_eq(session_cwd: &str, tab_cwd: &str) -> bool {
     session_cwd == tab_cwd
-        || session_cwd.strip_prefix("/private").unwrap_or(session_cwd) == tab_cwd
-        || tab_cwd.strip_prefix("/private").unwrap_or(tab_cwd) == session_cwd
+        || session_cwd.trim_prefix("/private") == tab_cwd
+        || tab_cwd.trim_prefix("/private") == session_cwd
 }
 
 impl App {

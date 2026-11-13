@@ -670,14 +670,8 @@ fn agent_hud_typing_and_paste_reach_the_child_unchanged() {
 fn agent_hud_mouse_rows_never_reach_child_and_geometry_changes_wait_for_owned_drags() {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     let _lock = crate::mouse_test_lock();
-    struct Capture;
-    impl Drop for Capture {
-        fn drop(&mut self) {
-            crate::set_mouse_capture_for_test(false);
-        }
-    }
     crate::set_mouse_capture_for_test(true);
-    let _capture = Capture;
+    let _capture = std::mem::DropGuard::new((), |()| crate::set_mouse_capture_for_test(false));
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let script = tmp.path().join("mouse.sh");
@@ -1183,14 +1177,8 @@ fn a_config_reload_keeps_the_hud_choice_unless_it_changes_agent_hud() {
 fn agent_hud_double_click_opens_the_dump_and_a_single_click_does_not() {
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
     let _lock = crate::mouse_test_lock();
-    struct Capture;
-    impl Drop for Capture {
-        fn drop(&mut self) {
-            crate::set_mouse_capture_for_test(false);
-        }
-    }
     crate::set_mouse_capture_for_test(true);
-    let _capture = Capture;
+    let _capture = std::mem::DropGuard::new((), |()| crate::set_mouse_capture_for_test(false));
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut app = fixture(tmp.path(), tmp.path());

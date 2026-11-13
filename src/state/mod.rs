@@ -287,7 +287,7 @@ fn read_file_prefix_tail_lossy(
         // Whole prefix fits in the budget — return it verbatim.
         let mut buf = Vec::new();
         f.take(end).read_to_end(&mut buf)?;
-        return Ok(String::from_utf8_lossy(&buf).into_owned());
+        return Ok(String::from_utf8_lossy_owned(buf));
     }
     // Seek to one byte *before* the window so we can tell whether the window
     // begins exactly at a line boundary: read from `start - 1` and then drop
@@ -299,7 +299,7 @@ fn read_file_prefix_tail_lossy(
     f.seek(SeekFrom::Start(start - 1))?;
     let mut buf = Vec::new();
     f.take(end - (start - 1)).read_to_end(&mut buf)?;
-    let text = String::from_utf8_lossy(&buf).into_owned();
+    let text = String::from_utf8_lossy_owned(buf);
     Ok(match text.find('\n') {
         Some(nl) => text[nl + 1..].to_string(),
         None => String::new(),
@@ -495,14 +495,10 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
 /// override is unwound when `body` returns *or panics* (RAII guard).
 #[cfg(test)]
 pub fn with_state_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            STATE_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = None);
-        }
-    }
     STATE_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = Some(root.to_path_buf()));
-    let _g = Guard;
+    let _g = std::mem::DropGuard::new((), |()| {
+        STATE_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = None);
+    });
     body()
 }
 
@@ -511,14 +507,10 @@ pub fn with_state_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R
 /// Mirrors [`with_state_root`].
 #[cfg(test)]
 pub fn with_config_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            CONFIG_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = None);
-        }
-    }
     CONFIG_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = Some(root.to_path_buf()));
-    let _g = Guard;
+    let _g = std::mem::DropGuard::new((), |()| {
+        CONFIG_ROOT_OVERRIDE.with(|c| *c.borrow_mut() = None);
+    });
     body()
 }
 

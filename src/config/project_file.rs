@@ -216,7 +216,7 @@ pub fn create(dir: &Path, anchor: &Path, label: &str) -> anyhow::Result<PathBuf>
 /// back, else as it is.
 pub(super) fn tilde(path: &Path) -> String {
     match super::home_dir().and_then(|home| path.strip_prefix(&home).ok().map(Path::to_path_buf)) {
-        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) if rest.is_empty() => "~".to_string(),
         Some(rest) => format!("~/{}", rest.display()),
         None => path.display().to_string(),
     }

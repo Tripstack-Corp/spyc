@@ -105,14 +105,10 @@ fn search_path() -> Option<std::ffi::OsString> {
 /// Run `body` with `dir` as the whole `$PATH` [`spyc_binary`] searches.
 #[cfg(test)]
 pub fn with_search_path<R>(dir: &Path, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            SEARCH_PATH_OVERRIDE.with(|c| *c.borrow_mut() = None);
-        }
-    }
     SEARCH_PATH_OVERRIDE.with(|c| *c.borrow_mut() = Some(dir.as_os_str().to_owned()));
-    let _guard = Guard;
+    let _guard = std::mem::DropGuard::new((), |()| {
+        SEARCH_PATH_OVERRIDE.with(|c| *c.borrow_mut() = None);
+    });
     body()
 }
 

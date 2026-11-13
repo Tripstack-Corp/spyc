@@ -94,7 +94,7 @@ pub fn run_git(dir: &Path, args: &[&str]) -> String {
         if out.status.success() {
             return String::from_utf8(out.stdout).expect("utf8 stdout");
         }
-        last_err = String::from_utf8_lossy(&out.stderr).into_owned();
+        last_err = String::from_utf8_lossy_owned(out.stderr);
         std::thread::sleep(std::time::Duration::from_millis(
             50 * u64::from(attempt + 1),
         ));

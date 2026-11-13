@@ -51,7 +51,7 @@ impl App {
         }
         let command = self.state.startup_commands.remove(0);
         let command = command.trim();
-        Some(self.dispatch_command(command.strip_prefix(':').unwrap_or(command)))
+        Some(self.dispatch_command(command.trim_prefix(':')))
     }
 }
 

@@ -41,7 +41,7 @@ pub fn with_checker<R>(
     f: impl FnOnce(&mut dyn FnMut(&Path) -> bool) -> R,
 ) -> Option<R> {
     #[cfg(test)]
-    CHECKER_BUILDS.with(|c| c.set(c.get() + 1));
+    CHECKER_BUILDS.update(|n| n + 1);
     let repo = gix::open(repo_root).ok()?;
     // `index_or_empty` tolerates a fresh repo with no `.git/index` yet (the
     // `Worktree::excludes()` shortcut errors there). Gitignore rules come from
@@ -59,7 +59,7 @@ pub fn with_checker<R>(
         let Ok(rel) = abs.strip_prefix(repo_root) else {
             return false; // outside the repo — not ours to ignore
         };
-        if rel.as_os_str().is_empty() {
+        if rel.is_empty() {
             return false; // the repo root itself
         }
         // Pass the leaf's mode so a bare ignored *directory* (`target/`) is
