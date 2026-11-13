@@ -1,10 +1,12 @@
 # The jar in production: a plan
 
-**Status:** proposed, for the owner to change.
+**Status:** proposed, for the owner to change; revised after an external
+review ("The review's findings, slice by slice", below).
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099), on
 the `3.0` milestone.
 **Builds:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md), whose version 1 froze on
-2026-11-12, from what [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md) proved.
+2026-11-12 and froze again the same day with the review's changes, from what
+[`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md) proved.
 
 The spike built every v1 verdict on `spike/jar-stage-2`, a branch that never
 merges: about 8,000 lines over 48 files, measured on macOS and Linux. Production
@@ -19,9 +21,10 @@ acceptance bar, carried into in-repo tests.
 
 ### S1. The crate
 
-`crates/spyc-jar`, ported from the spike at `9bec55f2`: the frame and message
-codec, the handover blob, the jar process, its PTY, the upgrade, the client and
-the attach client. Nothing in spyc uses it yet.
+`crates/spyc-jar`, ported from the spike at `670f5b04` (version 1 as it froze
+again after the review): the frame and message codec, the handover blob, the jar process,
+its PTY, the upgrade, the client and the attach client. Nothing in spyc uses it
+yet.
 
 - **Two PRs.** S1a: the parsers, with `tests/wire_v1.rs` (the frozen bytes) and
   the `jar_frame` and `jar_handover` fuzz targets registered with `make fuzz`
@@ -32,8 +35,30 @@ the attach client. Nothing in spyc uses it yet.
   a connection's loop, the log and its ring, describing. Functions over 100
   lines split; every module opens with its doc; `#![forbid(unsafe_code)]`
   stays.
+- **No lock across a blocking write** (review finding 4). The spike's jar
+  wedges three ways: an owner gone silent while its program prints keeps the
+  lease past its deadline, a reader that stops reading freezes a `release`,
+  and a paste into a program that reads nothing blocks its connection. Each
+  connection gets a bounded outbound queue and a write timeout, a socket is
+  shut down through a cloned handle, and input is written to the PTY off the
+  connection's reader thread.
+- **Tokenless connections can't hold the jar** (finding 5): a deadline for a
+  whole frame, not each read; lookups capped in number, never parked for an
+  upgrade nor carried across one; one duplicated descriptor fewer for each
+  connection.
+- **Lifetimes from the right moment:** an uncollected exit is kept from the
+  exit, not from when the owner left (16); a `release` grants a grace before a
+  linger starts, so a pane that doesn't linger survives a handover (17); a
+  window must be smaller than the ring (18). A signalled exit reports its
+  signal; a reader that falls behind gets a `gap`; no input is ever traced to
+  a file.
+- **The review's probes become tests,** asserting, each watched failing
+  before its fix lands.
 - **No timing in tests.** The spike found two tests that waited a fixed time
-  and failed under load; every wait polls for the state it needs.
+  and failed under load; every wait polls for the state it needs. The property
+  tests `JAR_PROTOCOL.md` promises under "Fuzzing" (no sequence lets a reader
+  type, takes a lease without the token, or answers a replayed query) land
+  here.
 - **Packaging.** spyc's package gains a `spyc-jar` `[[bin]]` that calls the
   crate, so `cargo install spyc` installs both binaries (decision 2), and
   `make package-check` builds both from their tarballs.
@@ -51,17 +76,36 @@ jar: pane tabs, tasks and `!` captures. Off, spyc runs exactly as today.
   and sweeping. The engine's snapshot code lands beside the engine, and every
   pane keeps both snapshot forms (decision I). After a `kill -9` of spyc,
   `spyc -r` adopts the jars and replays what each program printed meanwhile.
+  From the review:
+  - a jar that exits with 75 (`--wire` not spoken) leaves the program to run
+    without a jar, never a tab that fails to open (finding 1);
+  - a refused adoption marks the tab `[detached]` and starts nothing, where the
+    spike started a second copy of the program (7);
+  - a snapshot is stored at the jar offset of the last chunk parsed, so a gap
+    in mid-session doesn't shift every later one (8);
+  - every signal goes through the jar, never to a pid spyc was told (10);
+  - an agent's proxy finds its jar by `SPYC_JAR_SOCKET`, never by working the
+    path out again; with neither `XDG_RUNTIME_DIR` nor `TMPDIR`, jars live in
+    `/tmp/spyc-<uid>`, and both sides check the directory is this user's,
+    `0700` and not a link (14);
+  - spyc's sender holds no lock across a socket write, and pings run on their
+    own timer (4, spyc's side).
 - **S2b: losing and retaking the lease.** A spyc stopped past the deadline
   takes its jar back on resuming, or marks the tab `[detached]` when another
   spyc owns it (decision G). A killed jar marks its tab `[jar lost]`. On Linux
   that label waited for the next key on the spike: a reader that ends must
-  wake the loop.
+  wake the loop. The repaint after a gap holds the size a row off until
+  output arrives or about 100 ms pass, then restores it: sent back to back,
+  the two sizes reached a Node program on macOS in none of 40 trials
+  (finding 9), and the fix is shown on macOS before it lands.
 - **S2c: tasks, captures and orphans.** A demoted pane keeps its jar, its
   owner rewriting `is` to `task`; a capture lingers a minute. `spyc --jars`
   lists jars by label (R18). A spyc that starts and finds jars no spyc owns
   offers to restore or discard them, where the spike only flashed a notice.
 - **The release gate.** A release with `[pane] jars` in it ships `spyc-jar` in
-  its archives, the Homebrew formula and the apt package.
+  its archives, the Homebrew formula and the apt package, and **carries S3
+  too** (finding 13): the format is in the field from the first release that
+  ships a jar, so what consumes R33 is proven before it, not after.
 - **Tests,** in the repository, not the spike's harness: a `kill -9` of spyc
   and `spyc -r` adopting a running program, driven through the binary as
   `tests/mcp_proxy.rs` drives it, with a fake agent; the lease taken back and
@@ -73,13 +117,21 @@ then `spyc -r`, and the agent is still working.
 
 ### S3. Upgrades
 
-A spyc that starts and finds its jars on an older build asks each to upgrade
-to the `spyc-jar` beside it (R33): same PID, same program, same connections.
-The `jar` key of a description names the build.
+A spyc upgrades a jar it owns when it needs something the jar's version lacks
+(R33): same PID, same program, same connections. The `jar` key of a
+description names the build. Not at every start (finding 13): an upgrade is the
+design's one step with no rollback, so it runs only when it buys something.
 
+- **One jar first.** spyc upgrades one idle jar, confirms it resumed, and only
+  then the rest; never a jar whose agent is mid-turn, and never one another
+  spyc owns.
+- **A jar built to differ.** Before the first release with jars, CI builds a
+  jar that differs in its blob version, its `hello` and its unfrozen frames,
+  and runs upgrades and `hello`s against it in both directions, a downgrade
+  included ("Meeting another version" in `JAR_PROTOCOL.md`).
 - **Every released jar stays a test fixture.** CI keeps the jar of each
   release since the first that shipped one, and runs it against the current
-  spyc. S3 seeds that set with the first.
+  spyc.
 - **A jar outlives the binary it came from.** An uninstall or an upgrade
   replaces the file; a running jar keeps its own copy until its program ends,
   or until the next spyc upgrades it.
@@ -99,9 +151,16 @@ spyc started in an outer jar by its harness; the lazy entry is new.
   `spyc attach [name]` reattaches. `^D`, `Q`, `ZZ` and `:q` quit and end this
   spyc's jars.
 - **The attach event** sets spyc's modes, probes the terminal and repaints in
-  full, on a terminal that may be another emulator. Version 1 carries it as
-  the spike did: the jar signals its program, and the client changes the size
-  by a row and back.
+  full, on a terminal that may be another emulator. spyc hears it as the
+  outer jar's program (role `program`), which version 1 carries;
+  it hears `detached` too, and stops drawing for nobody.
+- **spyc detaches itself.** `^d` and `:detach` write spyc's own restore
+  sequence and then send `detach`, so the attach client's `^\` and its fixed
+  reset are only the fallback, and `^\` can reach a program inside spyc.
+- **A second attach takes over** (finding 12): `spyc attach` while a client
+  is attached ends the old client, by the `owner_pid` the jar describes, a
+  local process of the same user. Attached at a desk, then at home over SSH,
+  works.
 - **The detach reset** leaves the real terminal as it found it: the alternate
   screen, mouse reporting, bracketed paste, the kitty keyboard flags (#696,
   #710).
@@ -129,7 +188,11 @@ a spyc in an outer jar, which ends once it owns nothing.
 - **The move file** carries the project, its jars' tokens, its scope claims,
   each tab's live status and a shell tab's running agent, and is kept until
   the receiving spyc's session is saved (stage 6), so a spyc that dies
-  partway loses nothing.
+  partway loses nothing. It is written and `fsync`ed **before** any jar is
+  released, and a detach that can't write it stops there; it keeps each old
+  token until the receiving spyc confirms, which tries the new token, then the
+  old (finding 6: the spike released first, so a sending spyc dying between
+  the two stranded every jar).
 - **An agent's MCP follows its jar** (R30a): its proxy asks the jar, as a
   lookup, where its owner is now (decision J).
 - **Tests:** the spike's `scopes.py` and `attn.py` become in-repo tests: a
@@ -146,6 +209,39 @@ default flips, and that release is 3.0. `[pane] jars = false` stays as the way
 back (decision 1).
 
 ---
+
+## The review's findings, slice by slice
+
+The external review of 2026-11-12 (`PANE_JAR_SPIKE.md` → "The review") found
+18 things. The frozen surface's three, and the program role, were built on the
+spike when version 1 reopened; the rest land here.
+
+| Finding | Where |
+|---|---|
+| 1. Version skew in every direction | the format: built; the fallback when a jar exits with 75: S2a |
+| 2. `refused` with a reason | built; spyc acts on it: S2a, S2b |
+| 3. The blob through the holder | built |
+| 4. Blocking writes under locks | S1b (the jar), S2a (spyc) |
+| 5. Tokenless lookups deny upgrades | built in part (one question, then closed); the rest S1b |
+| 6. A move strands its jars | S5 |
+| 7. A refused adoption starts a second program | S2a |
+| 8. Snapshot offsets drift after a gap | S2a |
+| 9. The row-and-back repaint coalesces | S2b; for the outer jar, replaced by the program role |
+| 10. Signals reach stale pids | built (none after the exit); every signal through the jar: S2a |
+| 11. A failed `exec` leaves the jar killable | built |
+| 12. Detach from inside spyc, and a second attach | the program role: built; the rest S4 |
+| 13. Upgrades at every start, and S3 after S2 | S3, and S2's release gate |
+| 14. Discovery from the environment | `SPYC_JAR_SOCKET`: built; the rest S2a |
+| 15. Stored values the validator rejects | built |
+| 16. An exit with nobody there is lost | S1b |
+| 17. A pane with no linger dies in a handover | S1b |
+| 18. A window wider than the ring | S1b |
+
+The smaller items go with S1b (a signalled exit's code, a `gap` for a reader
+that falls behind, no traced input, snapshot size against the frame limit),
+S2a (the sweep and a socket not yet listening, `released()` keyed by pid, a
+snapshot's build and pin, resynchronizing the parser after a gap) and the
+property tests (S1b).
 
 ## Across every slice
 
@@ -169,7 +265,8 @@ and is its own issue.
 
 1. **Opt-in, then on by default.** Proposed: `[pane] jars`, off until a release
    of soak, on in 3.0, kept as the way back. The alternative, on from the first
-   release that ships it, gives daily users no way around a bug.
+   release that ships it, gives daily users no way around a bug. The first
+   release with the opt-in carries S2 and S3 together.
 2. **One package, two binaries.** Proposed: spyc's package installs
    `spyc-jar` through a `[[bin]]` that calls the crate, so every install path
    (`cargo install`, Homebrew, apt) carries it without a second crate to
