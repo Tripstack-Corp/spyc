@@ -63,6 +63,12 @@ normalize() { # <in.a> <out.a> <gnu|darwin>
     # local with llvm-objcopy-20.
     [ -f "$tmp/compiler_rt.o" ] || { echo "no compiler_rt.o in $in"; exit 1; }
     python3 "$ROOT/scripts/unexport-libc.py" "$tmp/compiler_rt.o"
+    # The other members keep their own exports but give up any listed C
+    # library function: libghostty-vt 1.0.1 exports its own memset on
+    # aarch64-musl, and a static musl link would take it over musl's (#1148).
+    others=()
+    for m in "${members[@]}"; do [ "$m" = compiler_rt.o ] || others+=("$tmp/$m"); done
+    python3 "$ROOT/scripts/unexport-libc.py" --listed-only "${others[@]}"
     rm -f "$out"
     ( cd "$tmp" && zig ar rcsD --format="$fmt" "$out" "${members[@]}" )
     rm -rf "$tmp"
