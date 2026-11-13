@@ -169,6 +169,12 @@ uid, a container — which is outside spyc's scope.
 - **MSRV pinned** via `rust-toolchain.toml`. A new stable release
   cannot tighten lints, change behaviour, or drop features behind
   our back.
+- **Secret scanning on every pull request.** GitHub's secret scanning
+  and push protection are on; on the free plan they know only partner
+  token formats. `.github/workflows/secrets.yml` runs TruffleHog over
+  the commits each pull request adds, and any match fails it, verified
+  or not. A false positive is silenced on its own line with a
+  `trufflehog:ignore` comment.
 - **Pre-commit hook** (optional, install via `make install-hooks`)
   runs the same gate as CI before each commit so drift surfaces in
   seconds locally instead of ~10 min later in pipelines.
