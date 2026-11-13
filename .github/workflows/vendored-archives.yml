@@ -61,6 +61,11 @@ jobs:
             exit 1
           fi
           echo "committed archives reproduce from the pin"
+      # The archives this run built, held to the same symbol rules as the
+      # committed ones: no function in `vendor/LIBC_SYMBOLS` exported by
+      # compiler_rt.o, or by any member of a darwin archive.
+      - name: Check the rebuilt archives' C library symbols
+        run: python3 -m unittest discover -s scripts -p 'test_vendored_archives.py'
       # The archives this run built, matching or not: on a mismatch, these are
       # the canonical bytes to commit.
       - uses: actions/upload-artifact@v7
