@@ -6,3 +6,13 @@
 # `cargo install` doesn't read it; `--locked` builds are unaffected.
 [registry]
 global-min-publish-age = "7 days"
+
+# spyc's minimum macOS, for both slices (#1158). The vendored libghostty-vt
+# archives are built for 13.0 (Zig's default), so the binary can't honestly
+# claim less. Cargo sets this for every rustc run and build script from this
+# checkout, `make`, CI and release builds alike: rustc stamps it on spyc's own
+# objects and the binary, and `cc` compiles zstd-sys and mlua-sys for it
+# rather than for the SDK's version. An exported MACOSX_DEPLOYMENT_TARGET takes
+# precedence, and `cargo install spyc` from crates.io doesn't read this file.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "13.0"
