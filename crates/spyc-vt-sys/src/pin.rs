@@ -1,20 +1,20 @@
 //! The pinned ghostty commit, and the policy for moving it.
 
 /// The ghostty commit every vendored archive and the checked-in bindings were
-/// built from: the one ghostty's `vt-1.0.0` tag names.
+/// built from: the one ghostty's `vt-1.0.1` tag names.
 ///
 /// **Why the commit and not the tag.** libghostty-vt has its own release
 /// cycle, and its `vt-X.Y.Z` tags are separate from the app's `vX.Y.Z` ones.
 /// A tag can still be re-pointed, and a hash cannot, so the hash is what the
 /// vendor script checks out; [`GHOSTTY_VT_VERSION`] names the release it is.
-pub const GHOSTTY_COMMIT: &str = "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec";
+pub const GHOSTTY_COMMIT: &str = "108cacb17ed8990840cd14abfce43d8ed8503ca1";
 
 /// The libghostty-vt release [`GHOSTTY_COMMIT`] is tagged as.
-pub const GHOSTTY_VT_VERSION: &str = "1.0.0";
+pub const GHOSTTY_VT_VERSION: &str = "1.0.1";
 
 /// The pin's author date, so the pin's age is readable without a network round
-/// trip. `2026-11-06`.
-pub const GHOSTTY_COMMIT_DATE: &str = "2026-11-06";
+/// trip. `2026-11-11`.
+pub const GHOSTTY_COMMIT_DATE: &str = "2026-11-11";
 
 /// The Zig version the pin's `build.zig.zon` requires. ghostty's `requireZig`
 /// wants **major and minor equal** and the patch at least as new; the vendor
