@@ -64,7 +64,7 @@ pub fn repack(
     let archive = index.source();
     let parent = archive
         .parent()
-        .filter(|p| !p.as_os_str().is_empty())
+        .filter(|p| !p.is_empty())
         .unwrap_or(Path::new("."));
 
     if let Some(free) = read::available_space(parent)

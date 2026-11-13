@@ -217,7 +217,7 @@ mod guard_tests {
         scan_rs(&app, &mut |path, src| {
             let production = crate::guard_support::production_half(src);
             for m in detect_on_field.find_iter(&production) {
-                let rel = path.strip_prefix(&app).unwrap_or(path).display();
+                let rel = path.trim_prefix(&app).display();
                 offenders.push(format!("{rel}: {}", m.as_str()));
             }
         });
@@ -734,7 +734,7 @@ mod guard_tests {
             if path.file_name().and_then(|n| n.to_str()) == Some("mod_tests.rs") {
                 return;
             }
-            let rel = path.strip_prefix(manifest).unwrap_or(path).display();
+            let rel = path.trim_prefix(manifest).display();
             for (i, line) in src.lines().enumerate() {
                 let Some(idx) = line.find("//") else { continue };
                 let comment = line[idx..].to_ascii_lowercase();
@@ -775,7 +775,7 @@ mod guard_tests {
             if path.file_name().and_then(|n| n.to_str()) == Some("mod_tests.rs") {
                 return;
             }
-            let rel = path.strip_prefix(manifest).unwrap_or(path).display();
+            let rel = path.trim_prefix(manifest).display();
             for (i, line) in src.lines().enumerate() {
                 for prefix in ["/Users/", "/home/"] {
                     let mut rest = line;

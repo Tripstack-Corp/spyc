@@ -691,7 +691,7 @@ fn model(view: &HudView<'_>, p: Palette) -> Field {
     };
     let mut spans = vec![model.as_deref().map_or_else(
         || p.label("model --"),
-        |model| p.strong(model.strip_prefix("claude-").unwrap_or(model)),
+        |model| p.strong(model.trim_prefix("claude-")),
     )];
     if let Some(effort) = effort.as_deref() {
         spans.push(Span::raw(" "));

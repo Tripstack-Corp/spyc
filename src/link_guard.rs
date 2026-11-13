@@ -150,7 +150,7 @@ fn percent_decode(s: &str) -> String {
             i += 1;
         }
     }
-    String::from_utf8_lossy(&out).into_owned()
+    String::from_utf8_lossy_owned(out)
 }
 
 /// `target` read from the doc at `from`, as a repo-relative path. `None` when

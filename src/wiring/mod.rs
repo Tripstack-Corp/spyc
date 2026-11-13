@@ -59,14 +59,8 @@ thread_local! {
 /// developer's own agent configuration.
 #[cfg(test)]
 pub fn with_env<R>(env: Env, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            ENV_OVERRIDE.with(|c| *c.borrow_mut() = None);
-        }
-    }
     ENV_OVERRIDE.with(|c| *c.borrow_mut() = Some(env));
-    let _guard = Guard;
+    let _guard = std::mem::DropGuard::new((), |()| ENV_OVERRIDE.with(|c| *c.borrow_mut() = None));
     body()
 }
 

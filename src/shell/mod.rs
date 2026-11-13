@@ -36,14 +36,9 @@ thread_local! {
 /// returns *or panics*.
 #[cfg(test)]
 pub fn with_editor<R>(editor: &str, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            EDITOR_OVERRIDE.with(|e| *e.borrow_mut() = None);
-        }
-    }
     EDITOR_OVERRIDE.with(|e| *e.borrow_mut() = Some(editor.to_string()));
-    let _guard = Guard;
+    let _guard =
+        std::mem::DropGuard::new((), |()| EDITOR_OVERRIDE.with(|e| *e.borrow_mut() = None));
     body()
 }
 
@@ -72,14 +67,8 @@ thread_local! {
 /// [`with_editor`] does for the editor.
 #[cfg(test)]
 pub fn with_pager<R>(pager: &str, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            PAGER_OVERRIDE.with(|p| *p.borrow_mut() = None);
-        }
-    }
     PAGER_OVERRIDE.with(|p| *p.borrow_mut() = Some(pager.to_string()));
-    let _guard = Guard;
+    let _guard = std::mem::DropGuard::new((), |()| PAGER_OVERRIDE.with(|p| *p.borrow_mut() = None));
     body()
 }
 
@@ -372,13 +361,9 @@ thread_local! {
 /// Controlled rc fixture; every other test still uses the rc-free system shell.
 #[cfg(test)]
 pub fn with_test_shell<T>(shell: &str, run: impl FnOnce() -> T) -> T {
-    struct Reset(Option<String>);
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            TEST_SHELL.with(|shell| *shell.borrow_mut() = self.0.take());
-        }
-    }
     let previous = TEST_SHELL.with(|value| value.replace(Some(shell.to_string())));
-    let _reset = Reset(previous);
+    let _reset = std::mem::DropGuard::new(previous, |previous| {
+        TEST_SHELL.with(|shell| *shell.borrow_mut() = previous);
+    });
     run()
 }

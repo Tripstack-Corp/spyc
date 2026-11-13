@@ -67,20 +67,17 @@ static PASTE_STUB_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Test-only: run `body` with [`paste`] returning `text` after `delay`.
 #[cfg(test)]
 pub fn with_paste_stub<R>(delay: Duration, text: &str, body: impl FnOnce() -> R) -> R {
-    struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            *PASTE_STUB
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        }
-    }
     // The guard takes the lock BEFORE the stub is installed and holds it for the
     // whole body, so a concurrent test can neither see nor replace this stub.
-    let _g = Guard(
+    let _g = std::mem::DropGuard::new(
         PASTE_STUB_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
+        |_lock| {
+            *PASTE_STUB
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        },
     );
     *PASTE_STUB
         .write()
@@ -115,20 +112,17 @@ static REAP_BUDGET_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// Test-only: run `body` with the reap budget pinned to `budget`.
 #[cfg(test)]
 pub fn with_reap_budget<R>(budget: std::time::Duration, body: impl FnOnce() -> R) -> R {
-    struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            *REAP_BUDGET_OVERRIDE
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        }
-    }
     // The guard takes the lock BEFORE the override is installed and holds it for
     // the whole body, so a concurrent test can neither see nor replace it.
-    let _g = Guard(
+    let _g = std::mem::DropGuard::new(
         REAP_BUDGET_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
+        |_lock| {
+            *REAP_BUDGET_OVERRIDE
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        },
     );
     *REAP_BUDGET_OVERRIDE
         .write()
@@ -155,18 +149,15 @@ fn reap_budget() -> Duration {
 /// The override is unwound when `body` returns *or panics* (RAII).
 #[cfg(test)]
 pub fn with_clipboard_override<R>(bin: &std::path::Path, body: impl FnOnce() -> R) -> R {
-    struct Guard(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            *CLIPBOARD_OVERRIDE
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        }
-    }
-    let _g = Guard(
+    let _g = std::mem::DropGuard::new(
         CLIPBOARD_OVERRIDE_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner),
+        |_lock| {
+            *CLIPBOARD_OVERRIDE
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        },
     );
     *CLIPBOARD_OVERRIDE
         .write()
@@ -312,7 +303,7 @@ fn capture(prog: &str, args: &[&str]) -> io::Result<String> {
     // bounded anyway, because a grandchild that inherited a pipe holds it open.
     let out = stdout.recv_timeout(budget).unwrap_or_default();
     if status.success() {
-        return Ok(String::from_utf8_lossy(&out).into_owned());
+        return Ok(String::from_utf8_lossy_owned(out));
     }
     let err = stderr.recv_timeout(budget).unwrap_or_default();
     let msg = String::from_utf8_lossy(&err).trim().to_string();

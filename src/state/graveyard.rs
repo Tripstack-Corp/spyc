@@ -388,7 +388,7 @@ pub fn reset_dir_scans() {
 
 fn read_entries(dir: &Path) -> Vec<Entry> {
     #[cfg(test)]
-    DIR_SCANS.with(|c| c.set(c.get() + 1));
+    DIR_SCANS.update(|n| n + 1);
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };

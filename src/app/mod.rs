@@ -381,7 +381,7 @@ impl RowData {
     /// one `*` still yields its real basename key.)
     pub fn git_key(&self) -> &str {
         match self.kind {
-            EntryKind::Executable => self.display.strip_suffix('*').unwrap_or(&self.display),
+            EntryKind::Executable => self.display.trim_suffix('*'),
             _ => &self.display,
         }
     }
