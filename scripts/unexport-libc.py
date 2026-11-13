@@ -38,6 +38,12 @@ every other export still is, and stops rather than leave an object it could not
 fix.
 
 Usage: unexport-libc.py OBJECT...  (64-bit little-endian Mach-O or ELF)
+       unexport-libc.py --listed-only OBJECT...
+
+The first form is for `compiler_rt.o`, whose C library exports must be exactly
+the list. `--listed-only` is for the archive's other objects: it localizes
+whichever listed names one exports and leaves its own API alone; libghostty-vt
+1.0.1 still exports its vectorized `memset` on `aarch64-unknown-linux-musl`.
 The `llvm-objcopy` run is `$LLVM_OBJCOPY`, by default `llvm-objcopy-20`.
 """
 
@@ -138,12 +144,19 @@ def names_to_localize(syms, names, macho, path):
     return sorted(want)
 
 
-def check(before, after, path):
-    """Stop unless `after` exports exactly `before`'s exports minus the C library's."""
-    def exported(syms):
-        return {name for name, e, _ in syms if e}
+def exported(syms):
+    return {name for name, e, _ in syms if e}
 
-    want = exported(before) - set(libc_names(before))
+
+def listed_exports(syms, names, macho):
+    """The listed names this object exports, as it spells them."""
+    prefix = b"_" if macho else b""
+    return sorted({prefix + n.encode() for n in names} & exported(syms))
+
+
+def check(before, after, names, path):
+    """Stop unless `after` exports exactly `before`'s exports minus `names`."""
+    want = exported(before) - set(names)
     got = exported(after)
     problems = [f"still exported: {n.decode()}" for n in sorted(got - want)]
     problems += [f"no longer exported: {n.decode()}" for n in sorted(want - got)]
@@ -165,17 +178,26 @@ def llvm_objcopy():
     return tool
 
 
-def unexport(path, tool, listed_names):
-    """Localize `path`'s exported C library symbols, as listed; returns their names."""
+def unexport(path, tool, listed_names, listed_only=False):
+    """Localize `path`'s exported C library symbols, as listed; returns their names.
+
+    `listed_only` is for the archive's other objects, which export their own API
+    beside any C library function: it localizes whichever listed names the object
+    exports, if any, without requiring the rule to pick exactly the list."""
     before = symbols(path)
-    names = names_to_localize(before, listed_names, is_macho(path), path)
+    if listed_only:
+        names = listed_exports(before, listed_names, is_macho(path))
+        if not names:
+            return []
+    else:
+        names = names_to_localize(before, listed_names, is_macho(path), path)
     # Beside the object, so the result replaces it with a rename on one filesystem.
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(path))) as tmp:
         listing, out = os.path.join(tmp, "names.txt"), os.path.join(tmp, "out.o")
         with open(listing, "wb") as f:
             f.write(b"".join(n + b"\n" for n in names))
         subprocess.run([tool, f"--localize-symbols={listing}", path, out], check=True)
-        check(before, symbols(out), path)
+        check(before, symbols(out), names, path)
         os.replace(out, path)
     return [n.decode() for n in names]
 
@@ -183,6 +205,9 @@ def unexport(path, tool, listed_names):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
+    only = sys.argv[1] == "--listed-only"
     objcopy, names = llvm_objcopy(), listed()
-    for p in sys.argv[1:]:
-        print(f"{p}: localized {len(unexport(p, objcopy, names))} C library names")
+    for p in sys.argv[2 if only else 1:]:
+        done = unexport(p, objcopy, names, listed_only=only)
+        if done or not only:
+            print(f"{p}: localized {len(done)} C library names: {' '.join(done) if only else '...'}")

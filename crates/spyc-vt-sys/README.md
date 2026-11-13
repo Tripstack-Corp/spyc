@@ -104,10 +104,11 @@ byte-at-a-time `memset` among them, and `ld` reported `memset` twice,
 makes the functions in `vendor/LIBC_SYMBOLS` local in `compiler_rt.o` with
 `llvm-objcopy --localize-symbols` ([`unexport-libc.py`](../../scripts/unexport-libc.py)
 checks the list against the object and the result), keeping the compiler
-helpers (`__udivti3`, ...) the other objects need. Every C library function then
-comes from the platform's C library, except on `aarch64-unknown-linux-musl`,
-where ghostty exports its own vectorized `memset` (`quirks_memset.zig`); from
-libghostty-vt 1.0.1 it doesn't on Darwin, x86_64 or glibc.
+helpers (`__udivti3`, ...) the other objects need. The other objects give up
+any listed function they export too: libghostty-vt 1.0.1 exports its own
+vectorized `memset` (`quirks_memset.zig`) on `aarch64-unknown-linux-musl`, and
+a static musl link would take it over musl's. Every C library function then
+comes from the platform's C library on every target.
 `scripts/test_vendored_archives.py` checks the committed archives, and
 `scripts/check-libsystem-binding.sh` a macOS binary.
 

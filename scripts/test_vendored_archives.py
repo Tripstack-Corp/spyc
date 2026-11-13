@@ -109,7 +109,6 @@ class VendoredArchives(unittest.TestCase):
         for target, objs in self.archives.items():
             self.assertEqual(sorted(names.intersection(exported(objs["compiler_rt.o"]))), [], target)
 
-    @unittest.skip("red: libghostty-vt 1.0.1 exports its memset on aarch64-unknown-linux-musl (#1148)")
     def test_no_archive_member_exports_a_listed_name(self):
         names = listed()
         for target, objs in self.archives.items():
