@@ -1,9 +1,10 @@
 # Pane jar spike: upgrade spyc without killing its agents
 
 **Status:** done
-([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)), and the protocol
-froze on 2026-11-12 ("The freeze", below). Its report is the "Findings"
-section, stage by stage.
+([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)). The protocol
+froze on 2026-11-12 ("The freeze", below), reopened the same day for an
+external review's findings, and froze again with them built ("The review").
+Its report is the "Findings" section, stage by stage.
 **Requirements:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md). This spike builds a
 minimal jar and measures it; it reports when a measurement contradicts a
 verdict there, and never changes the verdict itself.
@@ -913,6 +914,93 @@ The owner froze the protocol on 2026-11-12. Writing the spec down
   blob after stage 3's runs. Three minutes each, with a 5-second limit on
   any one input: 14.1 million frames and 18.3 million blobs, no crash and
   none slow.
+
+### The review
+
+After the freeze the owner had the protocol, this report, the production plan
+and the spike's code reviewed by another agent, adversarially. It reported 18
+findings with probes that drive the real jar: three for the frozen surface,
+thirteen for production, two for later. It ran on Linux only.
+
+**On macOS every probe that runs there reproduced** (P1 to P3, P5, P6, P8 to
+P10, P13 to P17; the others read `/proc`). Two came out worse than on Linux:
+
+- **The row-and-back repaint never reached a Node program.** Two resizes sent
+  back to back, as spyc sends them after a gap and the attach client sent them
+  on an attach: on Linux a busy Node loop saw the size change in 8 to 80 of 80
+  trials; on macOS in 0 of 40 at every load, an idle loop included. Every
+  trial got a `SIGWINCH` at an unchanged size.
+- **A failed `exec` left a jar the next refusal killed,** with `SIGPIPE`, as
+  on Linux.
+
+The hangs reproduced as reported: an owner gone silent while its program
+prints keeps the jar from everyone (P1); a reader that stops reading, then a
+`release`, stops the jar answering (P2); a large paste into a program that
+reads nothing blocks its connection (P13); a tokenless lookup trickling one
+frame, or 201 idle ones, refuse every upgrade (P3, P4).
+
+**The findings read from the code alone hold** (6, 7, 8, 14 and 16 were checked
+against it): a project detach rotates tokens before the move file is written;
+a refused adoption starts a second program; a snapshot's offset drifts after
+a gap; an agent's proxy works out its jar's path again from its own
+environment; an exit with nobody there is kept from when the owner left, not
+from the exit.
+
+**The owner reopened version 1** (decision K) for the frozen surface's three,
+and adopted the third. Built on `spike/jar-stage-2` (`670f5b04`):
+
+- **Version skew in every direction** (finding 1). Every start names
+  `--wire N`, and a jar that doesn't speak it exits with 75 before binding,
+  reading its token or starting the program. `welcome`'s version,
+  `unsupported`, who may send `upgrade` and a lookup's `describe` joined the
+  frozen list.
+- **`refused` leads with a reason** (finding 2), which the client hands its
+  caller as a typed error.
+- **The holder carries the blob** (finding 3): it takes a pipe's write end
+  with the sockets, then the blob, and writes the blob into the pipe the new
+  image reads. No file, and no cipher, on either platform. The validator reads
+  from a socketpair, and a failed `exec` puts `/dev/null` back on standard
+  input (finding 11).
+- **The program role** (finding 12): the jar's own child, known by the pid the
+  kernel records as it connects, hears `attached` and `detached` and may send
+  `detach`. It replaces `SIGUSR1` and the size change. spyc links to its outer
+  jar this way, and `:detach` restores spyc's terminal and then ends the
+  client.
+- **Cheap checks the tests needed:** a lookup answered once and closed, a
+  `hello` of at most 64 KiB, `SPYC_JAR_SOCKET` in the program's environment,
+  `owner_pid` in a description, and a short `release` token, a snapshot past
+  the head and a signal after the exit refused (findings 5, 10, 14 and 15 in
+  part).
+
+**Tests.** Each change has one, and each was watched failing with its fix
+broken, except the PTY drain before a detach: the race it guards is one the
+test can't make the jar lose. Three of the new tests passed at first with
+their fix broken, held up by a deadline or by std's own `SO_NOSIGPIPE`, and
+were tightened until they didn't. `wire_v1` was pinned again: `refused` and
+the blob changed, and four frames are new.
+
+**On macOS** the jar's 31 tests pass, and every harness: crash and restore,
+decision G free and held, a killed jar, R18 and the orphan notice, claims and
+attention moving with a project, and a real Claude upgraded mid-turn three
+times through the holder's pipe (184, 131 and 117 ms), its turn finishing.
+Through the program role, every attach of `shape2.py` repainted spyc with no
+size change, an upgrade of the outer jar carried spyc's program connection
+across, and `:detach` ended the client with only the cursor's mode left on
+its terminal; the next client found spyc as it was.
+
+**On Linux** the same: the 31 tests, `SO_PEERCRED`'s pid admitting the
+program, and every harness, `shape2.py` included, with its outer jar's
+upgrade in 108 ms. The shell case of attention after a move still isn't shown
+there, as before: the harness's stand-in agent isn't recognized in a Linux
+shell tab.
+
+**The parsers fuzzed again,** since `refused` and the blob changed and four
+kinds are new: three minutes each, with a 5-second limit on any one input,
+16.2 million frames and 21.1 million blobs, no crash and none slow.
+
+The rest of the review is production's: the plan takes each finding into a
+slice. **Version 1 froze again** on the owner's word, the same day, with the
+changes above.
 
 ## Sources
 
