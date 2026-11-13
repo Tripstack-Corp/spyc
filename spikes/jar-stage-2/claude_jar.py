@@ -1,7 +1,7 @@
 import os, re, signal, subprocess, time
 from common import *
 T = open(f"{D}/target_dir.txt").read().strip()
-REAL_HOME = "/Users/derekmarshall"
+REAL_HOME = os.environ.get("REAL_HOME", os.path.expanduser("~"))
 env = env_for(f"{D}/home5")
 env["SPYC_JARS"] = "1"
 env["SPYC_JAR_BIN"] = f"{T}/debug/spyc-jar"
