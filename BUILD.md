@@ -117,7 +117,7 @@ release artifacts locally — you need a cross-linker. spyc uses Zig via
 
 ```sh
 brew install zig
-cargo install cargo-zigbuild
+cargo install --locked cargo-zigbuild --version 0.24.0   # 0.23 or later (#1154)
 rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 rustup target add x86_64-apple-darwin aarch64-apple-darwin
 ```
