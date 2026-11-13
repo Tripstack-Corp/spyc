@@ -575,7 +575,7 @@ pub const COPY_MARKER: &str = " (copied)";
 /// must not put it on the clipboard, and must not nest a second marker into the
 /// next echo.
 pub fn strip_copy_marker(text: &str) -> &str {
-    text.strip_suffix(COPY_MARKER).unwrap_or(text)
+    text.trim_suffix(COPY_MARKER)
 }
 
 impl ClipMsg {

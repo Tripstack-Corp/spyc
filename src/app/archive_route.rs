@@ -642,7 +642,7 @@ pub fn archive_ancestor(
             continue;
         }
         let rel = path.strip_prefix(ancestor).ok()?;
-        if rel.as_os_str().is_empty() {
+        if rel.is_empty() {
             // The archive itself — mount it and land at its root.
             return Some((ancestor.to_path_buf(), String::new()));
         }

@@ -117,7 +117,7 @@ pub fn parse_key(tok: &str) -> Result<KeyChord, String> {
         return Ok(KeyChord::Ctrl(c.to_ascii_lowercase()));
     }
     // Named: <Enter>, <F1>, <Up>, ...
-    if let Some(inner) = tok.strip_prefix('<').and_then(|s| s.strip_suffix('>')) {
+    if let Some(inner) = tok.strip_circumfix('<', '>') {
         return parse_named(inner).map(KeyChord::Named);
     }
     // Plain char.

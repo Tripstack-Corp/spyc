@@ -178,14 +178,9 @@ fn agy_home() -> Option<PathBuf> {
 /// `body` returns or panics.
 #[cfg(test)]
 pub fn with_agy_home<R>(home: &std::path::Path, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            AGY_HOME_OVERRIDE.with(|c| *c.borrow_mut() = None);
-        }
-    }
     AGY_HOME_OVERRIDE.with(|c| *c.borrow_mut() = Some(home.to_path_buf()));
-    let _guard = Guard;
+    let _guard =
+        std::mem::DropGuard::new((), |()| AGY_HOME_OVERRIDE.with(|c| *c.borrow_mut() = None));
     body()
 }
 
@@ -329,8 +324,8 @@ pub fn find_claude_sessions(
             continue;
         }
         // Match cwd (handle /private/tmp vs /tmp macOS symlink).
-        let matches = session_cwd == cwd_str
-            || session_cwd.strip_prefix("/private").unwrap_or(session_cwd) == cwd_str.as_ref();
+        let matches =
+            [session_cwd, session_cwd.trim_prefix("/private")].contains(&cwd_str.as_ref());
 
         if matches {
             found.push((started_at, session_id.to_string(), name));
@@ -571,7 +566,7 @@ fn main_repo_root(cwd: &std::path::Path) -> Option<PathBuf> {
 /// True if agy's recorded `workspace` names `target`, tolerating macOS's
 /// `/private` symlink mirror (agy may record either form).
 fn agy_workspace_matches(workspace: &str, target: &str) -> bool {
-    workspace == target || workspace.strip_prefix("/private").unwrap_or(workspace) == target
+    workspace == target || workspace.trim_prefix("/private") == target
 }
 
 /// Find every Agy session for a given cwd by parsing `history.jsonl`.

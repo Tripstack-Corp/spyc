@@ -988,14 +988,8 @@ thread_local! {
 /// *or panics*. Mirrors `crate::state::with_config_root`.
 #[cfg(test)]
 pub fn with_home_root<R>(root: &std::path::Path, body: impl FnOnce() -> R) -> R {
-    struct Guard;
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            HOME_OVERRIDE.with(|h| *h.borrow_mut() = None);
-        }
-    }
     HOME_OVERRIDE.with(|h| *h.borrow_mut() = Some(root.to_path_buf()));
-    let _g = Guard;
+    let _g = std::mem::DropGuard::new((), |()| HOME_OVERRIDE.with(|h| *h.borrow_mut() = None));
     body()
 }
 

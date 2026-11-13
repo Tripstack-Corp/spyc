@@ -151,7 +151,7 @@ impl Host {
 
 fn home() -> Option<PathBuf> {
     let home = crate::paths::expand("~");
-    if home.as_os_str().is_empty() || home == Path::new("~") {
+    if home.is_empty() || home == Path::new("~") {
         return None;
     }
     Some(home)

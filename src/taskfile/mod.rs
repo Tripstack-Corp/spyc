@@ -105,7 +105,7 @@ fn read(path: &Path) -> Result<String> {
         bail!("{} is too large to read ({len} bytes)", path.display());
     }
     let bytes = std::fs::read(path).with_context(|| format!("reading {}", path.display()))?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(String::from_utf8_lossy_owned(bytes))
 }
 
 /// Read the file an `include` names as `name`, or decline: a name holding a

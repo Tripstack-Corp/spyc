@@ -52,7 +52,7 @@ pub(super) fn effective_root(args: &Value, ctx_path: &Path) -> Result<PathBuf, S
 fn allowed_roots(ctx_path: &Path) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut push = |p: PathBuf| {
-        if !p.as_os_str().is_empty() && !out.contains(&p) {
+        if !p.is_empty() && !out.contains(&p) {
             out.push(p);
         }
     };

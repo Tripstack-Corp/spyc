@@ -192,7 +192,7 @@ impl App {
             .unwrap_or(rel);
         // The staging root stands for the archive itself, named without the
         // trailing `/` an empty join adds.
-        if rel.as_os_str().is_empty() {
+        if rel.is_empty() {
             return Some(mount.archive().to_path_buf());
         }
         Some(mount.archive().join(rel))
@@ -503,7 +503,7 @@ fn stats_of<'a>(
 /// changes costs one per member it looks at.
 fn stat_staged(path: &Path) -> std::io::Result<std::fs::Metadata> {
     #[cfg(test)]
-    STAGED_STATS.with(|n| n.set(n.get() + 1));
+    STAGED_STATS.update(|n| n + 1);
     std::fs::metadata(path)
 }
 

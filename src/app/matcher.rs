@@ -89,13 +89,9 @@ fn undecorated(name: &str) -> Option<&str> {
 /// after the first keystroke of `^env`.
 fn desugar_anchors(query: &str) -> Option<String> {
     let at_start = query.starts_with('^');
-    let body = query.strip_prefix('^').unwrap_or(query);
+    let body = query.trim_prefix('^');
     let at_end = body.len() > 1 && body.ends_with('$');
-    let body = if at_end {
-        body.strip_suffix('$').unwrap_or(body)
-    } else {
-        body
-    };
+    let body = if at_end { body.trim_suffix('$') } else { body };
     match (at_start, at_end) {
         (false, false) => None,
         (true, true) => Some(body.to_string()),
