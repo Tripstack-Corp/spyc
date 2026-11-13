@@ -203,6 +203,9 @@ pub enum Wake {
     /// Jar spike: the orphaned jars at start were listed and landed on
     /// `runtime.jar_orphans`; `apply_jar_orphans` drains it.
     JarOrphans,
+    /// Jar spike: a client attached to spyc's outer jar; the loop top sets
+    /// the terminal's modes again and repaints (`terminal::take_attached`).
+    JarAttached,
     /// A make menu's Makefile was read (`Effect::ReadMakefile`) and landed on
     /// `runtime.make_results`. Payloadless, same shape as `ClosedRows`;
     /// `apply_makefile_reads` drains it in the pre-recv scan.

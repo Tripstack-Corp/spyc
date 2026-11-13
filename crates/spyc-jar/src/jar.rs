@@ -32,7 +32,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use rustix::process::{Pid, WaitOptions};
 
-use crate::proto::{self, JarSignal, Msg, Role, Snapshot};
+use crate::proto::{self, JarSignal, Msg, Role, Snapshot, reason};
 
 #[derive(Clone)]
 pub struct Config {
@@ -49,9 +49,6 @@ pub struct Config {
     pub deadline: Duration,
     /// How long an ended program's jar waits for an owner to collect the exit.
     pub linger_after_exit: Duration,
-    /// Stage 2b: send the program `SIGUSR1` when an owner connects, so a spyc
-    /// running in this jar knows a new terminal attached.
-    pub attach_signal: bool,
     /// R32a: how long the program runs on with no owner before the jar ends
     /// it, as a closed terminal would; `None` waits for an owner however long.
     pub linger: Option<Duration>,
@@ -175,6 +172,8 @@ pub(crate) struct ConnState {
 /// A live connection, shared by its reader and writer threads.
 pub(crate) struct Conn {
     pub(crate) role: Role,
+    /// The connecting process, 0 when the platform can't say.
+    pub(crate) peer_pid: u32,
     pub(crate) out: Arc<Mutex<UnixStream>>,
     /// Where the writer is in the log; `None` until the first `Replay`.
     pub(crate) cursor: Mutex<Option<(u64, u64)>>,
@@ -597,6 +596,14 @@ fn describe(shared: &Shared) -> Vec<(String, String)> {
             },
         ),
         (
+            "owner_pid",
+            st.owner
+                .and_then(|id| shared.conns().get(&id).map(|c| c.peer_pid))
+                .filter(|p| *p != 0)
+                .map(|p| p.to_string())
+                .unwrap_or_default(),
+        ),
+        (
             "log",
             format!(
                 "{} of {} bytes held, {} printed, from {}",
@@ -633,8 +640,10 @@ fn send_on(out: &Mutex<UnixStream>, msg: &Msg) -> std::io::Result<()> {
 }
 
 fn register(shared: &Shared, id: u64, role: Role, stream: UnixStream) -> anyhow::Result<Arc<Conn>> {
+    no_sigpipe(&stream);
     let conn = Arc::new(Conn {
         role,
+        peer_pid: peer_pid(&stream).unwrap_or(0),
         out: Arc::new(Mutex::new(stream)),
         cursor: Mutex::new(None),
         exit_sent: AtomicBool::new(false),
@@ -671,6 +680,91 @@ pub(crate) fn peer_is(stream: &UnixStream, uid: u32) -> bool {
     peer_uid(stream).is_ok_and(|p| p == uid)
 }
 
+/// The process at the other end of `stream`, as the kernel recorded it when
+/// it connected.
+#[cfg(target_os = "linux")]
+fn peer_pid(stream: &UnixStream) -> std::io::Result<u32> {
+    let pid = rustix::net::sockopt::socket_peercred(stream)?.pid;
+    Ok(pid.as_raw_nonzero().get().unsigned_abs())
+}
+
+/// The process at the other end of `stream`, as the kernel recorded it when
+/// it connected.
+#[cfg(target_os = "macos")]
+fn peer_pid(stream: &UnixStream) -> std::io::Result<u32> {
+    let pid = nix::sys::socket::getsockopt(stream, nix::sys::socket::sockopt::LocalPeerPid)?;
+    Ok(pid.unsigned_abs())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn peer_pid(_stream: &UnixStream) -> std::io::Result<u32> {
+    Err(std::io::Error::other(
+        "no peer credentials on this platform",
+    ))
+}
+
+/// Writing to a socket whose peer has gone answers `EPIPE` rather than raising
+/// `SIGPIPE`, whatever the jar's disposition: a failed `exec` leaves it at
+/// the default. Linux's std writes with `MSG_NOSIGNAL` already.
+pub(crate) fn no_sigpipe(stream: &UnixStream) {
+    #[cfg(target_os = "macos")]
+    let _ = rustix::net::sockopt::set_socket_nosigpipe(stream, true);
+    #[cfg(not(target_os = "macos"))]
+    let _ = stream;
+}
+
+/// Tell every connection of the program's own (role `program`) that `msg`
+/// happened: an owner attached or went.
+fn tell_program(shared: &Shared, msg: &Msg) {
+    let programs: Vec<Arc<Conn>> = shared
+        .conns()
+        .values()
+        .filter(|c| c.role == Role::Program)
+        .cloned()
+        .collect();
+    for c in programs {
+        let _ = send_on(&c.out, msg);
+    }
+}
+
+/// The program asked to be detached: end the owner's connection once
+/// everything the program printed until now has gone out on it, or after a
+/// second, so its last words (its terminal restored) reach the client.
+fn detach_owner(shared: &Arc<Shared>) {
+    let shared = Arc::clone(shared);
+    thread::spawn(move || {
+        // What the program wrote before asking is in the PTY by now, but
+        // perhaps not yet in the log: wait for the PTY to drain first.
+        let until = Instant::now() + Duration::from_millis(500);
+        while readable(&shared.master, Duration::ZERO) && Instant::now() < until {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let (owner, head) = {
+            let st = shared.lock();
+            (st.owner, st.log.head)
+        };
+        let Some(conn) = owner.and_then(|id| shared.conns().get(&id).cloned()) else {
+            return;
+        };
+        let until = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < until {
+            let sent = conn
+                .cursor
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some_and(|(_, from)| from >= head);
+            if sent {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        conn.closed.store(true, Ordering::SeqCst);
+        if let Ok(s) = conn.out.lock() {
+            let _ = s.shutdown(std::net::Shutdown::Both);
+        }
+    });
+}
+
 /// One new connection: its `hello`, then [`run_conn`].
 fn serve(shared: &Arc<Shared>, stream: UnixStream) {
     // Another user's process is refused before a byte of it is read, whatever
@@ -683,44 +777,58 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         Ok(s) => s,
         Err(_) => return,
     };
-    let refuse = |why: String| {
+    let refuse = |reason: u16, why: String| {
         let mut s = &stream;
-        let _ = proto::write_msg(&mut s, &Msg::Refused { why });
+        let _ = proto::write_msg(&mut s, &Msg::Refused { reason, why });
     };
     let Ok(Some(Msg::Hello {
         version,
         role,
         token,
-    })) = proto::read_msg(&mut read_half)
+    })) = proto::read_msg_max(&mut read_half, proto::MAX_HELLO)
     else {
-        refuse("expected a hello".into());
+        refuse(reason::INVALID, "expected a hello".into());
         return;
     };
     // A hello names the highest version its client speaks; the welcome
     // answers with the one this connection speaks.
     if version == 0 {
-        refuse(format!("jar speaks version {}", proto::VERSION));
+        refuse(
+            reason::VERSION_NOT_SERVED,
+            format!("jar speaks version {}", proto::VERSION),
+        );
         return;
     }
     let mut st = shared.lock();
-    if role != Role::Lookup && !same_token(&st.token, &token) {
+    let allowed = match role {
+        Role::Lookup => Ok(()),
+        // The program is known by its pid, which the kernel recorded as it
+        // connected; it holds no token, since it runs as whatever the user
+        // started in the jar.
+        Role::Program => {
+            let ours = st.exit.is_none() && peer_pid(&stream).is_ok_and(|p| p == shared.child_pid);
+            if ours {
+                Ok(())
+            } else {
+                Err((reason::ROLE_NOT_PERMITTED, "not this jar's program"))
+            }
+        }
+        Role::Owner | Role::Reader if !same_token(&st.token, &token) => {
+            Err((reason::WRONG_TOKEN, "wrong token"))
+        }
+        Role::Owner if st.owner.is_some() => {
+            Err((reason::OWNER_PRESENT, "the jar already has an owner"))
+        }
+        Role::Owner | Role::Reader => Ok(()),
+    };
+    if let Err((r, why)) = allowed {
         drop(st);
-        refuse("wrong token".into());
-        return;
-    }
-    if role == Role::Owner && st.owner.is_some() {
-        drop(st);
-        refuse("the jar already has an owner".into());
+        refuse(r, why.into());
         return;
     }
     let id = st.next_conn;
     st.next_conn += 1;
     if role == Role::Owner {
-        if shared.cfg.attach_signal
-            && let Some(pid) = i32::try_from(shared.child_pid).ok().and_then(Pid::from_raw)
-        {
-            let _ = rustix::process::kill_process(pid, rustix::process::Signal::USR1);
-        }
         st.owner = Some(id);
         st.had_owner = true;
         st.ownerless_since = None;
@@ -741,6 +849,14 @@ fn serve(shared: &Arc<Shared>, stream: UnixStream) {
     if send_on(&conn.out, &welcome).is_err() {
         release(shared, id);
         return;
+    }
+    let owned = shared.lock().owner.is_some();
+    match role {
+        Role::Owner => tell_program(shared, &Msg::Attached),
+        Role::Program if owned => {
+            let _ = send_on(&conn.out, &Msg::Attached);
+        }
+        _ => {}
     }
     run_conn(shared, id, &conn);
 }
@@ -765,6 +881,7 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
     let _ = read_half.set_read_timeout(Some(Duration::from_secs(5)));
     let owner = conn.role == Role::Owner;
     let lookup = conn.role == Role::Lookup;
+    let program = conn.role == Role::Program;
     let writer = {
         let shared = Arc::clone(shared);
         let conn = Arc::clone(conn);
@@ -786,6 +903,10 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             if owner && last_heard.elapsed() >= shared.cfg.deadline {
                 break;
             }
+            // A lookup asks one thing, at once.
+            if lookup && last_heard.elapsed() >= LOOKUP_DEADLINE {
+                break;
+            }
             continue;
         }
         let msg = match proto::read_msg(&mut read_half) {
@@ -798,9 +919,15 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             Err(_) => break,
         };
         last_heard = Instant::now();
-        if lookup && !matches!(msg, Msg::Describe | Msg::Ping { .. }) {
+        let permitted = match conn.role {
+            Role::Lookup => matches!(msg, Msg::Describe | Msg::Ping { .. }),
+            Role::Program => matches!(msg, Msg::Describe | Msg::Ping { .. } | Msg::Detach),
+            Role::Owner | Role::Reader => !matches!(msg, Msg::Detach),
+        };
+        if !permitted {
             let _ = send(&Msg::Refused {
-                why: "a lookup can only ask the jar to describe itself".into(),
+                reason: reason::ROLE_NOT_PERMITTED,
+                why: format!("a {:?} connection can't send that", conn.role),
             });
             continue;
         }
@@ -819,7 +946,11 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             }
             Msg::Ping { n } => {
                 let _ = send(&Msg::Pong { n });
+                if lookup {
+                    break;
+                }
             }
+            Msg::Detach => detach_owner(shared),
             // Every snapshot held, then `Snapshot(None)` to end the list.
             Msg::FetchSnapshot => {
                 let snaps = shared.lock().snapshots.clone();
@@ -829,6 +960,12 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
                 let _ = send(&Msg::Snapshot(None));
             }
             Msg::Upgrade { binary } => crate::upgrade::begin(shared, Arc::clone(&conn.out), binary),
+            Msg::Release { token } if owner && token.len() < MIN_TOKEN => {
+                let _ = send(&Msg::Refused {
+                    reason: reason::INVALID,
+                    why: format!("a token is {MIN_TOKEN} bytes or more"),
+                });
+            }
             Msg::Release { token } if owner => {
                 shared.lock().token = token;
                 // The old token's holders go with it: every reader is closed.
@@ -854,9 +991,13 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
                 let _ = send(&Msg::Description {
                     fields: describe(shared),
                 });
+                if lookup {
+                    break;
+                }
             }
-            _ if !owner => {
+            _ if !owner || program => {
                 let _ = send(&Msg::Refused {
+                    reason: reason::ROLE_NOT_PERMITTED,
                     why: "a reader can only watch".into(),
                 });
             }
@@ -904,7 +1045,19 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
                 st.acked = st.acked.max(offset.min(st.log.head));
                 shared.cv.notify_all();
             }
+            Msg::Signal { .. } if shared.lock().exit.is_some() => {
+                let _ = send(&Msg::Refused {
+                    reason: reason::PROGRAM_EXITED,
+                    why: "the program has ended".into(),
+                });
+            }
             Msg::Signal { signal } => deliver(shared.child_pid, signal),
+            Msg::StoreSnapshot(snap) if snap.offset > shared.lock().log.head => {
+                let _ = send(&Msg::Refused {
+                    reason: reason::INVALID,
+                    why: "a snapshot past what the program printed".into(),
+                });
+            }
             Msg::StoreSnapshot(snap) => {
                 let mut st = shared.lock();
                 st.snapshots.retain(|s| s.format != snap.format);
@@ -920,6 +1073,7 @@ fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             }
             other => {
                 let _ = send(&Msg::Refused {
+                    reason: reason::INVALID,
                     why: format!("not a client message: {other:?}"),
                 });
             }
@@ -944,14 +1098,26 @@ fn same_token(want: &[u8], got: &[u8]) -> bool {
 fn release(shared: &Shared, id: u64) {
     shared.conns().remove(&id);
     let mut st = shared.lock();
-    if st.owner == Some(id) {
+    let was_owner = st.owner == Some(id);
+    if was_owner {
         st.owner = None;
         st.ownerless_since = Some(Instant::now());
         st.info.retain(|(k, _)| k != "owner_mcp");
     }
+    drop(st);
+    if was_owner {
+        tell_program(shared, &Msg::Detached);
+    }
     shared.cv.notify_all();
     shared.park_cv.notify_all();
 }
+
+/// How long a lookup may wait to ask its one question.
+const LOOKUP_DEADLINE: Duration = Duration::from_secs(5);
+
+/// The shortest token a release may set (R26): an empty one would open the
+/// jar to anyone.
+pub const MIN_TOKEN: usize = 16;
 
 fn deliver(pid: u32, signal: i32) {
     use rustix::process::Signal;

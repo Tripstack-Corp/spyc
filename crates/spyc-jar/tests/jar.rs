@@ -29,6 +29,7 @@ impl Jar {
             .expect("tempdir");
         let socket = dir.path().join("j.sock");
         let process = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
+            .args(["--wire", "1"])
             .arg("--socket")
             .arg(&socket)
             .args(extra)
@@ -640,7 +641,7 @@ fn an_upgrade_the_new_binary_refuses_leaves_the_old_jar_running() {
         loop {
             assert!(Instant::now() < until, "no refusal for {binary}");
             if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
-                if let Msg::Refused { why } = &m {
+                if let Msg::Refused { why, .. } = &m {
                     assert!(why.contains("upgrade refused"), "{why}");
                     break;
                 }
@@ -1046,4 +1047,317 @@ fn a_released_jars_new_token_crosses_an_upgrade() {
     );
     Client::connect(&jar.socket, Role::Owner, WAIT, b"successor-token-0002")
         .expect("the new one does");
+}
+
+// The reopened version 1, after the review of 2026-11-12.
+
+fn refusal(r: anyhow::Result<Client>) -> u16 {
+    let e = r.err().expect("refused");
+    e.downcast_ref::<spyc_jar::client::Refusal>()
+        .unwrap_or_else(|| panic!("not a refusal: {e:#}"))
+        .reason
+}
+
+fn try_connect(jar: &Jar, role: Role, token: &[u8]) -> anyhow::Result<Client> {
+    Client::connect(&jar.socket, role, WAIT, token).map(|(c, _)| c)
+}
+
+/// Finding 2: a refusal says why, as a reason a client can act on.
+#[test]
+fn a_refusal_says_why() {
+    use spyc_jar::proto::reason;
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    assert_eq!(
+        refusal(try_connect(&jar, Role::Reader, b"not-the-token-at-all")),
+        reason::WRONG_TOKEN
+    );
+    assert_eq!(
+        refusal(try_connect(&jar, Role::Owner, TOKEN)),
+        reason::OWNER_PRESENT
+    );
+    assert_eq!(
+        refusal(try_connect(&jar, Role::Program, b"")),
+        reason::ROLE_NOT_PERMITTED,
+        "the test isn't the jar's program"
+    );
+    let reader = jar.connect(Role::Reader);
+    reader
+        .send(&Msg::Input {
+            bytes: b"x".to_vec(),
+        })
+        .unwrap();
+    let mut reader = reader;
+    let m = recv_matching(&mut reader, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::ROLE_NOT_PERMITTED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    owner
+        .send(&Msg::Release {
+            token: b"short".to_vec(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::INVALID,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+}
+
+/// Finding 1: a jar asked for a wire version it doesn't speak, or for none,
+/// exits with 75 before it binds its socket or starts the program.
+#[test]
+fn a_jar_asked_for_a_wire_version_it_doesnt_speak_exits_75() {
+    for wire in [Some("2"), Some("0"), None] {
+        let dir = tempfile::Builder::new()
+            .prefix("jar")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = dir.path().join("j.sock");
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_spyc-jar"));
+        if let Some(w) = wire {
+            cmd.args(["--wire", w]);
+        }
+        let mark = dir.path().join("ran");
+        let script = format!("touch {}", mark.display());
+        let status = cmd
+            .arg("--socket")
+            .arg(&socket)
+            .args(["--", "/bin/sh", "-c", &script])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(75), "--wire {wire:?}");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !socket.exists() && !mark.exists(),
+            "--wire {wire:?} started something"
+        );
+    }
+}
+
+/// A program in a jar, and whatever it starts, finds the jar by
+/// `SPYC_JAR_SOCKET`, not by working the path out again (finding 14).
+#[test]
+fn a_program_knows_its_jars_socket() {
+    let mut jar = Jar::start(&[], &sh("echo \"sock=$SPYC_JAR_SOCKET.\"; exec cat"));
+    let want = format!("sock={}.", jar.socket.display());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    read_until(&mut owner, true, |s| s.contains(&want));
+}
+
+/// Finding 12: the program hears an owner attach and go, and can ask the jar
+/// to detach its owner once what it printed has gone out.
+#[test]
+fn the_program_hears_attaches_and_detaches_its_owner() {
+    let program = [env!("CARGO_BIN_EXE_spyc-jar"), "program-events"];
+    let mut jar = Jar::start(&[], &program);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    read_until(&mut owner, true, |s| s.contains("program: attached"));
+    let fields = spyc_jar::client::describe(&jar.socket).unwrap();
+    assert_eq!(field(&fields, "owner_pid"), std::process::id().to_string());
+    owner
+        .send(&Msg::Input {
+            bytes: b"detach\r".to_vec(),
+        })
+        .unwrap();
+    // Everything up to its last words, then the connection ends.
+    let mut seen = Seen::default();
+    // Well inside the owner's 10 s deadline, which would end it anyway.
+    let until = Instant::now() + Duration::from_secs(3);
+    loop {
+        assert!(Instant::now() < until, "the owner was never detached");
+        match owner.recv(Duration::from_millis(200)) {
+            Ok(Some(m)) => seen.take(m),
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+    assert!(
+        seen.contains("program: bye"),
+        "its last words reached the owner"
+    );
+    let fields = spyc_jar::client::describe(&jar.socket).unwrap();
+    assert!(field(&fields, "owner").starts_with("none"), "{fields:?}");
+    assert!(field(&fields, "exit").is_empty(), "the program runs on");
+    let mut again = jar.connect(Role::Owner);
+    again.send(&Msg::Replay { from: 0 }).unwrap();
+    read_until(&mut again, true, |s| {
+        String::from_utf8_lossy(&s.text)
+            .matches("program: attached")
+            .count()
+            == 2
+            && s.contains("program: detached")
+    });
+}
+
+/// Finding 5, in part: a lookup is answered once and closed.
+#[test]
+fn a_lookup_is_answered_once_and_closed() {
+    let jar = Jar::start(&[], &["/bin/cat"]);
+    let mut lookup = try_connect(&jar, Role::Lookup, b"").unwrap();
+    lookup.send(&Msg::Describe).unwrap();
+    assert!(matches!(
+        lookup.recv(WAIT).unwrap(),
+        Some(Msg::Description { .. })
+    ));
+    // At once, not when its idle limit would close it.
+    let t0 = Instant::now();
+    assert!(lookup.recv(WAIT).is_err(), "the jar closed it");
+    assert!(t0.elapsed() < Duration::from_secs(1), "{:?}", t0.elapsed());
+    // One that asks nothing is closed too.
+    let mut idle = try_connect(&jar, Role::Lookup, b"").unwrap();
+    let t0 = Instant::now();
+    assert!(idle.recv(Duration::from_secs(8)).is_err());
+    assert!(t0.elapsed() < Duration::from_secs(8));
+}
+
+/// Finding 15: a jar refuses what its own upgrade would reject, so it can
+/// still be upgraded after.
+#[test]
+fn a_short_token_and_a_snapshot_past_the_head_are_refused_and_the_jar_still_upgrades() {
+    use spyc_jar::proto::reason;
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    owner.send(&Msg::Release { token: Vec::new() }).unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::INVALID,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    owner
+        .send(&Msg::StoreSnapshot(Snapshot {
+            format: SNAPSHOT_VT,
+            offset: 1 << 40,
+            rows: 24,
+            cols: 80,
+            blob: b"x".to_vec(),
+        }))
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::INVALID,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    let next = next_binary(jar._dir.path());
+    owner
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| {
+        matches!(m, Msg::Upgraded { .. } | Msg::Refused { .. })
+    });
+    assert!(matches!(m, Msg::Upgraded { .. }), "{m:?}");
+}
+
+/// Finding 10: once the program's exit is recorded, a signal reaches no one.
+#[test]
+fn a_signal_after_the_exit_is_refused() {
+    use spyc_jar::proto::reason;
+    let mut jar = Jar::start(&[], &sh("exit 3"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    recv_matching(&mut owner, |m| matches!(m, Msg::Exited { .. }));
+    owner.send(&Msg::Signal { signal: 3 }).unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::PROGRAM_EXITED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+}
+
+/// Finding 11: an `exec` that fails after the new binary accepted the
+/// handover leaves a jar that a later refusing validator can't kill.
+#[test]
+fn a_failed_exec_leaves_a_jar_that_survives_the_next_refusal() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    // A new binary that loses its execute bit while it holds the sockets, as
+    // a package manager replacing it mid-upgrade might.
+    let flaky = jar._dir.path().join("jar-flaky");
+    std::fs::write(
+        &flaky,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in hold-handover) chmod -x \"$0\";; esac\nexec {} \"$@\"\n",
+            env!("CARGO_BIN_EXE_spyc-jar")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&flaky, std::fs::Permissions::from_mode(0o755)).unwrap();
+    owner
+        .send(&Msg::Upgrade {
+            binary: flaky.display().to_string(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| {
+        matches!(m, Msg::Refused { .. } | Msg::Upgraded { .. })
+    });
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: spyc_jar::proto::reason::UPGRADE_FAILED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    owner
+        .send(&Msg::Upgrade {
+            binary: "/usr/bin/false".into(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: spyc_jar::proto::reason::UPGRADE_REJECTED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(jar.process.try_wait().unwrap().is_none(), "the jar lives");
+    owner.send(&Msg::Ping { n: 5 }).unwrap();
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 5 }));
 }

@@ -15,11 +15,10 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-# R19 on macOS: an upgrade's state is sealed before it touches a file.
-aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
-rustix = { version = "1.1.4", features = ["process", "fs", "termios", "pty", "event", "net", "stdio"] }
+rustix = { version = "1.1.4", features = ["process", "fs", "termios", "pty", "event", "net", "stdio", "pipe"] }
 
-# R26 on macOS: rustix reads a unix socket's peer only on Linux.
+# R26 and the program role on macOS: rustix reads a unix socket's peer
+# (its user and pid) only on Linux.
 [target.'cfg(target_os = "macos")'.dependencies]
 nix = { version = "0.29", default-features = false, features = ["socket", "user"] }
 

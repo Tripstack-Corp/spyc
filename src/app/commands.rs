@@ -199,12 +199,14 @@ pub(super) fn cmd_date(app: &mut App, _args: &str) -> Vec<Effect> {
 
 /// `:about` — open the about page (`docs/ABOUT.md`, bundled) in the pager.
 /// Same target as the `Space a` binding.
-/// Jar spike, stage 6: `:detach project`.
+/// Jar spike: `:detach` (spyc leaves the terminal, when it runs in its own
+/// jar) and, from stage 6, `:detach project`.
 pub(super) fn cmd_detach(app: &mut App, args: &str) -> Vec<Effect> {
-    if args.trim() == "project" {
-        app.detach_project();
-    } else {
-        app.state.flash_error("usage: :detach project");
+    match args.trim() {
+        "project" => app.detach_project(),
+        "" if crate::pane::jar_backend::in_outer_jar() => app.view.detach_requested = true,
+        "" => app.state.flash_error("spyc isn't running in a jar of its own"),
+        _ => app.state.flash_error("usage: :detach [project]"),
     }
     Vec::new()
 }

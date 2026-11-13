@@ -339,11 +339,6 @@ impl App {
                         self.run_effects(effects, terminal, foreground_exec);
                     }
                     Event::Resize(cols, rows) => {
-                        // Jar spike (stage 2b): a new terminal attached to
-                        // spyc's outer jar; set its modes and repaint.
-                        if crate::terminal::take_attached() {
-                            let _ = crate::terminal::reattach(terminal);
-                        }
                         self.handle_resize(cols, rows);
                     }
                     // Only arrives while `[mouse] capture` is on — with it off the
@@ -618,6 +613,12 @@ impl App {
         );
         self.wire_at_startup();
         self.spawn_jar_orphans();
+        if let Some(tx) = self.runtime.pane_wake_tx.clone() {
+            crate::pane::jar_backend::watch_outer_jar(move || {
+                crate::terminal::mark_attached();
+                let _ = tx.send(Message::Wake(super::Wake::JarAttached));
+            });
+        }
 
         // (Pre-v1.50.84 the loop carried `last_pane_render` and
         // `last_active_drain` timestamps to throttle pane renders /
@@ -645,6 +646,18 @@ impl App {
             // catches death even when the edge wake races a real message.
             if reader_done.load(std::sync::atomic::Ordering::Acquire) {
                 break take_reader_result(read_err);
+            }
+            // Jar spike, shape 2: leave the terminal as spyc found it, then
+            // have the outer jar end its client; set it up again on the next
+            // attach.
+            if std::mem::take(&mut self.view.detach_requested) {
+                let _ = crate::terminal::suspend_tui(terminal);
+                crate::pane::jar_backend::detach_outer_jar();
+            }
+            if crate::terminal::take_attached() {
+                let _ = crate::terminal::reattach(terminal);
+                self.view.needs_full_repaint = true;
+                ctx.draw.mark(3);
             }
             // One-shot full repaint after a pane or overlay closes (or any
             // other event that leaves ratatui's diff buffer stale).

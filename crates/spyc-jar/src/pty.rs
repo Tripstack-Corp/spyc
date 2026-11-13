@@ -49,11 +49,11 @@ pub(crate) fn spawn(cfg: &Config) -> anyhow::Result<(OwnedFd, u32)> {
     if let Some(cwd) = &cfg.cwd {
         cmd.current_dir(cwd);
     }
-    // An outer jar's program may start with no terminal attached, so nothing
-    // answers its terminal queries.
-    if cfg.attach_signal {
-        cmd.env("SPYC_JAR_OUTER", "1");
-    }
+    // Where the program, and anything it starts, finds this jar: the program
+    // connects as role `program` to hear of attaches, and an agent's MCP proxy
+    // asks the jar where its owner is, without working out the path again
+    // from an environment that may have changed.
+    cmd.env("SPYC_JAR_SOCKET", &cfg.socket);
     let child = cmd.spawn().context("spawn the program")?;
     Ok((master, child.id()))
 }

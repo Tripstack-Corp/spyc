@@ -9,6 +9,23 @@ use std::time::{Duration, Instant};
 
 use crate::proto::{self, Msg, Role};
 
+/// A jar's refusal of a `hello`: its reason (`proto::reason`) and text. A
+/// caller tells "another spyc owns it" from "this token is stale" by the
+/// reason, through `anyhow::Error::downcast_ref`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub reason: u16,
+    pub why: String,
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "refused: {}", self.why)
+    }
+}
+
+impl std::error::Error for Refusal {}
+
 pub struct Client {
     read: std::io::BufReader<UnixStream>,
     timeout: Option<Duration>,
@@ -47,7 +64,7 @@ impl Client {
         })?;
         match client.recv(Duration::from_secs(5))? {
             Some(w @ Msg::Welcome { .. }) => Ok((client, w)),
-            Some(Msg::Refused { why }) => Err(anyhow::anyhow!("refused: {why}")),
+            Some(Msg::Refused { reason, why }) => Err(Refusal { reason, why }.into()),
             other => Err(anyhow::anyhow!("expected a welcome, got {other:?}")),
         }
     }

@@ -104,6 +104,7 @@ pub fn spawn(
     let mut cmd = Command::new(jar_binary()?);
     cmd.arg("--socket")
         .arg(&socket)
+        .args(["--wire", "1"])
         .arg("--cwd")
         .arg(cwd)
         .arg("--rows")
@@ -1016,4 +1017,67 @@ mod tests {
         assert!(other.exists(), "only sockets are swept");
         assert_eq!(socket_state(&dead), SocketState::Missing);
     }
+}
+
+/// Jar spike: spyc's link to the jar it runs in as the program (shape 2), when
+/// it does. Taken by the run loop once it can wake.
+static OUTER: Mutex<Option<Client>> = Mutex::new(None);
+
+/// Whether spyc is the program of a jar: `SPYC_JAR_SOCKET` names one, and it
+/// takes spyc as its program, which it knows by spyc's pid. A spyc run in a
+/// shell inside a pane's jar is refused, and isn't one.
+pub fn link_outer_jar() -> bool {
+    let Some(socket) = std::env::var_os("SPYC_JAR_SOCKET") else {
+        return false;
+    };
+    match Client::connect(Path::new(&socket), Role::Program, Duration::from_millis(500), b"") {
+        Ok((client, _)) => {
+            *OUTER.lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
+            true
+        }
+        Err(e) => {
+            trace(&format!("outer jar: not its program: {e:#}"));
+            false
+        }
+    }
+}
+
+/// The outer jar's sender, while spyc is its program.
+static OUTER_TX: Mutex<Option<Sender>> = Mutex::new(None);
+
+/// Hear the outer jar's attaches on a thread of their own: each one calls
+/// `attached`.
+pub fn watch_outer_jar(attached: impl Fn() + Send + 'static) {
+    let Some(client) = OUTER.lock().unwrap_or_else(PoisonError::into_inner).take() else {
+        return;
+    };
+    let (mut rx, tx) = client.split();
+    *OUTER_TX.lock().unwrap_or_else(PoisonError::into_inner) = Some(tx);
+    std::thread::spawn(move || {
+        loop {
+            match rx.recv(Duration::from_secs(60)) {
+                Ok(Some(Msg::Attached)) => attached(),
+                Ok(_) => {}
+                Err(_) => return,
+            }
+        }
+    });
+}
+
+/// Ask the outer jar to detach its client, once what spyc wrote has reached
+/// it. `false` when spyc isn't in one.
+pub fn detach_outer_jar() -> bool {
+    OUTER_TX
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|tx| tx.send(&Msg::Detach).is_ok())
+}
+
+/// Whether spyc is its outer jar's program, linked and listening.
+pub fn in_outer_jar() -> bool {
+    OUTER_TX
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .is_some()
 }

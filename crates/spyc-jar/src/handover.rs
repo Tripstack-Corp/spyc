@@ -81,7 +81,6 @@ pub(crate) fn encode_parts(
     put_u64(&mut w, c.window);
     put_u64(&mut w, millis(c.deadline));
     put_u64(&mut w, millis(c.linger_after_exit));
-    w.push(u8::from(c.attach_signal));
     put_opt_u64(&mut w, c.linger.map(millis));
     put_u64(&mut w, c.instance);
     put_u64(&mut w, c.created);
@@ -191,7 +190,6 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     let window = r.u64()?;
     let deadline = Duration::from_millis(r.u64()?);
     let linger_after_exit = Duration::from_millis(r.u64()?);
-    let attach_signal = r.flag()?;
     let linger = r.opt_u64()?.map(Duration::from_millis);
     let instance = r.u64()?;
     let created = r.u64()?;
@@ -295,12 +293,7 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
         if id >= next_conn || conns.iter().any(|c| c.id == id) {
             return Err(Invalid("connection id"));
         }
-        let role = match r.u8()? {
-            1 => Role::Owner,
-            2 => Role::Reader,
-            3 => Role::Lookup,
-            _ => return Err(Invalid("connection role")),
-        };
+        let role = Role::from_wire(r.u8()?).ok_or(Invalid("connection role"))?;
         let cursor = match r.u8()? {
             0 => None,
             1 => {
@@ -339,7 +332,6 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
         window,
         deadline,
         linger_after_exit,
-        attach_signal,
         linger,
         instance,
         created,
@@ -479,7 +471,6 @@ pub fn sample_blob() -> Vec<u8> {
         window: 1 << 20,
         deadline: Duration::from_secs(10),
         linger_after_exit: Duration::from_secs(60),
-        attach_signal: false,
         linger: Some(Duration::from_secs(300)),
         instance: 0x1234_5678_9abc_def0,
         created: 1_794_000_000,

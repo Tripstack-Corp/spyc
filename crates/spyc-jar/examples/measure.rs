@@ -89,6 +89,7 @@ const TOKEN: &[u8] = b"measure-token-0123456";
 fn start_jar(bin: &Path, dir: &Path, name: &str, argv: &[&str]) -> (Child, PathBuf) {
     let socket = dir.join(name);
     let child = Command::new(bin)
+        .args(["--wire", "1"])
         .arg("--socket")
         .arg(&socket)
         .args(["--window", "8388608", "--ring", "8388608", "--"])

@@ -12,6 +12,37 @@ pub const MAX_FRAME: usize = 16 << 20;
 /// Set in a frame's flags when a reader that doesn't know its kind must refuse
 /// it rather than skip it.
 pub const CRITICAL: u8 = 0x80;
+/// The most a `hello` may be: a jar reads no more before it knows who is
+/// asking.
+pub const MAX_HELLO: usize = 64 << 10;
+
+/// Why a request was refused: the reason `refused` leads with. A client acts on
+/// the reason; the text after it is for people. A reason this version doesn't
+/// know reads as [`reason::UNSPECIFIED`].
+pub mod reason {
+    pub const UNSPECIFIED: u16 = 0;
+    /// A `hello` whose token isn't the jar's.
+    pub const WRONG_TOKEN: u16 = 1;
+    /// An owner's `hello` while the jar has one.
+    pub const OWNER_PRESENT: u16 = 2;
+    /// A `hello` naming no version this jar speaks.
+    pub const VERSION_NOT_SERVED: u16 = 3;
+    /// A request this connection's role may not make.
+    pub const ROLE_NOT_PERMITTED: u16 = 4;
+    /// An upgrade that can't start now: one is under way, or the jar couldn't
+    /// reach a safe point. Worth asking again.
+    pub const UPGRADE_BUSY: u16 = 5;
+    /// The new binary is missing or rejected the handover; the jar runs on.
+    pub const UPGRADE_REJECTED: u16 = 6;
+    /// The upgrade failed after the new binary accepted the handover; the jar
+    /// runs on.
+    pub const UPGRADE_FAILED: u16 = 7;
+    /// A request this jar can't act on: no `hello` first, a value out of
+    /// range, or a kind a client doesn't send.
+    pub const INVALID: u16 = 8;
+    /// A signal for a program that has already ended.
+    pub const PROGRAM_EXITED: u16 = 9;
+}
 
 /// What a connection asks to be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +52,21 @@ pub enum Role {
     /// R30a: asks only `Describe` and `Ping`, and needs no token: what a
     /// jar says of itself reveals nothing to type into or watch it with.
     Lookup = 3,
+    /// The jar's own program, known by its pid rather than a token: it hears
+    /// when a client attaches and detaches, and may ask the jar to detach it.
+    Program = 4,
+}
+
+impl Role {
+    pub const fn from_wire(n: u8) -> Option<Self> {
+        Some(match n {
+            1 => Self::Owner,
+            2 => Self::Reader,
+            3 => Self::Lookup,
+            4 => Self::Program,
+            _ => return None,
+        })
+    }
 }
 
 /// The signals a client may ask the jar to deliver to its program's group.
@@ -143,6 +189,7 @@ pub enum Msg {
         signaled: bool,
     },
     Refused {
+        reason: u16,
         why: String,
     },
     Unsupported {
@@ -185,6 +232,13 @@ pub enum Msg {
     Description {
         fields: Vec<(String, String)>,
     },
+    /// The program asks its jar to end its owner's connection, once
+    /// everything the program printed before has reached the owner.
+    Detach,
+    /// To the program: an owner connected.
+    Attached,
+    /// To the program: its owner went.
+    Detached,
 }
 
 #[derive(Debug)]
@@ -231,6 +285,7 @@ const UPGRADE: u8 = 12;
 const DESCRIBE: u8 = 13;
 const RELEASE: u8 = 14;
 const SET_INFO: u8 = 15;
+const DETACH: u8 = 16;
 const WELCOME: u8 = 64;
 const OUTPUT: u8 = 65;
 const RESIZED: u8 = 66;
@@ -243,6 +298,8 @@ const UNSUPPORTED: u8 = 72;
 const FOREGROUND: u8 = 73;
 const UPGRADED: u8 = 74;
 const DESCRIPTION: u8 = 75;
+const ATTACHED: u8 = 76;
+const DETACHED: u8 = 77;
 
 /// Every kind this version knows is critical: a reader that doesn't know one
 /// can't safely carry on without it.
@@ -361,10 +418,14 @@ fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
             p.push(u8::from(*signaled));
             EXITED
         }
-        Msg::Refused { why } => {
+        Msg::Refused { reason, why } => {
+            p.extend(reason.to_be_bytes());
             p.extend(why.as_bytes());
             REFUSED
         }
+        Msg::Detach => DETACH,
+        Msg::Attached => ATTACHED,
+        Msg::Detached => DETACHED,
         Msg::Upgrade { binary } => {
             p.extend(binary.as_bytes());
             UPGRADE
@@ -424,10 +485,15 @@ pub fn write_msg(w: &mut impl Write, msg: &Msg) -> io::Result<()> {
 /// Read one frame. `Ok(None)` is an ancillary frame of a kind this side
 /// doesn't know, already skipped.
 pub fn read_msg(r: &mut impl Read) -> Result<Option<Msg>, ReadError> {
+    read_msg_max(r, MAX_FRAME)
+}
+
+/// [`read_msg`] for a frame of at most `max` bytes.
+pub fn read_msg_max(r: &mut impl Read, max: usize) -> Result<Option<Msg>, ReadError> {
     let mut len = [0u8; 4];
     r.read_exact(&mut len)?;
     let len = u32::from_be_bytes(len) as usize;
-    if len > MAX_FRAME {
+    if len > max.min(MAX_FRAME) {
         return Err(ReadError::TooLarge(len));
     }
     if len < 2 {
@@ -444,12 +510,7 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
     let msg = match kind {
         HELLO => {
             let version = c.u16()?;
-            let role = match c.u8()? {
-                1 => Role::Owner,
-                2 => Role::Reader,
-                3 => Role::Lookup,
-                _ => return Err(ReadError::Malformed("unknown role")),
-            };
+            let role = Role::from_wire(c.u8()?).ok_or(ReadError::Malformed("unknown role"))?;
             Msg::Hello {
                 version,
                 role,
@@ -522,8 +583,12 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
             signaled: c.u8()? != 0,
         },
         REFUSED => Msg::Refused {
+            reason: c.u16()?,
             why: String::from_utf8_lossy(&c.rest()).into_owned(),
         },
+        DETACH => Msg::Detach,
+        ATTACHED => Msg::Attached,
+        DETACHED => Msg::Detached,
         UNSUPPORTED => Msg::Unsupported { kind: c.u8()? },
         UPGRADE => Msg::Upgrade {
             binary: String::from_utf8(c.rest()).map_err(|_| ReadError::Malformed("binary path"))?,
@@ -677,8 +742,17 @@ mod tests {
                 signaled: true,
             },
             Msg::Refused {
+                reason: reason::OWNER_PRESENT,
                 why: "an owner is connected".into(),
             },
+            Msg::Hello {
+                version: VERSION,
+                role: Role::Program,
+                token: Vec::new(),
+            },
+            Msg::Detach,
+            Msg::Attached,
+            Msg::Detached,
             Msg::Unsupported { kind: 200 },
             Msg::Foreground { pgid: 4242 },
         ]

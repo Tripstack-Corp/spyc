@@ -463,7 +463,7 @@ pub fn run() -> Result<()> {
     // Jar spike, stage 2b: in an outer jar nothing may be attached to answer
     // the probe, and its reader thread outlives the timeout, blocked on stdin,
     // stealing the first keys a later terminal sends.
-    if std::env::var_os("SPYC_JAR_OUTER").is_none() {
+    if !crate::pane::jar_backend::link_outer_jar() {
         app.set_picker(detect_image_picker());
     }
     app.set_shift_esc(crate::terminal::keyboard_enhancement_supported());

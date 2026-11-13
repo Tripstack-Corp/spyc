@@ -356,6 +356,8 @@ pub struct ViewState {
     pub(super) theme: Theme,
     /// One-shot full buffer clear/redraw request.
     pub(super) needs_full_repaint: bool,
+    /// Jar spike: `:detach` asked spyc to leave the terminal of its outer jar.
+    pub(super) detach_requested: bool,
     /// Last terminal-window title emitted (OSC 2 dedup). `None` forces
     /// a re-emit on next draw.
     pub(super) last_term_title: Option<String>,
@@ -590,6 +592,7 @@ impl ViewState {
             pager_positions: crate::state::pager_positions::PagerPositions::load(),
             theme,
             needs_full_repaint: false,
+            detach_requested: false,
             last_term_title: None,
             config_watch_gen: 0,
             harpoon_menu: None,

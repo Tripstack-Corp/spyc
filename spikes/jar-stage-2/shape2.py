@@ -14,7 +14,7 @@ TOK = f"{D}/outer.token"
 with open(TOK, "w") as f:
     f.write(os.urandom(32).hex())
 os.chmod(TOK, 0o600)
-outer = subprocess.Popen([J, "--socket", S, "--attach-signal", "--cwd", f"{D}/work", "--rows", "40", "--cols", "120", "--", SPYC],
+outer = subprocess.Popen([J, "--socket", S, "--wire", "1", "--cwd", f"{D}/work", "--rows", "40", "--cols", "120", "--", SPYC],
                          env=env, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 outer.stdin.write(open(TOK, "rb").read()); outer.stdin.close()
 time.sleep(4)  # spyc starts with nothing attached
@@ -85,7 +85,16 @@ print("outer jar upgraded with C attached:", (r.stdout or r.stderr).strip())
 c.pump(1)
 c.send(b"echo outer-$((6*7))\r"); c.pump(2)
 print("C typed through the upgraded outer jar:", "outer-42" in c.text(), "| the outer jar's process lives on:", outer.poll() is None)
-c.send(b"\x1c"); c.pump(1)
+# spyc detaches itself: `:detach` from the file view.
+c.send(b"\x01k"); c.pump(0.5)
+c.send(b":detach\r")
+t0 = time.monotonic(); ended = None
+while time.monotonic() - t0 < 8 and ended is None:
+    c.pump(0.1); ended = c.reap()
+print(f"C: spyc's :detach ended the client: {ended is not None} after {time.monotonic() - t0:.1f} s | modes left on C's terminal:", c.set_modes(), "| its last line:", [l for l in c.text().splitlines() if l.strip()][-1:])
+e = attach(40, 120)
+print("E attached after spyc's own detach:", "menu" in e.text(), "| modes set on E:", e.set_modes(), "| pane kept outer-42:", "outer-42" in e.text())
+e.send(b"\x1c"); e.pump(1)
 outer.kill(); outer.wait()
 direct = Term([SPYC], env, f"{D}/work", rows=40, cols=120)
 direct.pump(6); direct.send(b"\x01j"); direct.pump(0.8)

@@ -48,6 +48,7 @@ fn a_new_client_drives_an_old_jar() {
         .expect("tempdir");
     let socket = dir.path().join("j.sock");
     let mut jar = Command::new(&old)
+        .args(["--wire", "1"])
         .arg("--socket")
         .arg(&socket)
         .args(["--", "/bin/sh", "-c", "while read l; do echo got=$l; done"])

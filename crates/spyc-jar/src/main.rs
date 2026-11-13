@@ -1,7 +1,14 @@
-//! `spyc-jar --socket PATH [options] -- PROGRAM [ARGS…] < TOKEN`
+//! `spyc-jar --wire N --socket PATH [options] -- PROGRAM [ARGS…] < TOKEN`
 //!
 //! Options: `--cwd DIR`, `--rows N`, `--cols N`, `--ring BYTES`,
-//! `--window BYTES`, `--deadline-ms N`, `--linger-ms N`.
+//! `--window BYTES`, `--deadline-ms N`, `--linger-ms N`,
+//! `--linger-ownerless-ms N`.
+//!
+//! `--wire N` names the protocol version its starter speaks. A jar that
+//! doesn't speak it exits with [`WIRE_NOT_SERVED`] before it reads anything
+//! else or starts the program, whatever else the command line says, so a spyc
+//! that finds a newer or older `spyc-jar` beside it can tell, and run the
+//! program another way.
 
 #![forbid(unsafe_code)]
 
@@ -12,6 +19,10 @@ use std::time::Duration;
 
 use anyhow::{Context, bail};
 use spyc_jar::jar::{self, Config};
+
+/// The exit status of a jar asked to start for a wire version it doesn't
+/// speak (or for none).
+const WIRE_NOT_SERVED: i32 = 75;
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);
@@ -25,7 +36,6 @@ fn main() -> anyhow::Result<()> {
         window: 1 << 20,
         deadline: Duration::from_secs(10),
         linger_after_exit: Duration::from_secs(60),
-        attach_signal: false,
         linger: None,
         instance: instance(),
         created: std::time::SystemTime::now()
@@ -40,6 +50,7 @@ fn main() -> anyhow::Result<()> {
         Some("validate-handover") => return spyc_jar::upgrade::validate_stdin(),
         Some("resume-handover") => return spyc_jar::upgrade::resume(),
         Some("hold-handover") => return spyc_jar::upgrade::hold_stdin(),
+        Some("program-events") => return program_events(),
         Some("describe") => {
             let socket = std::env::args()
                 .nth(2)
@@ -66,9 +77,26 @@ fn main() -> anyhow::Result<()> {
         let token = spyc_jar::client::read_token_file(std::path::Path::new(&token))?;
         return spyc_jar::attach::run(std::path::Path::new(&socket), &token);
     }
+    // Before anything else is read: the flags after it are this version's.
+    let all: Vec<String> = std::env::args().collect();
+    let wire = all
+        .iter()
+        .position(|a| a == "--wire")
+        .and_then(|i| all.get(i + 1))
+        .and_then(|v| v.parse::<u16>().ok());
+    if wire != Some(spyc_jar::proto::VERSION) {
+        eprintln!(
+            "spyc-jar: speaks wire version {}, asked for {wire:?}",
+            spyc_jar::proto::VERSION
+        );
+        std::process::exit(WIRE_NOT_SERVED);
+    }
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().with_context(|| format!("{name} needs a value"));
         match a.as_str() {
+            "--wire" => {
+                value("--wire")?;
+            }
             "--socket" => cfg.socket = value("--socket")?.into(),
             "--cwd" => cfg.cwd = Some(value("--cwd")?.into()),
             "--rows" => cfg.rows = value("--rows")?.parse()?,
@@ -78,7 +106,6 @@ fn main() -> anyhow::Result<()> {
             "--deadline-ms" => {
                 cfg.deadline = Duration::from_millis(value("--deadline-ms")?.parse()?)
             }
-            "--attach-signal" => cfg.attach_signal = true,
             // R32a: end the program after this long with no owner; 0 ends it
             // as soon as its owner goes.
             "--linger-ownerless-ms" => {
@@ -163,9 +190,42 @@ fn upgrade(socket: &std::path::Path, token: &[u8], binary: String) -> anyhow::Re
                 );
                 return Ok(());
             }
-            Some(Msg::Refused { why }) => bail!("{why}"),
+            Some(Msg::Refused { why, .. }) => bail!("{why}"),
             Some(_) => {}
             None => bail!("no answer within 10 s"),
+        }
+    }
+}
+
+/// `spyc-jar program-events`, a stand-in program for tests: it connects to
+/// its jar as role `program`, prints each event it hears as a line, and asks
+/// the jar to detach its owner when a line `detach` arrives on its input.
+fn program_events() -> anyhow::Result<()> {
+    use spyc_jar::client::Client;
+    use spyc_jar::proto::{Msg, Role};
+    let socket = std::env::var_os("SPYC_JAR_SOCKET").context("no SPYC_JAR_SOCKET")?;
+    let (client, _) = Client::connect(
+        std::path::Path::new(&socket),
+        Role::Program,
+        Duration::from_secs(5),
+        b"",
+    )?;
+    println!("program: connected");
+    let (mut rx, tx) = client.split();
+    std::thread::spawn(move || {
+        for line in std::io::stdin().lines() {
+            if line.is_ok_and(|l| l.trim() == "detach") {
+                println!("program: bye");
+                let _ = tx.send(&Msg::Detach);
+            }
+        }
+    });
+    loop {
+        match rx.recv(Duration::from_secs(60)) {
+            Ok(Some(Msg::Attached)) => println!("program: attached"),
+            Ok(Some(Msg::Detached)) => println!("program: detached"),
+            Ok(_) => {}
+            Err(_) => return Ok(()),
         }
     }
 }

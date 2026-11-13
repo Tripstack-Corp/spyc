@@ -51,8 +51,8 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
     };
     let (mut rx, tx) = client.split();
     tx.send(&Msg::Replay { from: head })?;
-    // The program repaints on a size change, and a resize to the size it
-    // already has changes nothing, so change it by a row and back.
+    // The jar tells its program this owner attached (`attached`), and the
+    // program repaints for it; this terminal's size is all it needs from here.
     let (rows, cols) = size();
     let resize = |r: u16, c: u16| Msg::Resize {
         rows: r,
@@ -60,7 +60,6 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
         px_w: 0,
         px_h: 0,
     };
-    tx.send(&resize(rows.saturating_sub(1).max(1), cols))?;
     tx.send(&resize(rows, cols))?;
 
     let (done_tx, done_rx) = std::sync::mpsc::channel::<&'static str>();
