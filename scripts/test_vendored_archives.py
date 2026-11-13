@@ -9,7 +9,6 @@ ghostty's own (#1129).
 """
 
 from pathlib import Path
-import re
 import struct
 import unittest
 
@@ -21,12 +20,13 @@ TARGETS = [
     "x86_64-unknown-linux-musl",
     "aarch64-unknown-linux-musl",
 ]
-LIBC_PREFIXED = re.compile(r"__(stack_chk_guard|stack_chk_fail|chk_fail|[a-z]+_chk)")
 
 
-def is_libc(name):
-    """A C library name: lowercase, and plain (`memset`, `sinf`) or of the fortify family."""
-    return name == name.lower() and (not name.startswith("_") or LIBC_PREFIXED.fullmatch(name))
+def listed():
+    """The C library names in `vendor/LIBC_SYMBOLS`, which the vendoring tool localizes."""
+    names = [l for l in (VENDOR / "LIBC_SYMBOLS").read_text().splitlines() if l and not l.startswith("#")]
+    assert len(names) > 50, "LIBC_SYMBOLS is nearly empty"
+    return set(names)
 
 
 def members(archive):
@@ -100,9 +100,18 @@ class VendoredArchives(unittest.TestCase):
 
     @unittest.skip("red: compiler_rt.o defines memcmp, strlen, sin and __stack_chk_guard (#1129)")
     def test_compiler_rt_defines_no_c_library_function(self):
+        names = listed()
         for target, objs in self.archives.items():
-            libc = [n for n in exported(objs["compiler_rt.o"]) if is_libc(n)]
-            self.assertEqual(libc, [], target)
+            self.assertEqual(sorted(names.intersection(exported(objs["compiler_rt.o"]))), [], target)
+
+    @unittest.skip("red: compiler_rt.o and, up to libghostty-vt 1.0.0, ghostty export them (#1129)")
+    def test_no_darwin_archive_exports_a_listed_name(self):
+        names = listed()
+        for target, objs in self.archives.items():
+            if not target.endswith("-apple-darwin"):
+                continue
+            for member, obj in sorted(objs.items()):
+                self.assertEqual(sorted(names.intersection(exported(obj))), [], f"{target} {member}")
 
 
 if __name__ == "__main__":
