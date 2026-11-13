@@ -98,6 +98,8 @@ We use GitHub pull requests. The target branch is `main`.
 
 **Production code never calls `.unwrap()`.** `.expect("…")` says why the value is there (`"guarded by is_some check above"`), so a panic names the invariant it broke; when the `None` or `Err` can really happen, handle it instead. A lock whose data survives a panic recovers it rather than panicking (below). Clippy's `unwrap_used` enforces this; `clippy.toml` exempts `#[test]` code, and an integration test whose helpers unwrap opts out at the top of its file.
 
+**The toolchain is pinned, and the minimum supported Rust is the pin.** `rust-toolchain.toml` names an exact release, and `rust-version` in both crates matches it, so clippy's version-aware lints point at every standard-library form the toolchain offers, and nothing newer slips in. Both move together, in one `chore(toolchain)` PR. Take a point release when it lands, since point releases carry miscompilation fixes, and don't fall more than one minor release behind; `rustup check` says what's out. A bump fixes the lints it brings rather than allowing them. A lint that is wrong for spyc is allowed in the `[lints]` tables with its reason and, if it's temporary, the issue that ends it, as `linker_messages` is (#1129).
+
 Where spyc departs from Google's guide on purpose:
 
 - **A poisoned lock is recovered** (`unwrap_or_else(PoisonError::into_inner)`) where its data stays usable after a panic elsewhere: the pty reader's wake target, the `:s` environment overrides, the pane engine the parser worker rebuilds. The guide forbids reaching inside a poisoned mutex; in a TUI, a poison that turns one panicked worker into a dead terminal is the worse failure.
