@@ -22,6 +22,7 @@ on:
       - "crates/spyc-vt-sys/src/pin.rs"
       - "crates/spyc-vt-sys/REQUIRED_ZIG"
       - "scripts/vendor-ghostty.sh"
+      - "scripts/unexport-libc.py"
       - "scripts/vendor-ghostty-container.sh"
       - "Makefile"
       - ".github/workflows/vendored-archives.yml"
@@ -50,6 +51,10 @@ jobs:
         with:
           version: ${{ steps.zig.outputs.version }}
           use-cache: false
+      # `scripts/unexport-libc.py` localizes compiler_rt's C library symbols
+      # with LLVM 20's llvm-objcopy, the first with Mach-O support for it.
+      - name: Install llvm-objcopy 20
+        run: sudo apt-get install -y -qq llvm-20
       - name: Rebuild from the pinned source and compare checksums
         run: |
           cp crates/spyc-vt-sys/vendor/CHECKSUMS /tmp/CHECKSUMS.committed

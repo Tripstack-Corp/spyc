@@ -92,13 +92,11 @@ class VendoredArchives(unittest.TestCase):
             self.assertIn("ghostty-vt-static_zcu.o", objs, target)
             self.assertGreater(len(exported(objs["compiler_rt.o"])), 100, target)
 
-    @unittest.skip("red: compiler_rt.o and ghostty both define memset (#1129)")
     def test_memset_is_defined_once_and_it_is_ghosttys(self):
         for target, objs in self.archives.items():
             owners = [m for m, obj in sorted(objs.items()) if "memset" in exported(obj)]
             self.assertEqual(owners, ["ghostty-vt-static_zcu.o"], target)
 
-    @unittest.skip("red: compiler_rt.o defines memcmp, strlen, sin and __stack_chk_guard (#1129)")
     def test_compiler_rt_defines_no_c_library_function(self):
         names = listed()
         for target, objs in self.archives.items():

@@ -17,7 +17,7 @@ zig_version=$(cat crates/spyc-vt-sys/REQUIRED_ZIG)
 in_container=$(cat <<'IN_CONTAINER'
 set -euo pipefail
 apt-get update -qq >/dev/null
-apt-get install -y -qq git make perl ca-certificates curl xz-utils python3 >/dev/null
+apt-get install -y -qq git make perl ca-certificates curl xz-utils python3 llvm-20 >/dev/null
 # ziglang.org's build of the pinned version, as CI's setup-zig installs, checked
 # against the sha256 ziglang.org publishes for it.
 curl -fsSL https://ziglang.org/download/index.json -o /tmp/index.json

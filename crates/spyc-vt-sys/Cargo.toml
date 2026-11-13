@@ -38,13 +38,6 @@ links = "ghostty-vt"
 # `[dependencies]` and `[build-dependencies]`; `[dev-dependencies]` it can't).
 unused_dependencies = "deny"
 
-[lints.rust]
-# The vendored libghostty-vt.a defines `memset` twice (Zig's compiler_rt and
-# the ghostty unit); `ld` keeps the first, as it always has, and since Rust
-# 1.97 says so on every link. Restore the default once the archive is
-# rebuilt with one (#1129).
-linker_messages = "allow"
-
 [lints.clippy]
 # The generated bindings are not ours to restyle.
 pedantic = { level = "warn", priority = -1 }

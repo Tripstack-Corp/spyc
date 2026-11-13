@@ -59,7 +59,7 @@ build fails with a message that says so.
 ## Rebuilding the archives
 
 ```sh
-make vendor-ghostty              # on Linux; needs zig 0.17.0 (see REQUIRED_ZIG)
+make vendor-ghostty              # on Linux; needs zig 0.17.0 (see REQUIRED_ZIG) and llvm-objcopy-20
 make vendor-ghostty-container    # from a Mac: the same, in a podman/docker container
 ```
 
@@ -92,6 +92,21 @@ so a 7-CPU build, a 4-CPU build and a 4-CPU build on another host each emit
 different bytes, while every other object is identical. `-j1` does not reach the
 compiler's thread pool, which is sized from the CPU affinity; one CPU of
 affinity does.
+
+**`compiler_rt.o` exports no C library function.** The archive bundles Zig's
+`compiler_rt`, which also defines the C library's string, maths and
+stack-protector functions (`memset`, `memcmp`, `strlen`, `sin`,
+`__stack_chk_guard`, ...). A global that a loaded archive member defines takes
+part in spyc's link, and Apple's `ld` binds to it before libSystem, weak or not,
+so on macOS those copies replaced libSystem's for the whole binary, a
+byte-at-a-time `memset` among them, and `ld` reported `memset` twice,
+`compiler_rt.o`'s and ghostty's own (#1129). Before re-archiving, the script
+makes them local in `compiler_rt.o` with `llvm-objcopy --localize-symbols`
+([`unexport-libc.py`](../../scripts/unexport-libc.py) chooses the names and
+checks the result), keeping the compiler helpers (`__udivti3`, ...) the other
+objects need. Ghostty's vectorized `memset` is then the archive's only one;
+every other C library function comes from the platform's C library.
+`scripts/test_vendored_archives.py` checks the committed archives.
 
 Zig cross-compiles all five from one host. The recipe uses `ReleaseSmall`,
 which is the size lever; it does **not** strip, because at `ReleaseSmall` the

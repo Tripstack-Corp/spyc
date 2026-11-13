@@ -58,6 +58,11 @@ normalize() { # <in.a> <out.a> <gnu|darwin>
     for m in "${members[@]}"; do
         [ -f "$tmp/$m" ] || { echo "member $m did not extract from $in"; exit 1; }
     done
+    # Zig's compiler_rt defines the C library's functions too, and its copies
+    # would replace the platform's for all of spyc (#1129); this makes them
+    # local with llvm-objcopy-20.
+    [ -f "$tmp/compiler_rt.o" ] || { echo "no compiler_rt.o in $in"; exit 1; }
+    python3 "$ROOT/scripts/unexport-libc.py" "$tmp/compiler_rt.o"
     rm -f "$out"
     ( cd "$tmp" && zig ar rcsD --format="$fmt" "$out" "${members[@]}" )
     rm -rf "$tmp"

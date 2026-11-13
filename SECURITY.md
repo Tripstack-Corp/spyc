@@ -266,7 +266,10 @@ What we do about it:
   hashes printed. Verified by tampering with a byte, not by assuming.
 * **Reproducible by anyone.** `make vendor-ghostty` rebuilds all five on Linux
   from the pinned source with a pinned Zig version (ziglang.org's build of it)
-  and rewrites the checksums, so a third party can confirm the committed bytes
+  and LLVM 20's `llvm-objcopy`,
+  re-archived deterministically with one documented edit (`compiler_rt.o`
+  exports no C library function: `crates/spyc-vt-sys/README.md`), and
+  rewrites the checksums, so a third party can confirm the committed bytes
   are what the pinned source produces (`make vendor-ghostty-container` does the
   same from a Mac). CI does exactly that before every release, and the release
   is not published unless the bytes match.
