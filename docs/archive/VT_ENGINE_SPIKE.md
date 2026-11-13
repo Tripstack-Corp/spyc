@@ -1378,3 +1378,10 @@ the pruned page's memory when grow prunes by lines": a page pruned by the line
 limit is now zeroed and kept instead of decommitted, which its message prices
 at "~1 extra allocated page (~300KB) for an idle terminal at its line limit".
 spyc's panes have a line limit (`max_lines` 10,000), so they pay it on Linux.
+
+**The Linux floor is waived for this release** (#1147). The heavy-content
+shortfall on 4 KiB pages is 52 rows (0.5% of the budget), and it's transient:
+`membudget`, with the same heavy line and budget, retains 9,508 rows at 15,000
+fed, 9,820 at 30,000 and 9,900 at 60,000, identically at both pins and in three
+runs each. The gate's 15,000-row feed stops while the buffer is still filling.
+Deriving `BYTES_PER_ROW_HEAVY` per page size stays open in #1147.
