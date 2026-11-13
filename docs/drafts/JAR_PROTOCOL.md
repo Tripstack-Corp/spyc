@@ -1,9 +1,10 @@
 # The jar: its requirements and version 1
 
-**Status:** version 1 **frozen** on 2026-11-12, on the owner's word, after
-the spike built every v1 verdict below.
-[Version 1 on the wire](#version-1-on-the-wire) is the format, byte for byte.
-Every decision a freeze needed is made.
+**Status:** version 1 frozen on 2026-11-12, on the owner's word, after the
+spike built every v1 verdict below, and **reopened** the same day for three
+changes an external review found it needed (decision K). The changes are made
+and tested; [Version 1 on the wire](#version-1-on-the-wire) is the format with
+them, byte for byte, and it freezes again on the owner's word.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099).
 **Tested by:** [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md), which builds a minimal
 jar, measures it, and reports which of these requirements survive.
@@ -167,7 +168,7 @@ in the output.
 | R17d | Panes **take turns snapshotting:** a few at a time, not every pane at once | v1 | Thirty full panes snapshotting together held each pane's lock for 46 to 62 ms against 6 ms alone, enough to drop a frame. The spike lets two run at once. | all |
 | R17e | **A snapshot every five seconds while output flows,** as well as after a second of quiet | v1 | Decided by the owner after stage 4. Through a long stream the snapshot under a gap (R12c) would otherwise predate the stream, losing its start and any mode it changed. Each costs the pane's lock about 6 ms; the spike showed none during a 14-second stream without it, and one every five seconds with it. | U2 |
 | R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. Stage 6 found it needed for a jar no session describes. Built before the freeze: spyc writes `is`, `label`, `agent`, `project` and `project_home` as it opens a tab, the jar keeps them when its owner goes, and after a `kill -9` of spyc, `spyc --jars` names an orphaned tab `zsh (other in work)` rather than by its launch command. | U2, U10, U12 |
-| R19 | Keep all of it in memory, never on disk, except in `spill` mode. An upgrade's blob is sealed (AES-256-GCM, a fresh key that travels with the descriptors), so where it has to touch a file only ciphertext does | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). The seal is the owner's choice for macOS, which has no `memfd`; the spike seals on every platform. AES rather than ChaCha20-Poly1305 because it is FIPS-approved, at the company security manager's suggestion: for one key used once, the two are equally safe. | all |
+| R19 | Keep all of it in memory, never on disk, except in `spill` mode. An upgrade's blob travels through the holder and a pipe, so it never touches a file | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). Until the review (decision K) the blob went through an unlinked file, sealed with AES-256-GCM because macOS has no `memfd`, so only ciphertext could reach a disk. The holder already lives across the `exec`, so it takes the blob and writes it into a pipe the new image reads: nothing touches a file on either platform, and no key or cipher is left in what freezes. | all |
 
 ### Connections
 
@@ -203,8 +204,8 @@ in the output.
 
 | | Requirement | Verdict | Why | For |
 |---|---|---|---|---|
-| R33 | **Upgrade in place:** the jar asks the new binary to validate a versioned handover blob, and only if it accepts does the jar `exec` it, keeping its PID, child, PTY and connections. The blob, the listener, the PTY master and every connection cross as descriptors over a socketpair that becomes the new image's standard input, while the new binary, started as a **holder**, keeps copies of every socket until the new image has its own | v1, and only v1 | The escape hatch for every change this document gets wrong. A validation that fails leaves the old jar running. Stage 3 built it (`PANE_JAR_SPIKE.md` → "Stage 3: the jar upgrades itself"). The holder came before the freeze: on macOS an upgrade under load cut every connection, because the kernel flushes a unix socket whose every reference is in flight ("Before the freeze" there). The validator's and the holder's command lines are part of what freezes, since an old jar runs the new binary's. It can't arrive later: a jar that doesn't know the request can never be upgraded, so the first released jar has to carry it. | all |
-| R34 | A `hello` that lists capabilities, and messages flagged critical or ancillary ([below](#how-the-protocol-grows)) | v1 | How every later requirement arrives without a new version. Stage 3 found the first `hello` already reads the fields it knows and ignores what follows, so capabilities can follow them; that rule is part of what freezes. Since R26 the token comes first, length-prefixed, and capabilities after it. At the freeze the `hello`'s version became the highest its client speaks, and the `welcome`'s the one the connection speaks, so a later spyc meets an older jar without a refusal. | all |
+| R33 | **Upgrade in place:** the jar asks the new binary to validate a versioned handover blob, and only if it accepts does the jar `exec` it, keeping its PID, child, PTY and connections. The blob, the listener, the PTY master and every connection cross as descriptors over a socketpair that becomes the new image's standard input, while the new binary, started as a **holder**, keeps copies of every socket until the new image has its own | v1, and only v1 | The escape hatch for every change this document gets wrong. A validation that fails leaves the old jar running. Stage 3 built it (`PANE_JAR_SPIKE.md` → "Stage 3: the jar upgrades itself"). The holder came before the freeze: on macOS an upgrade under load cut every connection, because the kernel flushes a unix socket whose every reference is in flight ("Before the freeze" there). The validator's and the holder's command lines are part of what freezes, since an old jar runs the new binary's. Since the review the holder also carries the blob, through a pipe, and a validator reads it from a socket, so one that refuses without reading can't raise `SIGPIPE` in the jar. It can't arrive later: a jar that doesn't know the request can never be upgraded, so the first released jar has to carry it. | all |
+| R34 | A `hello` that lists capabilities, and messages flagged critical or ancillary ([below](#how-the-protocol-grows)) | v1 | How every later requirement arrives without a new version. Stage 3 found the first `hello` already reads the fields it knows and ignores what follows, so capabilities can follow them; that rule is part of what freezes. Since R26 the token comes first, length-prefixed, and capabilities after it. Since the review a `welcome`'s first field, `refused`'s reason and the start's `--wire` are in what freezes too ([Meeting another version](#meeting-another-version)). At the freeze the `hello`'s version became the highest its client speaks, and the `welcome`'s the one the connection speaks, so a later spyc meets an older jar without a refusal. | all |
 
 ### Never in the jar
 
@@ -347,11 +348,14 @@ What shape 2 asks of the protocol, as stage 2b built it:
   (R14) or tell a terminal's replies from keystrokes (R15) without parsing, so a
   single writer may send unframed bytes. The attach client sends what it reads,
   as it reads it.
-- **An attach event the jar's own program can see** (point 2). A signal alone
-  isn't enough: a signal handler can only set a flag, and spyc's loop wakes on
-  messages. The spike's jar sends `SIGUSR1` and the client then changes the
-  size by a row and back, so the resize wakes the loop and finds the flag. The
-  protocol should carry the attach as an event of its own.
+- **An attach event the jar's own program can see** (point 2), and a way for
+  it to detach. Until the review the spike's jar sent `SIGUSR1` and the
+  client changed the size by a row and back, so the resize woke spyc's loop;
+  on macOS a Node program never saw the size change at all. Since the review
+  the program connects to its jar as role `program`, known by its pid, and
+  hears `attached` and `detached`. Its `detach` ends the owner's connection
+  once spyc's last bytes, its terminal restored, have gone out, so `^d` and
+  `:detach` work from inside spyc and the fixed reset is only the fallback.
 
 ## Detaching, attaching and quitting
 
@@ -514,7 +518,8 @@ protocol freezes:
   replayed query.
 
 At the freeze the frame and blob targets ran three minutes each over the
-final parsers, 14.1 million and 18.3 million inputs, with no crash. The
+final parsers, 14.1 million and 18.3 million inputs, with no crash, and again
+after the review reopened version 1: 16.2 million and 21.1 million. The
 gateway's targets wait for the gateway.
 
 The protocol lives in its own crate under `#![forbid(unsafe_code)]`, its fuzz
@@ -588,39 +593,75 @@ shows, and the labels spyc wrote. The token is never among it.
 
 ## Version 1 on the wire
 
-Frozen on 2026-11-12. The spike's `spyc-jar` speaks it (`spike/jar-stage-2` at
-`9bec55f2`, a branch that never merges), and its `tests/wire_v1.rs` pins every
-frame and the blob below byte for byte. The production crate starts from these
-fixtures and that test.
+Frozen on 2026-11-12, and reopened the same day for three changes an external
+review found it needed ("The review" in the spike's report); the changes are
+made and tested, and it freezes again on the owner's word. The spike's
+`spyc-jar` speaks it (`spike/jar-stage-2` at `670f5b04`, a branch that never
+merges), and its `tests/wire_v1.rs` pins every frame and the blob below byte
+for byte. The production crate starts from these fixtures and that test.
 
 ### What freezes for good
 
 A spyc of any later release reaches a version-1 jar through these, and asks it
 to upgrade to whatever came after (R33). Nothing else has to stay.
 
+- **The start's first word:** every command line that starts a jar names
+  `--wire N`, the version its starter speaks. A jar that doesn't speak `N`, or
+  is given none, exits with status 75 before it binds its socket, reads its
+  token or starts the program, whatever else the line says. The flags after it
+  are that version's.
 - **The frame:** `len` (u32), `kind` (u8), `flags` (u8), the payload. `len`
   counts `kind`, `flags` and the payload, and is at most 16 MiB. Integers are
   big-endian and text is UTF-8. Flag `0x80` marks a frame critical: a jar that
   doesn't know a critical kind answers `unsupported` and keeps the
   connection, and one it doesn't know that isn't critical it skips.
-- **The `hello`,** first on every connection: `version` (u16), `role` (u8:
-  owner 1, reader 2, lookup 3), the token's length (u16), the token, then
-  capabilities, which version 1 ignores. `version` is the highest the client
-  speaks, and the `welcome` answers with the one the connection speaks, so a
-  later spyc learns a jar is version 1 from its welcome. Version 0 is refused.
-- **`upgrade`, `upgraded` and `refused`,** an upgrade's request and its two
-  answers.
+- **The `hello`,** first on every connection and at most 64 KiB: `version`
+  (u16), `role` (u8: owner 1, reader 2, lookup 3, program 4), the token's
+  length (u16), the token, then capabilities, which version 1 ignores.
+  `version` is the highest the client speaks.
+- **The `welcome`'s first field,** the version the connection speaks: the
+  lower of the `hello`'s and the jar's. Version 0 is refused.
+- **`refused`:** a reason (u16), then text for people. A client acts on the
+  reason, never the text, and reads a reason it doesn't know as 0.
+
+  | Reason | Meaning |
+  |---|---|
+  | 0 | unspecified |
+  | 1 | wrong token |
+  | 2 | the jar has an owner |
+  | 3 | no version this jar speaks |
+  | 4 | not for this connection's role |
+  | 5 | an upgrade can't start now (one is under way, or no safe point was reached); worth asking again |
+  | 6 | the new binary is missing or rejected the handover; the jar runs on |
+  | 7 | the upgrade failed after the new binary accepted; the jar runs on |
+  | 8 | invalid: no `hello` first, a value out of range, or a kind a client doesn't send |
+  | 9 | a signal for a program that has ended |
+
+- **`unsupported`** (the kind, u8), the answer to a critical kind a jar
+  doesn't know.
+- **`upgrade`, `upgraded`,** an upgrade's request and its answer, besides
+  `refused`. The owner may ask, and so may a reader holding the token.
+- **A lookup:** no token, one question, `describe` or `ping`, answered and
+  then closed, and closed unasked after 5 seconds. Its `description` carries
+  at least `pid` (the jar's) and `program_pid`, so a jar whose token is lost
+  can still be found and ended.
+- **`SPYC_JAR_SOCKET`:** a jar puts its socket's path in its program's
+  environment, so the program, and whatever it starts, finds the jar without
+  working the path out again.
 - **The upgrade's command lines,** since a version-1 jar runs a later
   binary's:
-  - `BINARY validate-handover`: the blob on standard input. Exiting 0 within
-    5 seconds accepts it.
-  - `BINARY hold-handover`: one byte, `h`, on standard input, carrying the
-    listener and every connection as `SCM_RIGHTS`. It answers `k` and holds
-    them until `SIGTERM`, or for 30 seconds.
-  - `BINARY resume-handover`, by `exec`: on standard input, one message of 56
-    bytes, `SPYCJARF`, the AES-256-GCM key (32 bytes), its nonce (12) and the
-    holder's pid (u32), carrying the sealed blob's file, the listener, the PTY
-    master, and every connection in the blob's order.
+  - `BINARY validate-handover`: the blob on standard input, a socket, until
+    its end. Exiting 0 within 5 seconds accepts it.
+  - `BINARY hold-handover`: on standard input, one byte, `h`, carrying as
+    `SCM_RIGHTS` the write end of a pipe, the listener and every connection;
+    then the blob's length (u64) and the blob. It answers `k` once it has
+    both, writes the length and the blob into the pipe, and holds the sockets
+    until `SIGTERM`, or for 30 seconds.
+  - `BINARY resume-handover`, by `exec`: on standard input, one message of 12
+    bytes, `SPYCJARF` and the holder's pid (u32), carrying the pipe's read
+    end, the listener, the PTY master, and every connection in the blob's
+    order. It reads the blob from the pipe, then sends the holder `SIGTERM`
+    and reaps it.
 - **The handover blob, version 1,** which every later binary accepts. A blob
   with bytes after its end is refused, so the blob changes only by its
   version, and a binary takes every version a released jar writes. In order:
@@ -628,9 +669,8 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   - the configuration: the socket's path, the program's arguments (a count,
     then each), its directory (a flag, then the path), rows and columns, the
     ring's size, the flow-control window, the owner's deadline and the linger
-    after an exit (in milliseconds), whether attaching signals the program,
-    the linger with no owner (an option), the instance, the created time, the
-    program's pid;
+    after an exit (in milliseconds), the linger with no owner (an option), the
+    instance, the created time, the program's pid;
   - the log: the next sequence number, its head and base, then its events (a
     count; each a sequence number, then `0`, an offset and bytes for output,
     or `1`, an offset, rows and columns for a resize);
@@ -648,6 +688,26 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   Lengths and counts are u32, and an option or a flag is a byte, `0` or `1`,
   with an option's value after a `1`.
 
+### Meeting another version
+
+Each direction has one rule:
+
+- **A later spyc, a version-1 jar.** Its `hello` names its own version; the
+  welcome answers 1, and the connection speaks version 1. When it needs what
+  version 1 lacks, it asks the jar to upgrade.
+- **A spyc, a `spyc-jar` beside it of another release** (a package upgraded
+  while spyc runs). The start names `--wire N`; a jar that doesn't speak it
+  exits with 75 before anything starts, and spyc runs the program without a
+  jar rather than fail the tab. A jar speaks every version from 1 to its own
+  unless a release says it stopped.
+- **An older spyc, a newer jar** (a downgrade). The jar welcomes the older
+  version if it still speaks it, and otherwise refuses with reason 3; spyc
+  then marks the tab detached and starts nothing. A jar can't be upgraded back
+  down: the older binary's validator refuses the newer blob (reason 6), and
+  the jar runs on.
+- **Across an upgrade,** every connection keeps the version it was welcomed
+  at: the new image speaks each the version it was welcomed with.
+
 ### The rest of version 1
 
 Every other kind changes by capability, or after an upgrade. The version moves
@@ -659,9 +719,19 @@ only for a change no capability can express.
   whose last field runs to the end of the frame (`input`, `reply`, `release`,
   `set_info`, `upgrade`, `output`, `refused`, `upgraded`, a snapshot) can't
   grow, so a change to one is a new kind.
-- **Who may send what.** A lookup may send `describe` and `ping`, and needs
-  no token. A reader may also send `replay`, `fetch_snapshot` and `upgrade`.
-  The rest is the owner's, and anyone else is answered `refused`.
+- **Who may send what.** A lookup: `describe` or `ping`, once. The program:
+  `describe`, `ping` and `detach`. A reader: those but `detach`, and `replay`,
+  `fetch_snapshot` and `upgrade`. The owner: everything but `detach`. Anything
+  else is refused with reason 4.
+- **The program** is the jar's own child, known by the pid the kernel records
+  as it connects, and needs no token. It hears `attached` when an owner
+  connects (at once, if one is there when it connects) and `detached` when the
+  owner goes. Its `detach` ends the owner's connection once everything the
+  program printed before has gone out on it, so its last words (its terminal
+  restored) reach the client.
+- **What a jar refuses at once** rather than store and fail on later: a
+  `release` token under 16 bytes, a snapshot past what the program printed,
+  and a signal once the program has ended.
 
 | Kind | Name | Payload |
 |---|---|---|
@@ -678,8 +748,9 @@ only for a change no capability can express.
 | 11 | `reply` | bytes answering the program's query (R15) |
 | 12 | `upgrade` | the new binary's path |
 | 13 | `describe` | none |
-| 14 | `release` | the jar's new token (R22) |
+| 14 | `release` | the jar's new token (R22), 16 bytes or more |
 | 15 | `set_info` | the key's length (u32), the key, the value (R18) |
+| 16 | `detach` | none; from the program only |
 | 64 | `welcome` | version (u16), the program's pid (u32), head and base (u64), rows and columns (u16) |
 | 65 | `output` | offset (u64), bytes |
 | 66 | `resized` | offset (u64), rows and columns (u16) |
@@ -687,22 +758,24 @@ only for a change no capability can express.
 | 68 | `snapshot` | `0`, or `1` and a snapshot as in `store_snapshot`: every one held, then `0` |
 | 69 | `pong` | n (u64) |
 | 70 | `exited` | code (i32), whether a signal ended it (u8) |
-| 71 | `refused` | why, as text |
+| 71 | `refused` | the reason (u16), then why, as text |
 | 72 | `unsupported` | the kind (u8) |
 | 73 | `foreground` | the foreground process group (u32) |
 | 74 | `upgraded` | the new build, as text; the one kind that isn't critical |
 | 75 | `description` | pairs, each a length (u32) and text: the key, then the value |
+| 76 | `attached` | none; to the program |
+| 77 | `detached` | none; to the program |
 
 A version-1 jar describes itself with `id`, `instance`, `created`, `jar`,
 `pid`, `program`, `program_pid`, `cwd`, `size`, `overflow`, `linger`, `owner`,
-`log`, `snapshots`, and `exit` once its program has ended, then every pair its
-owner set (spyc's `is`, `label`, `agent`, `project`, `project_home` and
-`owner_mcp`).
+`owner_pid` (the owner's process, when there is one), `log`, `snapshots`, and
+`exit` once its program has ended, then every pair its owner set (spyc's `is`,
+`label`, `agent`, `project`, `project_home` and `owner_mcp`).
 
-**Not frozen:** how spyc starts a jar (its flags, and the token of 16 bytes or
-more on its standard input, which then closes), since a spyc always starts the
-jar it ships; where spyc keeps tokens; and the wording of a description's
-values, which are for people to read.
+**Not frozen:** the start's flags after `--wire`, which belong to the version
+it names (and the token of 16 bytes or more on standard input, which then
+closes); where spyc keeps tokens; and the wording of a description's values
+and of a refusal's text, which are for people to read.
 
 ### Fixtures
 
@@ -733,11 +806,15 @@ snapshot (none)  00000003448000
 snapshot (some)  0000001344800100020000000000000006000200036869
 pong             0000000a45800000000000000007
 exited           0000000746800000000f01
-refused          0000000447806e6f
+refused          00000006478000016e6f
 unsupported      00000003488063
 foreground       00000006498000001092
 upgraded         000000044a006232
 description      000000104b800000000269730000000470616e65
+hello (program)  0000000701800001040000
+detach           000000021080
+attached         000000024c80
+detached         000000024d80
 ```
 
 The sample blob (`handover::sample_blob`): a program `/bin/sh -c 'echo hi'` with
@@ -748,19 +825,19 @@ and an exit not yet collected:
 535059434a41524800010000001a2f746d702f737079632f6a6172732f73616d
 706c652e736f636b00000003000000072f62696e2f7368000000022d63000000
 076563686f20686901000000042f746d70002800780000000000400000000000
-00001000000000000000002710000000000000ea60000100000000000493e012
-3456789abcdef0000000006aee4480000010e100000000000000070000000000
-00007d0000000000000064000000040000000000000003000000000000000064
-0000000668656c6c6f20000000000000000401000000000000006a001e006400
-0000000000000500000000000000006a00000007776f726c640d0a0000000000
-0000060000000000000000710000000c1b5b316d626f6c641b5b306d01000000
-0000000002000000000000006e000000020001000000000000006a001e006400
-0000030102030002000000000000006a001e0064000000091b5b4868656c6c6f
-200100000000000001001e006400000000000000040000001092010000001030
-31323334353637383961626364656600000001000000096f776e65725f6d6370
-000000122f746d702f737079632f6d63702e736f636b00000002000000000000
-000201010000000000000007000000000000007d000000109200000000000000
-0302000000000000
+00001000000000000000002710000000000000ea600100000000000493e01234
+56789abcdef0000000006aee4480000010e10000000000000007000000000000
+007d000000000000006400000004000000000000000300000000000000006400
+00000668656c6c6f20000000000000000401000000000000006a001e00640000
+00000000000500000000000000006a00000007776f726c640d0a000000000000
+00060000000000000000710000000c1b5b316d626f6c641b5b306d0100000000
+00000002000000000000006e000000020001000000000000006a001e00640000
+00030102030002000000000000006a001e0064000000091b5b4868656c6c6f20
+0100000000000001001e00640000000000000004000000109201000000103031
+323334353637383961626364656600000001000000096f776e65725f6d637000
+0000122f746d702f737079632f6d63702e736f636b0000000200000000000000
+0201010000000000000007000000000000007d00000010920000000000000003
+02000000000000
 ```
 
 ## How the protocol grows
@@ -851,7 +928,17 @@ Open unless marked decided:
   which may only describe and ping ([threat model](#threat-model)). The
   alternative, a second credential that opens only the lookup, gives the
   agent something to hold and leak for no gain: what it would protect is
-  already readable.
+  already readable. Since the review a lookup asks one thing and is closed,
+  so tokenless connections can't pile up or hold an upgrade off.
+- **K. Decided: version 1 reopens for the review** (2026-11-12). An external
+  review found three things the frozen surface needed: a rule for each
+  direction of version skew, with `welcome`, `unsupported`, a lookup's
+  `describe` and the start's `--wire` frozen too; a reason on `refused`; and
+  the blob carried by the holder through a pipe, not sealed in a file (the
+  owner adopted this one). The attach and detach events for the program came
+  with them, since the signal and size change they replace failed on macOS.
+  Its other findings belong to production (`JAR_PRODUCTION_PLAN.md`
+  is revised for them).
 
 Smaller ones: the keyboard's idle gap (about a second is proposed); `spill`
 stays opt-in; R29, status for readers.
