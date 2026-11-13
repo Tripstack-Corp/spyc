@@ -1,7 +1,8 @@
 # The jar in production: a plan
 
-**Status:** proposed, for the owner to change; revised after an external
-review ("The review's findings, slice by slice", below).
+**Status:** approved on 2026-11-12, after an external review revised it
+("The review's findings, slice by slice", below); the owner's four decisions
+are at the end.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099), on
 the `3.0` milestone.
 **Builds:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md), whose version 1 froze on
@@ -65,10 +66,12 @@ yet.
 
 **The owner tests:** nothing visible; the review is the test.
 
-### S2. A pane in a jar, opt-in
+### S2. A pane in a jar, opt-in on `-CURRENT`
 
 With `[pane] jars = true` (decision 1), every program spyc hosts runs in a
-jar: pane tabs, tasks and `!` captures. Off, spyc runs exactly as today.
+jar: pane tabs, tasks and `!` captures. Off, spyc runs exactly as today. Until
+S6 only a `-CURRENT` or rc build honours the setting, so a release cut while
+the slices land runs as today.
 
 - **S2a: spawning and adopting.** `src/pane/jar_backend.rs` (1,019 lines on
   the spike) splits into spawning and tokens (R26: 32 random bytes on the
@@ -102,8 +105,8 @@ jar: pane tabs, tasks and `!` captures. Off, spyc runs exactly as today.
   owner rewriting `is` to `task`; a capture lingers a minute. `spyc --jars`
   lists jars by label (R18). A spyc that starts and finds jars no spyc owns
   offers to restore or discard them, where the spike only flashed a notice.
-- **The release gate.** A release with `[pane] jars` in it ships `spyc-jar` in
-  its archives, the Homebrew formula and the apt package, and **carries S3
+- **The release gate.** The release that turns jars on (S6) ships `spyc-jar`
+  in its archives, the Homebrew formula and the apt package, and **carries S3
   too** (finding 13): the format is in the field from the first release that
   ships a jar, so what consumes R33 is proven before it, not after.
 - **Tests,** in the repository, not the spike's harness: a `kill -9` of spyc
@@ -204,9 +207,10 @@ attach it in another; answer the agent there.
 
 ### S6. On by default
 
-After a release of soak with `[pane] jars = true` among daily users, the
-default flips, and that release is 3.0. `[pane] jars = false` stays as the way
-back (decision 1).
+Once S2–S5 have merged, the default flips on `-CURRENT`, and daily users run
+it there, through rc builds, until the owner calls it ready. The first release
+with jars has them on, and that release is 3.0. `[pane] jars = false` stays as
+the way back (decision 1).
 
 ---
 
@@ -261,18 +265,19 @@ taking over (decision D), `block` and `spill` (R12b), and spyc not repainting
 after an outside `SIGCONT` until a key arrives, which happens without jars too
 and is its own issue.
 
-## Decisions for the owner
+## The owner's decisions
 
-1. **Opt-in, then on by default.** Proposed: `[pane] jars`, off until a release
-   of soak, on in 3.0, kept as the way back. The alternative, on from the first
-   release that ships it, gives daily users no way around a bug. The first
-   release with the opt-in carries S2 and S3 together.
-2. **One package, two binaries.** Proposed: spyc's package installs
+1. **On by default from the first release that ships jars** (decided
+   2026-11-12). The soak happens on `-CURRENT`, with daily users, before that
+   release, not in a release with jars off. `[pane] jars` is the opt-in on
+   `-CURRENT` while the slices land and stays as the way back. That release
+   carries S2 and S3 together.
+2. **One package, two binaries** (decided). spyc's package installs
    `spyc-jar` through a `[[bin]]` that calls the crate, so every install path
    (`cargo install`, Homebrew, apt) carries it without a second crate to
    install. The jar's crate is still published for spyc to depend on.
-3. **One issue per slice,** on the `3.0` milestone and linked from #1099, so
-   each PR closes its slice.
-4. **The spike branch is only on this machine.** Proposed: push it to
-   `origin` as a reference branch, after a check that nothing of the owner's
-   is in its harness, so a lost disk doesn't take the reference with it.
+3. **One issue per slice** (decided), on the `3.0` milestone and linked from
+   #1099, so each PR closes its slice.
+4. **The spike branch is pushed** (decided) to `origin` as a reference branch,
+   after a check that nothing of the owner's is in its harness, so a lost disk
+   doesn't take the reference with it. It is deleted once S5 merges.
