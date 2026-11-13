@@ -4,6 +4,10 @@
 # cargo-deny advisory sweep (.github/workflows/audit.yml) catch CVEs. This
 # file opens the routine, non-security dependency-bump PRs.
 #
+# Each ecosystem waits 7 days after a release before proposing it, the delay
+# `.cargo/config.toml` sets for a local resolve: a compromised release is
+# usually yanked by then. Security updates don't wait.
+#
 # Bumps are grouped and conventional-commit-prefixed so:
 #   - git-cliff files each PR under a CHANGELOG section (the commit subject
 #     is the changelog line — see cliff.toml / CONTRIBUTING.md), and
@@ -18,6 +22,8 @@ updates:
       day: monday
       time: "06:00"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
     groups:
@@ -32,6 +38,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(ci)"
     groups:
