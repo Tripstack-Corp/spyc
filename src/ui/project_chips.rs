@@ -1,8 +1,8 @@
 //! The status bar's `projects` segment while several projects are open: a
 //! chip for each, its label and the glyph of what its agents most need, and
-//! the steps the segment narrows by when the bar is short. Each label, and
-//! the collapsed segment's count, is marked on the spans drawn for it, for a
-//! click to find. The `Space j` rows show the same glyphs.
+//! the steps the segment narrows by when the bar is short. Each chip, out to
+//! its partings, and the collapsed segment's count, is marked on the spans
+//! drawn for it, for a click to find. The `Space j` rows show the same glyphs.
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
@@ -64,7 +64,7 @@ pub fn glyph(attention: ProjectAttention, pulse: Color, theme: &Theme) -> Span<'
 const MIN_CUT: usize = 4;
 
 /// The segment's spans, each with the part of it a click lands on: a
-/// project's label, or the collapsed count.
+/// project's chip, or the collapsed count.
 #[derive(Default)]
 pub struct ChipSpans {
     pub spans: Vec<Span<'static>>,
@@ -88,6 +88,14 @@ impl ChipSpans {
     pub fn append(&mut self, other: Self) {
         self.spans.extend(other.spans);
         self.parts.extend(other.parts);
+    }
+
+    /// What a click on the padding before and after the spans lands on: the
+    /// first span's part and the last's, so the chips at the ends reach the
+    /// padding as their highlight does.
+    pub fn edge_parts(&self) -> [Option<StatusSegment>; 2] {
+        let part = |p: Option<&Option<StatusSegment>>| p.copied().flatten();
+        [part(self.parts.first()), part(self.parts.last())]
     }
 }
 
@@ -152,7 +160,9 @@ impl ProjectChips {
 
     /// Every chip as `label glyph`, each label in at most `cap` columns,
     /// [`PARTING`]s between them: the one in view bold, the others dim, and
-    /// the parting neither, to stand out from both. The one in view is a tab
+    /// the parting neither, to stand out from both. A click lands on a chip
+    /// anywhere between its partings, spaces and glyph too, but not on a
+    /// parting's own mark. The one in view is a tab
     /// in [`in_view`]'s colours, out to the spaces either side of it, its
     /// parting's or the bar's padding ([`ChipSpans::edges`]), entered and left
     /// by [`TAB_EDGE`]s in colour.
@@ -166,19 +176,21 @@ impl ProjectChips {
             } else {
                 Style::default()
             };
+            let part = Some(StatusSegment::ProjectLabel(i));
             if i > 0 {
-                spans.push(Span::styled(" ", before), None);
+                let prior = Some(StatusSegment::ProjectLabel(i - 1));
+                spans.push(Span::styled(" ", before), prior);
                 spans.push(edge(before, pill, theme), None);
-                spans.push(Span::styled(" ", pill), None);
+                spans.push(Span::styled(" ", pill), part);
             } else {
                 spans.edges[0] = pill;
             }
             let drawn = label(chip, cap);
             let drawn = Span::styled(drawn.content, pill.patch(drawn.style));
-            spans.push(drawn, Some(StatusSegment::ProjectLabel(i)));
-            spans.push(Span::styled(" ", pill), None);
+            spans.push(drawn, part);
+            spans.push(Span::styled(" ", pill), part);
             let glyph = cell(chip.attention, self.pulse, theme);
-            spans.push(Span::styled(glyph.content, pill.patch(glyph.style)), None);
+            spans.push(Span::styled(glyph.content, pill.patch(glyph.style)), part);
             if i == last {
                 spans.edges[1] = pill;
             }
