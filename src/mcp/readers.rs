@@ -304,24 +304,21 @@ pub(super) fn read_picks_from_context(ctx_path: &Path) -> (Vec<PathBuf>, Option<
         return (Vec::new(), None);
     };
     let cwd = v["cwd"].as_str().map(PathBuf::from);
-    let picks = v["picks"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|p| p.as_str())
-                .map(|s| {
-                    let p = Path::new(s);
-                    if p.is_absolute() {
-                        p.to_path_buf()
-                    } else if let Some(c) = &cwd {
-                        c.join(p)
-                    } else {
-                        p.to_path_buf()
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let picks = v["picks"].as_array().map_or_default(|arr| {
+        arr.iter()
+            .filter_map(|p| p.as_str())
+            .map(|s| {
+                let p = Path::new(s);
+                if p.is_absolute() {
+                    p.to_path_buf()
+                } else if let Some(c) = &cwd {
+                    c.join(p)
+                } else {
+                    p.to_path_buf()
+                }
+            })
+            .collect()
+    });
     (picks, cwd)
 }
 
@@ -335,15 +332,12 @@ pub(super) fn read_inventory_from_context(ctx_path: &Path) -> Vec<PathBuf> {
     let Ok(v) = serde_json::from_str::<Value>(&text) else {
         return Vec::new();
     };
-    v["inventory"]
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|p| p.as_str())
-                .map(PathBuf::from)
-                .collect()
-        })
-        .unwrap_or_default()
+    v["inventory"].as_array().map_or_default(|arr| {
+        arr.iter()
+            .filter_map(|p| p.as_str())
+            .map(PathBuf::from)
+            .collect()
+    })
 }
 
 /// Render a slice of grep matches as a JSON array of objects with
@@ -634,10 +628,7 @@ pub(super) fn git_diff_text(root: &Path, mode: DiffMode, paths: &[String]) -> St
         DiffMode::Unstaged => crate::git::diff_model::diff_index_to_worktree(root, paths),
         DiffMode::HeadToWorktree => crate::git::diff_model::diff_head_to_worktree(root, paths),
     };
-    model
-        .as_ref()
-        .map(diff_model_to_unified)
-        .unwrap_or_default()
+    model.as_ref().map_or_default(diff_model_to_unified)
 }
 
 /// `git_diff`'s reply to `args`: the unified diff at the scope they name, or
@@ -647,14 +638,11 @@ pub(super) fn git_diff_text(root: &Path, mode: DiffMode, paths: &[String]) -> St
 /// old side as `cached` and `unstaged` do, so it takes neither.
 pub(super) fn git_diff_reply(root: &Path, args: &Value) -> Result<String, String> {
     let flag = |name: &str| args[name].as_bool().unwrap_or(false);
-    let paths: Vec<String> = args["paths"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
+    let paths: Vec<String> = args["paths"].as_array().map_or_default(|a| {
+        a.iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect()
+    });
     let Some(base) = args["base"].as_str() else {
         // `unstaged` (index↔worktree) wins over `cached` (index↔HEAD); with
         // neither set it's the working tree vs HEAD.

@@ -489,7 +489,7 @@ impl PaneInput {
     /// Exact matches only. A bare Esc / `\x03` byte is the key; `\x1b[A` and
     /// friends are arrows, and typing, menu navigation, or a paste that merely
     /// *contains* one of these leaves the dot red until the user commits.
-    fn settles_prompt(&self) -> bool {
+    const fn settles_prompt(&self) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         match self {
             Self::Key(k) => match k.code {

@@ -415,8 +415,7 @@ fn capital_t_flips_the_scrollback_source_both_ways() {
                 .project()
                 .scroll_pager
                 .as_ref()
-                .map(|v| v.title.clone())
-                .unwrap_or_default()
+                .map_or_default(|v| v.title.clone())
         };
         assert!(
             title(&app).contains("(history)"),

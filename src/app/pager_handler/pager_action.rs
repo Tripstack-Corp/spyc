@@ -133,7 +133,7 @@ impl PagerAction {
             Self::Close => "q",
             Self::Foreground | Self::ToPane => {
                 let command = self.command().unwrap_or_default();
-                let id = task.map(|id| format!(" {id}")).unwrap_or_default();
+                let id = task.map_or_default(|id| format!(" {id}"));
                 return format!(":{command}{id} (list)");
             }
         };
@@ -261,12 +261,11 @@ impl App {
             PagerAction::Save => self
                 .active_pager_ref()
                 .filter(|v| v.saveable)
-                .map(|v| {
+                .map_or_default(|v| {
                     vec![Effect::SavePagerOutput {
                         content: v.save_content(),
                     }]
-                })
-                .unwrap_or_default(),
+                }),
             PagerAction::Close => {
                 self.close_pager_by_key();
                 Vec::new()
@@ -287,13 +286,12 @@ impl App {
                 .host
                 .foreground_pgrp()
                 .or_else(|| capture.host.process_id())
-                .map(|pgrp| {
+                .map_or_default(|pgrp| {
                     vec![Effect::SignalCapture {
                         pgrp,
                         sig: rustix::process::Signal::INT,
                     }]
                 })
-                .unwrap_or_default()
         }
         // No signal path off-unix: the 0x03 byte, as `^C` encodes.
         #[cfg(not(unix))]
@@ -484,7 +482,7 @@ mod tests {
                         COMMAND_TABLE.iter().any(|c| c.name == name),
                         "{key}: no such command"
                     );
-                    assert_eq!(args, id.map(|n| n.to_string()).unwrap_or_default(), "{key}");
+                    assert_eq!(args, id.map_or_default(|n| n.to_string()), "{key}");
                 } else {
                     let strokes = keystrokes(&key);
                     let fired = if f.capture {

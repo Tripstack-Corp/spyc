@@ -878,8 +878,7 @@ fn list_worktrees_falls_back_to_the_agents_cwd() {
         });
         let paths: Vec<&str> = listed
             .as_array()
-            .map(|a| a.iter().filter_map(|e| e["path"].as_str()).collect())
-            .unwrap_or_default();
+            .map_or_default(|a| a.iter().filter_map(|e| e["path"].as_str()).collect());
         assert_eq!(paths, [agent.to_str().unwrap()], "{listed}");
     });
 }
@@ -909,8 +908,7 @@ fn a_stray_git_at_the_project_home_falls_back_to_the_agents_repo() {
         assert_eq!(created["path"], wt.to_str().unwrap(), "{created}");
         let paths: Vec<&str> = listed
             .as_array()
-            .map(|a| a.iter().filter_map(|e| e["path"].as_str()).collect())
-            .unwrap_or_default();
+            .map_or_default(|a| a.iter().filter_map(|e| e["path"].as_str()).collect());
         let want = [agent.to_str().unwrap(), wt.to_str().unwrap()];
         assert_eq!(paths, want, "{listed}");
     });

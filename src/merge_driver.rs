@@ -80,9 +80,8 @@ fn resolve_version_conflicts(text: &str) -> Option<String> {
                 }
             } else if l.starts_with("=======") {
                 break 'ours;
-            } else {
-                ours.push(l);
             }
+            ours.push(l);
         }
         // "theirs" runs until the closing marker.
         let mut theirs: Vec<&str> = Vec::new();

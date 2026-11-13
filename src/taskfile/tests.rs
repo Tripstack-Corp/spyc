@@ -188,7 +188,10 @@ fn a_makefile_of_pattern_rules_lists_nothing() {
         tmp.path(),
         &[("Makefile", "%.o: %.c\n\tcc -c $<\n%: %.o\n\tcc -o $@ $<\n")],
     );
-    assert!(discovered(tmp.path(), tmp.path()).targets.is_empty());
+    assert_eq!(
+        discovered(tmp.path(), tmp.path()).targets,
+        [] as [crate::taskfile::make::MakeTarget; 0]
+    );
 }
 
 // ── labels ──

@@ -100,8 +100,9 @@ def subdirs(path):
 
 def last_activity(path):
     """The newest mtime of `path`, its stamp, and the directories two levels down (a profile and
-    its `deps`, `.fingerprint`, `build` and `incremental`, which every build that changes
-    anything writes into)."""
+    its `build` and `incremental`, and before Rust 1.100 its `deps` and `.fingerprint`). Cargo
+    1.100 writes a rebuild deeper (`build/<package>/<hash>/`), so make's stamp, touched at every
+    use, is what dates a directory a rebuild changed nothing at those two levels of."""
     times = []
     for p in [path, path / STAMP, *subdirs(path)]:
         with contextlib.suppress(OSError):

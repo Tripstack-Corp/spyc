@@ -689,7 +689,7 @@ mod tests {
         let f = ImageOrigin::File {
             path: PathBuf::from("/"),
         };
-        assert!(!f.label().is_empty());
+        assert_ne!(f.label(), "");
     }
 
     /// The extension comes from the decoded format, so `s` can't write a `.png`

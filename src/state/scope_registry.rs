@@ -195,7 +195,10 @@ mod tests {
 
     #[test]
     fn conflicts_empty_registry_is_empty() {
-        assert!(conflicts(&[], "agent-a", &strs(&["x"])).is_empty());
+        assert_eq!(
+            conflicts(&[], "agent-a", &strs(&["x"])),
+            [] as [&crate::state::scope_registry::ScopeClaim; 0]
+        );
     }
 
     #[test]

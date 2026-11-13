@@ -458,7 +458,7 @@ mod tests {
             let mut app = test_pane(tmp.path());
             app.set_pane_focus(true);
             let paste = app.handle_paste("hello".into());
-            assert!(app.state.active_project().pane.pane_prompt_buf.is_empty());
+            assert_eq!(app.state.active_project().pane.pane_prompt_buf, "");
             execute(&mut app, paste);
             assert_eq!(app.state.active_project().pane.pane_prompt_buf, "hello");
             let enter = app
@@ -466,7 +466,7 @@ mod tests {
                 .unwrap();
             assert_eq!(app.state.active_project().pane.pane_prompt_buf, "hello");
             execute(&mut app, enter);
-            assert!(app.state.active_project().pane.pane_prompt_buf.is_empty());
+            assert_eq!(app.state.active_project().pane.pane_prompt_buf, "");
             assert_eq!(
                 app.state.active_project().pane.last_pane_prompt.as_deref(),
                 Some("hello")

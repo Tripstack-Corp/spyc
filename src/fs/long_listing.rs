@@ -542,7 +542,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let missing = tmp.path().join("nope");
         let lines = format_long_listing(&[&missing]);
-        assert!(!lines.is_empty());
+        assert_ne!(lines, [] as [String; 0]);
         // Only errors -> no header line; the error itself is the first line.
         assert!(
             lines[0].starts_with("?? "),

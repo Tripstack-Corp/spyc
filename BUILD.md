@@ -16,10 +16,10 @@ spyc is written in Rust. Install the toolchain via rustup:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Minimum supported Rust version: **1.88** (for `if let` chains).
+Minimum supported Rust version: **1.100**, the pinned toolchain's: both move together.
 
 The repo pins an exact toolchain in `rust-toolchain.toml` (currently
-**1.96.0**), so rustup auto-installs and selects it on first build —
+**1.100.0**), so rustup auto-installs and selects it on first build —
 no manual `rustup default` needed. Bump that file to move the project
 to a newer release.
 
@@ -160,7 +160,7 @@ hosted apt repo is built and signed.
 - **Why per checkout.** A workspace crate's test binary lands at the same path whichever checkout builds it, so with one shared directory two worktrees' gates could run each other's binaries, and their builds serialized on one cargo lock. A directory per checkout ends both. The price is that each checkout compiles its own dependencies: the first build in a new worktree takes a few minutes.
 - **How.** The Makefile exports `CARGO_TARGET_DIR`, overriding the environment and `[build] target-dir` in `~/.cargo/config.toml`, which other projects rely on and is left alone. `make target-dir` prints this checkout's directory; for a plain `cargo`, `export CARGO_TARGET_DIR=$(make -s target-dir)` first, or it builds into the shared directory. Recipes use `$(TARGET_DIR)`, never `target/`. CI keeps cargo's own `target/`, which its cache restores (`CI` is set there).
 - **The cap**, applied before every cargo target by `scripts/cargo_targets.py`: a directory whose worktree is gone goes at once, one unused for `SPYC_TARGET_IDLE_DAYS` (2) goes, then the least recently used while they total more than `SPYC_TARGET_CAP_GIB` (40) or the disk has less than `SPYC_TARGET_MIN_FREE_GIB` (20) free. It never removes this checkout's, one a cargo process holds, or one used in the last `SPYC_TARGET_GRACE_MIN` (60) minutes. `make target-usage` shows each directory's size, last use and what goes next.
-- **Inside each directory**, macOS leaks: every incremental rebuild leaves the previous build's per-codegen-unit debug objects in `deps/` (one test binary had 131k of them while its debug map read 256). `make prune-target` applies the cap, then `scripts/prune-cargo-target.py` to every directory it keeps, deleting build sets untouched for `PRUNE_DAYS` and objects no executable's debug map references, and then spyc's own stale sets in the shared directory a plain `cargo` uses, never a third-party dependency there. `cargo sweep` can't do the objects, since it judges whole sets.
+- **Inside each directory**, macOS leaks: every incremental rebuild leaves the previous build's per-codegen-unit debug objects beside the executable (one test binary had 131k of them while its debug map read 256): in a profile's `deps/` before Rust 1.100, and in each unit's `build/<package>/<hash>/out/` since. `make prune-target` applies the cap, then `scripts/prune-cargo-target.py` to every directory it keeps, deleting build sets untouched for `PRUNE_DAYS` and objects no executable's debug map references, and then spyc's own stale sets in the shared directory a plain `cargo` uses, never a third-party dependency there. `cargo sweep` can't do the objects, since it judges whole sets.
 - **Nightly.** `make prune-target-agent`, from the main checkout, installs a launchd job running `make prune-target PRUNE_DAYS=1` at 04:00, for days nobody builds; it logs to `~/Library/Logs/spyc-prune-target.log` with a dated line per run.
 - **`make clean`** deletes this checkout's directory only, and refuses when `SPYC_TARGET_DIR` points it somewhere shared (`FORCE=1` overrides). **`fuzz/` is a separate workspace**: through `make fuzz` it builds into this checkout's directory; a plain `cargo fuzz` writes `fuzz/target`, another ~2.6 GB.
 

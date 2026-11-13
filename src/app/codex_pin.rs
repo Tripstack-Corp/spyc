@@ -374,7 +374,10 @@ mod tests {
             spawn: 1000,
             resuming: false,
         }];
-        assert!(assign_codex_sessions(&other, &HashSet::new(), &snap).is_empty());
+        assert_eq!(
+            assign_codex_sessions(&other, &HashSet::new(), &snap),
+            [] as [(usize, String); 0]
+        );
     }
 
     /// A rollout whose `session_meta` is frozen far in the past but which is
@@ -479,7 +482,10 @@ mod tests {
             spawn: 1000,
             resuming: false,
         }];
-        assert!(assign_codex_sessions(&unpinned, &HashSet::new(), &snap).is_empty());
+        assert_eq!(
+            assign_codex_sessions(&unpinned, &HashSet::new(), &snap),
+            [] as [(usize, String); 0]
+        );
     }
 
     #[test]
@@ -549,7 +555,10 @@ mod tests {
                 resuming: false,
             },
         ];
-        assert!(assign_codex_sessions(&tabs, &HashSet::new(), &snap).is_empty());
+        assert_eq!(
+            assign_codex_sessions(&tabs, &HashSet::new(), &snap),
+            [] as [(usize, String); 0]
+        );
     }
 
     #[test]
@@ -564,6 +573,9 @@ mod tests {
             spawn: 1000,
             resuming: true,
         };
-        assert!(assign_codex_sessions(&[tab], &HashSet::new(), &snap).is_empty());
+        assert_eq!(
+            assign_codex_sessions(&[tab], &HashSet::new(), &snap),
+            [] as [(usize, String); 0]
+        );
     }
 }

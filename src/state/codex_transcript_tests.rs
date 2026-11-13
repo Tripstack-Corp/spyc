@@ -74,7 +74,7 @@ fn current_tools_and_custom_calls_render_and_can_be_hidden() {
         );
     }
     assert!(!rendered.contains("second line"), "{rendered}");
-    assert!(render_records(&records, false).is_empty());
+    assert_eq!(render_records(&records, false), "");
 }
 
 #[test]

@@ -425,7 +425,7 @@ mod tests {
         // row — keeps the test focused on the merge behaviour.
         let mut p = parser_with(2, 20, 100, b"hello");
         let lines = lines_from_scrollback(p.screen_mut());
-        assert!(!lines.is_empty());
+        assert_ne!(lines, [] as [ratatui::prelude::Line<'_>; 0]);
         assert_eq!(
             lines[0].spans.len(),
             1,

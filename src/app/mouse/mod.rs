@@ -306,13 +306,12 @@ impl super::App {
             .project()
             .pane_tabs
             .as_ref()
-            .map(|t| {
+            .map_or_default(|t| {
                 tab_hit::tab_layout(t, t.active().is_scrolling(), bar_width)
                     .into_iter()
                     .map(|c| c.width)
                     .collect()
             })
-            .unwrap_or_default()
     }
 
     /// The pane tab whose label the pointer is on. Only resolved over the
@@ -1863,12 +1862,7 @@ mod tests {
                 app.state.resolver.is_pending() && app.view.chord_hint.is_some(),
                 "the menu stays open for the number"
             );
-            let flash = app
-                .state
-                .flash
-                .as_ref()
-                .map(|f| f.text.clone())
-                .unwrap_or_default();
+            let flash = app.state.flash.as_ref().map_or_default(|f| f.text.clone());
             assert!(
                 flash.contains("1-9"),
                 "the flash names the keys to press: {flash:?}"

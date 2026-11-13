@@ -30,13 +30,12 @@ pub fn commit_meta(commit: &gix::Commit<'_>) -> Option<CommitMeta> {
     let author = commit.author().ok()?;
     let name = author.name.to_str_lossy().into_owned();
     let email = author.email.to_str_lossy().into_owned();
-    let time = author.time().ok().map(format_git_time).unwrap_or_default();
+    let time = author.time().ok().map_or_default(format_git_time);
     let message = commit.message().ok()?;
     let subject = message.summary().to_str_lossy().trim_end().to_owned();
     let body = message
         .body()
-        .map(|b| b.to_str_lossy().trim().to_owned())
-        .unwrap_or_default();
+        .map_or_default(|b| b.to_str_lossy().trim().to_owned());
 
     Some(CommitMeta {
         id,

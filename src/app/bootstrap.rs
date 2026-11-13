@@ -142,8 +142,7 @@ impl App {
             // once the first chdir resolves `current_repo_root`.
             harpoon_filter_set: harpoon
                 .as_ref()
-                .map(|h| h.ancestor_set().clone())
-                .unwrap_or_default(),
+                .map_or_default(|h| h.ancestor_set().clone()),
             harpoon,
             pending_ghosts: std::collections::HashSet::new(),
         };

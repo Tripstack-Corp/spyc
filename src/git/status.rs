@@ -133,8 +133,7 @@ pub fn map_to_listing(entries: &[StatusEntry], prefix: &str) -> HashMap<String, 
         };
         let name = Path::new(filename)
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
+            .map_or_default(|n| n.to_string_lossy().into_owned());
         // Top component relative to THIS directory.
         let top_component = filename.split('/').next().unwrap_or(filename).to_string();
         let in_this_dir = top_component == filename;

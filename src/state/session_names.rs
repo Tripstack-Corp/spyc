@@ -97,8 +97,8 @@ mod tests {
         let name = generate();
         let parts: Vec<&str> = name.split('_').collect();
         assert_eq!(parts.len(), 2, "expected FOO_BAR, got {name}");
-        assert!(!parts[0].is_empty());
-        assert!(!parts[1].is_empty());
+        assert_ne!(parts[0], "");
+        assert_ne!(parts[1], "");
         assert_ne!(parts[0], parts[1], "spices should differ");
     }
 

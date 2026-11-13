@@ -59,7 +59,7 @@ impl PromptLine<'_> {
             // The cursor sits on the suggestion's first character, the way a
             // shell autosuggestion reads: typing starts here and replaces it.
             let mut chars = ghost.chars();
-            let first = chars.next().map(String::from).unwrap_or_default();
+            let first = chars.next().map_or_default(String::from);
             let cursor_style = match self.vi_mode {
                 Some(ViMode::Normal) => ghost_style.bg(self.theme.cursor_bg),
                 _ => ghost_style.add_modifier(Modifier::UNDERLINED),

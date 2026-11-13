@@ -184,8 +184,7 @@ impl App {
                     .state
                     .resolver
                     .pending_display()
-                    .map(|s| s.trim_end_matches('-').to_string())
-                    .unwrap_or_default();
+                    .map_or_default(|s| s.trim_end_matches('-').to_string());
                 let entries = self.state.resolver.continuations();
                 let rows: Vec<(String, String)> = entries
                     .iter()

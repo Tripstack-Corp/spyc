@@ -181,7 +181,7 @@ fn run_reporter_with(
     }
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "{:?}", output.stderr);
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     let request = server.join().unwrap();
     let log = std::fs::read_to_string(temp.path().join("state/spyc/mcp.log")).unwrap_or_default();
     (request, log)

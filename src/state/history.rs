@@ -29,13 +29,12 @@ impl History {
     pub fn load_file(filename: &str) -> Self {
         let mut entries = disk_path(filename)
             .and_then(|p| std::fs::read_to_string(&p).ok())
-            .map(|text| {
+            .map_or_default(|text| {
                 text.lines()
                     .filter(|l| !l.is_empty())
                     .map(String::from)
                     .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+            });
         // Deduplicate: keep the *last* occurrence of each command (most recent).
         {
             let mut seen = std::collections::HashSet::new();
@@ -170,7 +169,7 @@ mod tests {
     #[test]
     fn empty_history_has_no_entries() {
         let h = empty_history();
-        assert!(h.entries().is_empty());
+        assert_eq!(h.entries(), [] as [String; 0]);
     }
 
     #[test]
@@ -192,7 +191,7 @@ mod tests {
         let mut h = empty_history();
         h.push("");
         h.push("   ");
-        assert!(h.entries().is_empty());
+        assert_eq!(h.entries(), [] as [String; 0]);
     }
 
     #[test]
