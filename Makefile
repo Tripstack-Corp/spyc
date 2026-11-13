@@ -2,7 +2,7 @@
 #
 # Prerequisites (one-time setup):
 #   brew install zig
-#   cargo install cargo-zigbuild
+#   cargo install --locked cargo-zigbuild --version 0.24.0
 #   rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 #   rustup target add x86_64-apple-darwin aarch64-apple-darwin
 #
@@ -409,13 +409,30 @@ release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal 
 
 # --- Linux (static, musl) ---
 
+# rustc 1.100 passes `--fix-cortex-a53-843419` when linking aarch64-musl, and
+# cargo-zigbuild before 0.23 hands it to `zig cc`, which rejects it (#1154).
+# release.yml pins the version; this stops an older local install with that
+# reason instead of a linker error.
+ZIGBUILD_MIN := 0.23.0
+
+.PHONY: zigbuild-check
+zigbuild-check:
+	@have=$$(cargo-zigbuild --version 2>/dev/null | awk '{print $$2}'); \
+	if [ -z "$$have" ]; then \
+		echo "cargo-zigbuild not found — install with: cargo install --locked cargo-zigbuild --version 0.24.0"; exit 1; \
+	fi; \
+	if [ "$$(printf '%s\n%s\n' "$(ZIGBUILD_MIN)" "$$have" | sort -V | head -1)" != "$(ZIGBUILD_MIN)" ]; then \
+		echo "cargo-zigbuild $$have is older than $(ZIGBUILD_MIN): it can't link aarch64-musl under rustc 1.100 (#1154)"; \
+		echo "  cargo install --locked cargo-zigbuild --version 0.24.0"; exit 1; \
+	fi
+
 # `ulimit -n 8192`: zig's linker opens an fd per object file (250+ for spyc),
 # so the final link dies with `ProcessFdQuotaExceeded` under macOS's 256-fd
 # default soft limit — which bites when a musl build is invoked from a
 # context that didn't raise it (e.g. spyc's own `!` shell). Raise it on the
 # same shell line as the build so it applies to that subshell.
 .PHONY: release-linux-x86
-release-linux-x86: target-cap ## Linux x86_64 (static, musl)
+release-linux-x86: target-cap zigbuild-check ## Linux x86_64 (static, musl)
 	@# Touch the main source so zigbuild always recompiles spyc itself
 	@# (zigbuild cache is separate from cargo build and can go stale).
 	@touch src/main.rs
@@ -424,7 +441,7 @@ release-linux-x86: target-cap ## Linux x86_64 (static, musl)
 	@ls -lh target/x86_64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: release-linux-arm
-release-linux-arm: target-cap ## Linux aarch64 (static, musl)
+release-linux-arm: target-cap zigbuild-check ## Linux aarch64 (static, musl)
 	@touch src/main.rs
 	ulimit -n 8192; cargo zigbuild $(RELEASE_FLAGS) --target aarch64-unknown-linux-musl
 	@echo "→ target/aarch64-unknown-linux-musl/release/$(BINARY)"
