@@ -693,9 +693,10 @@ else
 	@launchctl print gui/$$(id -u)/$(PRUNE_AGENT_LABEL) | grep -E '^\s+(state|program|path) =' | head -3
 endif
 
-# The build-directory scripts' own tests (Python's unittest; no dependencies).
+# The scripts' own tests and the vendored-archive checks (Python's unittest; no
+# dependencies).
 .PHONY: test-scripts
-test-scripts: ## Test scripts/cargo_targets.py
+test-scripts: ## Test the Python helpers in scripts/ and the vendored archives
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
 # ---------- Help -------------------------------------------------------------
