@@ -4,8 +4,14 @@
 # SHA256SUMS and rewrites Tripstack-Corp/homebrew-tap's Formula/spyc.rb —
 # `version` plus the three per-artifact sha256s (macOS universal, linux
 # x86_64, linux aarch64). The formula's URLs are `#{version}`-interpolated, so
-# nothing else changes. Prereleases are NOT skipped: the tap tracks the current
-# rc stream (unlike apt.yml, which stays on stable X.Y.Z).
+# nothing else changes, apart from the macOS requirement: the rewrite puts
+# `depends_on macos: :$MACOS_MIN` at the top of the `on_macos` block, replacing
+# any there, so the formula asks for the macOS the release was built for.
+# `MACOS_MIN` names `MACOSX_DEPLOYMENT_TARGET` from `.cargo/config.toml`, and
+# `scripts/test_homebrew_macos_floor.py` keeps the two together. It sits in
+# `on_macos` because Homebrew on Linux never satisfies a `depends_on macos:`.
+# Prereleases are NOT skipped: the tap tracks the current rc stream (unlike
+# apt.yml, which stays on stable X.Y.Z).
 #
 # Auth is an org-owned GitHub App (contents:write on the tap repo, no personal
 # PAT) that mints a short-lived token per run. The `homebrew-tap` environment
@@ -78,6 +84,8 @@ jobs:
           path: tap
 
       - name: Rewrite Formula/spyc.rb
+        env:
+          MACOS_MIN: ventura
         run: |
           set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
@@ -95,7 +103,8 @@ jobs:
           # both `on_arm` and `on_intel` at the one universal tarball, so its
           # hash legitimately lands twice. awk writes to `out` so its stdout
           # stays free for diagnostics; anything it can't attribute is fatal.
-          awk -v v="$V" -v m="$MAC" -v x="$LX" -v a="$LA" -v out="$f.new" '
+          awk -v v="$V" -v m="$MAC" -v x="$LX" -v a="$LA" -v macos="$MACOS_MIN" -v out="$f.new" '
+            /^ *depends_on macos: /             { next }
             /^  version "/                      { sub(/"[^"]*"/, "\"" v "\""); vseen = 1 }
             /url ".*-macos-universal\.tar\.gz"/ { want = m; tag = "macos-universal" }
             /url ".*-linux-x86_64\.tar\.gz"/    { want = x; tag = "linux-x86_64" }
@@ -105,16 +114,18 @@ jobs:
               else { sub(/"[0-9a-f]+"/, "\"" want "\""); seen[tag] = 1; want = "" }
             }
             { print > out }
+            /^  on_macos do$/                   { print "    depends_on macos: :" macos > out; mseen = 1 }
             END {
               if (bad) exit 1
               if (!vseen) { print "no `version \"...\"` line to bump"; exit 1 }
+              if (!mseen) { print "no `on_macos do` block for the macOS requirement"; exit 1 }
               if (want != "") { print "url for " tag " has no sha256 under it"; exit 1 }
               for (t in seen) n++
               if (n != 3) { print "expected all 3 artifacts, matched " n; exit 1 }
             }
           ' "$f" || { rm -f "$f.new"; echo "formula layout unexpected — bailing"; exit 1; }
           mv "$f.new" "$f"
-          echo "--- updated formula ---"; grep -E 'version "|sha256 "' "$f"
+          echo "--- updated formula ---"; grep -E 'version "|sha256 "|depends_on macos:' "$f"
 
       - name: Commit + push to the tap
         run: |
