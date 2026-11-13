@@ -6,9 +6,9 @@ Release tarball, no Rust toolchain required. To compile spyc yourself
 
 ## Platforms
 
-**macOS** and **Linux**, on `x86_64` and `aarch64`. macOS ships as a
-universal binary; Linux binaries are static (musl), so they run on any
-distro regardless of its glibc.
+**macOS 13 (Ventura) or later** and **Linux**, on `x86_64` and `aarch64`.
+macOS ships as a universal binary; Linux binaries are static (musl), so they
+run on any distro regardless of its glibc.
 
 **Windows is supported through WSL**, not natively — run spyc inside a
 WSL2 distro and it behaves like any other Linux install. Native Windows

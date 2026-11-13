@@ -18,6 +18,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 Minimum supported Rust version: **1.100**, the pinned toolchain's: both move together.
 
+Minimum macOS: **13.0** (Ventura), for both slices. `.cargo/config.toml` sets
+`MACOSX_DEPLOYMENT_TARGET` for every build from this checkout, since the
+vendored libghostty-vt objects are built for 13.0. Before this, the arm64
+slice declared 11.0 and the x86_64 slice 10.12 while containing 13.0 code.
+
 The repo pins an exact toolchain in `rust-toolchain.toml` (currently
 **1.100.0**), so rustup auto-installs and selects it on first build —
 no manual `rustup default` needed. Bump that file to move the project

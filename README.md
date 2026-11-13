@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  Keyboard-driven · MCP-native · Rust · macOS and Linux
+  Keyboard-driven · MCP-native · Rust · macOS 13+ and Linux
 </p>
 
 <p align="center">
