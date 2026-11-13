@@ -48,6 +48,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build universal binary
         run: make release-macos-universal
+      # Both slices take the C library functions in vendor/LIBC_SYMBOLS from
+      # libSystem, none from the vendored archive (ARCHITECTURE.md,
+      # vendored-libc-symbols).
+      - name: Check the artifact's libSystem bindings
+        run: scripts/check-libsystem-binding.sh dist/spyc-macos-universal
       - name: Package tarball
         run: |
           install -m 0755 dist/spyc-macos-universal spyc

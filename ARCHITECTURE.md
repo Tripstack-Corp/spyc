@@ -676,6 +676,40 @@ the alt screen, in raw mode, and — since `[mouse] capture` defaults on — wit
 session. The plan that introduced default-on capture listed this teardown as
 its prerequisite; the default shipped first, which is how the gap reached users.
 
+## The vendored archive defines no C library function
+
+<!-- SPYC-TRAP: vendored-libc-symbols -->
+spyc's `memset`, `memcpy`, `memmove`, `memcmp` and `strlen` come from the
+platform's C library. A global that a loaded archive member defines takes part
+in the final link, and Apple's `ld` binds an undefined symbol to it before
+libSystem, weak or not, so any C library function left global in the vendored
+libghostty-vt archive replaces the platform's for all of spyc.
+
+The archive has had two sources of them, and keeping both out depends on the
+ghostty pin and on the vendoring recipe:
+
+- **Zig's `compiler_rt.o`**, which defines the string, maths and
+  stack-protector functions. ghostty's own `libsystem_override.sh` localizes
+  them, but only when the build host is Darwin, and spyc builds its archives on
+  Linux. `scripts/unexport-libc.py` makes the ones in `vendor/LIBC_SYMBOLS`
+  local with LLVM 20's `llvm-objcopy` during vendoring instead.
+- **ghostty's own `memset`** (`quirks_memset.zig`), exported weak beside
+  compiler_rt's. Zig 0.16 and later write a weak `@export` to Mach-O as an
+  ordinary symbol (an LLVM alias the Mach-O writer emits without its weak flag,
+  llvm/llvm-project#229283), so up to libghostty-vt 1.0.0 the archive defined
+  `memset` twice, `ld` warned of a duplicate, and spyc ran compiler_rt's
+  byte-at-a-time copy. ghostty stopped exporting it on Darwin in `9899c07`,
+  first in `vt-1.0.1`.
+
+A pin before `9899c07`, a ghostty that exports another C library function, or
+a recipe that skips the localization brings one back.
+`scripts/check-libsystem-binding.sh` checks a macOS binary against
+`vendor/LIBC_SYMBOLS`: `tests/libsystem_binding.rs` runs it on the test build,
+and the release workflow on both slices of the universal artifact before
+upload. `scripts/test_vendored_archives.py` checks the committed archives, and
+the vendored-archives job the ones it rebuilds. The evidence, with the commands that reproduce it, is in
+[`spikes/zig-macho-weak-export/`](spikes/zig-macho-weak-export/README.md).
+
 ## spyc's stderr follows the screen
 
 <!-- SPYC-TRAP: stderr-follows-the-screen -->

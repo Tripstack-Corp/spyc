@@ -37,6 +37,8 @@
 
 use std::cell::{Cell, RefCell};
 
+// SPYC-TRAP(vendored-libc-symbols): linking `spyc_vt_sys` brings no C library
+// function into spyc, which depends on the ghostty pin and the vendoring recipe.
 use spyc_vt_sys::ffi::{
     GhosttyCellData as CellData, GhosttyPoint, GhosttyPointCoordinate, GhosttyPointTag,
     GhosttyRenderStateData as RsData, GhosttyRenderStateRowCellsData as CellsData,

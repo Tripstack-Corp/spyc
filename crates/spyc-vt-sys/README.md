@@ -2,7 +2,7 @@
 
 Raw FFI to [libghostty-vt](https://libghostty.tip.ghostty.org/) — the terminal
 state machine extracted from [Ghostty](https://ghostty.org) — at a spyc-owned
-pinned commit (libghostty-vt 1.0.0), with the static archives vendored.
+pinned commit (libghostty-vt 1.0.1), with the static archives vendored.
 
 This crate exists so that everything C has one home: the pin, the generated
 bindings, the prebuilt archives and their checksums. The safe engine wrapper
@@ -101,12 +101,15 @@ part in spyc's link, and Apple's `ld` binds to it before libSystem, weak or not,
 so on macOS those copies replaced libSystem's for the whole binary, a
 byte-at-a-time `memset` among them, and `ld` reported `memset` twice,
 `compiler_rt.o`'s and ghostty's own (#1129). Before re-archiving, the script
-makes them local in `compiler_rt.o` with `llvm-objcopy --localize-symbols`
-([`unexport-libc.py`](../../scripts/unexport-libc.py) chooses the names and
-checks the result), keeping the compiler helpers (`__udivti3`, ...) the other
-objects need. Ghostty's vectorized `memset` is then the archive's only one;
-every other C library function comes from the platform's C library.
-`scripts/test_vendored_archives.py` checks the committed archives.
+makes the functions in `vendor/LIBC_SYMBOLS` local in `compiler_rt.o` with
+`llvm-objcopy --localize-symbols` ([`unexport-libc.py`](../../scripts/unexport-libc.py)
+checks the list against the object and the result), keeping the compiler
+helpers (`__udivti3`, ...) the other objects need. Every C library function then
+comes from the platform's C library, except on `aarch64-unknown-linux-musl`,
+where ghostty exports its own vectorized `memset` (`quirks_memset.zig`); from
+libghostty-vt 1.0.1 it doesn't on Darwin, x86_64 or glibc.
+`scripts/test_vendored_archives.py` checks the committed archives, and
+`scripts/check-libsystem-binding.sh` a macOS binary.
 
 Zig cross-compiles all five from one host. The recipe uses `ReleaseSmall`,
 which is the size lever; it does **not** strip, because at `ReleaseSmall` the

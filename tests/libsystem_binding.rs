@@ -15,7 +15,6 @@
 use std::process::Command;
 
 #[test]
-#[ignore = "red: the archive's compiler_rt.o and ghostty unit define these in spyc"]
 fn spyc_takes_its_memory_functions_from_libsystem() {
     let script = concat!(
         env!("CARGO_MANIFEST_DIR"),

@@ -1299,3 +1299,82 @@ ghostty 2,730 KiB/pane (was 2,635).
 
 The five `ReleaseSmall` archives grew 11–13%, the largest 2.69 MB, inside the
 4 MiB per-target budget.
+
+# Addendum — 2026-11-13: re-measured at libghostty-vt 1.0.1
+
+The pin moved from `0fa3d577` (`vt-1.0.0`, 2026-11-06) to `108cacb17`, the
+commit ghostty's `vt-1.0.1` tag names (2026-11-11): 91 commits, 31 of them
+touching libghostty-vt's sources or build. The reason for the bump is `9899c07`,
+which stops ghostty exporting its own `memset` on Darwin
+(`spikes/zig-macho-weak-export/`). Among the rest are four that reach state
+spyc depends on: `321a32a42` (scrollback not pulled down when growing rows and
+shrinking columns), `d0addb9cd` (keep the pruned page's memory when grow prunes
+by lines), `9b848b0f5` (a restored snapshot keeps its final page capacity) and
+`8ad3f607f` (prompt redraw on resize).
+
+The headers changed only in `version.h`: bindings regenerated from them differ
+from 1.0.0's in `GHOSTTY_VT_VERSION_PATCH` and `GHOSTTY_VT_VERSION` alone, and
+regenerating at the old pin reproduces the committed file byte for byte.
+
+## macOS: identical to 1.0.0 on every criterion
+
+The harness, `--features ghostty,wezterm`, on macOS 26.7.2 / arm64, rustc
+1.100.0:
+
+| | 1.0.0 (2026-11-07) | 1.0.1 |
+|---|---|---|
+| `sbprobe` plain / heavy retained (floor 9,560) | 9,649 / 9,889 | 9,649 / 9,889 |
+| `sbprobe` pathological, valve | 1,017 of 3,976 | 1,017 of 3,976 |
+| `rowcost` heavy, 1 / 2 / 4 / 8 / 16 MiB | 1,119 / 799 / 772 / 758 / 752 | 1,119 / 799 / 772 / 758 / 752 |
+| `fuzz_diff`, 50,000 iterations, ghostty panics | 0 | 0 |
+| `rehydrate`, ghostty | 100% every axis, 389,363 B | 100% every axis, 389,363 B |
+| `snapshot_grade` | 100% every axis, 1,232,014 B | 100% every axis, 1,232,014 B |
+| `offset_isolate` | no offset | no offset |
+| `differential` | 20/26 at parity | 20/26 at parity |
+| `gfmt` palette / tabstops / cursor / style | +5,522 / +20 / +6 / +4 | +5,522 / +20 / +6 / +4 |
+| `membudget`, ghostty | 7.08 MiB/pane, 9,889 rows | 7.08 MiB/pane, 9,889 rows |
+
+`rowcost`'s plain column is unchanged as well, so `BYTES_PER_ROW_HEAVY` (929)
+stands. vt100 (1,437) and wezterm (15) panic exactly as often as before.
+
+`bench`, three runs of each pin in one session: ghostty 503.6–512.4 MiB/s at
+1.0.0 and 544.4–566.2 at 1.0.1, but vt100, whose code did not change, moved from
+106.0–126.9 to 143.3–149.5 between the two sets, so the difference is not
+offered as a change.
+
+The five archives changed size by −0.1% to +3%, the largest 2.79 MB.
+
+## Linux, measured for the first time: heavy content is under the floor
+
+The same binaries were run on Linux for the first time, as
+`aarch64-unknown-linux-musl` in a `rust:1.100.0-bookworm` container on the same
+Mac (Linux aarch64, page size 4,096; macOS's is 16,384). At 1.0.1 every
+criterion above holds except the scrollback budget's first assertion:
+
+```
+  plain / ghostty                    9820       9560       ok
+  heavy / ghostty                    9508       9560    UNDER
+```
+
+The same binaries built at 1.0.0 print the same 9,508, so this predates the
+bump. The other budget figures differ from macOS too, at both pins alike: the
+pathological stream keeps 1,112 of 3,976 rows, `membudget` retains 9,508, and
+`rowcost`'s heavy column runs 1,608 / 918 / 838 / 763 / 748 B/row from 1 to
+16 MiB, so at 2 MiB a heavy row costs within 11 B of `BYTES_PER_ROW_HEAVY`.
+`snapshot_grade` reaches the same verdicts in 1,232,048 B (macOS: 1,232,014).
+`fuzz_diff`, `rehydrate`, `offset_isolate`, `differential` and `gfmt` print
+exactly what they print on macOS.
+
+One Linux figure does move between the pins: `membudget`'s resident memory.
+At the same 9,508 rows retained, ghostty holds **6.77 MiB/pane at 1.0.0 and
+7.31 at 1.0.1**, the same to the hundredth over three runs each; wezterm, whose
+engine didn't change, stays at 8.01–8.02. It is bounded: with the feed raised
+from 15,000 to 30,000 and 60,000 rows, 1.0.1 stays at 7.30 MiB/pane while 1.0.0
+climbs 6.76 → 6.99 → 7.04 towards it (rows retained 9,508, 9,820 and 9,900 at
+both pins). On macOS both pins measure 7.08 MiB/pane in three runs each.
+`git bisect` between the pins, building libghostty-vt for
+`aarch64-unknown-linux-musl` at each step, names `d0addb9cd` "terminal: keep
+the pruned page's memory when grow prunes by lines": a page pruned by the line
+limit is now zeroed and kept instead of decommitted, which its message prices
+at "~1 extra allocated page (~300KB) for an idle terminal at its line limit".
+spyc's panes have a line limit (`max_lines` 10,000), so they pay it on Linux.

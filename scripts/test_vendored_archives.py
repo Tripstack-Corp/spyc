@@ -1,11 +1,10 @@
 """The vendored libghostty-vt archives leave the C library's functions to the C library.
 
-A global that a loaded archive member defines takes part in spyc's final link, so
-one that the C library also defines replaces the C library's for the whole
-binary. Zig's bundled `compiler_rt.o` defined `memset`, `memcmp`, `strlen`, the
-maths functions and `__stack_chk_guard`, and so spyc ran a byte-at-a-time
-`memset`; on macOS `ld` also reported `memset` twice, `compiler_rt.o`'s and
-ghostty's own (#1129).
+A global that a loaded archive member defines takes part in spyc's final link,
+and Apple's `ld` binds to it before libSystem, weak or not. Zig's bundled
+`compiler_rt.o` defined `memset`, `memcmp`, `strlen`, the maths functions and
+`__stack_chk_guard`, and so on macOS spyc ran a byte-at-a-time `memset`, and
+`ld` also reported `memset` twice, `compiler_rt.o`'s and ghostty's own (#1129).
 """
 
 from pathlib import Path
@@ -92,17 +91,24 @@ class VendoredArchives(unittest.TestCase):
             self.assertIn("ghostty-vt-static_zcu.o", objs, target)
             self.assertGreater(len(exported(objs["compiler_rt.o"])), 100, target)
 
-    def test_memset_is_defined_once_and_it_is_ghosttys(self):
-        for target, objs in self.archives.items():
-            owners = [m for m, obj in sorted(objs.items()) if "memset" in exported(obj)]
-            self.assertEqual(owners, ["ghostty-vt-static_zcu.o"], target)
+    def memset_owners(self, target):
+        objs = self.archives[target]
+        return [m for m, obj in sorted(objs.items()) if "memset" in exported(obj)]
+
+    def test_no_darwin_archive_defines_memset(self):
+        for target in TARGETS:
+            if target.endswith("-apple-darwin"):
+                self.assertEqual(self.memset_owners(target), [], target)
+
+    def test_memset_is_at_most_ghosttys_own(self):
+        for target in TARGETS:
+            self.assertIn(self.memset_owners(target), ([], ["ghostty-vt-static_zcu.o"]), target)
 
     def test_compiler_rt_defines_no_c_library_function(self):
         names = listed()
         for target, objs in self.archives.items():
             self.assertEqual(sorted(names.intersection(exported(objs["compiler_rt.o"]))), [], target)
 
-    @unittest.skip("red: compiler_rt.o and, up to libghostty-vt 1.0.0, ghostty export them (#1129)")
     def test_no_darwin_archive_exports_a_listed_name(self):
         names = listed()
         for target, objs in self.archives.items():
