@@ -1,10 +1,10 @@
 # The jar: its requirements and version 1
 
-**Status:** version 1 frozen on 2026-11-12, on the owner's word, after the
-spike built every v1 verdict below, and **reopened** the same day for three
-changes an external review found it needed (decision K). The changes are made
-and tested; [Version 1 on the wire](#version-1-on-the-wire) is the format with
-them, byte for byte, and it freezes again on the owner's word.
+**Status:** version 1 **frozen** on 2026-11-12, on the owner's word. It
+froze once after the spike built every v1 verdict below, reopened the same day
+for three changes an external review found it needed (decision K), and froze
+again with them made and tested; [Version 1 on the wire](#version-1-on-the-wire)
+is the format, byte for byte.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099).
 **Tested by:** [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md), which builds a minimal
 jar, measures it, and reports which of these requirements survive.
@@ -593,9 +593,9 @@ shows, and the labels spyc wrote. The token is never among it.
 
 ## Version 1 on the wire
 
-Frozen on 2026-11-12, and reopened the same day for three changes an external
-review found it needed ("The review" in the spike's report); the changes are
-made and tested, and it freezes again on the owner's word. The spike's
+Frozen on 2026-11-12, reopened the same day for three changes an external
+review found it needed ("The review" in the spike's report), and frozen again
+with them made and tested. The spike's
 `spyc-jar` speaks it (`spike/jar-stage-2` at `670f5b04`, a branch that never
 merges), and its `tests/wire_v1.rs` pins every frame and the blob below byte
 for byte. The production crate starts from these fixtures and that test.
@@ -938,7 +938,8 @@ Open unless marked decided:
   owner adopted this one). The attach and detach events for the program came
   with them, since the signal and size change they replace failed on macOS.
   Its other findings belong to production (`JAR_PRODUCTION_PLAN.md`
-  is revised for them).
+  is revised for them). Version 1 froze again with the changes, on the
+  owner's word, the same day.
 
 Smaller ones: the keyboard's idle gap (about a second is proposed); `spill`
 stays opt-in; R29, status for readers.

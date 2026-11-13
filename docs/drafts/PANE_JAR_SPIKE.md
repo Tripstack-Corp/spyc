@@ -2,9 +2,9 @@
 
 **Status:** done
 ([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)). The protocol
-froze on 2026-11-12 ("The freeze", below) and reopened the same day for an
-external review's findings ("The review"). Its report is the "Findings"
-section, stage by stage.
+froze on 2026-11-12 ("The freeze", below), reopened the same day for an
+external review's findings, and froze again with them built ("The review").
+Its report is the "Findings" section, stage by stage.
 **Requirements:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md). This spike builds a
 minimal jar and measures it; it reports when a measurement contradicts a
 verdict there, and never changes the verdict itself.
@@ -999,7 +999,8 @@ kinds are new: three minutes each, with a 5-second limit on any one input,
 16.2 million frames and 21.1 million blobs, no crash and none slow.
 
 The rest of the review is production's: the plan takes each finding into a
-slice.
+slice. **Version 1 froze again** on the owner's word, the same day, with the
+changes above.
 
 ## Sources
 
