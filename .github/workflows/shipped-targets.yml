@@ -1,26 +1,31 @@
-# Link spyc for every target release.yml ships, in the dev profile, on a PR
-# that can change how it links: the toolchain pin, Cargo.lock, the vendored
-# archives, a build script, the Makefile or release.yml itself.
-#
-# release.yml runs only on a tag, so a toolchain or dependency change that
+# Link spyc for every target release.yml ships, in the dev profile, on every
+# PR. release.yml runs only on a tag, so a toolchain or dependency change that
 # breaks a release link stays invisible until the release: rustc 1.100 broke
 # the aarch64-musl link under cargo-zigbuild before 0.23 (#1154) with every PR
 # check green. The musl jobs read the Zig and cargo-zigbuild versions out of
 # release.yml, so they link the way a release would.
+#
+# The macOS jobs also fail on a linker message. Of the linkers spyc ships
+# through, only Apple's `ld` has reported anything, the duplicate `_memset` of
+# #1129 among it; rust-lld and `zig cc` stayed silent. RUSTFLAGS force both
+# `linker_messages` and `linker_info` on, so no `allow` in Cargo.toml can hide
+# a message, and `scripts/linker-messages.py --deny` writes everything the
+# linker said to the job summary, then fails on a message that is neither
+# `linker_info` nor matched by an entry, with its issue, in
+# `.github/linker-exceptions.txt`; or on a link it parsed no output from.
+#
+# No rust-cache: the repo's Actions cache sits near its 10 GB limit, and four
+# more caches per PR would evict main's, which the required jobs restore.
 name: Shipped targets link
 
 on:
   pull_request:
-    paths:
-      - "rust-toolchain.toml"
-      - "Cargo.lock"
-      - "crates/spyc-vt-sys/vendor/**"
-      - "build.rs"
-      - "crates/spyc-vt-sys/build.rs"
-      - "Makefile"
-      - ".github/workflows/release.yml"
-      - ".github/workflows/shipped-targets.yml"
   workflow_dispatch:
+
+# A newer push to the same PR cancels the in-flight run.
+concurrency:
+  group: shipped-targets-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -35,11 +40,19 @@ jobs:
         target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
       - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
+      - name: Toolchain
+        run: rustc --version && ld -v 2>&1 | head -1 && xcrun --show-sdk-version
       - name: Link spyc
-        run: cargo build --locked --bin spyc --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: "--force-warn linker_messages --force-warn linker_info"
+        run: |
+          set -o pipefail
+          cargo build --locked --bin spyc --target ${{ matrix.target }} 2>&1 | tee build.log
+      - name: Linker messages
+        run: |
+          set -o pipefail
+          python3 scripts/linker-messages.py --deny .github/linker-exceptions.txt build.log \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
   musl:
     name: Link ${{ matrix.target }} (dev)
@@ -64,9 +77,6 @@ jobs:
       - uses: taiki-e/install-action@v2.90.2
         with:
           tool: cargo-zigbuild@${{ steps.pins.outputs.zigbuild }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
       - name: Link spyc
         run: |
           ulimit -n 8192
