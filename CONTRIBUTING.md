@@ -380,6 +380,37 @@ Invariants no linter can infer — like that action needing
 `include-hidden-files: true` — are pinned as guard tests in `src/lib.rs`
 instead.
 
+**A linker message fails the macOS link** (`.github/workflows/shipped-targets.yml`).
+On every PR, each macOS job links spyc with
+`--force-warn linker_messages --force-warn linker_info`, and
+`scripts/linker-messages.py --deny` lists everything the linker said in the
+job summary. It fails on a message rustc didn't file under `linker_info`
+unless an entry in `.github/linker-exceptions.txt` matches it, and on a link it
+parsed no linker output from. Apple's `ld` is the only linker in spyc's builds
+that has reported anything; on `main` it prints only informational output,
+which moves with the SDK and never fails the job. The lints are forced, so a
+`linker_messages = "allow"` in `Cargo.toml` hides nothing from the job; don't
+add one, and don't edit the job's `RUSTFLAGS`.
+
+The escape is an exceptions entry: a spyc issue number, then a regex searched
+in the message as the job summary prints it. An entry without an issue fails
+the job. The file starts empty and an entry is deleted when its issue closes.
+
+When a runner image update starts a message, the job fails on every PR at
+once, including ones that changed nothing about linking. The job's
+`Toolchain` step prints the `ld` and SDK versions. Open an issue quoting the
+message from the job summary and naming those versions, then add one entry
+for it, matching that message and no wider, in a PR of its own, so the
+other PRs can rebase onto it. If the job instead says the log format may have
+changed, rustc has changed how it reports linker output (a new note, say),
+and the parser in `scripts/linker-messages.py` needs updating, not an
+exception.
+
+A silent link is not a clean one either: the vendored archive displaced the C
+library's `memset` on Linux without a word from the linker, which is what the
+symbol checks in `scripts/test_vendored_archives.py` and
+`scripts/check-libsystem-binding.sh` are for.
+
 **Supply chain lives in `.github/workflows/audit.yml`**, not the PR gate: weekly
 plus `workflow_dispatch`, running the full `make deny` (advisories, bans,
 licenses, sources) against a freshly fetched RUSTSEC DB. It was taken off the PR

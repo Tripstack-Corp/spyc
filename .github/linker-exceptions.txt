@@ -1,0 +1,9 @@
+# Linker messages the macOS link jobs of shipped-targets.yml let through.
+#
+# One entry per line: a spyc issue number, then a Python regex searched in the
+# message's first line as the job summary prints it (paths and hashes
+# stripped). An entry without an issue number fails the job. Delete the entry
+# when its issue closes. CONTRIBUTING.md has the procedure.
+#
+# For example, the duplicate `memset` of #1129 would read:
+# 1129 ld: duplicate symbol '_memset'
