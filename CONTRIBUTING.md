@@ -387,6 +387,15 @@ The cost of that: a PR adding a banned or wrongly-licensed dependency isn't
 caught until the next scheduled run — so **dispatch `audit.yml` after merging a
 dependency change**, and before cutting a release.
 
+**New releases wait a week.** `.cargo/config.toml` sets a 7-day minimum publish
+age, so a local `cargo update` or `cargo add` passes over a release younger than
+that, and Dependabot's `cooldown` holds its bumps as long (security updates
+don't wait). A compromised release is usually yanked within days. To take a
+fresh release on purpose, `CARGO_REGISTRY_GLOBAL_MIN_PUBLISH_AGE=0 cargo update
+-p <crate> --precise <version>`. **A dependency no target uses fails `make
+lint`** (`[lints.cargo] unused_dependencies = "deny"`); it can't see
+`[dev-dependencies]`.
+
 **Never pipe the gate.** `make check 2>&1 | tail -20` reports the *pager's* exit status, so a failed gate reads as green — this shipped a broken `fmt-check` to CI once. A pipeline's status is its last command's in every shell, so no target can fix it: run `make check` unpiped, use `set -o pipefail`, or run **`make check-ci`**, which ends in `=== GATE: PASS ===` / `=== GATE: FAIL ===` so the verdict survives a tail even though the exit code does not.
 
 ## Cross-compilation
