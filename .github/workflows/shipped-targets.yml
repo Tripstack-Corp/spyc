@@ -1,0 +1,73 @@
+# Link spyc for every target release.yml ships, in the dev profile, on a PR
+# that can change how it links: the toolchain pin, Cargo.lock, the vendored
+# archives, a build script, the Makefile or release.yml itself.
+#
+# release.yml runs only on a tag, so a toolchain or dependency change that
+# breaks a release link stays invisible until the release: rustc 1.100 broke
+# the aarch64-musl link under cargo-zigbuild before 0.23 (#1154) with every PR
+# check green. The musl jobs read the Zig and cargo-zigbuild versions out of
+# release.yml, so they link the way a release would.
+name: Shipped targets link
+
+on:
+  pull_request:
+    paths:
+      - "rust-toolchain.toml"
+      - "Cargo.lock"
+      - "crates/spyc-vt-sys/vendor/**"
+      - "build.rs"
+      - "crates/spyc-vt-sys/build.rs"
+      - "Makefile"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/shipped-targets.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Link ${{ matrix.target }} (dev)
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Link spyc
+        run: cargo build --locked --bin spyc --target ${{ matrix.target }}
+
+  musl:
+    name: Link ${{ matrix.target }} (dev)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read release.yml's Zig and cargo-zigbuild versions
+        id: pins
+        run: |
+          zig=$(grep -A2 'mlugg/setup-zig' .github/workflows/release.yml | sed -n 's/^ *version: *//p' | head -1)
+          zigbuild=$(grep -o 'cargo-zigbuild@[0-9][0-9.]*' .github/workflows/release.yml | head -1 | cut -d@ -f2)
+          echo "zig=${zig:?no Zig version in release.yml}" >> "$GITHUB_OUTPUT"
+          echo "zigbuild=${zigbuild:?no cargo-zigbuild@version in release.yml}" >> "$GITHUB_OUTPUT"
+          echo "Zig $zig, cargo-zigbuild $zigbuild"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.pins.outputs.zig }}
+      - uses: taiki-e/install-action@v2.90.2
+        with:
+          tool: cargo-zigbuild@${{ steps.pins.outputs.zigbuild }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Link spyc
+        run: |
+          ulimit -n 8192
+          cargo zigbuild --locked --bin spyc --target ${{ matrix.target }}
