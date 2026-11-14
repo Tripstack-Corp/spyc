@@ -622,6 +622,10 @@ mod child_queries {
                 b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
             ),
             ("glyph protocol: Ghostty-only", b"\x1b_25a1;s\x1b\\"),
+            (
+                "cell borders: ratatui's cells carry none",
+                b"\x1bP1+bcell-border;q\x1b\\",
+            ),
             ("DA3: Ghostty doesn't answer it either", b"\x1b[=c"),
             ("ENQ answerback", b"\x05"),
             ("size in cells", b"\x1b[18t"),

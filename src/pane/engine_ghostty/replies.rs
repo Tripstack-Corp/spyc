@@ -203,6 +203,7 @@ mod tests {
             b"\x1bP1+r4d73=\x1b\\",
             b"\x1bP0+r\x1b\\",
             b"\x1bP!|00000000\x1b\\",
+            b"\x1bP1+bcell-border;ok;1;pen,rect,half,center,palette\x1b\\",
             b"\x1b]4;1;rgb:cc/00/00\x1b\\",
             b"\x1b]11;rgb:00/00/00\x1b\\",
             b"\x1b]l title\x1b\\",
