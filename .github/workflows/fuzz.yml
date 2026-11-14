@@ -38,8 +38,10 @@ permissions:
 env:
   # Pinned, not floating. A moving nightly turns an unrelated compiler
   # regression into a "fuzz failure" on a Monday morning, and the resulting
-  # noise is how scheduled jobs get muted. Bump deliberately.
-  NIGHTLY: nightly-2026-08-01
+  # noise is how scheduled jobs get muted. Bump deliberately, and with every
+  # `rust-version` bump: a nightly older than it fails every target before it
+  # builds ("rustc 1.99.0-nightly is not supported by the following packages").
+  NIGHTLY: nightly-2026-11-10
 
 jobs:
   fuzz:
