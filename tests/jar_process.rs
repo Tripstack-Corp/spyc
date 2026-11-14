@@ -1743,10 +1743,17 @@ fn a_window_must_fit_inside_the_ring() {
 
     let mut jar = Jar::start(
         &["--ring", "65536", "--window", "32768"],
-        &sh("head -c 1000000 /dev/zero | tr '\\000' a; echo; echo END"),
+        &sh("read go; head -c 1000000 /dev/zero | tr '\\000' a; echo; echo END"),
     );
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    // The program prints once its owner is there: with none, the jar drops
+    // the oldest bytes by design (R12).
+    owner
+        .send(&Msg::Input {
+            bytes: b"go\n".to_vec(),
+        })
+        .expect("go");
     // A live owner, slow to read: every byte arrives, contiguous.
     let mut seen = Seen::default();
     let until = Instant::now() + WAIT;
