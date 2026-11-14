@@ -592,6 +592,20 @@ mod child_queries {
         );
     }
 
+    /// A child asks for cell borders (a proposed protocol: borders drawn on
+    /// cell edges) with the query followed by DA1, and reads "no support" from
+    /// a DA1 reply with nothing before it. spyc's pane draws through ratatui,
+    /// whose cells carry no borders: a border reply would have the child draw
+    /// lines that never show, and stop drawing the `─` rules agent chrome is
+    /// found by.
+    #[test]
+    fn a_cell_border_query_reads_as_unsupported() {
+        assert_eq!(
+            replies_to(b"\x1bP1+bcell-border;q\x1b\\\x1b[c"),
+            b"\x1b[?62;22c"
+        );
+    }
+
     #[test]
     fn replies_are_taken_once() {
         let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
