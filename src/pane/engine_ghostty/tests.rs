@@ -592,20 +592,6 @@ mod child_queries {
         );
     }
 
-    /// A child asks for cell borders (a proposed protocol: borders drawn on
-    /// cell edges) with the query followed by DA1, and reads "no support" from
-    /// a DA1 reply with nothing before it. spyc's pane draws through ratatui,
-    /// whose cells carry no borders: a border reply would have the child draw
-    /// lines that never show, and stop drawing the `─` rules agent chrome is
-    /// found by.
-    #[test]
-    fn a_cell_border_query_reads_as_unsupported() {
-        assert_eq!(
-            replies_to(b"\x1bP1+bcell-border;q\x1b\\\x1b[c"),
-            b"\x1b[?62;22c"
-        );
-    }
-
     #[test]
     fn replies_are_taken_once() {
         let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
@@ -636,6 +622,10 @@ mod child_queries {
                 b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\",
             ),
             ("glyph protocol: Ghostty-only", b"\x1b_25a1;s\x1b\\"),
+            (
+                "cell borders: ratatui's cells carry none",
+                b"\x1bP1+bcell-border;q\x1b\\",
+            ),
             ("DA3: Ghostty doesn't answer it either", b"\x1b[=c"),
             ("ENQ answerback", b"\x05"),
             ("size in cells", b"\x1b[18t"),
