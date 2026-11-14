@@ -165,6 +165,17 @@ fn parse(mut args: impl Iterator<Item = String>) -> anyhow::Result<Config> {
     if cfg.socket.as_os_str().is_empty() || cfg.argv.is_empty() {
         bail!("usage: spyc-jar --socket PATH [options] -- PROGRAM [ARGS…]");
     }
+    // R11: a live owner may be a window plus one read behind, and all of it
+    // must stay in the ring, or the log drops bytes the owner was never sent
+    // (review finding 18).
+    if cfg.window.saturating_add(jar::PTY_READ as u64) > cfg.ring_cap as u64 {
+        bail!(
+            "a window of {} bytes needs a ring of at least {}, not {}",
+            cfg.window,
+            cfg.window.saturating_add(jar::PTY_READ as u64),
+            cfg.ring_cap
+        );
+    }
     Ok(cfg)
 }
 

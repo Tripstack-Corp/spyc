@@ -288,7 +288,7 @@ fn a_new_owner_replays_from_what_the_last_one_acknowledged() {
 #[test]
 fn an_ownerless_jar_drops_the_oldest_bytes_and_says_which() {
     let mut jar = Jar::start(
-        &["--ring", "65536"],
+        &["--ring", "65536", "--window", "32768"],
         &sh("head -c 1000000 /dev/zero | tr '\\000' b; echo; echo END; sleep 5"),
     );
     // Until the program has printed it all, as the jar describes its log:
@@ -1484,7 +1484,9 @@ fn cpu_seconds(pid: u32) -> f64 {
     let clock = text.trim().rsplit('-').next().unwrap_or_default();
     clock
         .split(':')
-        .fold(0.0, |total, part| total * 60.0 + part.parse::<f64>().unwrap_or(0.0))
+        .fold(0.0, |total, part| {
+            f64::mul_add(total, 60.0, part.parse::<f64>().unwrap_or(0.0))
+        })
 }
 
 /// Finding 4 (R21): an owner gone silent while its program prints loses the
@@ -1692,10 +1694,9 @@ fn a_window_must_fit_inside_the_ring() {
         status = refused.try_wait().expect("try_wait");
         std::thread::sleep(Duration::from_millis(20));
     }
-    if status.is_none() {
-        let _ = refused.kill();
-        let _ = refused.wait();
-    }
+    // A jar that started after all is ended here, not left behind.
+    let _ = refused.kill();
+    let _ = refused.wait();
     assert!(
         status.is_some_and(|s| !s.success()),
         "a 1 MiB window in a 64 KiB ring is refused: {status:?}"
