@@ -1,0 +1,1382 @@
+//! The jar binary, driven as spyc would drive it: one real program on a PTY,
+//! one or two connections, nothing of spyc's.
+
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+use spyc_jar::client::Client;
+use spyc_jar::proto::{Msg, Role, SNAPSHOT_VT, Snapshot};
+
+const WAIT: Duration = Duration::from_secs(10);
+const TOKEN: &[u8] = b"test-token-0123456789";
+
+struct Jar {
+    dir: tempfile::TempDir,
+    socket: PathBuf,
+    process: Child,
+    program: Option<u32>,
+}
+
+impl Jar {
+    /// Start a jar for `argv` with `extra` options. The socket lives under
+    /// `/tmp`, because macOS caps a socket's path at about 104 bytes.
+    fn start(extra: &[&str], argv: &[&str]) -> Self {
+        let dir = tempfile::Builder::new()
+            .prefix("jar")
+            .tempdir_in("/tmp")
+            .expect("tempdir");
+        let socket = dir.path().join("j.sock");
+        let process = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
+            .args(["--wire", "1"])
+            .arg("--socket")
+            .arg(&socket)
+            .args(extra)
+            .arg("--")
+            .args(argv)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn the jar");
+        let mut process = process;
+        // R26: the token goes over stdin, which then closes.
+        process
+            .stdin
+            .take()
+            .expect("the jar's stdin")
+            .write_all(TOKEN)
+            .expect("hand the jar its token");
+        Self {
+            dir,
+            socket,
+            process,
+            program: None,
+        }
+    }
+
+    fn connect(&mut self, role: Role) -> Client {
+        let (client, welcome) = Client::connect(&self.socket, role, WAIT, TOKEN).expect("connect");
+        if let Msg::Welcome { child_pid, .. } = welcome {
+            self.program = Some(child_pid);
+        }
+        client
+    }
+
+    fn welcome(&mut self, role: Role) -> (Client, Msg) {
+        let (client, welcome) = Client::connect(&self.socket, role, WAIT, TOKEN).expect("connect");
+        if let Msg::Welcome { child_pid, .. } = welcome {
+            self.program = Some(child_pid);
+        }
+        (client, welcome)
+    }
+
+    fn ended_within(&mut self, wait: Duration) -> bool {
+        let until = Instant::now() + wait;
+        while Instant::now() < until {
+            if self.process.try_wait().ok().flatten().is_some() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+}
+
+impl Drop for Jar {
+    fn drop(&mut self) {
+        if let Some(pid) = self.program.and_then(|p| i32::try_from(p).ok())
+            && let Some(pid) = rustix::process::Pid::from_raw(pid)
+        {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+        }
+        let _ = self.process.kill();
+        let _ = self.process.wait();
+    }
+}
+
+/// Poll until `done` holds, or fail naming what never happened. A test waits
+/// for the state it needs, never for a fixed time.
+fn eventually(what: &str, mut done: impl FnMut() -> bool) {
+    let until = Instant::now() + WAIT;
+    while !done() {
+        assert!(Instant::now() < until, "timed out waiting for {what}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// One field of the jar's description, asked as a lookup.
+fn described(jar: &Jar, key: &str) -> String {
+    field(
+        &spyc_jar::client::describe(&jar.socket).expect("describe"),
+        key,
+    )
+}
+
+/// What a client saw: output bytes in order, checked contiguous, and the
+/// other frames.
+#[derive(Default)]
+struct Seen {
+    text: Vec<u8>,
+    first_offset: Option<u64>,
+    next_offset: Option<u64>,
+    frames: Vec<Msg>,
+}
+
+impl Seen {
+    fn take(&mut self, msg: Msg) {
+        if let Msg::Output { offset, bytes } = &msg {
+            if let Some(next) = self.next_offset {
+                assert_eq!(*offset, next, "output arrives contiguous");
+            }
+            self.first_offset.get_or_insert(*offset);
+            self.next_offset = Some(offset + bytes.len() as u64);
+            self.text.extend(bytes);
+        } else {
+            self.frames.push(msg);
+        }
+    }
+
+    fn contains(&self, needle: &str) -> bool {
+        String::from_utf8_lossy(&self.text).contains(needle)
+    }
+}
+
+/// Read until `done` holds, acknowledging output as it arrives when `ack`.
+fn read_until(client: &mut Client, ack: bool, done: impl Fn(&Seen) -> bool) -> Seen {
+    let mut seen = Seen::default();
+    let until = Instant::now() + WAIT;
+    while !done(&seen) {
+        assert!(
+            Instant::now() < until,
+            "timed out; saw {} bytes, frames {:?}",
+            seen.text.len(),
+            seen.frames
+        );
+        if let Some(msg) = client.recv(Duration::from_millis(200)).expect("recv") {
+            seen.take(msg);
+            if ack && let Some(next) = seen.next_offset {
+                client.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+    }
+    seen
+}
+
+fn sh(script: &str) -> Vec<&str> {
+    vec!["/bin/sh", "-c", script]
+}
+
+#[test]
+fn input_reaches_the_program_and_its_output_comes_back() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    owner
+        .send(&Msg::Input {
+            bytes: b"hello jar\n".to_vec(),
+        })
+        .unwrap();
+    let seen = read_until(&mut owner, true, |s| s.contains("hello jar\r\nhello jar"));
+    assert_eq!(seen.first_offset, Some(0));
+}
+
+/// R11: a live owner that stops acknowledging holds the program a window
+/// behind, and nothing is lost when it catches up.
+#[test]
+fn a_live_owner_paces_the_program_and_loses_nothing() {
+    let window = 65_536u64;
+    let mut jar = Jar::start(
+        &["--window", &window.to_string()],
+        &sh("head -c 2000000 /dev/zero | tr '\\000' a; echo; echo END"),
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+
+    let mut stalled = Seen::default();
+    let until = Instant::now() + Duration::from_millis(800);
+    while Instant::now() < until {
+        if let Some(m) = owner.recv(Duration::from_millis(50)).unwrap() {
+            stalled.take(m);
+        }
+    }
+    // What the program printed before the owner connected is sent whatever
+    // the window; the window stops the program, so with no acks delivery
+    // stops growing.
+    let mut more = Seen::default();
+    let until = Instant::now() + Duration::from_millis(800);
+    while Instant::now() < until {
+        if let Some(m) = owner.recv(Duration::from_millis(50)).unwrap() {
+            more.take(m);
+        }
+    }
+    assert!(
+        more.text.is_empty(),
+        "with no acks the program kept printing: {} more bytes",
+        more.text.len()
+    );
+    let got = stalled.text.len() as u64;
+    assert!(got < 2_000_000, "the program was paused before it finished");
+
+    owner.send(&Msg::Ack { offset: got }).unwrap();
+    let mut rest = read_until(&mut owner, true, |s| s.contains("END"));
+    assert_eq!(
+        rest.first_offset,
+        Some(got),
+        "picks up where the stall left off"
+    );
+    rest.text.splice(0..0, stalled.text);
+    let a_count: usize = rest.text.iter().map(|b| usize::from(*b == b'a')).sum();
+    assert_eq!(a_count, 2_000_000, "every byte arrived once");
+    assert!(
+        rest.frames.iter().all(|f| !matches!(f, Msg::Gap { .. })),
+        "{:?}",
+        rest.frames
+    );
+}
+
+/// The crash case: an owner vanishes mid-stream, the program runs on, and the
+/// next owner replays from what the first one acknowledged.
+#[test]
+fn a_new_owner_replays_from_what_the_last_one_acknowledged() {
+    let mut jar = Jar::start(
+        &["--ring", "8388608"],
+        &sh("i=0; while [ $i -lt 20000 ]; do echo line$i; i=$((i+1)); done; echo END"),
+    );
+    let mut first = jar.connect(Role::Owner);
+    first.send(&Msg::Replay { from: 0 }).unwrap();
+    let early = read_until(&mut first, true, |s| s.text.len() > 20_000);
+    let acked = early.next_offset.unwrap();
+    first.drop_connection();
+    eventually("the first owner's lease to end", || {
+        described(&jar, "owner") != "connected"
+    });
+
+    let mut second = jar.connect(Role::Owner);
+    second.send(&Msg::Replay { from: acked }).unwrap();
+    let rest = read_until(&mut second, true, |s| s.contains("END"));
+    assert_eq!(rest.first_offset, Some(acked), "no byte lost or repeated");
+    assert!(rest.contains("line19999"));
+    assert!(
+        rest.frames.iter().all(|f| !matches!(f, Msg::Gap { .. })),
+        "{:?}",
+        rest.frames
+    );
+}
+
+/// R12/R12a: with no owner, a full log drops its oldest bytes, and a later
+/// replay is told which.
+#[test]
+fn an_ownerless_jar_drops_the_oldest_bytes_and_says_which() {
+    let mut jar = Jar::start(
+        &["--ring", "65536"],
+        &sh("head -c 1000000 /dev/zero | tr '\\000' b; echo; echo END; sleep 5"),
+    );
+    // Until the program has printed it all, as the jar describes its log:
+    // the same twice running, past the first byte.
+    let log = || {
+        field(
+            &spyc_jar::client::describe(&jar.socket).expect("describe"),
+            "log",
+        )
+    };
+    let until = Instant::now() + WAIT;
+    let mut last = String::new();
+    loop {
+        std::thread::sleep(Duration::from_millis(200));
+        let now = log();
+        if now == last && !now.ends_with("from 0") {
+            break;
+        }
+        assert!(Instant::now() < until, "the log never settled: {now}");
+        last = now;
+    }
+    let (mut owner, welcome) = jar.welcome(Role::Owner);
+    let Msg::Welcome { base, head, .. } = welcome else {
+        unreachable!()
+    };
+    assert!(
+        base > 0,
+        "the oldest bytes were dropped: base {base}, head {head}"
+    );
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let seen = read_until(&mut owner, true, |s| s.contains("END"));
+    assert_eq!(seen.frames.first(), Some(&Msg::Gap { from: 0, to: base }));
+    assert_eq!(seen.first_offset, Some(base));
+}
+
+#[test]
+fn the_exit_is_reported_and_collecting_it_ends_the_jar() {
+    let mut jar = Jar::start(&[], &sh("echo bye; exit 7"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let seen = read_until(&mut owner, true, |s| {
+        s.frames.iter().any(|f| matches!(f, Msg::Exited { .. }))
+    });
+    assert!(seen.contains("bye"), "output before the exit");
+    assert!(
+        seen.frames.contains(&Msg::Exited {
+            code: 7,
+            signaled: false
+        }),
+        "{:?}",
+        seen.frames
+    );
+    owner.send(&Msg::AckExit).unwrap();
+    assert!(
+        jar.ended_within(Duration::from_secs(3)),
+        "the jar ends once its exit is collected"
+    );
+    assert!(!jar.socket.exists(), "and removes its socket");
+}
+
+/// R9a: a resize is logged at the offset it took effect.
+#[test]
+fn a_resize_is_logged_where_it_happened() {
+    let mut jar = Jar::start(&[], &sh("read go; stty size; sleep 1"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    owner
+        .send(&Msg::Resize {
+            rows: 41,
+            cols: 101,
+            px_w: 0,
+            px_h: 0,
+        })
+        .unwrap();
+    owner
+        .send(&Msg::Input {
+            bytes: b"\n".to_vec(),
+        })
+        .unwrap();
+    let seen = read_until(&mut owner, true, |s| s.contains("41 101"));
+    assert!(
+        seen.frames.iter().any(|f| matches!(
+            f,
+            Msg::Resized {
+                rows: 41,
+                cols: 101,
+                ..
+            }
+        )),
+        "{:?}",
+        seen.frames
+    );
+}
+
+#[test]
+fn a_stored_snapshot_is_handed_to_the_next_client() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let owner = jar.connect(Role::Owner);
+    let snap = Snapshot {
+        format: SNAPSHOT_VT,
+        offset: 0,
+        rows: 24,
+        cols: 80,
+        blob: b"\x1b[2Jscreen".to_vec(),
+    };
+    owner.send(&Msg::StoreSnapshot(snap.clone())).unwrap();
+    owner.drop_connection();
+    eventually("the snapshot to be stored", || {
+        !described(&jar, "snapshots").is_empty()
+    });
+    let mut next = jar.connect(Role::Reader);
+    next.send(&Msg::FetchSnapshot).unwrap();
+    let reply = next.recv(WAIT).unwrap();
+    assert_eq!(reply, Some(Msg::Snapshot(Some(snap))));
+}
+
+/// R21: an owner that goes silent past the deadline loses its lease, even
+/// though its socket is still open, and another can take the jar.
+#[test]
+fn a_silent_owner_loses_the_jar() {
+    let mut jar = Jar::start(&["--deadline-ms", "300"], &["/bin/cat"]);
+    let mut silent = jar.connect(Role::Owner);
+    // It sends nothing, so the read ends only when the jar closes it.
+    let after = silent.recv(WAIT);
+    assert!(
+        !matches!(after, Ok(None)),
+        "the jar closed the silent owner's connection: {after:?}"
+    );
+    let _next = jar.connect(Role::Owner);
+}
+
+#[test]
+fn one_owner_at_a_time_and_a_reader_cannot_type() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let _owner = jar.connect(Role::Owner);
+    let second = Client::connect(&jar.socket, Role::Owner, WAIT, TOKEN);
+    assert!(
+        second.is_err(),
+        "a second owner is refused while the first is live"
+    );
+
+    let mut reader = jar.connect(Role::Reader);
+    reader
+        .send(&Msg::Input {
+            bytes: b"x".to_vec(),
+        })
+        .unwrap();
+    let reply = reader.recv(WAIT).unwrap();
+    assert!(matches!(reply, Some(Msg::Refused { .. })), "{reply:?}");
+}
+
+#[test]
+fn ping_is_answered() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Ping { n: 41 }).unwrap();
+    assert_eq!(owner.recv(WAIT).unwrap(), Some(Msg::Pong { n: 41 }));
+}
+
+/// A `hello` names the highest version its client speaks, and the welcome the
+/// one the connection speaks: a newer client, capabilities after its token,
+/// learns from the welcome that this jar is version 1, with no refusal and
+/// no second try. Version 0 is no version.
+#[test]
+fn a_newer_client_is_welcomed_at_version_1() {
+    use spyc_jar::proto;
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    drop(jar.connect(Role::Reader));
+    let hello = |version: u16| {
+        let mut p = version.to_be_bytes().to_vec();
+        p.push(Role::Owner as u8);
+        p.extend(u16::try_from(TOKEN.len()).unwrap().to_be_bytes());
+        p.extend(TOKEN);
+        p.extend(b"\x00\x02caps from a later version");
+        let mut f = u32::try_from(p.len() + 2).unwrap().to_be_bytes().to_vec();
+        f.extend([1, proto::CRITICAL]);
+        f.extend(p);
+        f
+    };
+    let mut s = std::os::unix::net::UnixStream::connect(&jar.socket).unwrap();
+    s.set_read_timeout(Some(WAIT)).unwrap();
+    s.write_all(&hello(2)).unwrap();
+    let welcome = proto::read_msg(&mut s).unwrap();
+    assert!(
+        matches!(welcome, Some(Msg::Welcome { version: 1, .. })),
+        "{welcome:?}"
+    );
+    // It owns the jar: the owner's frames come back to it.
+    proto::write_msg(&mut s, &Msg::Ping { n: 9 }).unwrap();
+    while proto::read_msg(&mut s).unwrap() != Some(Msg::Pong { n: 9 }) {}
+    drop(s);
+
+    let mut zero = std::os::unix::net::UnixStream::connect(&jar.socket).unwrap();
+    zero.set_read_timeout(Some(WAIT)).unwrap();
+    zero.write_all(&hello(0)).unwrap();
+    assert!(matches!(
+        proto::read_msg(&mut zero).unwrap(),
+        Some(Msg::Refused { .. })
+    ));
+}
+
+/// R4: the jar reports the PTY's foreground process group, which only it can
+/// read: the shell's at first, then a job's while the shell runs one.
+#[test]
+fn the_foreground_process_group_is_reported_as_it_changes() {
+    let mut jar = Jar::start(&[], &["/bin/sh", "-i"]);
+    let (mut owner, welcome) = jar.welcome(Role::Owner);
+    let Msg::Welcome { child_pid, .. } = welcome else {
+        unreachable!()
+    };
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let shell = read_until(&mut owner, true, |s| {
+        s.frames.contains(&Msg::Foreground { pgid: child_pid })
+    });
+    assert!(
+        !shell.frames.is_empty(),
+        "the shell's own group is reported"
+    );
+    owner
+        .send(&Msg::Input {
+            bytes: b"sleep 3\n".to_vec(),
+        })
+        .unwrap();
+    let job = read_until(&mut owner, true, |s| {
+        s.frames
+            .iter()
+            .any(|f| matches!(f, Msg::Foreground { pgid } if *pgid != child_pid))
+    });
+    assert!(!job.frames.is_empty(), "a job's group is reported");
+}
+
+// Stage 3 (R33): the jar replaces its own binary under a running program.
+
+/// A program that counts forever and echoes back each line it's sent, so a
+/// lost or repeated byte shows as a broken count and input as `got=`.
+fn counter() -> Vec<&'static str> {
+    vec![
+        "/bin/sh",
+        "-c",
+        "(i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.005; done) & while read l; do echo got=$l; done",
+    ]
+}
+
+/// The counts seen, which must run 1, 2, 3… with nothing missing or doubled.
+fn counts(seen: &Seen) -> Vec<u64> {
+    String::from_utf8_lossy(&seen.text)
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("n=")?.parse().ok())
+        .collect()
+}
+
+fn assert_unbroken(seen: &Seen) {
+    let c = counts(seen);
+    assert!(!c.is_empty(), "the program printed counts");
+    for w in c.windows(2) {
+        assert_eq!(w[1], w[0] + 1, "the count runs on unbroken");
+    }
+}
+
+/// A copy of the jar's binary under another name, so the upgrade can be seen
+/// to have run it.
+fn next_binary(dir: &std::path::Path) -> PathBuf {
+    let next = dir.join("jar-next");
+    std::fs::copy(env!("CARGO_BIN_EXE_spyc-jar"), &next).expect("copy the jar binary");
+    next
+}
+
+#[test]
+fn an_upgrade_keeps_the_program_its_pty_and_every_connection() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    let mut reader = jar.connect(Role::Reader);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    reader.send(&Msg::Replay { from: 0 }).expect("replay");
+    let next = next_binary(jar.dir.path());
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 30)
+    });
+    let before = jar.process.id();
+
+    owner
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .expect("upgrade");
+    let until = Instant::now() + WAIT;
+    while !seen
+        .frames
+        .iter()
+        .any(|f| matches!(f, Msg::Upgraded { .. }))
+    {
+        assert!(
+            Instant::now() < until,
+            "no Upgraded; frames {:?}",
+            seen.frames
+        );
+        if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+            seen.take(m);
+            if let Some(next) = seen.next_offset {
+                owner.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+    }
+    let build = seen.frames.iter().find_map(|f| match f {
+        Msg::Upgraded { build } => Some(build.clone()),
+        _ => None,
+    });
+    assert!(
+        build.is_some_and(|b| b.ends_with("jar-next")),
+        "the new binary runs"
+    );
+    assert!(
+        jar.process.try_wait().expect("try_wait").is_none(),
+        "the jar's process lives on"
+    );
+    assert_eq!(jar.process.id(), before);
+
+    // The same program, counting on from where it was, still reading input.
+    owner
+        .send(&Msg::Input {
+            bytes: b"after\n".to_vec(),
+        })
+        .expect("input");
+    let at = counts(&seen).last().copied().unwrap_or(0);
+    loop {
+        assert!(
+            Instant::now() < until + WAIT,
+            "the program went quiet: last count {:?}, got: {}, tail {:?}, frames {:?}",
+            counts(&seen).last(),
+            seen.contains("got=after"),
+            String::from_utf8_lossy(&seen.text[seen.text.len().saturating_sub(120)..]),
+            seen.frames
+        );
+        if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+            seen.take(m);
+            if let Some(next) = seen.next_offset {
+                owner.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+        if seen.contains("got=after") && counts(&seen).last().is_some_and(|n| *n >= at + 30) {
+            break;
+        }
+    }
+    assert_unbroken(&seen);
+
+    // The reader's connection crossed too, and the listener takes new ones.
+    let r = read_until(&mut reader, false, |s| {
+        s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. }))
+    });
+    assert_eq!(r.first_offset, Some(0), "the reader replays from the start");
+    let (_late, welcome) = jar.welcome(Role::Reader);
+    assert!(matches!(welcome, Msg::Welcome { .. }));
+
+    // A resize after the upgrade reaches the PTY.
+    owner
+        .send(&Msg::Resize {
+            rows: 33,
+            cols: 99,
+            px_w: 0,
+            px_h: 0,
+        })
+        .expect("resize");
+    let s = read_until(&mut owner, true, |s| {
+        s.frames.iter().any(|f| {
+            matches!(
+                f,
+                Msg::Resized {
+                    rows: 33,
+                    cols: 99,
+                    ..
+                }
+            )
+        })
+    });
+    assert!(!s.frames.is_empty(), "the resize is in the log");
+}
+
+#[test]
+fn an_upgrade_the_new_binary_refuses_leaves_the_old_jar_running() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 10)
+    });
+    for binary in ["/usr/bin/false", "/nonexistent/spyc-jar"] {
+        owner
+            .send(&Msg::Upgrade {
+                binary: binary.into(),
+            })
+            .expect("upgrade");
+        let until = Instant::now() + WAIT;
+        loop {
+            assert!(Instant::now() < until, "no refusal for {binary}");
+            if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+                if let Msg::Refused { why, .. } = &m {
+                    assert!(why.contains("upgrade refused"), "{why}");
+                    break;
+                }
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    owner.send(&Msg::Ack { offset: next }).expect("ack");
+                }
+            }
+        }
+    }
+    let at = counts(&seen).last().copied().unwrap_or(0);
+    let mut more = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= at + 20)
+    });
+    assert!(
+        !seen
+            .frames
+            .iter()
+            .chain(&more.frames)
+            .any(|f| matches!(f, Msg::Upgraded { .. }))
+    );
+    more.text.splice(0..0, seen.text.clone());
+    assert_unbroken(&more);
+}
+
+#[test]
+fn a_jar_upgrades_again_after_an_upgrade() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let next = next_binary(jar.dir.path());
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 5)
+    });
+    for _ in 0..3 {
+        let upgrades = |s: &Seen| {
+            s.frames
+                .iter()
+                .filter(|f| matches!(f, Msg::Upgraded { .. }))
+                .count()
+        };
+        let had = upgrades(&seen);
+        owner
+            .send(&Msg::Upgrade {
+                binary: next.display().to_string(),
+            })
+            .expect("upgrade");
+        let until = Instant::now() + WAIT;
+        while upgrades(&seen) == had {
+            assert!(
+                Instant::now() < until,
+                "no Upgraded; frames {:?}",
+                seen.frames
+            );
+            if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    owner.send(&Msg::Ack { offset: next }).expect("ack");
+                }
+            }
+        }
+    }
+    let at = counts(&seen).last().copied().unwrap_or(0);
+    let more = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= at + 10)
+    });
+    seen.text.extend(more.text);
+    assert_unbroken(&seen);
+}
+
+#[test]
+fn an_upgrade_survives_unix_sockets_closing_elsewhere() {
+    // On macOS any unix socket closing runs the collector that flushes a
+    // socket whose every reference is in flight, as a jar's connections are
+    // across its `exec`. Without the holder, every upgrade here cut them.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let churn = {
+        let stop = std::sync::Arc::clone(&stop);
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = std::os::unix::net::UnixStream::pair();
+            }
+        })
+    };
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    let mut reader = jar.connect(Role::Reader);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let next = next_binary(jar.dir.path());
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 5)
+    });
+    for round in 1..=3 {
+        owner
+            .send(&Msg::Upgrade {
+                binary: next.display().to_string(),
+            })
+            .expect("upgrade");
+        let more = read_until(&mut owner, true, |s| {
+            s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. }))
+        });
+        seen.text.extend(more.text);
+        let at = counts(&seen).last().copied().unwrap_or(0);
+        let more = read_until(&mut owner, true, |s| {
+            counts(s).last().is_some_and(|n| *n >= at + 5)
+        });
+        seen.text.extend(more.text);
+        reader.send(&Msg::Ping { n: round }).expect("ping");
+        assert!(
+            matches!(recv_matching(&mut reader, |m| matches!(m, Msg::Pong { .. })), Msg::Pong { n } if n == round)
+        );
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _ = churn.join();
+    assert_unbroken(&seen);
+}
+
+// Stage 4: how a jar ends (R32a), and how it describes itself (R31).
+
+fn field(fields: &[(String, String)], key: &str) -> String {
+    fields
+        .iter()
+        .find(|(k, _)| k == key)
+        .map_or_else(String::new, |(_, v)| v.clone())
+}
+
+#[test]
+fn a_finite_linger_ends_the_program_once_its_owner_has_gone() {
+    for (program, why) in [
+        ("sleep 1000", "a program that ends on a hangup"),
+        (
+            "trap '' HUP; while :; do sleep 1; done",
+            "a program that ignores it",
+        ),
+    ] {
+        let mut jar = Jar::start(&["--linger-ownerless-ms", "300"], &sh(program));
+        let owner = jar.connect(Role::Owner);
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(
+            jar.process.try_wait().expect("try_wait").is_none(),
+            "{why}: alive while owned"
+        );
+        owner.drop_connection();
+        assert!(
+            jar.ended_within(Duration::from_secs(6)),
+            "{why}: the jar ended after its linger"
+        );
+        let pid = jar
+            .program
+            .and_then(|p| i32::try_from(p).ok())
+            .and_then(rustix::process::Pid::from_raw);
+        assert!(
+            pid.is_some_and(|p| rustix::process::test_kill_process(p).is_err()),
+            "{why}: the program is gone too"
+        );
+    }
+}
+
+#[test]
+fn without_a_linger_the_program_waits_for_an_owner() {
+    let mut jar = Jar::start(&[], &sh("sleep 1000"));
+    jar.connect(Role::Owner).drop_connection();
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        jar.process.try_wait().expect("try_wait").is_none(),
+        "the jar waits"
+    );
+    let (_again, welcome) = jar.welcome(Role::Owner);
+    assert!(
+        matches!(welcome, Msg::Welcome { .. }),
+        "and a new owner gets it"
+    );
+}
+
+#[test]
+fn a_jar_describes_itself_and_keeps_its_identity_across_an_upgrade() {
+    let mut jar = Jar::start(&["--linger-ownerless-ms", "60000"], &sh("sleep 1000"));
+    let _owner = jar.connect(Role::Owner);
+    let before = spyc_jar::client::describe(&jar.socket).expect("describe");
+    assert_eq!(
+        field(&before, "program_pid"),
+        jar.program.expect("pid").to_string()
+    );
+    assert_eq!(field(&before, "linger"), "60000 ms");
+    assert_eq!(field(&before, "overflow"), "drop");
+    assert_eq!(field(&before, "owner"), "connected");
+    assert_eq!(field(&before, "pid"), jar.process.id().to_string());
+
+    let next = next_binary(jar.dir.path());
+    let (mut asker, _) = Client::connect(&jar.socket, Role::Reader, WAIT, TOKEN).expect("connect");
+    asker
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .expect("upgrade");
+    read_until(&mut asker, false, |s| {
+        s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. }))
+    });
+    let after = spyc_jar::client::describe(&jar.socket).expect("describe");
+    for key in ["instance", "created", "pid", "program_pid", "linger"] {
+        assert_eq!(
+            field(&before, key),
+            field(&after, key),
+            "{key} survives the upgrade"
+        );
+    }
+    assert!(field(&after, "jar").ends_with("jar-next"));
+}
+
+// Stage 6: a jar handed on (R22), where its owner's MCP socket is (R18,
+// R30a), and the token every role but a lookup presents (R26).
+
+#[test]
+fn a_released_jar_opens_only_to_its_new_token() {
+    let mut jar = Jar::start(&[], &sh("sleep 1000"));
+    let mut first = jar.connect(Role::Owner);
+    let mut reader = jar.connect(Role::Reader);
+    first
+        .send(&Msg::SetInfo {
+            key: "owner_mcp".into(),
+            value: "/tmp/spyc/a.sock".into(),
+        })
+        .expect("set info");
+    eventually("the owner's MCP socket to be stored", || {
+        described(&jar, "owner_mcp") == "/tmp/spyc/a.sock"
+    });
+
+    // The release, then the Kill a closing tab sends, on the same connection.
+    first
+        .send(&Msg::Release {
+            token: b"successor-token-0001".to_vec(),
+        })
+        .expect("release");
+    let _ = first.send(&Msg::Signal {
+        signal: spyc_jar::proto::JarSignal::Kill as i32,
+    });
+    // The jar ends the connection at the release: past this, the Kill can
+    // never be read.
+    assert!(
+        first.recv(WAIT).is_err(),
+        "the release ends the owner's connection"
+    );
+    let pid = jar
+        .program
+        .and_then(|p| i32::try_from(p).ok())
+        .and_then(rustix::process::Pid::from_raw)
+        .expect("pid");
+    assert!(
+        rustix::process::test_kill_process(pid).is_ok(),
+        "the Kill after a release never acts"
+    );
+    eventually("the old owner's socket to be forgotten", || {
+        described(&jar, "owner_mcp").is_empty()
+    });
+    let closed = (0..20).any(|_| reader.recv(Duration::from_millis(100)).is_err());
+    assert!(closed, "a reader that came in on the old token is closed");
+
+    let old = Client::connect(&jar.socket, Role::Owner, WAIT, TOKEN);
+    assert!(
+        old.is_err_and(|e| e.to_string().contains("wrong token")),
+        "the old token opens nothing"
+    );
+    let (next, welcome) = Client::connect(&jar.socket, Role::Owner, WAIT, b"successor-token-0001")
+        .expect("successor");
+    assert!(matches!(welcome, Msg::Welcome { .. }));
+    next.send(&Msg::SetInfo {
+        key: "owner_mcp".into(),
+        value: "/tmp/spyc/b.sock".into(),
+    })
+    .expect("set info");
+    eventually("the successor's MCP socket to be stored", || {
+        described(&jar, "owner_mcp") == "/tmp/spyc/b.sock"
+    });
+}
+
+#[test]
+fn without_the_token_a_client_can_only_ask_what_the_jar_is() {
+    let mut jar = Jar::start(&[], &sh("echo secret-on-screen; sleep 1000"));
+    let _owner = jar.connect(Role::Owner);
+    for role in [Role::Owner, Role::Reader] {
+        for token in [&b""[..], b"test-token-0123456780", b"test-token-012345678"] {
+            let got = Client::connect(&jar.socket, role, WAIT, token);
+            assert!(
+                got.is_err_and(|e| e.to_string().contains("wrong token")),
+                "{role:?} with {token:?}"
+            );
+        }
+    }
+    let (mut lookup, _) = Client::connect(&jar.socket, Role::Lookup, WAIT, b"").expect("a lookup");
+    for msg in [
+        Msg::Replay { from: 0 },
+        Msg::FetchSnapshot,
+        Msg::Input {
+            bytes: b"x".to_vec(),
+        },
+        Msg::Upgrade {
+            binary: "/bin/sh".into(),
+        },
+        Msg::Release {
+            token: b"mine-mine-mine-mine".to_vec(),
+        },
+    ] {
+        lookup.send(&msg).expect("send");
+        let answer = recv_matching(&mut lookup, |m| {
+            matches!(m, Msg::Refused { .. } | Msg::Output { .. })
+        });
+        assert!(
+            matches!(answer, Msg::Refused { .. }),
+            "{msg:?} from a lookup: {answer:?}"
+        );
+    }
+    lookup.send(&Msg::Describe).expect("describe");
+    let answer = recv_matching(&mut lookup, |m| matches!(m, Msg::Description { .. }));
+    let Msg::Description { fields } = answer else {
+        unreachable!()
+    };
+    assert!(
+        fields.iter().all(|(_, v)| !v.contains("test-token")),
+        "the token is never described"
+    );
+}
+
+/// The first message `want` accepts, within `WAIT`.
+fn recv_matching(client: &mut Client, want: impl Fn(&Msg) -> bool) -> Msg {
+    let until = Instant::now() + WAIT;
+    while Instant::now() < until {
+        if let Some(m) = client.recv(Duration::from_millis(200)).expect("recv")
+            && want(&m)
+        {
+            return m;
+        }
+    }
+    panic!("no matching message within {WAIT:?}");
+}
+
+// The $TMPDIR check: macOS's cleaner may delete a socket left untouched for
+// days. The jar puts its address back.
+
+#[test]
+fn a_jar_whose_socket_was_deleted_binds_it_again() {
+    let mut jar = Jar::start(&[], &sh("sleep 1000"));
+    let owner = jar.connect(Role::Owner);
+    std::fs::remove_file(&jar.socket).expect("delete the socket");
+    std::fs::remove_dir(jar.socket.parent().expect("its directory")).expect("and its directory");
+    let back = (0..50).any(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        jar.socket.exists()
+    });
+    assert!(back, "the socket is back within 5 s");
+    let mode = std::os::unix::fs::PermissionsExt::mode(
+        &std::fs::metadata(jar.socket.parent().expect("dir"))
+            .expect("stat")
+            .permissions(),
+    );
+    assert_eq!(mode & 0o777, 0o700, "its directory is private again");
+    let (mut reader, _) =
+        Client::connect(&jar.socket, Role::Reader, WAIT, TOKEN).expect("a new connection");
+    reader.send(&Msg::Ping { n: 7 }).expect("ping");
+    assert!(matches!(
+        recv_matching(&mut reader, |m| matches!(m, Msg::Pong { .. })),
+        Msg::Pong { n: 7 }
+    ));
+    owner
+        .send(&Msg::Ping { n: 1 })
+        .expect("the owner's connection is untouched");
+}
+
+#[test]
+fn a_released_jars_new_token_crosses_an_upgrade() {
+    let mut jar = Jar::start(&[], &sh("sleep 1000"));
+    let first = jar.connect(Role::Owner);
+    first
+        .send(&Msg::Release {
+            token: b"successor-token-0002".to_vec(),
+        })
+        .expect("release");
+    let next = next_binary(jar.dir.path());
+    let mut reader = None;
+    eventually("the new token to open the jar", || {
+        reader = Client::connect(&jar.socket, Role::Reader, WAIT, b"successor-token-0002").ok();
+        reader.is_some()
+    });
+    let (mut upgrader, _) = reader.expect("a reader on the new token");
+    upgrader
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .expect("upgrade");
+    let done = recv_matching(&mut upgrader, |m| {
+        matches!(m, Msg::Upgraded { .. } | Msg::Refused { .. })
+    });
+    assert!(matches!(done, Msg::Upgraded { .. }), "{done:?}");
+    let old = Client::connect(&jar.socket, Role::Owner, WAIT, TOKEN);
+    assert!(
+        old.is_err_and(|e| e.to_string().contains("wrong token")),
+        "the old token still opens nothing"
+    );
+    Client::connect(&jar.socket, Role::Owner, WAIT, b"successor-token-0002")
+        .expect("the new one does");
+}
+
+// The reopened version 1, after the review of 2026-11-12.
+
+fn refusal(r: anyhow::Result<Client>) -> u16 {
+    let e = r.err().expect("refused");
+    e.downcast_ref::<spyc_jar::client::Refusal>()
+        .unwrap_or_else(|| panic!("not a refusal: {e:#}"))
+        .reason
+}
+
+fn try_connect(jar: &Jar, role: Role, token: &[u8]) -> anyhow::Result<Client> {
+    Client::connect(&jar.socket, role, WAIT, token).map(|(c, _)| c)
+}
+
+/// Finding 2: a refusal says why, as a reason a client can act on.
+#[test]
+fn a_refusal_says_why() {
+    use spyc_jar::proto::reason;
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    assert_eq!(
+        refusal(try_connect(&jar, Role::Reader, b"not-the-token-at-all")),
+        reason::WRONG_TOKEN
+    );
+    assert_eq!(
+        refusal(try_connect(&jar, Role::Owner, TOKEN)),
+        reason::OWNER_PRESENT
+    );
+    assert_eq!(
+        refusal(try_connect(&jar, Role::Program, b"")),
+        reason::ROLE_NOT_PERMITTED,
+        "the test isn't the jar's program"
+    );
+    let reader = jar.connect(Role::Reader);
+    reader
+        .send(&Msg::Input {
+            bytes: b"x".to_vec(),
+        })
+        .unwrap();
+    let mut reader = reader;
+    let m = recv_matching(&mut reader, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::ROLE_NOT_PERMITTED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    owner
+        .send(&Msg::Release {
+            token: b"short".to_vec(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::INVALID,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+}
+
+/// Finding 1: a jar asked for a wire version it doesn't speak, or for none,
+/// exits with 75 before it binds its socket or starts the program.
+#[test]
+fn a_jar_asked_for_a_wire_version_it_doesnt_speak_exits_75() {
+    for wire in [Some("2"), Some("0"), None] {
+        let dir = tempfile::Builder::new()
+            .prefix("jar")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = dir.path().join("j.sock");
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_spyc-jar"));
+        if let Some(w) = wire {
+            cmd.args(["--wire", w]);
+        }
+        let mark = dir.path().join("ran");
+        let script = format!("touch {}", mark.display());
+        let status = cmd
+            .arg("--socket")
+            .arg(&socket)
+            .args(["--", "/bin/sh", "-c", &script])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(75), "--wire {wire:?}");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(
+            !socket.exists() && !mark.exists(),
+            "--wire {wire:?} started something"
+        );
+    }
+}
+
+/// A program in a jar, and whatever it starts, finds the jar by
+/// `SPYC_JAR_SOCKET`, not by working the path out again (finding 14).
+#[test]
+fn a_program_knows_its_jars_socket() {
+    let mut jar = Jar::start(&[], &sh("echo \"sock=$SPYC_JAR_SOCKET.\"; exec cat"));
+    let want = format!("sock={}.", jar.socket.display());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    read_until(&mut owner, true, |s| s.contains(&want));
+}
+
+/// Finding 12: the program hears an owner attach and go, and can ask the jar
+/// to detach its owner once what it printed has gone out.
+#[test]
+fn the_program_hears_attaches_and_detaches_its_owner() {
+    let program = [env!("CARGO_BIN_EXE_spyc-jar"), "program-events"];
+    let mut jar = Jar::start(&[], &program);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    read_until(&mut owner, true, |s| s.contains("program: attached"));
+    let fields = spyc_jar::client::describe(&jar.socket).unwrap();
+    assert_eq!(field(&fields, "owner_pid"), std::process::id().to_string());
+    owner
+        .send(&Msg::Input {
+            bytes: b"detach\r".to_vec(),
+        })
+        .unwrap();
+    // Everything up to its last words, then the connection ends.
+    let mut seen = Seen::default();
+    // Well inside the owner's 10 s deadline, which would end it anyway.
+    let until = Instant::now() + Duration::from_secs(3);
+    loop {
+        assert!(Instant::now() < until, "the owner was never detached");
+        match owner.recv(Duration::from_millis(200)) {
+            Ok(Some(m)) => seen.take(m),
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+    assert!(
+        seen.contains("program: bye"),
+        "its last words reached the owner"
+    );
+    let fields = spyc_jar::client::describe(&jar.socket).unwrap();
+    assert!(field(&fields, "owner").starts_with("none"), "{fields:?}");
+    assert!(field(&fields, "exit").is_empty(), "the program runs on");
+    let mut again = jar.connect(Role::Owner);
+    again.send(&Msg::Replay { from: 0 }).unwrap();
+    read_until(&mut again, true, |s| {
+        String::from_utf8_lossy(&s.text)
+            .matches("program: attached")
+            .count()
+            == 2
+            && s.contains("program: detached")
+    });
+}
+
+/// Finding 5, in part: a lookup is answered once and closed.
+#[test]
+fn a_lookup_is_answered_once_and_closed() {
+    let jar = Jar::start(&[], &["/bin/cat"]);
+    let mut lookup = try_connect(&jar, Role::Lookup, b"").unwrap();
+    lookup.send(&Msg::Describe).unwrap();
+    assert!(matches!(
+        lookup.recv(WAIT).unwrap(),
+        Some(Msg::Description { .. })
+    ));
+    // At once, not when its idle limit would close it.
+    let t0 = Instant::now();
+    assert!(lookup.recv(WAIT).is_err(), "the jar closed it");
+    assert!(t0.elapsed() < Duration::from_secs(1), "{:?}", t0.elapsed());
+    // One that asks nothing is closed too.
+    let mut idle = try_connect(&jar, Role::Lookup, b"").unwrap();
+    let t0 = Instant::now();
+    assert!(idle.recv(Duration::from_secs(8)).is_err());
+    assert!(t0.elapsed() < Duration::from_secs(8));
+}
+
+/// Finding 15: a jar refuses what its own upgrade would reject, so it can
+/// still be upgraded after.
+#[test]
+fn a_short_token_and_a_snapshot_past_the_head_are_refused_and_the_jar_still_upgrades() {
+    use spyc_jar::proto::reason;
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    owner.send(&Msg::Release { token: Vec::new() }).unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::INVALID,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    owner
+        .send(&Msg::StoreSnapshot(Snapshot {
+            format: SNAPSHOT_VT,
+            offset: 1 << 40,
+            rows: 24,
+            cols: 80,
+            blob: b"x".to_vec(),
+        }))
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::INVALID,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    let next = next_binary(jar.dir.path());
+    owner
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| {
+        matches!(m, Msg::Upgraded { .. } | Msg::Refused { .. })
+    });
+    assert!(matches!(m, Msg::Upgraded { .. }), "{m:?}");
+}
+
+/// Finding 10: once the program's exit is recorded, a signal reaches no one.
+#[test]
+fn a_signal_after_the_exit_is_refused() {
+    use spyc_jar::proto::reason;
+    let mut jar = Jar::start(&[], &sh("exit 3"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    recv_matching(&mut owner, |m| matches!(m, Msg::Exited { .. }));
+    owner.send(&Msg::Signal { signal: 3 }).unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: reason::PROGRAM_EXITED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+}
+
+/// Finding 11: an `exec` that fails after the new binary accepted the
+/// handover leaves a jar that a later refusing validator can't kill.
+#[test]
+fn a_failed_exec_leaves_a_jar_that_survives_the_next_refusal() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    // A new binary that loses its execute bit while it holds the sockets, as
+    // a package manager replacing it mid-upgrade might.
+    let flaky = jar.dir.path().join("jar-flaky");
+    std::fs::write(
+        &flaky,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in hold-handover) chmod -x \"$0\";; esac\nexec {} \"$@\"\n",
+            env!("CARGO_BIN_EXE_spyc-jar")
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&flaky, std::fs::Permissions::from_mode(0o755)).unwrap();
+    owner
+        .send(&Msg::Upgrade {
+            binary: flaky.display().to_string(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| {
+        matches!(m, Msg::Refused { .. } | Msg::Upgraded { .. })
+    });
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: spyc_jar::proto::reason::UPGRADE_FAILED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    owner
+        .send(&Msg::Upgrade {
+            binary: "/usr/bin/false".into(),
+        })
+        .unwrap();
+    let m = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            m,
+            Msg::Refused {
+                reason: spyc_jar::proto::reason::UPGRADE_REJECTED,
+                ..
+            }
+        ),
+        "{m:?}"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(jar.process.try_wait().unwrap().is_none(), "the jar lives");
+    owner.send(&Msg::Ping { n: 5 }).unwrap();
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 5 }));
+}

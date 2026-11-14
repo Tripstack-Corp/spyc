@@ -219,12 +219,12 @@ jobs:
     # a trusted-publisher entry on EACH crate's crates.io settings page
     # (repository + workflow filename) and, per crates.io, an existing crate.
     # So a new crate's first publish is by hand, with a token; spyc's was, and
-    # spyc-vt-sys's is too (RELEASE_ENGINEERING.md §5a).
+    # spyc-vt-sys's and spyc-jar's are too (RELEASE_ENGINEERING.md §5a).
     #
-    # Two crates, in dependency order: spyc's packaged manifest resolves
-    # spyc-vt-sys from crates.io, so the FFI crate goes first. Each version is
-    # checked before publishing, which keeps a re-run a no-op and lets a
-    # release that didn't move spyc-vt-sys skip it.
+    # Three crates, in dependency order: spyc's packaged manifest resolves
+    # spyc-vt-sys and spyc-jar from crates.io, so both go first. Each version
+    # is checked before publishing, which keeps a re-run a no-op and lets a
+    # release that didn't move a library crate skip it.
     permissions:
       id-token: write # OIDC for crates.io Trusted Publishing
     steps:
@@ -255,7 +255,10 @@ jobs:
             # returning, so the spyc publish below can resolve it.
             cargo publish --locked -p "${crate}"
           }
-          vt_ver="$(cargo metadata --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "spyc-vt-sys") | .version')"
-          publish spyc-vt-sys "${vt_ver}"
+          version_of() {
+            cargo metadata --no-deps --format-version 1 \
+              | jq -r --arg c "$1" '.packages[] | select(.name == $c) | .version'
+          }
+          publish spyc-vt-sys "$(version_of spyc-vt-sys)"
+          publish spyc-jar "$(version_of spyc-jar)"
           publish spyc "${GITHUB_REF_NAME#v}"

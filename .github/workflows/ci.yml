@@ -128,7 +128,7 @@ jobs:
   package:
     name: Package (cargo package --workspace)
     # The crates.io half of a release, run on every PR instead of first at a
-    # tag: both crates package, and each builds from its own tarball. v2.1.0's
+    # tag: every crate packages, and each builds from its own tarball. v2.1.0's
     # publish broke on a file the package left out (#426), and 2.2's would
     # have on an FFI crate crates.io couldn't resolve (#490); both surface here.
     runs-on: ubuntu-latest

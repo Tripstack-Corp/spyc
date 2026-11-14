@@ -47,7 +47,7 @@ One line per module: its `//!` doc has the rest, ARCHITECTURE.md the decisions b
 - **`src/agent/`** — one `AgentProfile` impl and one `REGISTRY` entry per hosted agent (claude, codex, agy, zot); scrape-fallback rules for states hooks can't report (`detect_rules.rs`); native chrome boundaries, so `gf`/`J` read the agent's output (`chrome/`); per-agent HUD metrics (`*_metrics/`, sharing `metrics.rs`'s types) over `tail/`, a bounded follower of one session file that its own watch wakes, never a poll; `waiting.rs`, the precedence of a live `waiting` over hook `done`s.
 - **`src/archive/`** — the pure archive core. A mount is an **index, not a directory**; name normalization makes a zip-slip name unrepresentable, and extraction never traverses a symlink.
 - **`crates/spyc-vt-sys/`** — the FFI to libghostty-vt at a pinned commit: bindings checked in, prebuilt archives vendored for five targets and SHA-256-checked by `build.rs`. A pin bump owes a full harness re-run; scrollback rows are the UX contract, bytes a safety valve.
-- **`crates/spyc-jar/`** — the jar, holding a pane's program and PTY and outliving spyc (#1099): `proto`, `state`, `handover`; `tests/wire_v1.rs` pins version 1's bytes.
+- **`crates/spyc-jar/`** — the jar: a pane's program and PTY, outliving spyc (#1099). `lib.rs` maps it, `src/bin/spyc-jar.rs` runs it, `tests/wire_v1.rs` pins v1's bytes.
 - **`src/taskfile/`** — a Makefile's targets, parsed (`makefile-lossless`) and never evaluated; `discover` follows only literal includes inside the root.
 - **`src/keymap/`** — the `Action` vocabulary, each with its `tier()`; resolver, DSL parser, default bindings; an object menu's rows (`menu.rs`).
 - **`src/wiring/`** — the `spyc` MCP entry and status hooks, installed once in each agent's user configuration (`spyc --install-agents` / `--remove-agents`). Ownership by content, writes through symlinks, never a file deleted, nothing ever written into a project.
@@ -123,7 +123,7 @@ make install      # release build + copy to ~/.local/bin
 make check        # fmt + clippy + test (CI gate; supply-chain is audit.yml)
 make check-ci     # the same, ending in a verdict line that survives a pipe
 make lint-linux   # clippy for Linux-gated code
-make package-check  # package both crates + build from the tarballs, as `cargo publish` will
+make package-check  # package the crates + build from the tarballs, as `cargo publish` will
 make fuzz         # nightly + cargo-fuzz, on-demand (NOT in check)
 make prune-target # cap and prune every checkout's build dir; runs nightly
 make changelog    # preview the pending CHANGELOG section
