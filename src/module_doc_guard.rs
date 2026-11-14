@@ -1,4 +1,5 @@
-//! Guard: every module in `src/` opens with a `//!` doc saying what it is for.
+//! Guard: every module in `src/` and in `crates/spyc-jar/src/` opens with a
+//! `//!` doc saying what it is for.
 //!
 //! AGENTS.md's module index gives each module one line because the module's own
 //! doc carries the rest, so a module without one has only that line to explain
@@ -19,7 +20,10 @@ fn every_module_opens_with_a_module_doc() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let modules: Vec<(String, String)> = crate::size_guard::rust_sources(repo)
         .into_iter()
-        .filter(|(rel, _)| rel.starts_with("src/") && !crate::size_guard::is_test_module(rel))
+        .filter(|(rel, _)| {
+            (rel.starts_with("src/") || rel.starts_with("crates/spyc-jar/src/"))
+                && !crate::size_guard::is_test_module(rel)
+        })
         .collect();
     // A walk that finds nothing passes everything.
     assert!(

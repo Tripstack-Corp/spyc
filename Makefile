@@ -248,7 +248,7 @@ demos: ## Re-record the README demo GIFs (vhs; agents needs tui-test, agg, rmatr
 	done
 
 .PHONY: fuzz
-fuzz: target-cap ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=archive_container|archive_name|dsl_parse|render_markdown|highlight|pane_engine|taskfile_make|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD, FUZZ_TRIPLE=<host triple>.
+fuzz: target-cap ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand, NOT in `check`). TARGET=archive_container|archive_name|dsl_parse|render_markdown|highlight|jar_frame|jar_handover|pane_engine|taskfile_make|word_wrap|expand_path|expand_percent, FUZZ_SECS=N, FUZZ_TOOLCHAIN=nightly-YYYY-MM-DD, FUZZ_TRIPLE=<host triple>.
 	@command -v cargo-fuzz >/dev/null 2>&1 || { \
 		echo "cargo-fuzz not found — install with: cargo install cargo-fuzz"; \
 		exit 1; \
