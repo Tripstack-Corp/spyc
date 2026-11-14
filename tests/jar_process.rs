@@ -1442,7 +1442,12 @@ const LOOKUP_HELLO: [u8; 11] = [0, 0, 0, 7, 1, 0x80, 0, 1, 3, 0, 0];
 /// A connection that has said `hello` as a lookup and been welcomed, and
 /// that the test drives byte by byte from here.
 fn raw_lookup(socket: &std::path::Path) -> UnixStream {
-    let mut s = UnixStream::connect(socket).expect("connect");
+    let mut connected = None;
+    eventually("the jar's socket", || {
+        connected = UnixStream::connect(socket).ok();
+        connected.is_some()
+    });
+    let mut s = connected.expect("connected");
     s.write_all(&LOOKUP_HELLO).expect("hello");
     s.set_read_timeout(Some(WAIT)).expect("timeout");
     let welcome = spyc_jar::proto::read_msg(&mut s);
@@ -1565,6 +1570,30 @@ fn a_lookup_trickling_a_frame_does_not_block_an_upgrade() {
         answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
         "the upgrade goes ahead: {answer:?}"
     );
+}
+
+/// Finding 5: a frame that has begun arrives whole by its deadline, however
+/// its bytes trickle, or the jar closes the connection.
+#[test]
+fn a_frame_that_trickles_is_cut_off() {
+    let jar = Jar::start(&[], &["/bin/cat"]);
+    let raw = raw_lookup(&jar.socket);
+    (&raw).write_all(&[0, 0, 0x0f, 0xa0, 9]).expect("header");
+    let stop = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop);
+        let raw = raw.try_clone().expect("clone");
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) && (&raw).write_all(&[0]).is_ok() {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        })
+    };
+    let mut rest = Vec::new();
+    let read = (&raw).read_to_end(&mut rest);
+    stop.store(true, Ordering::SeqCst);
+    let _ = trickle.join();
+    assert!(read.is_ok(), "the jar closed it: {read:?}");
 }
 
 /// Finding 5: idle connections without the token, more than a handover
