@@ -213,19 +213,6 @@ fn act_as_owner(shared: &Shared, id: u64, conn: &Conn, msg: Msg) {
     let send = |msg: &Msg| conn.send(shared, msg);
     match msg {
         Msg::Input { bytes } | Msg::Reply { bytes } => {
-            if let Some(path) = std::env::var_os("SPYC_JAR_TRACE")
-                && let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-            {
-                let _ = writeln!(
-                    f,
-                    "{} {:?}",
-                    shared.child_pid,
-                    String::from_utf8_lossy(&bytes)
-                );
-            }
             if !shared.queue_input(id, &bytes) {
                 send(&Msg::Refused {
                     reason: reason::INVALID,
@@ -268,6 +255,17 @@ fn act_as_owner(shared: &Shared, id: u64, conn: &Conn, msg: Msg) {
             });
         }
         Msg::Signal { signal } => deliver(shared.child_pid, signal),
+        // Handed back, a snapshot takes one byte more than it was stored in:
+        // one that would come back over the limit is refused now, rather
+        // than end the connection that fetches it.
+        Msg::StoreSnapshot(snap)
+            if proto::encode(&Msg::Snapshot(Some(snap.clone()))).len() - 4 > proto::MAX_FRAME =>
+        {
+            send(&Msg::Refused {
+                reason: reason::INVALID,
+                why: "a snapshot too big to hand back".into(),
+            });
+        }
         Msg::StoreSnapshot(snap) if snap.offset > shared.lock().log.head => {
             send(&Msg::Refused {
                 reason: reason::INVALID,
@@ -386,19 +384,32 @@ fn next_batch(
         let pos = *conn.cursor.lock().unwrap_or_else(PoisonError::into_inner);
         let mut batch = None;
         if let Some((seq, from)) = pos {
+            // A reader that fell behind the ring is told what it missed (R12a),
+            // as a replay from before the ring is, and goes on from the oldest
+            // byte still held.
+            let missed = (from < st.log.base).then_some(Msg::Gap {
+                from,
+                to: st.log.base,
+            });
+            let (seq, from) = if missed.is_some() {
+                (st.log.seq_for(st.log.base), st.log.base)
+            } else {
+                (seq, from)
+            };
             let pending = seq < st.log.next_seq;
             let exit_due = !conn.exit_sent.load(Ordering::SeqCst)
                 && st.exit.is_some()
                 && st.pty_eof
                 && !pending;
             let fg_due = st.fg != conn.fg_sent.load(Ordering::SeqCst);
-            if pending || exit_due || fg_due {
+            if pending || exit_due || fg_due || missed.is_some() {
                 let (mut frames, next) =
                     collect(&st, seq, from, exit_due.then(|| st.exit).flatten());
                 if fg_due {
                     frames.insert(0, Msg::Foreground { pgid: st.fg });
                     conn.fg_sent.store(st.fg, Ordering::SeqCst);
                 }
+                frames.splice(0..0, missed);
                 batch = Some((frames, next));
             }
         }

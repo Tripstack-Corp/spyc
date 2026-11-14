@@ -32,6 +32,20 @@ impl Jar {
     /// [`Jar::start`], with the jar's open descriptors limited to `nofile`
     /// when it is given.
     fn start_limited(nofile: Option<u32>, extra: &[&str], argv: &[&str]) -> Self {
+        Self::spawn(nofile, &[], extra, argv)
+    }
+
+    /// [`Jar::start`], with `env` set for the jar.
+    fn start_env(env: &[(&str, &std::path::Path)], extra: &[&str], argv: &[&str]) -> Self {
+        Self::spawn(None, env, extra, argv)
+    }
+
+    fn spawn(
+        nofile: Option<u32>,
+        env: &[(&str, &std::path::Path)],
+        extra: &[&str],
+        argv: &[&str],
+    ) -> Self {
         let dir = tempfile::Builder::new()
             .prefix("jar")
             .tempdir_in("/tmp")
@@ -47,6 +61,7 @@ impl Jar {
             None => Command::new(jar),
         };
         let process = command
+            .envs(env.iter().copied())
             .args(["--wire", "1"])
             .arg("--socket")
             .arg(&socket)
@@ -1833,4 +1848,503 @@ fn an_exit_with_nobody_there_is_kept_from_the_exit() {
         "{:?}",
         seen.frames
     );
+}
+
+// The review's smaller items: an exit says which signal ended it, a reader
+// that falls behind is told what it missed, input is never written to a file,
+// and a frame too big to send is refused before it is sent.
+
+/// A program ended by a signal is reported with that signal as its code, as
+/// the frozen `exited` fixture has it.
+#[test]
+fn a_signalled_exit_reports_its_signal() {
+    let mut jar = Jar::start(&[], &sh("kill -TERM $$"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let exit = recv_matching(&mut owner, |m| matches!(m, Msg::Exited { .. }));
+    assert_eq!(
+        exit,
+        Msg::Exited {
+            code: 15,
+            signaled: true
+        }
+    );
+    assert_eq!(described(&jar, "exit"), "signal 15");
+}
+
+/// R12a: a reader that falls behind the ring is told which bytes it missed,
+/// as a replay from before the ring would be, never handed a jump.
+#[test]
+fn a_reader_that_falls_behind_is_told_what_it_missed() {
+    let mut jar = Jar::start(
+        &["--ring", "65536", "--window", "32768"],
+        &sh(
+            "read go; yes line-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | head -c 3000000; echo; echo END",
+        ),
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut late = jar.connect(Role::Reader);
+    late.send(&Msg::Replay { from: 0 }).expect("replay");
+    owner
+        .send(&Msg::Input {
+            bytes: b"go\n".to_vec(),
+        })
+        .expect("go");
+    // The owner keeps up; the reader reads nothing until the program is done.
+    read_until(&mut owner, true, |s| s.contains("END"));
+    let (mut next, mut gaps, mut tail) = (None::<u64>, 0, Vec::new());
+    let until = Instant::now() + WAIT;
+    while !String::from_utf8_lossy(&tail).contains("END") {
+        assert!(Instant::now() < until, "the reader never reached the end");
+        match late.recv(Duration::from_millis(200)).expect("recv") {
+            Some(Msg::Gap { from, to }) => {
+                if let Some(n) = next {
+                    assert_eq!(from, n, "a gap from where the reader was");
+                }
+                next = Some(to);
+                gaps += 1;
+            }
+            Some(Msg::Output { offset, bytes }) => {
+                if let Some(n) = next {
+                    assert_eq!(offset, n, "output after {gaps} gap(s) jumped");
+                }
+                next = Some(offset + bytes.len() as u64);
+                tail.extend_from_slice(&bytes);
+                tail.drain(..tail.len().saturating_sub(64));
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        gaps > 0,
+        "a reader 3 MB behind a 64 KiB ring missed nothing?"
+    );
+}
+
+/// What the owner types never reaches a file, whatever the jar's
+/// environment says.
+#[test]
+fn input_is_never_written_to_a_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let trace = dir.path().join("trace");
+    let mut jar = Jar::start_env(&[("SPYC_JAR_TRACE", &trace)], &[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    owner
+        .send(&Msg::Input {
+            bytes: b"a secret\n".to_vec(),
+        })
+        .expect("input");
+    read_until(&mut owner, true, |s| s.contains("a secret\r\na secret"));
+    assert!(
+        !trace.exists(),
+        "the input was written to {}",
+        trace.display()
+    );
+}
+
+/// A frame over the limit would end the connection that sent it, so a
+/// client refuses to send one, and keeps its connection.
+#[test]
+fn a_frame_over_the_limit_is_refused_before_it_is_sent() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let sent = owner.send(&Msg::StoreSnapshot(Snapshot {
+        format: SNAPSHOT_VT,
+        offset: 0,
+        rows: 24,
+        cols: 80,
+        blob: vec![b's'; spyc_jar::proto::MAX_FRAME],
+    }));
+    assert!(
+        sent.as_ref()
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::InvalidInput),
+        "{sent:?}"
+    );
+    owner.send(&Msg::Ping { n: 7 }).expect("ping");
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 7 }));
+}
+
+/// A snapshot is handed back in a frame one byte bigger than the one that
+/// stored it, so one that only just fits is refused when it is stored, not
+/// stored and then impossible to fetch.
+#[test]
+fn a_snapshot_too_big_to_hand_back_is_refused() {
+    use spyc_jar::proto::{MAX_FRAME, encode};
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    let snapshot = |blob: Vec<u8>| {
+        Msg::StoreSnapshot(Snapshot {
+            format: SNAPSHOT_VT,
+            offset: 0,
+            rows: 24,
+            cols: 80,
+            blob,
+        })
+    };
+    // A frame's length field counts everything after itself.
+    let overhead = encode(&snapshot(Vec::new())).len() - 4;
+    let biggest = snapshot(vec![b's'; MAX_FRAME - overhead]);
+    assert_eq!(encode(&biggest).len() - 4, MAX_FRAME, "it fits a frame");
+    owner.send(&biggest).expect("store");
+    let answer = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            answer,
+            Msg::Refused {
+                reason: spyc_jar::proto::reason::INVALID,
+                ..
+            }
+        ),
+        "{answer:?}"
+    );
+    owner.send(&Msg::FetchSnapshot).expect("fetch");
+    let fetched = recv_matching(&mut owner, |m| matches!(m, Msg::Snapshot(_)));
+    assert_eq!(fetched, Msg::Snapshot(None), "nothing was stored");
+}
+
+// The property tests JAR_PROTOCOL.md promises under "Fuzzing": sequences of
+// messages, drawn at random, across the roles. Each runs against one jar,
+// checking the property after every sequence.
+
+mod sequences {
+    use std::cell::RefCell;
+
+    use proptest::prelude::*;
+    use proptest::test_runner::{Config, TestRunner};
+
+    use super::*;
+
+    /// What a reader types, if anything lets it.
+    const MARK: &[u8] = b"R34DER-TYPED";
+
+    fn runner() -> TestRunner {
+        TestRunner::new(Config {
+            cases: 32,
+            // The jar's state carries from case to case, so a shrunk case may
+            // pass on its own: a failure shows the sequence that failed.
+            max_shrink_iters: 0,
+            failure_persistence: None,
+            ..Config::default()
+        })
+    }
+
+    /// Any message a client could send, every kind a jar sends included,
+    /// with whatever it would type carrying [`MARK`].
+    fn any_msg() -> impl Strategy<Value = Msg> {
+        let typed = [MARK, b"\n"].concat();
+        prop_oneof![
+            (0u64..4096).prop_map(|from| Msg::Replay { from }),
+            any::<u64>().prop_map(|n| Msg::Ping { n }),
+            any::<u64>().prop_map(|offset| Msg::Ack { offset }),
+            Just(Msg::Input {
+                bytes: typed.clone()
+            }),
+            Just(Msg::Reply { bytes: typed }),
+            (1u16..200, 1u16..400).prop_map(|(rows, cols)| Msg::Resize {
+                rows,
+                cols,
+                px_w: 0,
+                px_h: 0
+            }),
+            (1i32..=6).prop_map(|signal| Msg::Signal { signal }),
+            (0u64..4096).prop_map(|offset| Msg::StoreSnapshot(Snapshot {
+                format: SNAPSHOT_VT,
+                offset,
+                rows: 24,
+                cols: 80,
+                blob: MARK.to_vec(),
+            })),
+            Just(Msg::FetchSnapshot),
+            Just(Msg::Describe),
+            Just(Msg::AckExit),
+            Just(Msg::Detach),
+            Just(Msg::Release {
+                token: NEXT_TOKEN.to_vec()
+            }),
+            Just(Msg::SetInfo {
+                key: "owner_mcp".into(),
+                value: "elsewhere".into()
+            }),
+            Just(Msg::Upgrade {
+                binary: "/nonexistent/spyc-jar".into()
+            }),
+            Just(Msg::Hello {
+                version: 1,
+                role: Role::Owner,
+                token: TOKEN.to_vec()
+            }),
+            Just(Msg::Output {
+                offset: 0,
+                bytes: MARK.to_vec()
+            }),
+        ]
+    }
+
+    /// Send `seq` on `client`, then wait until the jar has acted on all of
+    /// it: a ping's answer, or the connection's end.
+    fn settle(client: &mut Client, seq: &[Msg]) {
+        for m in seq {
+            if client.send(m).is_err() {
+                return;
+            }
+        }
+        if client.send(&Msg::Ping { n: u64::MAX }).is_err() {
+            return;
+        }
+        let until = Instant::now() + WAIT;
+        while Instant::now() < until {
+            match client.recv(Duration::from_millis(200)) {
+                Ok(Some(Msg::Pong { n: u64::MAX })) | Err(_) => return,
+                _ => {}
+            }
+        }
+        panic!("the jar never answered the ping after {seq:?}");
+    }
+
+    /// The program's output by offset, as an owner hears it, whatever it was
+    /// replayed from.
+    #[derive(Default)]
+    struct Screen(Vec<u8>);
+
+    impl Screen {
+        fn take(&mut self, msg: &Msg) {
+            if let Msg::Output { offset, bytes } = msg {
+                let at = usize::try_from(*offset).expect("offset");
+                if self.0.len() < at + bytes.len() {
+                    self.0.resize(at + bytes.len(), 0);
+                }
+                self.0[at..at + bytes.len()].copy_from_slice(bytes);
+            }
+        }
+
+        fn contains(&self, needle: &[u8]) -> bool {
+            self.0.windows(needle.len()).any(|w| w == needle)
+        }
+    }
+
+    /// Have the owner type `line` and read until the program has echoed it.
+    fn sentinel(owner: &mut Client, screen: &mut Screen, line: &str) {
+        owner
+            .send(&Msg::Input {
+                bytes: format!("{line}\n").into_bytes(),
+            })
+            .expect("sentinel");
+        let until = Instant::now() + WAIT;
+        while !screen.contains(line.as_bytes()) {
+            assert!(Instant::now() < until, "the program never echoed {line}");
+            if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+                screen.take(&m);
+                if let Msg::Output { offset, bytes } = &m {
+                    let _ = owner.send(&Msg::Ack {
+                        offset: offset + bytes.len() as u64,
+                    });
+                }
+            }
+        }
+    }
+
+    /// No sequence lets a reader type: whatever a reader sends, the program
+    /// receives only what the owner typed, and the token still opens the jar.
+    #[test]
+    fn no_sequence_lets_a_reader_type() {
+        let mut jar = Jar::start(&[], &sh("stty raw -echo; exec cat"));
+        let owner = jar.connect(Role::Owner);
+        owner.send(&Msg::Replay { from: 0 }).expect("replay");
+        let state = RefCell::new((owner, Screen::default(), 0u32));
+        let result = runner().run(&prop::collection::vec(any_msg(), 1..12), |seq| {
+            let mut reader = connect_within(&jar, Role::Reader, TOKEN, WAIT)
+                .map_err(|e| TestCaseError::fail(format!("the token opens nothing: {e:#}")))?;
+            settle(&mut reader, &seq);
+            let (owner, screen, round) = &mut *state.borrow_mut();
+            *round += 1;
+            sentinel(owner, screen, &format!("SENTINEL-{round}"));
+            prop_assert!(!screen.contains(MARK), "a reader typed, sending {seq:?}");
+            Ok(())
+        });
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// A `hello`'s token, anything but the jar's own.
+    fn wrong_token() -> impl Strategy<Value = Vec<u8>> {
+        prop_oneof![
+            Just(Vec::new()),
+            prop::collection::vec(any::<u8>(), 1..40),
+            (1..TOKEN.len()).prop_map(|n| TOKEN[..n].to_vec()),
+            (0..TOKEN.len(), 1u8..=255).prop_map(|(i, x)| {
+                let mut t = TOKEN.to_vec();
+                t[i] ^= x;
+                t
+            }),
+            Just([TOKEN, b"x"].concat()),
+        ]
+    }
+
+    fn any_role() -> impl Strategy<Value = Role> {
+        prop_oneof![
+            Just(Role::Owner),
+            Just(Role::Reader),
+            Just(Role::Lookup),
+            Just(Role::Program),
+        ]
+    }
+
+    /// No sequence takes the lease without the token: every `hello` with
+    /// another token is refused but a lookup's, nothing a lookup sends
+    /// changes that, and the jar's own token still takes the lease.
+    #[test]
+    fn no_sequence_takes_the_lease_without_the_token() {
+        let jar = Jar::start(&[], &["/bin/cat"]);
+        let attempt = (
+            any_role(),
+            wrong_token(),
+            prop::collection::vec(any_msg(), 0..6),
+        );
+        let result = runner().run(&prop::collection::vec(attempt, 1..6), |attempts| {
+            for (role, token, seq) in &attempts {
+                let got = Client::connect(&jar.socket, *role, WAIT, token);
+                match (role, got) {
+                    (Role::Lookup, Ok((mut c, _))) => settle(&mut c, seq),
+                    (Role::Lookup, Err(e)) => {
+                        return Err(TestCaseError::fail(format!("a lookup refused: {e:#}")));
+                    }
+                    (_, Ok(_)) => {
+                        return Err(TestCaseError::fail(format!(
+                            "{role:?} welcomed with token {token:?}"
+                        )));
+                    }
+                    (_, Err(_)) => {}
+                }
+            }
+            let owner = connect_within(&jar, Role::Owner, TOKEN, WAIT);
+            prop_assert!(
+                owner.is_ok(),
+                "the token no longer takes the lease after {attempts:?}: {:?}",
+                owner.err()
+            );
+            drop(owner);
+            // Until the jar has seen this owner go, the next case's owner
+            // would be refused as a second one.
+            eventually("the owner's going", || {
+                described(&jar, "owner").starts_with("none")
+            });
+            Ok(())
+        });
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// What clients ask of the jar's log without typing.
+    #[derive(Debug, Clone)]
+    enum Ask {
+        OwnerReplay(u64),
+        ReaderReplay(u64),
+        NewOwner(u64),
+        FetchSnapshot,
+        StoreSnapshot(u64),
+    }
+
+    fn any_ask() -> impl Strategy<Value = Ask> {
+        prop_oneof![
+            (0u64..64).prop_map(Ask::OwnerReplay),
+            (0u64..64).prop_map(Ask::ReaderReplay),
+            (0u64..64).prop_map(Ask::NewOwner),
+            Just(Ask::FetchSnapshot),
+            (0u64..16).prop_map(Ask::StoreSnapshot),
+        ]
+    }
+
+    /// No sequence answers a replayed query: the program's terminal queries
+    /// are replayed, from anywhere, to owners old and new and to readers, and
+    /// the program receives nothing but what an owner typed. Whether an
+    /// owner answers what it replays is spyc's half (R15a).
+    #[test]
+    fn no_sequence_answers_a_replayed_query() {
+        const QUERIES: &[u8] = b"\x1b[c\x1b[6n\x1b]11;?\x07";
+        let mut jar = Jar::start(
+            &[],
+            &sh("stty raw -echo; printf '\\033[c\\033[6n\\033]11;?\\007'; exec cat"),
+        );
+        let mut owner = jar.connect(Role::Owner);
+        owner.send(&Msg::Replay { from: 0 }).expect("replay");
+        // Once the queries are out, the terminal no longer echoes: what
+        // comes back after them is what the program read.
+        let mut screen = Screen::default();
+        let until = Instant::now() + WAIT;
+        while !screen.contains(QUERIES) {
+            assert!(Instant::now() < until, "the program never asked");
+            if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+                screen.take(&m);
+            }
+        }
+        let state = RefCell::new((Some(owner), screen, 0u32, Vec::<String>::new()));
+        let result = runner().run(&prop::collection::vec(any_ask(), 1..10), |asks| {
+            let (held, screen, round, typed) = &mut *state.borrow_mut();
+            for ask in &asks {
+                if let Ask::NewOwner(_) = ask
+                    && let Some(old) = held.take()
+                {
+                    old.drop_connection();
+                    *held = Some(reconnect_owner(&jar).map_err(TestCaseError::fail)?);
+                }
+                let owner = held.as_mut().expect("an owner");
+                match ask {
+                    // A new owner was connected above.
+                    Ask::OwnerReplay(from) | Ask::NewOwner(from) => {
+                        settle(owner, &[Msg::Replay { from: *from }]);
+                    }
+                    Ask::ReaderReplay(from) => {
+                        let mut r = connect_within(&jar, Role::Reader, TOKEN, WAIT)
+                            .map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
+                        settle(&mut r, &[Msg::Replay { from: *from }]);
+                    }
+                    Ask::FetchSnapshot => settle(owner, &[Msg::FetchSnapshot]),
+                    Ask::StoreSnapshot(at) => settle(
+                        owner,
+                        &[Msg::StoreSnapshot(Snapshot {
+                            format: SNAPSHOT_VT,
+                            offset: *at,
+                            rows: 24,
+                            cols: 80,
+                            blob: QUERIES.to_vec(),
+                        })],
+                    ),
+                }
+            }
+            *round += 1;
+            let line = format!("SENTINEL-{round}");
+            sentinel(held.as_mut().expect("an owner"), screen, &line);
+            typed.push(line);
+            // All the program ever printed: its queries, then each line an
+            // owner typed, echoed once.
+            let mut want = QUERIES.to_vec();
+            for t in typed.iter() {
+                want.extend_from_slice(t.as_bytes());
+                want.push(b'\n');
+            }
+            prop_assert_eq!(
+                String::from_utf8_lossy(&screen.0[..want.len().min(screen.0.len())]),
+                String::from_utf8_lossy(&want),
+                "after {:?}",
+                asks
+            );
+            prop_assert_eq!(screen.0.len(), want.len());
+            Ok(())
+        });
+        assert!(result.is_ok(), "{result:?}");
+    }
+
+    /// The owner, replaced: the old one goes, and a new one takes the lease
+    /// once the jar has seen it go.
+    fn reconnect_owner(jar: &Jar) -> Result<Client, String> {
+        let until = Instant::now() + WAIT;
+        loop {
+            match connect_within(jar, Role::Owner, TOKEN, Duration::from_millis(500)) {
+                Ok(c) => return Ok(c),
+                Err(e) if Instant::now() >= until => return Err(format!("{e:#}")),
+                Err(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
+        }
+    }
 }

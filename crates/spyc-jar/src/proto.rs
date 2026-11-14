@@ -441,8 +441,17 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
     out
 }
 
+/// Write one frame. One over [`MAX_FRAME`] is refused unsent, since the
+/// other side would end the connection on reading its length.
 pub fn write_msg(w: &mut impl Write, msg: &Msg) -> io::Result<()> {
-    w.write_all(&encode(msg))?;
+    let frame = encode(msg);
+    if frame.len() - 4 > MAX_FRAME {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("a frame of {} bytes, over the limit", frame.len() - 4),
+        ));
+    }
+    w.write_all(&frame)?;
     w.flush()
 }
 

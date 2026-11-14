@@ -143,7 +143,7 @@ in the output.
 | R11 | **While an owner is connected**, it acknowledges what it has parsed ("through offset N"), and the jar stops reading the PTY when the owner falls a window behind | v1 | A slow owner must slow the program, as `PtyHost`'s bounded channel (`READER_CHANNEL_CAP`) does today. Dropping bytes under a live owner would corrupt a plain `cat` of a big file. A jar refuses to start with a window that, with one read of the PTY, doesn't fit its ring. | all |
 | R12 | **While no owner is connected**, drop the oldest events when the ring fills (`drop`) | v1 | A crash window must never stall an agent. | U2 |
 | R12b | The `block` and `spill` modes ([below](#when-the-ring-fills-with-no-owner)) | later | Moved to later by decision B: with no long ownerless stretches, they only matter if a crashed spyc isn't relaunched. | U2 |
-| R12a | Mark a gap with the offsets it spans | v1 | A spyc that finds a gap forces a redraw rather than trusting a broken replay. | U2, U3 |
+| R12a | Mark a gap with the offsets it spans | v1 | A spyc that finds a gap forces a redraw rather than trusting a broken replay. A reader that falls behind the ring is sent the same `gap`, never a jump in the offsets. | U2, U3 |
 | R12c | **Across a gap,** spyc starts from the newest snapshot under it, applies the bytes after the gap, then makes the program repaint | v1 | Stage 4 (Q7): a repaint redraws the screen but sets no mode again. From an empty engine a full-screen Claude came back without the alternate screen, mouse reporting or bracketed paste; from the snapshot every mode matched a run that lost nothing, and the history before the gap stayed. Decided v1 by the owner. | U2 |
 | R13 | Ring, spill and snapshot sizes set per jar, with a report of what each holds | v1 | Many jars run at once; memory has to be visible and bounded. | all |
 
@@ -515,7 +515,13 @@ protocol freezes:
 - **The gateway's grant and authentication handling,** once it exists.
 - **Sequences across the roles,** as property tests: no sequence lets a reader
   type, takes a lease without the token, splits a key frame, or answers a
-  replayed query.
+  replayed query. The jar's three are in `tests/jar_process.rs`
+  (`mod sequences`): random messages from a reader never reach the program;
+  no `hello` with another token is welcomed, but a lookup's, and nothing a
+  lookup sends stops the token taking the lease; and replays from anywhere,
+  to owners old and new and to readers, never write to the program. Whether
+  spyc answers what it replays, and whether it splits a key frame, are
+  spyc's half, with its jar client.
 
 At the freeze the frame and blob targets ran three minutes each over the
 final parsers, 14.1 million and 18.3 million inputs, with no crash, and again
