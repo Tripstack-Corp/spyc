@@ -114,7 +114,9 @@ fn try_run(
     shared.inbox_cv.notify_all();
     wait_parked(shared).map_err(busy)?;
     if shared.input_pending() {
-        return Err(busy(anyhow!("the program hasn't read the input it was sent")));
+        return Err(busy(anyhow!(
+            "the program hasn't read the input it was sent"
+        )));
     }
     let st = shared.lock();
     let conns = shared.conns();
@@ -354,7 +356,11 @@ fn wait_parked(shared: &Shared) -> anyhow::Result<()> {
             want.push(Who::Waiter);
         }
         want.push(Who::Input);
-        for (id, c) in shared.conns().iter().filter(|(_, c)| c.role != Role::Lookup) {
+        for (id, c) in shared
+            .conns()
+            .iter()
+            .filter(|(_, c)| c.role != Role::Lookup)
+        {
             want.push(Who::ConnRead(*id));
             if !c.writer_done.load(Ordering::SeqCst) {
                 want.push(Who::ConnWrite(*id));

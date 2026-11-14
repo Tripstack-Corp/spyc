@@ -3,10 +3,10 @@
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use spyc_jar::client::Client;
@@ -1487,11 +1487,9 @@ fn cpu_seconds(pid: u32) -> f64 {
         .expect("ps");
     let text = String::from_utf8_lossy(&out.stdout);
     let clock = text.trim().rsplit('-').next().unwrap_or_default();
-    clock
-        .split(':')
-        .fold(0.0, |total, part| {
-            f64::mul_add(total, 60.0, part.parse::<f64>().unwrap_or(0.0))
-        })
+    clock.split(':').fold(0.0, |total, part| {
+        f64::mul_add(total, 60.0, part.parse::<f64>().unwrap_or(0.0))
+    })
 }
 
 /// Finding 4 (R21): an owner gone silent while its program prints loses the
@@ -1523,7 +1521,10 @@ fn a_silent_owner_loses_the_lease_while_its_program_prints() {
 /// owner hands it on. The release, a lookup and the successor are answered.
 #[test]
 fn a_stalled_reader_does_not_freeze_a_release() {
-    let mut jar = Jar::start(&[], &["yes", "line-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
+    let mut jar = Jar::start(
+        &[],
+        &["yes", "line-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    );
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
     let stalled = jar.connect(Role::Reader);
@@ -1539,7 +1540,11 @@ fn a_stalled_reader_does_not_freeze_a_release() {
     let described = describe_within(&jar.socket);
     assert!(described.is_ok(), "a lookup is answered: {described:?}");
     let next = connect_within(&jar, Role::Owner, NEXT_TOKEN, WAIT);
-    assert!(next.is_ok(), "the successor is welcomed: {next:?}", next = next.err());
+    assert!(
+        next.is_ok(),
+        "the successor is welcomed: {next:?}",
+        next = next.err()
+    );
     drop(stalled);
 }
 
@@ -1621,7 +1626,10 @@ fn idle_lookups_neither_block_nor_cross_an_upgrade() {
         }
     }
     let described = describe_within(&jar.socket);
-    assert!(described.is_ok(), "the new image answers a lookup: {described:?}");
+    assert!(
+        described.is_ok(),
+        "the new image answers a lookup: {described:?}"
+    );
 }
 
 /// Finding 5: connections without the token can't take every descriptor the
@@ -1807,7 +1815,10 @@ fn an_exit_with_nobody_there_is_kept_from_the_exit() {
     let seen = read_until(&mut back, true, |s| {
         s.frames.iter().any(|f| matches!(f, Msg::Exited { .. }))
     });
-    assert!(seen.contains("RESULT=42"), "the last of the output is there");
+    assert!(
+        seen.contains("RESULT=42"),
+        "the last of the output is there"
+    );
     assert!(
         seen.frames
             .iter()

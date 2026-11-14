@@ -82,7 +82,10 @@ pub(super) fn feed_pty(shared: &Shared, mut pty: File) {
                 let _ = shared.inbox_cv.wait_timeout(inbox, TICK);
                 continue;
             }
-            (inbox.bytes.iter().take(CHUNK).copied().collect(), inbox.dropped)
+            (
+                inbox.bytes.iter().take(CHUNK).copied().collect(),
+                inbox.dropped,
+            )
         };
         if !ready(&pty, rustix::event::PollFlags::OUT, TICK) {
             continue;
