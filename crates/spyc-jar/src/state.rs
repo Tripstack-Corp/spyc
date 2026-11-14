@@ -47,6 +47,14 @@ pub enum Event {
     Resized(u64, u16, u16),
 }
 
+impl Event {
+    pub(crate) const fn offset(&self) -> u64 {
+        match self {
+            Self::Out(o, _) | Self::Resized(o, _, _) => *o,
+        }
+    }
+}
+
 /// The event log: every event at or after `base`, numbered by sequence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Log {
@@ -59,6 +67,53 @@ pub struct Log {
     /// Bytes of output the events hold.
     pub held: usize,
     pub cap: usize,
+}
+
+impl Log {
+    pub(crate) fn push(&mut self, event: Event) {
+        if let Event::Out(_, bytes) = &event {
+            self.head += bytes.len() as u64;
+            self.held += bytes.len();
+        }
+        self.events.push_back((self.next_seq, event));
+        self.next_seq += 1;
+        self.trim(0);
+    }
+
+    /// Drop events wholly below `keep_from`, then the oldest until the log
+    /// fits its cap.
+    pub(crate) fn trim(&mut self, keep_from: u64) {
+        while let Some((_, front)) = self.events.front() {
+            // An output is wholly before `keep_from` once it ends at or before
+            // it; a resize only when it happened strictly before it, since one
+            // at `keep_from` lays out every byte from there on.
+            let below = match front {
+                Event::Out(o, b) => o + b.len() as u64 <= keep_from,
+                Event::Resized(o, ..) => *o < keep_from,
+            };
+            if !below && self.held <= self.cap {
+                break;
+            }
+            if let Some((_, Event::Out(o, b))) = self.events.pop_front() {
+                self.held -= b.len();
+                self.base = o + b.len() as u64;
+            }
+        }
+        if self.events.is_empty() {
+            self.base = self.head;
+        }
+    }
+
+    /// The first sequence number to send to a client replaying from `from`.
+    pub(crate) fn seq_for(&self, from: u64) -> u64 {
+        self.events
+            .iter()
+            .find(|(_, e)| match e {
+                Event::Out(o, b) => o + b.len() as u64 > from,
+                Event::Resized(o, ..) => *o >= from,
+            })
+            .map_or(self.next_seq, |(seq, _)| *seq)
+    }
 }
 
 /// The jar's mutable state, under its one lock.

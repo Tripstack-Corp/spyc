@@ -204,14 +204,14 @@ deny: ## Supply-chain checks: advisories, licenses, sources, bans (cargo-deny)
 	}
 	cargo deny --all-features check
 
-# What `cargo publish` does at a tag, without publishing: package both crates,
-# then build each from its own tarball (spyc against spyc-vt-sys's, through
-# cargo's temporary local registry). A file the build needs but the package
+# What `cargo publish` does at a tag, without publishing: package the three
+# crates, then build each from its own tarball (spyc against spyc-vt-sys's and
+# spyc-jar's, through cargo's temporary local registry). A file the build needs but the package
 # leaves out (#426) or a dependency crates.io can't resolve (#490) fails here
 # instead of on the release. Needs network for the crates.io index. Refuses an
 # uncommitted tree unless ALLOW_DIRTY=1.
 .PHONY: package-check
-package-check: target-cap ## Package both crates and build them from the tarballs, as `cargo publish` will (ALLOW_DIRTY=1 for a dirty tree)
+package-check: target-cap ## Package the crates and build them from the tarballs, as `cargo publish` will (ALLOW_DIRTY=1 for a dirty tree)
 	cargo package --locked --workspace $(if $(ALLOW_DIRTY),--allow-dirty)
 
 # Re-record the README demo GIFs. On-demand: each one drives a real spyc for

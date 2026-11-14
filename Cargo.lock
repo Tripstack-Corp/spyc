@@ -4494,6 +4494,7 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "shlex 2.0.1",
+ "spyc-jar",
  "spyc-vt-sys",
  "strip-ansi-escapes",
  "strum",
@@ -4518,6 +4519,11 @@ dependencies = [
 [[package]]
 name = "spyc-jar"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "nix 0.29.0",
+ "rustix 1.1.6",
+]
 
 [[package]]
 name = "spyc-vt-sys"

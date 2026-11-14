@@ -558,10 +558,11 @@ mod guard_tests {
     /// being reworded (the heading text is deliberately NOT the key).
     ///
     /// This guard pins BOTH ends against the slug so a reference can't rot
-    /// green: every `SPYC-TRAP(<slug>)` in `src/` must resolve to a
-    /// `<!-- SPYC-TRAP: <slug> -->` marker in ARCHITECTURE.md (no dangling
-    /// code→doc ref), AND every marker must have at least one code referrer (no
-    /// orphan store entry). See AGENTS.md → "Load-bearing trap anchors".
+    /// green: every `SPYC-TRAP(<slug>)` in `src/` or `crates/spyc-jar/src/`
+    /// must resolve to a `<!-- SPYC-TRAP: <slug> -->` marker in ARCHITECTURE.md
+    /// (no dangling code→doc ref), AND every marker must have at least one code
+    /// referrer (no orphan store entry). See AGENTS.md → "Load-bearing trap
+    /// anchors".
     #[test]
     fn traps_resolve_against_architecture_anchors() {
         // Assemble the sigil so this guard's own source (already skipped by
@@ -572,9 +573,10 @@ mod guard_tests {
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
 
-        // Code side: `SPYC-TRAP(<slug>)` across production src/.
+        // Code side: `SPYC-TRAP(<slug>)` across production src/ and the jar's
+        // crate.
         let mut code: Vec<(String, String)> = Vec::new(); // (slug, file)
-        scan_rs(&root.join("src"), &mut |path, src| {
+        let mut collect = |path: &std::path::Path, src: &str| {
             let name = path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -583,7 +585,9 @@ mod guard_tests {
             for slug in slugs_between(src, &code_open, ")") {
                 code.push((slug, name.clone()));
             }
-        });
+        };
+        scan_rs(&root.join("src"), &mut collect);
+        scan_rs(&root.join("crates/spyc-jar/src"), &mut collect);
 
         // Store side: `<!-- SPYC-TRAP: <slug> -->` in ARCHITECTURE.md.
         let arch =

@@ -742,6 +742,36 @@ upload. `scripts/test_vendored_archives.py` checks the committed archives, and
 the vendored-archives job the ones it rebuilds. The evidence, with the commands that reproduce it, is in
 [`spikes/zig-macho-weak-export/`](spikes/zig-macho-weak-export/README.md).
 
+## A jar's upgrade keeps its sockets in a holder
+
+<!-- SPYC-TRAP: jar-upgrade-holder -->
+When a jar replaces its binary (R33), its listener and every connection reach
+the new image as `SCM_RIGHTS` on a socketpair. From the `exec` until the new
+image receives them, nothing holds them but that message, and macOS flushes a
+unix socket whose every reference is in flight whenever its collector runs.
+Any unix socket closing anywhere on the machine runs it, and both ends then
+read end-of-file: the program lives on, its owner and readers are cut off. So
+the upgrade first starts `spyc-jar hold-handover`, which takes copies of the
+same sockets and keeps them until the new image has its own and ends it.
+
+Removing the holder passes on Linux and on a quiet Mac. The spike measured it
+on macOS (`docs/drafts/PANE_JAR_SPIKE.md`): with a loop closing socketpairs in
+the background, every upgrade failed in 10 runs of 10 without it and none in 10
+with it. `tests/jar_process.rs`'s
+`an_upgrade_survives_unix_sockets_closing_elsewhere` runs that loop, and is
+the test to run on a Mac before touching the handover.
+
+## A jar's token arrives on its standard input
+
+<!-- SPYC-TRAP: jar-token-stdin -->
+A jar's token (R26) is what lets a client own it or watch it, so it travels
+only where no other process can read it: its starter writes it to the jar's
+standard input, which then closes. Every user can read a process's arguments,
+any process of the same user its environment, and a jar's program inherits the
+jar's environment, so a token in either would reach every agent a jar hosts.
+A jar started without one, or with one shorter than 16 bytes, refuses to run
+rather than run open.
+
 ## spyc's stderr follows the screen
 
 <!-- SPYC-TRAP: stderr-follows-the-screen -->

@@ -219,12 +219,12 @@ in one file rather than being restated in the workflow.
 Inspect the policy against a directory of debs without publishing:
 `make apt-prune-check APT_REPO=<dir>`.
 
-### 5a. Two crates now publish, in order
+### 5a. Three crates publish, in order
 
-`spyc-vt-sys` must reach crates.io **before** spyc. Packaging drops a
-dependency's `path`, so spyc's published manifest resolves the FFI crate from
+`spyc-vt-sys` and `spyc-jar` must reach crates.io **before** spyc. Packaging
+drops a dependency's `path`, so spyc's published manifest resolves each from
 the registry by its `version`. That gives two requirements, and the first
-release carrying the crate needed both fixed (#490):
+release carrying `spyc-vt-sys` needed both fixed (#490):
 
 - **The dependency carries a version.** `spyc-vt-sys = { version = "0.2.0",
   path = "crates/spyc-vt-sys" }`. Without it `cargo package` refuses outright
@@ -232,32 +232,41 @@ release carrying the crate needed both fixed (#490):
   packaging"*). Bump the requirement whenever the crate's own version moves;
   cargo rejects a path crate whose version no longer satisfies it, so a missed
   bump fails the build rather than shipping.
-- **The crate is published first.** The `crates` job in `release.yml`
-  publishes `spyc-vt-sys`, then spyc. Each step checks crates.io for that
-  version first and skips it if it's there, so a re-run is a no-op and a
-  release that didn't move the FFI crate republishes nothing.
+- **The crates are published first.** The `crates` job in `release.yml`
+  publishes `spyc-vt-sys`, then `spyc-jar`, then spyc. Each step checks
+  crates.io for that version first and skips it if it's there, so a re-run is
+  a no-op and a release that didn't move a library crate republishes nothing.
 
 By hand, the same order:
 
 ```
 cargo publish -p spyc-vt-sys     # first
-cargo publish -p spyc            # then, once the registry has it
+cargo publish -p spyc-jar        # second
+cargo publish -p spyc            # then, once the registry has both
 ```
+
+`spyc-jar` is the jar that holds a pane's program (`crates/spyc-jar`). spyc's
+package installs its binary through a `[[bin]]` that calls the crate, so
+`cargo install spyc` carries both binaries.
 
 **A new crate's first publish is manual.** Trusted Publishing mints a token
 only for a crate that already exists and names this repo and `release.yml` as
 its trusted publisher. So, once per new crate:
 
-1. `cargo publish -p spyc-vt-sys` with a personal crates.io token
+1. `cargo publish -p <crate>` with a personal crates.io token
    (`cargo login`, or `CARGO_REGISTRY_TOKEN` for the one command).
 2. On the crate's crates.io settings page, add a trusted publisher: repository
    `Tripstack-Corp/spyc`, workflow `release.yml`.
 
 From then on the release job publishes it like spyc.
 
+**`spyc-jar` hasn't had its first publish yet.** The first release after it
+joined spyc's dependencies needs step 1 and step 2 above for it before the
+tag, or the `crates` job fails at `cargo publish -p spyc-jar`.
+
 **CI checks this on every PR.** `make package-check` (the `package` job) runs
-`cargo package --workspace`. That packages both crates and builds each from
-its own tarball, spyc against `spyc-vt-sys`'s through cargo's temporary local
+`cargo package --workspace`. That packages the three crates and builds each
+from its own tarball, spyc against the others' through cargo's temporary local
 registry, which is exactly what `cargo publish` will do at the tag. A file the
 build needs but the package leaves out (#426) fails there, and so does a
 dependency the registry can't resolve.
