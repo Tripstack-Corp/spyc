@@ -2290,13 +2290,15 @@ mod sequences {
                 }
                 let owner = held.as_mut().expect("an owner");
                 match ask {
-                    Ask::OwnerReplay(from) => settle(owner, &[Msg::Replay { from: *from }]),
+                    // A new owner was connected above.
+                    Ask::OwnerReplay(from) | Ask::NewOwner(from) => {
+                        settle(owner, &[Msg::Replay { from: *from }]);
+                    }
                     Ask::ReaderReplay(from) => {
                         let mut r = connect_within(&jar, Role::Reader, TOKEN, WAIT)
                             .map_err(|e| TestCaseError::fail(format!("{e:#}")))?;
                         settle(&mut r, &[Msg::Replay { from: *from }]);
                     }
-                    Ask::NewOwner(from) => settle(owner, &[Msg::Replay { from: *from }]),
                     Ask::FetchSnapshot => settle(owner, &[Msg::FetchSnapshot]),
                     Ask::StoreSnapshot(at) => settle(
                         owner,

@@ -82,7 +82,9 @@ pub(super) fn wait_child(shared: &Shared) {
             }
             Ok(Some((_, status))) => match (status.exit_status(), status.terminating_signal()) {
                 (Some(code), _) => (code, false),
-                (None, Some(_)) => (-1, true),
+                // As the frozen `exited` fixture has it: the code is the
+                // signal's number.
+                (None, Some(signal)) => (signal, true),
                 _ => (-1, false),
             },
             Err(_) => (-1, false),

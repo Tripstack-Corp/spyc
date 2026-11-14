@@ -81,7 +81,7 @@ pub(super) fn describe(shared: &Shared) -> Vec<(String, String)> {
         f.push((
             "exit",
             if signaled {
-                "signal".into()
+                format!("signal {code}")
             } else {
                 code.to_string()
             },
