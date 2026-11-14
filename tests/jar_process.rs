@@ -1967,6 +1967,44 @@ fn a_frame_over_the_limit_is_refused_before_it_is_sent() {
     recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 7 }));
 }
 
+/// A snapshot is handed back in a frame one byte bigger than the one that
+/// stored it, so one that only just fits is refused when it is stored, not
+/// stored and then impossible to fetch.
+#[test]
+fn a_snapshot_too_big_to_hand_back_is_refused() {
+    use spyc_jar::proto::{MAX_FRAME, encode};
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    let snapshot = |blob: Vec<u8>| {
+        Msg::StoreSnapshot(Snapshot {
+            format: SNAPSHOT_VT,
+            offset: 0,
+            rows: 24,
+            cols: 80,
+            blob,
+        })
+    };
+    // A frame's length field counts everything after itself.
+    let overhead = encode(&snapshot(Vec::new())).len() - 4;
+    let biggest = snapshot(vec![b's'; MAX_FRAME - overhead]);
+    assert_eq!(encode(&biggest).len() - 4, MAX_FRAME, "it fits a frame");
+    owner.send(&biggest).expect("store");
+    let answer = recv_matching(&mut owner, |m| matches!(m, Msg::Refused { .. }));
+    assert!(
+        matches!(
+            answer,
+            Msg::Refused {
+                reason: spyc_jar::proto::reason::INVALID,
+                ..
+            }
+        ),
+        "{answer:?}"
+    );
+    owner.send(&Msg::FetchSnapshot).expect("fetch");
+    let fetched = recv_matching(&mut owner, |m| matches!(m, Msg::Snapshot(_)));
+    assert_eq!(fetched, Msg::Snapshot(None), "nothing was stored");
+}
+
 // The property tests JAR_PROTOCOL.md promises under "Fuzzing": sequences of
 // messages, drawn at random, across the roles. Each runs against one jar,
 // checking the property after every sequence.
@@ -1985,8 +2023,9 @@ mod sequences {
     fn runner() -> TestRunner {
         TestRunner::new(Config {
             cases: 32,
-            // Each case drives a live jar: a failure is shown nearly as found.
-            max_shrink_iters: 16,
+            // The jar's state carries from case to case, so a shrunk case may
+            // pass on its own: a failure shows the sequence that failed.
+            max_shrink_iters: 0,
             failure_persistence: None,
             ..Config::default()
         })
