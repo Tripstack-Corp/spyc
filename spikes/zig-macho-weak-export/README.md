@@ -153,6 +153,77 @@ _memset:
 0000000101266c78	b.ne	0x101266c70
 ```
 
+## What it cost: macOS arm64, timed
+
+Does spyc run measurably faster with libSystem's memory and string functions
+than with the archive's copies? Two release builds of main `cd413b07` for
+`aarch64-apple-darwin`, differing only in the vendored archive:
+
+- **A**, main's archive as committed: all five bind to libSystem.
+- **B**, main's archive with the localize step undone by
+  [`libc-bench/scripts/globalize.sh`](libc-bench/scripts/globalize.sh):
+  `llvm-objcopy --globalize-symbol --weaken-symbol` (Homebrew LLVM 22.1.8) on
+  each name in `vendor/LIBC_SYMBOLS` that a member defines as a local symbol,
+  then the members re-archived in their original order. In `compiler_rt.o`, the
+  92 listed names go from `91 t` and `1 d` to `91 T` and `1 D` in `llvm-nm`;
+  the member list and order are identical. The archives' SHA-256 are
+  `8f08c8a7…a752` (A) and `1568b306…8514` (B).
+
+B was made this way rather than rebuilt from the pin without the localize step
+because the rebuild failed: Zig's package fetch broke in the build container in
+three ways, recorded in #1153. B's code bytes are A's; only symbol binding and
+visibility differ. It was not compared with a real rebuild.
+
+The five bind differently in the two binaries (`nm -m spyc | grep -E
+' _(memset|memcpy|memmove|memcmp|strlen)( |$)'`):
+
+```
+A:                 (undefined) external _memset (from libSystem)
+B: 0000000100f6bcb4 (__TEXT,__text) non-external (was a private external) _memset
+```
+
+and the same for `memcpy`, `memmove`, `memcmp` and `strlen`.
+
+[`libc-bench/scripts/build.sh`](libc-bench/scripts/build.sh) builds spyc and
+`spikes/vt-engine`'s `bench` (`--features ghostty`) with `cargo build --release`,
+strip off. Three workloads, all from what the repo already has:
+
+- **engine**: `bench 800`, which feeds `big-spew.bin` through libghostty-vt and
+  through vt100 (pure Rust) in 8 KiB chunks, 800 times, and reports each
+  engine's time.
+- **bigdir**: spyc started in a pty in a folder of 100,000 empty files with
+  `-c quit -c quit`, wall time from fork to exit
+  ([`drive.py`](libc-bench/scripts/drive.py)).
+- **merge**: `spyc --merge-driver` on 1,000,000-line base, ours and theirs files
+  (about 50 MB each) whose edits don't overlap
+  ([`mkdata.py`](libc-bench/scripts/mkdata.py)).
+
+[`timeit.py`](libc-bench/scripts/timeit.py) runs 2 warm-up rounds of each
+binary, then 10 rounds that alternate the order (A then B, B then A).
+[`macos-session.sh`](libc-bench/scripts/macos-session.sh) ran it on
+2026-11-14, 06:42 to 06:43, on Darwin 25.6.0 arm64, on battery at 100% and under
+`caffeinate -i`. Before timing, `pgrep -fl 'zig|cargo|rustc|clang|cc1plus|ld64|podman|vfkit'`
+showed only the idle podman VM. Seconds, lower is better:
+
+| workload | A mean | A sd | A min | B mean | B sd | B min | B/A | Welch t |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| engine, libghostty-vt | 0.4129 | 0.0079 | 0.4020 | 0.4108 | 0.0120 | 0.3990 | 0.99 | -0.46 |
+| engine, vt100 | 1.2354 | 0.0233 | 1.1940 | 1.7840 | 0.0490 | 1.7320 | 1.44 | 32.00 |
+| bigdir | 0.1843 | 0.0261 | 0.1568 | 0.2066 | 0.0240 | 0.1752 | 1.12 | 1.99 |
+| merge | 0.2575 | 0.0102 | 0.2381 | 0.4354 | 0.0285 | 0.3947 | 1.69 | 18.57 |
+
+With libSystem's functions, the vt100 engine run is 44% faster and the 50 MB
+merge 69% faster. libghostty-vt's throughput is the same, and so is starting in
+the 100,000-file folder: its 12% gap is smaller than one standard deviation.
+
+The raw runs are
+[`libc-bench/raw-macos-arm64.tsv`](libc-bench/raw-macos-arm64.tsv), SHA-256
+`3b315afed9b0a681ad0620486147e728fd59f40568d5d2b8fc64d2307c2a052e`. The file the
+session wrote, `60f8cc772974528021c1b7eaace3019a9196367adf762ed72dfe325181b31378`,
+differs only in the binaries' local path, which the copy replaces with
+`$BENCH`. The scripts are the copies that ran, with local paths replaced by
+`${BENCH:?}`, `${SPYC_B:?}`, `${SPYC_MAIN:?}` and `${OUT:?}`.
+
 ## What does not follow from it
 
 **The weak flag does not decide whether libSystem is used.** Section 6 links
