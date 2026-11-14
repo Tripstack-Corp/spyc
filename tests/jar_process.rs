@@ -1660,8 +1660,9 @@ fn tokenless_connections_cannot_exhaust_the_jars_descriptors() {
 }
 
 /// Finding 4: a large paste into a program that reads nothing doesn't stop
-/// the jar hearing its owner. A ping is answered, a kill is delivered, and an
-/// upgrade goes ahead once the owner has gone.
+/// the jar hearing its owner. A ping is answered; once the owner has gone, its
+/// paste goes with it, so the next owner can upgrade the jar and end the
+/// program.
 #[test]
 fn a_paste_the_program_never_reads_does_not_block_its_owner() {
     let mut jar = Jar::start(&[], &sh("stty raw -echo; echo READY; exec sleep 1000"));
@@ -1675,26 +1676,27 @@ fn a_paste_the_program_never_reads_does_not_block_its_owner() {
         .expect("paste");
     owner.send(&Msg::Ping { n: 42 }).expect("ping");
     recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 42 }));
-    owner
-        .send(&Msg::Signal {
-            signal: spyc_jar::proto::JarSignal::Kill as i32,
-        })
-        .expect("kill");
-    let exit = recv_matching(&mut owner, |m| matches!(m, Msg::Exited { .. }));
-    assert!(
-        matches!(exit, Msg::Exited { signaled: true, .. }),
-        "the program was killed: {exit:?}"
-    );
     drop(owner);
-    let mut asker = None;
+    let mut next = None;
     eventually("the owner's lease freed", || {
-        asker = connect_within(&jar, Role::Owner, TOKEN, Duration::from_millis(500)).ok();
-        asker.is_some()
+        next = connect_within(&jar, Role::Owner, TOKEN, Duration::from_millis(500)).ok();
+        next.is_some()
     });
-    let answer = upgrade(&jar, &mut asker.expect("welcomed"));
+    let mut next = next.expect("welcomed");
+    let answer = upgrade(&jar, &mut next);
     assert!(
         answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
         "the upgrade goes ahead: {answer:?}"
+    );
+    next.send(&Msg::Replay { from: 0 }).expect("replay");
+    next.send(&Msg::Signal {
+        signal: spyc_jar::proto::JarSignal::Kill as i32,
+    })
+    .expect("kill");
+    let exit = recv_matching(&mut next, |m| matches!(m, Msg::Exited { .. }));
+    assert!(
+        matches!(exit, Msg::Exited { signaled: true, .. }),
+        "the program was killed: {exit:?}"
     );
 }
 
