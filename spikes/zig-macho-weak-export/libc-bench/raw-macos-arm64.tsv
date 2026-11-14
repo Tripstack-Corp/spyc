@@ -1,0 +1,69 @@
+# engine: mode=bench runs=10 warmup=2 args=['800'] prep=''
+# A=$BENCH/run-macos/A/bench
+# B=$BENCH/run-macos/B/bench
+engine	0	A	ghostty=0.404000	vt100=1.194000
+engine	0	B	ghostty=0.401000	vt100=1.743000
+engine	1	B	ghostty=0.402000	vt100=1.732000
+engine	1	A	ghostty=0.418000	vt100=1.238000
+engine	2	A	ghostty=0.402000	vt100=1.228000
+engine	2	B	ghostty=0.402000	vt100=1.736000
+engine	3	B	ghostty=0.403000	vt100=1.752000
+engine	3	A	ghostty=0.416000	vt100=1.211000
+engine	4	A	ghostty=0.415000	vt100=1.242000
+engine	4	B	ghostty=0.410000	vt100=1.774000
+engine	5	B	ghostty=0.431000	vt100=1.803000
+engine	5	A	ghostty=0.411000	vt100=1.229000
+engine	6	A	ghostty=0.410000	vt100=1.237000
+engine	6	B	ghostty=0.414000	vt100=1.831000
+engine	7	B	ghostty=0.399000	vt100=1.783000
+engine	7	A	ghostty=0.417000	vt100=1.235000
+engine	8	A	ghostty=0.407000	vt100=1.267000
+engine	8	B	ghostty=0.431000	vt100=1.797000
+engine	9	B	ghostty=0.415000	vt100=1.889000
+engine	9	A	ghostty=0.429000	vt100=1.273000
+# bigdir: mode=spycstart runs=10 warmup=2 args=['$BENCH/data/bigdir'] prep=''
+# A=$BENCH/run-macos/A/spyc
+# B=$BENCH/run-macos/B/spyc
+bigdir	0	A	wall=0.173545
+bigdir	0	B	wall=0.194442
+bigdir	1	B	wall=0.189231
+bigdir	1	A	wall=0.180293
+bigdir	2	A	wall=0.156843
+bigdir	2	B	wall=0.175185
+bigdir	3	B	wall=0.189682
+bigdir	3	A	wall=0.180794
+bigdir	4	A	wall=0.172434
+bigdir	4	B	wall=0.218828
+bigdir	5	B	wall=0.212386
+bigdir	5	A	wall=0.172791
+bigdir	6	A	wall=0.167901
+bigdir	6	B	wall=0.188661
+bigdir	7	B	wall=0.219155
+bigdir	7	A	wall=0.233284
+bigdir	8	A	wall=0.231177
+bigdir	8	B	wall=0.257306
+bigdir	9	B	wall=0.221549
+bigdir	9	A	wall=0.173783
+# merge: mode=wall runs=10 warmup=2 args=['--merge-driver', '$BENCH/data/merge/base', '$BENCH/data/merge/cur', '$BENCH/data/merge/theirs'] prep='cp $BENCH/data/merge/ours $BENCH/data/merge/cur'
+# A=$BENCH/run-macos/A/spyc
+# B=$BENCH/run-macos/B/spyc
+merge	0	A	wall=0.262280
+merge	0	B	wall=0.412029
+merge	1	B	wall=0.465304
+merge	1	A	wall=0.246555
+merge	2	A	wall=0.255190
+merge	2	B	wall=0.466620
+merge	3	B	wall=0.425472
+merge	3	A	wall=0.267710
+merge	4	A	wall=0.271259
+merge	4	B	wall=0.460145
+merge	5	B	wall=0.394746
+merge	5	A	wall=0.265646
+merge	6	A	wall=0.260771
+merge	6	B	wall=0.413837
+merge	7	B	wall=0.468421
+merge	7	A	wall=0.256408
+merge	8	A	wall=0.251546
+merge	8	B	wall=0.443096
+merge	9	B	wall=0.404829
+merge	9	A	wall=0.238083

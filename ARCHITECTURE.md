@@ -679,11 +679,39 @@ its prerequisite; the default shipped first, which is how the gap reached users.
 ## The vendored archive defines no C library function
 
 <!-- SPYC-TRAP: vendored-libc-symbols -->
-spyc's `memset`, `memcpy`, `memmove`, `memcmp` and `strlen` come from the
-platform's C library. A global that a loaded archive member defines takes part
-in the final link, and Apple's `ld` binds an undefined symbol to it before
-libSystem, weak or not, so any C library function left global in the vendored
-libghostty-vt archive replaces the platform's for all of spyc.
+None of spyc's `memset`, `memcpy`, `memmove`, `memcmp` and `strlen` comes from
+the vendored libghostty-vt archive, on any shipped target. A global that a
+loaded archive member defines takes part in the final link, and Apple's `ld`
+binds an undefined symbol to it before libSystem, weak or not; a static musl
+link takes it over musl's. So any C library function left global in the archive
+replaces the platform's for all of spyc. Where each one comes from instead, in
+the release builds of `cd413b07`:
+
+| target | `memset` | `memcpy` | `memmove` | `memcmp` | `strlen` | checked by |
+|---|---|---|---|---|---|---|
+| macOS, arm64 and x86_64 | libSystem | libSystem | libSystem | libSystem | libSystem | `nm -m`: each is `(undefined) external ... (from libSystem)` |
+| `x86_64-unknown-linux-musl` | musl | `compiler_rt` | `compiler_rt` | musl | musl | each function's bytes in spyc compared with the objects the linker had |
+| `aarch64-unknown-linux-musl` | musl | `compiler_rt` | `compiler_rt` | musl | musl | the same |
+
+On the musl targets, "musl" and "`compiler_rt`" are Zig's: `release.yml` links
+them with `cargo zigbuild` and Zig 0.14.0, which adds its own musl `libc.a`
+and `compiler_rt`. That `libc.a` has no `memcpy` or `memmove` (`llvm-ar x` reports
+`'memcpy.o' was not found`), so those two come from `compiler_rt`.
+On `aarch64-unknown-linux-musl`, ghostty's own `memset` is also in the binary,
+as a local symbol only ghostty's code calls. #1148 has the byte comparison.
+
+**Changing the Zig version in `release.yml` changes which routines the musl
+binaries use, so benchmark before bumping it.** Zig 0.17.1's
+`lib/zig/c/string.zig` takes all five from `compiler_rt` for musl (lines 9 to
+13 and 31):
+
+```zig
+        // memcpy implemented in compiler_rt
+        // memmove implemented in compiler_rt
+        // memset implemented in compiler_rt
+        // memcmp implemented in compiler_rt
+        // strlen is in compiler_rt
+```
 
 The archive has had two sources of them, and keeping both out depends on the
 ghostty pin and on the vendoring recipe:
@@ -691,8 +719,11 @@ ghostty pin and on the vendoring recipe:
 - **Zig's `compiler_rt.o`**, which defines the string, maths and
   stack-protector functions. ghostty's own `libsystem_override.sh` localizes
   them, but only when the build host is Darwin, and spyc builds its archives on
-  Linux. `scripts/unexport-libc.py` makes the ones in `vendor/LIBC_SYMBOLS`
-  local with LLVM 20's `llvm-objcopy` during vendoring instead.
+  Linux. ghostty does not support cross-compiling to Darwin: "We don't support
+  cross-compiling to Darwin" (`src/build/SharedDeps.zig`, line 182, at ghostty
+  `f08437b7956abdefa0d6e0431c495303a7009069`). `scripts/unexport-libc.py` makes
+  the ones in `vendor/LIBC_SYMBOLS` local with LLVM 20's `llvm-objcopy` during
+  vendoring instead.
 - **ghostty's own `memset`** (`quirks_memset.zig`), exported weak beside
   compiler_rt's. Zig 0.16 and later write a weak `@export` to Mach-O as an
   ordinary symbol (an LLVM alias the Mach-O writer emits without its weak flag,
