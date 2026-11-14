@@ -11,12 +11,13 @@ use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, WaitOptions};
 
-use super::{Shared, TICK, Who, readable};
+use super::{PTY_READ, Shared, TICK, Who, readable};
 use crate::proto::JarSignal;
 use crate::state::{Event, State};
 
-/// How long a jar with a finite linger waits for its first owner: the spyc
-/// that spawned it connects within milliseconds.
+/// How long a jar with a finite linger waits for its first owner, or for the
+/// successor a release named: the spyc that spawned it connects within
+/// milliseconds, one taking it over within seconds.
 const FIRST_OWNER_GRACE: Duration = Duration::from_secs(10);
 
 /// Copy the program's output into the log, pausing while a live owner is a
@@ -24,7 +25,7 @@ const FIRST_OWNER_GRACE: Duration = Duration::from_secs(10);
 pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
     // The window is checked before each read, so a live owner can be a
     // window plus one read behind: keep reads small.
-    let mut buf = vec![0u8; 8192];
+    let mut buf = vec![0u8; PTY_READ];
     loop {
         if shared.upgrading() {
             shared.park(Who::Pty);
@@ -40,8 +41,17 @@ pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
             continue;
         }
         let n = match reader.read(&mut buf) {
-            Ok(0) | Err(_) => break,
+            Ok(0) => break,
             Ok(n) => n,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                continue;
+            }
+            Err(_) => break,
         };
         let mut st = shared.lock();
         let at = st.log.head;
@@ -86,7 +96,13 @@ pub(super) fn wait_child(shared: &Shared) {
 
 /// End the jar once its program has ended and the exit was collected, or
 /// nobody came back for it within the linger time.
+///
+/// That time runs from the later of the exit and the owner's going (R2,
+/// review finding 16): a program that ends long after spyc crashed keeps its
+/// exit and its last output for the spyc that comes back.
 pub(super) fn reap(shared: &Shared) {
+    // When this thread first saw the exit: an upgrade starts the hold again.
+    let mut exited_at: Option<Instant> = None;
     let mut st = shared.lock();
     loop {
         // R4: the foreground process group, read here because only the
@@ -106,9 +122,10 @@ pub(super) fn reap(shared: &Shared) {
             continue;
         }
         if st.exit.is_some() && !shared.upgrading() {
+            let exited = *exited_at.get_or_insert_with(Instant::now);
             let alone_too_long = st
                 .ownerless_since
-                .is_some_and(|t| t.elapsed() >= shared.cfg.linger_after_exit);
+                .is_some_and(|t| t.max(exited).elapsed() >= shared.cfg.linger_after_exit);
             if st.exit_acked || alone_too_long {
                 let _ = std::fs::remove_file(&shared.cfg.socket);
                 std::process::exit(0);

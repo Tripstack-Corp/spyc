@@ -1,9 +1,12 @@
 //! The jar binary, driven as spyc would drive it: one real program on a PTY,
 //! one or two connections, nothing of spyc's.
 
-use std::io::Write;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use spyc_jar::client::Client;
@@ -23,12 +26,27 @@ impl Jar {
     /// Start a jar for `argv` with `extra` options. The socket lives under
     /// `/tmp`, because macOS caps a socket's path at about 104 bytes.
     fn start(extra: &[&str], argv: &[&str]) -> Self {
+        Self::start_limited(None, extra, argv)
+    }
+
+    /// [`Jar::start`], with the jar's open descriptors limited to `nofile`
+    /// when it is given.
+    fn start_limited(nofile: Option<u32>, extra: &[&str], argv: &[&str]) -> Self {
         let dir = tempfile::Builder::new()
             .prefix("jar")
             .tempdir_in("/tmp")
             .expect("tempdir");
         let socket = dir.path().join("j.sock");
-        let process = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
+        let jar = env!("CARGO_BIN_EXE_spyc-jar");
+        let mut command = match nofile {
+            Some(n) => {
+                let mut c = Command::new("/bin/sh");
+                c.args(["-c", &format!("ulimit -n {n} && exec \"$0\" \"$@\""), jar]);
+                c
+            }
+            None => Command::new(jar),
+        };
+        let process = command
             .args(["--wire", "1"])
             .arg("--socket")
             .arg(&socket)
@@ -270,7 +288,7 @@ fn a_new_owner_replays_from_what_the_last_one_acknowledged() {
 #[test]
 fn an_ownerless_jar_drops_the_oldest_bytes_and_says_which() {
     let mut jar = Jar::start(
-        &["--ring", "65536"],
+        &["--ring", "65536", "--window", "32768"],
         &sh("head -c 1000000 /dev/zero | tr '\\000' b; echo; echo END; sleep 5"),
     );
     // Until the program has printed it all, as the jar describes its log:
@@ -1379,4 +1397,440 @@ fn a_failed_exec_leaves_a_jar_that_survives_the_next_refusal() {
     assert!(jar.process.try_wait().unwrap().is_none(), "the jar lives");
     owner.send(&Msg::Ping { n: 5 }).unwrap();
     recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 5 }));
+}
+
+// The review's probes, as requirements. A jar can't be wedged by a client
+// that stops reading or a program that stops reading (finding 4), nor held by
+// connections without its token (finding 5), and it keeps what an owner yet
+// to come will need (findings 16, 17 and 18).
+
+/// The token a release hands to the next owner.
+const NEXT_TOKEN: &[u8] = b"the-next-owners-token-0001";
+
+/// [`try_connect`], giving up after `wait`.
+fn connect_within(jar: &Jar, role: Role, token: &[u8], wait: Duration) -> anyhow::Result<Client> {
+    Client::connect(&jar.socket, role, wait, token).map(|(c, _)| c)
+}
+
+/// Ask on `client` for an upgrade to a copy of the jar's binary, and return
+/// the new build, or how the jar refused. Call it once a test: the copy is
+/// running afterwards.
+fn upgrade(jar: &Jar, client: &mut Client) -> Result<String, String> {
+    let next = next_binary(jar.dir.path());
+    client
+        .send(&Msg::Upgrade {
+            binary: next.display().to_string(),
+        })
+        .map_err(|e| format!("send: {e}"))?;
+    let until = Instant::now() + WAIT;
+    while Instant::now() < until {
+        match client.recv(Duration::from_millis(200)) {
+            Ok(Some(Msg::Upgraded { build })) => return Ok(build),
+            Ok(Some(Msg::Refused { reason, why })) => {
+                return Err(format!("refused ({reason}): {why}"));
+            }
+            Ok(_) => {}
+            Err(e) => return Err(format!("connection: {e:#}")),
+        }
+    }
+    Err("no answer".into())
+}
+
+/// A lookup's `hello` as raw bytes, the frozen fixture: no token.
+const LOOKUP_HELLO: [u8; 11] = [0, 0, 0, 7, 1, 0x80, 0, 1, 3, 0, 0];
+
+/// A connection that has said `hello` as a lookup and been welcomed, and
+/// that the test drives byte by byte from here.
+fn raw_lookup(socket: &std::path::Path) -> UnixStream {
+    let mut connected = None;
+    eventually("the jar's socket", || {
+        connected = UnixStream::connect(socket).ok();
+        connected.is_some()
+    });
+    let mut s = connected.expect("connected");
+    s.write_all(&LOOKUP_HELLO).expect("hello");
+    s.set_read_timeout(Some(WAIT)).expect("timeout");
+    let welcome = spyc_jar::proto::read_msg(&mut s);
+    assert!(
+        matches!(welcome, Ok(Some(Msg::Welcome { .. }))),
+        "a lookup is welcomed: {welcome:?}"
+    );
+    s
+}
+
+/// A lookup's `describe`, or why there was none within `WAIT`, however the
+/// jar fails to answer.
+fn describe_within(socket: &std::path::Path) -> Result<Vec<(String, String)>, String> {
+    let socket = socket.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(spyc_jar::client::describe(&socket).map_err(|e| format!("{e:#}")));
+    });
+    rx.recv_timeout(WAIT)
+        .unwrap_or_else(|_| Err(format!("no answer within {WAIT:?}")))
+}
+
+/// Whether process `pid` exists.
+fn running(pid: u32) -> bool {
+    i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
+}
+
+/// The CPU time process `pid` has used, as `ps` reports it on macOS
+/// (`M:SS.ss`) and Linux (`[DD-]HH:MM:SS`).
+fn cpu_seconds(pid: u32) -> f64 {
+    let out = Command::new("ps")
+        .args(["-o", "time=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let clock = text.trim().rsplit('-').next().unwrap_or_default();
+    clock.split(':').fold(0.0, |total, part| {
+        f64::mul_add(total, 60.0, part.parse::<f64>().unwrap_or(0.0))
+    })
+}
+
+/// Finding 4 (R21): an owner gone silent while its program prints loses the
+/// lease at its deadline, though the jar's writes to it are stuck.
+#[test]
+fn a_silent_owner_loses_the_lease_while_its_program_prints() {
+    let mut jar = Jar::start(
+        &["--deadline-ms", "500"],
+        &["yes", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    );
+    let silent = jar.connect(Role::Owner);
+    silent.send(&Msg::Replay { from: 0 }).expect("replay");
+    // From here it never reads, acknowledges or pings: a stopped spyc.
+    let mut next = None;
+    eventually("a new owner's welcome", || {
+        next = connect_within(&jar, Role::Owner, TOKEN, Duration::from_millis(500)).ok();
+        next.is_some()
+    });
+    let mut next = next.expect("welcomed");
+    let answer = upgrade(&jar, &mut next);
+    assert!(
+        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        "the new owner can upgrade the jar: {answer:?}"
+    );
+    drop(silent);
+}
+
+/// Finding 4: a reader that has stopped reading can't freeze the jar when its
+/// owner hands it on. The release, a lookup and the successor are answered.
+#[test]
+fn a_stalled_reader_does_not_freeze_a_release() {
+    let mut jar = Jar::start(
+        &[],
+        &["yes", "line-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let stalled = jar.connect(Role::Reader);
+    stalled.send(&Msg::Replay { from: 0 }).expect("replay");
+    // The owner reads on until far more has gone by than any socket holds, so
+    // the jar's writes to the reader are stuck.
+    read_until(&mut owner, true, |s| s.text.len() > 4 << 20);
+    owner
+        .send(&Msg::Release {
+            token: NEXT_TOKEN.to_vec(),
+        })
+        .expect("release");
+    let described = describe_within(&jar.socket);
+    assert!(described.is_ok(), "a lookup is answered: {described:?}");
+    let next = connect_within(&jar, Role::Owner, NEXT_TOKEN, WAIT);
+    assert!(
+        next.is_ok(),
+        "the successor is welcomed: {next:?}",
+        next = next.err()
+    );
+    drop(stalled);
+}
+
+/// Finding 5: a connection without the token can't hold off an upgrade by
+/// sending a frame a byte at a time.
+#[test]
+fn a_lookup_trickling_a_frame_does_not_block_an_upgrade() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let raw = raw_lookup(&jar.socket);
+    // The header of a 4,000-byte ping, then a byte at a time.
+    (&raw).write_all(&[0, 0, 0x0f, 0xa0, 9]).expect("header");
+    let stop = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop);
+        let raw = raw.try_clone().expect("clone");
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) && (&raw).write_all(&[0]).is_ok() {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        })
+    };
+    let answer = upgrade(&jar, &mut owner);
+    stop.store(true, Ordering::SeqCst);
+    let _ = trickle.join();
+    assert!(
+        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        "the upgrade goes ahead: {answer:?}"
+    );
+}
+
+/// Finding 5: a frame that has begun arrives whole by its deadline, however
+/// its bytes trickle, or the jar closes the connection.
+#[test]
+fn a_frame_that_trickles_is_cut_off() {
+    let jar = Jar::start(&[], &["/bin/cat"]);
+    let raw = raw_lookup(&jar.socket);
+    (&raw).write_all(&[0, 0, 0x0f, 0xa0, 9]).expect("header");
+    let stop = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop);
+        let raw = raw.try_clone().expect("clone");
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) && (&raw).write_all(&[0]).is_ok() {
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        })
+    };
+    let mut rest = Vec::new();
+    let read = (&raw).read_to_end(&mut rest);
+    stop.store(true, Ordering::SeqCst);
+    let _ = trickle.join();
+    assert!(read.is_ok(), "the jar closed it: {read:?}");
+}
+
+/// Finding 5: idle connections without the token, more than a handover
+/// carries, neither hold off an upgrade nor cross it.
+#[test]
+fn idle_lookups_neither_block_nor_cross_an_upgrade() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let lookups: Vec<UnixStream> = (0..201).map(|_| raw_lookup(&jar.socket)).collect();
+    let answer = upgrade(&jar, &mut owner);
+    assert!(
+        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        "the upgrade goes ahead: {answer:?}"
+    );
+    // A connection that crossed is told `upgraded`; a lookup reads to its end
+    // and is told nothing.
+    for (i, mut s) in lookups.into_iter().enumerate() {
+        let mut rest = Vec::new();
+        let read = s.read_to_end(&mut rest);
+        assert!(read.is_ok(), "lookup {i} is closed: {read:?}");
+        let mut frames = rest.as_slice();
+        while let Ok(Some(m)) = spyc_jar::proto::read_msg(&mut frames) {
+            assert!(!matches!(m, Msg::Upgraded { .. }), "lookup {i} crossed");
+        }
+    }
+    let described = describe_within(&jar.socket);
+    assert!(
+        described.is_ok(),
+        "the new image answers a lookup: {described:?}"
+    );
+}
+
+/// Finding 5: connections without the token can't take every descriptor the
+/// jar may open. A token holder is still welcomed, the upgrade goes ahead,
+/// and the jar doesn't spin.
+#[test]
+fn tokenless_connections_cannot_exhaust_the_jars_descriptors() {
+    let mut jar = Jar::start_limited(Some(64), &[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut held = Vec::new();
+    for _ in 0..60 {
+        let Ok(mut s) = UnixStream::connect(&jar.socket) else {
+            break;
+        };
+        let _ = s.write_all(&LOOKUP_HELLO);
+        held.push(s);
+    }
+    let reader = connect_within(&jar, Role::Reader, TOKEN, Duration::from_secs(2));
+    assert!(
+        reader.is_ok(),
+        "a token holder is welcomed: {:?}",
+        reader.err()
+    );
+    let pid = jar.process.id();
+    let before = cpu_seconds(pid);
+    std::thread::sleep(Duration::from_secs(3));
+    let spent = cpu_seconds(pid) - before;
+    assert!(spent < 1.0, "the jar spent {spent:.2} s of CPU in 3 s");
+    let answer = upgrade(&jar, &mut owner);
+    assert!(
+        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        "the upgrade goes ahead: {answer:?}"
+    );
+    drop(held);
+}
+
+/// Finding 4: a large paste into a program that reads nothing doesn't stop
+/// the jar hearing its owner. A ping is answered; once the owner has gone, its
+/// paste goes with it, so the next owner can upgrade the jar and end the
+/// program.
+#[test]
+fn a_paste_the_program_never_reads_does_not_block_its_owner() {
+    let mut jar = Jar::start(&[], &sh("stty raw -echo; echo READY; exec sleep 1000"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    read_until(&mut owner, true, |s| s.contains("READY"));
+    owner
+        .send(&Msg::Input {
+            bytes: vec![b'x'; 1 << 20],
+        })
+        .expect("paste");
+    owner.send(&Msg::Ping { n: 42 }).expect("ping");
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 42 }));
+    drop(owner);
+    let mut next = None;
+    eventually("the owner's lease freed", || {
+        next = connect_within(&jar, Role::Owner, TOKEN, Duration::from_millis(500)).ok();
+        next.is_some()
+    });
+    let mut next = next.expect("welcomed");
+    let answer = upgrade(&jar, &mut next);
+    assert!(
+        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        "the upgrade goes ahead: {answer:?}"
+    );
+    next.send(&Msg::Replay { from: 0 }).expect("replay");
+    next.send(&Msg::Signal {
+        signal: spyc_jar::proto::JarSignal::Kill as i32,
+    })
+    .expect("kill");
+    let exit = recv_matching(&mut next, |m| matches!(m, Msg::Exited { .. }));
+    assert!(
+        matches!(exit, Msg::Exited { signaled: true, .. }),
+        "the program was killed: {exit:?}"
+    );
+}
+
+/// Finding 18 (R11): a window the ring can't hold, plus one read, is refused
+/// at the start; a live owner's bytes are never dropped from under it.
+#[test]
+fn a_window_must_fit_inside_the_ring() {
+    let dir = tempfile::Builder::new()
+        .prefix("jar")
+        .tempdir_in("/tmp")
+        .expect("tempdir");
+    let mut refused = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
+        .args(["--wire", "1", "--socket"])
+        .arg(dir.path().join("j.sock"))
+        .args(["--ring", "65536", "--", "/bin/cat"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn the jar");
+    // A jar that refuses its options may have gone before its token arrives.
+    let _ = refused.stdin.take().expect("stdin").write_all(TOKEN);
+    let until = Instant::now() + WAIT;
+    let mut status = None;
+    while status.is_none() && Instant::now() < until {
+        status = refused.try_wait().expect("try_wait");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // A jar that started after all is ended here, not left behind.
+    let _ = refused.kill();
+    let _ = refused.wait();
+    assert!(
+        status.is_some_and(|s| !s.success()),
+        "a 1 MiB window in a 64 KiB ring is refused: {status:?}"
+    );
+
+    let mut jar = Jar::start(
+        &["--ring", "65536", "--window", "32768"],
+        &sh("read go; head -c 1000000 /dev/zero | tr '\\000' a; echo; echo END"),
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    // The program prints once its owner is there: with none, the jar drops
+    // the oldest bytes by design (R12).
+    owner
+        .send(&Msg::Input {
+            bytes: b"go\n".to_vec(),
+        })
+        .expect("go");
+    // A live owner, slow to read: every byte arrives, contiguous.
+    let mut seen = Seen::default();
+    let until = Instant::now() + WAIT;
+    while !seen.contains("END") {
+        assert!(Instant::now() < until, "saw {} bytes", seen.text.len());
+        if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+            seen.take(m);
+            std::thread::sleep(Duration::from_millis(5));
+            if let Some(next) = seen.next_offset {
+                owner.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+    }
+    assert_eq!(seen.first_offset, Some(0));
+    assert!(
+        seen.frames.iter().all(|f| !matches!(f, Msg::Gap { .. })),
+        "{:?}",
+        seen.frames
+    );
+}
+
+/// Finding 17 (R22, R32a): a pane that doesn't linger survives being handed
+/// on. A release grants the successor the time a first owner gets.
+#[test]
+fn a_pane_that_does_not_linger_survives_a_handover() {
+    let mut jar = Jar::start(
+        &["--linger-ownerless-ms", "0"],
+        &sh("trap 'exit 9' HUP; echo READY; while :; do sleep 0.05; done"),
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    read_until(&mut owner, true, |s| s.contains("READY"));
+    let pid = jar.program.expect("welcomed");
+    owner
+        .send(&Msg::Release {
+            token: NEXT_TOKEN.to_vec(),
+        })
+        .expect("release");
+    // The successor is another spyc, which takes a moment to arrive.
+    std::thread::sleep(Duration::from_millis(500));
+    let next = connect_within(&jar, Role::Owner, NEXT_TOKEN, WAIT);
+    assert!(next.is_ok(), "the successor is welcomed: {:?}", next.err());
+    assert!(running(pid), "the program runs on");
+}
+
+/// Finding 16 (R2): a program that ends while nobody is there keeps its exit
+/// for the hold, counted from the exit, not from when its owner left.
+#[test]
+fn an_exit_with_nobody_there_is_kept_from_the_exit() {
+    let mut jar = Jar::start(
+        &["--linger-ms", "2000"],
+        &sh("sleep 3; echo RESULT=42; exit 7"),
+    );
+    let owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    // spyc crashes; the program ends three seconds later.
+    drop(owner);
+    let mut ended = false;
+    eventually("the exit, or the jar's end", || {
+        ended = jar.process.try_wait().ok().flatten().is_some();
+        ended || spyc_jar::client::describe(&jar.socket).is_ok_and(|f| field(&f, "exit") == "7")
+    });
+    assert!(!ended, "the jar ended as its program did");
+    let mut back = connect_within(&jar, Role::Owner, TOKEN, WAIT).expect("a new owner");
+    back.send(&Msg::Replay { from: 0 }).expect("replay");
+    let seen = read_until(&mut back, true, |s| {
+        s.frames.iter().any(|f| matches!(f, Msg::Exited { .. }))
+    });
+    assert!(
+        seen.contains("RESULT=42"),
+        "the last of the output is there"
+    );
+    assert!(
+        seen.frames
+            .iter()
+            .any(|f| matches!(f, Msg::Exited { code: 7, .. })),
+        "{:?}",
+        seen.frames
+    );
 }

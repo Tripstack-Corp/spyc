@@ -772,6 +772,23 @@ jar's environment, so a token in either would reach every agent a jar hosts.
 A jar started without one, or with one shorter than 16 bytes, refuses to run
 rather than run open.
 
+## A jar's threads never wait on a peer under a lock
+
+<!-- SPYC-TRAP: jar-one-writer -->
+A jar outlives every spyc, so no client may be able to stop it: not one that
+has stopped reading, nor a program that has. Only a connection's writer
+thread writes to its socket, with a write timeout, and anything else to be
+sent waits in the connection's outbox. A socket is shut down through the
+connection's one handle, with no lock. The program's input goes to the PTY
+from a thread of its own, polling, so a program that reads nothing holds up
+nobody. The review that found this (finding 4) wedged the spike's jar three
+ways: a silent owner kept its lease while its program printed, a reader that
+stopped reading froze a release, and a paste into a program that read nothing
+blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
+`a_silent_owner_loses_the_lease_while_its_program_prints`,
+`a_stalled_reader_does_not_freeze_a_release` and
+`a_paste_the_program_never_reads_does_not_block_its_owner`.
+
 ## spyc's stderr follows the screen
 
 <!-- SPYC-TRAP: stderr-follows-the-screen -->

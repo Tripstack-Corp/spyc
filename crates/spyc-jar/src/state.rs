@@ -137,7 +137,8 @@ pub struct State {
     pub ownerless_since: Option<Instant>,
     /// The PTY's foreground process group, 0 until read.
     pub fg: u32,
-    /// Whether any owner has connected yet.
+    /// Whether an owner has connected since the jar started or was last
+    /// released (R22): until one has, a finite linger waits longer.
     pub had_owner: bool,
     /// R26: what a `hello` must present for any role but `Lookup`. Its
     /// starter hands it over on standard input; a release (R22) replaces it.

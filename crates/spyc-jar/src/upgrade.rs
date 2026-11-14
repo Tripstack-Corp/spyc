@@ -25,6 +25,11 @@
 //!
 //! Any failure before the `exec` unparks everything and refuses the upgrade:
 //! the old jar runs on as if nothing happened.
+//!
+//! Lookups and connections yet to say `hello` are neither waited for nor
+//! carried: they hold nothing, and are closed at the `exec` (review finding
+//! 5). Input the program hasn't taken can't be carried either, so an upgrade
+//! waits until there is none.
 
 use std::io::{IoSlice, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -32,15 +37,15 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow, bail};
 use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags};
 
 use crate::handover;
-use crate::jar::{Shared, Who};
-use crate::proto::{self, Msg, reason};
+use crate::jar::{Conn, Shared, Who};
+use crate::proto::{Msg, Role, reason};
 use crate::state::ConnState;
 
 /// The message that travels with the descriptors.
@@ -51,20 +56,18 @@ const HEAD: usize = 8 + 4;
 const MAX_BLOB: u64 = 1 << 30;
 /// How long a holder waits for the new image before it gives up.
 const HOLD_LIMIT: Duration = Duration::from_secs(30);
+/// How long a connection may take its last frames before the handover.
+const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
 const PARK_DEADLINE: Duration = Duration::from_secs(3);
 const VALIDATE_DEADLINE: Duration = Duration::from_secs(5);
 
-/// Start an upgrade to `binary`, asked for on the connection writing to
-/// `reply`, which hears why if it fails. On success nothing is sent from here:
-/// the new image announces itself with `Upgraded` on every connection.
-pub(crate) fn begin(
-    shared: &Arc<Shared>,
-    reply: Arc<Mutex<std::os::unix::net::UnixStream>>,
-    binary: String,
-) {
+/// Start an upgrade to `binary`, asked for on `reply`, which hears why if it
+/// fails. On success nothing is sent from here: the new image announces
+/// itself with `Upgraded` on every connection it carried.
+pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
     if shared.upgrading.swap(true, Ordering::SeqCst) {
-        let _ = proto::write_msg(
-            &mut *reply.lock().unwrap_or_else(PoisonError::into_inner),
+        reply.send(
+            shared,
             &Msg::Refused {
                 reason: reason::UPGRADE_BUSY,
                 why: "an upgrade is already under way".into(),
@@ -78,8 +81,8 @@ pub(crate) fn begin(
         shared.upgrading.store(false, Ordering::SeqCst);
         shared.park_cv.notify_all();
         shared.cv.notify_all();
-        let _ = proto::write_msg(
-            &mut *reply.lock().unwrap_or_else(PoisonError::into_inner),
+        reply.send(
+            &shared,
             &Msg::Refused {
                 reason: why,
                 why: format!("upgrade refused: {err:#}"),
@@ -108,15 +111,25 @@ fn try_run(
     let busy = |e: anyhow::Error| (reason::UPGRADE_BUSY, e);
     let failed = |e: anyhow::Error| (reason::UPGRADE_FAILED, e);
     shared.cv.notify_all();
+    shared.inbox_cv.notify_all();
     wait_parked(shared).map_err(busy)?;
+    if shared.input_pending() {
+        return Err(busy(anyhow!(
+            "the program hasn't read the input it was sent"
+        )));
+    }
     let st = shared.lock();
     let conns = shared.conns();
-    let mut ids: Vec<u64> = conns.keys().copied().collect();
-    ids.sort_unstable();
-    let outs: Vec<_> = ids
+    let mut ids: Vec<u64> = conns
         .iter()
-        .map(|id| conns[id].out.lock().unwrap_or_else(PoisonError::into_inner))
+        .filter(|(_, c)| c.role != Role::Lookup)
+        .map(|(id, _)| *id)
         .collect();
+    ids.sort_unstable();
+    // Every writer is parked: what waits in an outbox goes out now, ahead of
+    // `Upgraded`, or the connection stays behind.
+    ids.retain(|id| flushed(&conns[id]));
+    let outs: Vec<&UnixStream> = ids.iter().map(|id| &*conns[id].sock).collect();
     let states: Vec<ConnState> = ids
         .iter()
         .map(|id| {
@@ -174,6 +187,18 @@ fn try_run(
         return Err(failed(anyhow!("send the descriptors: {e}")));
     }
     drop(to_image);
+    // What stays behind is closed rather than left open in the new image.
+    for (_, c) in conns.iter().filter(|(id, _)| !ids.contains(id)) {
+        c.close();
+    }
+    for (_, sock) in shared
+        .tokenless
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+    {
+        let _ = sock.shutdown(std::net::Shutdown::Both);
+    }
     let err = Command::new(binary)
         .arg("resume-handover")
         .stdin(Stdio::from(OwnedFd::from(image_stdin)))
@@ -189,6 +214,21 @@ fn try_run(
     drop(conns);
     drop(st);
     Err(failed(anyhow!("exec {binary}: {err}")))
+}
+
+/// Write what waits in `conn`'s outbox, its writer being parked. False when
+/// the client won't take it in time: that connection is closed, not carried.
+fn flushed(conn: &Conn) -> bool {
+    let bytes = conn.take_outbox();
+    if bytes.is_empty() {
+        return true;
+    }
+    let _ = conn.sock.set_write_timeout(Some(FLUSH_DEADLINE));
+    if (&*conn.sock).write_all(&bytes).is_ok() {
+        return true;
+    }
+    conn.close();
+    false
 }
 
 /// A pipe whose ends don't cross an `exec` unless handed over.
@@ -315,7 +355,12 @@ fn wait_parked(shared: &Shared) -> anyhow::Result<()> {
         if !shared.waiter_done.load(Ordering::SeqCst) {
             want.push(Who::Waiter);
         }
-        for (id, c) in shared.conns().iter() {
+        want.push(Who::Input);
+        for (id, c) in shared
+            .conns()
+            .iter()
+            .filter(|(_, c)| c.role != Role::Lookup)
+        {
             want.push(Who::ConnRead(*id));
             if !c.writer_done.load(Ordering::SeqCst) {
                 want.push(Who::ConnWrite(*id));

@@ -1,29 +1,73 @@
 //! A new connection: who is at the other end (R26), its `hello`, and the
 //! lease an owner takes with it.
+//!
+//! Until its `hello` shows the token, and for as long as it lasts if it is a
+//! lookup, a connection is tokenless. At most [`MAX_TOKENLESS`] are open at
+//! once, the oldest closed to admit another, so they can't take the threads
+//! and descriptors that the jar's owner, its readers and an upgrade need
+//! (review finding 5).
 
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicBool, AtomicU32};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
-use super::conn::{release, run_conn};
-use super::{Conn, Shared, send_on};
+use super::conn::{LOOKUP_DEADLINE, run_conn};
+use super::{By, Conn, Outbox, Shared};
 use crate::proto::{self, Msg, Role, reason};
 
-pub(super) fn register(shared: &Shared, id: u64, role: Role, stream: UnixStream) -> Arc<Conn> {
-    no_sigpipe(&stream);
+/// The most tokenless connections open at once.
+const MAX_TOKENLESS: usize = 16;
+
+pub(super) fn register(shared: &Shared, id: u64, role: Role, sock: Arc<UnixStream>) -> Arc<Conn> {
+    no_sigpipe(&sock);
+    if role == Role::Lookup {
+        let _ = sock.set_write_timeout(Some(LOOKUP_DEADLINE));
+    }
     let conn = Arc::new(Conn {
         role,
-        peer_pid: peer_pid(&stream).unwrap_or(0),
-        out: Arc::new(Mutex::new(stream)),
+        peer_pid: peer_pid(&sock).unwrap_or(0),
+        sock,
+        outbox: Mutex::new(Outbox::default()),
         cursor: Mutex::new(None),
         exit_sent: AtomicBool::new(false),
         fg_sent: AtomicU32::new(0),
         closed: AtomicBool::new(false),
-        writer_done: AtomicBool::new(false),
+        // A lookup has no writer.
+        writer_done: AtomicBool::new(role == Role::Lookup),
     });
     shared.conns().insert(id, Arc::clone(&conn));
     conn
+}
+
+/// Count a new connection as tokenless, closing the oldest past
+/// [`MAX_TOKENLESS`]. Returns its ticket.
+pub(super) fn admit(shared: &Shared, sock: &Arc<UnixStream>) -> u64 {
+    let ticket = shared.next_ticket.fetch_add(1, Ordering::SeqCst);
+    let mut open = shared
+        .tokenless
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    open.push_back((ticket, Arc::clone(sock)));
+    while open.len() > MAX_TOKENLESS {
+        if let Some((_, oldest)) = open.pop_front() {
+            let _ = oldest.shutdown(std::net::Shutdown::Both);
+        }
+    }
+    ticket
+}
+
+/// A tokenless connection's place among them, given up when it is dropped:
+/// once its `hello` shows the token, or once it ends.
+struct Ticket<'a>(&'a Shared, u64);
+
+impl Drop for Ticket<'_> {
+    fn drop(&mut self) {
+        self.0
+            .tokenless
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(t, _)| *t != self.1);
+    }
 }
 
 /// R26: the user at the other end of `stream`.
@@ -96,30 +140,29 @@ pub(super) fn tell_program(shared: &Shared, msg: &Msg) {
         .cloned()
         .collect();
     for c in programs {
-        let _ = send_on(&c.out, msg);
+        c.send(shared, msg);
     }
 }
 
-/// One new connection: its `hello`, then [`run_conn`].
-pub(super) fn serve(shared: &Arc<Shared>, stream: UnixStream) {
+/// One new connection, holding `ticket` among the tokenless: its `hello`,
+/// then [`run_conn`].
+pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
+    let ticket = Ticket(shared, ticket);
     // Another user's process is refused before a byte of it is read, whatever
     // token it holds; the jar's directory being `0700` is the first fence.
-    if !peer_is(&stream, rustix::process::geteuid().as_raw()) {
+    if !peer_is(&sock, rustix::process::geteuid().as_raw()) {
         return;
     }
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let Ok(mut read_half) = stream.try_clone() else {
-        return;
-    };
+    let _ = sock.set_write_timeout(Some(LOOKUP_DEADLINE));
     let refuse = |reason: u16, why: String| {
-        let mut s = &stream;
+        let mut s = &*sock;
         let _ = proto::write_msg(&mut s, &Msg::Refused { reason, why });
     };
     let Ok(Some(Msg::Hello {
         version,
         role,
         token,
-    })) = proto::read_msg_max(&mut read_half, proto::MAX_HELLO)
+    })) = proto::read_msg_max(&mut By::frame(&sock), proto::MAX_HELLO)
     else {
         refuse(reason::INVALID, "expected a hello".into());
         return;
@@ -139,7 +182,7 @@ pub(super) fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         // connected; it holds no token, since it runs as whatever the user
         // started in the jar.
         Role::Program => {
-            let ours = st.exit.is_none() && peer_pid(&stream).is_ok_and(|p| p == shared.child_pid);
+            let ours = st.exit.is_none() && peer_pid(&sock).is_ok_and(|p| p == shared.child_pid);
             if ours {
                 Ok(())
             } else {
@@ -175,18 +218,17 @@ pub(super) fn serve(shared: &Arc<Shared>, stream: UnixStream) {
         rows: st.rows,
         cols: st.cols,
     };
-    let conn = register(shared, id, role, stream);
+    let _ = sock.set_write_timeout(None);
+    let conn = register(shared, id, role, sock);
     drop(st);
-    if send_on(&conn.out, &welcome).is_err() {
-        release(shared, id);
-        return;
+    if role != Role::Lookup {
+        drop(ticket);
     }
+    conn.send(shared, &welcome);
     let owned = shared.lock().owner.is_some();
     match role {
         Role::Owner => tell_program(shared, &Msg::Attached),
-        Role::Program if owned => {
-            let _ = send_on(&conn.out, &Msg::Attached);
-        }
+        Role::Program if owned => conn.send(shared, &Msg::Attached),
         _ => {}
     }
     run_conn(shared, id, &conn);

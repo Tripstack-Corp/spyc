@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use super::accept::tell_program;
 use super::describe::describe;
 use super::life::deliver;
-use super::{Conn, Shared, TICK, Who, readable, send_on};
+use super::{By, Conn, Shared, TICK, Who, readable};
 use crate::proto::{self, Msg, Role, reason};
 use crate::state::{Event, State};
 
@@ -46,31 +46,16 @@ pub(super) fn detach_owner(shared: &Arc<Shared>) {
             }
             thread::sleep(Duration::from_millis(10));
         }
-        conn.closed.store(true, Ordering::SeqCst);
-        if let Ok(s) = conn.out.lock() {
-            let _ = s.shutdown(std::net::Shutdown::Both);
-        }
+        conn.close();
     });
 }
 
 /// A connection after its `hello`: a writer thread streaming the log, and
-/// this thread reading what the client sends.
+/// this thread reading what the client sends. A lookup has no writer.
 pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
-    let cloned = conn
-        .out
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .try_clone();
-    let Ok(mut read_half) = cloned else {
-        release(shared, id);
-        return;
-    };
-    // A frame that has begun arrives whole within this; silence between
-    // frames is timed by `last_heard` instead.
-    let _ = read_half.set_read_timeout(Some(Duration::from_secs(5)));
     let owner = conn.role == Role::Owner;
     let lookup = conn.role == Role::Lookup;
-    let writer = {
+    let writer = (!lookup).then(|| {
         let shared = Arc::clone(shared);
         let conn = Arc::clone(conn);
         thread::spawn(move || {
@@ -78,8 +63,8 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             conn.writer_done.store(true, Ordering::SeqCst);
             shared.park_cv.notify_all();
         })
-    };
-    let send = |msg: &Msg| send_on(&conn.out, msg);
+    });
+    let send = |msg: &Msg| conn.send(shared, msg);
     let mut last_heard = Instant::now();
     loop {
         if shared.upgrading() {
@@ -87,7 +72,7 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             last_heard = Instant::now();
             continue;
         }
-        if !readable(&read_half, TICK) {
+        if !readable(&*conn.sock, TICK) {
             if owner && last_heard.elapsed() >= shared.cfg.deadline {
                 break;
             }
@@ -97,11 +82,13 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             }
             continue;
         }
-        let msg = match proto::read_msg(&mut read_half) {
+        // Silence between frames is timed by `last_heard`; a frame that
+        // has begun arrives whole by its deadline.
+        let msg = match proto::read_msg(&mut By::frame(&conn.sock)) {
             Ok(Some(m)) => m,
             Ok(None) => continue,
             Err(proto::ReadError::UnknownCritical(kind)) => {
-                let _ = send(&Msg::Unsupported { kind });
+                send(&Msg::Unsupported { kind });
                 continue;
             }
             Err(_) => break,
@@ -113,7 +100,7 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             Role::Owner | Role::Reader => !matches!(msg, Msg::Detach),
         };
         if !permitted {
-            let _ = send(&Msg::Refused {
+            send(&Msg::Refused {
                 reason: reason::ROLE_NOT_PERMITTED,
                 why: format!("a {:?} connection can't send that", conn.role),
             });
@@ -123,13 +110,12 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             break;
         }
     }
-    conn.closed.store(true, Ordering::SeqCst);
-    if let Ok(s) = conn.out.lock() {
-        let _ = s.shutdown(std::net::Shutdown::Both);
-    }
+    conn.close();
     release(shared, id);
     shared.cv.notify_all();
-    let _ = writer.join();
+    if let Some(writer) = writer {
+        let _ = writer.join();
+    }
 }
 
 /// What the reader does after a message.
@@ -139,8 +125,8 @@ enum Next {
 }
 
 /// Act on one message a connection sent, as its role allows.
-fn act(shared: &Arc<Shared>, id: u64, conn: &Conn, msg: Msg) -> Next {
-    let send = |msg: &Msg| send_on(&conn.out, msg);
+fn act(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>, msg: Msg) -> Next {
+    let send = |msg: &Msg| conn.send(shared, msg);
     let owner = conn.role == Role::Owner;
     let lookup = conn.role == Role::Lookup;
     let program = conn.role == Role::Program;
@@ -152,13 +138,13 @@ fn act(shared: &Arc<Shared>, id: u64, conn: &Conn, msg: Msg) -> Next {
             let seq = st.log.seq_for(from);
             drop(st);
             if let Some(to) = gap_to {
-                let _ = send(&Msg::Gap { from: asked, to });
+                send(&Msg::Gap { from: asked, to });
             }
             *conn.cursor.lock().unwrap_or_else(PoisonError::into_inner) = Some((seq, from));
             shared.cv.notify_all();
         }
         Msg::Ping { n } => {
-            let _ = send(&Msg::Pong { n });
+            send(&Msg::Pong { n });
             if lookup {
                 return Next::End;
             }
@@ -168,26 +154,29 @@ fn act(shared: &Arc<Shared>, id: u64, conn: &Conn, msg: Msg) -> Next {
         Msg::FetchSnapshot => {
             let snaps = shared.lock().snapshots.clone();
             for s in snaps {
-                let _ = send(&Msg::Snapshot(Some(s)));
+                send(&Msg::Snapshot(Some(s)));
             }
-            let _ = send(&Msg::Snapshot(None));
+            send(&Msg::Snapshot(None));
         }
-        Msg::Upgrade { binary } => crate::upgrade::begin(shared, Arc::clone(&conn.out), binary),
+        Msg::Upgrade { binary } => crate::upgrade::begin(shared, Arc::clone(conn), binary),
         Msg::Release { token } if owner && token.len() < MIN_TOKEN => {
-            let _ = send(&Msg::Refused {
+            send(&Msg::Refused {
                 reason: reason::INVALID,
                 why: format!("a token is {MIN_TOKEN} bytes or more"),
             });
         }
         Msg::Release { token } if owner => {
-            shared.lock().token = token;
+            let mut st = shared.lock();
+            st.token = token;
+            // The successor gets the time a first owner gets before the
+            // linger starts (finding 17): a pane that doesn't linger
+            // survives being handed on.
+            st.had_owner = false;
+            drop(st);
             // The old token's holders go with it: every reader is closed.
             for (other, c) in shared.conns().iter() {
                 if *other != id && c.role == Role::Reader {
-                    c.closed.store(true, Ordering::SeqCst);
-                    if let Ok(s) = c.out.lock() {
-                        let _ = s.shutdown(std::net::Shutdown::Both);
-                    }
+                    c.close();
                 }
             }
             // Nothing this connection sends after its release may act on
@@ -201,7 +190,7 @@ fn act(shared: &Arc<Shared>, id: u64, conn: &Conn, msg: Msg) -> Next {
             st.info.push((key, value));
         }
         Msg::Describe => {
-            let _ = send(&Msg::Description {
+            send(&Msg::Description {
                 fields: describe(shared),
             });
             if lookup {
@@ -209,19 +198,19 @@ fn act(shared: &Arc<Shared>, id: u64, conn: &Conn, msg: Msg) -> Next {
             }
         }
         _ if !owner || program => {
-            let _ = send(&Msg::Refused {
+            send(&Msg::Refused {
                 reason: reason::ROLE_NOT_PERMITTED,
                 why: "a reader can only watch".into(),
             });
         }
-        other => act_as_owner(shared, conn, other),
+        other => act_as_owner(shared, id, conn, other),
     }
     Next::Read
 }
 
 /// The messages only the owner may send: they reach the program.
-fn act_as_owner(shared: &Shared, conn: &Conn, msg: Msg) {
-    let send = |msg: &Msg| send_on(&conn.out, msg);
+fn act_as_owner(shared: &Shared, id: u64, conn: &Conn, msg: Msg) {
+    let send = |msg: &Msg| conn.send(shared, msg);
     match msg {
         Msg::Input { bytes } | Msg::Reply { bytes } => {
             if let Some(path) = std::env::var_os("SPYC_JAR_TRACE")
@@ -237,9 +226,12 @@ fn act_as_owner(shared: &Shared, conn: &Conn, msg: Msg) {
                     String::from_utf8_lossy(&bytes)
                 );
             }
-            let mut w = shared.input.lock().unwrap_or_else(PoisonError::into_inner);
-            let _ = w.write_all(&bytes);
-            let _ = w.flush();
+            if !shared.queue_input(id, &bytes) {
+                send(&Msg::Refused {
+                    reason: reason::INVALID,
+                    why: "the program isn't reading its input".into(),
+                });
+            }
         }
         Msg::Resize {
             rows,
@@ -270,14 +262,14 @@ fn act_as_owner(shared: &Shared, conn: &Conn, msg: Msg) {
             shared.cv.notify_all();
         }
         Msg::Signal { .. } if shared.lock().exit.is_some() => {
-            let _ = send(&Msg::Refused {
+            send(&Msg::Refused {
                 reason: reason::PROGRAM_EXITED,
                 why: "the program has ended".into(),
             });
         }
         Msg::Signal { signal } => deliver(shared.child_pid, signal),
         Msg::StoreSnapshot(snap) if snap.offset > shared.lock().log.head => {
-            let _ = send(&Msg::Refused {
+            send(&Msg::Refused {
                 reason: reason::INVALID,
                 why: "a snapshot past what the program printed".into(),
             });
@@ -296,7 +288,7 @@ fn act_as_owner(shared: &Shared, conn: &Conn, msg: Msg) {
             shared.cv.notify_all();
         }
         other => {
-            let _ = send(&Msg::Refused {
+            send(&Msg::Refused {
                 reason: reason::INVALID,
                 why: format!("not a client message: {other:?}"),
             });
@@ -317,75 +309,45 @@ pub(super) fn release(shared: &Shared, id: u64) {
     }
     drop(st);
     if was_owner {
+        shared.drop_input(id);
         tell_program(shared, &Msg::Detached);
     }
     shared.cv.notify_all();
     shared.park_cv.notify_all();
 }
 
-/// How long a lookup may wait to ask its one question.
-const LOOKUP_DEADLINE: Duration = Duration::from_secs(5);
+/// How long a lookup may wait to ask its one question, or to take its answer.
+pub(super) const LOOKUP_DEADLINE: Duration = Duration::from_secs(5);
 
 /// The shortest token a release may set (R26): an empty one would open the
 /// jar to anyone.
 pub const MIN_TOKEN: usize = 16;
 
-/// Stream the log to one connection from its cursor, then the exit once
-/// everything before it has gone out.
-#[expect(
-    clippy::significant_drop_tightening,
-    reason = "the cursor moves under the connection's lock, after the write"
-)]
+/// Stream the log to one connection from its cursor, after whatever waits in
+/// its outbox, then the exit once everything before it has gone out.
+///
+/// A write that makes no progress for the jar's deadline ends the
+/// connection, and the cursor moves only after its bytes have gone, so a
+/// parked writer's cursor is exactly what was sent.
 fn stream_log(shared: &Shared, id: u64, conn: &Conn) {
+    let _ = conn.sock.set_write_timeout(Some(shared.cfg.deadline));
     loop {
-        let mut st = shared.lock();
-        let batch = loop {
-            if conn.closed.load(Ordering::SeqCst) {
-                return;
-            }
-            if shared.upgrading() {
-                drop(st);
-                shared.park(Who::ConnWrite(id));
-                st = shared.lock();
-                continue;
-            }
-            let pos = *conn.cursor.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some((seq, from)) = pos {
-                let pending = seq < st.log.next_seq;
-                let exit_due = !conn.exit_sent.load(Ordering::SeqCst)
-                    && st.exit.is_some()
-                    && st.pty_eof
-                    && !pending;
-                let fg_due = st.fg != conn.fg_sent.load(Ordering::SeqCst);
-                if pending || exit_due || fg_due {
-                    let (mut frames, next) =
-                        collect(&st, seq, from, exit_due.then(|| st.exit).flatten());
-                    if fg_due {
-                        frames.insert(0, Msg::Foreground { pgid: st.fg });
-                        conn.fg_sent.store(st.fg, Ordering::SeqCst);
-                    }
-                    break (frames, next);
-                }
-            }
-            st = shared
-                .cv
-                .wait_timeout(st, Duration::from_millis(500))
-                .unwrap_or_else(PoisonError::into_inner)
-                .0;
+        let Some((queued, batch)) = next_batch(shared, id, conn) else {
+            return;
         };
-        let (frames, next) = batch;
-        // One write for the whole batch, under the connection's lock and
-        // before the cursor moves, so an upgrade never sees a cursor past
-        // what went out.
-        let mut bytes = Vec::new();
-        for f in &frames {
-            bytes.extend(proto::encode(f));
+        let mut bytes = queued;
+        if let Some((frames, _)) = &batch {
+            for f in frames {
+                bytes.extend(proto::encode(f));
+            }
         }
-        let mut s = conn.out.lock().unwrap_or_else(PoisonError::into_inner);
-        drop(st);
-        if s.write_all(&bytes).and_then(|()| s.flush()).is_err() {
+        if (&*conn.sock).write_all(&bytes).is_err() {
+            conn.close();
             return;
         }
+        let Some((frames, next)) = batch else {
+            continue;
+        };
         if frames.iter().any(|f| matches!(f, Msg::Exited { .. })) {
             conn.exit_sent.store(true, Ordering::SeqCst);
         }
@@ -393,6 +355,61 @@ fn stream_log(shared: &Shared, id: u64, conn: &Conn) {
         if c.is_some_and(|(seq, _)| seq <= next.0) {
             *c = Some(next);
         }
+    }
+}
+
+/// Frames for the connection's next write, and where its cursor stands after
+/// them: what waits in its outbox, then the log from its cursor. Waits until
+/// there is something, parking for an upgrade; `None` once the connection has
+/// closed.
+#[expect(
+    clippy::type_complexity,
+    reason = "the outbox's bytes, then the log's frames and the cursor after them"
+)]
+fn next_batch(
+    shared: &Shared,
+    id: u64,
+    conn: &Conn,
+) -> Option<(Vec<u8>, Option<(Vec<Msg>, (u64, u64))>)> {
+    let mut st = shared.lock();
+    loop {
+        if conn.closed.load(Ordering::SeqCst) {
+            return None;
+        }
+        if shared.upgrading() {
+            drop(st);
+            shared.park(Who::ConnWrite(id));
+            st = shared.lock();
+            continue;
+        }
+        let queued = conn.take_outbox();
+        let pos = *conn.cursor.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut batch = None;
+        if let Some((seq, from)) = pos {
+            let pending = seq < st.log.next_seq;
+            let exit_due = !conn.exit_sent.load(Ordering::SeqCst)
+                && st.exit.is_some()
+                && st.pty_eof
+                && !pending;
+            let fg_due = st.fg != conn.fg_sent.load(Ordering::SeqCst);
+            if pending || exit_due || fg_due {
+                let (mut frames, next) =
+                    collect(&st, seq, from, exit_due.then(|| st.exit).flatten());
+                if fg_due {
+                    frames.insert(0, Msg::Foreground { pgid: st.fg });
+                    conn.fg_sent.store(st.fg, Ordering::SeqCst);
+                }
+                batch = Some((frames, next));
+            }
+        }
+        if !queued.is_empty() || batch.is_some() {
+            return Some((queued, batch));
+        }
+        st = shared
+            .cv
+            .wait_timeout(st, Duration::from_millis(500))
+            .unwrap_or_else(PoisonError::into_inner)
+            .0;
     }
 }
 
