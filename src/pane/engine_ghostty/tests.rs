@@ -626,7 +626,7 @@ mod child_queries {
                 "cell borders: ratatui's cells carry none",
                 b"\x1bP1+bcell-border;q\x1b\\",
             ),
-            ("DA3: Ghostty doesn't answer it either", b"\x1b[=c"),
+            ("DA3: the Ghostty app leaves it unanswered", b"\x1b[=c"),
             ("ENQ answerback", b"\x05"),
             ("size in cells", b"\x1b[18t"),
             (
