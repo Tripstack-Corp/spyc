@@ -4,8 +4,10 @@
 #
 # The targets cover spyc's untrusted-input surface, which is larger than it
 # looks: the pager renders arbitrary files, the pty pane parses ANSI from
-# arbitrary child processes, and markdown/highlighting run over both. See
-# SECURITY.md → "Threat model".
+# arbitrary child processes, and markdown/highlighting run over both. A jar's
+# socket takes frames from any process of the same user, and a jar takes over
+# a live PTY from the handover blob it validates. See SECURITY.md → "Threat
+# model".
 #
 # Corpora persist between runs via the cache, so each week resumes from the
 # inputs previous weeks discovered rather than starting cold.
@@ -59,6 +61,8 @@ jobs:
           - expand_path
           - expand_percent
           - highlight
+          - jar_frame
+          - jar_handover
           - pane_engine
           - render_markdown
           - taskfile_make

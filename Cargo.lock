@@ -4516,6 +4516,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "spyc-jar"
+version = "0.1.0"
+
+[[package]]
 name = "spyc-vt-sys"
 version = "0.2.0"
 

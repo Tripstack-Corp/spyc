@@ -1,0 +1,38 @@
+[package]
+name = "spyc-jar"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+description = "The process that holds one spyc pane's program and its PTY, and outlives spyc: its wire format and handover blob"
+license = "BSD-3-Clause"
+repository = "https://github.com/Tripstack-Corp/spyc"
+# Not on crates.io: nothing outside this repository depends on it, and spyc's
+# own package doesn't yet either.
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[lints.rust]
+# The jar holds a live PTY for a program spyc no longer owns; `#![forbid]` in
+# lib.rs says the same, and this keeps a new target from forgetting it.
+unsafe_code = "forbid"
+
+[lints.cargo]
+unused_dependencies = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Production code never unwraps (`clippy.toml` lets tests): `.expect("…")` names
+# the invariant.
+unwrap_used = "warn"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# A codec of fixed-width big-endian fields converts between widths everywhere,
+# and checks each length against what is left before it does.
+cast_possible_truncation = "allow"
+# Counted by `src/fn_size_guard.rs` instead, as for spyc.
+too_many_lines = "allow"

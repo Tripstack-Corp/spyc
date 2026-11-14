@@ -44,15 +44,16 @@ One line per module: its `//!` doc has the rest, ARCHITECTURE.md the decisions b
 
 **Other crates.**
 
-- **`src/agent/`** — one `AgentProfile` impl and one `REGISTRY` entry per hosted agent (claude, codex, agy, zot); scrape-fallback rules for states hooks can't report (`detect_rules.rs`); native chrome boundaries, so `gf`/`J` read the agent's output (`chrome/`); per-agent transcript metrics for the HUD (`codex_metrics/`, `claude_metrics/`, `agy_metrics/`, sharing `metrics.rs`'s types) over `tail/`, a bounded follower of one session file that its own watch wakes, never a poll; `waiting.rs`, the precedence of a live `waiting` over hook `done`s.
+- **`src/agent/`** — one `AgentProfile` impl and one `REGISTRY` entry per hosted agent (claude, codex, agy, zot); scrape-fallback rules for states hooks can't report (`detect_rules.rs`); native chrome boundaries, so `gf`/`J` read the agent's output (`chrome/`); per-agent HUD metrics (`*_metrics/`, sharing `metrics.rs`'s types) over `tail/`, a bounded follower of one session file that its own watch wakes, never a poll; `waiting.rs`, the precedence of a live `waiting` over hook `done`s.
 - **`src/archive/`** — the pure archive core. A mount is an **index, not a directory**; name normalization makes a zip-slip name unrepresentable, and extraction never traverses a symlink.
-- **`crates/spyc-vt-sys/`** — the FFI to libghostty-vt at a pinned commit: bindings checked in, prebuilt archives vendored for five targets (CI's test host among them) and SHA-256-checked by `build.rs`. A pin bump owes a full harness re-run; scrollback rows are the UX contract, bytes a safety valve.
+- **`crates/spyc-vt-sys/`** — the FFI to libghostty-vt at a pinned commit: bindings checked in, prebuilt archives vendored for five targets and SHA-256-checked by `build.rs`. A pin bump owes a full harness re-run; scrollback rows are the UX contract, bytes a safety valve.
+- **`crates/spyc-jar/`** — the jar, holding a pane's program and PTY and outliving spyc (#1099): `proto`, `state`, `handover`; `tests/wire_v1.rs` pins version 1's bytes.
 - **`src/taskfile/`** — a Makefile's targets, parsed (`makefile-lossless`) and never evaluated; `discover` follows only literal includes inside the root.
 - **`src/keymap/`** — the `Action` vocabulary, each with its `tier()`; resolver, DSL parser, default bindings; an object menu's rows (`menu.rs`).
 - **`src/wiring/`** — the `spyc` MCP entry and status hooks, installed once in each agent's user configuration (`spyc --install-agents` / `--remove-agents`). Ownership by content, writes through symlinks, never a file deleted, nothing ever written into a project.
 - **`src/skill/`** — the installable agent skill (`spyc --install-skill`); staleness keyed on a content hash, and a manifest tells spyc's update from the user's edit, which is never overwritten unprompted.
 - **`src/lua/`** — embedded Lua 5.4 on its own thread, with an instruction-budget kill switch and a hard ceiling.
-- **`src/pane/`** — the pty-hosted subprocess: `pty_host.rs`; `engine.rs`, the terminal-engine seam, which carries only what spyc calls; `engine_ghostty/`, the engine behind the `PaneEngine` alias; `input.rs` (key → bytes), `widget.rs`, `pathref.rs` (`gf`/`gF`).
+- **`src/pane/`** — the pty-hosted subprocess: `pty_host.rs`; `engine.rs`, the terminal-engine seam; `engine_ghostty/`, the engine behind the `PaneEngine` alias; `input.rs` (key → bytes), `widget.rs`, `pathref.rs` (`gf`/`gF`).
 - **`src/ui/`** — pure renderers, `model + &Theme → Vec<Line>`, and the per-frame `color_depth.rs` and `emoji_diff.rs` passes.
 - **`src/fs/`** — listing, entries, file ops, `F`, `:grep`. **`src/git/`** — 100% in-process via gix, no subprocess in production (`no_subprocess_git_in_production`).
 - **`src/mcp/`** — the MCP server. A connection binds at `initialize` to its agent's pane and project; `tool_schemas` is the catalogue; `SERVER_INSTRUCTIONS` stays short.

@@ -27,6 +27,26 @@ zip / tar / tar.gz / tar.zst); the rest is the container itself.
 | `truncated_tar.tar`, `garbage_gz.tar.gz` | Malformed headers and a gz stream that decompresses to non-tar. |
 | `plain.tar`, `plain.tar.gz`, `plain.zip` | Minimal well-formed archives, so the mutator has valid structure to work from. |
 
+## jar_frame
+
+The input is decoded twice: as one frame's body (its first byte the kind, its
+second the flags, the rest the payload), and as a stream of whole frames. The
+target asserts neither panics nor loops.
+
+| seed | shape |
+|---|---|
+| `hello_input_upgrade.bin` | An owner's `hello` with a 16-byte token, an `input`, then an `upgrade`: three valid frames, so the mutator starts from the length prefix, the critical flag and a token that fits its own length. `proto.rs`'s ignored `write_fuzz_seed` writes it again, and `crates/spyc-jar/tests/fuzz_seeds.rs` fails when it stops decoding |
+
+## jar_handover
+
+The whole input is a handover blob, the one parser a jar trusts to take over a
+live PTY. The target asserts `decode` never panics, and that whatever it
+accepts encodes to a blob it accepts again.
+
+| seed | shape |
+|---|---|
+| `sample.bin` | `handover::sample_blob()`: a valid blob with something in every field, an owner and a reader among its connections. `handover.rs`'s ignored `write_fuzz_seed` writes it again, and `crates/spyc-jar/tests/fuzz_seeds.rs` fails when it differs |
+
 ## pane_engine
 
 The first two bytes pick the geometry (`rows = b0 % 40 + 1`,

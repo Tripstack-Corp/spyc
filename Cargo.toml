@@ -10,7 +10,7 @@
 # file, and a nested crate that forgets its own `[workspace]` would silently
 # join the gate.
 [workspace]
-members = [".", "crates/spyc-vt-sys"]
+members = [".", "crates/spyc-jar", "crates/spyc-vt-sys"]
 exclude = ["fuzz", "spikes/vt-engine", "spikes/vt-engine/sizeprobe"]
 
 [package]
