@@ -51,6 +51,12 @@ exclude = [
 name = "spyc"
 path = "src/main.rs"
 
+# The jar that holds a pane's program (`crates/spyc-jar`). Here, not in the
+# jar's own crate, so `cargo install spyc` installs it too.
+[[bin]]
+name = "spyc-jar"
+path = "src/bin/spyc-jar.rs"
+
 [dependencies]
 ratatui = "0.30"
 # Mermaid-in-pager (docs/archive/MERMAID_PAGER_PLAN.md): render ```mermaid blocks as
@@ -131,6 +137,7 @@ portable-pty = "0.9"
 # The version is what crates.io resolves; `path` is dropped from the packaged
 # manifest. Bump it with the crate's own version (RELEASE_ENGINEERING.md §5a).
 spyc-vt-sys = { version = "0.2.0", path = "crates/spyc-vt-sys" }
+spyc-jar = { version = "0.1.0", path = "crates/spyc-jar" }
 ansi-to-tui = "8"
 pretty-hex = "0.4"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }

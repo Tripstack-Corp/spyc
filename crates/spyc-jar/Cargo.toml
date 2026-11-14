@@ -3,15 +3,26 @@ name = "spyc-jar"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.100"
-description = "The process that holds one spyc pane's program and its PTY, and outlives spyc: its wire format and handover blob"
+description = "The process that holds one spyc pane's program and its PTY, and outlives spyc"
 license = "BSD-3-Clause"
 repository = "https://github.com/Tripstack-Corp/spyc"
-# Not on crates.io: nothing outside this repository depends on it, and spyc's
-# own package doesn't yet either.
-publish = false
+# Published, and before spyc: spyc's package depends on it for its `spyc-jar`
+# binary, and `cargo publish` resolves a dependency from the registry
+# (docs/RELEASE_ENGINEERING.md).
+# The fuzz seeds live in this repository, not the package, so the test that
+# checks them stays here too.
+exclude = ["/tests/fuzz_seeds.rs"]
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+rustix = { version = "1.1.4", features = ["process", "fs", "termios", "pty", "event", "net", "stdio", "pipe"] }
+
+# A unix socket's peer (its user and pid): rustix reads it only on Linux.
+[target.'cfg(target_os = "macos")'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["socket", "user"] }
 
 [lints.rust]
 # The jar holds a live PTY for a program spyc no longer owns; `#![forbid]` in
