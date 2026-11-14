@@ -10,7 +10,6 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
-import tomllib
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,8 +67,11 @@ def rewrite_step():
 
 class HomebrewMacosFloor(unittest.TestCase):
     def test_the_formula_asks_for_the_macos_spyc_is_built_for(self):
-        with open(ROOT / ".cargo/config.toml", "rb") as f:
-            target = tomllib.load(f)["env"]["MACOSX_DEPLOYMENT_TARGET"]
+        # A pattern, not `tomllib`: that needs Python 3.11, and macOS ships 3.9.
+        config = (ROOT / ".cargo/config.toml").read_text(encoding="utf-8")
+        found = re.search(r'^MACOSX_DEPLOYMENT_TARGET = "([0-9.]+)"$', config, re.M)
+        self.assertIsNotNone(found, "no MACOSX_DEPLOYMENT_TARGET line in .cargo/config.toml")
+        target = found.group(1)
         major = target.split(".")[0]
         self.assertEqual(rewrite_step()[0], MACOS_NAMES[major],
                          f"MACOSX_DEPLOYMENT_TARGET is {target}: set MACOS_MIN in homebrew.yml to match")

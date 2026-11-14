@@ -42,8 +42,8 @@ impl Sink {
 /// Left out on purpose: the kitty keyboard flags (spyc encodes legacy keys
 /// only), XTGETTCAP (answered from Ghostty's terminfo, which advertises OSC 52
 /// clipboard spyc lacks), colour reports (Ghostty's palette, not the host's),
-/// size reports (spyc's cell pixel size is a placeholder), and DA3 (Ghostty
-/// doesn't answer it either).
+/// size reports (spyc's cell pixel size is a placeholder), and DA3
+/// (libghostty-vt answers it, but the Ghostty app leaves it unanswered).
 pub(super) fn answered(reply: &[u8]) -> bool {
     if let Some(body) = reply.strip_prefix(b"\x1b[") {
         return match body.split_last() {
