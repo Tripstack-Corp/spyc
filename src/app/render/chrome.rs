@@ -715,16 +715,7 @@ impl App {
     }
 }
 
-/// spyc's "spice heat" palette — the warm pepper→ember→orange→spark ramp shared
-/// by the Working activity dot's breathing pulse (`spicy_pulse_color`, over
-/// [`BREATH_HEAT`]) and the visual-bell border sweep (`spice_gradient`), so
-/// both read as the same heat rather than two unrelated colour stories.
-const SPICE_HEAT: [(u8, u8, u8); 4] = [
-    (0xE0, 0x32, 0x22), // pepper red
-    (0xF4, 0x62, 0x12), // ember
-    (0xFF, 0x95, 0x12), // orange
-    (0xFF, 0xC4, 0x36), // spark
-];
+use crate::ui::theme::SPICE_HEAT;
 
 /// The stops the working dot breathes across: the spice-heat ramp's orange and
 /// spark, without pepper red or ember. A working dot that turns red, or even

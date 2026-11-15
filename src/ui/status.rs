@@ -303,7 +303,8 @@ impl StatusBar<'_> {
     fn push_pepper(&self, bar: &mut Bar, term_bg: Color) {
         let plain = Style::default().bg(term_bg);
         if self.plain_logo {
-            let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
+            let (r, g, b) = crate::ui::theme::SPICE_HEAT[0];
+            let pepper_red = Color::Rgb(r, g, b);
             let block = self.cooking.unwrap_or(pepper_red);
             bar.push(Span::styled(" ", plain));
             bar.push(Span::styled("  ", Style::default().bg(block)));

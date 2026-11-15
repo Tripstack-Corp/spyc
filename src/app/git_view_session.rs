@@ -26,6 +26,10 @@ use crate::ui::{blame_render, theme::Theme};
 use super::App;
 use super::pager_stream::{DrainOutcome, PagerStream, PagerStreamCmd, PagerStreamMount, RenderCtx};
 
+mod loader;
+
+use loader::{BuildProgress, LoaderWords};
+
 /// Which two sides a `git diff` view compares — the three diff keys (`gd` /
 /// `gD` / `gu`) each pick one. Maps 1:1 to a `diff_model` builder. `gm`'s
 /// fourth, since the branch left a base, carries the base, so it is a
@@ -109,6 +113,8 @@ pub enum GitViewPayload {
     Empty,
     /// The build failed (bad rev, not tracked, not a repo, …).
     Error(String),
+    /// The loader was closed before the build finished, so it stopped.
+    Cancelled,
 }
 
 /// Below this per-column width the side-by-side layout is unreadable, so the
@@ -196,12 +202,14 @@ fn git_view_body_width(full_width: bool) -> usize {
     w as usize
 }
 
-/// In-flight git-view: the worker is building the model off-thread, but NO
-/// pager is mounted yet. [`App::drain_pending_git_view`] mounts the overlay
-/// only when a non-empty model arrives; an empty result just flashes "no
-/// changes" (so `gd` over a clean path doesn't pop an overlay up and instantly
-/// tear it back down). Held on its project's `ProjectRuntime` until the worker
-/// reports, so it mounts in that project's pager.
+/// In-flight git-view: the worker is building the model off-thread. A build
+/// that finishes within the cooking grace mounts its overlay only when a
+/// non-empty model arrives, and an empty one just flashes "no changes" (so `gd`
+/// over a clean path doesn't pop an overlay up and instantly tear it back
+/// down). A longer one shows a loader in the overlay
+/// ([`App::settle_git_view_loader`]) that the result then replaces. Held on its
+/// project's `ProjectRuntime` until the worker reports, so it mounts in that
+/// project's pager.
 pub struct PendingGitView {
     id: u32,
     rx: std::sync::mpsc::Receiver<GitViewPayload>,
@@ -209,6 +217,34 @@ pub struct PendingGitView {
     title: String,
     /// Initial layout for diff/show (ignored for blame).
     layout: DiffLayout,
+    /// How far the worker has got; also how the loader stops it.
+    progress: std::sync::Arc<BuildProgress>,
+    /// When the build began.
+    started: std::time::Instant,
+    /// What the loader says the build is doing.
+    words: LoaderWords,
+    /// What the loader last drew, `None` until it is shown.
+    shown: Option<loader::Drawn>,
+}
+
+#[cfg(test)]
+impl PendingGitView {
+    /// A `git diff HEAD` building since now, its result to come over `rx`.
+    fn for_test(id: u32, rx: std::sync::mpsc::Receiver<GitViewPayload>) -> Self {
+        Self {
+            id,
+            rx,
+            title: "git diff HEAD".into(),
+            layout: DiffLayout::SideBySide,
+            progress: std::sync::Arc::new(BuildProgress::default()),
+            started: std::time::Instant::now(),
+            words: LoaderWords::for_kind(&GitViewKind::Show {
+                repo_root: PathBuf::new(),
+                rev: String::new(),
+            }),
+            shown: None,
+        }
+    }
 }
 
 /// A [`PagerStream`] for a *mounted* git-view. The content (model + highlight) is
@@ -306,11 +342,13 @@ impl PagerStream for GitViewStream {
 
 impl App {
     /// Spawn a git-view worker off-thread, but DON'T mount an overlay yet — the
-    /// pager is mounted by [`Self::drain_pending_git_view`] only when a non-empty
-    /// model arrives. An empty result (`gd` over a path with no changes) just
-    /// flashes "no changes", so the overlay never pops up and tears itself back
-    /// down. (Deferring keeps the build off the input thread — large repos don't
-    /// freeze it — while giving git-like "no changes" feedback for clean paths.)
+    /// pager is mounted by [`Self::drain_pending_git_view`] when a non-empty
+    /// model arrives, or by [`Self::settle_git_view_loader`] as a loader once
+    /// the build outruns the cooking grace. An empty result (`gd` over a path
+    /// with no changes) just flashes "no changes", so a quick one never pops an
+    /// overlay up and tears it back down. (Deferring keeps the build off the
+    /// input thread — large repos don't freeze it — while giving git-like "no
+    /// changes" feedback for clean paths.)
     pub fn open_git_view(&mut self, kind: GitViewKind, title: String) {
         let id = self.runtime.next_stream_id;
         self.runtime.next_stream_id = self.runtime.next_stream_id.wrapping_add(1);
@@ -321,9 +359,12 @@ impl App {
         let wake = self.make_pager_stream_wake();
         let final_wake = std::sync::Arc::clone(&wake);
         let tx = crate::fs::WakingSender::new(tx, wake);
+        let words = LoaderWords::for_kind(&kind);
+        let progress = std::sync::Arc::new(BuildProgress::default());
+        let worker_progress = std::sync::Arc::clone(&progress);
         let cooking = self.start_cooking();
         std::thread::spawn(move || {
-            let payload = build_payload(kind);
+            let payload = build_payload(kind, &worker_progress);
             drop(cooking);
             let _ = tx.send(payload);
             final_wake();
@@ -334,6 +375,10 @@ impl App {
             title,
             // SideBySide is the product default for diff/show.
             layout: DiffLayout::SideBySide,
+            progress,
+            started: std::time::Instant::now(),
+            words,
+            shown: None,
         });
     }
 
@@ -344,32 +389,46 @@ impl App {
     /// every tick from the run loop alongside `drain_pager_stream`. Returns
     /// true when something changed so the caller can redraw.
     pub(crate) fn drain_pending_git_view(&mut self) -> bool {
+        if self.cancel_closed_git_view_loader() {
+            return false;
+        }
         // Peek the worker's result without holding the borrow across the mutate.
-        let result = {
+        let (result, loader) = {
             let Some(pending) = self.runtime.project().pending_git_view.as_ref() else {
                 return false;
             };
-            pending.rx.try_recv()
+            (pending.rx.try_recv(), pending.shown.is_some())
         };
-        let payload = match result {
-            Ok(GitViewPayload::Empty) => {
-                self.state.flash_info("no changes");
+        let ended = match result {
+            Ok(GitViewPayload::Empty) => Ok("no changes".to_string()),
+            Ok(GitViewPayload::Error(msg)) => Err(msg),
+            Ok(GitViewPayload::Cancelled) => {
                 self.runtime.project_mut().pending_git_view = None;
+                return false;
+            }
+            Ok(payload) => {
+                self.mount_git_view(payload, loader);
                 return true;
             }
-            Ok(GitViewPayload::Error(msg)) => {
-                self.state.flash_error(msg);
-                self.runtime.project_mut().pending_git_view = None;
-                return true;
-            }
-            Ok(payload) => payload,
             Err(std::sync::mpsc::TryRecvError::Empty) => return false,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.state.flash_error("git: worker failed");
-                self.runtime.project_mut().pending_git_view = None;
-                return true;
+                Err("git: worker failed".to_string())
             }
         };
+        self.runtime.project_mut().pending_git_view = None;
+        if loader {
+            self.close_stream_pager(false);
+        }
+        match ended {
+            Ok(info) => self.state.flash_info(info),
+            Err(error) => self.state.flash_error(error),
+        }
+        true
+    }
+
+    /// Show a built `payload`: in the loader's overlay when one is up, else in
+    /// a new one.
+    fn mount_git_view(&mut self, payload: GitViewPayload, loader: bool) {
         // Non-empty content → mount the overlay now and render it. The model +
         // highlight were both built off-thread (in `build_payload`); the main
         // thread only lays them out.
@@ -378,21 +437,23 @@ impl App {
             .project_mut()
             .pending_git_view
             .take()
-            .expect("pending git-view present (checked above)");
+            .expect("the drain found a pending git view");
         let (content, title) = match payload {
             GitViewPayload::Built(c) => (c, pending.title),
             GitViewPayload::Titled(title, c) => (c, title),
-            GitViewPayload::Empty | GitViewPayload::Error(_) => {
-                unreachable!("empty/error handled above")
+            GitViewPayload::Empty | GitViewPayload::Error(_) | GitViewPayload::Cancelled => {
+                unreachable!("empty/error/cancelled handled above")
             }
         };
-        self.mount_stream_pager(
-            PagerStreamMount::Overlay {
-                title: title.clone(),
-                line_count_hint: None,
-            },
-            pending.id,
-        );
+        if !loader {
+            self.mount_stream_pager(
+                PagerStreamMount::Overlay {
+                    title: title.clone(),
+                    line_count_hint: None,
+                },
+                pending.id,
+            );
+        }
         let stream = GitViewStream {
             id: pending.id,
             layout: pending.layout,
@@ -416,7 +477,6 @@ impl App {
         }
         self.runtime.project_mut().pager_stream = Some(Box::new(stream));
         self.view.needs_full_repaint = true;
-        true
     }
 }
 
@@ -424,7 +484,7 @@ impl App {
 /// so the main thread never runs syntect (the expensive part). Pure of any
 /// `App`/OS-handle state — it only touches the gix builders and the pure
 /// highlighters, all of which take owned inputs.
-fn build_payload(kind: GitViewKind) -> GitViewPayload {
+fn build_payload(kind: GitViewKind, progress: &BuildProgress) -> GitViewPayload {
     use crate::git::{blame, diff_model};
     match kind {
         GitViewKind::Diff {
@@ -441,10 +501,10 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
             };
             match m {
                 Some(model) if model.files.is_empty() => GitViewPayload::Empty,
-                Some(model) => {
-                    let hl = highlight_parallel(&model);
-                    GitViewPayload::Built(GitViewContent::Diff(model, hl))
-                }
+                Some(model) => match highlight_parallel(&model, progress) {
+                    Some(hl) => GitViewPayload::Built(GitViewContent::Diff(model, hl)),
+                    None => GitViewPayload::Cancelled,
+                },
                 None => GitViewPayload::Error("git diff: not a git repository".into()),
             }
         }
@@ -454,19 +514,23 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
             base,
         } => match diff_model::diff_since_base(&repo_root, base.as_deref(), &paths) {
             Ok(diff) if diff.model.files.is_empty() => GitViewPayload::Empty,
-            Ok(diff) => {
-                let hl = highlight_parallel(&diff.model);
-                let title = since_base_title(&diff.fork);
-                GitViewPayload::Titled(title, GitViewContent::Diff(diff.model, hl))
-            }
+            Ok(diff) => match highlight_parallel(&diff.model, progress) {
+                Some(hl) => GitViewPayload::Titled(
+                    since_base_title(&diff.fork),
+                    GitViewContent::Diff(diff.model, hl),
+                ),
+                None => GitViewPayload::Cancelled,
+            },
             Err(e) => GitViewPayload::Error(format!("git diff: {e:#}")),
         },
         GitViewKind::Show { repo_root, rev } => match diff_model::show_model(&repo_root, &rev) {
             Some(pair) if pair.1.files.is_empty() => GitViewPayload::Empty,
-            Some((meta, model)) => {
-                let hl = highlight_parallel(&model);
-                GitViewPayload::Built(GitViewContent::Show(Box::new((meta, model, hl))))
-            }
+            Some((meta, model)) => match highlight_parallel(&model, progress) {
+                Some(hl) => {
+                    GitViewPayload::Built(GitViewContent::Show(Box::new((meta, model, hl))))
+                }
+                None => GitViewPayload::Cancelled,
+            },
             None => GitViewPayload::Error(format!("git show: bad revision {rev}")),
         },
         GitViewKind::Blame { repo_root, path } => match blame::blame(&repo_root, &path) {
@@ -481,10 +545,13 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
 
 /// Highlight `model`'s files on every core: syntect is nearly all of a large
 /// diff's build, and each file highlights on its own. The longest files go
-/// first, so a big one doesn't start last and finish alone.
-fn highlight_parallel(model: &DiffModel) -> DiffHighlight {
+/// first, so a big one doesn't start last and finish alone. Each file counts
+/// in `progress`; `None` when the loader was closed, which stops every worker
+/// at its next file.
+fn highlight_parallel(model: &DiffModel, progress: &BuildProgress) -> Option<DiffHighlight> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     let files = &model.files;
+    progress.begin_highlighting(files.len());
     let mut order: Vec<usize> = (0..files.len()).collect();
     order.sort_by_key(|&i| std::cmp::Reverse(diff_line_count(&files[i])));
     let workers = std::thread::available_parallelism()
@@ -498,8 +565,11 @@ fn highlight_parallel(model: &DiffModel) -> DiffHighlight {
         for _ in 0..workers {
             handles.push(scope.spawn(|| {
                 let mut done = Vec::new();
-                while let Some(&i) = order.get(next.fetch_add(1, Ordering::Relaxed)) {
+                while !progress.cancelled()
+                    && let Some(&i) = order.get(next.fetch_add(1, Ordering::Relaxed))
+                {
                     done.push((i, diff_render::highlight_file(&files[i])));
+                    progress.highlighted_one();
                 }
                 done
             }));
@@ -515,12 +585,15 @@ fn highlight_parallel(model: &DiffModel) -> DiffHighlight {
             }
         }
     });
-    DiffHighlight::from_files(
+    if progress.cancelled() {
+        return None;
+    }
+    Some(DiffHighlight::from_files(
         slots
             .into_iter()
             .map(|hl| hl.expect("each file index is taken by exactly one worker"))
             .collect(),
-    )
+    ))
 }
 
 /// How many diff lines `file` carries: its highlighting cost.
@@ -599,12 +672,31 @@ mod tests {
             )
         };
         let sequential = render(&diff_render::highlight_diff(&model));
-        assert_eq!(render(&highlight_parallel(&model)), sequential);
+        let progress = BuildProgress::default();
+        let parallel = highlight_parallel(&model, &progress).expect("not cancelled");
+        assert_eq!(render(&parallel), sequential);
         let empty = DiffModel {
             files: Vec::new(),
             truncated: false,
         };
-        assert!(highlight_parallel(&empty).is_empty());
+        let none = highlight_parallel(&empty, &BuildProgress::default());
+        assert!(none.expect("not cancelled").is_empty());
+    }
+
+    /// A cancelled build highlights nothing more and yields nothing.
+    #[test]
+    fn a_cancelled_highlight_stops_and_yields_nothing() {
+        let model = DiffModel {
+            files: (0..64)
+                .map(|i| rust_file(&format!("f{i}.rs"), 50))
+                .collect(),
+            truncated: false,
+        };
+        let progress = BuildProgress::default();
+        progress.cancel();
+        assert!(highlight_parallel(&model, &progress).is_none());
+        let finished = BuildProgress::default();
+        assert!(highlight_parallel(&model, &finished).is_some());
     }
 
     #[test]
@@ -637,12 +729,7 @@ mod tests {
         with_app(|app| {
             let (tx, rx) = std::sync::mpsc::channel();
             tx.send(GitViewPayload::Empty).unwrap();
-            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
-                id: 1,
-                rx,
-                title: "git diff HEAD".into(),
-                layout: DiffLayout::SideBySide,
-            });
+            app.runtime.project_mut().pending_git_view = Some(PendingGitView::for_test(1, rx));
             assert!(app.drain_pending_git_view());
             assert!(
                 app.view.project().pager.is_none(),
@@ -667,12 +754,7 @@ mod tests {
             let hl = diff_render::highlight_diff(&model);
             tx.send(GitViewPayload::Built(GitViewContent::Diff(model, hl)))
                 .unwrap();
-            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
-                id: 7,
-                rx,
-                title: "git diff HEAD".into(),
-                layout: DiffLayout::SideBySide,
-            });
+            app.runtime.project_mut().pending_git_view = Some(PendingGitView::for_test(7, rx));
             assert!(app.drain_pending_git_view());
             let pager = app
                 .view
@@ -735,12 +817,7 @@ mod tests {
             let hl = diff_render::highlight_diff(&content);
             tx.send(GitViewPayload::Built(GitViewContent::Diff(content, hl)))
                 .unwrap();
-            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
-                id: 9,
-                rx,
-                title: "git diff HEAD".into(),
-                layout: DiffLayout::SideBySide,
-            });
+            app.runtime.project_mut().pending_git_view = Some(PendingGitView::for_test(9, rx));
             assert!(app.drain_pending_git_view());
             let widest = |app: &App| {
                 app.view
@@ -821,12 +898,9 @@ mod tests {
             let (tx, rx) = std::sync::mpsc::channel();
             tx.send(GitViewPayload::Built(GitViewContent::Blame(model, hl)))
                 .unwrap();
-            app.runtime.project_mut().pending_git_view = Some(PendingGitView {
-                id: 3,
-                rx,
-                title: "git blame f.rs".into(),
-                layout: DiffLayout::SideBySide, // ignored for blame
-            });
+            let mut pending = PendingGitView::for_test(3, rx);
+            pending.title = "git blame f.rs".into();
+            app.runtime.project_mut().pending_git_view = Some(pending);
             assert!(app.drain_pending_git_view());
             let body = |app: &App| -> String {
                 app.view
