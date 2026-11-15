@@ -126,18 +126,7 @@ pub fn escape_stream(script: &[u8]) -> Vec<u8> {
             }
             6 => out.extend_from_slice(b"\x1b7"),
             7 => out.extend_from_slice(b"\x1b8"),
-            8 => {
-                // OSC, sometimes unterminated — a real risk, since an agent's
-                // title write can split across pty reads.
-                out.extend_from_slice(b"\x1b]");
-                out.extend_from_slice(s.byte().to_string().as_bytes());
-                out.extend_from_slice(b";payload");
-                match s.below(3) {
-                    0 => out.push(0x07),
-                    1 => out.extend_from_slice(b"\x1b\\"),
-                    _ => {}
-                }
-            }
+            8 => osc(&mut s, &mut out),
             9 => {
                 out.extend_from_slice(b"\x1b_Ga=T,f=24,s=1,v=1;AAAA");
                 if s.below(2) == 0 {
@@ -154,9 +143,76 @@ pub fn escape_stream(script: &[u8]) -> Vec<u8> {
     out
 }
 
+/// An OSC, sometimes unterminated: a real risk, since an agent's title write
+/// can split across pty reads. Three numbers reach what a program says about
+/// itself (#927): a status report, its support query and a shell's prompt start.
+fn osc(s: &mut Script<'_>, out: &mut Vec<u8>) {
+    const STATES: &[&[u8]] = &[b"idle", b"working", b"done", b"blocked", b"error", b"clear"];
+    out.extend_from_slice(b"\x1b]");
+    match s.byte() {
+        253 => {
+            out.extend_from_slice(b"7501;state=");
+            out.extend_from_slice(STATES[s.below(6) as usize]);
+            out.extend_from_slice(b":kind=permission:id=build/test:app=x");
+        }
+        254 => out.extend_from_slice(b"7501;?"),
+        255 => out.extend_from_slice(b"133;A"),
+        n => {
+            out.extend_from_slice(n.to_string().as_bytes());
+            out.extend_from_slice(b";payload");
+        }
+    }
+    match s.below(3) {
+        0 => out.push(0x07),
+        1 => out.extend_from_slice(b"\x1b\\"),
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::escape_stream;
+
+    /// A committed `pane_engine` seed, read from the source tree: the published
+    /// crate leaves `fuzz/` out, so the seeds aren't compiled in.
+    fn seed(name: &str) -> Vec<u8> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fuzz/seeds/pane_engine")
+            .join(name);
+        std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+    }
+
+    fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+        hay.windows(needle.len()).position(|w| w == needle)
+    }
+
+    /// The committed seeds for #927 reach the shapes `fuzz/seeds/README.md`
+    /// says they do: a seed that drifts off its shape still runs, and tests
+    /// nothing.
+    #[test]
+    fn the_program_status_seeds_reach_their_shapes() {
+        let stream = |seed: &[u8]| escape_stream(&seed[2..]);
+        let report = b"\x1b]7501;state=blocked:kind=permission:id=build/test:app=x\x1b\\";
+
+        let split = stream(&seed("program_status_split"));
+        let at = find(&split, report).expect("the report");
+        let chunk = 64.max(split.len() / 8 + 1);
+        assert!(
+            at < chunk && at + report.len() > chunk,
+            "{at}+{} over {chunk}",
+            report.len()
+        );
+
+        let dcs = stream(&seed("program_status_in_dcs"));
+        assert!(dcs.starts_with(b"\x1bP]7501;state=blocked"), "{dcs:?}");
+
+        let query = stream(&seed("program_status_query"));
+        assert!(query.starts_with(b"\x1b]7501;?\x1b\\"), "{query:?}");
+
+        let prompt = stream(&seed("prompt_start"));
+        assert!(prompt.starts_with(b"\x1b]133;A\x07"), "{prompt:?}");
+        assert!(find(&prompt, report).is_some(), "and a report after it");
+    }
 
     /// A generator that returns nothing tests nothing, and the bug would be
     /// invisible — the fuzz target would pass on every input.

@@ -64,6 +64,7 @@ fn forget_closed_agent(info: &mut crate::pane::tabs::TabInfo) {
     info.turn_open = false;
     info.scrape_status = None;
     info.scrape_dirty = false;
+    info.program.clear();
 }
 
 /// Total lifetime of a P3-1 visual-bell border pulse before it clears.
@@ -137,6 +138,8 @@ fn notification_for_transition(
     // routine finished-turn edge (per-channel opt-in) from `Blocked` (fires all).
     let is_done = match new {
         AgentActivity::Blocked if old != AgentActivity::Blocked => false,
+        // A reported error needs the user as a block does: every channel.
+        AgentActivity::Error if old != AgentActivity::Error => false,
         AgentActivity::Done if old != AgentActivity::Done => true,
         _ => return NotifyPlan::default(),
     };
@@ -210,6 +213,10 @@ fn notification_text(who: &Subject, new: AgentActivity) -> (String, String) {
             )
         }
         AgentActivity::Done => (format!("{agent} finished"), format!("{place} — done")),
+        AgentActivity::Error => (
+            format!("{agent} failed"),
+            format!("{place} reported an error"),
+        ),
         _ => (agent, place),
     }
 }
@@ -355,6 +362,7 @@ impl ActivityScan<'_> {
         } else {
             App::effective_activity(
                 entry.info.reported.as_ref(),
+                entry.info.program.activity(),
                 entry.info.scrape_status.map(|(s, _)| s),
                 kind,
                 entry.info.last_output_at,
@@ -629,13 +637,16 @@ impl App {
     /// dots are agent-only).
     fn effective_activity(
         reported: Option<&ReportedStatus>,
+        program: Option<AgentActivity>,
         scrape: Option<AgentActivity>,
         kind: AgentKind,
         last_output_at: Option<Instant>,
         now: Instant,
     ) -> AgentActivity {
+        // A tab running no agent spyc knows shows only what its program says
+        // about itself (OSC 7501, #927).
         if kind == AgentKind::Other {
-            return AgentActivity::Unknown;
+            return program.unwrap_or(AgentActivity::Unknown);
         }
         if crate::agent::codex_approval::overrides_report(reported, scrape, kind) {
             return AgentActivity::Blocked;
@@ -649,6 +660,11 @@ impl App {
             if !expired && !superseded {
                 return r.status;
             }
+        }
+        // What the program says about itself (OSC 7501) ranks below a live
+        // report and above reading its screen: it is the program's own word.
+        if let Some(program) = program {
+            return program;
         }
         // P1-2 scrape fallback: `settle_scrape_quiet` debounces the screen read.
         // Codex's complete forms have a bounded delay; other agents wait for
@@ -1083,6 +1099,7 @@ mod tests {
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(60)).as_ref(),
                 None,
+                None,
                 AgentKind::Agy,
                 None,
                 base,
@@ -1093,6 +1110,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report(AgentActivity::Blocked, base, base + Duration::from_secs(60)).as_ref(),
+                None,
                 None,
                 AgentKind::Agy,
                 Some(base),
@@ -1106,6 +1124,7 @@ mod tests {
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(1)).as_ref(),
                 None,
+                None,
                 AgentKind::Agy,
                 None,
                 base + Duration::from_secs(2),
@@ -1116,6 +1135,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report(AgentActivity::Working, base, base + Duration::from_secs(60)).as_ref(),
+                None,
                 None,
                 AgentKind::Other,
                 None,
@@ -1137,6 +1157,7 @@ mod tests {
             assert_eq!(
                 App::effective_activity(
                     Some(&idle),
+                    None,
                     None,
                     AgentKind::Agy,
                     Some(base + Duration::from_millis(output)),
@@ -1162,6 +1183,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 None,
+                None,
                 Some(AgentActivity::Blocked),
                 AgentKind::Agy,
                 None,
@@ -1173,6 +1195,7 @@ mod tests {
         // handles the timing — effective_activity just reads the result).
         assert_eq!(
             App::effective_activity(
+                None,
                 None,
                 Some(AgentActivity::Blocked),
                 AgentKind::Agy,
@@ -1192,6 +1215,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report.as_ref(),
+                None,
                 Some(AgentActivity::Idle),
                 AgentKind::Agy,
                 None,
@@ -1202,6 +1226,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 report.as_ref(),
+                None,
                 Some(AgentActivity::Blocked),
                 AgentKind::Agy,
                 None,
@@ -1211,12 +1236,13 @@ mod tests {
         );
         // No scrape guess either → falls all the way through to timing.
         assert_eq!(
-            App::effective_activity(None, None, AgentKind::Agy, None, base),
+            App::effective_activity(None, None, None, AgentKind::Agy, None, base),
             AgentActivity::Idle
         );
         // Non-agent tab ignores scrape too (dots are agent-only).
         assert_eq!(
             App::effective_activity(
+                None,
                 None,
                 Some(AgentActivity::Blocked),
                 AgentKind::Other,
@@ -1310,6 +1336,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 Some(&report),
+                None,
                 Some(AgentActivity::Idle),
                 AgentKind::Agy,
                 None,
@@ -1326,6 +1353,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 Some(&report),
+                None,
                 Some(AgentActivity::Blocked),
                 AgentKind::Agy,
                 Some(output_after),
@@ -1337,6 +1365,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 Some(&report),
+                None,
                 None,
                 AgentKind::Agy,
                 Some(output_after),
@@ -1365,7 +1394,14 @@ mod tests {
         // waits) does NOT supersede — the dot stays Blocked.
         let later = base + Duration::from_secs(30);
         assert_eq!(
-            App::effective_activity(blocked.as_ref(), None, AgentKind::Agy, Some(later), later),
+            App::effective_activity(
+                blocked.as_ref(),
+                None,
+                None,
+                AgentKind::Agy,
+                Some(later),
+                later
+            ),
             AgentActivity::Blocked,
             "blocked is latched — prompt redraws must not bounce it to working"
         );
@@ -1381,6 +1417,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 stale.as_ref(),
+                None,
                 None,
                 AgentKind::Agy,
                 None,
@@ -1401,6 +1438,7 @@ mod tests {
             assert_eq!(
                 App::effective_activity(
                     reported.as_ref(),
+                    None,
                     None,
                     AgentKind::Agy,
                     Some(base + Duration::from_millis(200)),
@@ -1425,6 +1463,7 @@ mod tests {
             App::effective_activity(
                 working.as_ref(),
                 None,
+                None,
                 AgentKind::Agy,
                 Some(base + Duration::from_millis(200)),
                 base + Duration::from_secs(10),
@@ -1436,6 +1475,7 @@ mod tests {
         assert_eq!(
             App::effective_activity(
                 working.as_ref(),
+                None,
                 None,
                 AgentKind::Agy,
                 Some(base + Duration::from_millis(200)),
@@ -1477,6 +1517,88 @@ mod tests {
             &who("claude", 1),
         );
         assert!(p.system.is_some());
+    }
+
+    /// A program's reported error (OSC 7501, #927) pings as a block does, on
+    /// every enabled channel even with the done opt-ins off, and only on the
+    /// edge into it.
+    #[test]
+    fn notify_fires_on_an_error_edge_as_on_a_block() {
+        use crate::config::NotifyConfig;
+        use crate::pane::AgentActivity::{Error, Working};
+        let cfg = NotifyConfig {
+            desktop_done: false,
+            visual_done: false,
+            ..NotifyConfig::default()
+        };
+        let p = super::notification_for_transition(
+            Working,
+            Error,
+            &cfg,
+            false,
+            false,
+            &who("build", 3),
+        );
+        let (summary, body) = p.system.clone().expect("an error pings the OS notifier");
+        assert!(summary.contains("build failed"), "{summary}");
+        assert!(body.contains('3'), "{body}");
+        assert!(p.visual, "the visual flash fires");
+        assert!(
+            super::notification_for_transition(Error, Error, &cfg, false, false, &who("build", 3))
+                .is_silent(),
+            "no edge, no ping"
+        );
+    }
+
+    /// What a program says about itself (OSC 7501, #927) ranks below a live
+    /// report and above the scrape and output timing, and is all a tab running
+    /// no known agent can show.
+    #[test]
+    fn a_programs_own_report_ranks_between_a_live_report_and_the_scrape() {
+        use crate::pane::AgentActivity::{Blocked, Error, Unknown, Working};
+        use crate::pane::ReportedStatus;
+        use std::time::{Duration, Instant};
+        let base = Instant::now();
+        let live = ReportedStatus::new(Working, base, base + Duration::from_secs(60));
+        assert_eq!(
+            App::effective_activity(Some(&live), Some(Blocked), None, AgentKind::Agy, None, base),
+            Working,
+            "a live report wins"
+        );
+        assert_eq!(
+            App::effective_activity(
+                None,
+                Some(Error),
+                Some(Blocked),
+                AgentKind::Claude,
+                Some(base),
+                base
+            ),
+            Error,
+            "the program's word beats the screen and the timing"
+        );
+        assert_eq!(
+            App::effective_activity(
+                None,
+                Some(Working),
+                Some(Blocked),
+                AgentKind::Codex,
+                Some(base),
+                base
+            ),
+            Blocked,
+            "but not a visible Codex approval form, which beats every report"
+        );
+        assert_eq!(
+            App::effective_activity(None, Some(Blocked), None, AgentKind::Other, None, base),
+            Blocked,
+            "a shell tab shows what its program reports"
+        );
+        assert_eq!(
+            App::effective_activity(None, None, Some(Blocked), AgentKind::Other, None, base),
+            Unknown,
+            "and nothing else"
+        );
     }
 
     /// The bell's flash goes to the most urgent: blocked over done, then the

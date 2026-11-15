@@ -932,6 +932,7 @@ through an allowlist:
 | DA1 `?62;22c`, DA2 `>1;10;0c` | Ghostty's own answers less clipboard access (52) |
 | XTVERSION `spyc <version>` | not `ghostty` or `kitty`, the names children key image support on |
 | DECRQSS | engine state |
+| program status support (`OSC 7501 ; ?`) | spyc keeps the reports it names (below) |
 
 Left unanswered: the kitty keyboard flags (spyc's key encoder is legacy-only,
 so claiming the protocol would switch a child to an encoding spyc never sends),
@@ -953,6 +954,30 @@ second producer beside the keyboard. That queue never blocks and shares input's
 8 MiB limit, so a child that never reads its input can't stall the worker.
 Replies go out even while a synchronized update holds the output: a child may
 wait on one before it closes the update.
+
+## Programs reporting their own status
+
+A program can say what it is doing with OSC 7501 (Superlogical's Program Status
+Protocol: `idle`, `working`, `done`, `blocked`, `error`, `clear`), and Claude
+Code, Codex and agy do ([#927](https://github.com/Tripstack-Corp/spyc/issues/927)).
+The pinned libghostty-vt parses it and hands each report to a callback
+(`GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS`), so spyc scans no bytes of its own: a
+scanner ahead of the engine would have to track every string state the engine
+already tracks, and a report inside a DCS or split across reads is exactly where
+two parsers disagree. While the callback is set the engine also answers the
+`OSC 7501 ; ?` support query, and the reply allowlist lets that answer through.
+The shell's prompt starts (OSC 133) come the same way, through
+`GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT`.
+
+Both callbacks only buffer, into the same sink as the replies (256 events, the
+oldest dropped), keeping a report's id, state, kind and app and never its title
+or message: untrusted text nothing shows. The loop takes the events when it
+drains the pane, and each tab keeps them as records by the rules the header
+gives (`pane::tabs::program_status`): a report replaces its record, a `clear`
+takes the nested ones with it, a prompt start ends `working`, `blocked` and
+`idle`, and `done` and `error` stay until the user's settling keystroke. The most
+urgent record ranks below a live `report_status` and above the screen scrape
+(`App::effective_activity`); a tab running no agent spyc knows shows it alone.
 
 ## Git: 100% in-process gix
 

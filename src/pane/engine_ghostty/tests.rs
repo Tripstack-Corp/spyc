@@ -653,3 +653,82 @@ mod child_queries {
         assert!(n > 0 && n <= 64 * 1024, "{n} bytes pending");
     }
 }
+
+/// What a program says about itself (#927): its status reports (OSC 7501) and
+/// the shell's prompt starts (OSC 133), as the engine hands them to the loop.
+#[cfg(test)]
+mod program_status {
+    use super::super::*;
+    use crate::pane::engine::{BlockedOn, ProgramEvent, ProgramState, ProgramStatus};
+
+    fn events(chunks: &[&[u8]]) -> Vec<ProgramEvent> {
+        let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
+        for chunk in chunks {
+            e.process(chunk);
+        }
+        e.take_program_events()
+    }
+
+    fn blocked_deploy() -> ProgramEvent {
+        ProgramEvent::Status(ProgramStatus {
+            id: String::new(),
+            state: ProgramState::Blocked,
+            blocked_on: Some(BlockedOn::Permission),
+            app: "deploy".into(),
+        })
+    }
+
+    const REPORT: &[u8] = b"\x1b]7501;state=blocked:kind=permission:app=deploy\x1b\\";
+
+    #[test]
+    fn a_report_reaches_the_loop_decoded() {
+        assert_eq!(events(&[REPORT]), [blocked_deploy()]);
+    }
+
+    #[test]
+    fn a_report_split_across_reads_is_one_report() {
+        assert_eq!(events(&[&REPORT[..17], &REPORT[17..]]), [blocked_deploy()]);
+    }
+
+    /// A report's text carried inside another string is that string's data.
+    /// (An ESC inside one ends it, so `ESC ]` there does start a real OSC.)
+    #[test]
+    fn a_report_inside_another_string_is_not_one() {
+        let text = &REPORT[1..REPORT.len() - 2]; // `]7501;…`, no ESC
+        for (name, open) in [
+            ("DCS", &b"\x1bP"[..]),
+            ("APC", b"\x1b_"),
+            ("OSC 2", b"\x1b]2;"),
+        ] {
+            let mut bytes = open.to_vec();
+            bytes.extend_from_slice(text);
+            bytes.extend_from_slice(b"\x1b\\");
+            assert_eq!(events(&[&bytes]), [], "inside {name}");
+        }
+    }
+
+    #[test]
+    fn a_shell_prompt_start_is_reported() {
+        assert_eq!(events(&[b"\x1b]133;A\x07"]), [ProgramEvent::PromptStart]);
+    }
+
+    #[test]
+    fn the_support_query_is_answered() {
+        let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
+        e.process(b"\x1b]7501;?\x1b\\");
+        let reply = e.take_replies();
+        assert!(
+            reply.starts_with(b"\x1b]7501;?") && reply.windows(7).any(|w| w == b"blocked"),
+            "{:?}",
+            String::from_utf8_lossy(&reply)
+        );
+    }
+
+    #[test]
+    fn events_are_taken_once_and_bounded() {
+        let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
+        e.process(&b"\x1b]7501;state=working\x1b\\".repeat(1000));
+        assert_eq!(e.take_program_events().len(), 256);
+        assert_eq!(e.take_program_events(), []);
+    }
+}

@@ -24,18 +24,26 @@ in-memory view coordinates them all.
 ## 1. Activity dots — "which agent needs me?"
 
 Each **agent** pane tab carries a live dot in the divider. Its state comes from
-three tiers, with a visible-approval override for Codex and agy:
+four tiers, with a visible-approval override for Codex and agy:
 
 1. **Semantic self-report** (best) — the agent calls the `report_status` MCP tool
    (or its lifecycle hook does): `working` / `blocked` / `done` / `waiting` /
    `idle`.
-2. **Scrape fallback** — for a state an agent's hooks can't report, spyc reads
+2. **The program's own report** — anything running in the tab can say what it is
+   doing with OSC 7501 (`working`, `blocked`, `done`, `error`, `idle`): Codex
+   does unasked, and Claude Code and agy do once spyc answers their support
+   query at start-up. This is also the only way a tab running no agent spyc
+   knows, a shell tab running a build or a deploy script, gets a dot:
+   `printf '\e]7501;state=blocked:kind=permission:app=deploy\e\\'` turns it red
+   and pings "needs you: permission". A new shell prompt (OSC 133) ends
+   `working` and `blocked`; `done` and `error` stay until you settle the tab.
+3. **Scrape fallback** — for a state an agent's hooks can't report, spyc reads
    its *visible screen* for a known prompt: agy's tool approval or Codex's
    complete command, file-edit, MCP-tool and network approval forms. Codex scans
    within 250 ms of the first pending repaint; agy waits for quiet.
    A verified approval prompt in Codex or agy temporarily overrides a
    non-blocked report; semantic question/agent blocks retain precedence.
-3. **Output timing** — with neither of the above, output flowing = `working`,
+4. **Output timing** — with none of the above, output flowing = `working`,
    silence = `idle`.
 
 Codex, Claude and agy retain semantic reports (`working`, `waiting`, `done`,
@@ -62,6 +70,7 @@ limit`), since that turn won't resume by itself.
 | heat-pulse `●` (pepper→ember) | **working** — output flowing or a `working` report |
 | quiet `·` | **idle** |
 | steady **red** square `■` | **blocked** — waiting on you ("needs me") |
+| steady **red** cross `✕` | **error** — a program reported that it failed (OSC 7501); pings as blocked does, and stays until you settle the tab |
 | calm **teal** square `■` | **done** — finished a turn; one that landed while its tab was out of view stays teal until the tab is in view |
 | steady **blue** hollow circle `○` | **waiting** — turn over, but background work the agent started will wake it |
 | `💤` | `^z`-suspended |
