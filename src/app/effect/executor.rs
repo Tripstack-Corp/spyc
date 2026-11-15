@@ -177,17 +177,19 @@ impl App {
                 // in the producer; only signal here (a failed kill is rare — we
                 // just read a live pid — so flash and let the loop survive).
                 #[cfg(unix)]
-                Effect::SignalPane { pgrp, resume } => {
+                Effect::SignalPane { tab, resume } => {
                     // SIGSTOP (not SIGTSTP): uncatchable, so Claude can't run
                     // its self-suspend handler — which on macOS ends in the
                     // false-exit. The agent just freezes; reader keeps blocking.
-                    let sig = if resume {
-                        rustix::process::Signal::CONT
-                    } else {
-                        rustix::process::Signal::STOP
-                    };
-                    if kill_pg(pgrp, sig).is_err() {
-                        self.state.flash_error("pane: signal failed");
+                    let sent = self
+                        .runtime
+                        .every_tab_set_mut()
+                        .flat_map(|(_, tabs)| tabs.tabs_mut().iter_mut())
+                        .find(|t| t.info.id == tab)
+                        .map(|t| t.pane.suspend(resume));
+                    if let Some(Err(e)) = sent {
+                        self.state
+                            .flash_error(format!("pane: signal failed: {e:#}"));
                     }
                 }
                 // Capture `^C`/`^\`: a real signal to the running command's

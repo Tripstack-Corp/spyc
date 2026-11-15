@@ -1,4 +1,7 @@
 //! Ordered, bounded input delivery; the child never owns the UI thread.
+//!
+//! A jarred program's replies to its queries go to a writer of their own, as
+//! the jar's `Reply` frames (R15), so a jar can tell them from keystrokes.
 
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -21,12 +24,14 @@ pub struct ReplyWriter {
 
 impl ReplyWriter {
     pub fn send(&self, bytes: Vec<u8>) -> io::Result<()> {
-        send(&self.tx, &self.outstanding, bytes, false)
+        send(&self.tx, &self.outstanding, bytes, false, true)
     }
 }
 
 struct Batch {
     bytes: Vec<u8>,
+    /// An answer to one of the child's queries, not a keystroke.
+    reply: bool,
     outstanding: Arc<AtomicUsize>,
 }
 
@@ -38,7 +43,16 @@ impl Drop for Batch {
 }
 
 impl InputWriter {
-    pub(super) fn new(mut writer: Box<dyn Write + Send>) -> io::Result<Self> {
+    pub(super) fn new(writer: Box<dyn Write + Send>) -> io::Result<Self> {
+        Self::with_replies(writer, None)
+    }
+
+    /// As [`Self::new`], with the replies to the child's queries written to
+    /// `replies` when given.
+    pub(super) fn with_replies(
+        mut writer: Box<dyn Write + Send>,
+        mut replies: Option<Box<dyn Write + Send>>,
+    ) -> io::Result<Self> {
         let (tx, rx) = mpsc::sync_channel::<Batch>(MAX_BATCHES);
         // Only this worker owns the OS writer, including its destructor, which
         // portable-pty may implement by writing EOF. Dropping a host never joins
@@ -48,8 +62,11 @@ impl InputWriter {
             .name("pty-input".into())
             .spawn(move || {
                 while let Ok(batch) = rx.recv() {
-                    if let Err(error) = writer.write_all(&batch.bytes).and_then(|()| writer.flush())
-                    {
+                    let out = match replies.as_mut() {
+                        Some(r) if batch.reply => r,
+                        _ => &mut writer,
+                    };
+                    if let Err(error) = out.write_all(&batch.bytes).and_then(|()| out.flush()) {
                         crate::spyc_debug!("pty input write failed: {error}");
                         return;
                     }
@@ -88,7 +105,7 @@ impl InputWriter {
 
     #[allow(clippy::needless_pass_by_ref_mut)]
     fn enqueue_owned(&mut self, bytes: Vec<u8>, confirmed: bool) -> io::Result<()> {
-        send(&self.tx, &self.outstanding, bytes, confirmed)
+        send(&self.tx, &self.outstanding, bytes, confirmed, false)
     }
 }
 
@@ -97,6 +114,7 @@ fn send(
     outstanding: &Arc<AtomicUsize>,
     bytes: Vec<u8>,
     confirmed: bool,
+    reply: bool,
 ) -> io::Result<()> {
     if bytes.is_empty() {
         return Ok(());
@@ -115,6 +133,7 @@ fn send(
         .map_err(|_| queue_full())?;
     let batch = Batch {
         bytes,
+        reply,
         outstanding: Arc::clone(outstanding),
     };
     match tx.try_send(batch) {
@@ -347,5 +366,41 @@ mod tests {
             output.recv_timeout(Duration::from_secs(2)),
             Err(mpsc::RecvTimeoutError::Disconnected)
         ));
+    }
+
+    /// R15: a jarred pane's answers to its program's queries reach their own
+    /// writer, its keystrokes the input's, each in order.
+    #[test]
+    fn replies_go_to_their_own_writer_when_given_one() {
+        struct To(mpsc::Sender<Vec<u8>>);
+        impl Write for To {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                let _ = self.0.send(bytes.to_vec());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let (keys_tx, keys) = mpsc::channel();
+        let (replies_tx, replies) = mpsc::channel();
+        let mut input =
+            InputWriter::with_replies(Box::new(To(keys_tx)), Some(Box::new(To(replies_tx))))
+                .unwrap();
+        let reply = input.reply_writer();
+        input.enqueue(b"a").unwrap();
+        reply.send(b"\x1b[?62c".to_vec()).unwrap();
+        input.enqueue(b"b").unwrap();
+        reply.send(b"\x1b[1;1R".to_vec()).unwrap();
+        let wait = Duration::from_secs(2);
+        assert_eq!(keys.recv_timeout(wait).unwrap(), b"a");
+        assert_eq!(keys.recv_timeout(wait).unwrap(), b"b");
+        assert_eq!(replies.recv_timeout(wait).unwrap(), b"\x1b[?62c");
+        assert_eq!(replies.recv_timeout(wait).unwrap(), b"\x1b[1;1R");
+        drop((input, reply));
+        assert!(
+            keys.recv_timeout(wait).is_err(),
+            "no reply reached the input's writer"
+        );
     }
 }

@@ -45,6 +45,7 @@ fn a_new_client_drives_an_old_jar() {
     let old = std::env::var("SPYC_JAR_OLD_BIN").expect("SPYC_JAR_OLD_BIN names an old jar binary");
     let dir = tempfile::Builder::new()
         .prefix("jar")
+        .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
         .tempdir_in("/tmp")
         .expect("tempdir");
     let socket = dir.path().join("j.sock");

@@ -556,7 +556,25 @@ pub fn strip_exit_suffix(label: &str) -> String {
     {
         return base.to_string();
     }
+    for lost in [super::jar::Lost::Gone, super::jar::Lost::Held] {
+        if let Some(base) = label.strip_suffix(&format!(" [{}]", lost.label())) {
+            return base.to_string();
+        }
+    }
     label.to_string()
+}
+
+/// What a closed tab's label adds: `exited N`, or for a jarred program whose
+/// jar went or ended its lease, why there's no exit to show.
+fn exit_suffix(status: Option<&portable_pty::ExitStatus>) -> String {
+    let lost = [super::jar::Lost::Gone, super::jar::Lost::Held]
+        .into_iter()
+        .find(|l| status.and_then(portable_pty::ExitStatus::signal) == Some(l.label()));
+    match (lost, status) {
+        (Some(l), _) => l.label().to_string(),
+        (None, Some(s)) => format!("exited {}", s.exit_code()),
+        (None, None) => "exited ?".to_string(),
+    }
 }
 
 impl TabEntry {
@@ -791,14 +809,11 @@ impl PaneTabs {
     pub fn mark_exited(&mut self) -> bool {
         let mut changed = false;
         for entry in &mut self.tabs {
-            if entry.pane.is_closed() && !entry.info.label.contains("[exited") {
+            if entry.pane.is_closed() && strip_exit_suffix(&entry.info.label) == entry.info.label {
                 // Retry exit status harvest if drain_output missed it.
                 entry.pane.try_harvest_exit_status();
-                let code = entry
-                    .pane
-                    .exit_status()
-                    .map_or_else(|| "?".to_string(), |s| s.exit_code().to_string());
-                entry.info.label = format!("{} [exited {}]", entry.info.label, code);
+                let suffix = exit_suffix(entry.pane.exit_status());
+                entry.info.label = format!("{} [{suffix}]", entry.info.label);
                 changed = true;
             }
         }
@@ -1084,6 +1099,27 @@ mod tests {
     fn strips_question_mark_exit() {
         // mark_exited writes "?" when exit_status() is None.
         assert_eq!(strip_exit_suffix("zsh [exited ?]"), "zsh");
+    }
+
+    /// A jarred tab whose jar went, or ended its lease, says so in place of
+    /// an exit code, and the label strips back as an exit's does.
+    #[test]
+    fn a_tab_whose_jar_is_lost_or_held_says_so() {
+        use crate::pane::jar::Lost;
+        use portable_pty::ExitStatus;
+        let label = |s: Option<ExitStatus>| super::exit_suffix(s.as_ref());
+        assert_eq!(
+            label(Some(ExitStatus::with_signal(Lost::Gone.label()))),
+            "jar lost"
+        );
+        assert_eq!(
+            label(Some(ExitStatus::with_signal(Lost::Held.label()))),
+            "detached"
+        );
+        assert_eq!(label(Some(ExitStatus::with_exit_code(3))), "exited 3");
+        assert_eq!(label(None), "exited ?");
+        assert_eq!(strip_exit_suffix("claude [jar lost]"), "claude");
+        assert_eq!(strip_exit_suffix("claude [detached]"), "claude");
     }
 
     #[test]

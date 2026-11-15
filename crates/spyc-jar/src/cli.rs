@@ -11,6 +11,10 @@
 //! else or starts the program, whatever else the command line says, so a spyc
 //! that finds a newer or older `spyc-jar` beside it can tell, and run the
 //! program another way.
+//!
+//! `PATH`'s directory must be the user's own, `0700` and not a link, or the
+//! jar refuses to run: anyone else who could write there could put a socket
+//! of theirs in its place.
 
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -23,7 +27,7 @@ use anyhow::{Context, bail};
 
 /// The exit status of a jar asked to start for a wire version it doesn't
 /// speak (or for none).
-const WIRE_NOT_SERVED: i32 = 75;
+pub const WIRE_NOT_SERVED: i32 = 75;
 
 /// Run `spyc-jar` with this process's arguments: a subcommand, or a jar.
 pub fn main() -> anyhow::Result<()> {
@@ -99,6 +103,7 @@ fn run_jar() -> anyhow::Result<()> {
             .recursive(true)
             .mode(0o700)
             .create(dir)?;
+        private_dir(dir)?;
     }
     if cfg.socket.exists() {
         if UnixStream::connect(&cfg.socket).is_ok() {
@@ -110,6 +115,23 @@ fn run_jar() -> anyhow::Result<()> {
         .with_context(|| format!("bind {}", cfg.socket.display()))?;
     std::fs::set_permissions(&cfg.socket, std::fs::Permissions::from_mode(0o600))?;
     jar::run(cfg, listener, token)
+}
+
+/// A jar listens only in a directory that is this user's alone: anyone else
+/// who could write there could put their own socket in its place (finding 14).
+fn private_dir(dir: &std::path::Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = dir
+        .symlink_metadata()
+        .with_context(|| format!("look at {}", dir.display()))?;
+    let uid = rustix::process::getuid().as_raw();
+    if !meta.file_type().is_dir() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
+        bail!(
+            "spyc-jar: {} must be a directory of uid {uid}'s, mode 0700 and not a link; refusing to run",
+            dir.display()
+        );
+    }
+    Ok(())
 }
 
 /// The jar's configuration from its flags.
