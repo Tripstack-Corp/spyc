@@ -419,6 +419,10 @@ pub struct ViewState {
     /// can't read the clock) while ≥1 agent tab is Working. The pure draw maps
     /// it to a warm heat colour for the per-tab dot.
     pub(super) agent_anim_frame: u64,
+    /// The status bar pepper's simmer frame while spyc cooks
+    /// ([`super::cooking`]), advanced by `settle_cooking`; `None` while
+    /// nothing has cooked past its grace.
+    pub(super) cooking_frame: Option<u64>,
     /// Active spice-heat border-pulse flash (P3-1 visual bell), or `None`.
     /// Started by `settle_agent_activity` on a Blocked/Done transition when
     /// `[notify].visual` is set (on by default); advanced + cleared by
@@ -615,6 +619,7 @@ impl ViewState {
             pane_send_at: None,
             started_at: std::time::Instant::now(),
             agent_anim_frame: 0,
+            cooking_frame: None,
             visual_bell: None,
             hud_pid: std::process::id(),
             hud_term: std::env::var("TERM").unwrap_or_else(|_| "?".to_string()),

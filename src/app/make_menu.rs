@@ -180,12 +180,16 @@ impl App {
             .runtime
             .make_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::Makefile);
+        let cooking = self.start_cooking();
         super::landing::spawn_worker(
             sender,
-            move || MakefileLanded {
-                origin,
-                request,
-                found: crate::taskfile::discover(&path, &root).map_err(|e| format!("{e:#}")),
+            move || {
+                let _cooking = cooking;
+                MakefileLanded {
+                    origin,
+                    request,
+                    found: crate::taskfile::discover(&path, &root).map_err(|e| format!("{e:#}")),
+                }
             },
             move |message| MakefileLanded {
                 origin,

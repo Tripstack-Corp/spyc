@@ -99,7 +99,9 @@ impl App {
             .runtime
             .closed_rows_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::ClosedRows);
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
+            let _cooking = cooking;
             let saved: Vec<(Manifest, bool)> = dir
                 .as_deref()
                 .map_or_default(crate::state::sessions::load_manifests_in)

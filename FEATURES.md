@@ -108,8 +108,10 @@ Full reference: [Projects and sessions](docs/features/projects.md).
 
 The status bar uses powerline-style segments in this order:
 
-- Pepper emoji (logo), then `⚠N` while spyc's own stderr has lines you
-  haven't seen: `:stderr` shows them ([Shell and the command line](docs/features/shell.md))
+- Pepper emoji (logo), glowing while spyc is cooking (a copy, a diff, a
+  search: work you may be waiting on, once it has run a quarter second),
+  then `⚠N` while spyc's own stderr has lines you haven't seen: `:stderr`
+  shows them ([Shell and the command line](docs/features/shell.md))
 - `PROJECT_HOME` basename (hidden when unset)
 - Session name in all caps (hidden when empty)
 - While several projects are open, a chip for each in place of those two,

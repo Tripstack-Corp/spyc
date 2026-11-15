@@ -100,6 +100,10 @@ pub enum Deadline {
     /// #1098: wake `HELD_DRAG_LIMIT` after a live pane drag's last mouse event
     /// to drop it. Armed only while one is live. PRE-recv (`settle_held_drag`).
     HeldDrag,
+    /// The status bar's simmering pepper: wake when cooking outlasts its
+    /// grace, then each frame. Armed only while a worker cooks, so idle stays
+    /// 0 dps. PRE-recv (`settle_cooking`).
+    Cooking,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

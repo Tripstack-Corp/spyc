@@ -140,7 +140,9 @@ impl App {
             .runtime
             .worktree_rows_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::WorktreeRows);
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
+            let _cooking = cooking;
             let tz = jiff::tz::TimeZone::system();
             let rows = read_rows(&dir, SystemTime::now(), &tz);
             let _ = results.send(WorktreeRows {

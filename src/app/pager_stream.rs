@@ -167,8 +167,10 @@ impl App {
         let wake = self.make_pager_stream_wake();
         let final_wake = std::sync::Arc::clone(&wake);
         let tx = crate::fs::WakingSender::new(tx, wake);
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
             produce(tx);
+            drop(cooking);
             final_wake();
         });
         let is_lower_pane = matches!(mount, PagerStreamMount::LowerPane { .. });
