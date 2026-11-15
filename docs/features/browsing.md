@@ -92,7 +92,9 @@ second, complete file list, each column labelled `a` and `b`.
   old half-height open. The `^a |` / `^a f` aliases reach the split from the
   **pane**, which passes every key but the `^a` family to its program. `^a a` / `^a h` focus the left pane
   (a), `^a b` / `^a l` the right (b); `^a + / ^a -` resize the split width when
-  a column is focused. Opinionated: exactly two file panes, labelled a/b
+  a column is focused. The divider shows where your keys go: it is bright
+  beside the focused column (in a full-height split, beside the pane too when
+  the pane has focus) and muted elsewhere. Opinionated: exactly two file panes, labelled a/b
   (numbers stay for PTY tabs). The preview **live-reloads**: edit the file
   (in spyc's editor, an agent pane, or any external editor) and the rendered
   markdown updates on save without losing your scroll position, and re-wraps
