@@ -1,12 +1,14 @@
 # The jar in production: a plan
 
 **Status:** approved on 2026-11-12, after an external review revised it
-("The review's findings, slice by slice", below); the owner's four decisions
-are at the end.
+("The review's findings, slice by slice", below); revised on 2026-11-15 for
+the upgrade step ("The upgrade step", below). The owner's decisions are at
+the end.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099), on
 the `3.0` milestone.
 **Builds:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md), whose version 1 froze on
-2026-11-12 and froze again the same day with the review's changes, from what
+2026-11-12, froze again the same day with the review's changes, and reopened
+on 2026-11-15 for the upgrade step (its decision L), from what
 [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md) proved.
 
 The spike built every v1 verdict on `spike/jar-stage-2`, a branch that never
@@ -92,7 +94,10 @@ the slices land runs as today.
     `/tmp/spyc-<uid>`, and both sides check the directory is this user's,
     `0700` and not a link (14);
   - spyc's sender holds no lock across a socket write, and pings run on their
-    own timer (4, spyc's side).
+    own timer (4, spyc's side);
+  - every jar starts from the store ("The jar binary store", below), never
+    from the `spyc-jar` beside spyc, and a pane's jar starts with
+    `--start-on-owner` (`JAR_PROTOCOL.md`, decision M).
 - **S2b: losing and retaking the lease.** A spyc stopped past the deadline
   takes its jar back on resuming, or marks the tab `[detached]` when another
   spyc owns it (decision G). A killed jar marks its tab `[jar lost]`. On Linux
@@ -136,8 +141,10 @@ design's one step with no rollback, so it runs only when it buys something.
   release since the first that shipped one, and runs it against the current
   spyc.
 - **A jar outlives the binary it came from.** An uninstall or an upgrade
-  replaces the file; a running jar keeps its own copy until its program ends,
-  or until the next spyc upgrades it.
+  replaces the file, and on macOS a running jar can then name nothing that
+  holds its own image (measured: "The upgrade step", below). It runs from its
+  store entry, which no install touches, until its program ends or the next
+  spyc upgrades it.
 
 **The owner tests:** start agents on build A, install build B, start spyc: the
 agents run on, and `spyc --jars` shows B.
@@ -214,6 +221,108 @@ the way back (decision 1).
 
 ---
 
+## The upgrade step
+
+A review of vtmux's live upgrade led to probes of `main`'s jar (`be018db6`)
+on macOS, which found two ways an upgrade ends the program it exists to keep
+(`JAR_PROTOCOL.md`, decision L). The fixes are sorted by where their code
+runs ("Upgrading: where each check runs" there): seven parts run in the old
+image and ship in the first release that ships a jar; the new image's parts
+ship with the first release an upgrade targets; spyc's ship whenever.
+[`JAR_UPGRADE_BRIEF.md`](JAR_UPGRADE_BRIEF.md) is the brief for building
+them.
+
+### What was measured
+
+On scratch sockets and directories, never a user's jars, with the release
+`spyc-jar` built from `be018db6`:
+
+- **macOS: a jar can't name its own image once it's replaced.** A jar started
+  from a path, then the file replaced by `install` (a new inode): the jar
+  ran on, and its `current_exe()` (as `describe`'s `jar` shows it), the
+  kernel's `proc_pidpath` and `lsof`'s name all gave the path, which now held
+  the new file. The jar's image was an inode with no name. Replaced in place
+  by `cp` instead (the same inode, new contents): the jar ran on, and its
+  image's file held the new contents. Either way a first upgrade has nothing
+  to switch back to.
+- **Linux: it can.** In a container on Linux 6.19 (Fedora 43, arm64, under
+  podman on macOS), the same jar built for musl, its
+  file replaced by `install`: `/proc/PID/exe` read `… (deleted)`, and copying
+  it gave the original image byte for byte. A `cp` onto the running file was
+  refused with `ETXTBSY`.
+- **A new copy's first `exec`.** Three byte-identical copies of `spyc-jar` in
+  fresh directories, each run three times: on macOS about 263 ms the first
+  time (every new copy pays it) and about 6 ms after; on Linux about 1.6 ms,
+  then 0.6 ms.
+- **Where things live** (the socket directory as S2a's `src/pane/jar/place.rs`
+  sets it, not yet on `main`; the state directory as `state::state_root`
+  sets it):
+
+  | | Sockets | State |
+  |---|---|---|
+  | macOS | `$TMPDIR/spyc/jars`, as `XDG_RUNTIME_DIR` is unset: `/var/folders/…/T/`, which the system cleans | `~/.local/state/spyc` (or `$XDG_STATE_HOME/spyc`) |
+  | Linux | `$XDG_RUNTIME_DIR/spyc/jars`, `/run/user/UID`: a tmpfs, `nosuid,nodev`, not `noexec` on the host checked | the same as macOS |
+  | either, with neither variable | `/tmp/spyc-UID/jars` | — |
+
+### The jar binary store
+
+spyc keeps the jar binaries it starts in `jar-bin/` under its state directory,
+one entry per binary, named by its SHA-256: `jar-bin/<sha256>/spyc-jar`. Not
+beside the sockets: on macOS that is `$TMPDIR`, which the system cleans.
+
+- **spyc copies at its own start,** on a worker off the loop, before its first
+  jar starts (which waits for it). It reads the `spyc-jar` beside its own
+  binary once, hashing as it writes into a temporary file in `jar-bin/`, then
+  `fsync`s it, makes it `0555`, and renames it into its entry. An entry that
+  exists already is hashed again before it's used, never rewritten.
+- **The copy is checked against spyc's own build** by running it once, as
+  `spyc-jar build-info`, which prints the `SPYC_GIT_SHA` and `SPYC_BUILD_TIME`
+  that `build.rs` gives both binaries of one build (they are one package). A
+  copy that answers otherwise isn't used: a package upgrade landed while spyc
+  started, and spyc runs this session without jars and says so, as it does for
+  a jar that exits with 75. The run also pays the copy's first-run cost
+  (about 263 ms on macOS) off the loop. Limit: a rebuild without a new commit
+  doesn't run `build.rs` again, so two development builds can share an
+  identity.
+- **An entry is removed** by a sweep at spyc's start, after the copy, when it
+  isn't this spyc's, no jar in the socket directory names it as its `build`,
+  and it is more than seven days old. A sweep that can't reach every socket
+  there (a jar mid-upgrade answers no lookup) removes nothing that time.
+- **A state directory that can't execute** (a `noexec` mount): spyc finds out
+  when it runs the copy, uses no store for that session, starts jars from the
+  `spyc-jar` beside it as before, and says so in `spyc --jars`. A jar started
+  outside a store keeps its upgrade copies in a `0700` directory beside its
+  socket. None of the macOS or Linux hosts checked mount either directory
+  `noexec`.
+- **A jar finds its store from its own path,** the directory two levels above
+  the entry it runs from, so neither the start's flags nor the blob carry it.
+  An upgrade copies the named binary into that store (decision L's part 1),
+  and the new image's `PREVIOUS` is the entry the old one ran from.
+- **The hash is the `build` key** `describe` gives, computed by the jar from
+  the file it started from.
+
+What it closes, of the four it is meant to:
+
+| | Closed? |
+|---|---|
+| A file swapped between validation and the `exec` | Yes, for every jar: the jar copies once and never looks the path up again. |
+| No image to switch back to after a failed resume | Yes, for a jar started from the store: `PREVIOUS` is an entry no install touches. Not for a jar started outside one (a `noexec` state directory) on macOS, and not if the state directory is deleted. Linux has `/proc/self/exe` too. |
+| A running spyc starting a newer jar from disk | Yes, while the store is in use: spyc starts jars from the entry it checked at its start. Not when the store is off, and not between two development builds that share an identity. A store entry also keeps a program started late by `--start-on-owner` on the same image, since the jar starts it through its own binary (`spyc-jar pty-child`, `crates/spyc-jar/src/pty.rs:46`). |
+| A binary overwritten in place under a running jar | Only in that nothing spyc or a jar does writes an entry twice, and entries are `0555`. Another process of the same user can still change one (outside the threat model), and a jar outside the store has no such protection. |
+
+The jar needs a SHA-256 for its own copies and its `build`; `sha2` is already
+in spyc's lockfile, but would be a new dependency of `spyc-jar` (decision E),
+and that is open.
+
+### Refreezing
+
+Version 1 freezes again when all three hold:
+
+1. the store's design has merged;
+2. `fake` and `swap` (decision L) pass: the program survives each, and the
+   requester hears a refusal within the validator's deadline;
+3. the jar built to differ (S3) passes upgrades in both directions.
+
 ## The review's findings, slice by slice
 
 The external review of 2026-11-12 (`PANE_JAR_SPIKE.md` → "The review") found
@@ -281,3 +390,6 @@ and is its own issue.
 4. **The spike branch is pushed** (decided) to `origin` as a reference branch,
    after a check that nothing of the owner's is in its harness, so a lost disk
    doesn't take the reference with it. It is deleted once S5 merges.
+5. **The upgrade step reopens version 1** (decided 2026-11-15), sorted by
+   where each part's code runs, with the store, and not refrozen until
+   "Refreezing" holds (`JAR_PROTOCOL.md`, decisions L and M).
