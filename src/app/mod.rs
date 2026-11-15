@@ -205,6 +205,7 @@ mod watch;
 mod wiring;
 mod worktree_clean;
 mod worktree_ops;
+mod worktree_picker;
 
 /// The event loop's own scratch type. Defined in [`run`] with the loop it
 /// serves; re-exported because the `pub(crate)` loop-step methods across this

@@ -263,6 +263,11 @@ pub(super) struct Runtime {
     pub(super) closed_rows_results: Landing<super::recently_closed::ClosedRows>,
     /// The switcher opened last; rows read for any other are stale.
     pub(super) closed_rows_seq: u64,
+    /// Where `W l`'s dated worktrees land (`worktree_list`). Drained by
+    /// `apply_worktree_rows`, which keeps only `worktree_rows_seq`'s.
+    pub(super) worktree_rows_results: Landing<super::worktree_picker::WorktreeRows>,
+    /// The `W l` pressed last; rows read for any other are stale.
+    pub(super) worktree_rows_seq: u64,
     /// Where a make menu's Makefile read lands (`Effect::ReadMakefile`),
     /// drained by `apply_makefile_reads`, which keeps only `make_request`'s.
     pub(super) make_results: Landing<super::make_menu::MakefileLanded>,
@@ -379,6 +384,8 @@ impl Runtime {
             make_results: Landing::default(),
             make_request: 0,
             closed_rows_seq: 0,
+            worktree_rows_results: Landing::default(),
+            worktree_rows_seq: 0,
             clipboard_copy_results: Landing::default(),
             listing_refresh_inflight: false,
             listing_refresh_dirty: false,

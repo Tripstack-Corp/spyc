@@ -200,6 +200,10 @@ pub enum Wake {
     /// on `runtime.closed_rows_results`. Payloadless, same shape as
     /// `JumpDefault`; `apply_closed_rows` drains it in the pre-recv scan.
     ClosedRows,
+    /// `W l`'s worktrees were read and dated (`worktree_list`) and landed on
+    /// `runtime.worktree_rows_results`. Payloadless, same shape as
+    /// `ClosedRows`; `apply_worktree_rows` drains it in the pre-recv scan.
+    WorktreeRows,
     /// A make menu's Makefile was read (`Effect::ReadMakefile`) and landed on
     /// `runtime.make_results`. Payloadless, same shape as `ClosedRows`;
     /// `apply_makefile_reads` drains it in the pre-recv scan.
