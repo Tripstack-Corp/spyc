@@ -525,6 +525,7 @@ mod esc_guard;
 mod focused_column;
 mod history_editor;
 mod jump_default;
+mod kitty_keys;
 mod list_double_click;
 mod manifest_v2;
 mod mcp;

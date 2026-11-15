@@ -240,6 +240,15 @@ pub trait Engine: Send {
     /// Take the replies to the child's queries that `process` produced, for the
     /// caller to write to the child once it no longer holds the engine.
     fn take_replies(&mut self) -> Vec<u8>;
+    /// The kitty keyboard flags the program pushed on the current screen, `0`
+    /// while it has asked for none (#1176).
+    fn kitty_keyboard_flags(&self) -> u8;
+    /// `key` encoded by the kitty keyboard protocol, with the flags and modes
+    /// in force; `None` for a key the engine has no name for.
+    fn encode_kitty_key(&self, key: crossterm::event::KeyEvent) -> Option<Vec<u8>>;
+    /// Pop every kitty keyboard flag on the current screen, for a program
+    /// that ended without popping its own.
+    fn end_kitty_keyboard(&mut self);
     /// Take what the program said about itself while `process` ran, oldest
     /// first.
     fn take_program_events(&mut self) -> Vec<ProgramEvent>;

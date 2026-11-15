@@ -960,11 +960,10 @@ through an allowlist:
 | DA1 `?62;22c`, DA2 `>1;10;0c` | Ghostty's own answers less clipboard access (52) |
 | XTVERSION `spyc <version>` | not `ghostty` or `kitty`, the names children key image support on |
 | DECRQSS | engine state |
+| kitty keyboard flags `CSI ? flags u` | spyc encodes keys by them for the program that pushed them (below) |
 | program status support (`OSC 7501 ; ?`) | spyc keeps the reports it names (below) |
 
-Left unanswered: the kitty keyboard flags (spyc's key encoder is legacy-only,
-so claiming the protocol would switch a child to an encoding spyc never sends),
-XTGETTCAP (answered from Ghostty's terminfo, which advertises OSC 52 clipboard
+Left unanswered: XTGETTCAP (answered from Ghostty's terminfo, which advertises OSC 52 clipboard
 spyc lacks), colour reports (Ghostty's palette, not the host's), size reports
 (the engine's cell pixel size is a placeholder), the title report (an injection
 path), and DA3, which Ghostty doesn't answer either. Kitty graphics and the
@@ -1006,6 +1005,32 @@ takes the nested ones with it, a prompt start ends `working`, `blocked` and
 `idle`, and `done` and `error` stay until the user's settling keystroke. The most
 urgent record ranks below a live `report_status` and above the screen scrape
 (`App::effective_activity`); a tab running no agent spyc knows shows it alone.
+
+## Keys for a program that asks for the kitty keyboard protocol
+
+<!-- SPYC-TRAP: kitty-keys-follow-the-owner -->
+A program that pushes kitty keyboard flags (`CSI > flags u`) gets its keys
+encoded by them ([#1176](https://github.com/Tripstack-Corp/spyc/issues/1176)):
+`Pane::send_key` hands the key to libghostty-vt's own encoder
+(`pane::engine_ghostty::keys`), which reads the flags and every key mode from
+the terminal. Everyone else gets `pane::input::encode_key`, the legacy encoder,
+unchanged. spyc hears keys as crossterm events, a character plus modifiers, so
+the mapping names the physical key only where the character does on a US
+layout, and leaves a shifted symbol as its own codepoint rather than guess its
+base key on a layout spyc can't see.
+
+Flags outlive a program that crashes or is stopped without popping them, and
+a shell handed kitty-encoded keys can't read its own Enter: the classic stuck
+protocol. So the flags belong to the process group in the foreground when
+they appear (noted at the drain after the push), and only that group gets
+kitty keys. While another group has the terminal (a `^z`'d editor, its shell
+back in front) keys go the legacy way and the flags stay for the owner's
+return; once no process is left in the owner's group, the flags are popped.
+`pane::kitty_route` is that decision, pure and tested.
+
+Keys arrive as presses (and repeats where the host reports them): spyc asks the
+host terminal for disambiguation only, and drops key releases, so a program
+asking for event types (flag 2) gets no releases yet.
 
 ## Git: 100% in-process gix
 
