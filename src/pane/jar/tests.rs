@@ -555,7 +555,9 @@ fn a_tab_whose_jar_still_runs_never_starts_its_program_twice() {
     first.write_all(b"still\n").unwrap();
     read_until(&first, "still");
 
-    first.shutdown(Duration::from_millis(250));
+    // As a tab's restart does (`Pane::try_kill`): the kill, then at once the
+    // new start, while the last jar is still ending.
+    first.child.kill().unwrap();
     let restarted = spawn_in(&place, "exec cat", dir.path()).unwrap();
     assert!(restarted.jarred(), "a restart gets a jar");
 }
