@@ -532,13 +532,24 @@ pub fn key_event_types_on() -> bool {
 
 /// The escape that sets the flags on the entry spyc pushed: disambiguation,
 /// and with `on` key repeats and releases too.
-fn key_event_types_seq(_on: bool) -> String {
-    String::new()
+fn key_event_types_seq(on: bool) -> String {
+    let mut flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
+    if on {
+        flags |= KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
+    }
+    // `CSI = flags ; 1 u` sets the top entry's flags rather than pushing one.
+    format!("\x1b[={};1u", flags.bits())
 }
 
 /// Turn key repeat and release reports on or off. Called only from the
 /// `Effect::SetKeyEventTypes` executor.
-pub fn set_key_event_types(_terminal: &mut Tui, _on: bool) -> Result<()> {
+pub fn set_key_event_types(terminal: &mut Tui, on: bool) -> Result<()> {
+    use std::io::Write as _;
+    terminal
+        .backend_mut()
+        .write_all(key_event_types_seq(on).as_bytes())?;
+    terminal.backend_mut().flush()?;
+    KEY_EVENT_TYPES_ON.store(on, Ordering::Relaxed);
     Ok(())
 }
 
@@ -563,6 +574,9 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
     // child (#686). Unconditional and best-effort, matching `restore_terminal`:
     // a terminal that never had it pushed just ignores an unknown CSI.
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    // The pop took key repeats and releases with it; the reconcile asks again
+    // once spyc is back.
+    KEY_EVENT_TYPES_ON.store(false, Ordering::Relaxed);
     execute!(
         terminal.backend_mut(),
         Clear(ClearType::All),

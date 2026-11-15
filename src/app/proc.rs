@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEventKind, MouseEventKind};
+use crossterm::event::{self, Event, MouseEventKind};
 
 use crate::spyc_debug;
 use crate::{Tui, resume_tui, suspend_tui};
@@ -344,22 +344,21 @@ fn paint_subshell_banner(terminal: &Tui) {
     let _ = crate::term_title::set(subshell_banner::MARKER);
 }
 
-/// Whether the input reader passes `ev` to the loop.
-fn reader_forwards(ev: &Event) -> bool {
-    match ev {
-        Event::Key(k) => k.kind == KeyEventKind::Press || k.kind == KeyEventKind::Repeat,
-        // `Drag` is forwarded: spyc asks for 1002 (button-event tracking), so a
-        // drag is a deliberate gesture and its redraw is wanted.
-        //
-        // `Moved` is dropped. 1002 reports motion only while a button is HELD,
-        // so a buttonless `Moved` means the terminal reported motion spyc never
-        // asked for, and `run.rs` marks a redraw for every `Message::Input`:
-        // idle pointer movement would become a redraw-per-motion storm. That is
-        // the 1003 hazard arriving by accident, and this is the belt to 1002's
-        // braces.
-        Event::Mouse(m) => !matches!(m.kind, MouseEventKind::Moved),
-        _ => true,
-    }
+/// Whether the input reader passes `ev` to the loop: everything but a
+/// buttonless mouse `Moved`.
+///
+/// Every key goes, a release too: the loop hands it to a program that asked for
+/// one and drops it before anything redraws. A mouse `Drag` goes: spyc asks for
+/// 1002 (button-event tracking), so a drag is a deliberate gesture and its
+/// redraw is wanted.
+///
+/// `Moved` is dropped. 1002 reports motion only while a button is HELD, so a
+/// buttonless `Moved` means the terminal reported motion spyc never asked for,
+/// and `run.rs` marks a redraw for every `Message::Input`: idle pointer movement
+/// would become a redraw-per-motion storm. That is the 1003 hazard arriving by
+/// accident, and this is the belt to 1002's braces.
+const fn reader_forwards(ev: &Event) -> bool {
+    !matches!(ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Moved))
 }
 
 #[cfg(test)]

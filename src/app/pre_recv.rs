@@ -351,6 +351,12 @@ impl App {
         if !mouse_fx.is_empty() {
             self.run_effects(mouse_fx, terminal, foreground_exec);
         }
+        // The same reconcile for key repeats and releases, which the terminal
+        // reports only while the pane in front holds a program that asked.
+        let keys_fx = self.settle_key_event_types();
+        if !keys_fx.is_empty() {
+            self.run_effects(keys_fx, terminal, foreground_exec);
+        }
 
         // Execute writable MCP commands buffered into `ctx.mcp_pending` (see
         // `drain_mcp_pending` — kept at this early loop position for the
