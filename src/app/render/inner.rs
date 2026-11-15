@@ -62,14 +62,11 @@ impl App {
             };
             if let Some(view) = underlying {
                 crate::ui::pager::render(frame, top_area, view, &self.view.theme);
-                // In a vsplit this pager lives in the left/single column
-                // (`overlay_column`); dim it when its column isn't focused, so a
-                // `D` in `a` fades on `^a l` to `b` — mirroring the list/right
-                // dim. (No split → full-frame → never dims.)
-                if self.state.active_project().vsplit.is_some()
-                    && self.view.dim_inactive
-                    && !self.column_focused(state::Side::Left)
-                {
+                // The pager lives in the left (or only) column (`overlay_column`)
+                // and fades whenever that column lacks the keys, as the list it
+                // replaces does: a `D` in `a` fades on `^a l` to `b`, and on
+                // `^a j` to the pane, split or not.
+                if self.view.dim_inactive && !self.column_focused(state::Side::Left) {
                     self.dim_region(frame, top_area);
                 }
             }
@@ -203,7 +200,12 @@ impl App {
         if let Some(view) = self.view.project().scroll_pager.as_ref() {
             // The scrollback snapshot owns this rect; the pty runs off-screen.
             // The first-frame scroll snap (pending) is settled in `prepare_panes`.
+            // It has the keys exactly when the pane does, and fades as the pane
+            // does without them.
             crate::ui::pager::render(frame, rect, view, &self.view.theme);
+            if self.view.dim_inactive && !self.state.pane_focused() {
+                self.dim_region(frame, rect);
+            }
         } else if let Some(tabs) = self.runtime.project().pane_tabs.as_ref() {
             let focused = self.state.pane_focused();
             let held = self.pane_drag_screen(Some(rect));
@@ -214,6 +216,7 @@ impl App {
                     PaneWidget {
                         screen,
                         focused,
+                        dimmed: !focused && self.view.dim_inactive,
                         selection: self.pane_selection_screen_coords(),
                     },
                     rect,
@@ -228,6 +231,7 @@ impl App {
                     PaneWidget {
                         screen,
                         focused,
+                        dimmed: !focused && self.view.dim_inactive,
                         selection: self.pane_selection_on_live_screen(screen, held),
                     },
                     rect,
@@ -585,6 +589,7 @@ impl App {
                         PaneWidget {
                             screen,
                             focused: right_focused,
+                            dimmed: !right_focused && self.view.dim_inactive,
                             selection: None,
                         },
                         rect,
@@ -624,26 +629,36 @@ impl App {
                 }
             }
         }
-        if let Some(vd) = layout.vdivider {
-            self.render_vsplit_divider(frame, vd);
+        if let (Some(vd), Some(vsplit)) = (layout.vdivider, self.state.active_project().vsplit) {
+            let pane_top = layout.divider.or(layout.pane).map(|r| r.y);
+            self.render_vsplit_divider(frame, vd, vsplit.mode, pane_top);
         }
     }
 
     /// Paint the 1-column vertical separator between the left and right columns
-    /// of a vertical split — `│` down the column, muted like the horizontal
-    /// pane divider's unfocused rule (`theme.status_suffix`). Cell-level paint
-    /// (the rect is 1 col wide) via the same `cell_mut` API the pane widget
-    /// uses. (PR4 can make it focus-aware.)
-    fn render_vsplit_divider(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
-        // Use the accent (prompt-prefix) colour, bold, so the column boundary
-        // reads as a deliberate divider and doesn't blend with muted content
-        // lines / gaps (e.g. a side-by-side diff's own separators).
-        let style = ratatui::style::Style::default()
+    /// of a vertical split: `│` down the column, in the accent colour and bold
+    /// beside the region that has the keys, and muted like the pane rule's
+    /// unfocused style (`theme.status_suffix`) elsewhere, so the divider points
+    /// at where typing goes (#1175). [`super::layout::vsplit_divider_lit_rows`]
+    /// decides which rows that is.
+    fn render_vsplit_divider(
+        &self,
+        frame: &mut Frame,
+        rect: ratatui::layout::Rect,
+        mode: state::VsplitMode,
+        pane_top: Option<u16>,
+    ) {
+        use ratatui::style::{Modifier, Style};
+        let focus = (!self.state.pane_focused()).then(|| self.focused_side());
+        let lit_rows = super::layout::vsplit_divider_lit_rows(mode, rect, pane_top, focus);
+        let lit = Style::default()
             .fg(self.view.theme.prompt_prefix)
-            .add_modifier(ratatui::style::Modifier::BOLD);
+            .add_modifier(Modifier::BOLD);
+        let muted = Style::default().fg(self.view.theme.status_suffix);
         let buf = frame.buffer_mut();
         for y in rect.y..rect.y.saturating_add(rect.height) {
             if let Some(cell) = buf.cell_mut((rect.x, y)) {
+                let style = if lit_rows.contains(&y) { lit } else { muted };
                 cell.set_char('│').set_style(style);
             }
         }
@@ -763,6 +778,7 @@ impl App {
                 PaneWidget {
                     screen,
                     focused: overlay_focused,
+                    dimmed: !overlay_focused && self.view.dim_inactive,
                     selection: None,
                 },
                 overlay_area,

@@ -243,6 +243,7 @@ mod htop_golden {
         PaneWidget {
             screen: e.screen(),
             focused: true,
+            dimmed: false,
             selection: None,
         }
         .render(area, &mut buf);

@@ -1,10 +1,13 @@
 # The jar: its requirements and version 1
 
-**Status:** version 1 **frozen** on 2026-11-12, on the owner's word. It
-froze once after the spike built every v1 verdict below, reopened the same day
-for three changes an external review found it needed (decision K), and froze
-again with them made and tested; [Version 1 on the wire](#version-1-on-the-wire)
-is the format, byte for byte.
+**Status:** version 1 **reopened** on 2026-11-15 for the upgrade step
+(decision L), and not frozen again until the conditions in
+[`JAR_PRODUCTION_PLAN.md`](JAR_PRODUCTION_PLAN.md) → "Refreezing" hold. It
+froze once after the spike built every v1 verdict below, reopened on
+2026-11-12 for three changes an external review found it needed (decision K),
+and froze again with them made and tested. No byte of any frame and nothing in
+the blob's layout changes in this reopening;
+[Version 1 on the wire](#version-1-on-the-wire) is the format, byte for byte.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099).
 **Tested by:** [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md), which builds a minimal
 jar, measures it, and reports which of these requirements survive.
@@ -205,6 +208,7 @@ in the output.
 | | Requirement | Verdict | Why | For |
 |---|---|---|---|---|
 | R33 | **Upgrade in place:** the jar asks the new binary to validate a versioned handover blob, and only if it accepts does the jar `exec` it, keeping its PID, child, PTY and connections. The blob, the listener, the PTY master and every connection cross as descriptors over a socketpair that becomes the new image's standard input, while the new binary, started as a **holder**, keeps copies of every socket until the new image has its own | v1, and only v1 | The escape hatch for every change this document gets wrong. A validation that fails leaves the old jar running. Stage 3 built it (`PANE_JAR_SPIKE.md` → "Stage 3: the jar upgrades itself"). The holder came before the freeze: on macOS an upgrade under load cut every connection, because the kernel flushes a unix socket whose every reference is in flight ("Before the freeze" there). The validator's and the holder's command lines are part of what freezes, since an old jar runs the new binary's. Since the review the holder also carries the blob, through a pipe, and a validator reads it from a socket, so one that refuses without reading can't raise `SIGPIPE` in the jar. It can't arrive later: a jar that doesn't know the request can never be upgraded, so the first released jar has to carry it. | all |
+| R33a | **An upgrade that can't hurt the program:** the jar runs only a file in its store, copying in anything else once, the validator proves it read the blob, and the new image is told the image it replaced | v1, and only v1 | Decision L. Whatever the old image does during an upgrade is fixed for every upgrade from it, so each of these is in the first released jar or never. | all |
 | R34 | A `hello` that lists capabilities, and messages flagged critical or ancillary ([below](#how-the-protocol-grows)) | v1 | How every later requirement arrives without a new version. Stage 3 found the first `hello` already reads the fields it knows and ignores what follows, so capabilities can follow them; that rule is part of what freezes. Since R26 the token comes first, length-prefixed, and capabilities after it. Since the review a `welcome`'s first field, `refused`'s reason and the start's `--wire` are in what freezes too ([Meeting another version](#meeting-another-version)). At the freeze the `hello`'s version became the highest its client speaks, and the `welcome`'s the one the connection speaks, so a later spyc meets an older jar without a refusal. | all |
 
 ### Never in the jar
@@ -601,7 +605,10 @@ shows, and the labels spyc wrote. The token is never among it.
 
 Frozen on 2026-11-12, reopened the same day for three changes an external
 review found it needed ("The review" in the spike's report), and frozen again
-with them made and tested. The spike's
+with them made and tested. Reopened on 2026-11-15 for the upgrade step
+(decision L): its command lines and `describe` gain what
+[Upgrading: where each check runs](#upgrading-where-each-check-runs) lists,
+and every frame's bytes and the blob's layout stay as below. The spike's
 `spyc-jar` speaks it (`spike/jar-stage-2` at `670f5b04`, a branch that never
 merges), and its `tests/wire_v1.rs` pins every frame and the blob below byte
 for byte. The production crate starts from these fixtures and that test.
@@ -655,19 +662,39 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   environment, so the program, and whatever it starts, finds the jar without
   working the path out again.
 - **The upgrade's command lines,** since a version-1 jar runs a later
-  binary's:
+  binary's. `BINARY` is a file in the jar's store: the binary `upgrade` named
+  when that is already a store entry, or the jar's own copy of it (decision
+  L), never a path the jar looks up again:
   - `BINARY validate-handover`: the blob on standard input, a socket, until
-    its end. Exiting 0 within 5 seconds accepts it.
+    its end. It accepts the blob by printing a **proof line** on standard
+    output and exiting 0, within 5 seconds: `spyc-jar-handover-ok`, a space,
+    the blob's instance as 16 lowercase hex digits (read from the head of the
+    blob), a space, and the number of bytes the decoder consumed, in decimal.
+    A blob with bytes after its end is refused, so that number is the blob's
+    length and is always defined, and only a decoder that reached the end can
+    give it with the instance. Later validators may append
+    fields, each after a space; a version-1 jar matches the prefix and the
+    first two fields and ignores the rest. Exiting 0 without the line, or with
+    values that aren't the blob's, is a refusal (reason 6).
+    **What the proof covers:** it refuses a binary that isn't a jar, and one
+    that stops parsing partway. It doesn't refuse a jar that validates and
+    then can't resume, nor stop a file replaced between validation and the
+    `exec`; running only a file in the store prevents the second, and the new
+    image's recovery contains the first
+    ([below](#upgrading-where-each-check-runs)).
   - `BINARY hold-handover`: on standard input, one byte, `h`, carrying as
     `SCM_RIGHTS` the write end of a pipe, the listener and every connection;
     then the blob's length (u64) and the blob. It answers `k` once it has
     both, writes the length and the blob into the pipe, and holds the sockets
     until `SIGTERM`, or for 30 seconds.
-  - `BINARY resume-handover`, by `exec`: on standard input, one message of 12
-    bytes, `SPYCJARF` and the holder's pid (u32), carrying the pipe's read
-    end, the listener, the PTY master, and every connection in the blob's
-    order. It reads the blob from the pipe, then sends the holder `SIGTERM`
-    and reaps it.
+  - `BINARY resume-handover PREVIOUS`, by `exec`: `PREVIOUS` is the absolute
+    path of the image that `exec`ed it, a store entry (decision L), which the
+    new image may `exec` back to if it can't resume. On standard input, one
+    message of 12 bytes, `SPYCJARF` and the holder's pid (u32), carrying the
+    pipe's read end, the listener, the PTY master, and every connection in the
+    blob's order. It reads the blob from the pipe, then sends the holder
+    `SIGTERM` and reaps it. A version-1 jar always passes `PREVIOUS`; an image
+    that can't switch back ignores it.
 - **The handover blob, version 1,** which every later binary accepts. A blob
   with bytes after its end is refused, so the blob changes only by its
   version, and a binary takes every version a released jar writes. In order:
@@ -702,7 +729,9 @@ Each direction has one rule:
   welcome answers 1, and the connection speaks version 1. When it needs what
   version 1 lacks, it asks the jar to upgrade.
 - **A spyc, a `spyc-jar` beside it of another release** (a package upgraded
-  while spyc runs). The start names `--wire N`; a jar that doesn't speak it
+  while spyc runs). spyc starts every jar from its own store copy, made and
+  checked when spyc starts (decision L), so this arises only where the store
+  can't be used. The start names `--wire N`; a jar that doesn't speak it
   exits with 75 before anything starts, and spyc runs the program without a
   jar rather than fail the tab. A jar speaks every version from 1 to its own
   unless a release says it stopped.
@@ -713,6 +742,67 @@ Each direction has one rule:
   the jar runs on.
 - **Across an upgrade,** every connection keeps the version it was welcomed
   at: the new image speaks each the version it was welcomed with.
+
+### Upgrading: where each check runs
+
+A released jar can't be fixed, so whatever its image does **during** an
+upgrade is fixed for every upgrade from it, whether or not it is on the wire.
+Each part of the upgrade is placed by where its code runs (decision L):
+
+| Where it runs | Ships | Parts |
+|---|---|---|
+| **The old image,** the jar being upgraded | In the first release that ships a jar; it can't be added later | 1–8 below |
+| **The new image,** the binary named in `upgrade` | With whichever release is first an upgrade's target; doesn't gate the first release | preventing, containing, then recovering |
+| **spyc** | Whenever | the store's contents and when spyc asks for an upgrade |
+
+**The old image,** in the first release:
+
+1. **One file, in the store.** A binary `upgrade` names that is already an
+   entry of the jar's own store is used as it is. Anything else is copied in
+   once (into the store, or beside the socket for a jar with none; part 8),
+   under a unique private name, and written whole: to a temporary name there,
+   synced, made `0555`, then renamed into place. The jar
+   then validates, holds and `exec`s that one file and never looks the
+   named path up again. A relative path is refused (reason 8). The jar
+   hashes nothing: spyc names the entries it writes, and S3 always names
+   one, so a jar copies only when someone names a path by hand.
+2. **A proof line.** The validator must print it; exiting 0 without it is a
+   refusal ([the command lines](#what-freezes-for-good)).
+3. **The previous image.** `resume-handover` is given the path of the image
+   that `exec`ed it: the file it ran from, a store entry for any jar spyc
+   started from the store.
+4. **One deadline for the validator.** Its standard error is read under the
+   same deadline as its exit, and a validator that runs out of time is killed
+   with its whole process group, not only the direct child.
+5. **One deadline for the flush.** A connection's last frames before the
+   handover get one deadline for the whole flush, not one for each write.
+6. **A `build`.** `describe` names the store entry a jar runs from: its
+   directory's name, which for an entry spyc wrote is the SHA-256 spyc
+   computed, so two builds at one commit differ. `commit` beside it gives
+   the git commit, for people to read.
+7. **Validating twice.** First while nothing is parked, on a blob taken then:
+   that pays a new binary's first-run cost (about 260 ms on macOS for a new
+   file) and refuses a binary that isn't a jar, with the program still being
+   served. Then again on the real blob, while parked. Validating only a blob
+   taken before parking isn't enough: snapshots, acknowledgements and the
+   token change between the two, not only the log, so "the same binary
+   validated the same bytes" would stop being true.
+8. **The store's layout.** A jar's store is the directory two levels above
+   the file it runs from (`<store>/<entry>/spyc-jar`), and only when that
+   directory holds the marker file `.spyc-jar-store` and is the user's,
+   `0700` and not a link. A jar that isn't running from a store (tests,
+   `cargo run`, a state directory that can't execute) has none: it keeps its
+   copies, written the same way, in a `0700` directory beside its socket.
+
+**The new image,** in this order: **prevent** (the store and the proof line,
+above), **contain** (`catch_unwind` around decoding and starting, a held mode
+that keeps the PTY and its connections when the jar can't resume, and ending
+the holder at once rather than after its 30 seconds), then **recover** (the
+switch back to `PREVIOUS`). Only the switch back's argument ships now (part
+3). Nothing here salvages a jar part by part, as vtmux's resume does.
+
+The store, the jar's copy and what each of them closes are in
+`JAR_PRODUCTION_PLAN.md` → "The jar binary store".
 
 ### The rest of version 1
 
@@ -773,7 +863,12 @@ only for a change no capability can express.
 | 77 | `detached` | none; to the program |
 
 A version-1 jar describes itself with `id`, `instance`, `created`, `jar`,
-`pid`, `program`, `program_pid`, `cwd`, `size`, `overflow`, `linger`, `owner`,
+`build` (the name of the store entry it runs from, which for an entry spyc
+wrote is its SHA-256 in lowercase hex; decision L), `commit` (the git commit
+it was built from, when its binary knows it), `pid`, `program`, `program_pid`
+(`0` while a jar started with `--start-on-owner` waits for its first owner;
+decision M),
+`cwd`, `size`, `overflow`, `linger`, `owner`,
 `owner_pid` (the owner's process, when there is one), `log`, `snapshots`, and
 `exit` once its program has ended, then every pair its owner set (spyc's `is`,
 `label`, `agent`, `project`, `project_home` and `owner_mcp`).
@@ -900,8 +995,10 @@ Open unless marked decided:
   numbers instead would need `unsafe`. That is also why an upgrade's sockets
   are kept alive across the `exec` by a holder process (R33) rather than by
   inheriting them: inherited copies would then have to be closed by number.
-  **Decided: no `unsafe` in the jar.** It depends on `anyhow`, `rustix` and
-  `aes-gcm` (R19's seal), and on macOS `nix`, for `getpeereid` (R26).
+  **Decided: no `unsafe` in the jar.** It depends on `anyhow` and `rustix`,
+  and on macOS `nix`, for `getpeereid` (R26); `aes-gcm` went with R19's seal
+  when the holder took the blob (decision K). Decision L's store adds
+  none: spyc hashes and names the entries, and the jar never hashes.
 
 - **F. WebSocket for the browser, next to SSH.** The decision log says remote
   support rides SSH rather than a custom protocol. A WebSocket transport for
@@ -946,6 +1043,55 @@ Open unless marked decided:
   Its other findings belong to production (`JAR_PRODUCTION_PLAN.md`
   is revised for them). Version 1 froze again with the changes, on the
   owner's word, the same day.
+- **L. Decided: version 1 reopens for the upgrade step** (2026-11-15). A
+  review of vtmux's live upgrade, which `exec`s a new image under running
+  panes as R33 does, led to probes of the production jar on macOS. Two
+  measured cases end the program the upgrade exists to keep: `fake`, a
+  binary that validates and holds but can't resume, and `swap`, a file
+  replaced at the named path while the holder starts. Each time the jar was
+  lost, its program got `SIGHUP`, and the reader saw nothing for 30 seconds,
+  then end-of-file. A third probe found the validator's exit status proves
+  nothing: `/usr/bin/true` passes it, and is stopped only because it never
+  answers the holder's handshake. And on macOS a jar can't name its own image
+  once an install replaces it: `current_exe()` and the kernel's
+  `proc_pidpath` both give the path, and the path holds the new file, so a
+  first upgrade has nothing to switch back to. The decision has three parts:
+  - **Sort by where the code runs, not by wire or not wire** (the table in
+    [Upgrading: where each check runs](#upgrading-where-each-check-runs)).
+    Eight parts run in the old image and so ship in the first release,
+    the store's layout and how the jar writes a copy among them.
+  - **spyc keeps a store of jar binaries** by content hash, under its state
+    directory, and starts every jar from it (`JAR_PRODUCTION_PLAN.md` →
+    "The jar binary store"). A jar's store is the directory two levels above
+    the entry it runs from, when a marker file there says so, so neither the
+    start's flags nor the blob need to carry it. The jar never hashes: spyc
+    names the entries, and a jar given any other path copies it in under a
+    unique private name.
+  - **Not refrozen in the same change.** Version 1 freezes again once the
+    store's design has merged, `fake` and `swap` pass, and the jar built to
+    differ passes in both directions (`JAR_PRODUCTION_PLAN.md` →
+    "Refreezing").
+
+  No frame's bytes change and the blob keeps its layout: the parts change the
+  upgrade's command lines, `describe`'s pairs, and what the old image does.
+- **M. Decided: a pane's jar starts its program when its first owner
+  connects.** Answering a program's start-up probes from the first replay
+  was weighed and rejected: if spyc dies between starting a jar and
+  attaching, the next spyc's first replay is stale, and a reply to a probe
+  that has already timed out reaches the program as typed input. Claude Code
+  and agy probe once, with about two seconds to answer (read from their
+  binaries, not measured in a pane), so a probe asked before any owner was
+  there loses them for good. So a start flag, `--start-on-owner MS`, holds
+  the program until the first owner's `hello` is accepted, and a jar whose
+  first owner doesn't arrive within `MS` milliseconds exits without having
+  started anything. The wait is its own setting, not the owner's liveness
+  deadline, so a short deadline doesn't shorten it. The program starts
+  before that owner's `welcome` is sent, so the `welcome` always carries a
+  real pid; until then `describe` gives `program_pid` as `0`. It is a flag,
+  not the default: spyc's outer jar has to start its program with nobody
+  attached. The start's flags after `--wire` aren't frozen, and an upgrade
+  isn't accepted before the program has started (reason 5), so the blob
+  always has a program to describe.
 
 Smaller ones: the keyboard's idle gap (about a second is proposed); `spill`
 stays opt-in; R29, status for readers.

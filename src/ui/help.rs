@@ -362,7 +362,7 @@ const SECTIONS: &[Section] = &[
             ),
             ("^a a  ^a h", "focus the left file pane (a)"),
             ("^a b  ^a l", "focus the right file pane (b)"),
-            ("^a d", "toggle dimming of the inactive pane / list"),
+            ("^a d", "toggle the fade on what lacks the keys"),
             ("^s n", "open a second file-commander (at PROJECT_HOME)"),
             ("^s x", "close the second file-commander"),
             (

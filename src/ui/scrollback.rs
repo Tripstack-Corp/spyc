@@ -566,6 +566,7 @@ mod live_and_scrollback_agree {
         PaneWidget {
             screen: e.screen(),
             focused: true,
+            dimmed: false,
             selection: None,
         }
         .render(area, &mut live);

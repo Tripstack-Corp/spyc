@@ -148,7 +148,7 @@ file view.
 | `^s f` / `^a f` | Vertical split — flip the height: full-height ⇄ top-only (opens per `[layout] vsplit_mode`) |
 | `^a a` / `^a h` | Focus the left file pane (a) |
 | `^a b` / `^a l` | Focus the right file pane (b) |
-| `^a d` | Toggle dimming of the inactive split column / list |
+| `^a d` | Toggle the fade on whatever lacks the keys: the other column, the list, the pane, the scrollback or a `D` pager |
 | `^s n` | Open a second file-commander (column b, at PROJECT_HOME; top-only, `^s f` for full-height) |
 | `^s x` | Close the second file-commander (`^d` quits, keeping `b` open for `-r`) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |

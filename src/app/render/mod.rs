@@ -30,6 +30,8 @@ mod activity_hud;
 mod agent_hud;
 mod chrome;
 #[cfg(test)]
+mod dim_tests;
+#[cfg(test)]
 mod divider_tests;
 #[cfg(test)]
 mod grid_settle_tests;
@@ -750,6 +752,79 @@ mod render_tests {
     // only, and the inactive-column dim is a *style* (colour), so a focus-left vs
     // focus-right frame is byte-identical. The dim direction isn't snapshot-
     // covered; `decide_focus` / vsplit focus unit tests guard the focus state.
+
+    /// Which rows of the split's divider are drawn bold (lit) in one frame.
+    fn lit_divider_rows(app: &mut App, w: u16, h: u16) -> Vec<u16> {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| app.render(f)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let vd = app
+            .frame_layout(ratatui::layout::Rect::new(0, 0, w, h))
+            .vdivider
+            .expect("a split is open");
+        (vd.y..vd.y + vd.height)
+            .filter(|&y| {
+                let cell = buf.cell((vd.x, y)).unwrap();
+                assert_eq!(cell.symbol(), "│", "row {y} is the divider");
+                cell.modifier.contains(ratatui::style::Modifier::BOLD)
+            })
+            .collect()
+    }
+
+    /// The split's divider is lit beside where the keys go (#1175). In a
+    /// full-height split the pane sits under the left column, so the divider is
+    /// lit above the pane's rule while the left column has the keys, from the
+    /// rule down while the pane has them, and all the way while the right
+    /// column has them. Below a top-only split the pane touches no row of it.
+    #[test]
+    fn the_vsplit_divider_is_lit_beside_the_focused_region() {
+        use crate::pane::Pane;
+        use crate::pane::tabs::{PaneTabs, TabEntry, TabInfo};
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = preview_app(state::VsplitMode::FullHeight, state::Side::Left);
+            let wake = app.make_pane_wake();
+            let root = std::path::Path::new("/");
+            let pane =
+                Pane::spawn("cat", 24, 80, root, &app.view.project().context_path, wake).unwrap();
+            app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(TabEntry::new(
+                pane,
+                TabInfo::new("cat", root),
+            )));
+            let rule = app
+                .frame_layout(ratatui::layout::Rect::new(0, 0, 80, 24))
+                .divider
+                .expect("the pane is open")
+                .y;
+            assert!(rule > 0 && rule < 23, "the rule splits the divider: {rule}");
+
+            assert_eq!(
+                lit_divider_rows(&mut app, 80, 24),
+                (0..rule).collect::<Vec<_>>()
+            );
+
+            app.state.active_project_mut().focus = state::Focus::Pane;
+            assert_eq!(
+                lit_divider_rows(&mut app, 80, 24),
+                (rule..24).collect::<Vec<_>>()
+            );
+
+            app.state.active_project_mut().focus = state::Focus::FileList;
+            if let Some(v) = app.state.active_project_mut().vsplit.as_mut() {
+                v.focus = state::Side::Right;
+            }
+            assert_eq!(
+                lit_divider_rows(&mut app, 80, 24),
+                (0..24).collect::<Vec<_>>()
+            );
+
+            if let Some(v) = app.state.active_project_mut().vsplit.as_mut() {
+                v.mode = state::VsplitMode::TopOnly;
+            }
+            app.state.active_project_mut().focus = state::Focus::Pane;
+            assert_eq!(lit_divider_rows(&mut app, 80, 24), Vec::<u16>::new());
+        });
+    }
 
     /// A second file-commander (`^s n`) open in the right column, focused: both
     /// columns paint their own listing with the divider between. Deterministic
