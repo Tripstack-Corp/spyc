@@ -23,6 +23,14 @@ pub(super) fn describe(shared: &Shared) -> Vec<(String, String)> {
                 std::env::current_exe().map_or_else(|_| String::new(), |p| p.display().to_string())
             ),
         ),
+        (
+            "build",
+            crate::store::build_of(
+                &crate::upgrade::own_image(),
+                &crate::upgrade::copies_dir(shared),
+            ),
+        ),
+        ("commit", crate::cli::commit().to_string()),
         ("pid", std::process::id().to_string()),
         ("program", shared.cfg.argv.join(" ")),
         ("program_pid", shared.child_pid.to_string()),

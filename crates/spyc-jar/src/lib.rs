@@ -8,7 +8,8 @@
 //! - [`jar`]: the jar itself: the program, the event log, the owner's lease.
 //! - [`pty`]: the program's PTY, opened and spawned without `unsafe`.
 //! - [`handover`] and [`upgrade`]: the jar replacing its own binary across
-//!   `exec` (R33), and the blob that carries it.
+//!   `exec` (R33), and the blob that carries it; [`store`]: the one file an
+//!   upgrade runs.
 //! - [`client`]: the owner's end of the socket, for spyc and the tests.
 //! - [`attach`]: the attach client, a raw relay to a real terminal.
 //! - [`cli`]: the `spyc-jar` command line.
@@ -26,4 +27,5 @@ pub mod jar;
 pub mod proto;
 pub mod pty;
 pub mod state;
+pub mod store;
 pub mod upgrade;
