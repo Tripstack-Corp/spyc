@@ -37,7 +37,6 @@ exclude = [
     "/docs/**",
     "!/docs/ABOUT.md",
     "/.github",
-    "/.aislop",
     "/fuzz",
     "/tests",
     "/assets",

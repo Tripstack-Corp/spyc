@@ -270,36 +270,6 @@ fuzz: target-cap ## Coverage-guided fuzz (needs nightly + cargo-fuzz; on-demand,
 		$(if $(FUZZ_TRIPLE),--target $(FUZZ_TRIPLE),) $(or $(TARGET),dsl_parse) \
 		-- -max_total_time=$(or $(FUZZ_SECS),30)
 
-# Advisory AI-slop / code-quality scan. Deliberately NOT part of `check`: its
-# format/lint/security engines duplicate clippy+rustfmt (already in `check`),
-# and its comment/complexity rules are tuned in `.aislop/` to respect spyc's
-# deliberate choices (dense "why" docs, allowed-long MVU dispatch fns, the
-# in-progress 800-LoC decomposition). Run it to triage genuine slop, not as a
-# pass/fail gate.
-#
-# `make aislop` runs through scripts/aislop-baseline.py, which subtracts the
-# accepted findings recorded in .aislop/baseline.json (per-rule, per-file
-# counts) and reports only NET-NEW slop — aislop 0.10.2 has no native
-# baseline, and its comment engine over-fires on spyc's style, so the raw
-# scan is mostly false positives. After intentionally accepting new findings,
-# refresh the snapshot with `make aislop-baseline`. Raw output is still
-# `aislop scan .` / `aislop --json scan .` / `aislop ci .`.
-.PHONY: aislop
-aislop: ## Advisory AI-slop scan vs .aislop/baseline.json (net-new only)
-	@command -v aislop >/dev/null 2>&1 || { \
-		echo "aislop not found — install with: npm i -g aislop"; \
-		exit 1; \
-	}
-	@python3 scripts/aislop-baseline.py check
-
-.PHONY: aislop-baseline
-aislop-baseline: ## Regenerate .aislop/baseline.json from the current scan
-	@command -v aislop >/dev/null 2>&1 || { \
-		echo "aislop not found — install with: npm i -g aislop"; \
-		exit 1; \
-	}
-	@python3 scripts/aislop-baseline.py update
-
 # ---------- Release builds ---------------------------------------------------
 
 .PHONY: release

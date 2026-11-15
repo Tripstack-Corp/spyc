@@ -57,8 +57,7 @@ We use GitHub pull requests. The target branch is `main`.
    shellcheck; `brew install actionlint shellcheck`) — CI runs it in
    the lint job. Prose — docs and comments alike — is
    Canadian English (`colour`, `centre`, but `organize`/`analyze`);
-   `prose_is_canadian_english` enforces it, and identifiers are exempt. `make aislop` is an advisory AI-slop scan (net-new
-   findings vs the baseline).
+   `prose_is_canadian_english` enforces it, and identifiers are exempt.
 
 4. **Push and open a PR** on GitHub:
    ```sh
