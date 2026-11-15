@@ -48,8 +48,9 @@ list_worktrees()
 ```
 
 Per tree: branch, dirty counts, which is current, ahead/behind the base,
-**`merged`** (the safe-to-remove signal), and whether it is `locked` (claimed by
-another session). Read `merged` before proposing a teardown.
+**`merged`** (the safe-to-remove signal), whether it is `locked` (claimed by
+another session), and when it was last `updated`. Read `merged` before proposing
+a teardown; `updated` tells a stale tree from one in use.
 
 ## Removing one
 
