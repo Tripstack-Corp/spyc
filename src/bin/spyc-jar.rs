@@ -3,5 +3,5 @@
 //! carries it; the `spyc-jar` crate is all of it.
 
 fn main() -> anyhow::Result<()> {
-    spyc_jar::cli::main()
+    spyc_jar::cli::main_built(env!("SPYC_GIT_SHA"))
 }

@@ -26,15 +26,24 @@
 //! Any failure before the `exec` unparks everything and refuses the upgrade:
 //! the old jar runs on as if nothing happened.
 //!
+//! Every step runs one file (decision L, [`crate::store`]): the named binary
+//! when it's an entry of the jar's store, or the jar's own copy of it, made
+//! before anything parks. The named path is never looked up again, so a
+//! file replaced there meanwhile never runs. The validator must print its
+//! proof line, since its exit status alone proves nothing, and it has one
+//! deadline for its exit and its output, after which its whole process
+//! group is ended.
+//!
 //! Lookups and connections yet to say `hello` are neither waited for nor
 //! carried: they hold nothing, and are closed at the `exec` (review finding
 //! 5). Input the program hasn't taken can't be carried either, so an upgrade
 //! waits until there is none.
 
-use std::io::{IoSlice, Read, Write};
+use std::io::{BufRead, IoSlice, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, PoisonError};
@@ -61,6 +70,10 @@ const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
 const PARK_DEADLINE: Duration = Duration::from_secs(3);
 const VALIDATE_DEADLINE: Duration = Duration::from_secs(5);
 
+/// The proof line's first field: a validator prints it, the blob's instance
+/// and the bytes it decoded.
+pub const PROOF: &str = "spyc-jar-handover-ok";
+
 /// Start an upgrade to `binary`, asked for on `reply`, which hears why if it
 /// fails. On success nothing is sent from here: the new image announces
 /// itself with `Upgraded` on every connection it carried.
@@ -77,7 +90,10 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
     }
     let shared = Arc::clone(shared);
     std::thread::spawn(move || {
-        let (why, err) = run(&shared, &binary);
+        let (why, err) = match one_file(&shared, &binary) {
+            Ok(image) => run(&shared, &image),
+            Err(e) => e,
+        };
         shared.upgrading.store(false, Ordering::SeqCst);
         shared.park_cv.notify_all();
         shared.cv.notify_all();
@@ -91,9 +107,38 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
     });
 }
 
+/// The file this jar runs from: an entry of its store, its own copy, or for
+/// a jar started from anywhere else, that path.
+pub(crate) fn own_image() -> PathBuf {
+    std::env::current_exe().unwrap_or_default()
+}
+
+/// Where a jar with no store keeps its copies: beside its socket.
+pub(crate) fn copies_dir(shared: &Shared) -> PathBuf {
+    shared
+        .cfg
+        .socket
+        .parent()
+        .unwrap_or_else(|| Path::new("/"))
+        .join(crate::store::COPIES)
+}
+
+/// The one file an upgrade to `binary` runs (decision L, part 1).
+fn one_file(shared: &Shared, binary: &str) -> Result<PathBuf, (u16, anyhow::Error)> {
+    let named = Path::new(binary);
+    if !named.is_absolute() {
+        return Err((reason::INVALID, anyhow!("{binary} isn't an absolute path")));
+    }
+    let store = crate::store::store_of(&own_image());
+    // SPYC-TRAP(jar-upgrade-one-file): every step after this runs the file it
+    // returns; looking `named` up again would run whatever is there by then.
+    crate::store::one_file(named, store.as_deref(), &copies_dir(shared))
+        .map_err(|e| (reason::UPGRADE_REJECTED, e))
+}
+
 /// Park, validate, hand over and `exec`. Returns only on failure, with its
 /// `proto::reason`.
-fn run(shared: &Shared, binary: &str) -> (u16, anyhow::Error) {
+fn run(shared: &Shared, binary: &Path) -> (u16, anyhow::Error) {
     match try_run(shared, binary) {
         Ok(never) => match never {},
         Err(e) => e,
@@ -106,7 +151,7 @@ fn run(shared: &Shared, binary: &str) -> (u16, anyhow::Error) {
 )]
 fn try_run(
     shared: &Shared,
-    binary: &str,
+    binary: &Path,
 ) -> Result<std::convert::Infallible, (u16, anyhow::Error)> {
     let busy = |e: anyhow::Error| (reason::UPGRADE_BUSY, e);
     let failed = |e: anyhow::Error| (reason::UPGRADE_FAILED, e);
@@ -150,7 +195,7 @@ fn try_run(
         )));
     }
     let blob = handover::encode_parts(&shared.cfg, shared.child_pid, &st, &states);
-    validate(binary, &blob).map_err(|e| (reason::UPGRADE_REJECTED, e))?;
+    validate(binary, &blob, shared.cfg.instance).map_err(|e| (reason::UPGRADE_REJECTED, e))?;
 
     let (blob_read, blob_write) = pipe().map_err(failed)?;
     let (to_image, image_stdin) = UnixStream::pair().context("socketpair").map_err(failed)?;
@@ -199,8 +244,11 @@ fn try_run(
     {
         let _ = sock.shutdown(std::net::Shutdown::Both);
     }
+    // `PREVIOUS`: the image this one runs from, for a new image that can't
+    // resume to switch back to.
     let err = Command::new(binary)
         .arg("resume-handover")
+        .arg(own_image())
         .stdin(Stdio::from(OwnedFd::from(image_stdin)))
         .exec();
     // The `exec` failed, and std has already put the socketpair on standard
@@ -213,7 +261,7 @@ fn try_run(
     drop(outs);
     drop(conns);
     drop(st);
-    Err(failed(anyhow!("exec {binary}: {err}")))
+    Err(failed(anyhow!("exec {}: {err}", binary.display())))
 }
 
 /// Write what waits in `conn`'s outbox, its writer being parked. False when
@@ -242,7 +290,11 @@ fn pipe() -> anyhow::Result<(OwnedFd, OwnedFd)> {
 /// Start `binary` holding `held` (step 3): the blob pipe's write end first,
 /// then the sockets. It reads the blob after them, and answers once it has
 /// both.
-fn hold(binary: &str, held: &[BorrowedFd<'_>], blob: &[u8]) -> anyhow::Result<std::process::Child> {
+fn hold(
+    binary: &Path,
+    held: &[BorrowedFd<'_>],
+    blob: &[u8],
+) -> anyhow::Result<std::process::Child> {
     let (ours, theirs) = UnixStream::pair().context("socketpair")?;
     crate::jar::no_sigpipe(&ours);
     let mut child = Command::new(binary)
@@ -251,7 +303,7 @@ fn hold(binary: &str, held: &[BorrowedFd<'_>], blob: &[u8]) -> anyhow::Result<st
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("run {binary} hold-handover"))?;
+        .with_context(|| format!("run {} hold-handover", binary.display()))?;
     let given = (|| -> anyhow::Result<()> {
         let mut space =
             vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(held.len()))];
@@ -277,7 +329,7 @@ fn hold(binary: &str, held: &[BorrowedFd<'_>], blob: &[u8]) -> anyhow::Result<st
     if let Err(e) = given {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(e.context(format!("{binary} didn't hold the handover")));
+        return Err(e.context(format!("{} didn't hold the handover", binary.display())));
     }
     Ok(child)
 }
@@ -381,56 +433,104 @@ fn wait_parked(shared: &Shared) -> anyhow::Result<()> {
     }
 }
 
-/// Have `binary` check the blob before anything is handed to it. The blob goes
-/// over a socketpair, not a pipe: a validator that refuses without reading
-/// it leaves a write that answers `EPIPE`, never `SIGPIPE`.
-fn validate(binary: &str, blob: &[u8]) -> anyhow::Result<()> {
+/// Have `binary` check the blob before anything is handed to it: it must
+/// print the proof line for this blob within the deadline, which covers its
+/// exit and its output. One that runs out of time is ended with its whole
+/// process group. The blob goes over a socketpair, not a pipe: a validator
+/// that refuses without reading it leaves a write that answers `EPIPE`, never
+/// `SIGPIPE`.
+fn validate(binary: &Path, blob: &[u8], instance: u64) -> anyhow::Result<()> {
     let (ours, theirs) = UnixStream::pair().context("socketpair")?;
     crate::jar::no_sigpipe(&ours);
     let mut child = Command::new(binary)
         .arg("validate-handover")
+        .process_group(0)
         .stdin(Stdio::from(OwnedFd::from(theirs)))
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("run {binary} validate-handover"))?;
-    let blob = blob.to_vec();
-    let feeder = std::thread::spawn(move || {
-        let _ = (&ours).write_all(&blob);
+        .with_context(|| format!("run {} validate-handover", binary.display()))?;
+    let group = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw);
+    let end_group = || {
+        if let Some(g) = group {
+            let _ = rustix::process::kill_process_group(g, rustix::process::Signal::KILL);
+        }
+    };
+    let blob_owned = blob.to_vec();
+    std::thread::spawn(move || {
+        let _ = (&ours).write_all(&blob_owned);
         let _ = ours.shutdown(std::net::Shutdown::Write);
     });
+    // Read on threads of their own: a child of the validator may hold either
+    // stream open long after the validator has gone.
+    let (line_tx, line_rx) = std::sync::mpsc::channel();
+    if let Some(out) = child.stdout.take() {
+        std::thread::spawn(move || {
+            let mut first = String::new();
+            let _ = std::io::BufReader::new(out.take(4096)).read_line(&mut first);
+            let _ = line_tx.send(first);
+        });
+    }
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    if let Some(err) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut why = String::new();
+            let _ = err.take(4096).read_to_string(&mut why);
+            let _ = err_tx.send(why);
+        });
+    }
     let until = Instant::now() + VALIDATE_DEADLINE;
+    let left = || until.saturating_duration_since(Instant::now());
     let status = loop {
         if let Some(s) = child.try_wait()? {
             break s;
         }
-        if Instant::now() >= until {
-            let _ = child.kill();
+        if left().is_zero() {
+            end_group();
             let _ = child.wait();
-            bail!("{binary} didn't answer within {VALIDATE_DEADLINE:?}");
+            bail!(
+                "{} didn't answer within {VALIDATE_DEADLINE:?}",
+                binary.display()
+            );
         }
         std::thread::sleep(Duration::from_millis(5));
     };
-    let _ = feeder.join();
     if !status.success() {
-        let mut why = String::new();
-        if let Some(mut e) = child.stderr.take() {
-            let _ = e.read_to_string(&mut why);
-        }
-        bail!("{binary} rejected the handover: {}", why.trim());
+        let why = err_rx.recv_timeout(left()).unwrap_or_default();
+        bail!("{} rejected the handover: {}", binary.display(), why.trim());
+    }
+    let line = line_rx.recv_timeout(left()).unwrap_or_default();
+    if !proves(&line, instance, blob.len()) {
+        bail!(
+            "{} exited without proving it took the handover (it printed {:?})",
+            binary.display(),
+            line.trim()
+        );
     }
     Ok(())
 }
 
-/// `spyc-jar validate-handover`: the blob on standard input, exit 0 if this
-/// binary would take over from it.
+/// Whether `line` is the proof line for the blob of `instance` and `len`
+/// bytes. A later validator may add fields after these three.
+fn proves(line: &str, instance: u64, len: usize) -> bool {
+    let mut f = line.split_whitespace();
+    f.next() == Some(PROOF)
+        && f.next() == Some(format!("{instance:016x}").as_str())
+        && f.next() == Some(len.to_string().as_str())
+}
+
+/// `spyc-jar validate-handover`: the blob on standard input; exit 0 and print
+/// the proof line if this binary would take over from it.
 pub fn validate_stdin() -> anyhow::Result<()> {
     let mut blob = Vec::new();
     std::io::stdin()
         .take(1 << 30)
         .read_to_end(&mut blob)
         .context("read the blob")?;
-    handover::validate(&blob)?;
+    let h = handover::decode(&blob)?;
+    println!("{PROOF} {:016x} {}", h.cfg.instance, blob.len());
     Ok(())
 }
 

@@ -620,7 +620,7 @@ fn an_upgrade_keeps_the_program_its_pty_and_every_connection() {
         _ => None,
     });
     assert!(
-        build.is_some_and(|b| b.ends_with("jar-next")),
+        build.is_some_and(|b| b.starts_with("jar-next")),
         "the new binary runs"
     );
     assert!(
@@ -895,6 +895,10 @@ fn a_jar_describes_itself_and_keeps_its_identity_across_an_upgrade() {
     assert_eq!(field(&before, "overflow"), "drop");
     assert_eq!(field(&before, "owner"), "connected");
     assert_eq!(field(&before, "pid"), jar.process.id().to_string());
+    assert!(
+        !field(&before, "commit").is_empty(),
+        "the binary knows its commit"
+    );
 
     let next = next_binary(jar.dir.path());
     let (mut asker, _) = Client::connect(&jar.socket, Role::Reader, WAIT, TOKEN).expect("connect");
@@ -914,7 +918,7 @@ fn a_jar_describes_itself_and_keeps_its_identity_across_an_upgrade() {
             "{key} survives the upgrade"
         );
     }
-    assert!(field(&after, "jar").ends_with("jar-next"));
+    assert!(field(&after, "build").starts_with("jar-next"));
 }
 
 // Stage 6: a jar handed on (R22), where its owner's MCP socket is (R18,
@@ -1564,7 +1568,6 @@ fn assert_program_survives(jar: &mut Jar, owner: Client, what: &str) {
 /// anything is handed to it; today the jar `exec`s it and is lost, and its
 /// program gets `SIGHUP`.
 #[test]
-#[ignore = "red until the proof line (JAR_UPGRADE_BRIEF.md, part 2)"]
 fn an_upgrade_to_a_binary_that_cant_resume_leaves_the_program_running() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
@@ -1589,7 +1592,6 @@ fn an_upgrade_to_a_binary_that_cant_resume_leaves_the_program_running() {
 /// `exec` the image it validated, never the path looked up again; today it
 /// runs whatever is at the path by then.
 #[test]
-#[ignore = "red until one file in the store (JAR_UPGRADE_BRIEF.md, part 1)"]
 fn an_upgrade_runs_the_image_it_validated_though_the_file_is_replaced() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
@@ -1621,7 +1623,6 @@ fn an_upgrade_runs_the_image_it_validated_though_the_file_is_replaced() {
 /// that exits 0 without its proof line is refused (reason 6), and the jar
 /// runs on as it was.
 #[test]
-#[ignore = "red until the proof line (JAR_UPGRADE_BRIEF.md, part 2)"]
 fn a_validator_that_prints_no_proof_is_refused() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
@@ -1653,7 +1654,6 @@ fn a_validator_that_prints_no_proof_is_refused() {
 /// held up meanwhile. Today the jar reads that standard error to its end,
 /// past the deadline, with every thread parked.
 #[test]
-#[ignore = "red until one deadline for the validator (JAR_UPGRADE_BRIEF.md, part 4)"]
 fn a_validators_child_holding_its_stderr_cannot_hold_the_jar() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
@@ -1678,7 +1678,6 @@ fn a_validators_child_holding_its_stderr_cannot_hold_the_jar() {
 /// A validator that outruns its deadline is ended with everything it started:
 /// its whole process group, not only the direct child.
 #[test]
-#[ignore = "red until one deadline for the validator (JAR_UPGRADE_BRIEF.md, part 4)"]
 fn a_validator_past_its_deadline_is_ended_with_its_children() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
@@ -1714,6 +1713,99 @@ fn a_validator_past_its_deadline_is_ended_with_its_children() {
     }
     assert!(!alive, "the validator's child outlived its deadline");
     assert_program_survives(&mut jar, owner, "a slow validator");
+}
+
+/// A proof line for some other blob proves nothing: the instance and the
+/// length must be this blob's.
+#[test]
+fn a_proof_for_another_blob_is_refused() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 5)
+    });
+    // The right length with another instance, and the real validator's
+    // line with another length.
+    let liars = [
+        (
+            "jar-other-instance",
+            "validate-handover) n=$(wc -c | tr -d ' '); echo spyc-jar-handover-ok 0123456789abcdef $n; exit 0;;",
+        ),
+        (
+            "jar-other-length",
+            "validate-handover) set -- $(\"$REAL\" validate-handover); echo $1 $2 1; exit 0;;",
+        ),
+    ];
+    for (name, cases) in liars {
+        let liar = jar_script(jar.dir.path(), name, cases);
+        let (answer, _) = upgrade_answer(&mut owner, &mut seen, &liar, WAIT);
+        assert!(
+            matches!(
+                answer,
+                Some(Msg::Refused {
+                    reason: spyc_jar::proto::reason::UPGRADE_REJECTED,
+                    ..
+                })
+            ),
+            "{name}: {answer:?}"
+        );
+    }
+    assert_program_survives(&mut jar, owner, "a proof for another blob");
+}
+
+/// A jar takes an absolute path only (reason 8): a relative one would be
+/// looked up from wherever the jar happens to be.
+#[test]
+fn an_upgrade_to_a_relative_path_is_refused() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 5)
+    });
+    let (answer, _) = upgrade_answer(
+        &mut owner,
+        &mut seen,
+        std::path::Path::new("relative/spyc-jar"),
+        WAIT,
+    );
+    assert!(
+        matches!(
+            answer,
+            Some(Msg::Refused {
+                reason: spyc_jar::proto::reason::INVALID,
+                ..
+            })
+        ),
+        "{answer:?}"
+    );
+    assert_program_survives(&mut jar, owner, "a relative path");
+}
+
+/// The new image is told the image it replaced (`PREVIOUS`), the one it
+/// would switch back to.
+#[test]
+fn a_new_image_is_told_the_image_it_replaced() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 5)
+    });
+    let told = jar.dir.path().join("previous");
+    let telling = jar_script(
+        jar.dir.path(),
+        "jar-telling",
+        &format!("resume-handover) printf %s \"$2\" > {};;", told.display()),
+    );
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &telling, WAIT);
+    assert!(matches!(answer, Some(Msg::Upgraded { .. })), "{answer:?}");
+    assert_eq!(
+        std::fs::read_to_string(&told).expect("the new image was told"),
+        env!("CARGO_BIN_EXE_spyc-jar")
+    );
+    assert_program_survives(&mut jar, owner, "an upgrade");
 }
 
 /// A reader that takes a byte every 0.9 s while the jar flushes its last
@@ -1905,7 +1997,7 @@ fn a_silent_owner_loses_the_lease_while_its_program_prints() {
     let mut next = next.expect("welcomed");
     let answer = upgrade(&jar, &mut next);
     assert!(
-        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        answer.as_ref().is_ok_and(|b| b.starts_with("jar-next")),
         "the new owner can upgrade the jar: {answer:?}"
     );
     drop(silent);
@@ -1976,7 +2068,7 @@ fn a_lookup_trickling_a_frame_does_not_block_an_upgrade() {
     stop.store(true, Ordering::SeqCst);
     let _ = trickle.join();
     assert!(
-        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        answer.as_ref().is_ok_and(|b| b.starts_with("jar-next")),
         "the upgrade goes ahead: {answer:?}"
     );
 }
@@ -2015,7 +2107,7 @@ fn idle_lookups_neither_block_nor_cross_an_upgrade() {
     let lookups: Vec<UnixStream> = (0..201).map(|_| raw_lookup(&jar.socket)).collect();
     let answer = upgrade(&jar, &mut owner);
     assert!(
-        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        answer.as_ref().is_ok_and(|b| b.starts_with("jar-next")),
         "the upgrade goes ahead: {answer:?}"
     );
     // A connection that crossed is told `upgraded`; a lookup reads to its end
@@ -2065,7 +2157,7 @@ fn tokenless_connections_cannot_exhaust_the_jars_descriptors() {
     assert!(spent < 1.0, "the jar spent {spent:.2} s of CPU in 3 s");
     let answer = upgrade(&jar, &mut owner);
     assert!(
-        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        answer.as_ref().is_ok_and(|b| b.starts_with("jar-next")),
         "the upgrade goes ahead: {answer:?}"
     );
     drop(held);
@@ -2097,7 +2189,7 @@ fn a_paste_the_program_never_reads_does_not_block_its_owner() {
     let mut next = next.expect("welcomed");
     let answer = upgrade(&jar, &mut next);
     assert!(
-        answer.as_ref().is_ok_and(|b| b.ends_with("jar-next")),
+        answer.as_ref().is_ok_and(|b| b.starts_with("jar-next")),
         "the upgrade goes ahead: {answer:?}"
     );
     next.send(&Msg::Replay { from: 0 }).expect("replay");
