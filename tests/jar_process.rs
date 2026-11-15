@@ -1815,11 +1815,80 @@ fn a_new_image_is_told_the_image_it_replaced() {
     assert_program_survives(&mut jar, owner, "an upgrade");
 }
 
-/// A reader that takes a byte every 0.9 s while the jar flushes its last
-/// frames before a handover gets one deadline for the whole flush, not one
-/// for each write: it can't keep the jar parked.
+/// A new binary's first run is slow (about 263 ms on macOS for a new file):
+/// the jar pays it while it still serves the program, validating once before
+/// anything parks, and again, parked, on the real blob (decision L, part 7).
 #[test]
-#[ignore = "red until one deadline for the flush (JAR_UPGRADE_BRIEF.md, part 5)"]
+fn a_slow_first_validation_never_stalls_the_program() {
+    let mut jar = Jar::start(&[], &counter());
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut seen = read_until(&mut owner, true, |s| {
+        counts(s).last().is_some_and(|n| *n >= 5)
+    });
+    let first = jar.dir.path().join("first-run-paid");
+    let slow_once = jar_script(
+        jar.dir.path(),
+        "jar-slow-once",
+        &format!(
+            "validate-handover) [ -e {first} ] || {{ sleep 2; touch {first}; }};;",
+            first = first.display()
+        ),
+    );
+    owner
+        .send(&Msg::Upgrade {
+            binary: slow_once.display().to_string(),
+        })
+        .expect("upgrade");
+    let mut last_output = Instant::now();
+    let mut longest = Duration::ZERO;
+    let until = Instant::now() + WAIT;
+    let answer = loop {
+        assert!(Instant::now() < until, "no answer to the upgrade");
+        match owner.recv(Duration::from_millis(50)).expect("recv") {
+            Some(m @ (Msg::Upgraded { .. } | Msg::Refused { .. })) => break m,
+            Some(m @ Msg::Output { .. }) => {
+                longest = longest.max(last_output.elapsed());
+                last_output = Instant::now();
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    owner.send(&Msg::Ack { offset: next }).expect("ack");
+                }
+            }
+            Some(m) => seen.take(m),
+            None => {}
+        }
+    };
+    assert!(matches!(answer, Msg::Upgraded { .. }), "{answer:?}");
+    // The silence ends with the next output, which the new image sends after
+    // its notice.
+    loop {
+        assert!(Instant::now() < until, "no output after the upgrade");
+        if let Some(m) = owner.recv(Duration::from_millis(50)).expect("recv")
+            && let Msg::Output { offset, bytes } = m
+        {
+            longest = longest.max(last_output.elapsed());
+            owner
+                .send(&Msg::Ack {
+                    offset: offset + bytes.len() as u64,
+                })
+                .expect("ack");
+            break;
+        }
+    }
+    assert!(
+        longest < Duration::from_secs(1),
+        "the program went quiet for {longest:?} while the new binary's first run was paid"
+    );
+    assert_program_survives(&mut jar, owner, "a slow first validation");
+}
+
+/// A reader that takes a little every 0.9 s while the jar flushes its last
+/// frames before a handover gets one deadline for the whole flush, not one
+/// for each write or each wait: it can't keep the jar parked. It takes 4 KiB
+/// at a time, which makes the socket writable each time (a byte at a time
+/// never does on macOS, which wakes a writer only once 2 KiB are free).
+#[test]
 fn a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked() {
     use spyc_jar::proto::{self, VERSION};
     let mut jar = Jar::start(
@@ -1853,14 +1922,23 @@ fn a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked() {
     (&sock).write_all(&pings).expect("pings");
     std::thread::sleep(Duration::from_millis(300));
     let stop = Arc::new(AtomicBool::new(false));
+    let first = jar.dir.path().join("first-run-paid");
     let trickle = {
         let stop = Arc::clone(&stop);
+        let (first, socket) = (first.clone(), jar.socket.clone());
         std::thread::spawn(move || {
-            // Once the upgrade is under way: read the rest of the log's
-            // batch, which lets the writer park with its outbox full, until
-            // the first answer to a ping shows the flush has begun; then take
-            // a byte every 0.9 s.
-            std::thread::sleep(Duration::from_millis(300));
+            // Once the jar has validated the new binary the first time and
+            // begun to park (its acceptor parks too, so a lookup goes
+            // unanswered): read the rest of the log's batch, which lets the
+            // writer park with its outbox full, until the first answer to a
+            // ping shows the flush has begun; then take 4 KiB every 0.9 s.
+            let until = Instant::now() + WAIT;
+            while !first.exists() || !parking(&socket) {
+                if Instant::now() > until {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
             let mut sock = sock;
             let mut flushing = false;
             while !flushing {
@@ -1870,26 +1948,49 @@ fn a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked() {
                     Err(_) => return false,
                 }
             }
-            let mut one = [0u8; 1];
+            let mut some = [0u8; 4096];
             while !stop.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(900));
-                let _ = (&sock).read(&mut one);
+                let _ = (&sock).read(&mut some);
             }
             true
         })
     };
-    let next = next_binary(jar.dir.path());
+    let next = jar_script(
+        jar.dir.path(),
+        "jar-next",
+        &format!(
+            "validate-handover) [ -e {first} ] || {{ sleep 1; touch {first}; }};;",
+            first = first.display()
+        ),
+    );
     let (answer, took) = upgrade_answer(&mut owner, &mut seen, &next, Duration::from_secs(20));
     stop.store(true, Ordering::SeqCst);
     assert!(
         trickle.join().expect("the trickle"),
         "premise: the reader saw the flush begin"
     );
-    assert!(answer.is_some(), "no answer to the upgrade in {took:?}");
+    assert!(
+        matches!(answer, Some(Msg::Upgraded { .. })),
+        "the upgrade goes ahead without the trickling reader, in {took:?}: {answer:?}"
+    );
     assert!(
         took < Duration::from_secs(8),
-        "the trickling reader held the jar parked for {took:?}: {answer:?}"
+        "the trickling reader held the jar parked for {took:?}"
     );
+}
+
+/// Whether the jar at `socket` has parked for a handover: a lookup's `hello`
+/// goes unanswered, its acceptor being parked with everything else.
+fn parking(socket: &std::path::Path) -> bool {
+    let Ok(mut s) = UnixStream::connect(socket) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_millis(300)));
+    if s.write_all(&LOOKUP_HELLO).is_err() {
+        return false;
+    }
+    spyc_jar::proto::read_msg(&mut s).is_err()
 }
 
 // The review's probes, as requirements. A jar can't be wedged by a client
@@ -1915,12 +2016,23 @@ fn upgrade(jar: &Jar, client: &mut Client) -> Result<String, String> {
             binary: next.display().to_string(),
         })
         .map_err(|e| format!("send: {e}"))?;
+    // The jar serves its program while it first validates the new binary,
+    // and keeps every deadline meanwhile: an owner waiting for the answer
+    // still pings and acknowledges, as spyc does.
     let until = Instant::now() + WAIT;
+    let mut n = 0;
     while Instant::now() < until {
-        match client.recv(Duration::from_millis(200)) {
+        n += 1;
+        let _ = client.send(&Msg::Ping { n });
+        match client.recv(Duration::from_millis(100)) {
             Ok(Some(Msg::Upgraded { build })) => return Ok(build),
             Ok(Some(Msg::Refused { reason, why })) => {
                 return Err(format!("refused ({reason}): {why}"));
+            }
+            Ok(Some(Msg::Output { offset, bytes })) => {
+                let _ = client.send(&Msg::Ack {
+                    offset: offset + bytes.len() as u64,
+                });
             }
             Ok(_) => {}
             Err(e) => return Err(format!("connection: {e:#}")),

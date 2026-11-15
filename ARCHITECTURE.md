@@ -779,6 +779,16 @@ Its exit and its output share one deadline, and it runs in a process group
 of its own, which is ended with it. The `swap`, `fake` and validator tests
 in `tests/jar_process.rs` each fail with their part undone.
 
+It validates twice. First on a blob taken while nothing is parked, so a new
+binary's first run (about 263 ms on macOS for a new file) and the refusal of
+one that isn't a jar both happen with the program still served and every
+deadline still kept; only then do the threads park, and the real blob is
+validated again. An upgrade under way is one flag, which refuses a second;
+parking is another, set only after the first validation, since every thread
+parks the moment it sees it. The connections' last frames before the
+handover get one deadline between them, not one per write, so a reader
+taking a byte at a time can't keep the jar parked.
+
 ## A jar's token arrives on its standard input
 
 <!-- SPYC-TRAP: jar-token-stdin -->

@@ -39,6 +39,7 @@
 //! 5). Input the program hasn't taken can't be carried either, so an upgrade
 //! waits until there is none.
 
+use std::collections::HashMap;
 use std::io::{BufRead, IoSlice, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::net::UnixStream;
@@ -65,7 +66,8 @@ const HEAD: usize = 8 + 4;
 const MAX_BLOB: u64 = 1 << 30;
 /// How long a holder waits for the new image before it gives up.
 const HOLD_LIMIT: Duration = Duration::from_secs(30);
-/// How long a connection may take its last frames before the handover.
+/// How long the connections have to take their last frames before the
+/// handover, all of them together.
 const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
 const PARK_DEADLINE: Duration = Duration::from_secs(3);
 const VALIDATE_DEADLINE: Duration = Duration::from_secs(5);
@@ -78,7 +80,7 @@ pub const PROOF: &str = "spyc-jar-handover-ok";
 /// fails. On success nothing is sent from here: the new image announces
 /// itself with `Upgraded` on every connection it carried.
 pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
-    if shared.upgrading.swap(true, Ordering::SeqCst) {
+    if shared.upgrade_claimed.swap(true, Ordering::SeqCst) {
         reply.send(
             shared,
             &Msg::Refused {
@@ -95,6 +97,7 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
             Err(e) => e,
         };
         shared.upgrading.store(false, Ordering::SeqCst);
+        shared.upgrade_claimed.store(false, Ordering::SeqCst);
         shared.park_cv.notify_all();
         shared.cv.notify_all();
         reply.send(
@@ -155,6 +158,12 @@ fn try_run(
 ) -> Result<std::convert::Infallible, (u16, anyhow::Error)> {
     let busy = |e: anyhow::Error| (reason::UPGRADE_BUSY, e);
     let failed = |e: anyhow::Error| (reason::UPGRADE_FAILED, e);
+    // A new binary's first run is slow (about 263 ms on macOS for a new
+    // file), and one that isn't a jar is refused here: both while the program
+    // is still served. The parked validation below is the one that counts.
+    validate(binary, &blob_now(shared), shared.cfg.instance)
+        .map_err(|e| (reason::UPGRADE_REJECTED, e))?;
+    shared.upgrading.store(true, Ordering::SeqCst);
     shared.cv.notify_all();
     shared.inbox_cv.notify_all();
     wait_parked(shared).map_err(busy)?;
@@ -165,29 +174,14 @@ fn try_run(
     }
     let st = shared.lock();
     let conns = shared.conns();
-    let mut ids: Vec<u64> = conns
-        .iter()
-        .filter(|(_, c)| c.role != Role::Lookup)
-        .map(|(id, _)| *id)
-        .collect();
-    ids.sort_unstable();
+    let mut ids = carried(&conns);
     // Every writer is parked: what waits in an outbox goes out now, ahead of
-    // `Upgraded`, or the connection stays behind.
-    ids.retain(|id| flushed(&conns[id]));
+    // `Upgraded`, or the connection stays behind. One deadline for all of it:
+    // a reader taking a byte at a time can't hold the jar parked.
+    let until = Instant::now() + FLUSH_DEADLINE;
+    ids.retain(|id| flushed(&conns[id], until));
     let outs: Vec<&UnixStream> = ids.iter().map(|id| &*conns[id].sock).collect();
-    let states: Vec<ConnState> = ids
-        .iter()
-        .map(|id| {
-            let c = &conns[id];
-            ConnState {
-                id: *id,
-                role: c.role,
-                cursor: *c.cursor.lock().unwrap_or_else(PoisonError::into_inner),
-                exit_sent: c.exit_sent.load(Ordering::SeqCst),
-                fg_sent: c.fg_sent.load(Ordering::SeqCst),
-            }
-        })
-        .collect();
+    let states = conn_states(&conns, &ids);
     if states.len() > handover::MAX_CONNS {
         return Err(busy(anyhow!(
             "{} connections, more than a handover carries",
@@ -264,15 +258,76 @@ fn try_run(
     Err(failed(anyhow!("exec {}: {err}", binary.display())))
 }
 
-/// Write what waits in `conn`'s outbox, its writer being parked. False when
-/// the client won't take it in time: that connection is closed, not carried.
-fn flushed(conn: &Conn) -> bool {
+/// The connections a handover carries: all but lookups, in order.
+fn carried(conns: &HashMap<u64, Arc<Conn>>) -> Vec<u64> {
+    let mut ids: Vec<u64> = conns
+        .iter()
+        .filter(|(_, c)| c.role != Role::Lookup)
+        .map(|(id, _)| *id)
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+fn conn_states(conns: &HashMap<u64, Arc<Conn>>, ids: &[u64]) -> Vec<ConnState> {
+    ids.iter()
+        .map(|id| {
+            let c = &conns[id];
+            ConnState {
+                id: *id,
+                role: c.role,
+                cursor: *c.cursor.lock().unwrap_or_else(PoisonError::into_inner),
+                exit_sent: c.exit_sent.load(Ordering::SeqCst),
+                fg_sent: c.fg_sent.load(Ordering::SeqCst),
+            }
+        })
+        .collect()
+}
+
+/// The jar as a blob now, nothing parked: what the first validation checks.
+fn blob_now(shared: &Shared) -> Vec<u8> {
+    let st = shared.lock();
+    let states = {
+        let conns = shared.conns();
+        conn_states(&conns, &carried(&conns))
+    };
+    handover::encode_parts(&shared.cfg, shared.child_pid, &st, &states)
+}
+
+/// Write what waits in `conn`'s outbox, its writer being parked, by `until`.
+/// False when the client won't take it in time: that connection is closed,
+/// not carried.
+fn flushed(conn: &Conn, until: Instant) -> bool {
     let bytes = conn.take_outbox();
     if bytes.is_empty() {
         return true;
     }
-    let _ = conn.sock.set_write_timeout(Some(FLUSH_DEADLINE));
-    if (&*conn.sock).write_all(&bytes).is_ok() {
+    // Written without blocking, each wait bounded by what's left of the
+    // deadline: a blocking write's timeout times each sleep inside it, and a
+    // reader that takes a byte at a time starts every sleep over.
+    if conn.sock.set_nonblocking(true).is_err() {
+        conn.close();
+        return false;
+    }
+    let mut left = bytes.as_slice();
+    while !left.is_empty() {
+        match (&*conn.sock).write(left) {
+            Ok(0) => break,
+            Ok(n) => left = &left[n..],
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                let time = until.saturating_duration_since(Instant::now());
+                if time.is_zero()
+                    || !crate::jar::ready(&*conn.sock, rustix::event::PollFlags::OUT, time)
+                {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let _ = conn.sock.set_nonblocking(false);
+    if left.is_empty() {
         return true;
     }
     conn.close();
