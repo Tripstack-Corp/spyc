@@ -106,6 +106,10 @@ pub(crate) struct Shared {
     /// lookups. The oldest goes when there are too many ([`accept::admit`]).
     pub(crate) tokenless: Mutex<VecDeque<(u64, Arc<UnixStream>)>>,
     pub(crate) next_ticket: AtomicU64,
+    /// An upgrade is under way: a second is refused.
+    pub(crate) upgrade_claimed: AtomicBool,
+    /// Every thread is to park for the handover. Set only once the new
+    /// binary has passed its first validation.
     pub(crate) upgrading: AtomicBool,
     pub(crate) parked: Mutex<HashSet<Who>>,
     pub(crate) park_cv: Condvar,
@@ -145,7 +149,7 @@ pub(super) fn readable(fd: impl AsFd, wait: Duration) -> bool {
 }
 
 /// Whether `fd` is ready for `flags` within `wait`.
-pub(super) fn ready(fd: impl AsFd, flags: rustix::event::PollFlags, wait: Duration) -> bool {
+pub(crate) fn ready(fd: impl AsFd, flags: rustix::event::PollFlags, wait: Duration) -> bool {
     let mut fds = [rustix::event::PollFd::new(&fd, flags)];
     let ts = rustix::event::Timespec {
         tv_sec: i64::try_from(wait.as_secs()).unwrap_or(i64::MAX),
@@ -253,6 +257,7 @@ pub(crate) fn start(
         conns: Mutex::new(HashMap::new()),
         tokenless: Mutex::new(VecDeque::new()),
         next_ticket: AtomicU64::new(1),
+        upgrade_claimed: AtomicBool::new(false),
         upgrading: AtomicBool::new(false),
         parked: Mutex::new(HashSet::new()),
         park_cv: Condvar::new(),
