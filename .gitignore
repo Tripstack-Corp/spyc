@@ -86,9 +86,5 @@ Cargo.lock.bak
 # machine-specific, must never be committed.
 .antigravitycli/
 
-# aislop local trend log (written on every `make aislop`); the baseline
-# (.aislop/baseline.json) IS committed, this churn log is not.
-.aislop/history.jsonl
-
 # Antigravity agent environment files
 .agents/

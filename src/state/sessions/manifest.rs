@@ -480,6 +480,7 @@ mod tests {
                     pane_id: String::new(),
                     agent_hint: None,
                     unopened: false,
+                    jar_socket: None,
                 })
                 .collect(),
             active_tab: 0,

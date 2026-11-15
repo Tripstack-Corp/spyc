@@ -146,6 +146,28 @@ impl Drop for Turn {
     }
 }
 
+/// A pane's engine at `rows` x `cols`, from an adopted jar's `snapshot`:
+/// the binary form when this build made it, else the portable form's replay.
+/// One that won't restore leaves the engine blank, and the replay fills it.
+pub fn engine_from(snapshot: &Snapshot, (rows, cols): (u16, u16)) -> PaneEngine {
+    let mut e = <PaneEngine as Engine>::new(rows, cols, SCROLLBACK_ROWS);
+    let restored = match snapshot.format {
+        SNAPSHOT_BINARY => unstamp(&snapshot.blob).is_some_and(|b| e.restore_snapshot(b)),
+        SNAPSHOT_VT => {
+            e.restore_portable(&snapshot.blob, snapshot.rows, snapshot.cols);
+            true
+        }
+        _ => false,
+    };
+    if !restored {
+        crate::spyc_debug!("jar snapshot (format {}) didn't restore", snapshot.format);
+    }
+    if e.screen().size() != (rows, cols) {
+        e.screen_mut().set_size(rows, cols);
+    }
+    e
+}
+
 /// What made a binary snapshot: this spyc and the libghostty pin it links.
 fn build() -> String {
     format!(
@@ -166,10 +188,6 @@ pub(super) fn stamp(blob: &[u8]) -> Vec<u8> {
 }
 
 /// The snapshot inside `stamped`, when this build made it.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "no pane restores a snapshot in this build")
-)]
 pub(super) fn unstamp(stamped: &[u8]) -> Option<&[u8]> {
     let rest = stamped.strip_prefix(STAMP_MAGIC)?;
     let (len, rest) = rest.split_first_chunk::<2>()?;

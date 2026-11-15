@@ -85,7 +85,7 @@ impl Pane {
         env.push(("COLORTERM", "truecolor"));
         env.extend(extra_env.iter().copied());
 
-        let host = PtyHost::spawn(PtySpec {
+        let mut host = PtyHost::spawn(PtySpec {
             command,
             rows,
             cols,
@@ -103,7 +103,12 @@ impl Pane {
             capture_launch_env: !extra_env.is_empty(),
             jar,
         })?;
-        let parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
+        // A program taken back from its jar: its pane starts from the jar's
+        // snapshot, and the replay brings it up to date.
+        let parser = match host.take_adoption().and_then(|a| a.snapshot) {
+            Some(snapshot) => jar::snapshots::engine_from(&snapshot, (rows, cols)),
+            None => <PaneEngine as engine::Engine>::new(rows, cols, 10_000),
+        };
         Ok(Self::adopt(host, parser, wake))
     }
 }

@@ -116,6 +116,11 @@ pub struct SavedTab {
     /// agent runs it.
     #[serde(default, skip_serializing_if = "is_false")]
     pub unopened: bool,
+    /// The socket of the jar the tab's program ran in (`[pane] jars`), which
+    /// a restore takes back while it still runs. Recorded, never worked out
+    /// again from an environment that may have changed (finding 14).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jar_socket: Option<PathBuf>,
 }
 
 // Serde's skip callback receives a reference to the field.

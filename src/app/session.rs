@@ -413,6 +413,7 @@ impl App {
                             pane_id: t.info.id.clone(),
                             agent_hint: t.info.agent_hint,
                             unopened: false,
+                            jar_socket: t.pane.jar_socket().map(std::path::Path::to_path_buf),
                         }
                     })
                     .collect()
@@ -1193,6 +1194,7 @@ mod tests {
                     pane_id: String::new(),
                     agent_hint: None,
                     unopened: false,
+                    jar_socket: None,
                 });
             crate::state::sessions::save_session(&saved).expect("seed the restore point");
 
@@ -1765,6 +1767,7 @@ mod tests {
             pane_id: String::new(),
             agent_hint: None,
             unopened: false,
+            jar_socket: None,
         };
         let one = Manifest::one_project(1, 0, "ONE", "/w/spyc", vec![tab("vim"), tab("zsh")]);
         let row = super::picker_row(0, &one, false, false);

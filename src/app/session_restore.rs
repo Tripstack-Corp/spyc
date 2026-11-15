@@ -25,7 +25,7 @@ impl App {
         let pane_id = tab.pane_id.as_str();
         // Any project's: an MCP call finds its tab by id across them all.
         let taken = self.runtime.project_of_pane(pane_id).is_some();
-        let reuse = (!pane_id.is_empty() && !taken).then_some(pane_id);
+        let reuse = (!pane_id.is_empty() && !taken).then_some(tab);
         self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, reuse, tab.agent_hint)
     }
 
@@ -421,10 +421,16 @@ impl App {
                 // spawn-proximity heuristic that crosses panes restored
                 // together (they all spawn within the same second).
                 entry.info.live_session_id = Some(session_id.clone());
-                entry.info.pending_resume_send = Some(crate::pane::tabs::PendingResumeSend::Text {
-                    sid: session_id,
-                    after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
-                });
+                // An agent taken back from its jar, or left in one another
+                // spyc owns, is still in its conversation: typing `/resume`
+                // into it would queue a prompt.
+                if !entry.pane.adopted() && !entry.pane.detached() {
+                    entry.info.pending_resume_send =
+                        Some(crate::pane::tabs::PendingResumeSend::Text {
+                            sid: session_id,
+                            after: std::time::Instant::now() + RESTORE_BANNER_SETTLE,
+                        });
+                }
             }
         } else {
             let reason = self
@@ -745,6 +751,7 @@ fn fresh_tab(tab: &SavedTab) -> SavedTab {
         agent_session_name: None,
         pane_id: String::new(),
         claim_owner: String::new(),
+        jar_socket: None,
         ..tab.clone()
     }
 }

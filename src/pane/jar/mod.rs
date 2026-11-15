@@ -14,6 +14,12 @@
 //! doesn't speak this spyc's wire version exits with 75 first), leaves the
 //! program to run without one: a tab never fails to open for want of a jar
 //! (finding 1).
+//!
+//! A restored tab whose jar still runs takes it back, its program untouched:
+//! the pane starts from the jar's snapshot and the jar replays what the
+//! program printed since. A jar that won't take it (another spyc owns it, or
+//! this one has no token for it) leaves the tab `[detached]`, and nothing is
+//! started in its place (finding 7).
 
 mod link;
 mod offsets;
@@ -33,13 +39,14 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use portable_pty::{Child, MasterPty, PtySize};
 use spyc_jar::client::{Client, Refusal};
-use spyc_jar::proto::{JarSignal, Msg, Role};
+use spyc_jar::proto::{JarSignal, Msg, Role, Snapshot};
+use std::path::PathBuf;
 
 pub use link::Lost;
 pub use place::Place;
 pub use snapshots::{SnapshotSink, Snapshotter};
 
-use link::{JarChild, JarMaster, JarReader, JarReplies, Link};
+use link::{JarChild, JarMaster, JarReader, JarReplies, Link, ReplayGate};
 use place::{SocketState, socket_state};
 
 /// Whether this build reads `[pane] jars`: until jars are on by default, a
@@ -55,8 +62,13 @@ fn honoured_by(version: &str) -> bool {
 
 /// The jar for the tab `tab` when `[pane] jars` is `on`: `None` when it's
 /// off, this build doesn't read it, or there's nowhere to put one (said on
-/// spyc's standard error).
-pub fn wanted(on: bool, tab: &str) -> Option<Spec> {
+/// spyc's standard error). `restoring` is the saved tab a restore opens, whose
+/// jar, still running, is taken back.
+pub fn wanted(
+    on: bool,
+    tab: &str,
+    restoring: Option<&crate::state::sessions::SavedTab>,
+) -> Option<Spec> {
     if !on || !honoured() {
         return None;
     }
@@ -66,6 +78,11 @@ pub fn wanted(on: bool, tab: &str) -> Option<Spec> {
         .map(|place| Spec {
             place,
             name: tab.to_string(),
+            adopt: None,
+        })
+        .map(|spec| match restoring {
+            Some(saved) => spec.restoring(saved.jar_socket.clone()),
+            None => spec,
         })
 }
 
@@ -76,6 +93,19 @@ pub fn wanted(on: bool, tab: &str) -> Option<Spec> {
 pub struct Spec {
     pub place: Place,
     pub name: String,
+    /// A restored tab's: the socket its jar was at, whose jar, still running,
+    /// it takes back rather than start its program again.
+    pub adopt: Option<PathBuf>,
+}
+
+impl Spec {
+    /// This spec for a restored tab whose jar was at `saved`, or, on a save
+    /// that didn't record it, at its own name's socket.
+    #[must_use]
+    pub fn restoring(mut self, saved: Option<PathBuf>) -> Self {
+        self.adopt = Some(saved.unwrap_or_else(|| self.place.socket(&self.name)));
+        self
+    }
 }
 
 /// A jarred program, as `PtyHost` drives it.
@@ -84,8 +114,20 @@ pub struct Jarred {
     pub child: Box<dyn Child + Send + Sync>,
     /// Where the terminal's replies to the program's queries go (R15).
     pub replies: Box<dyn Write + Send>,
-    pub signals: Signals,
-    pub snapshots: SnapshotSink,
+    /// `None` for a detached tab, whose jar answers to someone else.
+    pub signals: Option<Signals>,
+    pub snapshots: Option<SnapshotSink>,
+    /// The jar's socket, which a saved session records.
+    pub socket: PathBuf,
+    /// Set when a running program was taken back rather than started.
+    pub adoption: Option<Adoption>,
+}
+
+/// A running program taken back from its jar.
+pub struct Adoption {
+    /// The snapshot the pane's engine starts from; the replay begins at its
+    /// offset. `None`: the replay begins at the oldest byte the jar holds.
+    pub snapshot: Option<Snapshot>,
 }
 
 /// Signals to a jarred program's group, which only its jar sends.
@@ -95,6 +137,12 @@ pub struct Signals(Arc<Link>);
 impl Signals {
     pub fn send(&self, signal: JarSignal) -> std::io::Result<()> {
         self.0.signal(signal)
+    }
+
+    /// End the connection as a crash would, signalling nothing.
+    #[cfg(test)]
+    pub fn sever(&self) {
+        self.0.out.close();
     }
 }
 
@@ -138,6 +186,11 @@ pub fn spawn(
         return Ok(None);
     }
     sweep_once(place);
+    if let Some(at) = &spec.adopt
+        && socket_state(at) == SocketState::Live
+    {
+        return adopt(place, at, (rows, cols)).map(Some);
+    }
     let socket = place.socket(&spec.name);
     match ended_within(&socket, ENDING_WAIT) {
         SocketState::Live => anyhow::bail!(
@@ -199,7 +252,113 @@ pub fn spawn(
     std::thread::spawn(move || {
         let _ = jar.wait();
     });
-    connect(client, &welcome, &socket, (rows, cols)).map(Some)
+    let Msg::Welcome {
+        child_pid, base, ..
+    } = welcome
+    else {
+        anyhow::bail!("expected a welcome, got {welcome:?}");
+    };
+    let from = Resume {
+        pid: child_pid,
+        replay: base,
+        offsets: offsets::Offsets::new(base),
+        gate: ReplayGate::open(),
+    };
+    connect(client, from, &socket, (rows, cols)).map(Some)
+}
+
+/// Take back the running jar at `socket`, as a restored tab's. A jar that
+/// won't take this spyc leaves the tab detached.
+fn adopt(place: &Place, socket: &Path, (rows, cols): (u16, u16)) -> anyhow::Result<Jarred> {
+    let detached = |why: &str| {
+        eprintln!("spyc: a restored tab's jar runs on without it ({why}); the tab is detached");
+        Ok(link::detached(socket, (rows, cols)))
+    };
+    let Some(token) = tokens::load(place, socket) else {
+        return detached("this spyc has no token for it");
+    };
+    let (mut client, welcome) = match Client::connect(socket, Role::Owner, ANSWER_WAIT, &token) {
+        Ok(answered) => answered,
+        Err(e) => return detached(&format!("{e:#}")),
+    };
+    let Msg::Welcome {
+        child_pid,
+        base,
+        head,
+        rows: had_rows,
+        cols: had_cols,
+        ..
+    } = welcome
+    else {
+        return detached(&format!("expected a welcome, got {welcome:?}"));
+    };
+    client.send(&Msg::FetchSnapshot)?;
+    let mut fetched = Vec::new();
+    loop {
+        match client.recv(ANSWER_WAIT)? {
+            Some(Msg::Snapshot(Some(s))) => fetched.push(s),
+            Some(Msg::Snapshot(None)) => break,
+            Some(_) => {}
+            None => anyhow::bail!("{} listed no snapshots", socket.display()),
+        }
+    }
+    let snapshot = choose(&fetched, head, |blob| {
+        snapshots::unstamp(blob).is_some_and(crate::pane::engine_ghostty::snapshot_decodes)
+    })
+    .cloned();
+    // What the pane holds reaches the snapshot's offset; the jar holds bytes
+    // from `base`. Past a gap the first byte handed over follows a cut.
+    let from = snapshot.as_ref().map_or(base, |s| s.offset);
+    let offsets = if snapshot.is_none() && base > 0 {
+        offsets::Offsets::after_cut(base)
+    } else {
+        offsets::Offsets::new(from)
+    };
+    let replay = from.max(base);
+    let resume = Resume {
+        pid: child_pid,
+        replay,
+        offsets,
+        gate: ReplayGate::until(head),
+    };
+    let jarred = connect(client, resume, socket, (rows, cols))?;
+    if (had_rows, had_cols) != (rows, cols) {
+        jarred.master.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })?;
+    }
+    Ok(Jarred {
+        adoption: Some(Adoption { snapshot }),
+        ..jarred
+    })
+}
+
+/// R17b and R12c: the snapshot an adoption starts from. The newest this
+/// build can use, binary before portable at one offset; one older than the
+/// jar's oldest byte too, since past a gap it's still where the program's
+/// modes and history come back from.
+fn choose(fetched: &[Snapshot], head: u64, decodes: impl Fn(&[u8]) -> bool) -> Option<&Snapshot> {
+    use spyc_jar::proto::{SNAPSHOT_BINARY, SNAPSHOT_VT};
+    fetched
+        .iter()
+        .filter(|s| s.offset <= head)
+        .filter(|s| match s.format {
+            SNAPSHOT_BINARY => decodes(&s.blob),
+            SNAPSHOT_VT => true,
+            _ => false,
+        })
+        .max_by_key(|s| (s.offset, s.format == SNAPSHOT_BINARY))
+}
+
+/// Where a connection's stream begins, and what the pane already holds.
+struct Resume {
+    pid: u32,
+    replay: u64,
+    offsets: offsets::Offsets,
+    gate: ReplayGate,
 }
 
 /// The new jar's welcome. `Ok(None)` when it ended first, which it says on
@@ -231,28 +390,23 @@ fn answer(
     }
 }
 
-/// Take a jar that welcomed this spyc as its owner, from its oldest byte.
+/// Take a jar that welcomed this spyc as its owner, streaming from `from`.
 fn connect(
     client: Client,
-    welcome: &Msg,
+    from: Resume,
     socket: &Path,
     (rows, cols): (u16, u16),
 ) -> anyhow::Result<Jarred> {
-    let Msg::Welcome {
-        child_pid, base, ..
-    } = *welcome
-    else {
-        anyhow::bail!("expected a welcome, got {welcome:?}");
-    };
     let (rx, out) = client.split_queued(PING_EVERY, WRITE_STALL)?;
-    out.send(&Msg::Replay { from: base })?;
+    out.send(&Msg::Replay { from: from.replay })?;
     let link = Arc::new(Link {
         out,
-        pid: child_pid,
+        pid: from.pid,
         fg: std::sync::atomic::AtomicU32::new(0),
         exit: Mutex::new(None),
         exited: Condvar::new(),
-        offsets: Mutex::new(offsets::Offsets::new(base)),
+        offsets: Mutex::new(from.offsets),
+        gate: from.gate,
     });
     let (bytes_tx, bytes_rx) = mpsc::sync_channel::<Vec<u8>>(64);
     {
@@ -279,8 +433,10 @@ fn connect(
         }),
         child: Box::new(JarChild(Arc::clone(&link))),
         replies: Box::new(JarReplies(Arc::clone(&link))),
-        signals: Signals(Arc::clone(&link)),
-        snapshots: SnapshotSink(link),
+        signals: Some(Signals(Arc::clone(&link))),
+        snapshots: Some(SnapshotSink(link)),
+        socket: socket.to_path_buf(),
+        adoption: None,
     })
 }
 

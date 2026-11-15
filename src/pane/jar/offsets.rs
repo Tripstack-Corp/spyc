@@ -35,6 +35,15 @@ impl Offsets {
         }
     }
 
+    /// The pane's first byte will be the jar's byte `from`, which follows a
+    /// cut: the pane holds none of what came before it.
+    pub fn after_cut(from: u64) -> Self {
+        Self {
+            expected: u64::MAX,
+            ..Self::new(from)
+        }
+    }
+
     /// The jar's bytes `offset..offset + len` are handed over next. Returns
     /// whether they don't follow the last ones, in which case one
     /// resynchronizing byte is handed over first.

@@ -33,6 +33,60 @@ pub(super) struct Link {
     pub exited: Condvar,
     /// Which jar offset each byte handed to the pane came from (finding 8).
     pub offsets: Mutex<Offsets>,
+    /// When the terminal's replies may reach the program again (R15a).
+    pub gate: ReplayGate,
+}
+
+/// How long after a replayed tail is handed over its queries may still be in
+/// the parser.
+const REPLY_GRACE: Duration = Duration::from_millis(500);
+
+/// R15a: a replayed tail makes the engine see the program's old queries
+/// again, and the program must never get a second answer to a question it
+/// asked before the crash. Its replies are dropped until the tail has been handed over, and a grace for
+/// the parser after that.
+pub(super) struct ReplayGate {
+    /// The jar's head when this spyc took over: the bytes before it are
+    /// replay. `None`: nothing to replay, open from the start.
+    live_from: Option<u64>,
+    caught_up: Mutex<Option<std::time::Instant>>,
+}
+
+impl ReplayGate {
+    /// A gate with nothing to replay.
+    pub(super) const fn open() -> Self {
+        Self {
+            live_from: None,
+            caught_up: Mutex::new(None),
+        }
+    }
+
+    /// A gate closed until the bytes before `head` are handed over.
+    pub(super) const fn until(head: u64) -> Self {
+        Self {
+            live_from: Some(head),
+            caught_up: Mutex::new(None),
+        }
+    }
+
+    pub(super) fn handed_over(&self, end: u64) {
+        let mut at = self
+            .caught_up
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if at.is_none() && self.live_from.is_some_and(|head| end >= head) {
+            *at = Some(std::time::Instant::now());
+        }
+    }
+
+    pub(super) fn is_open(&self) -> bool {
+        self.live_from.is_none()
+            || self
+                .caught_up
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_some_and(|t| t.elapsed() >= REPLY_GRACE)
+    }
 }
 
 impl Link {
@@ -82,6 +136,7 @@ pub(super) fn read_frames(
                 if bytes.send(b).is_err() {
                     break;
                 }
+                link.gate.handed_over(end);
                 let _ = link.out.send(&Msg::Ack { offset: end });
             }
             Ok(Some(Msg::Exited { code, signaled })) => {
@@ -176,9 +231,11 @@ pub(super) struct JarReplies(pub Arc<Link>);
 
 impl Write for JarReplies {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.out.send(&Msg::Reply {
-            bytes: buf.to_vec(),
-        })?;
+        if self.0.gate.is_open() {
+            self.0.out.send(&Msg::Reply {
+                bytes: buf.to_vec(),
+            })?;
+        }
         Ok(buf.len())
     }
     fn flush(&mut self) -> io::Result<()> {
@@ -293,5 +350,76 @@ impl ChildKiller for JarKiller {
     }
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
         Box::new(Self(Arc::clone(&self.0)))
+    }
+}
+
+/// A detached tab's stand-ins: its jar runs on for another spyc, so here
+/// there is no output, no input and no program, only the exit that labels
+/// the tab `[detached]`.
+pub(super) fn detached(socket: &std::path::Path, (rows, cols): (u16, u16)) -> super::Jarred {
+    super::Jarred {
+        master: Box::new(GoneMaster(Mutex::new(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        }))),
+        child: Box::new(GoneChild),
+        replies: Box::new(io::sink()),
+        signals: None,
+        snapshots: None,
+        socket: socket.to_path_buf(),
+        adoption: None,
+    }
+}
+
+struct GoneMaster(Mutex<PtySize>);
+
+impl MasterPty for GoneMaster {
+    fn resize(&self, size: PtySize) -> anyhow::Result<()> {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = size;
+        Ok(())
+    }
+    fn get_size(&self) -> anyhow::Result<PtySize> {
+        Ok(*self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+    fn try_clone_reader(&self) -> anyhow::Result<Box<dyn Read + Send>> {
+        Ok(Box::new(io::empty()))
+    }
+    fn take_writer(&self) -> anyhow::Result<Box<dyn Write + Send>> {
+        Ok(Box::new(io::sink()))
+    }
+    fn process_group_leader(&self) -> Option<libc::pid_t> {
+        None
+    }
+    fn as_raw_fd(&self) -> Option<std::os::fd::RawFd> {
+        None
+    }
+    fn tty_name(&self) -> Option<PathBuf> {
+        None
+    }
+}
+
+#[derive(Debug)]
+struct GoneChild;
+
+impl ChildKiller for GoneChild {
+    fn kill(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+    fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
+        Box::new(Self)
+    }
+}
+
+impl Child for GoneChild {
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        Ok(Some(ExitStatus::with_signal(Lost::Held.label())))
+    }
+    fn wait(&mut self) -> io::Result<ExitStatus> {
+        Ok(ExitStatus::with_signal(Lost::Held.label()))
+    }
+    fn process_id(&self) -> Option<u32> {
+        None
     }
 }
