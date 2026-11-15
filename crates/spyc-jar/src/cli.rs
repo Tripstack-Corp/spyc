@@ -29,6 +29,21 @@ use anyhow::{Context, bail};
 /// speak (or for none).
 pub const WIRE_NOT_SERVED: i32 = 75;
 
+/// The git commit the running binary was built from, as the binary that
+/// calls [`main_built`] knows it; empty when it doesn't say.
+pub fn commit() -> &'static str {
+    COMMIT.get().copied().unwrap_or("")
+}
+
+static COMMIT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// [`main`], for a binary that knows the commit it was built from, which
+/// `describe` gives as `commit`.
+pub fn main_built(commit: &'static str) -> anyhow::Result<()> {
+    let _ = COMMIT.set(commit);
+    main()
+}
+
 /// Run `spyc-jar` with this process's arguments: a subcommand, or a jar.
 pub fn main() -> anyhow::Result<()> {
     match std::env::args().nth(1).as_deref() {
@@ -55,6 +70,8 @@ pub fn main() -> anyhow::Result<()> {
                 bail!("usage: spyc-jar upgrade SOCKET TOKEN_FILE BINARY");
             };
             let token = crate::client::read_token_file(std::path::Path::new(&token))?;
+            // A jar takes an absolute path only.
+            let binary = std::path::absolute(&binary)?.display().to_string();
             upgrade(std::path::Path::new(&socket), &token, binary)
         }
         Some("attach") => {

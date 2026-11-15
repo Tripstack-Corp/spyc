@@ -266,8 +266,10 @@ pub(crate) fn start(
         conn.fg_sent.store(cs.fg_sent, Ordering::SeqCst);
         let shared = Arc::clone(&shared);
         thread::spawn(move || {
-            let build =
-                std::env::current_exe().map_or_else(|_| String::new(), |p| p.display().to_string());
+            let build = crate::store::build_of(
+                &crate::upgrade::own_image(),
+                &crate::upgrade::copies_dir(&shared),
+            );
             conn.send(&shared, &Msg::Upgraded { build });
             conn::run_conn(&shared, cs.id, &conn);
         });
