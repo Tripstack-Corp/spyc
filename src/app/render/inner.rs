@@ -62,14 +62,11 @@ impl App {
             };
             if let Some(view) = underlying {
                 crate::ui::pager::render(frame, top_area, view, &self.view.theme);
-                // In a vsplit this pager lives in the left/single column
-                // (`overlay_column`); dim it when its column isn't focused, so a
-                // `D` in `a` fades on `^a l` to `b` — mirroring the list/right
-                // dim. (No split → full-frame → never dims.)
-                if self.state.active_project().vsplit.is_some()
-                    && self.view.dim_inactive
-                    && !self.column_focused(state::Side::Left)
-                {
+                // The pager lives in the left (or only) column (`overlay_column`)
+                // and fades whenever that column lacks the keys, as the list it
+                // replaces does: a `D` in `a` fades on `^a l` to `b`, and on
+                // `^a j` to the pane, split or not.
+                if self.view.dim_inactive && !self.column_focused(state::Side::Left) {
                     self.dim_region(frame, top_area);
                 }
             }
@@ -203,7 +200,12 @@ impl App {
         if let Some(view) = self.view.project().scroll_pager.as_ref() {
             // The scrollback snapshot owns this rect; the pty runs off-screen.
             // The first-frame scroll snap (pending) is settled in `prepare_panes`.
+            // It has the keys exactly when the pane does, and fades as the pane
+            // does without them.
             crate::ui::pager::render(frame, rect, view, &self.view.theme);
+            if self.view.dim_inactive && !self.state.pane_focused() {
+                self.dim_region(frame, rect);
+            }
         } else if let Some(tabs) = self.runtime.project().pane_tabs.as_ref() {
             let focused = self.state.pane_focused();
             let held = self.pane_drag_screen(Some(rect));
@@ -214,6 +216,7 @@ impl App {
                     PaneWidget {
                         screen,
                         focused,
+                        dimmed: !focused && self.view.dim_inactive,
                         selection: self.pane_selection_screen_coords(),
                     },
                     rect,
@@ -228,6 +231,7 @@ impl App {
                     PaneWidget {
                         screen,
                         focused,
+                        dimmed: !focused && self.view.dim_inactive,
                         selection: self.pane_selection_on_live_screen(screen, held),
                     },
                     rect,
@@ -585,6 +589,7 @@ impl App {
                         PaneWidget {
                             screen,
                             focused: right_focused,
+                            dimmed: !right_focused && self.view.dim_inactive,
                             selection: None,
                         },
                         rect,
@@ -763,6 +768,7 @@ impl App {
                 PaneWidget {
                     screen,
                     focused: overlay_focused,
+                    dimmed: !overlay_focused && self.view.dim_inactive,
                     selection: None,
                 },
                 overlay_area,
