@@ -912,6 +912,11 @@ impl Engine for GhosttyEngine {
         unsafe { (*self.inner.replies).take() }
     }
 
+    fn take_program_events(&mut self) -> Vec<crate::pane::engine::ProgramEvent> {
+        // SAFETY: as in `take_replies`.
+        unsafe { (*self.inner.replies).take_events() }
+    }
+
     fn screen(&self) -> &Self::Screen {
         &self.inner
     }

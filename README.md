@@ -189,9 +189,10 @@ enterprise `managed-mcp.json` policies are respected — see
 ## Running multiple agents
 
 Each tab's **activity dot** answers *which one needs me* — a warm breathing dot
-while working, a settled square when blocked or done, a hollow circle while it
-waits on background work that will wake it — with a desktop notification when
-an agent blocks or finishes. `^a F` forks a Claude Code or Codex conversation
+while working, a settled square when blocked or done, a red cross when a program
+reports it failed, a hollow circle while it waits on background work that will
+wake it — with a desktop notification when an agent blocks, fails or finishes.
+Any program can set its tab's dot with OSC 7501, a shell script included. `^a F` forks a Claude Code or Codex conversation
 into a new tab, so you can try another approach without losing the first. An
 advisory **scope registry** (`register_scope` / `list_scopes` /
 `wait_for_scope_clear`) keeps parallel agents off each other's files. Sessions

@@ -429,6 +429,12 @@ impl Pane {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Take what the program said about itself since the last call: its
+    /// status reports and the shell's prompt starts, oldest first (#927).
+    pub fn take_program_events(&self) -> Vec<engine::ProgramEvent> {
+        engine::Engine::take_program_events(&mut *self.lock_parser())
+    }
+
     /// Run `f` with a mutable reference to the engine's screen.
     /// Used by the scrollback adapter (which walks scrollback by
     /// temporarily shifting the offset). Same lock semantics as

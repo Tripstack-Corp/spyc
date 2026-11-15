@@ -58,7 +58,7 @@ image protocols or OSC 52 clipboard writes. How it answers:
   inert while zoomed (only `^a z` exits), and the prior split is restored on
   un-zoom.
 - **Agent-activity dots** — each **agent** tab shows a live dot in the
-  divider:
+  divider, and so does any tab whose program reports its own status (OSC 7501):
   - a pulsing **`●`** (an orange-to-spark breath) while it's working;
   - a steady hot-red **`■`** when it's **blocked** on you, and a calm teal
     **`■`** when it's **done**: a square is a settled state, and your turn. A
@@ -69,10 +69,14 @@ image protocols or OSC 52 clipboard writes. How it answers:
     changed in its worktree, and how long ago it finished,
     `2 turns · 14 tools (Edit 6, Bash 5) · 6 files changed · done 12m ago`.
     It never quotes the agent or says what a tool acted on;
+  - a steady red **`✕`** when a program reports it **failed**; it pings as a
+    block does and stays until you press **Enter** in the tab;
   - a blue hollow **`○`** when it's **waiting** on background work it started
     (a CI run, a build) that will wake it. `:why-status` shows what it said it
     waits on, and entering `waiting` pings nothing;
-  - a quiet **`·`** when it's idle. A plain shell tab gets no dot.
+  - a quiet **`·`** when it's idle. A plain shell tab gets no dot until the
+    program running in it reports one: a script can turn its tab red with
+    `printf '\e]7501;state=blocked:kind=permission\e\\'`.
 
   The pulse animates only while something is working, so an idle spyc draws
   nothing. **`blocked` stays red** until you answer the pane by pressing

@@ -391,6 +391,10 @@ impl App {
                     // Output stamp for EVERY tab (active + background) — the
                     // activity dot tracks live output, not just unseen output.
                     entry.info.last_output_at = Some(now);
+                    // What the program said about itself in that output (#927).
+                    for event in entry.pane.take_program_events() {
+                        entry.info.program.apply(&event);
+                    }
                     if crate::shell::command_is_shell(&entry.info.command) {
                         super::shell_agents::schedule_look(&mut entry.info, now);
                     }

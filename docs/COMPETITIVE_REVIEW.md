@@ -879,9 +879,9 @@ and quotes re-fetched from HN's Firebase item API.
   Code is working, waiting on you, or done") and in **Codex**
   ([openai/codex#52725](https://github.com/openai/codex/pull/52725)); bubbletea,
   libvaxis, psmux and tuios followed. Claude Code reports only to a terminal that
-  answers its `OSC 7501 ; ?` probe. spyc's libghostty-vt pin predates the
-  upstream support, so spyc neither parses the reports nor answers the probe
-  (#927).
+  answers its `OSC 7501 ; ?` probe. spyc's pinned libghostty-vt parses the
+  reports, and since #927 spyc keeps them as each tab's dot (a shell tab's
+  included) and answers the probe.
 - **zmx is unchanged in kind.** v0.8.1 (2026-09-05), 2.3k★. The forty commits
   since add OpenBSD, a frozen IPC protocol, `history --screen` and a docs site;
   none is agent-related, and its README still rules out windows, tabs and splits.

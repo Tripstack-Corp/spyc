@@ -100,6 +100,64 @@ pub enum MouseEncoding {
     Sgr,
 }
 
+/// What a program says it is doing, in a program status report (OSC 7501).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ProgramState {
+    Idle,
+    Working,
+    Done,
+    /// Waiting on the user, for the reason in [`ProgramStatus::kind`].
+    Blocked,
+    Error,
+    /// Remove the record with this id and every record beneath it.
+    Clear,
+}
+
+/// What a blocked program needs from the user.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BlockedOn {
+    Permission,
+    Question,
+    Auth,
+}
+
+impl BlockedOn {
+    /// What the ping and `Space !` say it waits on.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Permission => "permission",
+            Self::Question => "a question",
+            Self::Auth => "sign-in",
+        }
+    }
+}
+
+/// One program status report (OSC 7501), decoded by the engine.
+///
+/// Only what spyc acts on: the record's id, its state and kind, and the
+/// program's stable name. A report's title and message are untrusted text
+/// that nothing in spyc shows, so the seam doesn't carry them.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ProgramStatus {
+    /// The record the report replaces; empty for the program itself, and `/`
+    /// nests one record under another (`build/test` under `build`).
+    pub id: String,
+    pub state: ProgramState,
+    /// Set only for [`ProgramState::Blocked`], and only when the program said.
+    pub blocked_on: Option<BlockedOn>,
+    /// A stable name a machine can match, such as `cargo` or `claude-code`.
+    pub app: String,
+}
+
+/// Something the program running in a pane told the terminal about itself.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum ProgramEvent {
+    /// A program status report (OSC 7501).
+    Status(ProgramStatus),
+    /// The shell started a new prompt (OSC 133), so whatever it ran has ended.
+    PromptStart,
+}
+
 /// The read surface spyc's renderer and adapters need from a terminal screen.
 ///
 /// `&mut self` on the scrollback pair is not an accident: an engine whose
@@ -182,6 +240,9 @@ pub trait Engine: Send {
     /// Take the replies to the child's queries that `process` produced, for the
     /// caller to write to the child once it no longer holds the engine.
     fn take_replies(&mut self) -> Vec<u8>;
+    /// Take what the program said about itself while `process` ran, oldest
+    /// first.
+    fn take_program_events(&mut self) -> Vec<ProgramEvent>;
     fn screen(&self) -> &Self::Screen;
     fn screen_mut(&mut self) -> &mut Self::Screen;
 }

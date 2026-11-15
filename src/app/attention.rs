@@ -61,7 +61,7 @@ pub(super) fn pick(waiting: &[Waiting], after: Option<WaitKey>) -> Option<Waitin
 }
 
 /// What one project's agents most need from the user, from each tab and
-/// whether it is in view: blocked, then a done not yet seen, then at work,
+/// whether it is in view: blocked (or failed), then a done not yet seen, then at work,
 /// then waiting on work of its own. `None` while every agent is idle or its
 /// done is seen, and for a project running none. A `^z`-suspended tab counts
 /// for nothing, as its dot shows 💤 in place of its state.
@@ -71,7 +71,8 @@ pub(super) fn rollup<'a>(
     tabs.into_iter()
         .filter(|(info, _)| !info.suspended)
         .filter_map(|(info, seen)| match info.shown_activity(seen) {
-            AgentActivity::Blocked => Some(ProjectAttention::Blocked),
+            // A program's reported error needs the user as a block does.
+            AgentActivity::Blocked | AgentActivity::Error => Some(ProjectAttention::Blocked),
             AgentActivity::Done if !seen && info.unseen_done.is_some() => {
                 Some(ProjectAttention::UnseenDone)
             }

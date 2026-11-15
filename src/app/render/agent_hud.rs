@@ -53,7 +53,7 @@ impl App {
             match info.activity {
                 AgentActivity::Working => Attention::Working,
                 AgentActivity::Waiting => Attention::Waiting,
-                AgentActivity::Blocked => Attention::NeedsYou,
+                AgentActivity::Blocked | AgentActivity::Error => Attention::NeedsYou,
                 AgentActivity::Done => Attention::Done,
                 AgentActivity::Idle => Attention::Idle,
                 AgentActivity::Unknown => Attention::Unknown,

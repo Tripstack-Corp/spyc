@@ -87,7 +87,7 @@ open too, across its tabs.
 **The status bar shows every open project** while there are several: a chip
 for each, in the order they were opened, the one you're in drawn as a tab in
 the list cursor's colours (reversed in mono) and the others dim, each with the glyph of what its agents most need, as their tab dots show
-it: a red `■` when one is blocked on you, a teal `■` for a done you haven't
+it: a red `■` when one is blocked on you or failed, a teal `■` for a done you haven't
 seen, `●` while one works and `○` while one waits on its own background work,
 and a blank while they're idle, parted by powerline's thin chevron (`U+E0B1`;
 a `|` in mono: `spyc ■ | web ● | api`). The chips take the session name's
