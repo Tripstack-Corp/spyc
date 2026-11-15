@@ -1,4 +1,6 @@
-//! Keyboard → pty byte encoding.
+//! Keyboard → pty byte encoding, the legacy way: for every program but one
+//! that pushed kitty keyboard flags, whose keys libghostty-vt encodes
+//! (`Pane::send_key`, #1176).
 //!
 //! Most terminal applications expect xterm-style escape sequences for
 //! special keys. We cover the common cases (arrows, Home/End, PgUp/PgDn,

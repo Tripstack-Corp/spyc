@@ -66,9 +66,11 @@ impl Sink {
 /// Whether spyc sends a reply libghostty-vt produced. An allowlist, so an answer
 /// a pin bump teaches the engine stays unsent until someone judges it here.
 ///
-/// Left out on purpose: the kitty keyboard flags (spyc encodes legacy keys
-/// only), XTGETTCAP (answered from Ghostty's terminfo, which advertises OSC 52
-/// clipboard spyc lacks), colour reports (Ghostty's palette, not the host's),
+/// The kitty keyboard flags are answered: spyc encodes a key by them for the
+/// program that pushed them (#1176).
+///
+/// Left out on purpose: XTGETTCAP (answered from Ghostty's terminfo, which
+/// advertises OSC 52 clipboard spyc lacks), colour reports (Ghostty's palette, not the host's),
 /// size reports (spyc's cell pixel size is a placeholder), and DA3
 /// (libghostty-vt answers it, but the Ghostty app leaves it unanswered).
 pub(super) fn answered(reply: &[u8]) -> bool {
@@ -82,6 +84,10 @@ pub(super) fn answered(reply: &[u8]) -> bool {
             Some((b'c', rest)) => matches!(rest.first(), Some(b'?' | b'>')),
             // Operating status; the other `n` reports are colour scheme and visibility.
             Some((b'n', rest)) => rest == b"0",
+            // The kitty keyboard flags in force (`CSI ? flags u`).
+            Some((b'u', rest)) => rest.split_first().is_some_and(|(q, digits)| {
+                *q == b'?' && !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
+            }),
             _ => false,
         };
     }
@@ -302,6 +308,8 @@ mod tests {
     fn the_allowlist_admits_only_true_answers() {
         let sent: &[&[u8]] = &[
             b"\x1b[?2027;1$y",
+            b"\x1b[?0u",
+            b"\x1b[?15u",
             b"\x1b[4;2$y",
             b"\x1b[12;40R",
             b"\x1b[?62;22c",
@@ -316,7 +324,8 @@ mod tests {
             assert!(answered(r), "dropped {:?}", String::from_utf8_lossy(r));
         }
         let unsent: &[&[u8]] = &[
-            b"\x1b[?0u",
+            b"\x1b[?u",
+            b"\x1b[?1;2u",
             b"\x1b[?997;1n",
             b"\x1b[8;24;80t",
             b"\x1b[4;384;640t",

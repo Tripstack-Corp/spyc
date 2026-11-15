@@ -52,6 +52,7 @@ use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, Terminal
 #[cfg(test)]
 mod jar_fidelity;
 mod jar_snapshot;
+mod keys;
 pub use jar_snapshot::snapshot_decodes;
 mod replies;
 
@@ -904,6 +905,19 @@ impl Engine for GhosttyEngine {
         }
         self.inner.synchronized = false;
         self.inner.invalidate();
+    }
+
+    fn kitty_keyboard_flags(&self) -> u8 {
+        keys::flags(self.inner.t)
+    }
+
+    fn encode_kitty_key(&self, key: crossterm::event::KeyEvent) -> Option<Vec<u8>> {
+        keys::key(key).map(|k| keys::encode(self.inner.t, &k))
+    }
+
+    fn end_kitty_keyboard(&mut self) {
+        // The program's own pop, as many times as the stack can hold.
+        self.process(b"\x1b[<255u");
     }
 
     fn take_replies(&mut self) -> Vec<u8> {

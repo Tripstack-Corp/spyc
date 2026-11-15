@@ -28,6 +28,7 @@ pub use widget::{PaneWidget, cell_style};
 // Shared pty kernel that `Pane`, `PendingCapture` and `BackgroundTask`
 // all wrap.
 pub mod jar;
+mod kitty;
 mod launch;
 pub mod launch_env;
 pub mod pty_host;
@@ -119,6 +120,10 @@ pub struct Pane {
     /// scrollback instead of being forwarded to the child.
     /// `drain_output()` still runs so no output is lost.
     scrolling: bool,
+    /// The process group that pushed the kitty keyboard flags in force: only
+    /// it gets kitty-encoded keys (#1176). Noted at the drain after the push,
+    /// so a program that exits or stops hands the shell legacy keys.
+    kitty_owner: Option<u32>,
 }
 
 impl Pane {
@@ -182,6 +187,7 @@ impl Pane {
                 rx_home_rx,
             },
             output_dirty: false,
+            kitty_owner: None,
             scroll_offset: 0,
             scrolling: false,
         }
@@ -234,6 +240,7 @@ impl Pane {
         } else {
             self.last_seen_gen = gen_now;
             self.output_dirty = true;
+            self.note_kitty_owner();
             true
         }
     }
@@ -285,7 +292,9 @@ impl Pane {
         // disagreeing with the bytes it annotates would misdirect the next
         // investigation rather than settle it.
         let app_cursor = self.application_cursor();
-        let bytes = input::encode_key(key, app_cursor);
+        let bytes = self
+            .kitty_key(key)
+            .unwrap_or_else(|| input::encode_key(key, app_cursor));
         if !bytes.is_empty() {
             if crate::key_trace::is_enabled() {
                 crate::key_trace::log_tx(&format!(

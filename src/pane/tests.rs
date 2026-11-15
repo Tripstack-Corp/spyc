@@ -530,3 +530,73 @@ mod recovery_tests {
         );
     }
 }
+
+/// Who gets kitty-encoded keys (#1176): only the process group that pushed the
+/// flags, and its flags go once it does.
+#[cfg(test)]
+mod kitty_route_tests {
+    use super::super::kitty::{KittyRoute, group_alive, kitty_route};
+
+    const ALIVE: fn(u32) -> bool = |_| true;
+    const GONE: fn(u32) -> bool = |_| false;
+
+    #[test]
+    fn no_flags_no_kitty_and_no_owner() {
+        assert_eq!(
+            kitty_route(0, Some(7), Some(7), ALIVE),
+            (KittyRoute::Legacy, None)
+        );
+    }
+
+    #[test]
+    fn the_foreground_group_that_pushed_owns_them() {
+        assert_eq!(
+            kitty_route(1, None, Some(7), ALIVE),
+            (KittyRoute::Kitty, Some(7))
+        );
+        assert_eq!(
+            kitty_route(1, Some(7), Some(7), ALIVE),
+            (KittyRoute::Kitty, Some(7))
+        );
+    }
+
+    #[test]
+    fn a_stopped_owner_keeps_its_flags_but_the_shell_gets_legacy_keys() {
+        assert_eq!(
+            kitty_route(1, Some(7), Some(3), ALIVE),
+            (KittyRoute::Legacy, Some(7))
+        );
+    }
+
+    #[test]
+    fn a_gone_owners_flags_are_popped() {
+        assert_eq!(
+            kitty_route(1, Some(7), Some(3), GONE),
+            (KittyRoute::EndThenLegacy, None)
+        );
+    }
+
+    #[test]
+    fn with_the_foreground_unknown_the_program_that_asked_is_believed() {
+        assert_eq!(kitty_route(1, None, None, GONE), (KittyRoute::Kitty, None));
+        assert_eq!(
+            kitty_route(1, Some(7), None, GONE),
+            (KittyRoute::Kitty, Some(7))
+        );
+    }
+
+    #[test]
+    fn a_group_is_alive_until_its_last_process_is_reaped() {
+        use std::os::unix::process::CommandExt;
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pgid = child.id();
+        assert!(group_alive(pgid));
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(!group_alive(pgid));
+    }
+}

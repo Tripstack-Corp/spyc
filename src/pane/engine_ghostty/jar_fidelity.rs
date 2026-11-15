@@ -7,7 +7,7 @@
 
 use std::fmt::Write as _;
 
-use super::{Data, GhosttyEngine, ffi, jar_snapshot::snapshot_decodes};
+use super::{Data, GhosttyEngine, jar_snapshot::snapshot_decodes};
 use crate::pane::engine::{Engine, TerminalScreen};
 
 const ROWS: u16 = 24;
@@ -65,20 +65,10 @@ fn observe(e: &mut GhosttyEngine) -> Vec<String> {
     out
 }
 
-/// The kitty keyboard flags in force, read from the terminal: spyc's engine
-/// doesn't answer the program's `CSI ? u`, so the probes can't see them.
+/// The kitty keyboard flags in force, read from the terminal rather than by a
+/// `CSI ? u` probe, so the probes' own replies stay out of the comparison.
 fn kitty_flags(e: &GhosttyEngine) -> u8 {
-    let mut v: u8 = 0;
-    // SAFETY: `t` is live, and KITTY_KEYBOARD_FLAGS writes a `uint8_t`.
-    let ok = unsafe {
-        ffi::ghostty_terminal_get(
-            e.inner.t,
-            Data::GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
-            (&raw mut v).cast(),
-        )
-    };
-    assert_eq!(ok, spyc_vt_sys::SUCCESS, "the kitty flags read");
-    v
+    e.kitty_keyboard_flags()
 }
 
 /// The emit with escape sequences dropped: the history's characters alone.

@@ -233,6 +233,11 @@ image protocols or OSC 52 clipboard writes. How it answers:
   older ones were left out. `r` reloads while the agent keeps running;
   `Esc` (or scrolling down past the end) returns to the live pane.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
+- **The kitty keyboard protocol** for a program that asks for it: Shift+Enter,
+  Ctrl+I apart from Tab, Esc apart from Alt, Ctrl+Alt+letter and Super
+  bindings reach it as the program expects. Only the program that asked gets
+  them: a shell it leaves behind, or one you `^z` back to, gets ordinary keys.
+  Key releases aren't passed on yet.
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
   output (including scrollback) so paths in large diffs are still found.
