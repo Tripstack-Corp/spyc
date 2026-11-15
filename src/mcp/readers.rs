@@ -477,6 +477,7 @@ fn worktrees_json(
                 .and_then(|(root, base)| crate::git::branch::branch_status(root, &wt.head, base));
             let lock_reason = crate::git::worktree::lock_reason(&wt.path);
             json!({
+                "updated": updated_utc(&wt.path),
                 "path": wt.path.display().to_string(),
                 "branch": wt.branch,
                 "head": wt.head,
@@ -491,6 +492,17 @@ fn worktrees_json(
         })
         .collect();
     Value::Array(arr).to_string()
+}
+
+/// When the worktree at `path` was last updated
+/// ([`crate::git::last_updated`]), RFC 3339 UTC to the second, or `None` for
+/// one with no directory.
+fn updated_utc(path: &Path) -> Option<String> {
+    let at = crate::git::last_updated::last_updated(path)?;
+    let ts = jiff::Timestamp::try_from(at).ok()?;
+    jiff::Timestamp::from_second(ts.as_second())
+        .ok()
+        .map(|ts| ts.to_string())
 }
 
 /// Resolve a worktree path arg for the lease tools: absolute as-is, else
@@ -1014,6 +1026,17 @@ mod tests {
         assert_eq!(feat["merged"], json!(true));
         assert_eq!(feat["ahead"], json!(0));
         assert_eq!(main["merged"], json!(true));
+        // Both trees were written just now; RFC 3339 UTC to the second.
+        for entry in [main, feat] {
+            let updated = entry["updated"].as_str().expect("an updated time");
+            let at: jiff::Timestamp = updated.parse().expect("RFC 3339");
+            let age = jiff::Timestamp::now().as_second() - at.as_second();
+            assert!((0..120).contains(&age), "{updated} is {age}s old");
+            assert!(
+                updated.ends_with('Z') && !updated.contains('.'),
+                "{updated}"
+            );
+        }
     }
 
     #[test]
