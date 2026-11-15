@@ -69,7 +69,7 @@ pub fn upgrade_answer(
 
 /// The program still counts and reads input, on `owner`'s connection or, if
 /// that one ended, a new owner's.
-fn assert_program_survives(jar: &mut Jar, owner: Client, what: &str) {
+pub fn assert_program_survives(jar: &mut Jar, owner: Client, what: &str) {
     let mut owner = if owner.send(&Msg::Ping { n: 77 }).is_ok() {
         owner
     } else {
@@ -518,7 +518,7 @@ fn a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked() {
 
 /// Whether the jar at `socket` has parked for a handover: a lookup's `hello`
 /// goes unanswered, its acceptor being parked with everything else.
-fn parking(socket: &std::path::Path) -> bool {
+pub fn parking(socket: &std::path::Path) -> bool {
     let Ok(mut s) = UnixStream::connect(socket) else {
         return false;
     };
