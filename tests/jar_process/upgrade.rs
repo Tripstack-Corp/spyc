@@ -218,8 +218,9 @@ fn a_validators_child_holding_its_stderr_cannot_hold_the_jar() {
     assert_program_survives(&mut jar, owner, "a held standard error");
 }
 
-/// A validator that outruns its deadline is ended with everything it started:
-/// its whole process group, not only the direct child.
+/// A validator that outruns its deadline (here the first validation's long
+/// backstop) is ended with everything it started, its whole process group
+/// and not only the direct child, and the upgrade is busy.
 #[test]
 fn a_validator_past_its_deadline_is_ended_with_its_children() {
     let mut jar = Jar::start(&[], &counter());
@@ -237,8 +238,17 @@ fn a_validator_past_its_deadline_is_ended_with_its_children() {
             pidfile.display()
         ),
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow, Duration::from_secs(20));
-    assert!(matches!(answer, Some(Msg::Refused { .. })), "{answer:?}");
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow, Duration::from_secs(60));
+    assert!(
+        matches!(
+            answer,
+            Some(Msg::Refused {
+                reason: spyc_jar::proto::reason::UPGRADE_BUSY,
+                ..
+            })
+        ),
+        "a validator out of time makes the upgrade busy: {answer:?}"
+    );
     let child: i32 = std::fs::read_to_string(&pidfile)
         .expect("the validator started a child")
         .trim()

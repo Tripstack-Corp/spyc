@@ -776,8 +776,14 @@ that one file. Nothing the jar does writes an entry twice.
 The validator's exit status proves nothing, since `/usr/bin/true` passes it,
 so it must print a proof line naming the blob's instance and length.
 Its exit and its output share one deadline, and it runs in a process group
-of its own, which is ended with it. The `swap`, `fake` and validator tests
-in `tests/jar_process.rs` each fail with their part undone.
+of its own, which is ended with it. Each deadline is sized by what running
+out costs: the first validation, with the program still served, has a 30 s
+backstop; the parked one has 5 s, its binary's first run already paid. Only
+what the binary did rejects it (reason 6); running out of time makes the
+upgrade busy (reason 5), so a loaded machine defers an upgrade and never
+fails a good binary. The `swap`, `fake` and validator tests in
+`tests/jar_process.rs` and the timer tests in
+`tests/jar_process/timers.rs` each fail with their part undone.
 
 It validates twice. First on a blob taken while nothing is parked, so a new
 binary's first run (about 263 ms on macOS for a new file) and the refusal of
