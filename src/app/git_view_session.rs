@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use ratatui::text::Line;
 
 use crate::git::model::{BlameModel, CommitMeta, DiffModel};
-use crate::ui::diff_render::{self, DiffHighlight, DiffLayout};
+use crate::ui::diff_render::{self, DiffHighlight, DiffLayout, FileHighlight};
 use crate::ui::pager::{self, PagerView};
 use crate::ui::{blame_render, theme::Theme};
 
@@ -439,7 +439,7 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
             match m {
                 Some(model) if model.files.is_empty() => GitViewPayload::Empty,
                 Some(model) => {
-                    let hl = diff_render::highlight_diff(&model);
+                    let hl = highlight_parallel(&model);
                     GitViewPayload::Built(GitViewContent::Diff(model, hl))
                 }
                 None => GitViewPayload::Error("git diff: not a git repository".into()),
@@ -452,7 +452,7 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
         } => match diff_model::diff_since_base(&repo_root, base.as_deref(), &paths) {
             Ok(diff) if diff.model.files.is_empty() => GitViewPayload::Empty,
             Ok(diff) => {
-                let hl = diff_render::highlight_diff(&diff.model);
+                let hl = highlight_parallel(&diff.model);
                 let title = since_base_title(&diff.fork);
                 GitViewPayload::Titled(title, GitViewContent::Diff(diff.model, hl))
             }
@@ -461,7 +461,7 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
         GitViewKind::Show { repo_root, rev } => match diff_model::show_model(&repo_root, &rev) {
             Some(pair) if pair.1.files.is_empty() => GitViewPayload::Empty,
             Some((meta, model)) => {
-                let hl = diff_render::highlight_diff(&model);
+                let hl = highlight_parallel(&model);
                 GitViewPayload::Built(GitViewContent::Show(Box::new((meta, model, hl))))
             }
             None => GitViewPayload::Error(format!("git show: bad revision {rev}")),
@@ -473,6 +473,58 @@ fn build_payload(kind: GitViewKind) -> GitViewPayload {
             }
             None => GitViewPayload::Error("git blame: not tracked at HEAD".into()),
         },
+    }
+}
+
+/// Highlight `model`'s files on every core: syntect is nearly all of a large
+/// diff's build, and each file highlights on its own. The longest files go
+/// first, so a big one doesn't start last and finish alone.
+fn highlight_parallel(model: &DiffModel) -> DiffHighlight {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let files = &model.files;
+    let mut order: Vec<usize> = (0..files.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(diff_line_count(&files[i])));
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZero::get)
+        .min(files.len());
+    let next = AtomicUsize::new(0);
+    let mut slots: Vec<Option<FileHighlight>> =
+        std::iter::repeat_with(|| None).take(files.len()).collect();
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        for _ in 0..workers {
+            handles.push(scope.spawn(|| {
+                let mut done = Vec::new();
+                while let Some(&i) = order.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    done.push((i, diff_render::highlight_file(&files[i])));
+                }
+                done
+            }));
+        }
+        for handle in handles {
+            match handle.join() {
+                Ok(done) => {
+                    for (i, hl) in done {
+                        slots[i] = Some(hl);
+                    }
+                }
+                Err(panic) => std::panic::resume_unwind(panic),
+            }
+        }
+    });
+    DiffHighlight::from_files(
+        slots
+            .into_iter()
+            .map(|hl| hl.expect("each file index is taken by exactly one worker"))
+            .collect(),
+    )
+}
+
+/// How many diff lines `file` carries: its highlighting cost.
+fn diff_line_count(file: &crate::git::model::FileDiff) -> usize {
+    match &file.kind {
+        crate::git::model::DiffKind::Text(hunks) => hunks.iter().map(|h| h.lines.len()).sum(),
+        _ => 0,
     }
 }
 
@@ -489,6 +541,68 @@ fn since_base_title(fork: &crate::git::branch::ForkPoint) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A modified `name` whose one hunk adds `lines` lines of Rust.
+    fn rust_file(name: &str, lines: usize) -> crate::git::model::FileDiff {
+        use crate::git::model::{DiffKind, DiffLine, FileDiff, FileStatus, Hunk, LineOrigin};
+        let added = (0..lines).map(|i| DiffLine {
+            origin: LineOrigin::Add,
+            text: format!("let v{i} = \"/* {name} */\"; // {i}"),
+        });
+        FileDiff {
+            old_path: Some(name.into()),
+            new_path: Some(name.into()),
+            status: FileStatus::Modified,
+            lang_hint: "rs".into(),
+            kind: DiffKind::Text(vec![Hunk {
+                old_start: 1,
+                old_lines: 1,
+                new_start: 1,
+                new_lines: u32::try_from(lines + 1).unwrap(),
+                lines: std::iter::once(DiffLine {
+                    origin: LineOrigin::Context,
+                    text: "/* a comment that".into(),
+                })
+                .chain(added)
+                .collect(),
+            }]),
+        }
+    }
+
+    /// Highlighting on every core lays out exactly as highlighting one file
+    /// after another: each file keeps its own highlight, whatever order the
+    /// workers finished in.
+    #[test]
+    fn a_parallel_highlight_renders_as_a_sequential_one() {
+        let model = DiffModel {
+            files: [3, 400, 1, 57, 0, 1200, 9, 220]
+                .iter()
+                .enumerate()
+                .map(|(i, &n)| rust_file(&format!("f{i}.rs"), n))
+                .collect(),
+            truncated: false,
+        };
+        let render = |hl: &DiffHighlight| {
+            diff_render::render_diff_highlighted(
+                &model,
+                hl,
+                &Theme::default(),
+                DiffLayout::Unified,
+                120,
+                diff_render::DiffOpts {
+                    tab_width: 4,
+                    intraline: crate::config::Intraline::default(),
+                },
+            )
+        };
+        let sequential = render(&diff_render::highlight_diff(&model));
+        assert_eq!(render(&highlight_parallel(&model)), sequential);
+        let empty = DiffModel {
+            files: Vec::new(),
+            truncated: false,
+        };
+        assert!(highlight_parallel(&empty).is_empty());
+    }
 
     #[test]
     fn split_too_narrow_below_threshold() {
