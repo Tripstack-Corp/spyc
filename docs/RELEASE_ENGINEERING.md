@@ -426,8 +426,8 @@ are the source of truth — Actions *call them* so local and CI never drift.
   be narrowed. Default setup must stay **disabled** in repo settings — an
   advanced-setup upload is rejected while it is on. Re-enabling it in the UI
   silently restores the per-PR cost this workflow exists to avoid.
-- `python` is not analyzed: default setup covered one dev helper,
-  `scripts/aislop-baseline.py`, which ships in no artifact.
+- `python` is not analyzed: spyc's Python is the dev and test helpers under
+  `scripts/` and `spikes/`, which ship in no artifact.
 
 ### `homebrew.yml` — tap bump (on release published) — **TAP LIVE**
 - `Tripstack-Corp/homebrew-tap` is live with `Formula/spyc.rb` (pins the release

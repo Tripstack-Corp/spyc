@@ -11,9 +11,8 @@
 # only way to choose when it runs. Default setup must therefore stay DISABLED in
 # repo settings — while it is on, an advanced-setup upload is rejected outright.
 #
-# `python` is deliberately not in the matrix. Default setup analyzed it for
-# exactly one file, `scripts/aislop-baseline.py`, a local dev helper that ships
-# in no artifact.
+# `python` is deliberately not in the matrix: spyc's Python is the dev and
+# test helpers under `scripts/` and `spikes/`, which ship in no artifact.
 #
 # build-mode `none` on both legs is not a shortcut: CodeQL's Rust extractor
 # reads source directly and never invokes cargo, which is why no build cache
