@@ -644,7 +644,7 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   | 2 | the jar has an owner |
   | 3 | no version this jar speaks |
   | 4 | not for this connection's role |
-  | 5 | an upgrade can't start now (one is under way, or no safe point was reached); worth asking again |
+  | 5 | an upgrade can't start or finish now (one is under way, no safe point was reached, or the new binary didn't answer in time); worth asking again |
   | 6 | the new binary is missing or rejected the handover; the jar runs on |
   | 7 | the upgrade failed after the new binary accepted: the jar runs on, or, when the new image took over and couldn't resume, holds its program and serves nothing else |
   | 8 | invalid: no `hello` first, a value out of range, or a kind a client doesn't send |
@@ -667,7 +667,8 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   L), never a path the jar looks up again:
   - `BINARY validate-handover`: the blob on standard input, a socket, until
     its end. It accepts the blob by printing a **proof line** on standard
-    output and exiting 0, within 5 seconds: `spyc-jar-handover-ok`, a space,
+    output and exiting 0, within 30 seconds the first time (the program is
+    still served) and 5 seconds the second (parked): `spyc-jar-handover-ok`, a space,
     the blob's instance as 16 lowercase hex digits (read from the head of the
     blob), a space, and the number of bytes the decoder consumed, in decimal.
     A blob with bytes after its end is refused, so that number is the blob's
@@ -675,7 +676,9 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
     give it with the instance. Later validators may append
     fields, each after a space; a version-1 jar matches the prefix and the
     first two fields and ignores the rest. Exiting 0 without the line, or with
-    values that aren't the blob's, is a refusal (reason 6).
+    values that aren't the blob's, is a refusal (reason 6), as is a non-zero
+    exit. Running out of time is not: the upgrade is busy (reason 5), since
+    a loaded machine defers an upgrade and never fails a good binary.
     **What the proof covers:** it refuses a binary that isn't a jar, and one
     that stops parsing partway. It doesn't refuse a jar that validates and
     then can't resume, nor stop a file replaced between validation and the
@@ -773,7 +776,10 @@ Each part of the upgrade is placed by where its code runs (decision L):
    started from the store.
 4. **One deadline for the validator.** Its standard error is read under the
    same deadline as its exit, and a validator that runs out of time is killed
-   with its whole process group, not only the direct child.
+   with its whole process group, not only the direct child. Each timer is
+   sized by what its expiry costs: the first validation, while the program
+   is served, has 30 seconds; the parked one has 5. Running out of time
+   makes the upgrade busy (reason 5), never rejected.
 5. **One deadline for the flush.** A connection's last frames before the
    handover get one deadline for the whole flush, not one for each write.
 6. **A `build`.** `describe` names the store entry a jar runs from: its

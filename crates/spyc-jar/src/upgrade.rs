@@ -71,7 +71,14 @@ const HOLD_LIMIT: Duration = Duration::from_secs(30);
 /// handover, all of them together.
 const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
 const PARK_DEADLINE: Duration = Duration::from_secs(3);
-const VALIDATE_DEADLINE: Duration = Duration::from_secs(5);
+/// The first validation runs while the program is served, so running out
+/// costs nothing but the wait: a long backstop, for a cold binary on a
+/// loaded machine.
+const FIRST_VALIDATION: Duration = Duration::from_secs(30);
+/// The second runs parked, on a binary whose first run is paid: short.
+const PARKED_VALIDATION: Duration = Duration::from_secs(5);
+/// How long a validator's output may trail its exit.
+const OUTPUT_GRACE: Duration = Duration::from_secs(1);
 
 /// The proof line's first field: a validator prints it, the blob's instance
 /// and the bytes it decoded.
@@ -171,8 +178,12 @@ fn try_run(
     // A new binary's first run is slow (about 263 ms on macOS for a new
     // file), and one that isn't a jar is refused here: both while the program
     // is still served. The parked validation below is the one that counts.
-    validate(binary, &blob_now(shared), shared.cfg.instance)
-        .map_err(|e| (reason::UPGRADE_REJECTED, e))?;
+    validate(
+        binary,
+        &blob_now(shared),
+        shared.cfg.instance,
+        FIRST_VALIDATION,
+    )?;
     shared.upgrading.store(true, Ordering::SeqCst);
     shared.cv.notify_all();
     shared.inbox_cv.notify_all();
@@ -199,7 +210,7 @@ fn try_run(
         )));
     }
     let blob = handover::encode_parts(&shared.cfg, shared.child_pid(), &st, &states);
-    validate(binary, &blob, shared.cfg.instance).map_err(|e| (reason::UPGRADE_REJECTED, e))?;
+    validate(binary, &blob, shared.cfg.instance, PARKED_VALIDATION)?;
 
     let (blob_read, blob_write) = pipe().map_err(failed)?;
     let (to_image, image_stdin) = UnixStream::pair().context("socketpair").map_err(failed)?;
@@ -384,7 +395,7 @@ fn hold(
         )?;
         (&ours).write_all(&(blob.len() as u64).to_be_bytes())?;
         (&ours).write_all(blob)?;
-        ours.set_read_timeout(Some(VALIDATE_DEADLINE))?;
+        ours.set_read_timeout(Some(PARKED_VALIDATION))?;
         let mut ack = [0u8; 1];
         (&ours)
             .read_exact(&mut ack)
@@ -499,13 +510,24 @@ fn wait_parked(shared: &Shared) -> anyhow::Result<()> {
 }
 
 /// Have `binary` check the blob before anything is handed to it: it must
-/// print the proof line for this blob within the deadline, which covers its
-/// exit and its output. One that runs out of time is ended with its whole
-/// process group. The blob goes over a socketpair, not a pipe: a validator
-/// that refuses without reading it leaves a write that answers `EPIPE`, never
-/// `SIGPIPE`.
-fn validate(binary: &Path, blob: &[u8], instance: u64) -> anyhow::Result<()> {
-    let (ours, theirs) = UnixStream::pair().context("socketpair")?;
+/// print the proof line for this blob within `deadline`, which covers its
+/// exit and its output. The blob goes over a socketpair, not a pipe: a
+/// validator that refuses without reading it leaves a write that answers
+/// `EPIPE`, never `SIGPIPE`.
+///
+/// Only what the binary did rejects it (reason 6): it isn't there, it exits
+/// non-zero, or it exits 0 without the proof. One that runs out of time is
+/// ended with its whole process group and makes the upgrade busy (reason 5):
+/// a loaded machine defers an upgrade and never fails a good binary.
+fn validate(
+    binary: &Path,
+    blob: &[u8],
+    instance: u64,
+    deadline: Duration,
+) -> Result<(), (u16, anyhow::Error)> {
+    let busy = |e: anyhow::Error| (reason::UPGRADE_BUSY, e);
+    let rejected = |e: anyhow::Error| (reason::UPGRADE_REJECTED, e);
+    let (ours, theirs) = UnixStream::pair().context("socketpair").map_err(busy)?;
     crate::jar::no_sigpipe(&ours);
     let mut child = Command::new(binary)
         .arg("validate-handover")
@@ -514,7 +536,8 @@ fn validate(binary: &Path, blob: &[u8], instance: u64) -> anyhow::Result<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("run {} validate-handover", binary.display()))?;
+        .with_context(|| format!("run {} validate-handover", binary.display()))
+        .map_err(rejected)?;
     let group = i32::try_from(child.id())
         .ok()
         .and_then(rustix::process::Pid::from_raw);
@@ -546,33 +569,47 @@ fn validate(binary: &Path, blob: &[u8], instance: u64) -> anyhow::Result<()> {
             let _ = err_tx.send(why);
         });
     }
-    let until = Instant::now() + VALIDATE_DEADLINE;
+    let until = Instant::now() + deadline;
     let left = || until.saturating_duration_since(Instant::now());
     let status = loop {
-        if let Some(s) = child.try_wait()? {
-            break s;
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) => {}
+            Err(e) => {
+                end_group();
+                let _ = child.wait();
+                return Err(busy(anyhow!("wait for {}: {e}", binary.display())));
+            }
         }
         if left().is_zero() {
             end_group();
             let _ = child.wait();
-            bail!(
-                "{} didn't answer within {VALIDATE_DEADLINE:?}",
+            return Err(busy(anyhow!(
+                "{} didn't answer within {deadline:?}",
                 binary.display()
-            );
+            )));
         }
         std::thread::sleep(Duration::from_millis(5));
     };
     if !status.success() {
-        let why = err_rx.recv_timeout(left()).unwrap_or_default();
-        bail!("{} rejected the handover: {}", binary.display(), why.trim());
+        // Its reason, if it has gone with it: a child of the validator may
+        // keep the stream open.
+        let why = err_rx
+            .recv_timeout(left().min(OUTPUT_GRACE))
+            .unwrap_or_default();
+        return Err(rejected(anyhow!(
+            "{} rejected the handover: {}",
+            binary.display(),
+            why.trim()
+        )));
     }
     let line = line_rx.recv_timeout(left()).unwrap_or_default();
     if !proves(&line, instance, blob.len()) {
-        bail!(
+        return Err(rejected(anyhow!(
             "{} exited without proving it took the handover (it printed {:?})",
             binary.display(),
             line.trim()
-        );
+        )));
     }
     Ok(())
 }

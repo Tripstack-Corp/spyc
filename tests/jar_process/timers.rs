@@ -132,9 +132,8 @@ fn open_fds(pid: u32) -> usize {
 /// (1) A new binary's first run that takes longer than a parked validation
 /// may (a cold file under load, a jar with no store) is paid with the
 /// program still served: the upgrade goes ahead, and the output never stops
-/// for it. Today the one 5 s deadline refuses a good binary as rejected.
+/// for it.
 #[test]
-#[ignore = "red until the first validation gets a long backstop"]
 fn a_first_run_slower_than_a_parked_validation_still_upgrades() {
     let (mut jar, mut owner, mut seen) = counting();
     let calls = jar.dir.path().join("validations");
@@ -161,9 +160,8 @@ fn a_first_run_slower_than_a_parked_validation_still_upgrades() {
 /// busy (worth asking again), not rejected: the binary is good, the jar
 /// only couldn't wait for it parked. The program's output resumes before
 /// the stalled validator would have answered, nothing is lost or doubled,
-/// and the next attempt goes through. Today it is rejected (reason 6).
+/// and the next attempt goes through.
 #[test]
-#[ignore = "red until a validation's timeout is busy"]
 fn a_parked_validation_past_its_limit_is_busy_and_a_retry_succeeds() {
     let (mut jar, mut owner, mut seen) = counting();
     let calls = jar.dir.path().join("validations");
@@ -194,9 +192,8 @@ fn a_parked_validation_past_its_limit_is_busy_and_a_retry_succeeds() {
 }
 
 /// (3) A parked validator that never exits: busy, its whole process group
-/// ended, and the jar serves on. Today it is rejected (reason 6).
+/// ended, and the jar serves on.
 #[test]
-#[ignore = "red until a validation's timeout is busy"]
 fn a_parked_validator_that_never_answers_is_busy_and_ended_with_its_group() {
     let (mut jar, mut owner, mut seen) = counting();
     let calls = jar.dir.path().join("validations");

@@ -31,8 +31,9 @@ pub mod reason {
     pub const VERSION_NOT_SERVED: u16 = 3;
     /// A request this connection's role may not make.
     pub const ROLE_NOT_PERMITTED: u16 = 4;
-    /// An upgrade that can't start now: one is under way, or the jar couldn't
-    /// reach a safe point. Worth asking again.
+    /// An upgrade that can't start or finish now: one is under way, the jar
+    /// couldn't reach a safe point, or the new binary didn't answer in time.
+    /// Worth asking again.
     pub const UPGRADE_BUSY: u16 = 5;
     /// The new binary is missing or rejected the handover; the jar runs on.
     pub const UPGRADE_REJECTED: u16 = 6;
