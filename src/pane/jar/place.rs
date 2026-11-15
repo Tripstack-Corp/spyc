@@ -31,19 +31,22 @@ impl Place {
     /// This user's: the jar beside the running spyc, sockets in the runtime
     /// directory, tokens in spyc's state directory.
     pub fn for_this_user() -> anyhow::Result<Self> {
-        let binary = std::env::current_exe()
-            .context("where spyc runs from")?
-            .with_file_name("spyc-jar");
+        let dirs = socket_dirs(
+            std::env::var_os("XDG_RUNTIME_DIR"),
+            std::env::var_os("TMPDIR"),
+            rustix::process::getuid().as_raw(),
+        );
+        start_store()?;
+        let binary = match super::store::binary() {
+            super::store::Binary::Entry(e) | super::store::Binary::Beside(e, _) => e,
+            super::store::Binary::None(why) => anyhow::bail!("{why}"),
+        };
         let tokens = crate::state::state_root()
             .context("no state directory for jar tokens")?
             .join("jar-tokens");
         Ok(Self {
             binary,
-            dirs: socket_dirs(
-                std::env::var_os("XDG_RUNTIME_DIR"),
-                std::env::var_os("TMPDIR"),
-                rustix::process::getuid().as_raw(),
-            ),
+            dirs,
             tokens,
         })
     }
@@ -78,6 +81,25 @@ impl Place {
         }
         Ok(())
     }
+}
+
+/// Start this user's jar binary store (`super::store`), once a session:
+/// at spyc's start when jars are on, so the first jar needn't wait.
+pub fn start_store() -> anyhow::Result<()> {
+    let source = std::env::current_exe()
+        .context("where spyc runs from")?
+        .with_file_name("spyc-jar");
+    let root = crate::state::state_root()
+        .context("no state directory for the jar store")?
+        .join("jar-bin");
+    let dirs = socket_dirs(
+        std::env::var_os("XDG_RUNTIME_DIR"),
+        std::env::var_os("TMPDIR"),
+        rustix::process::getuid().as_raw(),
+    );
+    let sockets = dirs.last().cloned().unwrap_or_default();
+    super::store::start(root, source, sockets);
+    Ok(())
 }
 
 /// The socket directories for these values of `XDG_RUNTIME_DIR` and

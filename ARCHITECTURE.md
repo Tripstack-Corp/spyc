@@ -849,6 +849,15 @@ by default.
   nothing started in its place. Any other start that finds the tab's jar
   running waits up to two seconds for it to end, as a restart's does once
   its exit is acknowledged, and otherwise keeps the tab from opening.
+- **Every jar starts from spyc's store of jar binaries** (decision L,
+  `src/pane/jar/store.rs`): `<state>/jar-bin/<sha256>/spyc-jar`, copied
+  whole from the `spyc-jar` beside spyc on a worker at start and run once as
+  `spyc-jar build-info` to check it is this build's. Never the binary beside
+  spyc, which an install may replace while spyc runs, and which a jar would
+  otherwise run by name. A copy that can't run (a `noexec` state directory)
+  leaves jars to start beside spyc; one of another build starts none. Its
+  sweep removes only an entry no live jar reports, not spyc's own, a day
+  untouched, and nothing while any live jar won't say what it runs.
 - **A replayed query goes unanswered** (R15a). Until the replayed tail has
   been handed to the pane, and half a second after, the terminal's answers
   are dropped: they'd answer what the program asked before the crash.

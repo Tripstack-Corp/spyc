@@ -361,11 +361,8 @@ fn a_jar_that_wont_run_leaves_the_program_to_run_without_one() {
         .unwrap_or_else(|e| panic!("{}: the tab failed to open: {e:#}", binary.display()));
         assert!(!host.jarred(), "{}", binary.display());
         assert_eq!(read_bytes(&host, 3), b"ran");
-        assert!(
-            at.elapsed() < Duration::from_secs(3),
-            "waited {:?}",
-            at.elapsed()
-        );
+        // A jar that ended is seen at once: never the wait for one to answer.
+        assert!(at.elapsed() < ANSWER_WAIT, "waited {:?}", at.elapsed());
         let left: Vec<_> = std::fs::read_dir(&place.tokens).unwrap().collect();
         assert!(left.is_empty(), "a token outlived its jar: {left:?}");
     }
@@ -979,4 +976,213 @@ fn a_replayed_query_is_not_answered_again() {
         "a replayed query was answered again: {line:?}"
     );
     second.shutdown_reporting(END, || {});
+}
+
+/// The SHA-256 of `file`, in hex.
+fn sha256_of(file: &Path) -> String {
+    use sha2::Digest as _;
+    use std::fmt::Write as _;
+    sha2::Sha256::digest(std::fs::read(file).unwrap())
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+}
+
+/// The build the built `spyc-jar` says it is. A test built apart from it
+/// (`cargo test --lib`, in a worktree, where `build.rs` runs every time) has
+/// another build time, as a spyc would whose `spyc-jar` an upgrade replaced.
+fn built_jars_build() -> store::Build<'static> {
+    let out = std::process::Command::new(built_jar())
+        .arg("build-info")
+        .output()
+        .unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    let mut lines = text
+        .lines()
+        .map(|l| &*Box::leak(l.to_string().into_boxed_str()));
+    store::Build {
+        commit: lines.next().unwrap(),
+        built: lines.next().unwrap(),
+    }
+}
+
+fn inode(path: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).unwrap().ino()
+}
+
+/// Decision L: this build's `spyc-jar` goes into the store under its SHA-256,
+/// written whole, `0555`, in a marked private directory a jar knows as a
+/// store; a second start uses that entry again, never writing it twice.
+#[test]
+fn the_store_holds_this_build_under_its_hash() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = short_dir();
+    let root = dir.path().join("jar-bin");
+    let source = built_jar();
+    let got = store::install(&root, &source, built_jars_build());
+    let store::Binary::Entry(entry) = got else {
+        panic!("this build's spyc-jar wasn't taken: {got:?}");
+    };
+    assert_eq!(entry, root.join(sha256_of(&source)).join("spyc-jar"));
+    assert_eq!(sha256_of(&entry), sha256_of(&source));
+    let mode = std::fs::metadata(&entry).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o555);
+    assert_eq!(
+        spyc_jar::store::store_of(&entry),
+        Some(root.clone()),
+        "a jar knows its store"
+    );
+    let first = inode(&entry);
+    assert_eq!(
+        store::install(&root, &source, built_jars_build()),
+        store::Binary::Entry(entry.clone())
+    );
+    assert_eq!(inode(&entry), first, "the entry was written again");
+    let strays: Vec<_> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(".incoming"))
+        .collect();
+    assert!(strays.is_empty(), "{strays:?}");
+}
+
+/// A `spyc-jar` that isn't this build's (a package upgrade landed while spyc
+/// started) starts no jars this session.
+#[test]
+fn another_builds_spyc_jar_starts_no_jars() {
+    let dir = short_dir();
+    let other = store::Build {
+        commit: "0000000",
+        built: "another time",
+    };
+    let got = store::install(&dir.path().join("jar-bin"), &built_jar(), other);
+    assert!(matches!(got, store::Binary::None(_)), "{got:?}");
+}
+
+/// A store copy that can't run (a state directory mounted `noexec`) leaves
+/// jars to start from the `spyc-jar` beside spyc; one that doesn't hash to
+/// its name isn't used either.
+#[test]
+fn a_store_copy_that_cant_be_used_falls_back_to_the_binary_beside_spyc() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = short_dir();
+    let root = dir.path().join("jar-bin");
+    let garbage = dir.path().join("spyc-jar");
+    std::fs::write(&garbage, b"\x7fELF not really").unwrap();
+    let got = store::install(&root, &garbage, built_jars_build());
+    assert!(
+        matches!(&got, store::Binary::Beside(at, _) if *at == garbage),
+        "{got:?}"
+    );
+
+    let source = built_jar();
+    let store::Binary::Entry(entry) = store::install(&root, &source, built_jars_build()) else {
+        panic!("premise: the entry is made");
+    };
+    // Changed under its name into something that answers as this build
+    // would: only its hash gives it away.
+    let build = built_jars_build();
+    std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            "#!/bin/sh\necho '{}'\necho '{}'\n",
+            build.commit, build.built
+        ),
+    )
+    .unwrap();
+    let got = store::install(&root, &source, built_jars_build());
+    assert!(matches!(got, store::Binary::Beside(..)), "{got:?}");
+}
+
+/// Set `dir`'s modification time two days back.
+fn age(dir: &Path) {
+    use rustix::fs::{AtFlags, CWD, Timespec, Timestamps};
+    let then = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        - 2 * 24 * 3600;
+    let t = Timespec {
+        tv_sec: i64::try_from(then).unwrap(),
+        tv_nsec: 0,
+    };
+    rustix::fs::utimensat(
+        CWD,
+        dir,
+        &Timestamps {
+            last_access: t,
+            last_modification: t,
+        },
+        AtFlags::empty(),
+    )
+    .unwrap();
+}
+
+/// The sweep removes an old entry no live jar reports, and keeps one a live
+/// jar runs from, spyc's own, and a new one; when a live jar won't say what
+/// it runs, it removes nothing.
+#[test]
+fn the_store_sweep_removes_only_old_entries_nothing_runs() {
+    let dir = short_dir();
+    let root = dir.path().join("jar-bin");
+    let store::Binary::Entry(running) = store::install(&root, &built_jar(), built_jars_build())
+    else {
+        panic!("premise: the entry is made");
+    };
+    let mut place = place_in(dir.path(), running.clone());
+    place.binary = running.clone();
+    let mut host = spawn_in(&place, "exec cat", dir.path()).unwrap();
+    let entry = |name: &str| {
+        let d = root.join(name);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("spyc-jar"), b"x").unwrap();
+        d
+    };
+    let ours = entry("ours");
+    let stale = entry("stale");
+    let fresh = entry("fresh");
+    for d in [running.parent().unwrap(), &ours, &stale] {
+        age(d);
+    }
+
+    // A jar that answers a connection but never describes itself.
+    let mute = std::os::unix::net::UnixListener::bind(place.sockets().join("mute.sock")).unwrap();
+    assert!(
+        store::sweep(
+            &root,
+            place.sockets(),
+            &ours.join("spyc-jar"),
+            store::UNTOUCHED
+        )
+        .is_empty(),
+        "a sweep went ahead with a jar it couldn't ask"
+    );
+    drop(mute);
+    let _ = std::fs::remove_file(place.sockets().join("mute.sock"));
+
+    let removed = store::sweep(
+        &root,
+        place.sockets(),
+        &ours.join("spyc-jar"),
+        store::UNTOUCHED,
+    );
+    assert_eq!(removed, std::slice::from_ref(&stale));
+    assert!(running.exists(), "the entry a live jar runs from");
+    assert!(ours.exists() && fresh.exists());
+    let touched = running
+        .parent()
+        .unwrap()
+        .symlink_metadata()
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert!(
+        touched.elapsed().unwrap() < Duration::from_secs(60),
+        "a reported entry is touched"
+    );
+    host.shutdown(END);
 }

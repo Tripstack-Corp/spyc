@@ -325,6 +325,12 @@ impl App {
         // `Effect::Graveyard` kicked from `App::run`, so its disk IO stays off
         // the startup path. See that call site.
 
+        // The jar binary store copies and checks its entry off the loop,
+        // before a pane's jar needs it.
+        if app.state.active_project().config.pane.jars && crate::pane::jar::honoured() {
+            let _ = crate::pane::jar::place::start_store();
+        }
+
         // Startup pane tabs (`[pane] tabs` / `[[pane.tab]]`): the declared
         // fleet at launch, or the consent prompt a project-local list needs
         // first (`startup_tabs`). Precedence: restore > an approved project
