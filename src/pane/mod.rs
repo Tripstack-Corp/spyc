@@ -18,6 +18,7 @@ pub mod snapshot;
 pub mod tabs;
 mod widget;
 
+pub use launch::Launch;
 pub use tabs::{
     AgentActivity, PaneTabs, ReportedStatus, RetiredReason, RunningAgent, TabEntry, TabInfo,
 };
@@ -26,6 +27,8 @@ pub use widget::{PaneWidget, cell_style};
 
 // Shared pty kernel that `Pane`, `PendingCapture` and `BackgroundTask`
 // all wrap.
+pub mod jar;
+mod launch;
 pub mod launch_env;
 pub mod pty_host;
 
@@ -48,12 +51,11 @@ pub type PaneScreen = <PaneEngine as engine::Engine>::Screen;
 // must be in scope.
 use crate::pane::engine::{Engine as _, TerminalScreen as _};
 use std::io::Write as _;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use crate::pane::pty_host::{PtyEvent, PtyHost, PtySpec, Wake};
+use crate::pane::pty_host::{PtyEvent, PtyHost, Wake};
 
 /// MVU Phase 3b: an opaque wake callback the parser worker fires when new
 /// output arrives, so the unified event loop can sleep instead of polling
@@ -120,67 +122,6 @@ pub struct Pane {
 }
 
 impl Pane {
-    /// Spawn `command` in a fresh pty of `rows × cols`, with `cwd` as
-    /// the working directory. `context_path` points at *App's* live
-    /// context file (the one the main loop writes to) so the child's
-    /// `SPYC_CONTEXT` always resolves to a real file regardless of
-    /// where the pane itself spawns — App writes one canonical file
-    /// (`context::process_context_path`), but a pane can spawn in any
-    /// subdir, and recomputing from `cwd` would point at a path nobody
-    /// writes.
-    pub fn spawn(
-        command: &str,
-        rows: u16,
-        cols: u16,
-        cwd: &Path,
-        context_path: &Path,
-        wake: PaneWake,
-    ) -> anyhow::Result<Self> {
-        Self::spawn_with_env(command, rows, cols, cwd, context_path, &[], wake)
-    }
-
-    pub fn spawn_with_env(
-        command: &str,
-        rows: u16,
-        cols: u16,
-        cwd: &Path,
-        context_path: &Path,
-        extra_env: &[(&str, &str)],
-        wake: PaneWake,
-    ) -> anyhow::Result<Self> {
-        // Pane env: tell child processes (e.g. Claude CLI's MCP server)
-        // where this spyc instance's context file lives, and advertise
-        // truecolor support so apps that negotiate it (bat, fzf, delta,
-        // …) don't silently downgrade to 256-colour. TERM=xterm-256color
-        // alone doesn't signal 24-bit; COLORTERM=truecolor is the de
-        // facto standard pair.
-        let context_str = context_path.to_string_lossy().into_owned();
-        let mut env: Vec<(&str, &str)> = Vec::with_capacity(extra_env.len() + 2);
-        env.push((crate::context::CONTEXT_ENV_VAR, context_str.as_str()));
-        env.push(("COLORTERM", "truecolor"));
-        env.extend(extra_env.iter().copied());
-
-        let host = PtyHost::spawn(PtySpec {
-            command,
-            rows,
-            cols,
-            cwd,
-            env: &env,
-            term: "xterm-256color",
-            // Send SIGWINCH right after spawn so rc-file shells
-            // (p10k / oh-my-zsh) re-query the pty size and render
-            // their first prompt at the right geometry.
-            nudge_winch: true,
-            debug_dump: std::env::var("SPYC_PTY_DEBUG").is_ok(),
-            // Interactive pane: exec the agent so it replaces the rc-sourcing
-            // shell (no job-control wrapper to fight `^z` suspend/resume).
-            exec_replace: true,
-            capture_launch_env: !extra_env.is_empty(),
-        })?;
-        let parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
-        Ok(Self::adopt(host, parser, wake))
-    }
-
     /// Build a `Pane` around an already-spawned `PtyHost` and a
     /// terminal engine. v1.5 Phase 6 promotion path: a backgrounded
     /// task hands over its `PtyHost`, we wrap it in a fresh parser
@@ -206,6 +147,7 @@ impl Pane {
             debug_dump: host.debug_dump,
             sync_timeout: SYNC_TIMEOUT,
             replies: Some(host.reply_writer()),
+            snapshots: host.snapshot_sink().map(jar::Snapshotter::new),
         };
         let parser_clone = Arc::clone(&parser);
         let gen_clone = Arc::clone(&parser_gen);
@@ -369,6 +311,17 @@ impl Pane {
     /// wrapper-shell `process_id`. Used by the `^z` suspend to stop the agent.
     pub fn foreground_pgrp(&self) -> Option<u32> {
         self.host.foreground_pgrp()
+    }
+
+    /// `^z`: stop the program's job, or continue it ([`PtyHost::suspend`]).
+    #[cfg(unix)]
+    pub fn suspend(&self, resume: bool) -> anyhow::Result<()> {
+        self.host.suspend(resume)
+    }
+
+    /// Whether the program runs in a jar.
+    pub const fn jarred(&self) -> bool {
+        self.host.jarred()
     }
 
     /// Best-effort kill of just the immediate child (no signal-group
@@ -698,6 +651,8 @@ struct WorkerOpts {
     debug_dump: bool,
     sync_timeout: std::time::Duration,
     replies: Option<pty_host::ReplyWriter>,
+    /// A jarred pane's snapshots of its engine.
+    snapshots: Option<jar::Snapshotter>,
 }
 
 fn parser_worker(
@@ -706,7 +661,7 @@ fn parser_worker(
     parser: Arc<Mutex<PaneEngine>>,
     parser_gen: Arc<AtomicU64>,
     wake: Wake,
-    opts: WorkerOpts,
+    mut opts: WorkerOpts,
 ) {
     // `guard` owns the byte receiver and ships it back to the pane on EVERY
     // exit from this function — normal return AND panic-unwind. A worker
@@ -759,6 +714,9 @@ fn parser_worker(
             .recv_timeout(std::time::Duration::from_millis(50))
         {
             Ok(PtyEvent::Bytes(bytes)) => {
+                if let Some(s) = &mut opts.snapshots {
+                    s.parsed(bytes.len());
+                }
                 if opts.debug_dump {
                     append_pty_debug(&bytes);
                 }
@@ -819,6 +777,9 @@ fn parser_worker(
                 wake_on_close();
                 return;
             }
+        }
+        if let Some(s) = &mut opts.snapshots {
+            s.tick(&parser, sync_opened.is_none());
         }
         if sync_opened.is_some_and(|t| t.elapsed() >= opts.sync_timeout) {
             let mut p = parser

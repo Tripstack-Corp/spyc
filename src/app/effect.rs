@@ -112,11 +112,12 @@ pub enum Effect {
         on_err: String,
     },
 
-    /// A-class. `^z`-toggle a bottom pane: `SIGSTOP` (`resume == false`) stops
-    /// the agent's process group, or `SIGCONT` (`resume == true`) wakes it.
-    /// `pgrp` is the pty's foreground group (`tcgetpgrp`) — the agent itself,
-    /// since a pane execs the agent (it's the direct child / session leader, no
-    /// job-control wrapper shell to reclaim the tty). **`SIGSTOP`, not
+    /// A-class. `^z`-toggle the pane tab `tab` (its id): `SIGSTOP`
+    /// (`resume == false`) stops the agent's process group, or `SIGCONT`
+    /// (`resume == true`) wakes it, through `Pane::suspend`: locally the pty's
+    /// foreground group (`tcgetpgrp`), the agent itself, since a pane execs the
+    /// agent (it's the direct child / session leader, no job-control wrapper
+    /// shell to reclaim the tty); in a jar, by the jar. **`SIGSTOP`, not
     /// `SIGTSTP`, is deliberate**: Claude catches `SIGTSTP` and runs a
     /// self-suspend handler that on macOS ends in the false-exit
     /// (`[exited 146]`); `SIGSTOP` is uncatchable, so the agent just freezes and
@@ -124,7 +125,7 @@ pub enum Effect {
     /// `TabInfo.suspended` flip + flash run in the producer (pure state); only
     /// the signal is the effect. `#[cfg(unix)]`, like `SignalGroup`.
     #[cfg(unix)]
-    SignalPane { pgrp: u32, resume: bool },
+    SignalPane { tab: String, resume: bool },
 
     /// A-class. Send `sig` to a live `!`-capture's foreground process group —
     /// the `^C` (SIGINT) / `^\` (SIGKILL) keys. A real signal, not the old

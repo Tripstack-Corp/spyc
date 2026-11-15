@@ -281,6 +281,11 @@ pub struct PaneConfig {
     /// a pane has the keyboard. False makes it an ordinary key there, which
     /// reaches the pane's program; from the file view it still arms the prefix.
     pub ctrl_w_prefix: bool,
+    /// When true, a pane tab's program runs in a `spyc-jar`, which holds its
+    /// PTY and outlives spyc (#1099). Honoured only on a `-CURRENT` or rc
+    /// build ([`crate::pane::jar::honoured`]); only the user's own files
+    /// decide. Default false.
+    pub jars: bool,
     /// Home-configured opt-in strip below the active Codex pane.
     pub agent_hud: AgentHudMode,
     /// How the strip says when a plan window resets: clock time, or a countdown.
@@ -338,6 +343,7 @@ impl Default for PaneConfig {
             preview_pasted_images: true,
             claude_esc_guard: true,
             ctrl_w_prefix: true,
+            jars: false,
             agent_hud: AgentHudMode::Off,
             agent_hud_resets: AgentHudResets::Clock,
             tabs: Vec::new(),
@@ -383,6 +389,8 @@ struct FilePane {
     claude_esc_guard: Option<bool>,
     #[serde(default)]
     ctrl_w_prefix: Option<bool>,
+    #[serde(default)]
+    jars: Option<bool>,
     #[serde(default)]
     agent_hud: Option<AgentHudMode>,
     #[serde(default)]
@@ -2142,5 +2150,23 @@ dir = "#222222"
         let cfg = Config::load_from(&[Some(&user), Some(&proj)]).unwrap();
         assert_eq!(cfg.colors.dir.as_deref(), Some("#222222"));
         assert_eq!(cfg.bindings.len(), 2);
+    }
+
+    #[test]
+    fn jars_are_off_by_default_and_only_your_own_file_turns_them_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home.toml");
+        let project = dir.path().join("project.toml");
+        assert!(!Config::default().pane.jars);
+        std::fs::write(&project, "[pane]\njars = true\n").unwrap();
+        assert!(!Config::load_layered(None, &project).unwrap().pane.jars);
+        std::fs::write(&home, "[pane]\njars = true\n").unwrap();
+        std::fs::write(&project, "[pane]\njars = false\n").unwrap();
+        assert!(
+            Config::load_layered(Some(&home), &project)
+                .unwrap()
+                .pane
+                .jars
+        );
     }
 }

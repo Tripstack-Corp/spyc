@@ -789,6 +789,57 @@ blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
 `a_stalled_reader_does_not_freeze_a_release` and
 `a_paste_the_program_never_reads_does_not_block_its_owner`.
 
+## A pane in a jar
+
+With `[pane] jars` on, a pane tab's program runs in a `spyc-jar`
+(`src/pane/jar/`), whose socket stands in for the PTY master and the child:
+`PtyHost` drives it through `portable-pty`'s traits, as it drives a local
+program. Only pane tabs: overlays, tasks and captures run on a PTY of spyc's
+own. A `-CURRENT` or rc build
+reads the setting; a release runs every program as before until jars are on
+by default.
+
+- **No tab fails to open for want of a jar** (finding 1). A jar that can't be
+  started, ends before it answers (one that doesn't speak spyc's wire version
+  exits with 75 first), or would sit in a directory others can reach leaves
+  the program to run without one, which spyc's standard error says.
+- **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
+  writer thread per connection, which pings whenever it's idle, so a jar that
+  stops reading holds up neither the event loop nor the parser.
+- **A socket's directory is this user's** (finding 14): under
+  `$XDG_RUNTIME_DIR`, else `$TMPDIR`, else `/tmp/spyc-<uid>`, and both spyc and
+  the jar check it is a directory, not a link, owned by this user and closed to
+  others before trusting a socket there. A program finds its jar by
+  `SPYC_JAR_SOCKET`, never by working the path out again.
+- **Each start of a tab gets a socket of its own**, its name the tab's id and
+  four random bytes: a restarted tab's jar can't meet the last one's, which
+  ends only once its exit is acknowledged.
+
+## A jarred program's signals go through its jar
+
+<!-- SPYC-TRAP: jar-signals-through-the-jar -->
+The pid a jar reports is its program's when the jar says so, and only the jar
+knows when that stops being true: after the exit is recorded the kernel may
+give it to anyone. So `PtyHost` sends every signal for a jarred program, the
+shutdown's `TERM` and `KILL`, a drop's `KILL` and `^z`'s `STOP` and `CONT`, as
+a frame to its jar, and never to the pid (finding 10). The pid stays for
+reading what the process is doing. A signal sent to it directly passes every
+test where the pid is still the program's, and kills a bystander the day it
+isn't: `pane::jar::tests::every_signal_goes_through_the_jar` gives the jar a
+bystander's pid to report.
+
+## A snapshot is stored at the jar's offset
+
+<!-- SPYC-TRAP: jar-snapshot-offset -->
+A pane counts the bytes it parses; its jar numbers the bytes it logged. The two
+part at a gap, where the jar dropped bytes the pane never saw, and at the one
+`CAN` the pane is handed after a gap, which ends whatever escape sequence the
+gap cut and which the jar never sent. A snapshot stored at the pane's count
+after a gap sits below the jar's offset by the gap's size, and the next
+replay from it applies bytes the snapshot already holds: an inline agent's
+output twice in the scrollback (finding 8). `pane::jar::offsets` maps each
+count to the jar's offset of the last byte it reflects.
+
 ## spyc's stderr follows the screen
 
 <!-- SPYC-TRAP: stderr-follows-the-screen -->

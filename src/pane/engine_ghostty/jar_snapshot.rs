@@ -10,10 +10,7 @@
 //! binary form case by case.
 #![cfg_attr(
     not(test),
-    expect(
-        dead_code,
-        reason = "no pane takes or restores a snapshot in this build"
-    )
+    expect(dead_code, reason = "no pane restores a snapshot in this build")
 )]
 
 use spyc_vt_sys::ffi;

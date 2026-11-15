@@ -1,10 +1,16 @@
 //! The client's end of a jar's socket: connect, `hello`, then send and receive
 //! frames. One thread may read while another writes.
+//!
+//! An owner that must never wait on its jar splits into an [`Outbox`]: frames
+//! queue for a writer thread of their own, which pings whenever it has been
+//! idle, so a jar that stops reading stalls nothing but that thread
+//! (finding 4).
 
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
 use crate::proto::{self, Msg, Role};
@@ -119,6 +125,121 @@ impl Client {
     }
 }
 
+impl Client {
+    /// Split into the receiving half and an [`Outbox`] whose writer pings
+    /// after `idle` with nothing to send, and gives up on a jar whose socket
+    /// takes no bytes for `stall`.
+    pub fn split_queued(self, idle: Duration, stall: Duration) -> io::Result<(Receiver, Outbox)> {
+        let sock = Arc::new(
+            self.write
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .try_clone()?,
+        );
+        sock.set_write_timeout(Some(stall))?;
+        let (queue, frames) = mpsc::channel();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let writer = (Arc::clone(&sock), Arc::clone(&queued));
+        std::thread::Builder::new()
+            .name("jar-outbox".into())
+            .spawn(move || write_queued(&writer.0, &frames, &writer.1, idle))?;
+        Ok((
+            Receiver(self),
+            Outbox {
+                queue,
+                sock,
+                queued,
+            },
+        ))
+    }
+}
+
+enum Queued {
+    Frame(Vec<u8>),
+    Close,
+}
+
+/// The sending half of an owner's connection: [`Outbox::send`] queues and
+/// returns, and one writer thread does every write.
+#[derive(Clone, Debug)]
+pub struct Outbox {
+    queue: mpsc::Sender<Queued>,
+    sock: Arc<UnixStream>,
+    queued: Arc<AtomicUsize>,
+}
+
+impl std::fmt::Debug for Queued {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Frame(b) => write!(f, "Frame({} bytes)", b.len()),
+            Self::Close => f.write_str("Close"),
+        }
+    }
+}
+
+impl Outbox {
+    /// Queue `msg`. An error only when it is over the frame limit or the
+    /// connection has ended.
+    pub fn send(&self, msg: &Msg) -> io::Result<()> {
+        let frame = proto::encode(msg);
+        if frame.len() - 4 > proto::MAX_FRAME {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("a frame of {} bytes, over the limit", frame.len() - 4),
+            ));
+        }
+        let len = frame.len();
+        self.queued.fetch_add(len, Ordering::AcqRel);
+        self.queue.send(Queued::Frame(frame)).map_err(|_| {
+            self.queued.fetch_sub(len, Ordering::AcqRel);
+            io::Error::from(io::ErrorKind::BrokenPipe)
+        })
+    }
+
+    /// The bytes queued and not yet written.
+    pub fn queued(&self) -> usize {
+        self.queued.load(Ordering::Acquire)
+    }
+
+    /// End the connection once what is queued has been written.
+    pub fn close(&self) {
+        if self.queue.send(Queued::Close).is_err() {
+            let _ = self.sock.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+/// The writer: each queued frame in order, a ping after `idle` with none,
+/// and the connection shut once a write fails or times out.
+fn write_queued(
+    sock: &UnixStream,
+    frames: &mpsc::Receiver<Queued>,
+    queued: &AtomicUsize,
+    idle: Duration,
+) {
+    use std::io::Write as _;
+    let mut pings = 0u64;
+    loop {
+        let (frame, counted) = match frames.recv_timeout(idle) {
+            Ok(Queued::Frame(f)) => {
+                let n = f.len();
+                (f, n)
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                pings += 1;
+                (proto::encode(&Msg::Ping { n: pings }), 0)
+            }
+            Ok(Queued::Close) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        let written = (&*sock).write_all(&frame);
+        queued.fetch_sub(counted, Ordering::AcqRel);
+        if written.is_err() {
+            break;
+        }
+    }
+    let _ = sock.shutdown(std::net::Shutdown::Both);
+}
+
 fn self_write(c: &Client) -> Arc<Mutex<UnixStream>> {
     Arc::clone(&c.write)
 }
@@ -183,4 +304,116 @@ impl Sender {
 pub fn read_token_file(path: &Path) -> anyhow::Result<Vec<u8>> {
     let text = std::fs::read(path).map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
     Ok(text.trim_ascii().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A client on one end of a socket pair, and the jar's end.
+    fn pair() -> (Client, UnixStream) {
+        let (ours, jar) = UnixStream::pair().unwrap();
+        let client = Client {
+            read: std::io::BufReader::new(ours.try_clone().unwrap()),
+            timeout: None,
+            write: Arc::new(Mutex::new(ours)),
+        };
+        (client, jar)
+    }
+
+    fn next(jar: &mut UnixStream) -> Option<Msg> {
+        jar.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        proto::read_msg(jar).unwrap_or_default()
+    }
+
+    /// Finding 4: a jar that reads nothing holds up no sender. Sixty-four
+    /// MiB is far past what the socket's buffer takes.
+    #[test]
+    fn a_send_returns_while_the_jar_reads_nothing() {
+        let (client, _jar) = pair();
+        let (_rx, out) = client
+            .split_queued(Duration::from_secs(60), Duration::from_secs(60))
+            .unwrap();
+        let at = Instant::now();
+        for _ in 0..64 {
+            out.send(&Msg::Input {
+                bytes: vec![b'x'; 1 << 20],
+            })
+            .unwrap();
+        }
+        assert!(
+            at.elapsed() < Duration::from_secs(2),
+            "sends waited on the socket: {:?}",
+            at.elapsed()
+        );
+        assert!(out.queued() > 32 << 20, "the frames wait in the queue");
+    }
+
+    /// Pings keep the jar's deadline when the owner has nothing to say.
+    #[test]
+    fn an_idle_outbox_pings() {
+        let (client, mut jar) = pair();
+        let (_rx, _out) = client
+            .split_queued(Duration::from_millis(50), Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(next(&mut jar), Some(Msg::Ping { n: 1 }));
+        assert_eq!(next(&mut jar), Some(Msg::Ping { n: 2 }));
+    }
+
+    #[test]
+    fn close_writes_what_was_queued_first() {
+        let (client, mut jar) = pair();
+        let (_rx, out) = client
+            .split_queued(Duration::from_secs(60), Duration::from_secs(5))
+            .unwrap();
+        out.send(&Msg::Ack { offset: 1 }).unwrap();
+        out.send(&Msg::Ack { offset: 2 }).unwrap();
+        out.close();
+        assert_eq!(next(&mut jar), Some(Msg::Ack { offset: 1 }));
+        assert_eq!(next(&mut jar), Some(Msg::Ack { offset: 2 }));
+        assert_eq!(next(&mut jar), None, "then the connection ends");
+    }
+
+    /// A jar that takes no bytes for `stall` loses the connection, and the
+    /// sender hears so rather than queueing for ever.
+    #[test]
+    fn a_stalled_jar_ends_the_connection() {
+        let (client, _jar) = pair();
+        let (_rx, out) = client
+            .split_queued(Duration::from_secs(60), Duration::from_millis(200))
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        let mut ended = false;
+        while Instant::now() < until {
+            if out
+                .send(&Msg::Input {
+                    bytes: vec![b'x'; 1 << 16],
+                })
+                .is_err()
+            {
+                ended = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            ended,
+            "a send still queued 5 s after the jar stopped reading"
+        );
+    }
+
+    #[test]
+    fn a_frame_over_the_limit_is_refused_at_once() {
+        let (client, _jar) = pair();
+        let (_rx, out) = client
+            .split_queued(Duration::from_secs(60), Duration::from_secs(5))
+            .unwrap();
+        let e = out
+            .send(&Msg::Input {
+                bytes: vec![0; proto::MAX_FRAME],
+            })
+            .unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(out.queued(), 0);
+    }
 }

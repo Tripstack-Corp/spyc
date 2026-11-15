@@ -332,6 +332,11 @@ impl Config {
         {
             self.pane.agent_hud = mode;
         }
+        if trust == Trust::Trusted
+            && let Some(b) = file.jars
+        {
+            self.pane.jars = b;
+        }
     }
 
     /// Startup tabs. The two forms are mutually exclusive within one file —

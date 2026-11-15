@@ -11,6 +11,11 @@
 //!
 //! Input delivery runs on a bounded worker queue: a stopped or non-reading
 //! child may stall its writer, never the application event loop.
+//!
+//! A pane tab's program may run in a jar instead (`super::jar`), whose
+//! stand-ins for the master and the child take the place of the PTY's. Every
+//! signal to a jarred program then goes through its jar, never to a pid
+//! (finding 10).
 
 use std::io::Read;
 use std::path::Path;
@@ -19,6 +24,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
+use spyc_jar::proto::JarSignal;
 
 use super::PaneWake;
 
@@ -107,6 +113,8 @@ pub struct PtySpec<'a> {
     pub exec_replace: bool,
     /// Record home variables after shell rc loading, before the command execs.
     pub capture_launch_env: bool,
+    /// Run the program in a jar, when one can be started.
+    pub jar: Option<super::jar::Spec>,
 }
 
 pub use super::launch_env::LaunchEnvironment;
@@ -121,6 +129,10 @@ pub use super::launch_env::LaunchEnvironment;
 /// differs.
 pub struct PtyHost {
     launch_env: Option<super::launch_env::RecordFile>,
+    /// The jar the program runs in, which sends it every signal.
+    jar: Option<super::jar::Signals>,
+    /// Where a jarred pane's snapshots go.
+    snapshots: Option<super::jar::SnapshotSink>,
     pub master: Box<dyn MasterPty + Send>,
     input: InputWriter,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -199,14 +211,6 @@ impl PtyHost {
     /// Same machinery that `Pane::spawn_with_env` and `spawn_capture`
     /// used pre-v1.5; consumers now share it.
     pub fn spawn(spec: PtySpec) -> anyhow::Result<Self> {
-        let pty_system = native_pty_system();
-        let pair = pty_system.openpty(PtySize {
-            rows: spec.rows,
-            cols: spec.cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-
         let (shell, mut shell_args) =
             crate::shell::pane_invocation(spec.command, spec.exec_replace);
         let launch_env = if spec.capture_launch_env && !spec.command.trim().is_empty() {
@@ -214,32 +218,63 @@ impl PtyHost {
         } else {
             None
         };
-        let mut cmd = CommandBuilder::new(&shell);
-        cmd.args(shell_args.iter().map(String::as_str));
-        cmd.cwd(spec.cwd);
         // Runtime `:s` overrides (formerly applied by mutating the
         // process env, which children inherited). Applied before the
         // caller's env so spec keys (TERM/COLUMNS/LINES/…) still win on
         // collision, matching the old inherit-then-override order.
-        for (k, v) in crate::envset::overrides() {
-            cmd.env(k, v);
-        }
-        cmd.env("TERM", spec.term);
-        cmd.env("COLUMNS", spec.cols.to_string());
-        cmd.env("LINES", spec.rows.to_string());
-        for (k, v) in spec.env {
-            cmd.env(k, v);
-        }
+        let mut env = crate::envset::overrides();
+        env.push(("TERM".into(), spec.term.into()));
+        env.push(("COLUMNS".into(), spec.cols.to_string()));
+        env.push(("LINES".into(), spec.rows.to_string()));
+        env.extend(
+            spec.env
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string())),
+        );
 
-        // Start the writer before spawning the child, so a failed worker spawn
-        // cannot strand a running child. No child input exists at this point.
-        let reader = pair.master.try_clone_reader()?;
-        let input = InputWriter::new(pair.master.take_writer()?)?;
-        let child = pair.slave.spawn_command(cmd)?;
-        // We don't need our own handle on the slave — once the child
-        // exits, the master read side will see EOF.
-        drop(pair.slave);
+        let mut argv = vec![shell];
+        argv.extend(shell_args);
+        let jarred = match &spec.jar {
+            Some(jar) => super::jar::spawn(jar, &argv, spec.cwd, (spec.rows, spec.cols), &env)?,
+            None => None,
+        };
+        let (jar, snapshots, spawned) = match jarred {
+            Some(j) => jar_parts(j)?,
+            None => (None, None, spawn_native(&spec, &argv, &env)?),
+        };
+        let mut host = Self::running(spawned, (spec.rows, spec.cols), spec.debug_dump);
+        host.launch_env = launch_env;
+        host.jar = jar;
+        host.snapshots = snapshots;
+        if spec.nudge_winch {
+            // Send SIGWINCH so rc-file shells re-query the pty size
+            // and render their first prompt at the right geometry.
+            let _ = host.master.resize(PtySize {
+                rows: spec.rows,
+                cols: spec.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            });
+        }
+        Ok(host)
+    }
 
+    /// A host around a program already running in a jar.
+    #[cfg(test)]
+    pub(crate) fn around_jar(j: super::jar::Jarred, size: (u16, u16)) -> anyhow::Result<Self> {
+        let (jar, snapshots, spawned) = jar_parts(j)?;
+        let mut host = Self::running(spawned, size, false);
+        host.jar = jar;
+        host.snapshots = snapshots;
+        Ok(host)
+    }
+
+    /// The host of a running program, its reader thread started.
+    fn running(
+        (master, reader, input, child): Spawned,
+        size: (u16, u16),
+        debug_dump: bool,
+    ) -> Self {
         // Background thread pumps reader → channel. The render loop
         // drains the channel without blocking on child output. The channel is
         // BOUNDED (`READER_CHANNEL_CAP`): a full channel blocks the reader's
@@ -253,31 +288,21 @@ impl PtyHost {
         let wake: Arc<Mutex<Option<Wake>>> = Arc::new(Mutex::new(None));
         let wake_reader = Arc::clone(&wake);
         thread::spawn(move || reader_loop(reader, &tx, &closed_flag, &wake_reader));
-
-        if spec.nudge_winch {
-            // Send SIGWINCH so rc-file shells re-query the pty size
-            // and render their first prompt at the right geometry.
-            let _ = pair.master.resize(PtySize {
-                rows: spec.rows,
-                cols: spec.cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
-        }
-
-        Ok(Self {
-            launch_env,
+        Self {
+            launch_env: None,
+            jar: None,
+            snapshots: None,
             wake,
-            master: pair.master,
+            master,
             input,
             child,
             event_rx: Some(event_rx),
             closed_atomic,
             closed: false,
             exit_status: None,
-            last_size: (spec.rows, spec.cols),
-            debug_dump: spec.debug_dump,
-        })
+            last_size: size,
+            debug_dump,
+        }
     }
 
     /// The post-rc record may not have arrived when spawn returns.
@@ -434,7 +459,7 @@ impl PtyHost {
         // the reap (and the main loop) can't block indefinitely.
         #[cfg(unix)]
         if let Some(pid) = self.child.process_id() {
-            kill_group(pid, rustix::process::Signal::KILL);
+            self.signal_group(pid, JarSignal::Kill);
         } else {
             let _ = self.child.kill();
         }
@@ -496,6 +521,65 @@ impl PtyHost {
             .and_then(|p| u32::try_from(p).ok())
     }
 
+    /// Signal the program's process group, led by `pid`: through its jar
+    /// when it runs in one, which knows whether that pid is still its
+    /// program's.
+    #[cfg(unix)]
+    fn signal_group(&self, pid: u32, signal: JarSignal) {
+        use rustix::process::Signal;
+        // SPYC-TRAP(jar-signals-through-the-jar): never `pid` for a jarred
+        // program; after its exit the pid may be anyone's.
+        if let Some(jar) = &self.jar {
+            let _ = jar.send(signal);
+            return;
+        }
+        let sig = match signal {
+            JarSignal::Interrupt => Signal::INT,
+            JarSignal::Terminate => Signal::TERM,
+            JarSignal::Kill => Signal::KILL,
+            JarSignal::Stop => Signal::STOP,
+            JarSignal::Continue => Signal::CONT,
+            JarSignal::Hangup => Signal::HUP,
+        };
+        kill_group(pid, sig);
+    }
+
+    /// `^z`: stop the program's job with `SIGSTOP`, or continue it. Locally
+    /// that is the PTY's foreground group, the one a real `^z` signals; a
+    /// jarred program's jar signals its program's group.
+    #[cfg(unix)]
+    pub fn suspend(&self, resume: bool) -> anyhow::Result<()> {
+        if let Some(jar) = &self.jar {
+            return Ok(jar.send(if resume {
+                JarSignal::Continue
+            } else {
+                JarSignal::Stop
+            })?);
+        }
+        let pgrp = self
+            .foreground_pgrp()
+            .or_else(|| self.process_id())
+            .and_then(|p| rustix::process::Pid::from_raw(i32::try_from(p).ok()?))
+            .ok_or_else(|| anyhow::anyhow!("no process group to signal"))?;
+        let sig = if resume {
+            rustix::process::Signal::CONT
+        } else {
+            rustix::process::Signal::STOP
+        };
+        rustix::process::kill_process_group(pgrp, sig)?;
+        Ok(())
+    }
+
+    /// Whether the program runs in a jar.
+    pub const fn jarred(&self) -> bool {
+        self.jar.is_some()
+    }
+
+    /// Where a jarred pane's snapshots go.
+    pub fn snapshot_sink(&self) -> Option<super::jar::SnapshotSink> {
+        self.snapshots.clone()
+    }
+
     /// Orderly shutdown: SIGTERM the child's process group, wait up
     /// to `grace` for voluntary exit, then SIGKILL the group and
     /// reap. Mirrors `Pane::shutdown` from before the refactor —
@@ -531,7 +615,7 @@ impl PtyHost {
         };
 
         #[cfg(unix)]
-        kill_group(pid, rustix::process::Signal::TERM);
+        self.signal_group(pid, JarSignal::Terminate);
         let start = std::time::Instant::now();
         let deadline = start + grace;
         let mut on_linger = Some(on_linger);
@@ -556,7 +640,7 @@ impl PtyHost {
             }
         }
         #[cfg(unix)]
-        kill_group(pid, rustix::process::Signal::KILL);
+        self.signal_group(pid, JarSignal::Kill);
         if let Ok(status) = self.child.wait() {
             self.exit_status = Some(status);
         }
@@ -578,7 +662,7 @@ impl Drop for PtyHost {
         }
         if let Some(pid) = self.child.process_id() {
             #[cfg(unix)]
-            kill_group(pid, rustix::process::Signal::KILL);
+            self.signal_group(pid, JarSignal::Kill);
         } else {
             let _ = self.child.kill();
         }
@@ -597,6 +681,58 @@ fn kill_group(pid: u32, sig: rustix::process::Signal) {
     if let Some(rpid) = rustix::process::Pid::from_raw(pid as i32) {
         let _ = rustix::process::kill_process_group(rpid, sig);
     }
+}
+
+type Spawned = (
+    Box<dyn MasterPty + Send>,
+    Box<dyn Read + Send>,
+    InputWriter,
+    Box<dyn portable_pty::Child + Send + Sync>,
+);
+
+type JarParts = (
+    Option<super::jar::Signals>,
+    Option<super::jar::SnapshotSink>,
+    Spawned,
+);
+
+/// A jarred program's stand-ins, as a host holds them.
+fn jar_parts(j: super::jar::Jarred) -> anyhow::Result<JarParts> {
+    let reader = j.master.try_clone_reader()?;
+    let input = InputWriter::with_replies(j.master.take_writer()?, Some(j.replies))?;
+    Ok((
+        Some(j.signals),
+        Some(j.snapshots),
+        (j.master, reader, input, j.child),
+    ))
+}
+
+/// `argv` on a PTY of spyc's own.
+fn spawn_native(
+    spec: &PtySpec,
+    argv: &[String],
+    env: &[(String, String)],
+) -> anyhow::Result<Spawned> {
+    let pair = native_pty_system().openpty(PtySize {
+        rows: spec.rows,
+        cols: spec.cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
+    let mut cmd = CommandBuilder::from_argv(argv.iter().map(Into::into).collect());
+    cmd.cwd(spec.cwd);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    // Start the writer before spawning the child, so a failed worker spawn
+    // cannot strand a running child. No child input exists at this point.
+    let reader = pair.master.try_clone_reader()?;
+    let input = InputWriter::new(pair.master.take_writer()?)?;
+    let child = pair.slave.spawn_command(cmd)?;
+    // We don't need our own handle on the slave — once the child
+    // exits, the master read side will see EOF.
+    drop(pair.slave);
+    Ok((pair.master, reader, input, child))
 }
 
 /// Reader thread: pump bytes from the pty master into the channel
@@ -677,6 +813,7 @@ mod tests {
             debug_dump: false,
             exec_replace: false,
             capture_launch_env: false,
+            jar: None,
         }
     }
 
