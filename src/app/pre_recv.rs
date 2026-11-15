@@ -279,6 +279,11 @@ impl App {
         if self.settle_cooking(now_pre, ctx) {
             ctx.draw.mark(3);
         }
+        // A git view still building past the grace shows its loader, on the
+        // cooking clock just advanced.
+        if self.settle_git_view_loader(now_pre) {
+            ctx.draw.mark(3);
+        }
 
         // Lua runaway watchdog: while a Lua job is in-flight + un-prompted,
         // arm `LuaRunaway` at its soft threshold and raise the interactive

@@ -486,6 +486,7 @@ mod guard_tests {
             "key_dispatch",
             "pager_handler",
             "harness_tests",
+            "git_view_session",
         ];
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

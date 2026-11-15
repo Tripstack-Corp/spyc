@@ -120,6 +120,11 @@ characters that differ, `"word"` marks the whole changed token the way
   the viewport is too narrow; a no-op for blame
 - All pager keys work: `/` search, `:N` jump, visual yank, `gf`/`gF`
   path jumps, buffer history
+- A view that takes more than a quarter second to build opens on a
+  loader: a large pepper with heat running along it, what the build is
+  doing ("reading the changes", then "highlighting 312 / 1204 files" with
+  a bar), and how long it has run. The view replaces it when it is ready,
+  and `Esc` or `q` closes it and stops the build
 
 Quick Select's uppercase **Git SHA** label opens the same `show` view
 for that commit (see [Quick Select](pane.md#quick-select--labelled-overlay-picker)).

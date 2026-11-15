@@ -426,7 +426,7 @@ impl App {
     /// changes". Revealing the base listing keeps `gd <clean path>` honest; the
     /// prior diff was already pushed to `pager_history`, so `:bprev` still
     /// reaches it for deliberate buffer navigation.
-    fn close_stream_pager(&mut self, in_scroll: bool) {
+    pub(super) fn close_stream_pager(&mut self, in_scroll: bool) {
         if in_scroll {
             self.view.project_mut().scroll_pager = None;
             if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {
