@@ -130,7 +130,9 @@ impl App {
             .runtime
             .graveyard_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::Graveyard);
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
+            let _cooking = cooking;
             let _ = results.send((origin, run_graveyard_op(op)));
         });
     }

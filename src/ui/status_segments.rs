@@ -208,6 +208,7 @@ mod tests {
                     theme: &theme,
                     plain_logo: false,
                     stderr_notice: Some("\u{26a0}2"),
+                    cooking: None,
                     teach_menu: true,
                 };
                 let (cells, spans) = drawn(&bar, width);
@@ -295,6 +296,7 @@ mod tests {
                 theme: &theme,
                 plain_logo: true,
                 stderr_notice: None,
+                cooking: None,
                 teach_menu: false,
             };
             let (cells, spans) = drawn(&bar, 100);

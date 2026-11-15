@@ -482,7 +482,9 @@ impl super::App {
             .image_results
             .sender(self.runtime.pane_wake_tx.clone(), super::Wake::Image);
         let picker = self.runtime.picker.clone();
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
+            let _cooking = cooking;
             let _ = results.send((origin, work(picker)));
         });
     }

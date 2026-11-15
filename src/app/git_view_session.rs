@@ -321,8 +321,11 @@ impl App {
         let wake = self.make_pager_stream_wake();
         let final_wake = std::sync::Arc::clone(&wake);
         let tx = crate::fs::WakingSender::new(tx, wake);
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
-            let _ = tx.send(build_payload(kind));
+            let payload = build_payload(kind);
+            drop(cooking);
+            let _ = tx.send(payload);
             final_wake();
         });
         self.runtime.project_mut().pending_git_view = Some(PendingGitView {

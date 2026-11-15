@@ -439,6 +439,10 @@ impl App {
             // Non-truecolor terminals (GNU screen) mangle the 🌶️ glyph → red block.
             plain_logo: self.view.color_depth != crate::ui::color_depth::ColorDepth::TrueColor,
             stderr_notice: stderr_notice.as_deref(),
+            cooking: self
+                .view
+                .cooking_frame
+                .map(|frame| self.spicy_pulse_color(frame)),
             teach_menu: self.teaches_the_menu_key(),
         }
         .build(rect);

@@ -226,7 +226,7 @@ Used sparingly — every glyph below has a specific meaning.
 
 | Glyph | Meaning |
 |---|---|
-| `🌶️` | spyc logo (status bar, exit summary) |
+| `🌶️` | spyc logo (status bar, exit summary); glows between two heat-coloured half blocks while spyc is cooking |
 | `~` | git-modified file marker; an edited archive member |
 | `+` | git-added marker / a member added to an archive / pane-tab activity badge |
 | `?` | git-untracked marker |
