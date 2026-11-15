@@ -12,20 +12,18 @@ use super::place::Place;
 
 /// A fresh token.
 pub(super) fn new() -> anyhow::Result<Vec<u8>> {
-    Ok(random_hex(32)?.into_bytes())
-}
-
-/// `n` random bytes, as hex.
-pub(super) fn random_hex(n: usize) -> anyhow::Result<String> {
-    let mut raw = vec![0u8; n];
+    let mut raw = [0u8; 32];
     std::fs::File::open("/dev/urandom")
         .and_then(|mut f| f.read_exact(&mut raw))
-        .context("read /dev/urandom")?;
-    Ok(raw.iter().fold(String::new(), |mut s, b| {
-        use std::fmt::Write as _;
-        let _ = write!(s, "{b:02x}");
-        s
-    }))
+        .context("read a jar token from /dev/urandom")?;
+    Ok(raw
+        .iter()
+        .fold(String::new(), |mut s, b| {
+            use std::fmt::Write as _;
+            let _ = write!(s, "{b:02x}");
+            s
+        })
+        .into_bytes())
 }
 
 fn path(place: &Place, socket: &Path) -> Option<PathBuf> {

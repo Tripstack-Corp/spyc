@@ -811,9 +811,11 @@ by default.
   the jar check it is a directory, not a link, owned by this user and closed to
   others before trusting a socket there. A program finds its jar by
   `SPYC_JAR_SOCKET`, never by working the path out again.
-- **Each start of a tab gets a socket of its own**, its name the tab's id and
-  four random bytes: a restarted tab's jar can't meet the last one's, which
-  ends only once its exit is acknowledged.
+- **A tab's program never runs twice** (finding 7, for a start). A jar's
+  socket is named after its tab. A start that finds the tab's jar running
+  waits up to two seconds for it to end, as a restart's does once its exit is
+  acknowledged; one that goes on running, its spyc crashed, keeps the tab from
+  opening.
 
 ## A jarred program's signals go through its jar
 

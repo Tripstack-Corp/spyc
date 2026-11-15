@@ -489,17 +489,13 @@ fn built_jar() -> PathBuf {
         })
 }
 
-/// The real jar: a tab's program runs in it, reads what's typed, finds its
-/// jar by `SPYC_JAR_SOCKET`, and ends with it, the jar's socket gone after.
-#[test]
-fn a_program_runs_in_a_real_jar_and_ends_with_it() {
-    let dir = short_dir();
-    let place = place_in(dir.path(), built_jar());
-    let mut host = PtyHost::spawn(crate::pane::pty_host::PtySpec {
-        command: "printf \"[$SPYC_JAR_SOCKET]\"; read x; printf \"got:$x\"; exit 3",
+/// A tab's program on a PTY of the real jar's, as `PtyHost` spawns it.
+fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost> {
+    PtyHost::spawn(crate::pane::pty_host::PtySpec {
+        command,
         rows: 24,
         cols: 80,
-        cwd: dir.path(),
+        cwd,
         env: &[],
         term: "dumb",
         nudge_winch: false,
@@ -511,45 +507,22 @@ fn a_program_runs_in_a_real_jar_and_ends_with_it() {
             name: "0123456789abcdef".into(),
         }),
     })
+}
+
+/// The real jar: a tab's program runs in it, reads what's typed, finds its
+/// jar by `SPYC_JAR_SOCKET`, and ends with it, the jar's socket gone after.
+#[test]
+fn a_program_runs_in_a_real_jar_and_ends_with_it() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let mut host = spawn_in(
+        &place,
+        "printf \"[$SPYC_JAR_SOCKET]\"; read x; printf \"got:$x\"; exit 3",
+        dir.path(),
+    )
     .unwrap();
     assert!(host.jarred());
-    let sockets: Vec<PathBuf> = std::fs::read_dir(place.sockets())
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .collect();
-    assert_eq!(sockets.len(), 1, "{sockets:?}");
-    let socket = &sockets[0];
-    assert!(
-        socket
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("01234567"),
-        "named after the tab: {}",
-        socket.display()
-    );
-    let again = PtyHost::spawn(crate::pane::pty_host::PtySpec {
-        command: "cat",
-        rows: 24,
-        cols: 80,
-        cwd: dir.path(),
-        env: &[],
-        term: "dumb",
-        nudge_winch: false,
-        debug_dump: false,
-        exec_replace: false,
-        capture_launch_env: false,
-        jar: Some(Spec {
-            place,
-            name: "0123456789abcdef".into(),
-        }),
-    })
-    .unwrap();
-    assert!(
-        again.jarred(),
-        "a second start of the tab gets a jar of its own"
-    );
-    drop(again);
+    let socket = place.socket("0123456789abcdef");
     read_until(&host, &format!("[{}]", socket.display()));
     host.write_all(b"hi\n").unwrap();
     read_until(&host, "got:hi");
@@ -562,6 +535,29 @@ fn a_program_runs_in_a_real_jar_and_ends_with_it() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+/// Finding 7, for a start: a tab whose jar still runs (its spyc crashed)
+/// doesn't open, so its program never runs twice; a restart, whose last jar
+/// ends a moment after its program, gets a new one.
+#[test]
+fn a_tab_whose_jar_still_runs_never_starts_its_program_twice() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let mark = dir.path().join("ran");
+    let mut first = spawn_in(&place, "exec cat", dir.path()).unwrap();
+    assert!(first.jarred());
+    let e = spawn_in(&place, &format!("touch {}", mark.display()), dir.path())
+        .err()
+        .expect("a second start while the tab's jar runs");
+    assert!(format!("{e:#}").contains("wasn't started twice"), "{e:#}");
+    assert!(!mark.exists(), "the program ran twice");
+    first.write_all(b"still\n").unwrap();
+    read_until(&first, "still");
+
+    first.shutdown(Duration::from_millis(250));
+    let restarted = spawn_in(&place, "exec cat", dir.path()).unwrap();
+    assert!(restarted.jarred(), "a restart gets a jar");
 }
 
 /// R17e: a snapshot follows a second of quiet, never a frame the program

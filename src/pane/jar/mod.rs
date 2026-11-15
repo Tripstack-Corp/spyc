@@ -69,9 +69,10 @@ pub fn wanted(on: bool, tab: &str) -> Option<Spec> {
         })
 }
 
-/// A pane's jar, asked for: where, and the tab's id, which its socket's name
-/// begins with. The rest of the name is new each time, so a restarted tab's
-/// jar never meets the last one's, still ending.
+/// A pane's jar, asked for: where, and the tab's id, which names its socket.
+/// A tab's jar that still runs when the tab starts again is waited for, as a
+/// restart's ends a moment after its program; one that goes on running (its
+/// spyc crashed) keeps the tab from opening, so its program never runs twice.
 pub struct Spec {
     pub place: Place,
     pub name: String,
@@ -94,6 +95,22 @@ pub struct Signals(Arc<Link>);
 impl Signals {
     pub fn send(&self, signal: JarSignal) -> std::io::Result<()> {
         self.0.signal(signal)
+    }
+}
+
+/// How long a tab's last jar has to end once its program has: the jar goes
+/// once its owner acknowledges the exit, within its own 200 ms tick.
+const ENDING_WAIT: Duration = Duration::from_secs(2);
+
+/// The state of the jar at `socket`, once it has ended or `wait` has passed.
+fn ended_within(socket: &Path, wait: Duration) -> SocketState {
+    let until = Instant::now() + wait;
+    loop {
+        let state = socket_state(socket);
+        if state != SocketState::Live || Instant::now() >= until {
+            return state;
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
 }
 
@@ -121,16 +138,10 @@ pub fn spawn(
         return Ok(None);
     }
     sweep_once(place);
-    let tab: String = spec
-        .name
-        .chars()
-        .filter(char::is_ascii_hexdigit)
-        .take(8)
-        .collect();
-    let socket = place.socket(&format!("{tab}{}", tokens::random_hex(4)?));
-    match socket_state(&socket) {
+    let socket = place.socket(&spec.name);
+    match ended_within(&socket, ENDING_WAIT) {
         SocketState::Live => anyhow::bail!(
-            "a jar already runs at {}; its program wasn't started twice",
+            "this tab's jar still runs at {}; its program wasn't started twice",
             socket.display()
         ),
         SocketState::Stale => {
