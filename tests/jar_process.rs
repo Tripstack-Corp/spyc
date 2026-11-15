@@ -230,10 +230,17 @@ fn a_live_owner_paces_the_program_and_loses_nothing() {
     let window = 65_536u64;
     let mut jar = Jar::start(
         &["--window", &window.to_string()],
-        &sh("head -c 2000000 /dev/zero | tr '\\000' a; echo; echo END"),
+        &sh("read go; head -c 2000000 /dev/zero | tr '\\000' a; echo; echo END"),
     );
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).unwrap();
+    // The program prints only once the owner is there to pace it: started
+    // free, it may print everything before the owner connects.
+    owner
+        .send(&Msg::Input {
+            bytes: b"go\n".to_vec(),
+        })
+        .unwrap();
 
     let mut stalled = Seen::default();
     let until = Instant::now() + Duration::from_millis(800);
