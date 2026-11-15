@@ -360,6 +360,9 @@ pub(super) fn clear_blocked_for_input(
     if !input.settles_prompt() {
         return;
     }
+    // The user has seen the tab and answered it: the program's blocked, done
+    // and error records have done their job (#927).
+    info.program.acknowledge();
     let question_waiting = recovery
         .as_ref()
         .is_some_and(|state| state.question_waiting());

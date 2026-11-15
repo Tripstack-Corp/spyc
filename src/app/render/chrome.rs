@@ -443,6 +443,15 @@ impl App {
                     .fg(crate::ui::project_chips::BLOCKED_RED)
                     .add_modifier(Modifier::BOLD),
             )),
+            // Error = a program reported it failed (OSC 7501): a STEADY hot-red
+            // `✕`, as urgent as Blocked but a different shape, so "it broke"
+            // and "it asks" read apart.
+            AgentActivity::Error => Some(Span::styled(
+                "\u{2715}", // ✕
+                Style::default()
+                    .fg(crate::ui::project_chips::BLOCKED_RED)
+                    .add_modifier(Modifier::BOLD),
+            )),
             // Done = finished a turn, waiting for the next prompt: a calm teal
             // SQUARE `■` — settled (square, not the live circle).
             AgentActivity::Done => Some(Span::styled(

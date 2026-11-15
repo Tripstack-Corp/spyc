@@ -38,7 +38,7 @@ end)
 
 -- event hooks (low-frequency; fire on a transition, not every tick)
 spyc.on("dir_changed", function(ev) spyc.warn("now in " .. ev.cwd) end)
-spyc.on("agent_status", function(ev)   -- ev.pane, ev.state ∈ working|blocked|done|waiting|idle
+spyc.on("agent_status", function(ev)   -- ev.pane, ev.state ∈ working|blocked|done|error|waiting|idle
   if ev.state == "blocked" then spyc.notify("pane " .. ev.pane .. " needs you") end
 end)
 ```

@@ -64,6 +64,9 @@ pub fn pane_engine(data: &[u8]) {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             p.process(chunk);
+            // What the program said about itself goes to the loop the same
+            // way: taken under the lock, as `App::drain_pane_output` does.
+            let _ = p.take_program_events();
         }
 
         // The invariants, checked after every chunk rather than once at the

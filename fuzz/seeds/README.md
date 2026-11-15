@@ -54,7 +54,9 @@ The first two bytes pick the geometry (`rows = b0 % 40 + 1`,
 clamp in `Pane::resize` and `pane_spawn_size`). The rest is a *script* for
 `fuzz_support::escape_stream`, which selects a sequence shape per byte
 (`% 12` → CSI / private mode / SGR / printable / CRLF / DECSC / DECRC / OSC /
-APC / charset).
+APC / charset). In the OSC shape, the number byte `253` makes a program status
+report (OSC 7501), `254` its support query, and `255` a shell prompt start
+(OSC 133).
 
 These are the shapes the VT-engine spike found worth reaching, kept so a fresh
 corpus does not have to rediscover them.
@@ -71,6 +73,10 @@ corpus does not have to rediscover them.
 | `charset_switch` | SCS charset selection (DEC special graphics) |
 | `mode_churn` | alt screen, bracketed paste, mouse and cursor-key modes toggled densely |
 | `zwj_glyph_one_column` | the three bytes that aborted the first version of this target. A ZWJ glyph in a one-column grid panics vt100, and `libfuzzer-sys`'s hook aborted before `catch_unwind` could recover it. Kept because it is the shape that proves the hook scoping is still in place — if that regresses, this seed aborts on the first run rather than after someone rediscovers it |
+| `program_status_split` | an OSC 7501 status report straddling the target's chunk boundary, as one split across pty reads (#927) |
+| `program_status_in_dcs` | a status report's text inside a DCS string, which must stay the string's data |
+| `program_status_query` | the `OSC 7501 ; ?` support query, which the engine answers while the status callback is set |
+| `prompt_start` | a shell prompt start (OSC 133 `A`) then a report, both buffered for the loop |
 
 ## taskfile_make
 

@@ -8,7 +8,9 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 use super::Pane;
 
+mod program_status;
 mod report;
+pub use program_status::ProgramRecords;
 pub use report::{Away, ReportedStatus, RetiredReason};
 
 /// Three-phase scheduling for the `/resume <sid>` keystroke injection
@@ -72,6 +74,9 @@ pub enum AgentActivity {
     Blocked,
     /// Finished a turn (a `done` self-report). Semantic only.
     Done,
+    /// Failed: a program reported `error` (OSC 7501, #927). Kept, like
+    /// `Blocked`, until the user answers the tab. Semantic only.
+    Error,
     /// Neither the user's turn nor finished: the agent ended its turn while
     /// background work it started is still running, and resumes by itself when
     /// that work wakes it (a `waiting` report). Semantic only; precedence in
@@ -91,6 +96,7 @@ impl AgentActivity {
             Self::Idle => "idle",
             Self::Blocked => "blocked",
             Self::Done => "done",
+            Self::Error => "error",
             Self::Waiting => "waiting",
             Self::Unknown => "unknown",
         }
@@ -162,6 +168,10 @@ pub struct TabInfo {
     /// done report's decay to idle, so the tab's dot stays a teal `■`. Never
     /// saved: an unseen done is about this run.
     pub unseen_done: Option<std::time::Instant>,
+    /// What the program running in the tab said about itself (OSC 7501),
+    /// applied in `App::drain_pane_output`. Never saved: it describes a
+    /// running program.
+    pub program: ProgramRecords,
     /// Since the tab last left view, while it is out of it: the turns its
     /// agent finished meanwhile, which `App::start_away_recap` recaps once it
     /// is seen (#919).
@@ -367,6 +377,11 @@ impl TabInfo {
                 self.scrape_waits_on
                     .filter(|_| matches!(self.scrape_status, Some((AgentActivity::Blocked, _))))
             })
+            .or_else(|| {
+                self.program
+                    .blocked_on()
+                    .map(crate::pane::engine::BlockedOn::label)
+            })
     }
 
     /// What a blocked tab waits for, as the ping, the HUD and `Space !` show
@@ -447,6 +462,7 @@ impl TabInfo {
             activity: AgentActivity::Unknown,
             notified: AgentActivity::Unknown,
             unseen_done: None,
+            program: ProgramRecords::default(),
             away: None,
             blocked_since: None,
             suspended: false,
