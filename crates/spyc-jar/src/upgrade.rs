@@ -65,8 +65,15 @@ pub(crate) const FDS_TAG: &[u8; 8] = b"SPYCJARF";
 const HEAD: usize = 8 + 4;
 /// The largest blob a holder or a new image takes.
 const MAX_BLOB: u64 = 1 << 30;
-/// How long a holder waits for the new image before it gives up.
-const HOLD_LIMIT: Duration = Duration::from_secs(30);
+/// The most a holder waits for the new image to end it. A holder ends on an
+/// event: the new image's `SIGTERM` once it has its descriptors, or the
+/// jar's process going. Letting go any sooner loses every connection still
+/// in flight, so the clock is only a backstop for a new image that hangs.
+const HOLD_BACKSTOP: Duration = Duration::from_secs(600);
+/// How often a holder looks for the jar's process to have gone.
+const PARENT_CHECK: Duration = Duration::from_millis(100);
+/// How long a holder has to say it holds the sockets, with the jar parked.
+const HOLDER_ANSWER: Duration = Duration::from_secs(5);
 /// How long the connections have to take their last frames before the
 /// handover, all of them together.
 const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
@@ -221,7 +228,7 @@ fn try_run(
         .collect();
     // SPYC-TRAP(jar-upgrade-holder): without these copies, macOS flushes
     // every connection while it is in flight across the `exec`.
-    let mut holder = hold(binary, &held, &blob).map_err(failed)?;
+    let mut holder = hold(binary, &held, &blob)?;
     drop(blob_write);
     let mut fds: Vec<BorrowedFd<'_>> =
         vec![blob_read.as_fd(), listener.as_fd(), shared.master.as_fd()];
@@ -230,15 +237,13 @@ fn try_run(
         vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(fds.len()))];
     let mut control = SendAncillaryBuffer::new(&mut space);
     if !control.push(SendAncillaryMessage::ScmRights(&fds)) {
-        let _ = holder.kill();
-        let _ = holder.wait();
+        end_group(&mut holder);
         return Err(failed(anyhow!("the descriptors don't fit one message")));
     }
     let pid = holder.id().to_be_bytes();
     let iov = [IoSlice::new(FDS_TAG), IoSlice::new(&pid)];
     if let Err(e) = rustix::net::sendmsg(&to_image, &iov, &mut control, SendFlags::empty()) {
-        let _ = holder.kill();
-        let _ = holder.wait();
+        end_group(&mut holder);
         return Err(failed(anyhow!("send the descriptors: {e}")));
     }
     drop(to_image);
@@ -266,8 +271,7 @@ fn try_run(
     if let Ok(null) = std::fs::File::open("/dev/null") {
         let _ = rustix::stdio::dup2_stdin(&null);
     }
-    let _ = holder.kill();
-    let _ = holder.wait();
+    end_group(&mut holder);
     drop(outs);
     drop(conns);
     drop(st);
@@ -386,21 +390,36 @@ fn pipe() -> anyhow::Result<(OwnedFd, OwnedFd)> {
 
 /// Start `binary` holding `held` (step 3): the blob pipe's write end first,
 /// then the sockets. It reads the blob after them, and answers once it has
-/// both.
+/// both. It runs in a process group of its own: anything it starts holds
+/// the sockets in flight too, so a holder that fails is ended with all of
+/// it. Taking the blob and answering share one deadline, since the jar is
+/// parked meanwhile, and a holder that runs out of it (one that doesn't
+/// read, or doesn't answer) makes the upgrade busy (reason 5): a loaded
+/// machine only defers it.
 fn hold(
     binary: &Path,
     held: &[BorrowedFd<'_>],
     blob: &[u8],
-) -> anyhow::Result<std::process::Child> {
-    let (ours, theirs) = UnixStream::pair().context("socketpair")?;
+) -> Result<std::process::Child, (u16, anyhow::Error)> {
+    let failed = |e: anyhow::Error| {
+        (
+            reason::UPGRADE_FAILED,
+            e.context(format!("{} didn't hold the handover", binary.display())),
+        )
+    };
+    let (ours, theirs) = UnixStream::pair()
+        .context("socketpair")
+        .map_err(|e| (reason::UPGRADE_BUSY, e))?;
     crate::jar::no_sigpipe(&ours);
     let mut child = Command::new(binary)
         .arg("hold-handover")
+        .process_group(0)
         .stdin(Stdio::from(OwnedFd::from(theirs)))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("run {} hold-handover", binary.display()))?;
+        .with_context(|| format!("run {} hold-handover", binary.display()))
+        .map_err(failed)?;
     let given = (|| -> anyhow::Result<()> {
         let mut space =
             vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(held.len()))];
@@ -414,28 +433,89 @@ fn hold(
             &mut control,
             SendFlags::empty(),
         )?;
-        (&ours).write_all(&(blob.len() as u64).to_be_bytes())?;
-        (&ours).write_all(blob)?;
-        ours.set_read_timeout(Some(PARKED_VALIDATION))?;
-        let mut ack = [0u8; 1];
-        (&ours)
-            .read_exact(&mut ack)
-            .context("no word from the holder")?;
         Ok(())
     })();
     if let Err(e) = given {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(e.context(format!("{} didn't hold the handover", binary.display())));
+        end_group(&mut child);
+        return Err(failed(e));
     }
-    Ok(child)
+    let until = Instant::now() + HOLDER_ANSWER;
+    let answered = write_until(&ours, &(blob.len() as u64).to_be_bytes(), until)
+        .and_then(|()| write_until(&ours, blob, until))
+        .and_then(|()| {
+            let left = until.saturating_duration_since(Instant::now());
+            ours.set_read_timeout(Some(left.max(Duration::from_millis(1))))?;
+            let mut ack = [0u8; 1];
+            (&ours).read_exact(&mut ack)
+        });
+    match answered {
+        Ok(()) => Ok(child),
+        Err(e) => {
+            end_group(&mut child);
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            ) {
+                Err((
+                    reason::UPGRADE_BUSY,
+                    anyhow!(
+                        "{} didn't say it held the handover within {HOLDER_ANSWER:?}",
+                        binary.display()
+                    ),
+                ))
+            } else {
+                Err(failed(anyhow!("no word from the holder: {e}")))
+            }
+        }
+    }
+}
+
+/// Write all of `bytes` to `sock` by `until`. Written without blocking,
+/// each wait a poll bounded by what's left: a blocking write's timeout
+/// times each sleep inside it, so a reader taking a little at a time would
+/// start it over and over.
+fn write_until(sock: &UnixStream, bytes: &[u8], until: Instant) -> std::io::Result<()> {
+    sock.set_nonblocking(true)?;
+    let mut left = bytes;
+    let written = loop {
+        if left.is_empty() {
+            break Ok(());
+        }
+        match (&*sock).write(left) {
+            Ok(0) => break Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(n) => left = &left[n..],
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                let time = until.saturating_duration_since(Instant::now());
+                if time.is_zero() || !crate::jar::ready(sock, rustix::event::PollFlags::OUT, time) {
+                    break Err(std::io::ErrorKind::TimedOut.into());
+                }
+            }
+            Err(e) => break Err(e),
+        }
+    };
+    let _ = sock.set_nonblocking(false);
+    written
+}
+
+/// End `child`, which leads a process group of its own, with everything it
+/// started, and reap it.
+fn end_group(child: &mut std::process::Child) {
+    if let Some(group) = i32::try_from(child.id())
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
+    let _ = child.wait();
 }
 
 /// `spyc-jar hold-handover`: keep an upgrade's sockets alive across `exec`.
 ///
 /// It takes the blob pipe and the sockets on standard input, then the blob;
 /// says so; writes the blob into the pipe for the new image; and keeps the
-/// sockets until the new image ends this process, or [`HOLD_LIMIT`].
+/// sockets until the new image ends this process, or the jar's process (its
+/// parent, the same across the `exec`) has gone, or [`HOLD_BACKSTOP`].
 pub fn hold_stdin() -> anyhow::Result<()> {
     use rustix::net::{RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags};
     let sock = UnixStream::from(std::io::stdin().as_fd().try_clone_to_owned()?);
@@ -473,7 +553,11 @@ pub fn hold_stdin() -> anyhow::Result<()> {
         let _ = pipe.write_all(&(blob.len() as u64).to_be_bytes());
         let _ = pipe.write_all(&blob);
     });
-    std::thread::sleep(HOLD_LIMIT);
+    let parent = rustix::process::getppid();
+    let until = Instant::now() + HOLD_BACKSTOP;
+    while rustix::process::getppid() == parent && Instant::now() < until {
+        std::thread::sleep(PARENT_CHECK);
+    }
     drop(held);
     Ok(())
 }

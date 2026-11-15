@@ -689,7 +689,11 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
     `SCM_RIGHTS` the write end of a pipe, the listener and every connection;
     then the blob's length (u64) and the blob. It answers `k` once it has
     both, writes the length and the blob into the pipe, and holds the sockets
-    until `SIGTERM`, or for 30 seconds.
+    until `SIGTERM`, or until its parent (the jar's process, the same across
+    the `exec`) has gone, or for 10 minutes. The jar gives it 5 seconds to
+    take the blob and answer, as one deadline, and a holder that runs out
+    of it is ended with its process group and makes the upgrade busy
+    (reason 5).
   - `BINARY resume-handover PREVIOUS`, by `exec`: `PREVIOUS` is the absolute
     path of the image that `exec`ed it, a store entry (decision L), which the
     new image may `exec` back to if it can't resume. On standard input, one
@@ -807,7 +811,7 @@ Each part of the upgrade is placed by where its code runs (decision L):
 **The new image,** in this order: **prevent** (the store and the proof line,
 above), **contain** (`catch_unwind` around decoding and starting, a held mode
 that keeps the PTY and its connections when the jar can't resume, and ending
-the holder at once rather than after its 30 seconds), then **recover** (the
+the holder at once rather than leaving it to wait), then **recover** (the
 switch back to `PREVIOUS`). Only the switch back's argument ships now (part
 3). Nothing here salvages a jar part by part, as vtmux's resume does.
 

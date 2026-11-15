@@ -753,6 +753,13 @@ Any unix socket closing anywhere on the machine runs it, and both ends then
 read end-of-file: the program lives on, its owner and readers are cut off. So
 the upgrade first starts `spyc-jar hold-handover`, which takes copies of the
 same sockets and keeps them until the new image has its own and ends it.
+It ends on that event, or on the jar's process going, never on a short
+clock: a holder that let go after 30 s lost every connection when a loaded
+new image was slower than that. Ten minutes is only a backstop for a new
+image that hangs. The holder runs in a process group of its own, and one
+that doesn't take the blob and answer within 5 s, with the jar parked, is
+ended with everything it started, which would otherwise keep the sockets
+in flight, and the upgrade is busy.
 
 Removing the holder passes on Linux and on a quiet Mac. The spike measured it
 on macOS (`docs/drafts/PANE_JAR_SPIKE.md`): with a loop closing socketpairs in
