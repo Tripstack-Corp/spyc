@@ -32,15 +32,17 @@ pub const WIRE_NOT_SERVED: i32 = 75;
 /// The git commit the running binary was built from, as the binary that
 /// calls [`main_built`] knows it; empty when it doesn't say.
 pub fn commit() -> &'static str {
-    COMMIT.get().copied().unwrap_or("")
+    BUILD.get().map_or("", |b| b.0)
 }
 
-static COMMIT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+/// The commit and build time the running binary was built with.
+static BUILD: std::sync::OnceLock<(&'static str, &'static str)> = std::sync::OnceLock::new();
 
-/// [`main`], for a binary that knows the commit it was built from, which
-/// `describe` gives as `commit`.
-pub fn main_built(commit: &'static str) -> anyhow::Result<()> {
-    let _ = COMMIT.set(commit);
+/// [`main`], for a binary that knows the commit it was built from (which
+/// `describe` gives as `commit`) and when: `build-info` prints both, so spyc
+/// can tell its own build's `spyc-jar` from another's.
+pub fn main_built(commit: &'static str, built: &'static str) -> anyhow::Result<()> {
+    let _ = BUILD.set((commit, built));
     main()
 }
 
@@ -55,6 +57,11 @@ pub fn main() -> anyhow::Result<()> {
         Some("resume-handover") => crate::upgrade::resume(),
         Some("hold-handover") => crate::upgrade::hold_stdin(),
         Some("program-events") => program_events(),
+        Some("build-info") => {
+            let (commit, built) = BUILD.get().copied().unwrap_or(("", ""));
+            println!("{commit}\n{built}");
+            Ok(())
+        }
         Some("describe") => {
             let socket = std::env::args()
                 .nth(2)

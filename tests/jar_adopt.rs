@@ -257,6 +257,11 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
         socket.is_some()
     });
     let socket = socket.unwrap();
+    let build = described(&socket, "build").unwrap_or_default();
+    assert!(
+        build.len() == 64 && build.bytes().all(|b| b.is_ascii_hexdigit()),
+        "the pane's jar runs from a store entry, not {build:?}"
+    );
     if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
         left.0.push(jar);
     }

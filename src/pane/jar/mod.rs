@@ -9,6 +9,7 @@
 //! - `link`: the connection, its reader thread and the `portable-pty` traits.
 //! - `offsets`: the jar offset of what the pane has parsed (finding 8).
 //! - [`snapshots`]: when a pane's engine is snapshotted, and its storing.
+//! - [`store`]: the jar binaries every jar starts from (decision L).
 //!
 //! A jar that can't be started, or that ends before it answers (one that
 //! doesn't speak this spyc's wire version exits with 75 first), leaves the
@@ -25,6 +26,7 @@ mod link;
 mod offsets;
 pub mod place;
 pub mod snapshots;
+pub mod store;
 mod tokens;
 
 #[cfg(test)]
@@ -203,6 +205,11 @@ pub fn spawn(
             tokens::forget(place, &socket);
         }
         SocketState::Missing => {}
+    }
+    if let Some(entry) = place.binary.parent()
+        && spyc_jar::store::store_of(&place.binary).is_some()
+    {
+        store::touch(entry);
     }
     let token = tokens::new()?;
     tokens::save(place, &socket, &token)?;
