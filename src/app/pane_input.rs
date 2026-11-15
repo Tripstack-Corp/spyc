@@ -60,6 +60,25 @@ impl App {
         }
     }
 
+    /// A key let go goes where its press would have: to the pane in front, for
+    /// a program that asked for releases (kitty flag 2); anywhere else it is
+    /// dropped. `Pane::send_key` drops it for a program that didn't ask.
+    pub(super) fn handle_key_release(&mut self, _key: KeyEvent) -> Vec<Effect> {
+        Vec::new()
+    }
+
+    /// Whether the pane keys go to holds a program that asked for key repeats
+    /// and releases.
+    pub(super) fn key_releases_wanted(&self) -> bool {
+        false
+    }
+
+    /// Reconcile the terminal's key repeat and release reports with whether a
+    /// program wants them; emits nothing when they agree.
+    pub(super) fn settle_key_event_types(&self) -> Vec<Effect> {
+        Vec::new()
+    }
+
     fn track_accepted_pane_input(&mut self, input: &PaneInput) {
         match input {
             PaneInput::Paste { text, .. } => {
@@ -125,9 +144,36 @@ impl App {
     }
 }
 
+/// The key event reports to set, given whether the terminal speaks the kitty
+/// keyboard protocol, whether it reports them now and whether a program wants
+/// them; `None` when nothing changes.
+fn key_event_types_change(_supported: bool, _on: bool, _wanted: bool) -> Option<bool> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Repeats and releases are asked of the terminal only while a program
+    /// wants them, and never of a terminal without the kitty protocol.
+    #[test]
+    fn key_reports_follow_a_program_that_wants_them() {
+        let cases = [
+            ((true, false, true), Some(true)),
+            ((true, true, false), Some(false)),
+            ((true, true, true), None),
+            ((true, false, false), None),
+            ((false, false, true), None),
+        ];
+        for ((supported, on, wanted), change) in cases {
+            assert_eq!(
+                key_event_types_change(supported, on, wanted),
+                change,
+                "supported={supported} on={on} wanted={wanted}"
+            );
+        }
+    }
     use crate::app::file_ops::FileOutcome;
     use std::time::{Duration, Instant};
 

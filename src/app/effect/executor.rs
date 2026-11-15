@@ -123,6 +123,13 @@ impl App {
                             .flash_error(format!("mouse: could not set reporting: {e:#}"));
                     }
                 }
+                Effect::SetKeyEventTypes { on } => {
+                    // Records the new state only on success, as `SetMouseMode` does.
+                    if let Err(e) = crate::terminal::set_key_event_types(terminal, on) {
+                        self.state
+                            .flash_error(format!("keys: could not set key reports: {e:#}"));
+                    }
+                }
                 Effect::Notify { system, osc9, bell } => notify(system, osc9, bell),
                 // C-class: the chdir de-IO fork (MVU Phase 5). The blocking
                 // listing read runs here in the executor — never in the pure
