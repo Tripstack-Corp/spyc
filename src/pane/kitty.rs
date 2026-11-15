@@ -6,11 +6,15 @@
 use super::{Pane, engine};
 
 impl Pane {
+    /// The kitty keyboard flags the program pushed, in force on its screen.
+    pub fn kitty_keyboard_flags(&self) -> u8 {
+        engine::Engine::kitty_keyboard_flags(&*self.lock_parser())
+    }
+
     /// After output: a program that just pushed kitty keyboard flags owns them,
     /// and with none in force nobody does.
     pub(super) fn note_kitty_owner(&mut self) {
-        let flags = engine::Engine::kitty_keyboard_flags(&*self.lock_parser());
-        if flags == 0 {
+        if self.kitty_keyboard_flags() == 0 {
             self.kitty_owner = None;
         } else if self.kitty_owner.is_none() {
             self.kitty_owner = self.foreground_pgrp();
@@ -20,7 +24,7 @@ impl Pane {
     /// `key` by the kitty keyboard protocol, when the program in the
     /// foreground pushed its flags (#1176); `None` sends it the legacy way.
     pub(super) fn kitty_key(&mut self, key: crossterm::event::KeyEvent) -> Option<Vec<u8>> {
-        let flags = engine::Engine::kitty_keyboard_flags(&*self.lock_parser());
+        let flags = self.kitty_keyboard_flags();
         let fg = self.foreground_pgrp();
         let (route, owner) = kitty_route(flags, self.kitty_owner, fg, group_alive);
         self.kitty_owner = owner;

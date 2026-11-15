@@ -50,6 +50,10 @@ pub enum Effect {
     /// what the terminal is actually in — so this is idempotent by construction
     /// and never needs to be emitted speculatively.
     SetMouseMode { capture: bool },
+    /// Ask the terminal to report key repeats and releases, or stop. Emitted
+    /// only by [`App::settle_key_event_types`], so it is idempotent by
+    /// construction.
+    SetKeyEventTypes { on: bool },
     /// Move the process cwd to the focused column's directory. Emitted only by
     /// [`App::settle_process_cwd`], so it is idempotent by construction.
     SetProcessCwd { dir: std::path::PathBuf },
@@ -412,6 +416,10 @@ pub(super) fn clear_blocked_for_input(
 pub enum PaneInput {
     Bytes(Vec<u8>),
     Key(KeyEvent),
+    /// A key let go, for a program that asked for key releases (#1176). Its
+    /// own variant so nothing that reads a typed key (prompt tracking, an
+    /// interrupt, a blocked agent's answer) takes a release for one.
+    KeyRelease(KeyEvent),
     /// Text tracking commits only after the child input queue accepts the paste.
     Paste {
         bytes: Vec<u8>,
@@ -436,7 +444,7 @@ impl PaneInput {
         match self {
             Self::Bytes(bytes) | Self::Paste { bytes, .. } => pane.send_bytes(bytes),
             Self::ConfirmedPipe { bytes, .. } => pane.send_confirmed_pipe(std::mem::take(bytes)),
-            Self::Key(key) => pane.send_key(*key),
+            Self::Key(key) | Self::KeyRelease(key) => pane.send_key(*key),
             Self::Paths(paths) => {
                 // Read fresh, not the tab's cached `live_cwd`: a shell that just
                 // ran `cd` would otherwise get paths relative to where it was,
@@ -503,9 +511,11 @@ impl PaneInput {
                 _ => false,
             },
             Self::Bytes(b) => matches!(b.as_slice(), b"\r" | b"\n" | b"\r\n" | b"\x1b" | b"\x03"),
-            Self::Paths(_) | Self::Prompt(_) | Self::Paste { .. } | Self::ConfirmedPipe { .. } => {
-                false
-            }
+            Self::KeyRelease(_)
+            | Self::Paths(_)
+            | Self::Prompt(_)
+            | Self::Paste { .. }
+            | Self::ConfirmedPipe { .. } => false,
         }
     }
 }
@@ -759,6 +769,7 @@ pub mod matchers {
             | Effect::SignalCapture { .. } => false,
             Effect::AgentHud(_)
             | Effect::SetMouseMode { .. }
+            | Effect::SetKeyEventTypes { .. }
             | Effect::SetProcessCwd { .. }
             | Effect::ForegroundExec { .. }
             | Effect::CopyToClipboard { .. }

@@ -1,9 +1,11 @@
-//! Pane input execution and tracking of input accepted by the writer queue.
+//! Pane input execution and tracking of input accepted by the writer queue,
+//! and key releases for a program that asked for them (#1176).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::effect::clear_blocked_for_input;
-use super::{App, Effect, Mode, PaneInput, PaneTarget, PromptKind};
+use super::key_dispatch::{PaneKeyAction, pane_suspend_key_action};
+use super::{App, Effect, Mode, PaneInput, PaneTarget, PromptKind, route};
 
 impl App {
     /// The `SendToPane` executor; child input always passes through `PtyHost`.
@@ -58,6 +60,73 @@ impl App {
             }
             None => {}
         }
+    }
+
+    /// A key let go goes where its press would have: to the pane in front, for
+    /// a program that asked for releases (kitty flag 2); anywhere else it is
+    /// dropped. `Pane::send_key` drops it for a program that didn't ask.
+    pub(super) fn handle_key_release(&self, key: KeyEvent) -> Vec<Effect> {
+        // The last key of a chord that just focused the pane is spyc's.
+        if self
+            .view
+            .focus_chord_completed
+            .is_some_and(|(_, code)| code == key.code)
+        {
+            return Vec::new();
+        }
+        let target = match route::route_input(self.route_snapshot(), route::InputKind::Key(key)) {
+            route::InputSink::BottomPane => {
+                let (is_shell, suspended) = self.active_tab_shell_and_suspended();
+                if pane_suspend_key_action(key, is_shell, suspended) != PaneKeyAction::Forward {
+                    return Vec::new();
+                }
+                PaneTarget::Active
+            }
+            route::InputSink::OverlayPty => PaneTarget::Overlay,
+            _ => return Vec::new(),
+        };
+        vec![Effect::SendToPane {
+            target,
+            input: PaneInput::KeyRelease(key),
+            on_ok: None,
+            err_prefix: None,
+        }]
+    }
+
+    /// Whether the pane keys go to holds a program that asked for key repeats
+    /// and releases.
+    pub(super) fn key_releases_wanted(&self) -> bool {
+        let project = self.runtime.project();
+        let tab = project
+            .pane_tabs
+            .as_ref()
+            .map(crate::pane::tabs::PaneTabs::active);
+        let overlays = [&project.top_overlay, &project.top_overlay_right];
+        tab.into_iter()
+            .chain(overlays.into_iter().flatten())
+            .any(|pane| pane.kitty_keyboard_flags() & KITTY_REPORT_EVENT_TYPES != 0)
+    }
+
+    /// The `SetKeyEventTypes` executor. The terminal records the new state only
+    /// on success, as `SetMouseMode`'s does, so a failed write is retried.
+    pub(super) fn set_key_event_types(&mut self, terminal: &mut crate::Tui, on: bool) {
+        if let Err(e) = crate::terminal::set_key_event_types(terminal, on) {
+            self.state
+                .flash_error(format!("keys: could not set key reports: {e:#}"));
+        }
+    }
+
+    /// Reconcile the terminal's key repeat and release reports with whether a
+    /// program wants them; emits nothing when they agree.
+    pub(super) fn settle_key_event_types(&self) -> Vec<Effect> {
+        key_event_types_change(
+            crate::terminal::keyboard_enhancement_supported(),
+            crate::terminal::key_event_types_on(),
+            self.key_releases_wanted(),
+        )
+        .into_iter()
+        .map(|on| Effect::SetKeyEventTypes { on })
+        .collect()
     }
 
     fn track_accepted_pane_input(&mut self, input: &PaneInput) {
@@ -125,9 +194,40 @@ impl App {
     }
 }
 
+/// The key event reports to set, given whether the terminal speaks the kitty
+/// keyboard protocol, whether it reports them now and whether a program wants
+/// them; `None` when nothing changes.
+fn key_event_types_change(supported: bool, on: bool, wanted: bool) -> Option<bool> {
+    let want = supported && wanted;
+    (want != on).then_some(want)
+}
+
+/// Kitty keyboard flag 2: report key repeats and releases.
+const KITTY_REPORT_EVENT_TYPES: u8 = 2;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Repeats and releases are asked of the terminal only while a program
+    /// wants them, and never of a terminal without the kitty protocol.
+    #[test]
+    fn key_reports_follow_a_program_that_wants_them() {
+        let cases = [
+            ((true, false, true), Some(true)),
+            ((true, true, false), Some(false)),
+            ((true, true, true), None),
+            ((true, false, false), None),
+            ((false, false, true), None),
+        ];
+        for ((supported, on, wanted), change) in cases {
+            assert_eq!(
+                key_event_types_change(supported, on, wanted),
+                change,
+                "supported={supported} on={on} wanted={wanted}"
+            );
+        }
+    }
     use crate::app::file_ops::FileOutcome;
     use std::time::{Duration, Instant};
 

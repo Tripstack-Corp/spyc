@@ -519,6 +519,40 @@ pub fn set_mouse_capture(terminal: &mut Tui, capture: bool) -> Result<()> {
     Ok(())
 }
 
+/// Whether the terminal reports key repeats and releases (kitty flag 2) on
+/// top of the disambiguation spyc pushed. A process-global for the reason
+/// `MOUSE_CAPTURE_ON` is one: `suspend_tui` pops the entry it lives on.
+static KEY_EVENT_TYPES_ON: AtomicBool = AtomicBool::new(false);
+
+/// Whether the terminal is reporting key repeats and releases; the
+/// `settle_key_event_types` reconcile compares this with what a pane wants.
+pub fn key_event_types_on() -> bool {
+    KEY_EVENT_TYPES_ON.load(Ordering::Relaxed)
+}
+
+/// The escape that sets the flags on the entry spyc pushed: disambiguation,
+/// and with `on` key repeats and releases too.
+fn key_event_types_seq(on: bool) -> String {
+    let mut flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES;
+    if on {
+        flags |= KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
+    }
+    // `CSI = flags ; 1 u` sets the top entry's flags rather than pushing one.
+    format!("\x1b[={};1u", flags.bits())
+}
+
+/// Turn key repeat and release reports on or off. Called only from the
+/// `Effect::SetKeyEventTypes` executor.
+pub fn set_key_event_types(terminal: &mut Tui, on: bool) -> Result<()> {
+    use std::io::Write as _;
+    terminal
+        .backend_mut()
+        .write_all(key_event_types_seq(on).as_bytes())?;
+    terminal.backend_mut().flush()?;
+    KEY_EVENT_TYPES_ON.store(on, Ordering::Relaxed);
+    Ok(())
+}
+
 /// Release the tty so a child process (editor, pager, shell) can own it,
 /// without exposing the user's shell scrollback in the interim.
 ///
@@ -540,6 +574,9 @@ pub fn suspend_tui(terminal: &mut Tui) -> Result<()> {
     // child (#686). Unconditional and best-effort, matching `restore_terminal`:
     // a terminal that never had it pushed just ignores an unknown CSI.
     let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    // The pop took key repeats and releases with it; the reconcile asks again
+    // once spyc is back.
+    KEY_EVENT_TYPES_ON.store(false, Ordering::Relaxed);
     execute!(
         terminal.backend_mut(),
         Clear(ClearType::All),
@@ -971,6 +1008,35 @@ mod keyboard_enhancement_tests {
             alt < gate && gate < push,
             "resume_tui must re-enter the alternate screen, then push the flag \
              if the terminal supports it: {body}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod key_event_types_tests {
+    /// Repeats and releases are set on the entry spyc pushed, never pushed as
+    /// their own: the one pop on suspend or quit takes them away with it.
+    #[test]
+    fn key_reports_are_set_on_the_entry_spyc_pushed() {
+        assert_eq!(super::key_event_types_seq(true), "\x1b[=3;1u");
+        assert_eq!(super::key_event_types_seq(false), "\x1b[=1;1u");
+    }
+
+    /// The pop on suspend takes the reports with it, so spyc must not go on
+    /// believing they're on: the reconcile asks again once it's back.
+    #[test]
+    fn suspend_forgets_the_key_reports() {
+        let production = crate::guard_support::production_half(include_str!("terminal.rs"));
+        let suspend_body = production
+            .split_once("pub fn suspend_tui(")
+            .expect("suspend_tui exists")
+            .1
+            .split_once("pub fn resume_tui(")
+            .expect("resume_tui exists")
+            .0;
+        assert!(
+            suspend_body.contains("KEY_EVENT_TYPES_ON.store(false"),
+            "{suspend_body}"
         );
     }
 }

@@ -1028,9 +1028,17 @@ back in front) keys go the legacy way and the flags stay for the owner's
 return; once no process is left in the owner's group, the flags are popped.
 `pane::kitty_route` is that decision, pure and tested.
 
-Keys arrive as presses (and repeats where the host reports them): spyc asks the
-host terminal for disambiguation only, and drops key releases, so a program
-asking for event types (flag 2) gets no releases yet.
+Key repeats and releases (flag 2) take three steps. spyc pushes
+disambiguation on the host terminal, and the loop-bottom reconcile
+`settle_key_event_types` adds repeats and releases to that entry
+(`CSI = 3 ; 1 u`) only while the pane keys go to holds a program that pushed
+flag 2, so the host sends spyc no releases otherwise. A release reaching the
+loop skips `handle_key` and the redraw: `handle_key_release` sends it where its
+press would have gone (the pane in front, never spyc's own prefix, `^z`, a
+stopped tab or the last key of a chord that focused the pane) as its own
+`PaneInput::KeyRelease`, which nothing that reads typed keys mistakes for one.
+`Pane::send_key` drops a release that isn't kitty-encoded: legacy keys have no
+release, and sending one would type the key again.
 
 ## Git: 100% in-process gix
 

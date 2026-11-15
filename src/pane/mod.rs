@@ -292,9 +292,12 @@ impl Pane {
         // disagreeing with the bytes it annotates would misdirect the next
         // investigation rather than settle it.
         let app_cursor = self.application_cursor();
-        let bytes = self
-            .kitty_key(key)
-            .unwrap_or_else(|| input::encode_key(key, app_cursor));
+        let bytes = match self.kitty_key(key) {
+            Some(bytes) => bytes,
+            // Legacy keys have no release: sent, it would type the key again.
+            None if key.kind == crossterm::event::KeyEventKind::Release => return Ok(()),
+            None => input::encode_key(key, app_cursor),
+        };
         if !bytes.is_empty() {
             if crate::key_trace::is_enabled() {
                 crate::key_trace::log_tx(&format!(

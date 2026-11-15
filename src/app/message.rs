@@ -24,9 +24,9 @@ use super::state;
 /// rollover, capture-timer, …) — and they only SHORTEN the wait; nothing armed
 /// means an unbounded block until a real message.
 pub enum Message {
-    /// A crossterm input event. The reader Press-filters `Key` events
-    /// (only `Press`/`Repeat` are forwarded); `Paste`/`Resize`/`Focus`/
-    /// `Mouse` pass through unchanged.
+    /// A crossterm input event. Every `Key` event is forwarded, a release
+    /// included (`run.rs` hands it only to a program that asked for one); a
+    /// buttonless mouse `Moved` is dropped.
     Input(Event),
     /// MVU Phase 3a: a filesystem change from the notify watcher closure.
     /// Carries a bare `notify::Event` — the closure drops `Err` at the
