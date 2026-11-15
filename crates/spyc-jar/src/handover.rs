@@ -226,6 +226,7 @@ impl Reader<'_> {
             linger: self.opt_u64()?.map(Duration::from_millis),
             instance: self.u64()?,
             created: self.u64()?,
+            start_on_owner: None,
         })
     }
 
@@ -495,6 +496,7 @@ pub fn sample_blob() -> Vec<u8> {
         linger: Some(Duration::from_secs(300)),
         instance: 0x1234_5678_9abc_def0,
         created: 1_794_000_000,
+        start_on_owner: None,
     };
     let mut events = VecDeque::new();
     events.push_back((3, Event::Out(100, b"hello ".to_vec())));

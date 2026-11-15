@@ -20,6 +20,13 @@ use crate::state::Config;
 /// Open a PTY at the configured size and start the program on it: the
 /// master, and the program's pid.
 pub(crate) fn spawn(cfg: &Config) -> anyhow::Result<(OwnedFd, u32)> {
+    let (master, slave) = open(cfg)?;
+    Ok((master, start(cfg, slave)?))
+}
+
+/// Open a PTY at the configured size: its master, and its slave for the
+/// program [`start`] runs on it.
+pub(crate) fn open(cfg: &Config) -> anyhow::Result<(OwnedFd, File)> {
     let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).context("open a PTY")?;
     rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC)?;
     grantpt(&master).context("grantpt")?;
@@ -43,6 +50,11 @@ pub(crate) fn spawn(cfg: &Config) -> anyhow::Result<(OwnedFd, u32)> {
         },
     )
     .context("size the PTY")?;
+    Ok((master, slave))
+}
+
+/// Start the program on the PTY whose slave is `slave`: its pid.
+pub(crate) fn start(cfg: &Config, slave: File) -> anyhow::Result<u32> {
     let mut cmd = Command::new(std::env::current_exe().context("the jar's own binary")?);
     cmd.arg("pty-child").arg("--").args(&cfg.argv);
     cmd.stdin(slave.try_clone()?)
@@ -57,7 +69,7 @@ pub(crate) fn spawn(cfg: &Config) -> anyhow::Result<(OwnedFd, u32)> {
     // from an environment that may have changed.
     cmd.env("SPYC_JAR_SOCKET", &cfg.socket);
     let child = cmd.spawn().context("spawn the program")?;
-    Ok((master, child.id()))
+    Ok(child.id())
 }
 
 /// `spyc-jar pty-child -- PROGRAM [ARGS…]`, with the PTY's slave on standard

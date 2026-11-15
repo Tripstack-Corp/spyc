@@ -1186,3 +1186,27 @@ fn the_store_sweep_removes_only_old_entries_nothing_runs() {
     );
     host.shutdown(END);
 }
+
+/// Decision M: a pane's jar holds its program until spyc, its first owner,
+/// connects, so the program's start-up probes are answered by an owner.
+#[test]
+fn a_panes_jar_holds_its_program_for_its_first_owner() {
+    let args = jar_args(
+        Path::new("/s/j.sock"),
+        Path::new("/w"),
+        (24, 80),
+        &["claude".into()],
+    );
+    let at = args
+        .iter()
+        .position(|a| a == "--start-on-owner")
+        .expect("the jar holds the program for its owner");
+    let wait: u64 = args[at + 1].to_str().unwrap().parse().unwrap();
+    assert!(
+        wait > ANSWER_WAIT.as_millis() as u64,
+        "spyc gives up before the jar does"
+    );
+    let program = args.iter().position(|a| a == "--").unwrap();
+    assert!(at < program, "a flag after the program is the program's");
+    assert_eq!(args[program + 1], "claude");
+}

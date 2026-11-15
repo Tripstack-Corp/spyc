@@ -182,7 +182,8 @@ pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
         // connected; it holds no token, since it runs as whatever the user
         // started in the jar.
         Role::Program => {
-            let ours = st.exit.is_none() && peer_pid(&sock).is_ok_and(|p| p == shared.child_pid);
+            let ours = st.exit.is_none()
+                && peer_pid(&sock).is_ok_and(|p| p != 0 && p == shared.child_pid());
             if ours {
                 Ok(())
             } else {
@@ -204,6 +205,19 @@ pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
     }
     let id = st.next_conn;
     st.next_conn += 1;
+    // Decision M: the program held for its first owner starts now, before
+    // the welcome, which carries its pid.
+    if role == Role::Owner
+        && let Err(e) = shared.start_program()
+    {
+        drop(st);
+        refuse(
+            reason::UNSPECIFIED,
+            format!("the program didn't start: {e:#}"),
+        );
+        let _ = std::fs::remove_file(&shared.cfg.socket);
+        std::process::exit(1);
+    }
     if role == Role::Owner {
         st.owner = Some(id);
         st.had_owner = true;
@@ -212,7 +226,7 @@ pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
     }
     let welcome = Msg::Welcome {
         version: version.min(proto::VERSION),
-        child_pid: shared.child_pid,
+        child_pid: shared.child_pid(),
         head: st.log.head,
         base: st.log.base,
         rows: st.rows,

@@ -38,6 +38,11 @@ pub struct Config {
     /// upgrades, and when it started, in seconds since the epoch.
     pub instance: u64,
     pub created: u64,
+    /// Decision M: hold the program until the first owner's `hello` is
+    /// accepted, and end the jar, having started nothing, if none comes
+    /// within this. Not carried by an upgrade, which can't come before the
+    /// program has started.
+    pub start_on_owner: Option<Duration>,
 }
 
 /// One entry in the log, at the offset of the next byte after it.

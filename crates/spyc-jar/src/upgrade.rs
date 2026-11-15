@@ -92,9 +92,18 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
     }
     let shared = Arc::clone(shared);
     std::thread::spawn(move || {
-        let (why, err) = match one_file(&shared, &binary) {
-            Ok(image) => run(&shared, &image),
-            Err(e) => e,
+        // The blob always has a program (decision M): nothing is copied or
+        // run for an upgrade asked before it has started.
+        let (why, err) = if shared.child_pid() == 0 {
+            (
+                reason::UPGRADE_BUSY,
+                anyhow!("the program hasn't started: the jar waits for its first owner"),
+            )
+        } else {
+            match one_file(&shared, &binary) {
+                Ok(image) => run(&shared, &image),
+                Err(e) => e,
+            }
         };
         shared.upgrading.store(false, Ordering::SeqCst);
         shared.upgrade_claimed.store(false, Ordering::SeqCst);
@@ -188,7 +197,7 @@ fn try_run(
             states.len()
         )));
     }
-    let blob = handover::encode_parts(&shared.cfg, shared.child_pid, &st, &states);
+    let blob = handover::encode_parts(&shared.cfg, shared.child_pid(), &st, &states);
     validate(binary, &blob, shared.cfg.instance).map_err(|e| (reason::UPGRADE_REJECTED, e))?;
 
     let (blob_read, blob_write) = pipe().map_err(failed)?;
@@ -291,7 +300,7 @@ fn blob_now(shared: &Shared) -> Vec<u8> {
         let conns = shared.conns();
         conn_states(&conns, &carried(&conns))
     };
-    handover::encode_parts(&shared.cfg, shared.child_pid, &st, &states)
+    handover::encode_parts(&shared.cfg, shared.child_pid(), &st, &states)
 }
 
 /// Write what waits in `conn`'s outbox, its writer being parked, by `until`.
@@ -653,5 +662,5 @@ pub fn resume() -> anyhow::Result<()> {
         );
     }
     let conns = h.conns.into_iter().zip(streams).collect();
-    crate::jar::start(h.cfg, h.state, h.child_pid, master, listener, conns)
+    crate::jar::start(h.cfg, h.state, (h.child_pid, None), master, listener, conns)
 }
