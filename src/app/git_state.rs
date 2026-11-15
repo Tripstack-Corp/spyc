@@ -5,8 +5,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::ui::pager;
-
 use super::git_view_session::{DiffScope, GitViewKind};
 use super::{App, Effect, state};
 
@@ -312,70 +310,6 @@ impl App {
             title,
         );
     }
-
-    /// W l — list worktrees in a pager; digit keys 1-9 select.
-    pub fn worktree_list(&mut self) {
-        self.clear_pending_pickers();
-        match crate::git::worktree::list(&self.state.cur().listing.dir) {
-            Some(worktrees) => {
-                let cur_dir = self.state.cur().listing.dir.clone();
-                // Start the cursor on the worktree the focused column is in (so
-                // the highlight reflects "where I am"), else the first row.
-                let start = worktrees
-                    .iter()
-                    .position(|w| w.path == cur_dir)
-                    .unwrap_or(0);
-                self.state.pending_worktrees =
-                    Some(worktrees.iter().map(|w| w.path.clone()).collect());
-                let lines: Vec<String> = worktrees
-                    .iter()
-                    .enumerate()
-                    .map(|(i, wt)| worktree_row(i, wt, &cur_dir))
-                    .collect();
-                let mut view = pager::PagerView::new_plain(
-                    "git worktrees — j/k+Enter or 1-9 to switch, / to search, q to close",
-                    lines,
-                );
-                // A highlighted picker row (j/k move it, Enter switches to it);
-                // `/` search syncs the cursor to its match (see
-                // `handle_pager_search_typing`). Mirrors the jump-history popup.
-                view.picker_cursor = Some(start);
-                view.picker = Some(pager::PickerKind::Worktrees);
-                view.no_history = true;
-                view.show_line_numbers = false;
-                view.wrap = false;
-                self.set_pager(view);
-            }
-            None => self
-                .state
-                .flash_error("not in a git repository (or no worktrees)"),
-        }
-    }
-}
-
-/// One `W l` picker row: `[n]  branch  head  path`, marked ` (main worktree)`
-/// for the repo's main checkout and ` ← current` for the one the focused column
-/// sits in. The branch column names whatever is checked out there, so without
-/// the main marker a main worktree holding a feature branch reads exactly like a
-/// linked one — and then "where do I switch back to?" has no answer on screen.
-///
-/// The path is tilde-collapsed like every other user-facing path display; the
-/// switch target comes from `state.pending_worktrees`, which keeps the real
-/// absolute paths, so shortening the label can't misdirect a jump.
-fn worktree_row(i: usize, wt: &crate::git::worktree::Worktree, cur_dir: &Path) -> String {
-    format!(
-        "  [{}]  {:<30} {:>8}  {}{}{}",
-        i + 1,
-        wt.branch,
-        wt.head,
-        crate::paths::display_tilde(&wt.path),
-        if wt.primary { " (main worktree)" } else { "" },
-        if wt.path == cur_dir {
-            " ← current"
-        } else {
-            ""
-        },
-    )
 }
 
 /// Relativize an absolute `path` to a repo-relative, forward-slash path under
@@ -414,87 +348,6 @@ mod tests {
         assert_eq!(
             repo_relative(Path::new("/home/u/proj/README.md"), root).as_deref(),
             Some("README.md")
-        );
-    }
-
-    fn wt(path: &str, branch: &str, primary: bool) -> crate::git::worktree::Worktree {
-        crate::git::worktree::Worktree {
-            path: std::path::PathBuf::from(path),
-            head: "abc1234".to_string(),
-            branch: branch.to_string(),
-            primary,
-        }
-    }
-
-    /// The whole point of the marker: the main worktree is identifiable even
-    /// when the branch checked out in it isn't the default one.
-    #[test]
-    fn main_worktree_row_is_marked_whatever_branch_it_holds() {
-        let row = super::worktree_row(0, &wt("/src/proj", "fold-rule-8", true), Path::new("/nope"));
-        assert!(
-            row.contains("(main worktree)"),
-            "main worktree row must say so: {row}"
-        );
-        assert!(row.contains("fold-rule-8"), "branch still shown: {row}");
-    }
-
-    #[test]
-    fn linked_worktree_row_is_not_marked_main() {
-        let row = super::worktree_row(
-            1,
-            &wt("/src/proj.worktrees/feat", "feat", false),
-            Path::new("/nope"),
-        );
-        assert!(
-            !row.contains("(main worktree)"),
-            "a linked worktree is not the main one: {row}"
-        );
-    }
-
-    /// A bare repo has no working tree to mark, and its row already reads
-    /// `(bare)` — so the marker must not claim otherwise.
-    #[test]
-    fn bare_repo_row_is_not_marked_main() {
-        let row = super::worktree_row(0, &wt("/src/proj.git", "(bare)", false), Path::new("/nope"));
-        assert!(row.contains("(bare)"), "bare label kept: {row}");
-        assert!(
-            !row.contains("(main worktree)"),
-            "a bare repo has no main worktree: {row}"
-        );
-    }
-
-    /// Paths under `$HOME` collapse to `~/…` like every other user-facing path
-    /// display (DESIGN.md), and the markers still land after the shortened path.
-    #[test]
-    fn row_path_is_tilde_collapsed() {
-        let Some(home) = std::env::var_os("HOME") else {
-            return;
-        };
-        let home = home.to_string_lossy().trim_end_matches('/').to_string();
-        let path = format!("{home}/src/proj");
-        let row = super::worktree_row(0, &wt(&path, "fold-rule-8", true), Path::new(&path));
-        assert!(
-            row.contains("~/src/proj (main worktree) ← current"),
-            "path should be tilde-collapsed with markers intact: {row}"
-        );
-        assert!(!row.contains(&home), "absolute home prefix leaked: {row}");
-    }
-
-    #[test]
-    fn row_path_outside_home_is_left_absolute() {
-        let row = super::worktree_row(0, &wt("/srv/checkout", "main", true), Path::new("/nope"));
-        assert!(
-            row.contains("/srv/checkout"),
-            "a non-home path stays as-is: {row}"
-        );
-    }
-
-    #[test]
-    fn both_markers_appear_when_the_user_is_in_the_main_worktree() {
-        let row = super::worktree_row(0, &wt("/src/proj", "main", true), Path::new("/src/proj"));
-        assert!(
-            row.ends_with("(main worktree) ← current"),
-            "main marker precedes the current marker: {row}"
         );
     }
 

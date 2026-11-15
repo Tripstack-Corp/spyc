@@ -117,8 +117,9 @@ impl App {
         if self.apply_jump_defaults() {
             ctx.draw.mark(3);
         }
-        // The switcher's closed rows landed (woke via `Wake::ClosedRows`).
-        if self.apply_closed_rows() {
+        // A picker's rows landed: the switcher's closed ones (woke via
+        // `Wake::ClosedRows`) or `W l`'s worktrees (`Wake::WorktreeRows`).
+        if self.apply_closed_rows() | self.apply_worktree_rows() {
             ctx.draw.mark(3);
         }
         // A make menu's Makefile was read (woke via `Wake::Makefile`).
