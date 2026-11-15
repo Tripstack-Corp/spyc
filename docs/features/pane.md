@@ -12,8 +12,8 @@ The pane is a terminal in its own right, not a pass-through to the host. A
 program that redraws in one go is shown once the redraw is finished, and a
 program that asks what the terminal supports gets answers about the pane, not
 the host, so claude's and brew's redraws don't flicker even in a host terminal
-that can't do this itself. The pane doesn't offer the kitty keyboard protocol,
-image protocols or OSC 52 clipboard writes. How it answers:
+that can't do this itself. The pane doesn't offer image protocols or OSC 52
+clipboard writes. How it answers:
 [ARCHITECTURE.md → "Answering the child's queries"](../../ARCHITECTURE.md#answering-the-childs-queries).
 
 - **^\\ / F10** toggle the pane open/closed
@@ -233,6 +233,12 @@ image protocols or OSC 52 clipboard writes. How it answers:
   older ones were left out. `r` reloads while the agent keeps running;
   `Esc` (or scrolling down past the end) returns to the live pane.
 - **Ctrl+J** newline in pane (multi-line input for Claude CLI)
+- **The kitty keyboard protocol** for a program that asks for it: Shift+Enter,
+  Ctrl+I apart from Tab, Esc apart from Alt, Ctrl+Alt+letter and Super
+  bindings reach it as the program expects. Only the program that asked gets
+  them: a shell it leaves behind, or one you `^z` back to, gets ordinary keys.
+  A program that asks for key releases and repeats gets those too, when your
+  terminal speaks the protocol (Ghostty, kitty, WezTerm, foot, iTerm2).
 - **gf** jump to a file path referenced in pane output; **gF** also
   opens the pager at the referenced line. Scans the last 200 lines of
   output (including scrollback) so paths in large diffs are still found.

@@ -585,6 +585,14 @@ mod child_queries {
         assert_eq!(replies_to(b"\x1b[3;5H\x1b[6n"), b"\x1b[3;5R");
     }
 
+    /// The kitty keyboard flags in force, `0` until a program pushes any
+    /// (#1176): spyc encodes keys by them.
+    #[test]
+    fn kitty_keyboard_flags_are_reported() {
+        assert_eq!(replies_to(b"\x1b[?u"), b"\x1b[?0u");
+        assert_eq!(replies_to(b"\x1b[>5u\x1b[?u"), b"\x1b[?5u");
+    }
+
     #[test]
     fn decrqss_reports_the_scroll_region() {
         assert_eq!(
@@ -606,7 +614,6 @@ mod child_queries {
     #[test]
     fn untrue_or_unsafe_answers_stay_unsent() {
         let silent: &[(&str, &[u8])] = &[
-            ("kitty keyboard: spyc encodes legacy keys only", b"\x1b[?u"),
             (
                 "XTGETTCAP Ms: Ghostty's terminfo, not spyc's",
                 b"\x1bP+q4d73\x1b\\",
@@ -730,5 +737,97 @@ mod program_status {
         e.process(&b"\x1b]7501;state=working\x1b\\".repeat(1000));
         assert_eq!(e.take_program_events().len(), 256);
         assert_eq!(e.take_program_events(), []);
+    }
+}
+
+/// The kitty keyboard protocol for the program that asks (#1176): its flags
+/// are reported and popped, and a key is encoded by them as the spec says.
+#[cfg(test)]
+mod kitty_keys {
+    use super::super::*;
+    use crossterm::event::{KeyCode as K, KeyEvent, KeyModifiers as M};
+
+    fn pushed(push: &str) -> GhosttyEngine {
+        let mut e = <GhosttyEngine as Engine>::new(24, 80, 100);
+        e.process(push.as_bytes());
+        e
+    }
+
+    fn enc(e: &GhosttyEngine, code: K, mods: M) -> String {
+        let out = e
+            .encode_kitty_key(KeyEvent::new(code, mods))
+            .expect("a key the engine names");
+        String::from_utf8(out).expect("utf-8")
+    }
+
+    #[test]
+    fn the_flags_are_reported_and_popped() {
+        let mut e = pushed("\x1b[>1u\x1b[>5u");
+        assert_eq!(e.kitty_keyboard_flags(), 5);
+        e.process(b"\x1b[?u");
+        assert_eq!(
+            e.take_replies(),
+            b"\x1b[?5u",
+            "answered through the allowlist"
+        );
+        e.end_kitty_keyboard();
+        assert_eq!(e.kitty_keyboard_flags(), 0, "every push popped");
+    }
+
+    /// Flag 1, disambiguate: text stays text, and what legacy keys can't tell
+    /// apart gets its own escape.
+    #[test]
+    fn disambiguate_tells_apart_what_legacy_keys_cannot() {
+        let e = pushed("\x1b[>1u");
+        let cases: &[(K, M, &str)] = &[
+            (K::Char('a'), M::NONE, "a"),
+            (K::Char('A'), M::SHIFT, "A"),
+            (K::Char('!'), M::SHIFT, "!"),
+            (K::Char('é'), M::NONE, "é"),
+            (K::Enter, M::NONE, "\r"),
+            (K::Tab, M::NONE, "\t"),
+            (K::Up, M::NONE, "\x1b[A"),
+            (K::F(5), M::NONE, "\x1b[15~"),
+            (K::Enter, M::SHIFT, "\x1b[13;2u"),
+            (K::Char('i'), M::CONTROL, "\x1b[105;5u"),
+            (K::Esc, M::NONE, "\x1b[27u"),
+            (K::Char('v'), M::CONTROL | M::ALT, "\x1b[118;7u"),
+            (K::Char('k'), M::SUPER, "\x1b[107;9u"),
+            (K::BackTab, M::SHIFT, "\x1b[9;2u"),
+        ];
+        for (code, mods, want) in cases {
+            assert_eq!(enc(&e, *code, *mods), *want, "{code:?} {mods:?}");
+        }
+    }
+
+    /// Flag 8, every key as an escape: the key's unshifted code, Shift as a
+    /// modifier, and an `A` from a host that reports no Shift still has one.
+    #[test]
+    fn all_keys_as_escapes_report_the_unshifted_key() {
+        let e = pushed("\x1b[>9u");
+        assert_eq!(enc(&e, K::Char('a'), M::NONE), "\x1b[97u");
+        assert_eq!(enc(&e, K::Char('A'), M::SHIFT), "\x1b[97;2u");
+        assert_eq!(enc(&e, K::Char('A'), M::NONE), "\x1b[97;2u");
+        assert_eq!(enc(&e, K::Enter, M::NONE), "\x1b[13u");
+        assert_eq!(enc(&e, K::Char('é'), M::NONE), "\x1b[233u");
+    }
+
+    /// Flag 16, associated text: what the key typed rides along.
+    #[test]
+    fn associated_text_rides_along() {
+        let e = pushed("\x1b[>25u");
+        assert_eq!(enc(&e, K::Char('A'), M::SHIFT), "\x1b[97;2;65u");
+    }
+
+    #[test]
+    fn a_key_with_no_name_goes_the_legacy_way() {
+        let e = pushed("\x1b[>1u");
+        assert_eq!(
+            e.encode_kitty_key(KeyEvent::new(
+                K::Media(crossterm::event::MediaKeyCode::Play),
+                M::NONE
+            )),
+            None
+        );
     }
 }

@@ -285,6 +285,12 @@ impl App {
         ctx: &mut RunCtx,
     ) -> Result<DispatchFlow> {
         match effective {
+            // A release is no keypress and redraws nothing: it only reaches a
+            // program that asked for releases.
+            Ok(Message::Input(Event::Key(key))) if key.kind == KeyEventKind::Release => {
+                let effects = self.handle_key_release(key);
+                self.run_effects(effects, terminal, foreground_exec);
+            }
             Ok(Message::Input(ev)) => {
                 ctx.draw.mark(2);
                 match ev {

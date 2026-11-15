@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyEventKind, MouseEventKind};
+use crossterm::event::{self, Event, MouseEventKind};
 
 use crate::spyc_debug;
 use crate::{Tui, resume_tui, suspend_tui};
@@ -120,30 +120,7 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                     match event::poll(READER_POLL) {
                         Ok(true) => match event::read() {
                             Ok(ev) => {
-                                // Press-filter for Key (verbatim from the
-                                // old inline guard); everything else
-                                // (Paste/Resize/Focus/Mouse) forwarded.
-                                let forward = match &ev {
-                                    Event::Key(k) => {
-                                        k.kind == KeyEventKind::Press
-                                            || k.kind == KeyEventKind::Repeat
-                                    }
-                                    // `Drag` is forwarded: spyc asks for 1002
-                                    // (button-event tracking), so a drag is a
-                                    // deliberate gesture and its redraw is wanted.
-                                    //
-                                    // `Moved` is still dropped. 1002 reports motion
-                                    // only while a button is HELD, so a buttonless
-                                    // `Moved` means the terminal reported motion
-                                    // spyc never asked for — and `run.rs` marks a
-                                    // redraw for every `Message::Input`, so idle
-                                    // pointer movement would become a
-                                    // redraw-per-motion storm. That is the 1003
-                                    // hazard arriving by accident, and this is the
-                                    // belt to 1002's braces.
-                                    Event::Mouse(m) => !matches!(m.kind, MouseEventKind::Moved),
-                                    _ => true,
-                                };
+                                let forward = reader_forwards(&ev);
                                 if forward && tx.send(Message::Input(ev)).is_err() {
                                     reader_done.store(true, Release); // main loop gone
                                     return;
@@ -365,6 +342,53 @@ fn paint_subshell_banner(terminal: &Tui) {
         let _ = stdout.flush();
     }
     let _ = crate::term_title::set(subshell_banner::MARKER);
+}
+
+/// Whether the input reader passes `ev` to the loop: everything but a
+/// buttonless mouse `Moved`.
+///
+/// Every key goes, a release too: the loop hands it to a program that asked for
+/// one and drops it before anything redraws. A mouse `Drag` goes: spyc asks for
+/// 1002 (button-event tracking), so a drag is a deliberate gesture and its
+/// redraw is wanted.
+///
+/// `Moved` is dropped. 1002 reports motion only while a button is HELD, so a
+/// buttonless `Moved` means the terminal reported motion spyc never asked for,
+/// and `run.rs` marks a redraw for every `Message::Input`: idle pointer movement
+/// would become a redraw-per-motion storm. That is the 1003 hazard arriving by
+/// accident, and this is the belt to 1002's braces.
+const fn reader_forwards(ev: &Event) -> bool {
+    !matches!(ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Moved))
+}
+
+#[cfg(test)]
+mod reader_tests {
+    use super::reader_forwards;
+    use crossterm::event::{
+        Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+    };
+
+    /// Every key reaches the loop, its release too: a program that asked for
+    /// releases (kitty flag 2) is owed them, and the loop drops the rest
+    /// before anything redraws.
+    #[test]
+    fn every_key_event_reaches_the_loop() {
+        for kind in [
+            KeyEventKind::Press,
+            KeyEventKind::Repeat,
+            KeyEventKind::Release,
+        ] {
+            let key = KeyEvent::new_with_kind(KeyCode::Char('a'), KeyModifiers::NONE, kind);
+            assert!(reader_forwards(&Event::Key(key)), "{kind:?}");
+        }
+        let moved = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(!reader_forwards(&Event::Mouse(moved)), "buttonless motion");
+    }
 }
 
 #[cfg(test)]
