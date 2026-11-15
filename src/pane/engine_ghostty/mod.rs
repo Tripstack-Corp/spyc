@@ -49,6 +49,9 @@ use spyc_vt_sys::{ffi, scrollback};
 
 use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, TerminalScreen, Wide};
 
+#[cfg(test)]
+mod jar_fidelity;
+mod jar_snapshot;
 mod replies;
 
 /// DEC mode 2027 — grapheme clustering. See `GhosttyEngine::new` for why spyc
@@ -784,6 +787,51 @@ fn row_string(frame: &Frame, row: u16) -> String {
     out.trim_end().to_string()
 }
 
+/// spyc's settings on a terminal, new or restored from a snapshot: grapheme
+/// clustering, the scrollback limits for `scrollback_rows`, and replies into
+/// `replies`.
+fn configure(t: ffi::GhosttyTerminal, scrollback_rows: usize, replies: *mut replies::Sink) {
+    // Grapheme clustering (DEC mode 2027), which libghostty leaves off by
+    // default. spyc's host-facing half already models it enabled —
+    // `ui::display_width` and ratatui both measure a cluster as one unit —
+    // so an engine laying `\u{1f1e8}\u{1f1e6}` across four columns
+    // disagrees with every other component and with the producers filling
+    // the pane. `OPT_MODE_DEFAULT` rather than `OPT_MODE`: it sets the
+    // current value AND the one RIS restores, so a child running `reset`
+    // doesn't silently drop back to per-codepoint layout.
+    let cluster = GhosttyTerminalModeConfig {
+        mode: MODE_GRAPHEME_CLUSTER,
+        value: true,
+    };
+    // SAFETY: `t` is live, and `MODE_DEFAULT` reads a
+    // `GhosttyTerminalModeConfig` during the call.
+    unsafe {
+        ffi::ghostty_terminal_set(
+            t,
+            Opt::GHOSTTY_TERMINAL_OPT_MODE_DEFAULT,
+            (&raw const cluster).cast(),
+        );
+    }
+    // Both limits, always: rows are the UX contract, bytes the safety
+    // valve, and leaving either at its default truncates history.
+    let limits = scrollback::limits_for_row_budget(scrollback_rows.max(1));
+    let (bytes, lines) = (limits.max_bytes, limits.max_lines);
+    // SAFETY: `t` is live, and both limits read a `size_t` during the call.
+    unsafe {
+        ffi::ghostty_terminal_set(
+            t,
+            Opt::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+            (&raw const bytes).cast(),
+        );
+        ffi::ghostty_terminal_set(
+            t,
+            Opt::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+            (&raw const lines).cast(),
+        );
+    }
+    replies::install(t, replies);
+}
+
 impl Engine for GhosttyEngine {
     type Screen = GhosttyScreen;
 
@@ -796,46 +844,8 @@ impl Engine for GhosttyEngine {
             spyc_vt_sys::SUCCESS,
             "ghostty_terminal_new"
         );
-        // Grapheme clustering (DEC mode 2027), which libghostty leaves off by
-        // default. spyc's host-facing half already models it enabled —
-        // `ui::display_width` and ratatui both measure a cluster as one unit —
-        // so an engine laying `\u{1f1e8}\u{1f1e6}` across four columns
-        // disagrees with every other component and with the producers filling
-        // the pane. `OPT_MODE_DEFAULT` rather than `OPT_MODE`: it sets the
-        // current value AND the one RIS restores, so a child running `reset`
-        // doesn't silently drop back to per-codepoint layout.
-        let cluster = GhosttyTerminalModeConfig {
-            mode: MODE_GRAPHEME_CLUSTER,
-            value: true,
-        };
-        // SAFETY: `t` is live, and `MODE_DEFAULT` reads a
-        // `GhosttyTerminalModeConfig` during the call.
-        unsafe {
-            ffi::ghostty_terminal_set(
-                t,
-                Opt::GHOSTTY_TERMINAL_OPT_MODE_DEFAULT,
-                (&raw const cluster).cast(),
-            );
-        }
-        // Both limits, always: rows are the UX contract, bytes the safety
-        // valve, and leaving either at its default truncates history.
-        let limits = scrollback::limits_for_row_budget(scrollback_rows.max(1));
-        let (bytes, lines) = (limits.max_bytes, limits.max_lines);
-        // SAFETY: `t` is live, and both limits read a `size_t` during the call.
-        unsafe {
-            ffi::ghostty_terminal_set(
-                t,
-                Opt::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
-                (&raw const bytes).cast(),
-            );
-            ffi::ghostty_terminal_set(
-                t,
-                Opt::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
-                (&raw const lines).cast(),
-            );
-        }
         let replies = Box::into_raw(Box::default());
-        replies::install(t, replies);
+        configure(t, scrollback_rows, replies);
         let mut rs: ffi::GhosttyRenderState = std::ptr::null_mut();
         let mut it: ffi::GhosttyRenderStateRowIterator = std::ptr::null_mut();
         let mut rc: ffi::GhosttyRenderStateRowCells = std::ptr::null_mut();
