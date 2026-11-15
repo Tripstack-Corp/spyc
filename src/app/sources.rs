@@ -561,6 +561,7 @@ mod tests {
             Message::Wake(Wake::Wiring),
             Message::Wake(Wake::JumpDefault),
             Message::Wake(Wake::ClosedRows),
+            Message::Wake(Wake::WorktreeRows),
         ];
         for done in wakes {
             let (_tx, rx) = mpsc::channel::<Message>();

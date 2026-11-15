@@ -219,6 +219,17 @@ impl App {
         true
     }
 
+    /// Wait, at most five seconds, for `W l`'s worktrees, read and dated off
+    /// the loop thread, to land as the loop lands them. Whether they did.
+    pub(crate) fn land_worktree_rows(&mut self) -> bool {
+        let landed = self
+            .runtime
+            .worktree_rows_results
+            .wait(std::time::Duration::from_secs(5));
+        self.apply_worktree_rows();
+        landed
+    }
+
     /// Open a `cat` tab in project `id`, as that project's keyboard would, and
     /// return the tab's pane id.
     pub(crate) fn open_tab_in_project(

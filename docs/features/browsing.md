@@ -118,10 +118,14 @@ second, complete file list, each column labelled `a` and `b`.
 - **W l** opens a **worktree picker** — `j`/`k` (or arrows) move the
   highlighted row, `Enter` switches the *focused* column to it, `/`
   searches (the cursor lands on the match), and `1`-`9` quick-switch by
-  number (focus `b` first to put a worktree there). Rows list the main
-  worktree first (git's ordering), each showing the branch checked out
-  in it; the main one is marked **`(main worktree)`** and the one the
-  focused column is in `← current`. The marker is what tells you which
+  number (focus `b` first to put a worktree there). Rows list the
+  main worktree first, then the rest with the one updated last first,
+  each showing the branch checked out in it and when it was last
+  updated, in local time and how long ago: the newest change to a file
+  or directory git doesn't ignore, so a build into `target/` doesn't
+  count, or a commit or checkout there. The main one is marked
+  **`(main worktree)`** and the one the focused column is in
+  `← current`. The marker is what tells you which
   row is your git home when a feature branch is checked out there
   directly — the branch column can't. With the MCP tools
   (`create_worktree` / `open_worktree` /

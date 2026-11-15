@@ -212,6 +212,7 @@ fn the_worktree_picker_takes_its_own_keys() {
     crate::state::with_state_root(&base.join("state"), || {
         let mut app = App::test_app(repo.clone());
         app.worktree_list();
+        assert!(app.land_worktree_rows(), "W l's worktrees never landed");
         let cursor = |app: &App| {
             app.view
                 .project()
@@ -219,9 +220,16 @@ fn the_worktree_picker_takes_its_own_keys() {
                 .as_ref()
                 .and_then(|v| v.picker_cursor)
         };
+        // Two rows, newest first, the cursor on the column's own: move it
+        // toward the other.
         let start = cursor(&app).expect("W l opened no picker");
-        app.handle_key(key('j')).unwrap();
-        assert_ne!(cursor(&app), Some(start), "j didn't move the highlight");
+        let toward = if start == 0 { 'j' } else { 'k' };
+        app.handle_key(key(toward)).unwrap();
+        assert_ne!(
+            cursor(&app),
+            Some(start),
+            "{toward} didn't move the highlight"
+        );
     });
 }
 
