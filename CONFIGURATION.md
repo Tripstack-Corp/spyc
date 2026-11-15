@@ -86,6 +86,7 @@ claude_esc_guard = true        # drop a bare Esc that would interrupt a working 
 ctrl_w_prefix = true           # ^w is a pane prefix like ^a; false sends a focused pane's ^w to its program
 agent_hud = "off"             # "off", "compact", or "full"; only your own files decide
 agent_hud_resets = "clock"    # when a plan window resets: "clock" (3:40pm, Thu 9am) or "countdown" (2h05m)
+jars = false                  # run each tab's program in a spyc-jar; -CURRENT and rc builds only, your own files only
 
 [yank]
 include_pager_title = true     # prepend a source header to pager yanks (y/Y)

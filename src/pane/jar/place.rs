@@ -1,0 +1,180 @@
+//! Where this user's jars live: their sockets in a private directory under the
+//! runtime directory, their tokens under spyc's state (R26), and the
+//! `spyc-jar` binary beside spyc.
+//!
+//! The socket directory is `$XDG_RUNTIME_DIR/spyc/jars`, else
+//! `$TMPDIR/spyc/jars`, else `/tmp/spyc-<uid>/jars`, and each directory spyc
+//! makes there must be this user's, `0700` and not a link before a socket in
+//! it is trusted (finding 14): another user who made `/tmp/spyc` first could
+//! otherwise put a socket where spyc expects a jar. A pane's jar is found by
+//! the path spyc started it at, never worked out again from a changed
+//! environment.
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+use anyhow::Context;
+
+/// Where one spyc's jars are started and found.
+#[derive(Debug, Clone)]
+pub struct Place {
+    /// The `spyc-jar` to start.
+    pub binary: PathBuf,
+    /// The directories spyc makes for the sockets, outermost first: each is
+    /// checked, and the last holds the sockets.
+    pub dirs: Vec<PathBuf>,
+    /// Where each jar's token is kept, `0600`, by its socket's name.
+    pub tokens: PathBuf,
+}
+
+impl Place {
+    /// This user's: the jar beside the running spyc, sockets in the runtime
+    /// directory, tokens in spyc's state directory.
+    pub fn for_this_user() -> anyhow::Result<Self> {
+        let binary = std::env::current_exe()
+            .context("where spyc runs from")?
+            .with_file_name("spyc-jar");
+        let tokens = crate::state::state_root()
+            .context("no state directory for jar tokens")?
+            .join("jar-tokens");
+        Ok(Self {
+            binary,
+            dirs: socket_dirs(
+                std::env::var_os("XDG_RUNTIME_DIR"),
+                std::env::var_os("TMPDIR"),
+                rustix::process::getuid().as_raw(),
+            ),
+            tokens,
+        })
+    }
+
+    /// The directory the sockets are in.
+    pub fn sockets(&self) -> &Path {
+        self.dirs.last().map_or(Path::new("/"), PathBuf::as_path)
+    }
+
+    /// The socket of the jar named `name`: its first 16 hex digits, inside
+    /// macOS's 104-byte limit on a socket's path.
+    pub fn socket(&self, name: &str) -> PathBuf {
+        let id: String = name
+            .chars()
+            .filter(char::is_ascii_hexdigit)
+            .take(16)
+            .collect();
+        self.sockets().join(format!("{id}.sock"))
+    }
+
+    /// Make the socket directories this user's alone, or say why they can't
+    /// be trusted.
+    pub fn prepare(&self) -> anyhow::Result<()> {
+        use std::os::unix::fs::DirBuilderExt;
+        for dir in &self.dirs {
+            match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e).with_context(|| format!("create {}", dir.display())),
+            }
+            private_dir(dir)?;
+        }
+        Ok(())
+    }
+}
+
+/// The socket directories for these values of `XDG_RUNTIME_DIR` and
+/// `TMPDIR`, outermost first.
+pub(super) fn socket_dirs(
+    runtime: Option<std::ffi::OsString>,
+    tmpdir: Option<std::ffi::OsString>,
+    uid: u32,
+) -> Vec<PathBuf> {
+    let nonempty = |v: Option<std::ffi::OsString>| v.filter(|v| !v.is_empty());
+    let base = nonempty(runtime).or_else(|| nonempty(tmpdir)).map_or_else(
+        || PathBuf::from(format!("/tmp/spyc-{uid}")),
+        |root| PathBuf::from(root).join("spyc"),
+    );
+    let jars = base.join("jars");
+    vec![base, jars]
+}
+
+/// `dir` is a directory, not a link, owned by this user and closed to
+/// everyone else.
+pub(super) fn private_dir(dir: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let meta = dir
+        .symlink_metadata()
+        .with_context(|| format!("look at {}", dir.display()))?;
+    anyhow::ensure!(
+        meta.file_type().is_dir(),
+        "{} isn't a directory (a link?); no jar is trusted there",
+        dir.display()
+    );
+    let uid = rustix::process::getuid().as_raw();
+    anyhow::ensure!(
+        meta.uid() == uid,
+        "{} belongs to uid {}, not this user's {uid}; no jar is trusted there",
+        dir.display(),
+        meta.uid()
+    );
+    let mode = meta.permissions().mode() & 0o777;
+    let others = mode & 0o077;
+    anyhow::ensure!(
+        others == 0,
+        "{} is open to others (mode {mode:o}); no jar is trusted there",
+        dir.display()
+    );
+    Ok(())
+}
+
+/// Whether a jar answers at a socket's path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SocketState {
+    /// Something answers: a jar, alive.
+    Live,
+    /// The file is there and nothing listens: its jar is gone (R32).
+    Stale,
+    Missing,
+}
+
+/// Only a refused connection or a vanished file counts as stale; any other
+/// failure is taken as live, so a jar is never cut off by a passing error.
+pub fn socket_state(socket: &Path) -> SocketState {
+    if socket.symlink_metadata().is_err() {
+        return SocketState::Missing;
+    }
+    let refused = std::os::unix::net::UnixStream::connect(socket).is_err_and(|e| {
+        matches!(
+            e.kind(),
+            io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+        )
+    });
+    if refused {
+        SocketState::Stale
+    } else {
+        SocketState::Live
+    }
+}
+
+/// How old a socket must be before a sweep may judge it: a jar binds its
+/// socket a moment before it listens, and is refused meanwhile.
+pub(super) const SWEEP_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Remove the sockets in `place` at least `age` old whose jars are gone, and
+/// their tokens (R32); how many.
+pub(super) fn sweep(place: &Place, age: std::time::Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(place.sockets()) else {
+        return 0;
+    };
+    let old_enough = |p: &Path| {
+        p.symlink_metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t.elapsed().is_ok_and(|old| old >= age))
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "sock"))
+        .filter(|p| old_enough(p))
+        .filter(|p| socket_state(p) == SocketState::Stale && std::fs::remove_file(p).is_ok())
+        .inspect(|p| super::tokens::forget(place, p))
+        .count()
+}

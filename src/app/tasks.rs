@@ -841,6 +841,7 @@ fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<crate::pane::pty_ho
         // drop the tail. Captures are one-shot, not suspendable panes anyway.
         exec_replace: false,
         capture_launch_env: false,
+        jar: None,
     })
 }
 

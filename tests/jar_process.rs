@@ -46,10 +46,7 @@ impl Jar {
         extra: &[&str],
         argv: &[&str],
     ) -> Self {
-        let dir = tempfile::Builder::new()
-            .prefix("jar")
-            .tempdir_in("/tmp")
-            .expect("tempdir");
+        let dir = socket_dir();
         let socket = dir.path().join("j.sock");
         let jar = env!("CARGO_BIN_EXE_spyc-jar");
         let mut command = match nofile {
@@ -131,6 +128,17 @@ impl Drop for Jar {
 
 /// Poll until `done` holds, or fail naming what never happened. A test waits
 /// for the state it needs, never for a fixed time.
+/// A directory for a jar's socket: under `/tmp`, because macOS caps a
+/// socket's path at about 104 bytes, and `0700`, as a jar requires.
+fn socket_dir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt;
+    tempfile::Builder::new()
+        .prefix("jar")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in("/tmp")
+        .expect("tempdir")
+}
+
 fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     let until = Instant::now() + WAIT;
     while !done() {
@@ -1174,10 +1182,7 @@ fn a_refusal_says_why() {
 #[test]
 fn a_jar_asked_for_a_wire_version_it_doesnt_speak_exits_75() {
     for wire in [Some("2"), Some("0"), None] {
-        let dir = tempfile::Builder::new()
-            .prefix("jar")
-            .tempdir_in("/tmp")
-            .unwrap();
+        let dir = socket_dir();
         let socket = dir.path().join("j.sock");
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_spyc-jar"));
         if let Some(w) = wire {
@@ -1198,6 +1203,53 @@ fn a_jar_asked_for_a_wire_version_it_doesnt_speak_exits_75() {
         assert!(
             !socket.exists() && !mark.exists(),
             "--wire {wire:?} started something"
+        );
+    }
+}
+
+/// Finding 14: a jar listens only in a directory of its user's own, `0700`
+/// and not a link; anywhere else it starts nothing.
+#[test]
+fn a_jar_refuses_a_socket_directory_others_could_reach() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = socket_dir();
+    let open = dir.path().join("open");
+    std::fs::create_dir(&open).unwrap();
+    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let private = dir.path().join("private");
+    std::fs::create_dir(&private).unwrap();
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let linked = dir.path().join("linked");
+    std::os::unix::fs::symlink(&private, &linked).unwrap();
+    for (i, (sockets, ok)) in [(&private, true), (&open, false), (&linked, false)]
+        .into_iter()
+        .enumerate()
+    {
+        let socket = sockets.join(format!("j{i}.sock"));
+        let mark = dir.path().join("ran");
+        let _ = std::fs::remove_file(&mark);
+        let mut jar = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
+            .args(["--wire", "1", "--socket"])
+            .arg(&socket)
+            .args(["--", "/bin/sh", "-c", &format!("touch {}", mark.display())])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        jar.stdin.take().unwrap().write_all(TOKEN).unwrap();
+        if ok {
+            eventually("the program runs", || mark.exists());
+            let _ = jar.kill();
+            let _ = jar.wait();
+            continue;
+        }
+        let status = jar.wait().unwrap();
+        assert!(!status.success(), "{}: the jar ran", sockets.display());
+        assert!(
+            !socket.exists() && !mark.exists(),
+            "{}: the jar started something",
+            sockets.display()
         );
     }
 }
@@ -1727,10 +1779,7 @@ fn a_paste_the_program_never_reads_does_not_block_its_owner() {
 /// at the start; a live owner's bytes are never dropped from under it.
 #[test]
 fn a_window_must_fit_inside_the_ring() {
-    let dir = tempfile::Builder::new()
-        .prefix("jar")
-        .tempdir_in("/tmp")
-        .expect("tempdir");
+    let dir = socket_dir();
     let mut refused = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
         .args(["--wire", "1", "--socket"])
         .arg(dir.path().join("j.sock"))

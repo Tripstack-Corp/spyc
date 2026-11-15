@@ -332,15 +332,16 @@ impl App {
             };
             extra_env.push(("CODEX_HOME", home));
         }
-        match Pane::spawn_with_env(
-            &self.spawn_command(cmd),
+        let launch = crate::pane::Launch {
+            command: &self.spawn_command(cmd),
             rows,
             cols,
             cwd,
-            &self.view.project().context_path,
-            &extra_env,
-            wake,
-        ) {
+            context_path: &self.view.project().context_path,
+            extra_env: &extra_env,
+            jar: crate::pane::jar::wanted(self.state.active_project().config.pane.jars, &info.id),
+        };
+        match Pane::launch(launch, wake) {
             Ok(p) => {
                 if kind == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.map(std::path::Path::to_path_buf).or_else(|| {
@@ -457,15 +458,16 @@ impl App {
             };
             extra_env.push(("CODEX_HOME", home));
         }
-        match Pane::spawn_with_env(
-            &self.spawn_command(cmd),
+        let launch = crate::pane::Launch {
+            command: &self.spawn_command(cmd),
             rows,
             cols,
             cwd,
-            &self.view.project().context_path,
-            &extra_env,
-            wake,
-        ) {
+            context_path: &self.view.project().context_path,
+            extra_env: &extra_env,
+            jar: crate::pane::jar::wanted(self.state.active_project().config.pane.jars, &info.id),
+        };
+        match Pane::launch(launch, wake) {
             Ok(p) => {
                 if info.launched_agent().kind() == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.clone().or_else(|| {
@@ -588,10 +590,15 @@ impl App {
             // This is exactly the group a real `^z` would signal.
             // Fall back to the child pid if `tcgetpgrp` is somehow unavailable.
             let active = tabs.active();
-            let Some(pgrp) = active.foreground_pgrp().or_else(|| active.process_id()) else {
+            if !active.jarred()
+                && active
+                    .foreground_pgrp()
+                    .or_else(|| active.process_id())
+                    .is_none()
+            {
                 self.state.flash_error("pane: no process group to suspend");
                 return Vec::new();
-            };
+            }
             let info = tabs.active_info_mut();
             // Currently suspended → this press RESUMES (SIGCONT); else suspends.
             let resume = info.suspended;
@@ -606,7 +613,10 @@ impl App {
             // The frozen/woken child won't repaint the pane itself; force a
             // redraw so the 💤 marker (and, on resume, fresh output) lands.
             self.view.needs_full_repaint = true;
-            vec![Effect::SignalPane { pgrp, resume }]
+            vec![Effect::SignalPane {
+                tab: info.id.clone(),
+                resume,
+            }]
         }
         #[cfg(not(unix))]
         {
