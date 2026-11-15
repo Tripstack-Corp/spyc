@@ -1604,6 +1604,16 @@ fn a_stalled_reader_does_not_freeze_a_release() {
             token: NEXT_TOKEN.to_vec(),
         })
         .expect("release");
+    // The release is done when the jar ends the owner's connection: it is read
+    // after every acknowledgement queued before it, so a successor that comes
+    // sooner may still meet the old token.
+    let until = Instant::now() + WAIT;
+    while owner.recv(Duration::from_millis(200)).is_ok() {
+        assert!(
+            Instant::now() < until,
+            "the release never ended the owner's connection"
+        );
+    }
     let described = describe_within(&jar.socket);
     assert!(described.is_ok(), "a lookup is answered: {described:?}");
     let next = connect_within(&jar, Role::Owner, NEXT_TOKEN, WAIT);

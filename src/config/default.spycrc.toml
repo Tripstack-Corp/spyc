@@ -109,7 +109,8 @@
 # Run each pane tab's program in a spyc-jar, which holds its terminal and
 # outlives spyc. Read on development (-CURRENT) and release-candidate builds
 # only, and from your own config files, not a repo's. A tab opened while it's
-# on keeps its jar until it closes.
+# on keeps its jar until it closes, and if spyc dies, `spyc -r` takes the
+# running program back.
 # jars = false
 #   Keep a copy of each image you paste into an agent pane, so `^a g` can show
 #   it before you send. An agent reads the system clipboard itself on its paste

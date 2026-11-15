@@ -133,6 +133,11 @@ pub struct PtyHost {
     jar: Option<super::jar::Signals>,
     /// Where a jarred pane's snapshots go.
     snapshots: Option<super::jar::SnapshotSink>,
+    /// The jar's socket, which a saved session records.
+    jar_socket: Option<std::path::PathBuf>,
+    /// A program taken back from its jar, until the pane takes its snapshot.
+    adoption: Option<super::jar::Adoption>,
+    adopted: bool,
     pub master: Box<dyn MasterPty + Send>,
     input: InputWriter,
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
@@ -238,14 +243,15 @@ impl PtyHost {
             Some(jar) => super::jar::spawn(jar, &argv, spec.cwd, (spec.rows, spec.cols), &env)?,
             None => None,
         };
-        let (jar, snapshots, spawned) = match jarred {
+        let (jar, spawned) = match jarred {
             Some(j) => jar_parts(j)?,
-            None => (None, None, spawn_native(&spec, &argv, &env)?),
+            None => (None, spawn_native(&spec, &argv, &env)?),
         };
         let mut host = Self::running(spawned, (spec.rows, spec.cols), spec.debug_dump);
         host.launch_env = launch_env;
-        host.jar = jar;
-        host.snapshots = snapshots;
+        if let Some(jar) = jar {
+            host.set_jar(jar);
+        }
         if spec.nudge_winch {
             // Send SIGWINCH so rc-file shells re-query the pty size
             // and render their first prompt at the right geometry.
@@ -262,11 +268,50 @@ impl PtyHost {
     /// A host around a program already running in a jar.
     #[cfg(test)]
     pub(crate) fn around_jar(j: super::jar::Jarred, size: (u16, u16)) -> anyhow::Result<Self> {
-        let (jar, snapshots, spawned) = jar_parts(j)?;
+        let (jar, spawned) = jar_parts(j)?;
         let mut host = Self::running(spawned, size, false);
-        host.jar = jar;
-        host.snapshots = snapshots;
+        if let Some(jar) = jar {
+            host.set_jar(jar);
+        }
         Ok(host)
+    }
+
+    fn set_jar(&mut self, jar: JarFields) {
+        self.jar = jar.signals;
+        self.snapshots = jar.snapshots;
+        self.jar_socket = Some(jar.socket);
+        self.adopted = jar.adoption.is_some();
+        self.adoption = jar.adoption;
+    }
+
+    /// The jar's socket, when the program runs in one (or did, for a
+    /// detached tab).
+    pub fn jar_socket(&self) -> Option<&Path> {
+        self.jar_socket.as_deref()
+    }
+
+    /// Whether the program was taken back from its jar rather than started.
+    pub const fn adopted(&self) -> bool {
+        self.adopted
+    }
+
+    /// End the jar's connection as a crash of spyc would: the program and
+    /// its jar run on.
+    #[cfg(test)]
+    pub(crate) fn sever_jar(&self) {
+        if let Some(jar) = &self.jar {
+            jar.sever();
+        }
+    }
+
+    /// Whether the tab's jar runs on for another spyc, and nothing runs here.
+    pub const fn detached(&self) -> bool {
+        self.jar_socket.is_some() && self.jar.is_none()
+    }
+
+    /// The adoption's snapshot, once: the pane's engine starts from it.
+    pub const fn take_adoption(&mut self) -> Option<super::jar::Adoption> {
+        self.adoption.take()
     }
 
     /// The host of a running program, its reader thread started.
@@ -292,6 +337,9 @@ impl PtyHost {
             launch_env: None,
             jar: None,
             snapshots: None,
+            jar_socket: None,
+            adoption: None,
+            adopted: false,
             wake,
             master,
             input,
@@ -690,21 +738,25 @@ type Spawned = (
     Box<dyn portable_pty::Child + Send + Sync>,
 );
 
-type JarParts = (
-    Option<super::jar::Signals>,
-    Option<super::jar::SnapshotSink>,
-    Spawned,
-);
+/// What a host keeps of its program's jar.
+struct JarFields {
+    signals: Option<super::jar::Signals>,
+    snapshots: Option<super::jar::SnapshotSink>,
+    socket: std::path::PathBuf,
+    adoption: Option<super::jar::Adoption>,
+}
 
 /// A jarred program's stand-ins, as a host holds them.
-fn jar_parts(j: super::jar::Jarred) -> anyhow::Result<JarParts> {
+fn jar_parts(j: super::jar::Jarred) -> anyhow::Result<(Option<JarFields>, Spawned)> {
     let reader = j.master.try_clone_reader()?;
     let input = InputWriter::with_replies(j.master.take_writer()?, Some(j.replies))?;
-    Ok((
-        Some(j.signals),
-        Some(j.snapshots),
-        (j.master, reader, input, j.child),
-    ))
+    let fields = JarFields {
+        signals: j.signals,
+        snapshots: j.snapshots,
+        socket: j.socket,
+        adoption: j.adoption,
+    };
+    Ok((Some(fields), (j.master, reader, input, j.child)))
 }
 
 /// `argv` on a PTY of spyc's own.

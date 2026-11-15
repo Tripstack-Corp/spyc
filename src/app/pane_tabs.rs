@@ -267,7 +267,7 @@ impl App {
         cwd: &std::path::Path,
         slot: TabSlot,
         home: Option<&std::path::Path>,
-        pane_id: Option<&str>,
+        restoring: Option<&crate::state::sessions::SavedTab>,
         hint: Option<crate::state::sessions::AgentKind>,
     ) -> bool {
         // A new pane is meant to be used — if the file list is zoomed (the
@@ -292,8 +292,8 @@ impl App {
         // pane knows its session id immediately — pin it now so `^a v` is exact
         // from the first keypress (the spawn-time scan handles fresh codex panes).
         let mut info = TabInfo::new(cmd, cwd);
-        if let Some(id) = pane_id {
-            info.id = id.to_string();
+        if let Some(saved) = restoring {
+            info.id.clone_from(&saved.pane_id);
         }
         info.agent_hint = hint;
         info.status_hooks_at_spawn = super::wiring::hooks_present(kind);
@@ -332,6 +332,7 @@ impl App {
             };
             extra_env.push(("CODEX_HOME", home));
         }
+        let jars = self.state.active_project().config.pane.jars;
         let launch = crate::pane::Launch {
             command: &self.spawn_command(cmd),
             rows,
@@ -339,7 +340,7 @@ impl App {
             cwd,
             context_path: &self.view.project().context_path,
             extra_env: &extra_env,
-            jar: crate::pane::jar::wanted(self.state.active_project().config.pane.jars, &info.id),
+            jar: crate::pane::jar::wanted(jars, &info.id, restoring),
         };
         match Pane::launch(launch, wake) {
             Ok(p) => {
@@ -458,6 +459,7 @@ impl App {
             };
             extra_env.push(("CODEX_HOME", home));
         }
+        let jars = self.state.active_project().config.pane.jars;
         let launch = crate::pane::Launch {
             command: &self.spawn_command(cmd),
             rows,
@@ -465,7 +467,7 @@ impl App {
             cwd,
             context_path: &self.view.project().context_path,
             extra_env: &extra_env,
-            jar: crate::pane::jar::wanted(self.state.active_project().config.pane.jars, &info.id),
+            jar: crate::pane::jar::wanted(jars, &info.id, None),
         };
         match Pane::launch(launch, wake) {
             Ok(p) => {
