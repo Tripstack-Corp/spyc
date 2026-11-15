@@ -171,7 +171,7 @@ fn a_parked_validation_past_its_limit_is_busy_and_a_retry_succeeds() {
         &format!("validate-handover) {};;", on_call(&calls, 2, "sleep 12")),
     );
     let (answer, quiet) =
-        upgrade_watching(&mut owner, &mut seen, &slow_parked, Duration::from_secs(30));
+        upgrade_watching(&mut owner, &mut seen, &slow_parked, Duration::from_secs(60));
     assert_eq!(
         reason_of(answer.as_ref()),
         Some(reason::UPGRADE_BUSY),
@@ -182,7 +182,7 @@ fn a_parked_validation_past_its_limit_is_busy_and_a_retry_succeeds() {
         "the jar stayed parked for {quiet:?}, near the stalled validator's 12 s"
     );
     let (answer, _) =
-        upgrade_watching(&mut owner, &mut seen, &slow_parked, Duration::from_secs(30));
+        upgrade_watching(&mut owner, &mut seen, &slow_parked, Duration::from_secs(60));
     assert!(
         matches!(answer, Some(Msg::Upgraded { .. })),
         "asked again, the upgrade goes through: {answer:?}"
@@ -210,7 +210,7 @@ fn a_parked_validator_that_never_answers_is_busy_and_ended_with_its_group() {
             )
         ),
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &hung, Duration::from_secs(30));
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &hung, Duration::from_secs(60));
     assert_eq!(
         reason_of(answer.as_ref()),
         Some(reason::UPGRADE_BUSY),
@@ -356,10 +356,7 @@ fn an_owner_that_cant_take_its_last_frames_keeps_its_connection() {
 /// (6) A holder slow to say it has the sockets: busy, the holder ended with
 /// everything it started (which would otherwise keep the jar's sockets in
 /// flight), no descriptor left open in the jar, and the next upgrade works.
-/// Today it is a failure (reason 7), and only the holder's own process is
-/// killed.
 #[test]
-#[ignore = "red until a holder's timeout is busy and ends its group"]
 fn a_slow_holder_is_busy_leaks_nothing_and_the_next_upgrade_works() {
     let (mut jar, mut owner, mut seen) = counting();
     let calls = jar.dir.path().join("holds");
@@ -378,7 +375,7 @@ fn a_slow_holder_is_busy_leaks_nothing_and_the_next_upgrade_works() {
     );
     let jar_pid = jar.process.id();
     let before = open_fds(jar_pid);
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow_holder, Duration::from_secs(30));
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow_holder, Duration::from_secs(60));
     assert_eq!(
         reason_of(answer.as_ref()),
         Some(reason::UPGRADE_BUSY),
@@ -393,7 +390,7 @@ fn a_slow_holder_is_busy_leaks_nothing_and_the_next_upgrade_works() {
         after <= before,
         "the jar has {after} descriptors open after the failed hold, {before} before"
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow_holder, Duration::from_secs(30));
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow_holder, Duration::from_secs(60));
     assert!(
         matches!(answer, Some(Msg::Upgraded { .. })),
         "the next upgrade goes through: {answer:?}"
@@ -401,13 +398,40 @@ fn a_slow_holder_is_busy_leaks_nothing_and_the_next_upgrade_works() {
     assert_program_survives(&mut jar, owner, "a slow holder");
 }
 
+/// A holder that never reads the blob, where the blob is far bigger than a
+/// socket's buffer: taking it and answering share one deadline, so the jar
+/// isn't held parked by the write, and the upgrade is busy.
+#[test]
+fn a_holder_that_never_takes_the_blob_cannot_hold_the_jar_parked() {
+    let mut jar = Jar::start(
+        &[],
+        &sh(
+            "yes aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | head -c 1000000; while read l; do echo got=$l; done",
+        ),
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut seen = read_until(&mut owner, true, |s| s.text.len() >= 1_000_000);
+    let deaf = jar_script(
+        jar.dir.path(),
+        "jar-deaf-holder",
+        "hold-handover) sleep 300;;",
+    );
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &deaf, Duration::from_secs(60));
+    assert_eq!(
+        reason_of(answer.as_ref()),
+        Some(reason::UPGRADE_BUSY),
+        "a holder that doesn't take the blob is busy: {answer:?}"
+    );
+    assert_program_survives(&mut jar, owner, "a deaf holder");
+}
+
 /// (7) A new image that takes longer to take its descriptors than the
 /// holder's old 30 s: the holder keeps every socket until the new image has
 /// them, so the owner's connection and the listener survive, and so does
-/// the program. Today the holder lets go at 30 s, and on macOS every socket
-/// still in flight is flushed.
+/// the program. A holder that let go on a clock would leave them only in
+/// flight, and macOS flushes those.
 #[test]
-#[ignore = "red until the holder ends on an event, not a clock"]
 fn a_new_image_slower_than_the_holders_old_limit_keeps_every_connection() {
     let (mut jar, mut owner, mut seen) = counting();
     let calls = jar.dir.path().join("resumes");
@@ -425,4 +449,49 @@ fn a_new_image_slower_than_the_holders_old_limit_keeps_every_connection() {
     recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 3 }));
     let _ = jar.connect(Role::Reader);
     assert_program_survives(&mut jar, owner, "a slow resume");
+}
+
+/// A holder ends with the jar's process: a new image that dies before
+/// taking its descriptors leaves nothing to hold them for, and the holder
+/// mustn't keep them, and itself, for its whole backstop.
+#[test]
+fn a_holder_ends_when_the_jar_does() {
+    let (mut jar, mut owner, mut seen) = counting();
+    let holder_pid = jar.dir.path().join("holder.pid");
+    let resuming = jar.dir.path().join("resuming");
+    let stalled = jar_script(
+        jar.dir.path(),
+        "jar-stalled-resume",
+        &format!(
+            "hold-handover) echo $$ > {holder};;\nresume-handover) touch {resuming}; sleep 300;;",
+            holder = holder_pid.display(),
+            resuming = resuming.display()
+        ),
+    );
+    owner
+        .send(&Msg::Upgrade {
+            binary: stalled.display().to_string(),
+        })
+        .expect("upgrade");
+    // Read on meanwhile, as an owner does: one that stops reading can't let
+    // the jar park.
+    let until = Instant::now() + Duration::from_secs(60);
+    while !resuming.exists() {
+        assert!(Instant::now() < until, "the new image never started");
+        if let Ok(Some(m)) = owner.recv(Duration::from_millis(50)) {
+            assert!(
+                !matches!(m, Msg::Refused { .. }),
+                "premise: the upgrade goes ahead: {m:?}"
+            );
+            seen.take(m);
+            if let Some(next) = seen.next_offset {
+                let _ = owner.send(&Msg::Ack { offset: next });
+            }
+        }
+    }
+    let holder = pid_in(&holder_pid);
+    assert!(running(holder), "premise: the holder holds");
+    jar.process.kill().expect("kill the jar");
+    let _ = jar.process.wait();
+    assert!(gone_soon(holder), "the holder outlived the jar");
 }
