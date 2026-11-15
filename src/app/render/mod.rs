@@ -30,6 +30,8 @@ mod activity_hud;
 mod agent_hud;
 mod chrome;
 #[cfg(test)]
+mod dim_tests;
+#[cfg(test)]
 mod divider_tests;
 #[cfg(test)]
 mod grid_settle_tests;

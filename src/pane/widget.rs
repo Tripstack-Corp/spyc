@@ -15,7 +15,12 @@ use super::engine::{CellStyle, TerminalScreen};
 
 pub struct PaneWidget<'a, S: TerminalScreen> {
     pub screen: &'a S,
+    /// Whether the pane has the keys: only then does it draw its cursor block.
     pub focused: bool,
+    /// Whether to fade the whole pane, as for a surface without the keys.
+    /// Separate from `focused` so `^a d` can turn the fade off without giving
+    /// an unfocused pane a cursor.
+    pub dimmed: bool,
     /// A spyc-side text selection over the visible grid, as ordered
     /// `((start_row, start_col), (end_row, end_col))` in SCREEN coordinates.
     ///
@@ -34,12 +39,10 @@ impl<S: TerminalScreen> Widget for PaneWidget<'_, S> {
         // so the user can tell at a glance which side has focus. SGR 2
         // (Modifier::DIM) is the cheap way: every modern terminal we
         // support renders it as ~50% lightness on the affected cells.
-        // Combined with the dimmed cursor block below, the unfocused
-        // pane looks visibly muted vs. the focused list above.
-        let dim = if self.focused {
-            Modifier::empty()
-        } else {
+        let dim = if self.dimmed {
             Modifier::DIM
+        } else {
+            Modifier::empty()
         };
 
         // One buffer for the whole render rather than one per cell: the seam's
@@ -203,6 +206,7 @@ mod attribute_tests {
         PaneWidget {
             screen: parser.screen(),
             focused,
+            dimmed: !focused,
             selection: None,
         }
         .render(area, &mut buf);
@@ -401,6 +405,7 @@ mod cluster_alignment_tests {
         PaneWidget {
             screen: parser.screen(),
             focused: true,
+            dimmed: false,
             selection: None,
         }
         .render(area, &mut buf);
