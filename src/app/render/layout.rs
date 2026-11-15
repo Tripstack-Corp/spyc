@@ -261,3 +261,95 @@ fn zoomed_pane_layout(area: Rect) -> FrameLayout {
         vdivider: None,
     }
 }
+
+/// The rows of the vertical split's divider that border where the keys go, as
+/// a range of `y`. `focus` is the focused column, or `None` while the pane has
+/// the keys; `pane_top` is the pane's first row, its rule included.
+///
+/// A column owns every row it touches: the right column runs beside the whole
+/// divider in either mode, and so does the left one when only the list is
+/// split. In a full-height split the pane sits under the left column, so the
+/// left column owns the rows above `pane_top` and the pane those from it down.
+/// A pane below a top-only split touches no row of the divider.
+pub(super) fn vsplit_divider_lit_rows(
+    mode: crate::app::state::VsplitMode,
+    divider: Rect,
+    pane_top: Option<u16>,
+    focus: Option<crate::app::state::Side>,
+) -> std::ops::Range<u16> {
+    use crate::app::state::{Side, VsplitMode};
+    let (top, bottom) = (divider.y, divider.y.saturating_add(divider.height));
+    let split_at = pane_top.map_or(bottom, |y| y.clamp(top, bottom));
+    match (focus, mode) {
+        (Some(Side::Right), _) | (Some(Side::Left), VsplitMode::TopOnly) => top..bottom,
+        (Some(Side::Left), VsplitMode::FullHeight) => top..split_at,
+        (None, VsplitMode::FullHeight) => split_at..bottom,
+        (None, VsplitMode::TopOnly) => top..top,
+    }
+}
+
+#[cfg(test)]
+mod vsplit_divider_tests {
+    use super::vsplit_divider_lit_rows as lit;
+    use crate::app::state::{Side, VsplitMode};
+    use ratatui::layout::Rect;
+
+    /// A divider from row 0 to row 23, the pane's rule at row 14.
+    const FULL: Rect = Rect {
+        x: 40,
+        y: 0,
+        width: 1,
+        height: 24,
+    };
+    /// A divider beside the list only: rows 1 to 12.
+    const TOP: Rect = Rect {
+        x: 40,
+        y: 1,
+        width: 1,
+        height: 12,
+    };
+
+    #[test]
+    fn the_right_column_lights_the_whole_divider() {
+        assert_eq!(
+            lit(VsplitMode::FullHeight, FULL, Some(14), Some(Side::Right)),
+            0..24
+        );
+        assert_eq!(
+            lit(VsplitMode::TopOnly, TOP, Some(14), Some(Side::Right)),
+            1..13
+        );
+    }
+
+    #[test]
+    fn a_full_height_split_shares_the_divider_between_the_left_column_and_the_pane() {
+        assert_eq!(
+            lit(VsplitMode::FullHeight, FULL, Some(14), Some(Side::Left)),
+            0..14
+        );
+        assert_eq!(lit(VsplitMode::FullHeight, FULL, Some(14), None), 14..24);
+    }
+
+    #[test]
+    fn with_no_pane_the_left_column_lights_the_whole_divider() {
+        assert_eq!(
+            lit(VsplitMode::FullHeight, FULL, None, Some(Side::Left)),
+            0..24
+        );
+        assert_eq!(lit(VsplitMode::TopOnly, TOP, None, Some(Side::Left)), 1..13);
+    }
+
+    #[test]
+    fn a_pane_below_a_top_only_split_lights_nothing() {
+        assert!(lit(VsplitMode::TopOnly, TOP, Some(14), None).is_empty());
+    }
+
+    #[test]
+    fn a_pane_top_outside_the_divider_is_clamped_to_it() {
+        assert_eq!(
+            lit(VsplitMode::FullHeight, FULL, Some(30), Some(Side::Left)),
+            0..24
+        );
+        assert!(lit(VsplitMode::FullHeight, FULL, Some(30), None).is_empty());
+    }
+}
