@@ -57,7 +57,7 @@ use anyhow::Context;
 use crate::proto::{Msg, Role};
 use crate::state::{Config, ConnState, Log, State};
 
-pub(crate) use accept::no_sigpipe;
+pub(crate) use accept::{no_sigpipe, peer_is};
 pub use conn::MIN_TOKEN;
 pub(crate) use input::Inbox;
 pub(crate) use outbox::Outbox;
@@ -269,11 +269,33 @@ pub fn run(cfg: Config, listener: UnixListener, token: Vec<u8>) -> anyhow::Resul
 pub(crate) fn start(
     cfg: Config,
     state: State,
-    (child_pid, pending): (u32, Option<File>),
+    child: (u32, Option<File>),
     master: OwnedFd,
     listener: UnixListener,
     conns: Vec<(ConnState, UnixStream)>,
 ) -> anyhow::Result<()> {
+    prepare(cfg, state, child, master, listener, conns)?.serve()
+}
+
+/// A jar set up and not yet running: no thread started, so a new image that
+/// fails here still holds everything that crossed (`held.rs`).
+pub(crate) struct Ready {
+    shared: Arc<Shared>,
+    reader: File,
+    input: File,
+    conns: Vec<(u64, Arc<Conn>)>,
+}
+
+/// Set a jar up from `state`: everything [`start`] does that can fail, and
+/// nothing that starts a thread.
+pub(crate) fn prepare(
+    cfg: Config,
+    state: State,
+    (child_pid, pending): (u32, Option<File>),
+    master: OwnedFd,
+    listener: UnixListener,
+    conns: Vec<(ConnState, UnixStream)>,
+) -> anyhow::Result<Ready> {
     // Neither the PTY's reader nor its writer may block on it: each polls,
     // and a write the program has no room for waits its turn.
     let flags = rustix::fs::fcntl_getfl(&master).context("the PTY's flags")?;
@@ -281,6 +303,7 @@ pub(crate) fn start(
         .context("the PTY, non-blocking")?;
     let reader = File::from(master.try_clone().context("PTY reader")?);
     let input = File::from(master.try_clone().context("PTY writer")?);
+    listener.set_nonblocking(true)?;
     let exited = state.exit.is_some();
     let pty_eof = state.pty_eof;
     let shared = Arc::new(Shared {
@@ -303,48 +326,73 @@ pub(crate) fn start(
         pty_done: AtomicBool::new(pty_eof),
         waiter_done: AtomicBool::new(exited),
     });
-    for (cs, stream) in conns {
-        let conn = accept::register(&shared, cs.id, cs.role, Arc::new(stream));
-        *conn.cursor.lock().unwrap_or_else(PoisonError::into_inner) = cs.cursor;
-        conn.exit_sent.store(cs.exit_sent, Ordering::SeqCst);
-        conn.fg_sent.store(cs.fg_sent, Ordering::SeqCst);
-        let shared = Arc::clone(&shared);
-        thread::spawn(move || {
-            let build = crate::store::build_of(
-                &crate::upgrade::own_image(),
-                &crate::upgrade::copies_dir(&shared),
-            );
-            conn.send(&shared, &Msg::Upgraded { build });
-            conn::run_conn(&shared, cs.id, &conn);
-        });
+    let conns = conns
+        .into_iter()
+        .map(|(cs, stream)| {
+            let conn = accept::register(&shared, cs.id, cs.role, Arc::new(stream));
+            *conn.cursor.lock().unwrap_or_else(PoisonError::into_inner) = cs.cursor;
+            conn.exit_sent.store(cs.exit_sent, Ordering::SeqCst);
+            conn.fg_sent.store(cs.fg_sent, Ordering::SeqCst);
+            (cs.id, conn)
+        })
+        .collect();
+    Ok(Ready {
+        shared,
+        reader,
+        input,
+        conns,
+    })
+}
+
+impl Ready {
+    /// Start the jar's threads and serve its socket until the jar ends.
+    /// Never returns on success: the reaper ends the process.
+    pub(crate) fn serve(self) -> anyhow::Result<()> {
+        let Self {
+            shared,
+            reader,
+            input,
+            conns,
+        } = self;
+        for (id, conn) in conns {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || {
+                let build = crate::store::build_of(
+                    &crate::upgrade::own_image(),
+                    &crate::upgrade::copies_dir(&shared),
+                );
+                conn.send(&shared, &Msg::Upgraded { build });
+                conn::run_conn(&shared, id, &conn);
+            });
+        }
+        if !shared.pty_done.load(Ordering::SeqCst) {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || life::pump_pty(&shared, reader));
+        }
+        {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || input::feed_pty(&shared, input));
+        }
+        if !shared.waiter_done.load(Ordering::SeqCst) {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || life::wait_child(&shared));
+        }
+        {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || life::reap(&shared));
+        }
+        if let Some(wait) = shared.cfg.start_on_owner
+            && shared.child_pid() == 0
+        {
+            let shared = Arc::clone(&shared);
+            thread::spawn(move || life::await_first_owner(&shared, wait));
+        }
+        accept_loop(&shared)
     }
-    if !pty_eof {
-        let shared = Arc::clone(&shared);
-        thread::spawn(move || life::pump_pty(&shared, reader));
-    }
-    {
-        let shared = Arc::clone(&shared);
-        thread::spawn(move || input::feed_pty(&shared, input));
-    }
-    if !exited {
-        let shared = Arc::clone(&shared);
-        thread::spawn(move || life::wait_child(&shared));
-    }
-    {
-        let shared = Arc::clone(&shared);
-        thread::spawn(move || life::reap(&shared));
-    }
-    if let Some(wait) = shared.cfg.start_on_owner
-        && shared.child_pid() == 0
-    {
-        let shared = Arc::clone(&shared);
-        thread::spawn(move || life::await_first_owner(&shared, wait));
-    }
-    shared
-        .listener
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .set_nonblocking(true)?;
+}
+
+/// Take new connections until the jar ends.
+fn accept_loop(shared: &Arc<Shared>) -> ! {
     let mut checked = Instant::now();
     loop {
         if shared.upgrading() {
@@ -353,7 +401,7 @@ pub(crate) fn start(
         }
         if checked.elapsed() >= SOCKET_CHECK {
             checked = Instant::now();
-            keep_socket(&shared);
+            keep_socket(shared);
         }
         let listener = shared
             .listener
@@ -372,8 +420,8 @@ pub(crate) fn start(
         };
         let _ = stream.set_nonblocking(false);
         let sock = Arc::new(stream);
-        let ticket = accept::admit(&shared, &sock);
-        let shared = Arc::clone(&shared);
+        let ticket = accept::admit(shared, &sock);
+        let shared = Arc::clone(shared);
         thread::spawn(move || accept::serve(&shared, sock, ticket));
     }
 }

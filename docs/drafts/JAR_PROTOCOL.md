@@ -646,7 +646,7 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   | 4 | not for this connection's role |
   | 5 | an upgrade can't start now (one is under way, or no safe point was reached); worth asking again |
   | 6 | the new binary is missing or rejected the handover; the jar runs on |
-  | 7 | the upgrade failed after the new binary accepted; the jar runs on |
+  | 7 | the upgrade failed after the new binary accepted: the jar runs on, or, when the new image took over and couldn't resume, holds its program and serves nothing else |
   | 8 | invalid: no `hello` first, a value out of range, or a kind a client doesn't send |
   | 9 | a signal for a program that has ended |
 
@@ -800,6 +800,25 @@ that keeps the PTY and its connections when the jar can't resume, and ending
 the holder at once rather than after its 30 seconds), then **recover** (the
 switch back to `PREVIOUS`). Only the switch back's argument ships now (part
 3). Nothing here salvages a jar part by part, as vtmux's resume does.
+
+**Contain, as built.** A new image ends the holder as soon as it has its
+descriptors and the blob, or knows the blob won't come. One that can't
+decode the blob or start from it, by an error or a panic, holds what
+crossed:
+
+- The PTY's master stays open and is drained, so the program runs on and
+  never blocks on a full terminal. What it prints is dropped.
+- Each connection that crossed gets `refused` with reason 7 and a `why`,
+  which is the requester's answer in place of `upgraded`. After that it has
+  `ping` and `describe` answered, and anything else refused with reason 7.
+- A new connection may look the jar up. Its `describe` has a `held` field
+  saying why, beside `id`, `jar`, `build`, `commit`, `pid` and `drained`.
+  Any other role is refused with reason 7, since nothing can attach.
+- The jar ends with its program. Once no connection that crossed is left,
+  it ends the program as a closed terminal would (`SIGHUP`, then `SIGKILL`
+  after 2 seconds), removes its socket and goes.
+
+No frame or blob changes for any of it.
 
 The store, the jar's copy and what each of them closes are in
 `JAR_PRODUCTION_PLAN.md` → "The jar binary store".

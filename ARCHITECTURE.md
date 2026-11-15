@@ -789,6 +789,27 @@ parks the moment it sees it. The connections' last frames before the
 handover get one deadline between them, not one per write, so a reader
 taking a byte at a time can't keep the jar parked.
 
+## A new image that can't resume holds the program
+
+<!-- SPYC-TRAP: jar-resume-contained -->
+The proof line refuses a binary that isn't a jar, or one that stops
+parsing partway, but not one that validates and then can't resume. By the
+time that shows, the old image is gone, and a new image that just exited
+would close the PTY's master and send the program `SIGHUP`. So
+`upgrade::resume` ends the holder as soon as it has its descriptors and
+the blob, or knows the blob won't come, and decodes and sets the jar up
+under `catch_unwind`, on copies of what crossed. `jar::prepare` does
+everything in a jar's start that can fail and starts no thread, so a
+failure or a panic there leaves the originals whole. The new image then
+holds them (`held.rs`) instead of exiting. It keeps the PTY drained, so the
+program never blocks on a full terminal. It tells every connection that
+crossed why, with reason 7, and answers `Ping` and `Describe` on them and
+on new lookups. It ends with the program, or ends the program (`SIGHUP`,
+then `SIGKILL`) once no connection that crossed is left, since nothing can
+attach to it. `SPYC_JAR_RESUME_FAULT` makes a debug build's resume fail at
+each step, and the tests in `tests/jar_process/contain.rs` fail with any
+part of this undone.
+
 ## A jar's token arrives on its standard input
 
 <!-- SPYC-TRAP: jar-token-stdin -->

@@ -9,7 +9,8 @@
 //! - [`pty`]: the program's PTY, opened and spawned without `unsafe`.
 //! - [`handover`] and [`upgrade`]: the jar replacing its own binary across
 //!   `exec` (R33), and the blob that carries it; [`store`]: the one file an
-//!   upgrade runs.
+//!   upgrade runs; `held`: a new image that couldn't resume, holding the
+//!   program it was handed.
 //! - [`client`]: the owner's end of the socket, for spyc and the tests.
 //! - [`attach`]: the attach client, a raw relay to a real terminal.
 //! - [`cli`]: the `spyc-jar` command line.
@@ -23,6 +24,7 @@ pub mod attach;
 pub mod cli;
 pub mod client;
 pub mod handover;
+mod held;
 pub mod jar;
 pub mod proto;
 pub mod pty;
