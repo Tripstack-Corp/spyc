@@ -782,6 +782,10 @@ Each part of the upgrade is placed by where its code runs (decision L):
    makes the upgrade busy (reason 5), never rejected.
 5. **One deadline for the flush.** A connection's last frames before the
    handover get one deadline for the whole flush, not one for each write.
+   The owner's go first. An owner that can't take them in time keeps them
+   and its connection, and the upgrade is busy (reason 5): its lease is in
+   the blob, so it can't stay behind. A reader that can't is closed and
+   stays behind.
 6. **A `build`.** `describe` names the store entry a jar runs from: its
    directory's name, which for an entry spyc wrote is the SHA-256 spyc
    computed, so two builds at one commit differ. `commit` beside it gives

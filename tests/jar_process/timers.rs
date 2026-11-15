@@ -254,10 +254,8 @@ fn a_binary_that_refuses_is_rejected_for_what_it_did() {
 
 /// (5) An owner that can't take its last frames before the handover (a
 /// spyc starved by load) keeps its connection: the upgrade is refused as
-/// busy rather than going ahead without it. Today the jar closes the
-/// owner's connection after the flush's 1 s and upgrades anyway.
+/// busy rather than going ahead without it, and every frame still comes.
 #[test]
-#[ignore = "red until an owner that can't flush makes the upgrade busy"]
 fn an_owner_that_cant_take_its_last_frames_keeps_its_connection() {
     let mut jar = Jar::start(
         &["--deadline-ms", "60000"],

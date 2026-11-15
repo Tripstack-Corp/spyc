@@ -195,12 +195,7 @@ fn try_run(
     }
     let st = shared.lock();
     let conns = shared.conns();
-    let mut ids = carried(&conns);
-    // Every writer is parked: what waits in an outbox goes out now, ahead of
-    // `Upgraded`, or the connection stays behind. One deadline for all of it:
-    // a reader taking a byte at a time can't hold the jar parked.
-    let until = Instant::now() + FLUSH_DEADLINE;
-    ids.retain(|id| flushed(&conns[id], until));
+    let ids = flush_all(&conns, st.owner).map_err(busy)?;
     let outs: Vec<&UnixStream> = ids.iter().map(|id| &*conns[id].sock).collect();
     let states = conn_states(&conns, &ids);
     if states.len() > handover::MAX_CONNS {
@@ -315,20 +310,46 @@ fn blob_now(shared: &Shared) -> Vec<u8> {
     handover::encode_parts(&shared.cfg, shared.child_pid(), &st, &states)
 }
 
+/// Every writer is parked: what waits in an outbox goes out now, ahead of
+/// `Upgraded`. One deadline for all of it: a reader taking a byte at a time
+/// can't hold the jar parked. The owner goes first, and one that can't take
+/// its frames in time (a spyc starved by load) keeps them and its
+/// connection, and the upgrade waits: its lease is in the blob, so it can't
+/// stay behind. A reader that can't stays behind, closed. Returns the
+/// connections to carry, in order.
+fn flush_all(conns: &HashMap<u64, Arc<Conn>>, owner: Option<u64>) -> anyhow::Result<Vec<u64>> {
+    let until = Instant::now() + FLUSH_DEADLINE;
+    let mut ids = carried(conns);
+    ids.sort_by_key(|id| Some(*id) != owner);
+    let mut kept = Vec::with_capacity(ids.len());
+    for id in ids {
+        let conn = &conns[&id];
+        match flush(conn, until) {
+            Ok(()) => kept.push(id),
+            Err(left) if Some(id) == owner => {
+                conn.put_back(left);
+                bail!("the owner didn't take its last frames within {FLUSH_DEADLINE:?}");
+            }
+            Err(_) => conn.close(),
+        }
+    }
+    kept.sort_unstable();
+    Ok(kept)
+}
+
 /// Write what waits in `conn`'s outbox, its writer being parked, by `until`.
-/// False when the client won't take it in time: that connection is closed,
-/// not carried.
-fn flushed(conn: &Conn, until: Instant) -> bool {
+/// What the client won't take in time is handed back, from the first byte
+/// not written.
+fn flush(conn: &Conn, until: Instant) -> Result<(), Vec<u8>> {
     let bytes = conn.take_outbox();
     if bytes.is_empty() {
-        return true;
+        return Ok(());
     }
     // Written without blocking, each wait bounded by what's left of the
     // deadline: a blocking write's timeout times each sleep inside it, and a
     // reader that takes a byte at a time starts every sleep over.
     if conn.sock.set_nonblocking(true).is_err() {
-        conn.close();
-        return false;
+        return Err(bytes);
     }
     let mut left = bytes.as_slice();
     while !left.is_empty() {
@@ -349,10 +370,10 @@ fn flushed(conn: &Conn, until: Instant) -> bool {
     }
     let _ = conn.sock.set_nonblocking(false);
     if left.is_empty() {
-        return true;
+        Ok(())
+    } else {
+        Err(left.to_vec())
     }
-    conn.close();
-    false
 }
 
 /// A pipe whose ends don't cross an `exec` unless handed over.
