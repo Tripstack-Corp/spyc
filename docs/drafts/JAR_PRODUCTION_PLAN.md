@@ -226,7 +226,7 @@ the way back (decision 1).
 A review of vtmux's live upgrade led to probes of `main`'s jar (`be018db6`)
 on macOS, which found two ways an upgrade ends the program it exists to keep
 (`JAR_PROTOCOL.md`, decision L). The fixes are sorted by where their code
-runs ("Upgrading: where each check runs" there): seven parts run in the old
+runs ("Upgrading: where each check runs" there): eight parts run in the old
 image and ship in the first release that ships a jar; the new image's parts
 ship with the first release an upgrade targets; spyc's ship whenever.
 [`JAR_UPGRADE_BRIEF.md`](JAR_UPGRADE_BRIEF.md) is the brief for building
@@ -268,51 +268,66 @@ On scratch sockets and directories, never a user's jars, with the release
 
 spyc keeps the jar binaries it starts in `jar-bin/` under its state directory,
 one entry per binary, named by its SHA-256: `jar-bin/<sha256>/spyc-jar`. Not
-beside the sockets: on macOS that is `$TMPDIR`, which the system cleans.
+beside the sockets: on macOS that is `$TMPDIR`, which the system cleans. spyc
+makes `jar-bin/` `0700`, with the marker file `.spyc-jar-store` in it, which
+is how a jar knows it runs from a store.
 
 - **spyc copies at its own start,** on a worker off the loop, before its first
   jar starts (which waits for it). It reads the `spyc-jar` beside its own
-  binary once, hashing as it writes into a temporary file in `jar-bin/`, then
-  `fsync`s it, makes it `0555`, and renames it into its entry. An entry that
-  exists already is hashed again before it's used, never rewritten.
+  binary once and writes every entry whole: hashing as it writes to a
+  temporary name in `jar-bin/`, then `fsync`, `0555`, and a rename into the
+  entry, so a crash mid-copy leaves no truncated binary under an entry's
+  name. An entry that exists already is hashed again before it's used, never
+  rewritten.
 - **The copy is checked against spyc's own build** by running it once, as
   `spyc-jar build-info`, which prints the `SPYC_GIT_SHA` and `SPYC_BUILD_TIME`
   that `build.rs` gives both binaries of one build (they are one package). A
   copy that answers otherwise isn't used: a package upgrade landed while spyc
   started, and spyc runs this session without jars and says so, as it does for
   a jar that exits with 75. The run also pays the copy's first-run cost
-  (about 263 ms on macOS) off the loop. Limit: a rebuild without a new commit
-  doesn't run `build.rs` again, so two development builds can share an
-  identity.
-- **An entry is removed** by a sweep at spyc's start, after the copy, when it
-  isn't this spyc's, no jar in the socket directory names it as its `build`,
-  and it is more than seven days old. A sweep that can't reach every socket
-  there (a jar mid-upgrade answers no lookup) removes nothing that time.
+  (about 263 ms on macOS) off the loop. Two development builds at one commit
+  can pass this check as each other, since `build.rs` doesn't run again
+  without a new commit; their entries, and so their `build` keys, still
+  differ.
+- **The jar never hashes.** A binary `upgrade` names that is already an entry
+  of the jar's store is used as it is; anything else is copied in, written
+  whole the same way, under a unique private name (decision L's part 1). S3
+  always names an entry, so in practice no jar copies or pays the first-run
+  cost; a hand-run `spyc-jar upgrade /some/path` is still protected. The jar
+  keeps no dependency for it.
+- **`build` is the entry's name,** read by the jar from the directory it runs
+  from: the hash spyc computed, so two builds at one commit differ. `commit`
+  gives the git commit beside it, for people.
+- **A jar finds its store from its own path:** the directory two levels above
+  the file it runs from, when that directory holds the marker and is the
+  user's, `0700` and not a link. Neither the start's flags nor the blob carry
+  it. The new image's `PREVIOUS` is the entry the old one ran from.
+- **A jar not started from a store** (tests and `cargo run` start jars from
+  scratch paths, where "two levels up" is an arbitrary directory) finds no
+  marker and has no store. It keeps its upgrade copies, written the same way,
+  in a `0700` directory beside its socket.
+- **An entry is removed rarely.** An entry is about 0.75 MB, so deleting one
+  wrongly is far worse than keeping it. spyc touches an entry's directory
+  when it starts a jar from it, and its sweep, at spyc's start after the
+  copy, touches every entry a live jar reports as its `build`. The sweep
+  removes an entry only when no live jar reports it, it isn't spyc's own, and
+  it has gone untouched for a day. If any socket in the jar directory fails
+  to answer `describe`, which covers a jar mid-upgrade, the sweep removes
+  nothing that time. Nothing waits on the sweep.
 - **A state directory that can't execute** (a `noexec` mount): spyc finds out
   when it runs the copy, uses no store for that session, starts jars from the
-  `spyc-jar` beside it as before, and says so in `spyc --jars`. A jar started
-  outside a store keeps its upgrade copies in a `0700` directory beside its
-  socket. None of the macOS or Linux hosts checked mount either directory
-  `noexec`.
-- **A jar finds its store from its own path,** the directory two levels above
-  the entry it runs from, so neither the start's flags nor the blob carry it.
-  An upgrade copies the named binary into that store (decision L's part 1),
-  and the new image's `PREVIOUS` is the entry the old one ran from.
-- **The hash is the `build` key** `describe` gives, computed by the jar from
-  the file it started from.
+  `spyc-jar` beside it as before, and says so in `spyc --jars`. Those jars
+  find no marker and keep their copies beside their sockets. None of the
+  macOS or Linux hosts checked mount either directory `noexec`.
 
 What it closes, of the four it is meant to:
 
 | | Closed? |
 |---|---|
-| A file swapped between validation and the `exec` | Yes, for every jar: the jar copies once and never looks the path up again. |
+| A file swapped between validation and the `exec` | Yes, for every jar: it validates, holds and `exec`s one file in its store (or, with no store, its private copy) and never looks the named path up again. |
 | No image to switch back to after a failed resume | Yes, for a jar started from the store: `PREVIOUS` is an entry no install touches. Not for a jar started outside one (a `noexec` state directory) on macOS, and not if the state directory is deleted. Linux has `/proc/self/exe` too. |
-| A running spyc starting a newer jar from disk | Yes, while the store is in use: spyc starts jars from the entry it checked at its start. Not when the store is off, and not between two development builds that share an identity. A store entry also keeps a program started late by `--start-on-owner` on the same image, since the jar starts it through its own binary (`spyc-jar pty-child`, `crates/spyc-jar/src/pty.rs:46`). |
-| A binary overwritten in place under a running jar | Only in that nothing spyc or a jar does writes an entry twice, and entries are `0555`. Another process of the same user can still change one (outside the threat model), and a jar outside the store has no such protection. |
-
-The jar needs a SHA-256 for its own copies and its `build`; `sha2` is already
-in spyc's lockfile, but would be a new dependency of `spyc-jar` (decision E),
-and that is open.
+| A running spyc starting a newer jar from disk | Yes, while the store is in use: spyc starts jars from the entry it checked at its start. Not when the store is off. A store entry also keeps a program started late by `--start-on-owner` on the same image, since the jar starts it through its own binary (`spyc-jar pty-child`, `crates/spyc-jar/src/pty.rs:46`). |
+| A binary overwritten in place under a running jar | The store removes the exposure: no install writes into it, and nothing spyc or a jar does writes an entry twice. It doesn't fix an observed failure: the in-place `cp` probe left the jar running. Another process of the same user can still change an entry (outside the threat model), and a jar outside the store keeps the exposure. |
 
 ### Refreezing
 

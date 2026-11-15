@@ -51,15 +51,18 @@ each watched failing for the reason it names before any fix lands:
 
 ## 2. The old image's parts, and the store
 
-The seven parts, as `JAR_PROTOCOL.md` → "Upgrading: where each check runs"
+The eight parts, as `JAR_PROTOCOL.md` → "Upgrading: where each check runs"
 numbers them:
 
-1. **One copy.** `upgrade` (`crates/spyc-jar/src/jar/conn.rs:161`, then
-   `upgrade::begin`) copies the named binary into the jar's store once,
-   then validates, holds and `exec`s that file. Refuse a relative path with
-   reason 8.
+1. **One file, in the store.** `upgrade` (`crates/spyc-jar/src/jar/conn.rs:161`,
+   then `upgrade::begin`) uses a named binary that is already an entry of the
+   jar's store as it is, and copies anything else in once under a unique
+   private name, written whole (a temporary name, `fsync`, `0555`, then a
+   rename). It then validates, holds and `exec`s that one file. Refuse a
+   relative path with reason 8. The jar hashes nothing.
 2. **The proof line** on the validator's standard output, as "The upgrade's
-   command lines" specifies; exiting 0 without it is reason 6. No new
+   command lines" specifies: the prefix, the blob's instance, and the number
+   of bytes the decoder consumed. Exiting 0 without it is reason 6. No new
    dependency for it.
 3. **`resume-handover PREVIOUS`:** the old image passes the store entry it
    runs from. `cli.rs:36` dispatches on the first argument only, so a resume
@@ -68,36 +71,47 @@ numbers them:
    exit, and the validator started in its own process group (std's
    `CommandExt::process_group`, no `unsafe`) so a timeout kills the group.
 5. **One flush deadline** for the whole flush.
-6. **`build` in `describe`** (`crates/spyc-jar/src/jar/describe.rs:19-25`
-   has `jar` as the version and `current_exe()`): the SHA-256 of the image the
-   jar started from. `upgraded` carries the path today
+6. **`build` and `commit` in `describe`**
+   (`crates/spyc-jar/src/jar/describe.rs:19-25` has `jar` as the version and
+   `current_exe()`): `build` is the name of the store entry the jar runs from,
+   which spyc made its SHA-256; `commit` is the git commit, which only the
+   `spyc-jar` binary knows (`SPYC_GIT_SHA` from spyc's `build.rs`), so
+   `src/bin/spyc-jar.rs` passes it into the crate. `upgraded` carries the path
+   today
    (`crates/spyc-jar/src/jar/mod.rs:268-270`) where the protocol's table says
    "the new build": send the `build`.
 7. **Validate twice:** once unparked, on a blob taken then, to pay a new
    binary's first-run cost (about 263 ms on macOS) and refuse a non-jar while
    the program is still served; then again, parked, on the real blob.
+8. **The store's layout:** the jar's store is two levels above the file it
+   runs from, only when that directory holds `.spyc-jar-store` and is the
+   user's, `0700` and not a link; otherwise the jar has none and keeps its
+   copies in a `0700` directory beside its socket. Tests and `cargo run` run
+   jars from scratch paths, so this rule is what keeps them from treating an
+   arbitrary directory as a store.
 
 **The store** ("The jar binary store" in the plan) is spyc's side and the
 jar's together:
 
-- spyc: copy and check at start (`spyc-jar build-info`, a new subcommand of
-  `src/bin/spyc-jar.rs`, printing `SPYC_GIT_SHA` and `SPYC_BUILD_TIME`), the
-  sweep, and the fallback when the state directory can't execute.
-- The jar: its store is the directory two levels above the entry it runs
-  from; a jar outside a store keeps upgrade copies in a `0700` directory
-  beside its socket.
+- spyc: the store's directory and its marker, copying and checking at start
+  (`spyc-jar build-info`, a new subcommand of `src/bin/spyc-jar.rs`, printing
+  `SPYC_GIT_SHA` and `SPYC_BUILD_TIME`), every entry written whole, the
+  conservative sweep (only an entry no live jar reports, not spyc's own and
+  untouched for a day, and nothing at all when any socket fails `describe`),
+  and the fallback when the state directory can't execute.
+- The jar: parts 1, 6 and 8 above.
 - **S2a starts every jar from the store.** On `jar/s2a-spawn`,
   `src/pane/jar/place.rs` sets `Place::binary` to the `spyc-jar` beside
   spyc's own binary: that is what changes.
-- The SHA-256: `sha2` (0.10, already in the lockfile) would be a new
-  dependency of `spyc-jar`, which decision E lists. Ask the owner before
-  adding it.
 
 ## 3. `--start-on-owner`
 
-A pane's jar starts its program when its first owner's `hello` is accepted
-(decision M); without that owner within the owner's deadline
-(`--deadline-ms`, 10 s by default) it exits having started nothing. Today the
+A pane's jar started with `--start-on-owner MS` starts its program when its
+first owner's `hello` is accepted, before that owner's `welcome` (decision
+M); without that owner within `MS` it exits having started nothing. The wait
+is its own value, not `--deadline-ms`. Until the program starts, `describe`
+gives `program_pid` as `0` (today it is `shared.child_pid`,
+`crates/spyc-jar/src/jar/describe.rs:28`). Today the
 program is spawned as `jar::run` begins (`crates/spyc-jar/src/jar/mod.rs:197`).
 It is a flag after `--wire`, which isn't frozen; spyc's outer jar never passes
 it. Refuse an upgrade (reason 5) until the program has started, so the blob
