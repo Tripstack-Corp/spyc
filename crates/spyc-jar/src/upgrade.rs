@@ -24,7 +24,8 @@
 //!    the holder and reaps it.
 //!
 //! Any failure before the `exec` unparks everything and refuses the upgrade:
-//! the old jar runs on as if nothing happened.
+//! the old jar runs on as if nothing happened. A new image that can't decode
+//! the blob or start from it holds what crossed instead (`held.rs`).
 //!
 //! Every step runs one file (decision L, [`crate::store`]): the named binary
 //! when it's an entry of the jar's store, or the jar's own copy of it, made
@@ -633,34 +634,117 @@ pub fn resume() -> anyhow::Result<()> {
     }
     drop(sock);
     for fd in &fds {
-        rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC)?;
+        let _ = rustix::io::fcntl_setfd(fd, rustix::io::FdFlags::CLOEXEC);
     }
     let mut fds = fds.into_iter();
-    let blob = read_blob(&mut std::fs::File::from(
-        fds.next().context("no blob pipe")?,
-    ))?;
-    // Every socket is ours now, and the blob: the holder can go.
-    if let Some(pid) = i32::try_from(holder)
+    let pipe = fds.next();
+    let blob = fault(Fault::Blob)
+        .and_then(|()| read_blob(&mut std::fs::File::from(pipe.context("no blob pipe")?)));
+    // Every socket is ours now, and the blob if it came: the holder goes at
+    // once, whether this image resumes or holds.
+    end_holder(holder);
+    let crossed = crate::held::Crossed {
+        listener: fds.next().map(std::os::unix::net::UnixListener::from),
+        master: fds.next(),
+        conns: fds.map(UnixStream::from).collect(),
+    };
+    // SPYC-TRAP(jar-resume-contained): a resume that fails or panics must
+    // leave `crossed` whole, or the program is lost with the image.
+    let taken = blob.and_then(|blob| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| take_over(&blob, &crossed)))
+            .unwrap_or_else(|p| Err(anyhow!("it panicked: {}", panic_text(p.as_ref()))))
+    });
+    match taken {
+        Ok(ready) => {
+            drop(crossed);
+            ready.serve()
+        }
+        Err(e) => crate::held::hold(crossed, &format!("{e:#}")),
+    }
+}
+
+/// End the holder and reap it.
+fn end_holder(pid: u32) {
+    if let Some(pid) = i32::try_from(pid)
         .ok()
         .and_then(rustix::process::Pid::from_raw)
     {
         let _ = rustix::process::kill_process(pid, rustix::process::Signal::TERM);
         let _ = rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty());
     }
-    let h = handover::decode(&blob)?;
-    let listener = std::os::unix::net::UnixListener::from(fds.next().context("no listener")?);
-    let master = fds.next().context("no PTY master")?;
+}
+
+/// Decode the blob and set the jar up from it, on copies of what crossed:
+/// whatever fails, `crossed` is left for [`crate::held::hold`].
+fn take_over(blob: &[u8], crossed: &crate::held::Crossed) -> anyhow::Result<crate::jar::Ready> {
+    fault(Fault::Decode)?;
+    let h = handover::decode(blob)?;
+    let listener = crossed
+        .listener
+        .as_ref()
+        .context("no listener")?
+        .try_clone()
+        .context("the listener")?;
+    let master = crossed
+        .master
+        .as_ref()
+        .context("no PTY master")?
+        .try_clone()
+        .context("the PTY master")?;
     if !rustix::termios::isatty(&master) {
         bail!("the PTY master isn't a terminal");
     }
-    let streams: Vec<UnixStream> = fds.map(UnixStream::from).collect();
-    if streams.len() != h.conns.len() {
+    if crossed.conns.len() != h.conns.len() {
         bail!(
             "{} connections in the blob, {} descriptors",
             h.conns.len(),
-            streams.len()
+            crossed.conns.len()
         );
     }
+    let streams = crossed
+        .conns
+        .iter()
+        .map(UnixStream::try_clone)
+        .collect::<std::io::Result<Vec<_>>>()
+        .context("the connections")?;
     let conns = h.conns.into_iter().zip(streams).collect();
-    crate::jar::start(h.cfg, h.state, (h.child_pid, None), master, listener, conns)
+    fault(Fault::Start)?;
+    crate::jar::prepare(h.cfg, h.state, (h.child_pid, None), master, listener, conns)
+}
+
+/// What a panic said, as far as it can be told.
+fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
+    p.downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| p.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "no message".into())
+}
+
+/// Where a debug build's resume may be made to fail.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fault {
+    Blob,
+    Decode,
+    Start,
+}
+
+/// A debug build's resume fails as `SPYC_JAR_RESUME_FAULT` asks: `blob`
+/// leaves the blob unread, `error` fails decoding it, `panic` panics as the
+/// jar starts. The tests that
+/// a new image contains a resume it can't finish use it; a release build has
+/// none.
+#[cfg(debug_assertions)]
+fn fault(at: Fault) -> anyhow::Result<()> {
+    match (std::env::var("SPYC_JAR_RESUME_FAULT").as_deref(), at) {
+        (Ok("blob"), Fault::Blob) => bail!("the blob left unread, as asked"),
+        (Ok("error"), Fault::Decode) => bail!("a decoding fault, as asked"),
+        (Ok("panic"), Fault::Start) => panic!("a start-up fault, as asked"),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(not(debug_assertions))]
+#[allow(clippy::unnecessary_wraps)]
+const fn fault(_: Fault) -> anyhow::Result<()> {
+    Ok(())
 }

@@ -19,7 +19,7 @@ use super::*;
 
 /// A binary at `dir/name` that runs `cases` (a `case "$1" in` body) and hands
 /// anything else to the real jar.
-fn jar_script(dir: &std::path::Path, name: &str, cases: &str) -> PathBuf {
+pub fn jar_script(dir: &std::path::Path, name: &str, cases: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join(name);
     std::fs::write(
@@ -37,7 +37,7 @@ fn jar_script(dir: &std::path::Path, name: &str, cases: &str) -> PathBuf {
 /// Ask `owner` for an upgrade to `binary`; what the jar answers (`Upgraded`
 /// or `Refused`) and how long it took, acknowledging output meanwhile. `None`
 /// when the jar answers neither within `wait`, or the connection ends.
-fn upgrade_answer(
+pub fn upgrade_answer(
     owner: &mut Client,
     seen: &mut Seen,
     binary: &std::path::Path,

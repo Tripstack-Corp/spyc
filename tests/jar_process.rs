@@ -1480,6 +1480,9 @@ fn a_failed_exec_leaves_a_jar_that_survives_the_next_refusal() {
 #[path = "jar_process/upgrade.rs"]
 mod upgrade;
 
+#[path = "jar_process/contain.rs"]
+mod contain;
+
 // The review's probes, as requirements. A jar can't be wedged by a client
 // that stops reading or a program that stops reading (finding 4), nor held by
 // connections without its token (finding 5), and it keeps what an owner yet

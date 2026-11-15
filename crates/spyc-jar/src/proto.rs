@@ -36,8 +36,9 @@ pub mod reason {
     pub const UPGRADE_BUSY: u16 = 5;
     /// The new binary is missing or rejected the handover; the jar runs on.
     pub const UPGRADE_REJECTED: u16 = 6;
-    /// The upgrade failed after the new binary accepted the handover; the jar
-    /// runs on.
+    /// The upgrade failed after the new binary accepted the handover: the jar
+    /// runs on, or, when the new image took over and couldn't resume, holds
+    /// its program and serves nothing else (`held.rs`).
     pub const UPGRADE_FAILED: u16 = 7;
     /// A request this jar can't act on: no `hello` first, a value out of
     /// range, or a kind a client doesn't send.

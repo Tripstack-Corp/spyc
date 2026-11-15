@@ -91,7 +91,7 @@ fn peer_uid(_stream: &UnixStream) -> std::io::Result<u32> {
 }
 
 /// R26: whether the peer on `stream` is `uid`. One that can't be told is not.
-fn peer_is(stream: &UnixStream, uid: u32) -> bool {
+pub fn peer_is(stream: &UnixStream, uid: u32) -> bool {
     peer_uid(stream).is_ok_and(|p| p == uid)
 }
 
