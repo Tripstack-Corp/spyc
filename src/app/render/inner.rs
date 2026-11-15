@@ -624,26 +624,36 @@ impl App {
                 }
             }
         }
-        if let Some(vd) = layout.vdivider {
-            self.render_vsplit_divider(frame, vd);
+        if let (Some(vd), Some(vsplit)) = (layout.vdivider, self.state.active_project().vsplit) {
+            let pane_top = layout.divider.or(layout.pane).map(|r| r.y);
+            self.render_vsplit_divider(frame, vd, vsplit.mode, pane_top);
         }
     }
 
     /// Paint the 1-column vertical separator between the left and right columns
-    /// of a vertical split — `│` down the column, muted like the horizontal
-    /// pane divider's unfocused rule (`theme.status_suffix`). Cell-level paint
-    /// (the rect is 1 col wide) via the same `cell_mut` API the pane widget
-    /// uses. (PR4 can make it focus-aware.)
-    fn render_vsplit_divider(&self, frame: &mut Frame, rect: ratatui::layout::Rect) {
-        // Use the accent (prompt-prefix) colour, bold, so the column boundary
-        // reads as a deliberate divider and doesn't blend with muted content
-        // lines / gaps (e.g. a side-by-side diff's own separators).
-        let style = ratatui::style::Style::default()
+    /// of a vertical split: `│` down the column, in the accent colour and bold
+    /// beside the region that has the keys, and muted like the pane rule's
+    /// unfocused style (`theme.status_suffix`) elsewhere, so the divider points
+    /// at where typing goes (#1175). [`super::layout::vsplit_divider_lit_rows`]
+    /// decides which rows that is.
+    fn render_vsplit_divider(
+        &self,
+        frame: &mut Frame,
+        rect: ratatui::layout::Rect,
+        mode: state::VsplitMode,
+        pane_top: Option<u16>,
+    ) {
+        use ratatui::style::{Modifier, Style};
+        let focus = (!self.state.pane_focused()).then(|| self.focused_side());
+        let lit_rows = super::layout::vsplit_divider_lit_rows(mode, rect, pane_top, focus);
+        let lit = Style::default()
             .fg(self.view.theme.prompt_prefix)
-            .add_modifier(ratatui::style::Modifier::BOLD);
+            .add_modifier(Modifier::BOLD);
+        let muted = Style::default().fg(self.view.theme.status_suffix);
         let buf = frame.buffer_mut();
         for y in rect.y..rect.y.saturating_add(rect.height) {
             if let Some(cell) = buf.cell_mut((rect.x, y)) {
+                let style = if lit_rows.contains(&y) { lit } else { muted };
                 cell.set_char('│').set_style(style);
             }
         }
