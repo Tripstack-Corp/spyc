@@ -1,0 +1,112 @@
+//! The jar's ownership timers, each asked what a starved but live peer sees
+//! when it fires: an owner that is slow but there keeps its lease, and a jar
+//! waiting for its first owner waits without spending the machine's time.
+//! Slowness is injected (a client that pauses mid-frame or stops reading,
+//! while it pings), never measured.
+
+use std::time::{Duration, Instant};
+
+use spyc_jar::proto::{self, Msg, Role};
+
+use super::*;
+
+/// A jar holding its program for its first owner, with a finite linger,
+/// waits past the first-owner grace without spinning, and the owner that
+/// comes inside its start wait is still given the program.
+#[test]
+#[ignore = "red until the reaper leaves a program held for its first owner alone"]
+fn a_jar_holding_its_program_for_a_first_owner_waits_idle_past_the_grace() {
+    let mut jar = Jar::start(
+        &["--start-on-owner", "30000", "--linger-ownerless-ms", "0"],
+        &["/bin/cat"],
+    );
+    eventually("the jar's socket", || jar.socket.exists());
+    // Past the jar's ten-second first-owner grace, inside its start wait.
+    std::thread::sleep(Duration::from_secs(13));
+    let spent = cpu_seconds(jar.process.id());
+    assert!(
+        spent < 1.0,
+        "a jar waiting for its first owner spent {spent} s of CPU in 13 s"
+    );
+    let (_owner, welcome) = jar.welcome(Role::Owner);
+    let Msg::Welcome { child_pid, .. } = welcome else {
+        panic!("{welcome:?}");
+    };
+    assert_ne!(
+        child_pid, 0,
+        "the owner inside the start wait gets the program"
+    );
+}
+
+/// R21: a lease ends when its connection drops or its owner misses the
+/// liveness deadline. An owner that pings on time but has stopped reading
+/// (its spyc's pane is busy) keeps the lease, its program paced meanwhile,
+/// and reads on with nothing lost.
+#[test]
+#[ignore = "red until a stalled write to a live owner keeps its lease"]
+fn an_owner_that_pings_keeps_its_lease_while_it_stops_reading() {
+    let deadline = Duration::from_millis(1000);
+    let mut jar = Jar::start(
+        &["--deadline-ms", "1000"],
+        &sh("i=0; while :; do i=$((i+1)); echo n=$i; done"),
+    );
+    let owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let (mut rx, tx) = owner.split();
+    // Four deadlines of pings and no reads: far more is printed meanwhile
+    // than the flow-control window and the socket hold.
+    let until = Instant::now() + deadline * 4;
+    let mut n = 0;
+    while Instant::now() < until {
+        n += 1;
+        tx.send(&Msg::Ping { n }).unwrap_or_else(|e| {
+            panic!("the jar ended a live owner's connection while it pinged: {e}")
+        });
+        std::thread::sleep(deadline / 5);
+    }
+    let mut seen = Seen::default();
+    let until = Instant::now() + WAIT;
+    while counts(&seen).last().is_none_or(|n| *n < 50_000) {
+        assert!(
+            Instant::now() < until,
+            "timed out; saw {} bytes",
+            seen.text.len()
+        );
+        let msg = rx.recv(Duration::from_millis(200));
+        let msg = msg.unwrap_or_else(|e| {
+            panic!(
+                "the jar ended a live owner's connection after {} bytes: {e:#}",
+                seen.text.len()
+            )
+        });
+        if let Some(msg) = msg {
+            seen.take(msg);
+            if let Some(next) = seen.next_offset {
+                tx.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+    }
+    assert_eq!(seen.first_offset, Some(0), "the stream starts at the start");
+    assert_unbroken(&seen);
+}
+
+/// An owner paused partway through a frame (a large paste or snapshot, its
+/// spyc stopped or starved) is waited for as long as its liveness deadline,
+/// not cut sooner by the frame deadline that bounds a tokenless trickle.
+#[test]
+#[ignore = "red until an owner's frame is timed by its liveness deadline"]
+fn an_owner_paused_mid_frame_inside_its_deadline_keeps_its_lease() {
+    let mut jar = Jar::start(&["--deadline-ms", "10000"], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let mut line = vec![b'a'; 512];
+    line.extend(b" paused-mid-frame\n");
+    let frame = proto::encode(&Msg::Input { bytes: line });
+    let (first, rest) = frame.split_at(frame.len() / 2);
+    owner.send_raw(first).expect("the frame's first half");
+    // Past the five-second frame deadline, inside the ten-second lease.
+    std::thread::sleep(Duration::from_secs(7));
+    owner.send_raw(rest).expect("the rest of the frame");
+    let seen = read_until(&mut owner, true, |s| s.contains("paused-mid-frame"));
+    assert!(seen.contains("paused-mid-frame"));
+}
