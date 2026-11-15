@@ -20,6 +20,18 @@ use crate::state::{Event, State};
 /// milliseconds, one taking it over within seconds.
 const FIRST_OWNER_GRACE: Duration = Duration::from_secs(10);
 
+/// Decision M: end the jar, having started nothing, when no owner has come
+/// within `wait`. Under the state's lock, so an owner being welcomed either
+/// started the program first or finds no jar.
+pub(super) fn await_first_owner(shared: &Shared, wait: Duration) {
+    thread::sleep(wait);
+    let st = shared.lock();
+    if shared.child_pid() == 0 && st.owner.is_none() {
+        let _ = std::fs::remove_file(&shared.cfg.socket);
+        std::process::exit(0);
+    }
+}
+
 /// Copy the program's output into the log, pausing while a live owner is a
 /// window behind.
 pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
@@ -69,7 +81,13 @@ pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
 
 /// Record the program's exit, polled so the waiter can park for an upgrade.
 pub(super) fn wait_child(shared: &Shared) {
-    let pid = i32::try_from(shared.child_pid).ok().and_then(Pid::from_raw);
+    // A program held for its first owner has no pid yet.
+    while shared.child_pid() == 0 {
+        thread::sleep(Duration::from_millis(50));
+    }
+    let pid = i32::try_from(shared.child_pid())
+        .ok()
+        .and_then(Pid::from_raw);
     loop {
         if shared.upgrading() {
             shared.park(Who::Waiter);
@@ -160,7 +178,10 @@ fn lingered(shared: &Shared, st: &State) -> bool {
 /// the jar once the exit is recorded, no owner being there to collect it.
 fn end_program(shared: &Shared) {
     use rustix::process::Signal;
-    let Some(pid) = i32::try_from(shared.child_pid).ok().and_then(Pid::from_raw) else {
+    let Some(pid) = i32::try_from(shared.child_pid())
+        .ok()
+        .and_then(Pid::from_raw)
+    else {
         return;
     };
     let _ = rustix::process::kill_process_group(pid, Signal::HUP);

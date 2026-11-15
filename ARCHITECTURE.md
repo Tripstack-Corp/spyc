@@ -858,6 +858,14 @@ by default.
   leaves jars to start beside spyc; one of another build starts none. Its
   sweep removes only an entry no live jar reports, not spyc's own, a day
   untouched, and nothing while any live jar won't say what it runs.
+- **A pane's jar starts its program when spyc connects** (decision M,
+  `--start-on-owner`): the jar opens the PTY and holds the program until its
+  first owner's `hello` is accepted, then starts it before that owner's
+  `welcome`, so a program's start-up probes (Claude Code's and agy's give
+  about two seconds) are always answered by an owner that is there. A jar
+  whose spyc died before connecting ends after 30 s having started nothing.
+  Until the program starts, `describe` gives `program_pid` 0 and an upgrade
+  is refused as busy.
 - **A replayed query goes unanswered** (R15a). Until the replayed tail has
   been handed to the pane, and half a second after, the terminal's answers
   are dropped: they'd answer what the program asked before the crash.

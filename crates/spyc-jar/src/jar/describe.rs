@@ -33,7 +33,7 @@ pub(super) fn describe(shared: &Shared) -> Vec<(String, String)> {
         ("commit", crate::cli::commit().to_string()),
         ("pid", std::process::id().to_string()),
         ("program", shared.cfg.argv.join(" ")),
-        ("program_pid", shared.child_pid.to_string()),
+        ("program_pid", shared.child_pid().to_string()),
         (
             "cwd",
             shared

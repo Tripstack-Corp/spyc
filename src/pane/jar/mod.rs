@@ -214,14 +214,7 @@ pub fn spawn(
     let token = tokens::new()?;
     tokens::save(place, &socket, &token)?;
     let mut cmd = Command::new(&place.binary);
-    cmd.arg("--socket")
-        .arg(&socket)
-        .args(["--wire", &spyc_jar::proto::VERSION.to_string()])
-        .arg("--cwd")
-        .arg(cwd)
-        .args(["--rows", &rows.to_string(), "--cols", &cols.to_string()])
-        .arg("--")
-        .args(argv)
+    cmd.args(jar_args(&socket, cwd, (rows, cols), argv))
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -366,6 +359,36 @@ struct Resume {
     replay: u64,
     offsets: offsets::Offsets,
     gate: ReplayGate,
+}
+
+/// How long a pane's jar holds its program for this spyc to connect
+/// (decision M): far longer than the connect takes, and a jar whose spyc
+/// died meanwhile ends having started nothing.
+const START_WAIT: Duration = Duration::from_secs(30);
+
+/// A pane's jar's arguments: its socket, wire version and size, its program
+/// held for its first owner (decision M), then the program.
+fn jar_args(
+    socket: &Path,
+    cwd: &Path,
+    (rows, cols): (u16, u16),
+    argv: &[String],
+) -> Vec<std::ffi::OsString> {
+    let mut args: Vec<std::ffi::OsString> = vec!["--socket".into(), socket.into()];
+    for (flag, value) in [
+        ("--wire", spyc_jar::proto::VERSION.to_string()),
+        ("--rows", rows.to_string()),
+        ("--cols", cols.to_string()),
+        ("--start-on-owner", START_WAIT.as_millis().to_string()),
+    ] {
+        args.push(flag.into());
+        args.push(value.into());
+    }
+    args.push("--cwd".into());
+    args.push(cwd.into());
+    args.push("--".into());
+    args.extend(argv.iter().map(Into::into));
+    args
 }
 
 /// The new jar's welcome. `Ok(None)` when it ended first, which it says on

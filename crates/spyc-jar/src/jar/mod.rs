@@ -99,7 +99,10 @@ pub(crate) struct Shared {
     pub(crate) inbox_cv: Condvar,
     /// Replaced when its path goes missing ([`keep_socket`]).
     pub(crate) listener: Mutex<UnixListener>,
-    pub(crate) child_pid: u32,
+    /// The program's pid; 0 while a jar started on its owner waits for one.
+    pub(crate) child_pid: std::sync::atomic::AtomicU32,
+    /// The PTY's slave, held for a program not yet started.
+    pub(crate) pending: Mutex<Option<File>>,
     pub(crate) cfg: Config,
     pub(crate) conns: Mutex<HashMap<u64, Arc<Conn>>>,
     /// Connections that have shown no token: before their `hello`, and
@@ -118,6 +121,28 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    /// The program's pid; 0 until a jar started on its owner has one.
+    pub(crate) fn child_pid(&self) -> u32 {
+        self.child_pid.load(Ordering::SeqCst)
+    }
+
+    /// Start the program held for the first owner, under the state's lock.
+    /// Nothing to do once it has started.
+    pub(crate) fn start_program(&self) -> anyhow::Result<()> {
+        let Some(slave) = self
+            .pending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        else {
+            return Ok(());
+        };
+        let pid = crate::pty::start(&self.cfg, slave)?;
+        self.child_pid.store(pid, Ordering::SeqCst);
+        self.cv.notify_all();
+        Ok(())
+    }
+
     pub(crate) fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -198,7 +223,13 @@ impl Read for By<'_> {
 /// Spawn the program and serve the socket until the jar ends. Never returns
 /// on success: the reaper ends the process.
 pub fn run(cfg: Config, listener: UnixListener, token: Vec<u8>) -> anyhow::Result<()> {
-    let (master, child_pid) = crate::pty::spawn(&cfg)?;
+    let (master, child_pid, pending) = if cfg.start_on_owner.is_some() {
+        let (master, slave) = crate::pty::open(&cfg)?;
+        (master, 0, Some(slave))
+    } else {
+        let (master, pid) = crate::pty::spawn(&cfg)?;
+        (master, pid, None)
+    };
     let state = State {
         log: Log {
             events: VecDeque::new(),
@@ -223,7 +254,14 @@ pub fn run(cfg: Config, listener: UnixListener, token: Vec<u8>) -> anyhow::Resul
         token,
         info: Vec::new(),
     };
-    start(cfg, state, child_pid, master, listener, Vec::new())
+    start(
+        cfg,
+        state,
+        (child_pid, pending),
+        master,
+        listener,
+        Vec::new(),
+    )
 }
 
 /// Run a jar from `state`: a fresh one, or one taking over across `exec` with
@@ -231,7 +269,7 @@ pub fn run(cfg: Config, listener: UnixListener, token: Vec<u8>) -> anyhow::Resul
 pub(crate) fn start(
     cfg: Config,
     state: State,
-    child_pid: u32,
+    (child_pid, pending): (u32, Option<File>),
     master: OwnedFd,
     listener: UnixListener,
     conns: Vec<(ConnState, UnixStream)>,
@@ -252,7 +290,8 @@ pub(crate) fn start(
         inbox: Mutex::new(Inbox::default()),
         inbox_cv: Condvar::new(),
         listener: Mutex::new(listener),
-        child_pid,
+        child_pid: std::sync::atomic::AtomicU32::new(child_pid),
+        pending: Mutex::new(pending),
         cfg,
         conns: Mutex::new(HashMap::new()),
         tokenless: Mutex::new(VecDeque::new()),
@@ -294,6 +333,12 @@ pub(crate) fn start(
     {
         let shared = Arc::clone(&shared);
         thread::spawn(move || life::reap(&shared));
+    }
+    if let Some(wait) = shared.cfg.start_on_owner
+        && shared.child_pid() == 0
+    {
+        let shared = Arc::clone(&shared);
+        thread::spawn(move || life::await_first_owner(&shared, wait));
     }
     shared
         .listener

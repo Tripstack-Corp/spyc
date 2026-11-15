@@ -4,7 +4,9 @@
 //!
 //! Options: `--cwd DIR`, `--rows N`, `--cols N`, `--ring BYTES`,
 //! `--window BYTES`, `--deadline-ms N`, `--linger-ms N`,
-//! `--linger-ownerless-ms N`.
+//! `--linger-ownerless-ms N`, `--start-on-owner MS` (decision M: the program
+//! starts when the first owner's `hello` is accepted, and the jar ends having
+//! started nothing if none comes within `MS`).
 //!
 //! `--wire N` names the protocol version its starter speaks. A jar that
 //! doesn't speak it exits with [`WIRE_NOT_SERVED`] before it reads anything
@@ -175,6 +177,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> anyhow::Result<Config> {
         created: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
+        start_on_owner: None,
     };
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().with_context(|| format!("{name} needs a value"));
@@ -200,6 +203,10 @@ fn parse(mut args: impl Iterator<Item = String>) -> anyhow::Result<Config> {
             }
             "--linger-ms" => {
                 cfg.linger_after_exit = Duration::from_millis(value("--linger-ms")?.parse()?);
+            }
+            "--start-on-owner" => {
+                cfg.start_on_owner =
+                    Some(Duration::from_millis(value("--start-on-owner")?.parse()?));
             }
             "--" => {
                 cfg.argv = args.by_ref().collect();
