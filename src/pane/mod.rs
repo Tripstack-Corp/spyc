@@ -324,6 +324,22 @@ impl Pane {
         self.host.jarred()
     }
 
+    /// Whether the program was taken back from its jar rather than started.
+    pub const fn adopted(&self) -> bool {
+        self.host.adopted()
+    }
+
+    /// Whether the tab's jar runs on for another spyc, and nothing runs here.
+    pub const fn detached(&self) -> bool {
+        self.host.detached()
+    }
+
+    /// The jar's socket, when the program runs in one or a detached tab's
+    /// still does.
+    pub fn jar_socket(&self) -> Option<&std::path::Path> {
+        self.host.jar_socket()
+    }
+
     /// Best-effort kill of just the immediate child (no signal-group
     /// escalation). Used by tab-restart, which then re-spawns.
     pub fn try_kill(&mut self) {

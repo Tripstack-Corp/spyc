@@ -8,10 +8,6 @@
 //! (R17c). It is made from the binary form in a scratch engine, so the pane's
 //! own engine stays unlocked meanwhile. `jar_fidelity` checks it against the
 //! binary form case by case.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "no pane restores a snapshot in this build")
-)]
 
 use spyc_vt_sys::ffi;
 

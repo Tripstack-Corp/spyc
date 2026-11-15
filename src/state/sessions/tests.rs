@@ -192,6 +192,7 @@ fn effective_kind_passes_through_explicit_value() {
         pane_id: String::new(),
         agent_hint: None,
         unopened: false,
+        jar_socket: None,
     };
     assert_eq!(tab.effective_kind(), AgentKind::Codex);
     tab.agent_kind = AgentKind::Other;
@@ -520,6 +521,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                 pane_id: String::new(),
                 agent_hint: None,
                 unopened: false,
+                jar_socket: None,
             }],
         );
         save_session(&session).unwrap();
@@ -556,6 +558,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     pane_id: String::new(),
                     agent_hint: None,
                     unopened: false,
+                    jar_socket: None,
                 }],
             );
             save_session(&s).unwrap();
@@ -588,6 +591,7 @@ fn save_load_prune_and_keep_distinct_sessions() {
                     pane_id: String::new(),
                     agent_hint: None,
                     unopened: false,
+                    jar_socket: None,
                 }],
             );
             save_session(&s).unwrap();
@@ -692,6 +696,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     pane_id: String::new(),
                     agent_hint: None,
                     unopened: false,
+                    jar_socket: None,
                 },
                 SavedTab {
                     command: "codex".into(),
@@ -707,6 +712,7 @@ fn session_round_trips_through_disk_preserving_tabs_in_order() {
                     pane_id: String::new(),
                     agent_hint: None,
                     unopened: false,
+                    jar_socket: None,
                 },
             ],
         );
@@ -829,6 +835,7 @@ fn tab_omits_absent_session_id_in_json() {
         pane_id: String::new(),
         agent_hint: None,
         unopened: false,
+        jar_socket: None,
     };
     let json = serde_json::to_value(&bare).unwrap();
     assert!(

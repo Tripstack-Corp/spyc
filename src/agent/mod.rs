@@ -1604,6 +1604,7 @@ mod tests {
             pane_id: String::new(),
             agent_hint: None,
             unopened: false,
+            jar_socket: None,
         };
         // `effective_kind` upgrades the legacy Other → Claude.
         assert_eq!(tab.effective_kind(), AgentKind::Claude);
@@ -1638,6 +1639,7 @@ mod tests {
             pane_id: String::new(),
             agent_hint: None,
             unopened: false,
+            jar_socket: None,
         };
         assert_eq!(tab.effective_kind(), AgentKind::Other);
         let plan = profile_for(tab.effective_kind()).reconstruct_restore(

@@ -811,11 +811,19 @@ by default.
   the jar check it is a directory, not a link, owned by this user and closed to
   others before trusting a socket there. A program finds its jar by
   `SPYC_JAR_SOCKET`, never by working the path out again.
-- **A tab's program never runs twice** (finding 7, for a start). A jar's
-  socket is named after its tab. A start that finds the tab's jar running
-  waits up to two seconds for it to end, as a restart's does once its exit is
-  acknowledged; one that goes on running, its spyc crashed, keeps the tab from
-  opening.
+- **A tab's program never runs twice** (finding 7). A jar's socket is named
+  after its tab, and a saved session records it. A restore that finds the
+  tab's jar running takes it back: the pane starts from the jar's newest
+  snapshot this build can use (the binary form when this build made it,
+  else the portable one, and past a gap the newest anyway), and the jar
+  replays what the program printed since. A jar that won't take it, owned by
+  another spyc or with no token here, leaves the tab `[detached]` with
+  nothing started in its place. Any other start that finds the tab's jar
+  running waits up to two seconds for it to end, as a restart's does once
+  its exit is acknowledged, and otherwise keeps the tab from opening.
+- **A replayed query goes unanswered** (R15a). Until the replayed tail has
+  been handed to the pane, and half a second after, the terminal's answers
+  are dropped: they'd answer what the program asked before the crash.
 
 ## A jarred program's signals go through its jar
 

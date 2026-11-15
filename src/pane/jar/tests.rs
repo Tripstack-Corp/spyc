@@ -9,6 +9,10 @@ use super::*;
 use crate::pane::pty_host::{PtyEvent, PtyHost};
 
 const WAIT: Duration = Duration::from_secs(5);
+/// A test's program is ended in order before the test does: a dropped
+/// pane's kill may not reach its jar before the test process exits, and a
+/// pane's jar waits for an owner for ever.
+const END: Duration = Duration::from_millis(500);
 
 /// A directory under `/tmp`, short enough for a socket's path on macOS.
 fn short_dir() -> tempfile::TempDir {
@@ -105,7 +109,16 @@ fn host_in_fake_jar(pid: u32) -> (FakeJar, PtyHost) {
         }
     });
     let (client, welcome) = Client::connect(&socket, Role::Owner, WAIT, b"token").unwrap();
-    let jarred = connect(client, &welcome, &socket, (24, 80)).unwrap();
+    let Msg::Welcome { child_pid, .. } = welcome else {
+        panic!("no welcome: {welcome:?}");
+    };
+    let fresh = Resume {
+        pid: child_pid,
+        replay: 0,
+        offsets: offsets::Offsets::new(0),
+        gate: ReplayGate::open(),
+    };
+    let jarred = connect(client, fresh, &socket, (24, 80)).unwrap();
     let host = PtyHost::around_jar(jarred, (24, 80)).unwrap();
     let to_owner = conn_rx.recv_timeout(WAIT).unwrap();
     let jar = FakeJar {
@@ -342,6 +355,7 @@ fn a_jar_that_wont_run_leaves_the_program_to_run_without_one() {
             jar: Some(Spec {
                 place: place.clone(),
                 name: "0123456789abcdef".into(),
+                adopt: None,
             }),
         })
         .unwrap_or_else(|e| panic!("{}: the tab failed to open: {e:#}", binary.display()));
@@ -458,7 +472,7 @@ fn only_a_current_or_rc_build_reads_the_setting() {
     assert!(honoured_by("2.5.0-CURRENT"));
     assert!(honoured_by("3.0.0-rc.1"));
     assert!(!honoured_by("2.5.0"));
-    assert!(wanted(false, "0123").is_none(), "off is off");
+    assert!(wanted(false, "0123", None).is_none(), "off is off");
 }
 
 /// A binary snapshot says which build made it; another build's, or one
@@ -505,6 +519,7 @@ fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost>
         jar: Some(Spec {
             place: place.clone(),
             name: "0123456789abcdef".into(),
+            adopt: None,
         }),
     })
 }
@@ -558,8 +573,9 @@ fn a_tab_whose_jar_still_runs_never_starts_its_program_twice() {
     // As a tab's restart does (`Pane::try_kill`): the kill, then at once the
     // new start, while the last jar is still ending.
     first.child.kill().unwrap();
-    let restarted = spawn_in(&place, "exec cat", dir.path()).unwrap();
+    let mut restarted = spawn_in(&place, "exec cat", dir.path()).unwrap();
     assert!(restarted.jarred(), "a restart gets a jar");
+    restarted.shutdown(END);
 }
 
 /// R17e: a snapshot follows a second of quiet, never a frame the program
@@ -649,6 +665,7 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
             jar: Some(Spec {
                 place: place.clone(),
                 name: "0123456789abcdef".into(),
+                adopt: None,
             }),
         },
         std::sync::Arc::new(|| {}),
@@ -688,5 +705,278 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    drop(pane);
+    let mut pane = pane;
+    pane.shutdown_reporting(END, || {});
+}
+
+/// R17b: the newest snapshot this build can use, binary before portable at
+/// one offset; a binary one it can't decode, or one past the jar's head,
+/// never; past a gap (R12c), the newest anyway.
+#[test]
+fn an_adoption_starts_from_the_newest_snapshot_this_build_can_use() {
+    let snap = |format, offset, blob: &[u8]| Snapshot {
+        format,
+        offset,
+        rows: 24,
+        cols: 80,
+        blob: blob.to_vec(),
+    };
+    let ours = |b: &[u8]| b == b"ours";
+    let pick = |all: &[Snapshot], head| choose(all, head, ours).map(|s| (s.format, s.offset));
+    let both = [
+        snap(proto::SNAPSHOT_VT, 100, b"vt"),
+        snap(proto::SNAPSHOT_BINARY, 100, b"ours"),
+    ];
+    assert_eq!(pick(&both, 200), Some((proto::SNAPSHOT_BINARY, 100)));
+    let foreign = [
+        snap(proto::SNAPSHOT_VT, 100, b"vt"),
+        snap(proto::SNAPSHOT_BINARY, 100, b"another build's"),
+    ];
+    assert_eq!(pick(&foreign, 200), Some((proto::SNAPSHOT_VT, 100)));
+    let newer_vt = [
+        snap(proto::SNAPSHOT_BINARY, 100, b"ours"),
+        snap(proto::SNAPSHOT_VT, 150, b"vt"),
+    ];
+    assert_eq!(pick(&newer_vt, 200), Some((proto::SNAPSHOT_VT, 150)));
+    assert_eq!(
+        pick(&newer_vt, 120),
+        Some((proto::SNAPSHOT_BINARY, 100)),
+        "past the head"
+    );
+    assert_eq!(pick(&[], 200), None);
+}
+
+/// R15a: while a replayed tail is in the parser, its queries go unanswered;
+/// a grace after it's handed over, answers flow again.
+#[test]
+fn replies_wait_until_the_replayed_tail_is_parsed() {
+    let gate = link::ReplayGate::until(100);
+    assert!(!gate.is_open());
+    gate.handed_over(50);
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(!gate.is_open(), "half the tail");
+    gate.handed_over(100);
+    assert!(!gate.is_open(), "the parser may still hold its queries");
+    std::thread::sleep(Duration::from_millis(600));
+    assert!(gate.is_open());
+    assert!(link::ReplayGate::open().is_open(), "nothing to replay");
+}
+
+const TAB: &str = "fedcba9876543210";
+
+/// A pane tab in a real jar, taking back the jar at `adopt` when it runs.
+fn pane_in(place: &Place, command: &str, cwd: &Path, adopt: Option<PathBuf>) -> crate::pane::Pane {
+    crate::pane::Pane::launch(
+        crate::pane::Launch {
+            command,
+            rows: 24,
+            cols: 80,
+            cwd,
+            context_path: &cwd.join("context"),
+            extra_env: &[],
+            jar: Some(Spec {
+                place: place.clone(),
+                name: TAB.into(),
+                adopt,
+            }),
+        },
+        std::sync::Arc::new(|| {}),
+    )
+    .unwrap()
+}
+
+fn screen(pane: &crate::pane::Pane) -> String {
+    pane.with_screen(crate::pane::engine::TerminalScreen::contents)
+}
+
+/// Wait until the pane's screen holds `needle`.
+fn shows(pane: &crate::pane::Pane, needle: &str) {
+    let until = Instant::now() + WAIT;
+    while !screen(pane).contains(needle) {
+        assert!(
+            Instant::now() < until,
+            "{needle:?} never showed: {:?}",
+            screen(pane)
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Wait until the jar at `socket` holds both snapshot forms at its head.
+fn snapshotted(socket: &Path) {
+    let until = Instant::now() + WAIT;
+    loop {
+        let fields = spyc_jar::client::describe(socket).unwrap();
+        let get = |k: &str| {
+            fields
+                .iter()
+                .find(|(key, _)| key == k)
+                .map_or_else(String::new, |(_, v)| v.clone())
+        };
+        let printed = get("log")
+            .split(" printed")
+            .next()
+            .and_then(|s| s.rsplit(' ').next())
+            .map(str::to_string)
+            .unwrap();
+        if get("snapshots") == format!("1@{printed} 2@{printed}") {
+            return;
+        }
+        assert!(Instant::now() < until, "snapshots {:?}", get("snapshots"));
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// A restored tab whose jar still runs takes it back: the same program,
+/// its screen from the snapshot and the replay, nothing in it twice, and
+/// what's typed reaching it.
+#[test]
+fn a_restored_tab_takes_its_running_jar_back() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let socket = place.socket(TAB);
+    let first = pane_in(
+        &place,
+        "sh -c 'printf before; read x; printf \"got-%s\" \"$x\"; exec cat'",
+        dir.path(),
+        None,
+    );
+    shows(&first, "before");
+    snapshotted(&socket);
+    let mut first = first;
+    first.send_bytes(b"zz\n").unwrap();
+    shows(&first, "got-zz");
+    let pid = first.process_id();
+    first.host.sever_jar();
+    drop(first);
+
+    let second = pane_in(&place, "echo started-again", dir.path(), Some(socket));
+    assert!(second.adopted(), "the running jar was taken back");
+    assert_eq!(second.process_id(), pid, "the same program");
+    shows(&second, "got-zz");
+    let text = screen(&second);
+    assert_eq!(
+        text.matches("before").count(),
+        1,
+        "replayed twice: {text:?}"
+    );
+    assert_eq!(
+        text.matches("got-zz").count(),
+        1,
+        "replayed twice: {text:?}"
+    );
+    assert!(!text.contains("started-again"), "{text:?}");
+    let mut second = second;
+    second.send_bytes(b"typed\n").unwrap();
+    shows(&second, "typed");
+    second.shutdown_reporting(END, || {});
+}
+
+/// Finding 7: a jar another spyc still owns, or one this spyc has no token
+/// for, isn't taken, and nothing is started in its place: the tab is
+/// detached.
+#[test]
+fn a_restored_tab_whose_jar_wont_take_it_is_detached_and_starts_nothing() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let socket = place.socket(TAB);
+    let mark = dir.path().join("ran");
+    let owner = pane_in(&place, "exec cat", dir.path(), None);
+    let command = format!("touch {}", mark.display());
+
+    let held = pane_in(&place, &command, dir.path(), Some(socket.clone()));
+    assert!(held.detached(), "another spyc owns it");
+    assert!(!held.adopted());
+    assert_eq!(
+        held.jar_socket(),
+        Some(socket.as_path()),
+        "kept for a later restore"
+    );
+
+    owner.host.sever_jar();
+    drop(owner);
+    std::fs::remove_file(place.tokens.join(TAB)).unwrap();
+    let tokenless = pane_in(&place, &command, dir.path(), Some(socket.clone()));
+    assert!(tokenless.detached(), "no token for it");
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!mark.exists(), "the program was started twice");
+    assert_eq!(socket_state(&socket), SocketState::Live, "the jar runs on");
+    let mut held = held;
+    let until = Instant::now() + WAIT;
+    while !held.is_closed() {
+        held.drain_output();
+        assert!(Instant::now() < until, "a detached tab never closed");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let status = held.exit_status().map(portable_pty::ExitStatus::signal);
+    assert_eq!(status, Some(Some(Lost::Held.label())));
+    // Nothing here owns the jar: end it and its program by hand.
+    for key in ["program_pid", "pid"] {
+        let _ = rustix::process::kill_process_group(
+            rustix::process::Pid::from_raw(describe_field(&socket, key)).unwrap(),
+            rustix::process::Signal::KILL,
+        );
+    }
+}
+
+fn describe_field(socket: &Path, key: &str) -> i32 {
+    spyc_jar::client::describe(socket)
+        .unwrap()
+        .into_iter()
+        .find(|(k, _)| k == key)
+        .and_then(|(_, v)| v.parse().ok())
+        .unwrap()
+}
+
+/// A restored tab whose jar is gone starts its program again, in a jar.
+#[test]
+fn a_restored_tab_whose_jar_is_gone_starts_again() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let gone = place.sockets().join("gone.sock");
+    let pane = pane_in(
+        &place,
+        "sh -c 'printf fresh; exec cat'",
+        dir.path(),
+        Some(gone),
+    );
+    assert!(pane.jarred() && !pane.adopted() && !pane.detached());
+    shows(&pane, "fresh");
+    let mut pane = pane;
+    pane.shutdown_reporting(END, || {});
+}
+
+/// R15a end to end: a query the program made before the crash is replayed
+/// into the new pane's engine and goes unanswered. `cat -v` shows every
+/// answer it reads on the line `done` ends: one answer, the first spyc's.
+#[test]
+fn a_replayed_query_is_not_answered_again() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let socket = place.socket(TAB);
+    let first = pane_in(
+        &place,
+        "sh -c 'printf \"\\033[c\"; exec cat -v'",
+        dir.path(),
+        None,
+    );
+    shows(&first, "?62");
+    first.host.sever_jar();
+    drop(first);
+
+    let second = pane_in(&place, "exec cat", dir.path(), Some(socket));
+    assert!(second.adopted());
+    std::thread::sleep(Duration::from_millis(1500));
+    let mut second = second;
+    second.send_bytes(b"done\n").unwrap();
+    shows(&second, "cdone");
+    let text = screen(&second);
+    let line = text.lines().find(|l| l.ends_with("cdone")).unwrap();
+    assert_eq!(
+        line.matches("?62").count(),
+        1,
+        "a replayed query was answered again: {line:?}"
+    );
+    second.shutdown_reporting(END, || {});
 }

@@ -52,6 +52,7 @@ use super::engine::{CellStyle, Color, Engine, MouseEncoding, MouseMode, Terminal
 #[cfg(test)]
 mod jar_fidelity;
 mod jar_snapshot;
+pub use jar_snapshot::snapshot_decodes;
 mod replies;
 
 /// DEC mode 2027 — grapheme clustering. See `GhosttyEngine::new` for why spyc

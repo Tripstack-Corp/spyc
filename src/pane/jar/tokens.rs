@@ -49,6 +49,11 @@ pub(super) fn save(place: &Place, socket: &Path, token: &[u8]) -> anyhow::Result
     Ok(())
 }
 
+/// The token saved for the jar at `socket`.
+pub(super) fn load(place: &Place, socket: &Path) -> Option<Vec<u8>> {
+    spyc_jar::client::read_token_file(&path(place, socket)?).ok()
+}
+
 pub(super) fn forget(place: &Place, socket: &Path) {
     if let Some(p) = path(place, socket) {
         let _ = std::fs::remove_file(p);
