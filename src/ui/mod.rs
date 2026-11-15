@@ -18,6 +18,7 @@ pub mod json;
 pub mod line_edit;
 pub mod line_select;
 pub mod list_view;
+pub mod loader;
 pub mod markdown;
 pub mod pager;
 pub mod project_chips;

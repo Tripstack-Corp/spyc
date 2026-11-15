@@ -12,6 +12,17 @@ use ratatui::style::{Color, Modifier, Style};
 
 use crate::config::ColorOverrides;
 
+/// spyc's "spice heat" palette — the warm pepper→ember→orange→spark ramp shared
+/// by the Working activity dot's breathing pulse, the visual-bell border sweep,
+/// the cooking pepper and the git-view loader, so all read as the same heat
+/// rather than unrelated colour stories.
+pub const SPICE_HEAT: [(u8, u8, u8); 4] = [
+    (0xE0, 0x32, 0x22), // pepper red
+    (0xF4, 0x62, 0x12), // ember
+    (0xFF, 0x95, 0x12), // orange
+    (0xFF, 0xC4, 0x36), // spark
+];
+
 /// Runtime colour theme. Every field corresponds to a named colour that can be
 /// overridden by the user's `.spycrc.toml` `[colors]` table.
 #[derive(Debug, Clone)]

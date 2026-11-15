@@ -117,6 +117,12 @@ pub(super) struct Runtime {
     /// clears or its deadline passes. In `Runtime` — it owns OS handles (the
     /// reply channel) + a clock instant, never the pure Model.
     pub(super) scope_waiters: Vec<PendingScopeWait>,
+    /// How many workers the user may be waiting on are cooking
+    /// ([`super::cooking`]); each holds a guard while it runs.
+    pub(super) cooking: super::cooking::Cooking,
+    /// When the current cooking began, noted by `settle_cooking`; `None`
+    /// while nothing cooks.
+    pub(super) cooking_since: Option<std::time::Instant>,
     /// Every open project's runtime, keyed by id — an id-addressed side
     /// table (unlike `AppState::projects`, which is ordered for the
     /// switcher). The active one is reached through
@@ -348,6 +354,8 @@ impl Runtime {
             autosave_due: None,
             pane_scroll_settle: None,
             scope_waiters: Vec::new(),
+            cooking: super::cooking::Cooking::default(),
+            cooking_since: None,
             projects,
             active,
             lua: None,

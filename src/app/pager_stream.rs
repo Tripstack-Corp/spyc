@@ -167,8 +167,10 @@ impl App {
         let wake = self.make_pager_stream_wake();
         let final_wake = std::sync::Arc::clone(&wake);
         let tx = crate::fs::WakingSender::new(tx, wake);
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
             produce(tx);
+            drop(cooking);
             final_wake();
         });
         let is_lower_pane = matches!(mount, PagerStreamMount::LowerPane { .. });
@@ -424,7 +426,7 @@ impl App {
     /// changes". Revealing the base listing keeps `gd <clean path>` honest; the
     /// prior diff was already pushed to `pager_history`, so `:bprev` still
     /// reaches it for deliberate buffer navigation.
-    fn close_stream_pager(&mut self, in_scroll: bool) {
+    pub(super) fn close_stream_pager(&mut self, in_scroll: bool) {
         if in_scroll {
             self.view.project_mut().scroll_pager = None;
             if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() {

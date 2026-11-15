@@ -120,6 +120,7 @@ mod codex_pin;
 pub mod command_table;
 mod commands;
 mod config;
+mod cooking;
 mod cwd_file;
 mod effect;
 mod esc_guard;

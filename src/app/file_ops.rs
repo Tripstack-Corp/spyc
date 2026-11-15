@@ -657,9 +657,13 @@ impl App {
             .file_results
             .sender(self.runtime.pane_wake_tx.clone(), Wake::FileOp);
         let stopped = stopped_outcome(&op);
+        let cooking = self.start_cooking();
         super::landing::spawn_worker(
             results,
-            move || (origin, run_file_op(op)),
+            move || {
+                let _cooking = cooking;
+                (origin, run_file_op(op))
+            },
             move |message| (origin, stopped(message)),
         );
     }

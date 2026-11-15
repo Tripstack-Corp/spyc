@@ -338,7 +338,9 @@ impl App {
         // asked, and an MCP command is served inside its caller's project
         // (`in_project`), so the active project is the one that asked.
         let project = self.state.active;
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
+            let _cooking = cooking;
             let result = run_worktree_job(job);
             let _ = results.send(WorktreeOutcome {
                 result,

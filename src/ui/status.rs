@@ -45,6 +45,9 @@ pub struct StatusBar<'a> {
     /// The `⚠N` of unread stderr lines ([`stderr_notice`]), drawn right after
     /// the logo. `None` draws nothing there.
     pub stderr_notice: Option<&'a str>,
+    /// The simmer's colour this frame while spyc cooks: the pepper glows in
+    /// it. `None` draws the pepper still.
+    pub cooking: Option<Color>,
     /// Draw [`MENU_KEY`] after the suffix: the key that opens an object's menu,
     /// until the first menu ever opens.
     pub teach_menu: bool,
@@ -295,17 +298,29 @@ impl StatusBar<'_> {
         4 + self.stderr_notice.map_or(0, |notice| dw(notice) + 1)
     }
 
+    /// The pepper, four columns wide. Cooking, the plain block takes the
+    /// simmer's colour, and the emoji glows between two half blocks of it.
     fn push_pepper(&self, bar: &mut Bar, term_bg: Color) {
+        let plain = Style::default().bg(term_bg);
+        if self.plain_logo {
+            let (r, g, b) = crate::ui::theme::SPICE_HEAT[0];
+            let pepper_red = Color::Rgb(r, g, b);
+            let block = self.cooking.unwrap_or(pepper_red);
+            bar.push(Span::styled(" ", plain));
+            bar.push(Span::styled("  ", Style::default().bg(block)));
+            bar.push(Span::styled(" ", plain));
+            return;
+        }
         // Pepper emoji gets its own span with terminal-default bg so the
         // emoji colour rendering isn't clipped by the segment background.
-        let emoji_text = " \u{1f336}\u{fe0f} ";
-        if self.plain_logo {
-            let pepper_red = Color::Rgb(0xE0, 0x32, 0x22); // SPICE_HEAT[0]
-            bar.push(Span::styled(" ", Style::default().bg(term_bg)));
-            bar.push(Span::styled("  ", Style::default().bg(pepper_red)));
-            bar.push(Span::styled(" ", Style::default().bg(term_bg)));
-        } else {
-            bar.push(Span::styled(emoji_text, Style::default().bg(term_bg)));
+        let emoji = "\u{1f336}\u{fe0f}";
+        match self.cooking {
+            Some(glow) => {
+                bar.push(Span::styled("\u{2590}", plain.fg(glow)));
+                bar.push(Span::styled(emoji, plain));
+                bar.push(Span::styled("\u{258c}", plain.fg(glow)));
+            }
+            None => bar.push(Span::styled(format!(" {emoji} "), plain)),
         }
     }
 
@@ -667,6 +682,7 @@ mod tests {
                     theme: &theme,
                     plain_logo,
                     stderr_notice: None,
+                    cooking: None,
                     teach_menu: false,
                 };
                 f.render_widget(Paragraph::new(bar.build_line(area)), area);
@@ -698,6 +714,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            cooking: None,
             teach_menu: false,
         };
         bar.build_line(Rect::new(0, 0, width, 1))
@@ -752,6 +769,7 @@ mod tests {
                     theme,
                     plain_logo: true,
                     stderr_notice: None,
+                    cooking: None,
                     teach_menu: true,
                 };
                 bar.build_line(Rect::new(0, 0, width, 1))
@@ -796,6 +814,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            cooking: None,
             teach_menu: false,
         };
         let text: String = bar
@@ -918,6 +937,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            cooking: None,
             teach_menu: false,
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
@@ -1000,6 +1020,7 @@ mod tests {
                     theme: &theme,
                     plain_logo: true,
                     stderr_notice: None,
+                    cooking: None,
                     teach_menu: false,
                 };
                 let line = bar.build_line(Rect::new(0, 0, w, 1));
@@ -1061,6 +1082,7 @@ mod tests {
                         theme: &theme,
                         plain_logo: true,
                         stderr_notice: None,
+                        cooking: None,
                         teach_menu: false,
                     };
                     let line = bar.build_line(Rect::new(0, 0, w, 1));
@@ -1118,6 +1140,7 @@ mod tests {
             theme: &theme,
             plain_logo: true,
             stderr_notice: None,
+            cooking: None,
             teach_menu: false,
         };
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
@@ -1157,6 +1180,57 @@ mod tests {
         );
     }
 
+    /// Cooking, the pepper glows in the simmer's colour, and keeps its four
+    /// columns, so nothing after it moves as it starts and stops.
+    #[test]
+    fn a_cooking_pepper_glows_in_the_simmer_colour() {
+        let glow = Color::Rgb(0xFF, 0xC4, 0x36);
+        let theme = Theme::default();
+        let area = Rect::new(0, 0, 60, 1);
+        for plain_logo in [false, true] {
+            let line = |cooking| {
+                StatusBar {
+                    project_home: Some("spyc"),
+                    session_name: None,
+                    projects: None,
+                    path: "/tmp",
+                    suffix: "",
+                    suffix_short: None,
+                    git_info: None,
+                    agent_info: None,
+                    theme: &theme,
+                    plain_logo,
+                    stderr_notice: None,
+                    cooking,
+                    teach_menu: false,
+                }
+                .build_line(area)
+            };
+            let still = line(None);
+            let cooking = line(Some(glow));
+            let pepper_width = |l: &Line<'_>| {
+                let at = l
+                    .spans
+                    .iter()
+                    .position(|s| s.content.contains("spyc"))
+                    .expect("the project segment");
+                l.spans[..at].iter().map(|s| dw(&s.content)).sum::<usize>()
+            };
+            assert_eq!(pepper_width(&cooking), pepper_width(&still));
+            let glows = |l: &Line<'_>| {
+                l.spans
+                    .iter()
+                    .any(|s| s.style.fg == Some(glow) || s.style.bg == Some(glow))
+            };
+            assert!(glows(&cooking), "plain_logo={plain_logo}: {cooking:?}");
+            assert!(!glows(&still), "plain_logo={plain_logo}: {still:?}");
+            if !plain_logo {
+                let text: String = cooking.spans.iter().map(|s| s.content.as_ref()).collect();
+                assert!(text.contains('\u{1f336}'), "{text:?}");
+            }
+        }
+    }
+
     #[test]
     fn the_notice_counts_unread_lines_and_caps_at_ninety_nine() {
         assert_eq!(stderr_notice(0), None);
@@ -1188,6 +1262,7 @@ mod tests {
                 theme: &theme,
                 plain_logo,
                 stderr_notice: Some("\u{26a0}3"),
+                cooking: None,
                 teach_menu: false,
             };
             let line = bar.build_line(area);

@@ -49,21 +49,36 @@ pub enum DiffLayout {
 /// overlaid later) nor the width/layout. So the `|` layout toggle, `f`
 /// full-width toggle, and a terminal resize re-lay-out from this cache instead
 /// of re-highlighting up to [`crate::git::diff_model::MAX_DIFF_LINES`] lines
-/// each time. Index-aligned with `model.files`. Build with [`highlight_diff`].
+/// each time. Index-aligned with `model.files`. Built from each file's
+/// [`highlight_file`]; the git-view worker highlights the files in parallel.
 pub struct DiffHighlight {
     files: Vec<FileHighlight>,
 }
 
+impl DiffHighlight {
+    /// Assemble a highlight from each file's [`highlight_file`], in
+    /// `model.files` order.
+    pub const fn from_files(files: Vec<FileHighlight>) -> Self {
+        Self { files }
+    }
+
+    /// Whether no file was highlighted.
+    #[cfg(test)]
+    pub const fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+}
+
 /// One file's cached per-side highlight (`None` per side for an unknown
 /// language or a non-text kind — callers fall back to flat `+`/`-` text).
-struct FileHighlight {
+pub struct FileHighlight {
     new_hl: Option<Vec<Line<'static>>>,
     old_hl: Option<Vec<Line<'static>>>,
 }
 
-/// Syntax-highlight every file in `model`, once, into a reusable [`DiffHighlight`].
-/// This is the expensive (syntect) half of rendering; [`render_diff_highlighted`]
-/// is the cheap width-dependent layout half that consumes the result.
+/// Syntax-highlight every file in `model`, one after another, into a
+/// [`DiffHighlight`]: the tests' reference for the parallel build.
+#[cfg(test)]
 pub fn highlight_diff(model: &DiffModel) -> DiffHighlight {
     DiffHighlight {
         files: model.files.iter().map(highlight_file).collect(),
@@ -72,7 +87,10 @@ pub fn highlight_diff(model: &DiffModel) -> DiffHighlight {
 
 /// Highlight one file's two sides. Non-text kinds (binary / submodule / error)
 /// carry no highlight — the layout pass renders their one-line explanation.
-fn highlight_file(file: &FileDiff) -> FileHighlight {
+/// This is the expensive (syntect) half of rendering; [`render_diff_highlighted`]
+/// is the cheap width-dependent layout half that consumes the result. Files are
+/// independent, so a caller may highlight several at once.
+pub fn highlight_file(file: &FileDiff) -> FileHighlight {
     let DiffKind::Text(hunks) = &file.kind else {
         return FileHighlight {
             new_hl: None,
@@ -164,7 +182,7 @@ pub fn render_diff_opts(
 }
 
 /// Lay out a diff at `width`/`layout` using a precomputed [`DiffHighlight`].
-/// `hl` must come from `highlight_diff(model)` (index-aligned with
+/// `hl` must be `model`'s own highlight (index-aligned with
 /// `model.files`); a mismatched/short entry falls back to unhighlighted text.
 pub fn render_diff_highlighted(
     model: &DiffModel,
@@ -203,7 +221,7 @@ pub fn render_diff_highlighted(
 
 /// Render `git show <rev>`: the commit-metadata header block followed by the
 /// commit's diff in the chosen `layout`. A test convenience that highlights
-/// inline; production splits [`highlight_diff`] (once, off-thread) from
+/// inline; production splits the highlight (once, off-thread) from
 /// [`render_show_highlighted`] (the cached-highlight variant).
 #[cfg(test)]
 pub fn render_show(
@@ -369,7 +387,7 @@ struct PreparedFile<'a> {
 /// Shared prologue for both layouts: push the file header, then resolve the
 /// hunks. The non-text kinds (binary / submodule / error) push their
 /// one-line explanation and return `None`, signalling the caller to stop. The
-/// per-side highlight comes from the precomputed `hl` (see [`highlight_diff`]);
+/// per-side highlight comes from the precomputed `hl` (see [`highlight_file`]);
 /// a missing entry falls back to unhighlighted `+`/`-` text.
 fn prepare_file<'a>(
     file: &'a FileDiff,

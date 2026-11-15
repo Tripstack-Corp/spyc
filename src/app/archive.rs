@@ -364,7 +364,9 @@ impl App {
             .runtime
             .archive_results
             .sender(self.runtime.pane_wake_tx.clone(), super::Wake::Archive);
+        let cooking = self.start_cooking();
         std::thread::spawn(move || {
+            let _cooking = cooking;
             let _ = results.send((origin, super::archive_ops::run_archive_op(op)));
         });
     }
