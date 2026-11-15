@@ -55,6 +55,15 @@ impl Conn {
         shared.cv.notify_all();
     }
 
+    /// Put back, ahead of everything, what a flush couldn't write: the rest
+    /// of a frame already begun, then the frames after it. The writer sends
+    /// it first, so the frames run on unbroken.
+    pub(crate) fn put_back(&self, bytes: Vec<u8>) {
+        let mut out = self.outbox.lock().unwrap_or_else(PoisonError::into_inner);
+        out.bytes += bytes.len();
+        out.frames.push_front(bytes);
+    }
+
     /// Everything waiting in the outbox, in order, as one write.
     pub(crate) fn take_outbox(&self) -> Vec<u8> {
         let mut out = self.outbox.lock().unwrap_or_else(PoisonError::into_inner);

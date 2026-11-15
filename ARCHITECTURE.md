@@ -793,7 +793,12 @@ validated again. An upgrade under way is one flag, which refuses a second;
 parking is another, set only after the first validation, since every thread
 parks the moment it sees it. The connections' last frames before the
 handover get one deadline between them, not one per write, so a reader
-taking a byte at a time can't keep the jar parked.
+taking a byte at a time can't keep the jar parked. The owner's go first,
+and an owner that can't take them in time (a spyc starved by load) keeps
+them, the rest of a frame already begun put back ahead of its outbox, and
+its connection: the upgrade is busy instead. Closing it would leave its
+lease in the blob with no connection to hold it, which the new binary
+rightly refuses. A reader that can't is closed and stays behind.
 
 ## A new image that can't resume holds the program
 
