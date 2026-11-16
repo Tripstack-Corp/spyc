@@ -199,6 +199,10 @@ pub fn spawn(
             "this tab's jar still runs at {}; its program wasn't started twice",
             socket.display()
         ),
+        SocketState::Unknown => anyhow::bail!(
+            "can't tell whether this tab's last jar still runs at {}; its program wasn't started twice",
+            socket.display()
+        ),
         SocketState::Stale => {
             std::fs::remove_file(&socket)
                 .with_context(|| format!("remove {}", socket.display()))?;

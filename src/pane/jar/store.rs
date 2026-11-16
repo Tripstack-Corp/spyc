@@ -263,10 +263,15 @@ fn reported_builds(sockets: &Path) -> Option<std::collections::HashSet<String>> 
         return Some(builds);
     };
     for sock in entries.filter_map(Result::ok).map(|e| e.path()) {
-        if sock.extension().is_none_or(|x| x != "sock")
-            || super::place::socket_state(&sock) != super::place::SocketState::Live
-        {
+        use super::place::SocketState;
+        if sock.extension().is_none_or(|x| x != "sock") {
             continue;
+        }
+        match super::place::socket_state(&sock) {
+            SocketState::Live => {}
+            // A jar that may run from an entry this can't name.
+            SocketState::Unknown => return None,
+            SocketState::Stale | SocketState::Missing => continue,
         }
         let fields = spyc_jar::client::describe(&sock).ok()?;
         if let Some((_, b)) = fields.into_iter().find(|(k, _)| k == "build") {

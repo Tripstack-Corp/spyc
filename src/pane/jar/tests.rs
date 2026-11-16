@@ -427,21 +427,26 @@ fn a_socket_directory_others_could_reach_is_refused() {
 }
 
 /// R32: a sweep removes a socket nothing answers, and its token, but not one
-/// too new to judge (a jar binds a moment before it listens), a live one, or
-/// anything else.
+/// too new to judge (a jar binds a moment before it listens), a live one, one
+/// whose lock can't be read, or anything else.
 #[test]
-fn a_sweep_removes_only_old_sockets_nothing_answers() {
+fn a_sweep_removes_only_old_sockets_whose_lock_is_free() {
     let dir = short_dir();
     let place = place_in(dir.path(), PathBuf::from("/nonexistent"));
     place.prepare().unwrap();
     let live = place.socket("aaaa");
     let dead = place.socket("bbbb");
+    let unknown = place.socket("dddd");
     let other = place.sockets().join("notes.txt");
     let _listening = UnixListener::bind(&live).unwrap();
     drop(UnixListener::bind(&dead).unwrap());
+    drop(UnixListener::bind(&unknown).unwrap());
+    // A lock file nothing holds: the jar that held it is gone.
+    std::fs::write(spyc_jar::lock::path(&dead), "").unwrap();
     std::fs::write(&other, "x").unwrap();
     tokens::save(&place, &dead, b"t").unwrap();
     tokens::save(&place, &live, b"t").unwrap();
+    tokens::save(&place, &unknown, b"t").unwrap();
     // A child another test forks meanwhile holds a copy of the listener until
     // it `exec`s.
     let until = Instant::now() + WAIT;
@@ -459,6 +464,9 @@ fn a_sweep_removes_only_old_sockets_nothing_answers() {
     assert_eq!(place::sweep(&place, Duration::ZERO), 1);
     assert!(live.exists(), "a live jar's socket is kept");
     assert!(!dead.exists(), "a dead jar's socket is removed");
+    assert!(!spyc_jar::lock::path(&dead).exists(), "with its lock file");
+    assert!(unknown.exists(), "one with no lock file to read is kept");
+    assert!(place.tokens.join("dddd").exists(), "with its token");
     assert!(other.exists(), "only sockets are swept");
     assert!(!place.tokens.join("bbbb").exists(), "with its token");
     assert!(place.tokens.join("aaaa").exists());
@@ -671,10 +679,9 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
     assert!(pane.jarred());
     let socket = std::fs::read_dir(place.sockets())
         .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
+        .map(|e| e.unwrap().path())
+        .find(|p| p.extension().is_some_and(|x| x == "sock"))
+        .unwrap();
     let field = |fields: &[(String, String)], key: &str| {
         fields
             .iter()
@@ -1236,32 +1243,78 @@ fn not_accepting(path: &Path) -> (rustix::fd::OwnedFd, Vec<rustix::fd::OwnedFd>)
     (listener, queued)
 }
 
-/// R32: a jar is gone only when nothing holds its socket. One whose backlog
-/// is full is answered for at once as live, and the sweep keeps its socket
-/// and its token; macOS refuses a connection to a full backlog as it does
-/// one to a socket nothing listens on.
+/// `socket_state` and a sweep, from another thread, answered within `WAIT`
+/// or `None`: a probe that blocks is a failure too.
+fn judged(place: &Place, socket: &Path) -> Option<(SocketState, usize)> {
+    let (tx, rx) = mpsc::channel();
+    let place = place.clone();
+    let socket = socket.to_path_buf();
+    std::thread::spawn(move || {
+        let state = socket_state(&socket);
+        let _ = tx.send((state, place::sweep(&place, Duration::ZERO)));
+    });
+    rx.recv_timeout(WAIT).ok()
+}
+
+/// R32b, finding 4: a socket counts as gone only when its jar's lock is
+/// free. A real jar that isn't accepting (stopped, its backlog full, so
+/// macOS refuses a connection) holds its lock: live, and never swept.
 #[test]
-#[ignore = "red until a jar is judged gone only when nothing holds its socket"]
-fn a_jar_that_isnt_accepting_is_never_judged_gone() {
+fn a_jar_holding_its_lock_is_never_judged_gone_however_busy() {
+    use rustix::process::{Pid, Signal, kill_process};
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let mut host = spawn_in(&place, "exec sleep 100", dir.path()).unwrap();
+    let socket = place.socket("0123456789abcdef");
+    let jar = describe_field(&socket, "pid");
+    let _ends = Ends(vec![jar]);
+    kill_process(Pid::from_raw(jar).unwrap(), Signal::STOP).unwrap();
+    let mut queued = Vec::new();
+    for _ in 0..200 {
+        let c = rustix::net::socket(
+            rustix::net::AddressFamily::UNIX,
+            rustix::net::SocketType::STREAM,
+            None,
+        )
+        .unwrap();
+        rustix::io::ioctl_fionbio(&c, true).unwrap();
+        let addr = rustix::net::SocketAddrUnix::new(&socket).unwrap();
+        if rustix::net::connect(&c, &addr).is_err() {
+            break;
+        }
+        queued.push(c);
+    }
+    assert_eq!(
+        judged(&place, &socket),
+        Some((SocketState::Live, 0)),
+        "a stopped jar, {} connections queued, holds its lock",
+        queued.len()
+    );
+    assert!(socket.exists(), "its socket is kept");
+    assert!(
+        place.tokens.join("0123456789abcdef").exists(),
+        "and its token"
+    );
+    drop(queued);
+    kill_process(Pid::from_raw(jar).unwrap(), Signal::CONT).unwrap();
+    host.shutdown(END);
+}
+
+/// R32b: with no lock file to read, a socket nothing accepts at once is
+/// unknown: answered for at once, never a blocking connect, and never
+/// swept with its token.
+#[test]
+fn a_socket_without_a_lock_file_is_never_judged_gone() {
     let dir = short_dir();
     let place = place_in(dir.path(), PathBuf::from("/nonexistent"));
     place.prepare().unwrap();
     let socket = place.socket("cccc");
     let _held = not_accepting(&socket);
     tokens::save(&place, &socket, b"t").unwrap();
-    let (tx, rx) = mpsc::channel();
-    {
-        let place = place.clone();
-        let socket = socket.clone();
-        std::thread::spawn(move || {
-            let state = socket_state(&socket);
-            let _ = tx.send((state, place::sweep(&place, Duration::ZERO)));
-        });
-    }
     assert_eq!(
-        rx.recv_timeout(WAIT).ok(),
-        Some((SocketState::Live, 0)),
-        "a jar with a full backlog runs, and is answered for at once"
+        judged(&place, &socket),
+        Some((SocketState::Unknown, 0)),
+        "a full backlog and no lock file: nothing can be told, at once"
     );
     assert!(socket.exists(), "its socket is kept");
     assert!(place.tokens.join("cccc").exists(), "and its token");
