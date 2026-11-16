@@ -428,7 +428,7 @@ fresh release on purpose, `CARGO_REGISTRY_GLOBAL_MIN_PUBLISH_AGE=0 cargo update
 lint`** (`[lints.cargo] unused_dependencies = "deny"`); it can't see
 `[dev-dependencies]`.
 
-**Never pipe the gate.** `make check 2>&1 | tail -20` reports the *pager's* exit status, so a failed gate reads as green — this shipped a broken `fmt-check` to CI once. A pipeline's status is its last command's in every shell, so no target can fix it: run `make check` unpiped, use `set -o pipefail`, or run **`make check-ci`**, which ends in `=== GATE: PASS ===` / `=== GATE: FAIL ===` so the verdict survives a tail even though the exit code does not.
+**Never pipe the gate.** `make check 2>&1 | tail -20` reports the *pager's* exit status, so a failed gate reads as green — this shipped a broken `fmt-check` to CI once. A pipeline's status is its last command's in every shell, so no target can fix it: run `make check` unpiped, use `set -o pipefail`, or run **`make check-ci`**, which ends in `=== GATE: PASS ===` / `=== GATE: FAIL ===` so the verdict survives a tail even though the exit code does not. Just above the verdict, `make ignored-tests` counts the `#[ignore]`d tests from the source and names the ones landed red (`#[ignore = "red until …"]`), each waiting for the PR that fixes its finding to lift it.
 
 ## Cross-compilation
 
