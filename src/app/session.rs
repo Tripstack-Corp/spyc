@@ -544,6 +544,8 @@ impl App {
                 t.info.claude_home.hash(h);
                 // `^a R` respawns in place with the same command and a new id.
                 t.info.id.hash(h);
+                // A tab's jar lands after the save its opening made.
+                t.pane.host.jar_socket().hash(h);
             }
         }
         let project = self.state.active_project();
