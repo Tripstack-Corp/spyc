@@ -239,12 +239,16 @@ impl PtyHost {
 
         let mut argv = vec![shell];
         argv.extend(shell_args);
-        let jarred = match &spec.jar {
-            Some(jar) => super::jar::spawn(jar, &argv, spec.cwd, (spec.rows, spec.cols), &env)?,
-            None => None,
-        };
-        let (jar, spawned) = match jarred {
-            Some(j) => jar_parts(j)?,
+        // SPYC-TRAP(jar-or-nothing): a program asked for in a jar runs in one
+        // or not at all; only a tab with jars off runs on a PTY of spyc's.
+        let (jar, spawned) = match &spec.jar {
+            Some(jar) => jar_parts(super::jar::spawn(
+                jar,
+                &argv,
+                spec.cwd,
+                (spec.rows, spec.cols),
+                &env,
+            )?)?,
             None => (None, spawn_native(&spec, &argv, &env)?),
         };
         let mut host = Self::running(spawned, (spec.rows, spec.cols), spec.debug_dump);

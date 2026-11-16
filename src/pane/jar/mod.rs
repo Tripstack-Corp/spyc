@@ -173,25 +173,25 @@ const PING_EVERY: Duration = Duration::from_secs(2);
 const WRITE_STALL: Duration = Duration::from_secs(10);
 
 /// Start a jar running `argv` in `cwd` at `rows` x `cols`, with `env` added
-/// to spyc's own, and take it as its owner. `Ok(None)`: no jar could be
-/// started, and the caller runs the program itself.
+/// to spyc's own, and take it as its owner.
+///
+/// SPYC-TRAP(jar-or-nothing): with jars on, a tab's program runs in a jar or
+/// not at all. A jar that can't be started is the tab's failure, said in the
+/// error, never a program run another way that would die with spyc.
 pub fn spawn(
     spec: &Spec,
     argv: &[String],
     cwd: &Path,
     (rows, cols): (u16, u16),
     env: &[(String, String)],
-) -> anyhow::Result<Option<Jarred>> {
+) -> anyhow::Result<Jarred> {
     let place = &spec.place;
-    if let Err(e) = place.prepare() {
-        eprintln!("spyc: no jar ({e:#}); the tab's program runs without one");
-        return Ok(None);
-    }
+    place.prepare().context("no place for the tab's jar")?;
     sweep_once(place);
     if let Some(at) = &spec.adopt
         && socket_state(at) == SocketState::Live
     {
-        return adopt(place, at, (rows, cols)).map(Some);
+        return adopt(place, at, (rows, cols));
     }
     let socket = place.socket(&spec.name);
     match ended_within(&socket, ENDING_WAIT) {
@@ -227,11 +227,9 @@ pub fn spawn(
         Ok(jar) => jar,
         Err(e) => {
             tokens::forget(place, &socket);
-            eprintln!(
-                "spyc: no jar ({} didn't start: {e}); the tab's program runs without one",
-                place.binary.display()
-            );
-            return Ok(None);
+            return Err(e).with_context(|| {
+                format!("the tab's jar, {}, didn't start", place.binary.display())
+            });
         }
     };
     // SPYC-TRAP(jar-token-stdin): the token goes on the jar's standard input,
@@ -240,11 +238,7 @@ pub fn spawn(
         let _ = stdin.write_all(&token);
     }
     let (client, welcome) = match answer(&mut jar, &socket, &token) {
-        Ok(Some(answered)) => answered,
-        Ok(None) => {
-            tokens::forget(place, &socket);
-            return Ok(None);
-        }
+        Ok(answered) => answered,
         Err(e) => {
             let _ = jar.kill();
             let _ = jar.wait();
@@ -268,7 +262,7 @@ pub fn spawn(
         offsets: offsets::Offsets::new(base),
         gate: ReplayGate::open(),
     };
-    connect(client, from, &socket, (rows, cols)).map(Some)
+    connect(client, from, &socket, (rows, cols))
 }
 
 /// Take back the running jar at `socket`, as a restored tab's. A jar that
@@ -395,29 +389,35 @@ fn jar_args(
     args
 }
 
-/// The new jar's welcome. `Ok(None)` when it ended first, which it says on
-/// spyc's standard error.
+/// The new jar's welcome, or why there is none: it ended first, or didn't
+/// answer within [`ANSWER_WAIT`].
 fn answer(
     jar: &mut std::process::Child,
     socket: &Path,
     token: &[u8],
-) -> anyhow::Result<Option<(Client, Msg)>> {
+) -> anyhow::Result<(Client, Msg)> {
     let until = Instant::now() + ANSWER_WAIT;
     loop {
         match Client::connect(socket, Role::Owner, Duration::from_millis(50), token) {
-            Ok(answered) => return Ok(Some(answered)),
+            Ok(answered) => return Ok(answered),
             Err(e) => {
                 if let Some(status) = jar.try_wait().context("wait for spyc-jar")? {
-                    let why = if status.code() == Some(spyc_jar::cli::WIRE_NOT_SERVED) {
-                        format!("it doesn't speak wire version {}", spyc_jar::proto::VERSION)
-                    } else {
-                        format!("it ended: {status}")
-                    };
-                    eprintln!("spyc: no jar ({why}); the tab's program runs without one");
-                    return Ok(None);
+                    if status.code() == Some(spyc_jar::cli::WIRE_NOT_SERVED) {
+                        anyhow::bail!(
+                            "the tab's jar doesn't speak wire version {}",
+                            spyc_jar::proto::VERSION
+                        );
+                    }
+                    anyhow::bail!("the tab's jar ended before it answered: {status}");
                 }
-                if e.downcast_ref::<Refusal>().is_some() || Instant::now() >= until {
+                if e.downcast_ref::<Refusal>().is_some() {
                     return Err(e.context(format!("start a jar at {}", socket.display())));
+                }
+                if Instant::now() >= until {
+                    return Err(e.context(format!(
+                        "the tab's jar didn't answer within {} s",
+                        ANSWER_WAIT.as_secs()
+                    )));
                 }
             }
         }
