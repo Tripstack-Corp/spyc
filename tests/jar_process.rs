@@ -1489,6 +1489,9 @@ mod timers;
 #[path = "jar_process/ownership.rs"]
 mod ownership;
 
+#[path = "jar_process/lock.rs"]
+mod lock;
+
 // The review's probes, as requirements. A jar can't be wedged by a client
 // that stops reading or a program that stops reading (finding 4), nor held by
 // connections without its token (finding 5), and it keeps what an owner yet

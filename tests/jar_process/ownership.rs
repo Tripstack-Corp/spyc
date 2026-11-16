@@ -110,3 +110,47 @@ fn an_owner_paused_mid_frame_inside_its_deadline_keeps_its_lease() {
     let seen = read_until(&mut owner, true, |s| s.contains("paused-mid-frame"));
     assert!(seen.contains("paused-mid-frame"));
 }
+
+/// A jar in any idle state spends next to no CPU: waiting for its first
+/// owner past the first-owner grace, ownerless with no linger, ownerless
+/// within a finite linger, and holding an exit nobody has collected.
+#[test]
+#[ignore = "red until the reaper leaves a program held for its first owner alone"]
+fn a_jar_sits_idle_in_every_idle_state() {
+    let waiting = Jar::start(
+        &["--start-on-owner", "60000", "--linger-ownerless-ms", "0"],
+        &["/bin/cat"],
+    );
+    let mut ownerless = Jar::start(&[], &["/bin/sleep", "120"]);
+    drop(ownerless.connect(Role::Owner));
+    let mut lingering = Jar::start(&["--linger-ownerless-ms", "60000"], &["/bin/sleep", "120"]);
+    drop(lingering.connect(Role::Owner));
+    let mut exited = Jar::start(&["--linger-ms", "60000"], &["/bin/sh", "-c", "exit 3"]);
+    {
+        let mut owner = exited.connect(Role::Owner);
+        owner.send(&Msg::Replay { from: 0 }).expect("replay");
+        // Seen, and never collected.
+        recv_matching(&mut owner, |m| matches!(m, Msg::Exited { .. }));
+    }
+    eventually("every jar's socket", || waiting.socket.exists());
+    let jars = [
+        ("waiting for its first owner", &waiting),
+        ("ownerless", &ownerless),
+        ("lingering", &lingering),
+        ("holding an exit", &exited),
+    ];
+    let before: Vec<f64> = jars
+        .iter()
+        .map(|(_, j)| cpu_seconds(j.process.id()))
+        .collect();
+    // The window ends past the waiting jar's ten-second first-owner grace.
+    std::thread::sleep(Duration::from_secs(12));
+    for ((state, jar), at) in jars.iter().zip(before) {
+        assert!(
+            jar.process.id() > 0 && running(jar.process.id()),
+            "premise: the jar {state} still runs"
+        );
+        let spent = cpu_seconds(jar.process.id()) - at;
+        assert!(spent < 0.5, "a jar {state} spent {spent} s of CPU in 12 s");
+    }
+}
