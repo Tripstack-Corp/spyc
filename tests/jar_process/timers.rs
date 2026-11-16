@@ -20,7 +20,7 @@ use super::*;
 
 /// A shell step that runs `then` on the `n`th time it runs, counting in
 /// `counter`.
-fn on_call(counter: &Path, n: u32, then: &str) -> String {
+pub fn on_call(counter: &Path, n: u32, then: &str) -> String {
     format!(
         "c=$(cat {f} 2>/dev/null || echo 0); c=$((c+1)); echo $c > {f}; [ $c -ne {n} ] || {{ {then}; }}",
         f = counter.display()
@@ -28,7 +28,7 @@ fn on_call(counter: &Path, n: u32, then: &str) -> String {
 }
 
 /// A jar running [`counter`], its owner having seen the count start.
-fn counting() -> (Jar, Client, Seen) {
+pub fn counting() -> (Jar, Client, Seen) {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
