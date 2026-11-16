@@ -1803,3 +1803,109 @@ fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
         );
     }
 }
+
+/// Every time constant in the `spyc-jar` crate, by what running out costs: a
+/// new timer fails this until it is classified. A running jar keeps its
+/// compiled-in timers for its whole life, so each is sized for its kind
+/// before it ships. A parked one is part of `limits::PARKED_AT_MOST`, which
+/// clients outwait (SPYC-TRAP `jar-outwait`).
+#[test]
+fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Kind {
+        /// Before an upgrade's `exec`, the program served: nothing is lost,
+        /// so a long backstop.
+        Served,
+        /// Before the `exec`, the program parked: the jar unparks and reports
+        /// busy, so short.
+        Parked,
+        /// After the `exec`: running out loses something, so it ends on an
+        /// event, and the clock is only a backstop.
+        AfterExec,
+        /// A peer's deadline: running out ends a lease or a connection, so
+        /// sized for a starved but live peer.
+        Peer,
+        /// Running out fails a jar's start; nothing running is lost.
+        Start,
+        /// Running out ends a program that is being ended anyway.
+        Ending,
+        /// How often something is looked at, not a wait.
+        Poll,
+        /// A limit published for clients, made from the others.
+        Limit,
+    }
+    use Kind::{AfterExec, Ending, Limit, Parked, Peer, Poll, Served, Start};
+    const TIMERS: [(&str, Kind); 20] = [
+        ("FIRST_VALIDATION", Served),
+        ("PARK_DEADLINE", Parked),
+        ("FLUSH_DEADLINE", Parked),
+        ("PARKED_VALIDATION", Parked),
+        ("OUTPUT_GRACE", Parked),
+        ("HOLDER_ANSWER", Parked),
+        ("HOLD_BACKSTOP", AfterExec),
+        ("OWNER_DEADLINE", Peer),
+        ("FIRST_OWNER_GRACE", Peer),
+        ("FRAME_DEADLINE", Peer),
+        ("LOOKUP_DEADLINE", Peer),
+        ("WELCOME_WAIT", Peer),
+        ("REST_OF_FRAME", Peer),
+        ("WAIT", Peer),
+        ("READER_GRACE", Start),
+        ("HANGUP_GRACE", Ending),
+        ("PARENT_CHECK", Poll),
+        ("TICK", Poll),
+        ("SOCKET_CHECK", Poll),
+        ("PARKED_AT_MOST", Limit),
+    ];
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
+    let mut found = std::collections::BTreeSet::new();
+    let mut dirs = vec![src.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for line in crate::guard_support::production_half(&text).lines() {
+                let Some((head, rest)) = line.split_once(": ") else {
+                    continue;
+                };
+                if let Some(name) = head.trim_start().split("const ").nth(1)
+                    && rest.contains("Duration =")
+                {
+                    found.insert(name.to_string());
+                }
+            }
+        }
+    }
+    assert!(
+        found.contains("FIRST_VALIDATION"),
+        "premise: the scan finds timers"
+    );
+    let listed: std::collections::BTreeSet<String> =
+        TIMERS.iter().map(|(n, _)| (*n).to_string()).collect();
+    assert_eq!(
+        found, listed,
+        "every time constant in spyc-jar is classified by what running out costs"
+    );
+    let limits = std::fs::read_to_string(src.join("limits.rs")).unwrap();
+    let parked_at_most = crate::guard_support::production_half(&limits)
+        .split("pub const PARKED_AT_MOST")
+        .nth(1)
+        .and_then(|rest| rest.split(';').next())
+        .map(str::to_string)
+        .expect("PARKED_AT_MOST's definition");
+    for (name, kind) in TIMERS {
+        if kind == Parked {
+            assert!(
+                parked_at_most.contains(name),
+                "{name} parks the jar, so it is part of PARKED_AT_MOST"
+            );
+        }
+    }
+}

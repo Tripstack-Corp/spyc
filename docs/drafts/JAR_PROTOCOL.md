@@ -941,7 +941,9 @@ compiles:
 | `OWNER_DEADLINE` | 10 s | How long a jar goes without hearing from its owner before it ends the owner's lease, unless `--deadline-ms` says otherwise. An owner pings more often. |
 | The start's hold | as the start says | How long a jar holds its program for a first owner (decision M). A starter waits as long for its answer. |
 
-spyc's waits that take a jar for gone outlast `PARKED_AT_MOST`: the owner
+Every time constant in the jar is classified by what running out costs, and
+every step that parks the jar is part of `PARKED_AT_MOST`, which a test of
+spyc's checks. spyc's waits that take a jar for gone outlast `PARKED_AT_MOST`: the owner
 connection's write stall (20 s) and an adoption's wait for its welcome (20 s).
 It pings every 2 s, inside `OWNER_DEADLINE`. Its shorter waits end in nothing
 that can't be undone: a restart that finds the tab's last jar still running
