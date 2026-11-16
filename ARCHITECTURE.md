@@ -794,6 +794,15 @@ lock: `lock::state` is for clients only, and the jar makes the file again
 only once a cleaner has deleted it. `tests/jar_process/lock.rs` watches the
 lock across three upgrades, a parked validation included.
 
+<!-- SPYC-TRAP: jar-gone-on-evidence -->
+spyc reads the lock before it connects (`place::socket_state`), and only a
+free lock makes a socket gone: the sweep removes it with its token and lock
+file, and a tab's new jar may take its place. A held lock is a live jar,
+however busy. With no lock file to read, a jar that accepts a non-blocking
+connection at once is live, and anything else is unknown, which is never
+removed, since a token deleted by mistake can't be undone. The connect never
+blocks: on Linux a blocking connect to a full backlog waits for ever.
+
 ## A jar's upgrade runs one file, and proves it took the blob
 
 <!-- SPYC-TRAP: jar-upgrade-one-file -->

@@ -244,6 +244,25 @@ fn self_write(c: &Client) -> Arc<Mutex<UnixStream>> {
     Arc::clone(&c.write)
 }
 
+/// Whether something accepts a connection at `socket` at once.
+///
+/// It never waits, so a socket whose backlog is full (a jar not accepting)
+/// is answered for without the hang a blocking connect has on Linux. A
+/// refusal says nothing on its own: macOS refuses a full backlog too.
+pub fn answers_now(socket: &Path) -> bool {
+    use rustix::net::{AddressFamily, SocketAddrUnix, SocketType};
+    let Ok(addr) = SocketAddrUnix::new(socket) else {
+        return false;
+    };
+    let Ok(sock) = rustix::net::socket(AddressFamily::UNIX, SocketType::STREAM, None) else {
+        return false;
+    };
+    if rustix::io::ioctl_fionbio(&sock, true).is_err() {
+        return false;
+    }
+    rustix::net::connect(&sock, &addr).is_ok()
+}
+
 /// R31: ask the jar at `socket` to describe itself, as a [`Role::Lookup`],
 /// which needs no token.
 pub fn describe(socket: &Path) -> anyhow::Result<Vec<(String, String)>> {

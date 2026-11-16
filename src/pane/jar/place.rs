@@ -147,32 +147,34 @@ pub(super) fn private_dir(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Whether a jar answers at a socket's path.
+/// Whether a jar runs at a socket's path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketState {
-    /// Something answers: a jar, alive.
+    /// A jar holds the socket's lock, however busy, or one from before the
+    /// lock answers there.
     Live,
-    /// The file is there and nothing listens: its jar is gone (R32).
+    /// The lock is free: its jar is gone (R32).
     Stale,
+    /// Nothing can be told: no lock file, and nothing answered at once.
+    /// Never removed.
+    Unknown,
     Missing,
 }
 
-/// Only a refused connection or a vanished file counts as stale; any other
-/// failure is taken as live, so a jar is never cut off by a passing error.
+/// SPYC-TRAP(jar-gone-on-evidence): a socket counts as gone only when its
+/// jar's lock is free (R32b). A refused connection proves nothing (macOS
+/// refuses a full backlog), and deleting a live jar's socket and token
+/// can't be undone.
 pub fn socket_state(socket: &Path) -> SocketState {
+    use spyc_jar::lock::LockState;
     if socket.symlink_metadata().is_err() {
         return SocketState::Missing;
     }
-    let refused = std::os::unix::net::UnixStream::connect(socket).is_err_and(|e| {
-        matches!(
-            e.kind(),
-            io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-        )
-    });
-    if refused {
-        SocketState::Stale
-    } else {
-        SocketState::Live
+    match spyc_jar::lock::state(socket) {
+        LockState::Held => SocketState::Live,
+        LockState::Free => SocketState::Stale,
+        LockState::Unknown if spyc_jar::client::answers_now(socket) => SocketState::Live,
+        LockState::Unknown => SocketState::Unknown,
     }
 }
 
@@ -181,7 +183,7 @@ pub fn socket_state(socket: &Path) -> SocketState {
 pub(super) const SWEEP_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Remove the sockets in `place` at least `age` old whose jars are gone, and
-/// their tokens (R32); how many.
+/// their tokens and lock files (R32); how many.
 pub(super) fn sweep(place: &Place, age: std::time::Duration) -> usize {
     let Ok(entries) = std::fs::read_dir(place.sockets()) else {
         return 0;
@@ -197,6 +199,9 @@ pub(super) fn sweep(place: &Place, age: std::time::Duration) -> usize {
         .filter(|p| p.extension().is_some_and(|x| x == "sock"))
         .filter(|p| old_enough(p))
         .filter(|p| socket_state(p) == SocketState::Stale && std::fs::remove_file(p).is_ok())
-        .inspect(|p| super::tokens::forget(place, p))
+        .inspect(|p| {
+            super::tokens::forget(place, p);
+            let _ = std::fs::remove_file(spyc_jar::lock::path(p));
+        })
         .count()
 }

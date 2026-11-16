@@ -151,10 +151,9 @@ pub(super) fn read_frames(
             Ok(Some(Msg::Foreground { pgid })) => link.fg.store(pgid, Ordering::Relaxed),
             Ok(_) => {}
             Err(e) => {
-                let lost = if socket_state(socket) == SocketState::Live {
-                    Lost::Held
-                } else {
-                    Lost::Gone
+                let lost = match socket_state(socket) {
+                    SocketState::Live | SocketState::Unknown => Lost::Held,
+                    SocketState::Stale | SocketState::Missing => Lost::Gone,
                 };
                 crate::spyc_debug!("jar {}: {} after {e:#}", socket.display(), lost.label());
                 link.set_exit(ExitStatus::with_signal(lost.label()));
