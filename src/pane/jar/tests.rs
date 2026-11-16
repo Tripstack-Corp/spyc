@@ -600,6 +600,50 @@ fn a_program_runs_in_a_real_jar_and_ends_with_it() {
     }
 }
 
+/// A jar's command line, which `ps` shows anyone for the jar's whole life,
+/// is `spyc-jar`, the program's name and the wire version:
+/// never the program's arguments or where it runs, since a tab's command can
+/// carry a prompt, and spyc's wrapper around it names files gone once spyc
+/// is. Both still reach the program.
+#[test]
+fn a_jars_command_line_names_its_program_and_nothing_else() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let cwd = dir.path().join("where-the-program-runs");
+    std::fs::create_dir(&cwd).unwrap();
+    let host = spawn_in(
+        &place,
+        "sh -c 'printf \"[%s]\" \"$PWD\"; exec cat' # a-prompt-of-the-users",
+        &cwd,
+    )
+    .unwrap();
+    read_until(&host, "where-the-program-runs]");
+    let socket = place.socket("0123456789abcdef");
+    let pid = describe_field(&socket, "pid");
+    let out = std::process::Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "spyc-jar sh --wire 1"
+    );
+}
+
+/// A jar's name is the program a tab runs, past `exec`, `env` and variables
+/// set for it, without its directory; a tab with no command runs the shell.
+#[test]
+fn a_jar_is_named_for_the_program_its_tab_runs() {
+    for (command, name) in [
+        ("claude --resume 0f3c 'fix the bug'", "spyc-jar claude"),
+        ("exec env CODEX_HOME=/x /opt/bin/codex", "spyc-jar codex"),
+        ("", "spyc-jar zsh"),
+        ("FOO=1", "spyc-jar zsh"),
+    ] {
+        assert_eq!(jar_name(command, "/bin/zsh"), name, "{command:?}");
+    }
+}
+
 /// Finding 7, for a start: a tab whose jar still runs (its spyc crashed)
 /// doesn't open, so its program never runs twice; a restart, whose last jar
 /// ends a moment after its program, gets a new one.
@@ -1065,7 +1109,8 @@ fn inode(path: &Path) -> u64 {
     std::fs::metadata(path).unwrap().ino()
 }
 
-/// Decision L: this build's `spyc-jar` goes into the store under its SHA-256,
+/// Decision L: this build's `spyc-jar` goes into the store under its version
+/// and the first 12 hex digits of its SHA-256,
 /// written whole, `0555`, in a marked private directory a jar knows as a
 /// store; a second start uses that entry again, never writing it twice.
 #[test]
@@ -1078,7 +1123,12 @@ fn the_store_holds_this_build_under_its_hash() {
     let store::Binary::Entry(entry) = got else {
         panic!("this build's spyc-jar wasn't taken: {got:?}");
     };
-    assert_eq!(entry, root.join(sha256_of(&source)).join("spyc-jar"));
+    let name = format!(
+        "{}-{}",
+        spyc_jar::PACKAGE_VERSION,
+        &sha256_of(&source)[..12]
+    );
+    assert_eq!(entry, root.join(name).join("spyc-jar"));
     assert_eq!(sha256_of(&entry), sha256_of(&source));
     let mode = std::fs::metadata(&entry).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o555);
@@ -1241,29 +1291,33 @@ fn the_store_sweep_removes_only_old_entries_nothing_runs() {
 
 /// Decision M: a pane's jar holds its program until spyc, its first owner,
 /// connects, so the program's start-up probes are answered by an owner, and
-/// for as long as spyc waits for it to answer.
+/// for as long as spyc waits for it to answer. Read from what spyc hands the
+/// real jar, through a wrapper that keeps a copy.
 #[test]
 fn a_panes_jar_holds_its_program_for_its_first_owner() {
-    let args = jar_args(
-        Path::new("/s/j.sock"),
-        Path::new("/w"),
-        (24, 80),
-        &["claude".into()],
-        place::HOLD,
-    );
-    let at = args
-        .iter()
-        .position(|a| a == "--start-on-owner")
-        .expect("the jar holds the program for its owner");
-    let wait: u64 = args[at + 1].to_str().unwrap().parse().unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let dir = short_dir();
+    let (copy, wrapper) = (dir.path().join("start"), dir.path().join("jar"));
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\ntee {} | exec {} \"$@\"\n",
+            copy.display(),
+            built_jar().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let place = place_in(dir.path(), wrapper);
+    let host = spawn_in(&place, "printf up; exec cat", dir.path()).unwrap();
+    read_until(&host, "up");
+    let sent = spyc_jar::cli::Start::parse(&std::fs::read(&copy).unwrap()).unwrap();
     assert_eq!(
-        u128::from(wait),
-        place::HOLD.as_millis(),
+        sent.hold,
+        Some(place::HOLD),
         "the jar holds the program for as long as spyc waits"
     );
-    let program = args.iter().position(|a| a == "--").unwrap();
-    assert!(at < program, "a flag after the program is the program's");
-    assert_eq!(args[program + 1], "claude");
+    assert_eq!((sent.rows, sent.cols), (24, 80), "at the tab's size");
 }
 
 // The ownership timers on spyc's side, each asked what a starved but live

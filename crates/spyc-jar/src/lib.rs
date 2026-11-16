@@ -22,6 +22,9 @@
 
 #![forbid(unsafe_code)]
 
+/// This crate's version, as `describe` gives it and spyc names a store entry.
+pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod attach;
 pub mod cli;
 pub mod client;

@@ -263,8 +263,9 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
     });
     let socket = socket.unwrap();
     let build = described(&socket, "build").unwrap_or_default();
+    let hash = build.strip_prefix(&format!("{}-", spyc_jar::PACKAGE_VERSION));
     assert!(
-        build.len() == 64 && build.bytes().all(|b| b.is_ascii_hexdigit()),
+        hash.is_some_and(|h| h.len() == 12 && h.bytes().all(|b| b.is_ascii_hexdigit())),
         "the pane's jar runs from a store entry, not {build:?}"
     );
     if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {

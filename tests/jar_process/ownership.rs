@@ -15,10 +15,7 @@ use super::*;
 /// comes inside its start wait is still given the program.
 #[test]
 fn a_jar_holding_its_program_for_a_first_owner_waits_idle_past_the_grace() {
-    let mut jar = Jar::start(
-        &["--start-on-owner", "30000", "--linger-ownerless-ms", "0"],
-        &["/bin/cat"],
-    );
+    let mut jar = Jar::holding(30000, &["--linger-ownerless-ms", "0"], &["/bin/cat"]);
     eventually("the jar's socket", || jar.socket.exists());
     // Past the jar's ten-second first-owner grace, inside its start wait.
     std::thread::sleep(Duration::from_secs(13));
@@ -113,10 +110,7 @@ fn an_owner_paused_mid_frame_inside_its_deadline_keeps_its_lease() {
 /// within a finite linger, and holding an exit nobody has collected.
 #[test]
 fn a_jar_sits_idle_in_every_idle_state() {
-    let waiting = Jar::start(
-        &["--start-on-owner", "60000", "--linger-ownerless-ms", "0"],
-        &["/bin/cat"],
-    );
+    let waiting = Jar::holding(60000, &["--linger-ownerless-ms", "0"], &["/bin/cat"]);
     let mut ownerless = Jar::start(&[], &["/bin/sleep", "120"]);
     drop(ownerless.connect(Role::Owner));
     let mut lingering = Jar::start(&["--linger-ownerless-ms", "60000"], &["/bin/sleep", "120"]);

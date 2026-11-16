@@ -244,6 +244,7 @@ impl PtyHost {
         let (jar, spawned) = match &spec.jar {
             Some(jar) => jar_parts(super::jar::spawn(
                 jar,
+                spec.command,
                 &argv,
                 spec.cwd,
                 (spec.rows, spec.cols),

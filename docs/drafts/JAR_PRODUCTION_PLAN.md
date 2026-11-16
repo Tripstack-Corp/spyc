@@ -97,8 +97,8 @@ the slices land runs as today.
   - spyc's sender holds no lock across a socket write, and pings run on their
     own timer (4, spyc's side);
   - every jar starts from the store ("The jar binary store", below), never
-    from the `spyc-jar` beside spyc, and a pane's jar starts with
-    `--start-on-owner` (`JAR_PROTOCOL.md`, decision M).
+    from the `spyc-jar` beside spyc, and a pane's jar's start holds its
+    program for its first owner (`JAR_PROTOCOL.md`, decision M).
 - **S2b: losing and retaking the lease.** A spyc stopped past the deadline
   takes its jar back on resuming, or marks the tab `[detached]` when another
   spyc owns it (decision G). A killed jar marks its tab `[jar lost]`. On Linux
@@ -276,7 +276,8 @@ On scratch sockets and directories, never a user's jars, with the release
 ### The jar binary store
 
 spyc keeps the jar binaries it starts in `jar-bin/` under its state directory,
-one entry per binary, named by its SHA-256: `jar-bin/<sha256>/spyc-jar`. Not
+one entry per binary, named by its version and the first 12 hex digits of its
+SHA-256: `jar-bin/<version>-<hash>/spyc-jar`. Not
 beside the sockets: on macOS that is `$TMPDIR`, which the system cleans. spyc
 makes `jar-bin/` `0700`, with the marker file `.spyc-jar-store` in it, which
 is how a jar knows it runs from a store.
@@ -335,7 +336,7 @@ What it closes, of the four it is meant to:
 |---|---|
 | A file swapped between validation and the `exec` | Yes, for every jar: it validates, holds and `exec`s one file in its store (or, with no store, its private copy) and never looks the named path up again. |
 | No image to switch back to after a failed resume | Yes, for a jar started from the store: `PREVIOUS` is an entry no install touches. Not for a jar started outside one (a `noexec` state directory) on macOS, and not if the state directory is deleted. Linux has `/proc/self/exe` too. |
-| A running spyc starting a newer jar from disk | Yes, while the store is in use: spyc starts jars from the entry it checked at its start. Not when the store is off. A store entry also keeps a program started late by `--start-on-owner` on the same image, since the jar starts it through its own binary (`spyc-jar pty-child`, `crates/spyc-jar/src/pty.rs:46`). |
+| A running spyc starting a newer jar from disk | Yes, while the store is in use: spyc starts jars from the entry it checked at its start. Not when the store is off. A store entry also keeps a program started late by the start's hold on the same image, since the jar starts it through its own binary (`spyc-jar pty-child`, `crates/spyc-jar/src/pty.rs:46`). |
 | A binary overwritten in place under a running jar | The store removes the exposure: no install writes into it, and nothing spyc or a jar does writes an entry twice. It doesn't fix an observed failure: the in-place `cp` probe left the jar running. Another process of the same user can still change an entry (outside the threat model), and a jar outside the store keeps the exposure. |
 
 ### Refreezing

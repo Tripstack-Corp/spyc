@@ -74,7 +74,7 @@ numbers them:
 6. **`build` and `commit` in `describe`**
    (`crates/spyc-jar/src/jar/describe.rs:19-25` has `jar` as the version and
    `current_exe()`): `build` is the name of the store entry the jar runs from,
-   which spyc made its SHA-256; `commit` is the git commit, which only the
+   which spyc made its version and the first 12 hex digits of its SHA-256; `commit` is the git commit, which only the
    `spyc-jar` binary knows (`SPYC_GIT_SHA` from spyc's `build.rs`), so
    `src/bin/spyc-jar.rs` passes it into the crate. `upgraded` carries the path
    today
@@ -106,6 +106,7 @@ jar's together:
 
 ## 3. `--start-on-owner`
 
+(The flag became the hold in the start a jar reads on its standard input.)
 A pane's jar started with `--start-on-owner MS` starts its program when its
 first owner's `hello` is accepted, before that owner's `welcome` (decision
 M); without that owner within `MS` it exits having started nothing. The wait

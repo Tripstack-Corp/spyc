@@ -137,7 +137,7 @@ pub(super) fn reap(shared: &Shared) {
             shared.cv.notify_all();
         }
         // A program held for its first owner has nothing to end: its wait is
-        // `--start-on-owner`'s, and ending it here would spin, the pid being 0.
+        // the start's hold, and ending it here would spin, the pid being 0.
         if st.exit.is_none()
             && shared.child_pid() != 0
             && !shared.upgrading()

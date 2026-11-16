@@ -265,7 +265,12 @@ fn try_run(
     crate::lock::cross_exec(true);
     // `PREVIOUS`: the image this one runs from, for a new image that can't
     // resume to switch back to.
+    // The jar's name, as its starter gave it, crosses too: `ps` shows it.
+    let name = std::env::args_os()
+        .next()
+        .unwrap_or_else(|| "spyc-jar".into());
     let err = Command::new(binary)
+        .arg0(name)
         .arg("resume-handover")
         .arg(own_image())
         .stdin(Stdio::from(OwnedFd::from(image_stdin)))
