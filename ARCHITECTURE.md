@@ -818,7 +818,14 @@ that spyc pings inside the jar's `OWNER_DEADLINE`.
 `every_wait_on_a_jar_outlasts_it_or_says_why_not` makes every time constant in
 `src/pane/jar` one of those or name why it may be shorter: a restart's wait for
 the last jar to end and shutdown's wait for an exit report end in nothing that
-can't be undone, and quitting must not hang on a jar.
+can't be undone, and quitting must not hang on a jar. The jar's own timers
+are held to the same account:
+`every_timer_in_the_jar_is_classified_by_what_running_out_costs` puts every
+time constant in `spyc-jar` in a kind by what running out costs (the program
+served or parked before an upgrade's `exec`, after it, a peer's deadline, a
+start, an ending, a poll), and a parked one must be part of `PARKED_AT_MOST`.
+A running jar keeps its compiled-in timers for weeks, so each is sized for
+its kind before it ships.
 
 ## A jar's upgrade runs one file, and proves it took the blob
 
