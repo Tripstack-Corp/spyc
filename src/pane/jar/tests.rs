@@ -22,6 +22,11 @@ fn short_dir() -> tempfile::TempDir {
         .unwrap()
 }
 
+/// Where `place` keeps the token of the jar at `socket`: by the socket's name.
+fn token_of(place: &Place, socket: &Path) -> PathBuf {
+    place.tokens.join(socket.file_stem().unwrap())
+}
+
 /// A place in `dir`, starting `binary`.
 fn place_in(dir: &Path, binary: PathBuf) -> Place {
     Place {
@@ -508,10 +513,10 @@ fn a_sweep_removes_only_old_sockets_whose_lock_is_free() {
     assert!(!dead.exists(), "a dead jar's socket is removed");
     assert!(!spyc_jar::lock::path(&dead).exists(), "with its lock file");
     assert!(unknown.exists(), "one with no lock file to read is kept");
-    assert!(place.tokens.join("dddd").exists(), "with its token");
+    assert!(token_of(&place, &unknown).exists(), "with its token");
     assert!(other.exists(), "only sockets are swept");
-    assert!(!place.tokens.join("bbbb").exists(), "with its token");
-    assert!(place.tokens.join("aaaa").exists());
+    assert!(!token_of(&place, &dead).exists(), "with its token");
+    assert!(token_of(&place, &live).exists());
 }
 
 #[test]
@@ -988,7 +993,7 @@ fn a_restored_tab_whose_jar_wont_take_it_is_detached_and_starts_nothing() {
 
     owner.host.sever_jar();
     drop(owner);
-    std::fs::remove_file(place.tokens.join(TAB)).unwrap();
+    std::fs::remove_file(token_of(&place, &socket)).unwrap();
     let tokenless = pane_in(&place, &command, dir.path(), Some(socket.clone()));
     assert!(tokenless.detached(), "no token for it");
 
@@ -1393,10 +1398,7 @@ fn a_jar_holding_its_lock_is_never_judged_gone_however_busy() {
         queued.len()
     );
     assert!(socket.exists(), "its socket is kept");
-    assert!(
-        place.tokens.join("0123456789abcdef").exists(),
-        "and its token"
-    );
+    assert!(token_of(&place, &socket).exists(), "and its token");
     drop(queued);
     kill_process(Pid::from_raw(jar).unwrap(), Signal::CONT).unwrap();
     host.shutdown(END);
@@ -1419,7 +1421,7 @@ fn a_socket_without_a_lock_file_is_never_judged_gone() {
         "a full backlog and no lock file: nothing can be told, at once"
     );
     assert!(socket.exists(), "its socket is kept");
-    assert!(place.tokens.join("cccc").exists(), "and its token");
+    assert!(token_of(&place, &socket).exists(), "and its token");
 }
 
 /// Ends the processes a test started in a jar, however the test ends.
@@ -1589,4 +1591,15 @@ fn an_owner_outwaits_a_jar_parked_for_its_longest_upgrade() {
             ),
         }
     }
+}
+
+/// Every tab has a socket of its own, though tabs made together share their
+/// ids' leading digits: a v7 UUID's are its millisecond and a counter.
+#[test]
+fn tabs_made_together_have_sockets_of_their_own() {
+    let place = place_in(Path::new("/x"), PathBuf::from("/j"));
+    let sockets: std::collections::HashSet<PathBuf> = (0..1000)
+        .map(|_| place.socket(&crate::pane::tabs::TabInfo::new("zsh", "/").id))
+        .collect();
+    assert_eq!(sockets.len(), 1000, "tabs made together shared a socket");
 }

@@ -62,14 +62,20 @@ impl Place {
         self.dirs.last().map_or(Path::new("/"), PathBuf::as_path)
     }
 
-    /// The socket of the jar named `name`: its first 16 hex digits, inside
-    /// macOS's 104-byte limit on a socket's path.
+    /// The socket of the jar named `name`: the first 16 hex digits of the
+    /// name's SHA-256, inside macOS's 104-byte limit on a socket's path. Not
+    /// the name's own: a tab's id is a v7 UUID, whose leading digits are its
+    /// millisecond and a counter, the same for tabs made together.
     pub fn socket(&self, name: &str) -> PathBuf {
-        let id: String = name
-            .chars()
-            .filter(char::is_ascii_hexdigit)
-            .take(16)
-            .collect();
+        use sha2::{Digest, Sha256};
+        let id = Sha256::digest(name.as_bytes())
+            .iter()
+            .take(8)
+            .fold(String::new(), |mut s, b| {
+                use std::fmt::Write as _;
+                let _ = write!(s, "{b:02x}");
+                s
+            });
         self.sockets().join(format!("{id}.sock"))
     }
 
