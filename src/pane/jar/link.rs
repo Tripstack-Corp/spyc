@@ -166,21 +166,26 @@ pub(super) fn read_frames(
     link.set_exit(ExitStatus::with_signal(Lost::Gone.label()));
 }
 
-/// Why a pane's connection to its jar ended without an exit.
+/// Why a pane has no program to drive and no exit from one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lost {
     /// The jar still runs: it ended this owner's lease (decision G).
     Held,
     /// The jar is gone, and its program with it.
     Gone,
+    /// The jar never started the program: it couldn't run, or didn't answer.
+    Unstarted,
 }
 
 impl Lost {
+    pub const ALL: [Self; 3] = [Self::Held, Self::Gone, Self::Unstarted];
+
     /// What the pane's exit status carries, and its tab shows.
     pub const fn label(self) -> &'static str {
         match self {
             Self::Held => "detached",
             Self::Gone => "jar lost",
+            Self::Unstarted => "not started",
         }
     }
 }
@@ -355,35 +360,93 @@ impl ChildKiller for JarKiller {
 /// A detached tab's stand-ins: its jar runs on for another spyc, so here
 /// there is no output, no input and no program, only the exit that labels
 /// the tab `[detached]`.
-pub(super) fn detached(socket: &std::path::Path, (rows, cols): (u16, u16)) -> super::Jarred {
+pub(super) fn detached(socket: &std::path::Path, size: (u16, u16)) -> super::Jarred {
+    stand_in(b"", Some(socket), Some(Lost::Held), size)
+}
+
+/// Stand-ins for a tab with no program here: its screen shows `note`, and
+/// what's typed goes nowhere. With `ended`, the tab ends at once, labelled
+/// by it; without, it stays open until spyc replaces it.
+pub(super) fn stand_in(
+    note: &[u8],
+    socket: Option<&std::path::Path>,
+    ended: Option<Lost>,
+    (rows, cols): (u16, u16),
+) -> super::Jarred {
+    let (open, held) = mpsc::channel();
     super::Jarred {
-        master: Box::new(GoneMaster(Mutex::new(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        }))),
-        child: Box::new(GoneChild),
+        master: Box::new(GoneMaster {
+            size: Mutex::new(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            }),
+            note: Mutex::new(Some(NoteReader {
+                note: note.to_vec(),
+                pos: 0,
+                held: ended.is_none().then_some(held),
+            })),
+            _open: open,
+        }),
+        child: Box::new(GoneChild(ended)),
         replies: Box::new(io::sink()),
         signals: None,
         snapshots: None,
-        socket: socket.to_path_buf(),
+        socket: socket.map(std::path::Path::to_path_buf),
         adoption: None,
     }
 }
 
-struct GoneMaster(Mutex<PtySize>);
+/// A stand-in's screen: its note, then, for one that stays open, nothing
+/// until its master is dropped.
+struct NoteReader {
+    note: Vec<u8>,
+    pos: usize,
+    held: Option<mpsc::Receiver<()>>,
+}
+
+impl Read for NoteReader {
+    fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        if self.pos >= self.note.len() {
+            // Ends once the master and its sender are dropped.
+            if let Some(held) = &self.held {
+                let _ = held.recv();
+            }
+            return Ok(0);
+        }
+        let n = out.len().min(self.note.len() - self.pos);
+        out[..n].copy_from_slice(&self.note[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+struct GoneMaster {
+    size: Mutex<PtySize>,
+    note: Mutex<Option<NoteReader>>,
+    /// Keeps an open stand-in's reader waiting.
+    _open: mpsc::Sender<()>,
+}
 
 impl MasterPty for GoneMaster {
     fn resize(&self, size: PtySize) -> anyhow::Result<()> {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = size;
+        *self.size.lock().unwrap_or_else(PoisonError::into_inner) = size;
         Ok(())
     }
     fn get_size(&self) -> anyhow::Result<PtySize> {
-        Ok(*self.0.lock().unwrap_or_else(PoisonError::into_inner))
+        Ok(*self.size.lock().unwrap_or_else(PoisonError::into_inner))
     }
     fn try_clone_reader(&self) -> anyhow::Result<Box<dyn Read + Send>> {
-        Ok(Box::new(io::empty()))
+        let note = self
+            .note
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        Ok(match note {
+            Some(note) => Box::new(note),
+            None => Box::new(io::empty()),
+        })
     }
     fn take_writer(&self) -> anyhow::Result<Box<dyn Write + Send>> {
         Ok(Box::new(io::sink()))
@@ -399,24 +462,28 @@ impl MasterPty for GoneMaster {
     }
 }
 
+/// A stand-in's program: none, ended as `.0` says, or not yet.
 #[derive(Debug)]
-struct GoneChild;
+struct GoneChild(Option<Lost>);
 
 impl ChildKiller for GoneChild {
     fn kill(&mut self) -> io::Result<()> {
         Ok(())
     }
     fn clone_killer(&self) -> Box<dyn ChildKiller + Send + Sync> {
-        Box::new(Self)
+        Box::new(Self(self.0))
     }
 }
 
 impl Child for GoneChild {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
-        Ok(Some(ExitStatus::with_signal(Lost::Held.label())))
+        Ok(self.0.map(|l| ExitStatus::with_signal(l.label())))
     }
+    /// An open stand-in has nothing to wait for: it ends as never started.
     fn wait(&mut self) -> io::Result<ExitStatus> {
-        Ok(ExitStatus::with_signal(Lost::Held.label()))
+        Ok(ExitStatus::with_signal(
+            self.0.unwrap_or(Lost::Unstarted).label(),
+        ))
     }
     fn process_id(&self) -> Option<u32> {
         None

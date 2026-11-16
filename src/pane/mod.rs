@@ -124,6 +124,9 @@ pub struct Pane {
     /// it gets kitty-encoded keys (#1176). Noted at the drain after the push,
     /// so a program that exits or stops hands the shell legacy keys.
     kitty_owner: Option<u32>,
+    /// A stand-in for a tab whose jar is starting or being taken back, which
+    /// spyc replaces when the worker's pane lands (`app::pane_starts`).
+    starting: bool,
 }
 
 impl Pane {
@@ -190,6 +193,7 @@ impl Pane {
             kitty_owner: None,
             scroll_offset: 0,
             scrolling: false,
+            starting: false,
         }
     }
 
@@ -343,7 +347,13 @@ impl Pane {
 
     /// Whether the tab's jar runs on for another spyc, and nothing runs here.
     pub const fn detached(&self) -> bool {
-        self.host.detached()
+        !self.starting && self.host.detached()
+    }
+
+    /// Whether this is a stand-in for a tab whose jar is starting or being
+    /// taken back: nothing runs here yet, and what's typed is dropped.
+    pub const fn starting(&self) -> bool {
+        self.starting
     }
 
     /// The jar's socket, when the program runs in one or a detached tab's

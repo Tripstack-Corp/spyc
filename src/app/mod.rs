@@ -165,6 +165,7 @@ mod pane_fork;
 mod pane_input;
 mod pane_resize;
 mod pane_scroll;
+mod pane_starts;
 mod pane_tabs;
 mod pane_wake;
 mod paste_capture;

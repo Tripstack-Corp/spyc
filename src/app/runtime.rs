@@ -94,6 +94,9 @@ pub(super) struct Runtime {
     /// Clone of the unified-channel sender; pane wake closures clone it to push
     /// `Wake::Pane`. `None` before `run()` / in the test harness.
     pub(super) pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
+    /// The same sender, for a wake made before `run()` installed it: a
+    /// startup tab's pane, and its jar's start, wake the loop once it runs.
+    pub(super) loop_wake: std::sync::Arc<std::sync::OnceLock<std::sync::mpsc::Sender<Message>>>,
     /// Monotonic `SinkId` allocator (never reused).
     pub(super) next_sink_id: u64,
     /// P3-2 crash-sufficient autosave: fingerprint of the session-relevant state
@@ -261,6 +264,12 @@ pub(super) struct Runtime {
     /// Drained by `apply_jump_defaults`, which keeps only the answer to
     /// `jump_default_seq`.
     pub(super) jump_default_results: Landing<super::jump_default::JumpDefaultAnswer>,
+    /// Where a jarred tab's pane lands once a worker launched it
+    /// (`start_jarred_pane`); `apply_pane_starts` puts it in its tab.
+    pub(super) pane_starts: Landing<super::pane_starts::PaneStart>,
+    /// The place every tab's jar starts in: this user's when `None`, a
+    /// test's own otherwise.
+    pub(super) jar_place: Option<crate::pane::jar::Place>,
     /// The newest `J` default request; an answer to any other is stale.
     pub(super) jump_default_seq: u64,
     /// Where the switcher's closed rows land (`spawn_closed_rows`).
@@ -349,6 +358,7 @@ impl Runtime {
             git_worker_tx,
             mcp_cmd_rx,
             pane_wake_tx: None,
+            loop_wake: std::sync::Arc::default(),
             next_sink_id: 0,
             autosave_last_saved_fp: None,
             autosave_due: None,
@@ -387,6 +397,8 @@ impl Runtime {
             file_results: Landing::default(),
             clipboard_paste_results: Landing::default(),
             jump_default_results: Landing::default(),
+            pane_starts: Landing::default(),
+            jar_place: None,
             jump_default_seq: 0,
             closed_rows_results: Landing::default(),
             make_results: Landing::default(),

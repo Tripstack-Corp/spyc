@@ -28,6 +28,7 @@ fn place_in(dir: &Path, binary: PathBuf) -> Place {
         binary,
         dirs: vec![dir.join("spyc"), dir.join("spyc").join("jars")],
         tokens: dir.join("tokens"),
+        hold: place::HOLD,
     }
 }
 
@@ -364,7 +365,7 @@ fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
             binary.display()
         );
         // A jar that ended is seen at once: never the wait for one to answer.
-        assert!(at.elapsed() < ANSWER_WAIT, "waited {:?}", at.elapsed());
+        assert!(at.elapsed() < WAIT, "waited {:?}", at.elapsed());
         std::thread::sleep(Duration::from_millis(300));
         assert!(!mark.exists(), "{}: the program ran", binary.display());
         let left: Vec<_> = std::fs::read_dir(&place.tokens).unwrap().collect();
@@ -926,7 +927,7 @@ fn a_restored_tab_whose_jar_wont_take_it_is_detached_and_starts_nothing() {
     let place = place_in(dir.path(), built_jar());
     let socket = place.socket(TAB);
     let mark = dir.path().join("ran");
-    let owner = pane_in(&place, "exec cat", dir.path(), None);
+    let owner = pane_in(&place, "cat", dir.path(), None);
     let command = format!("touch {}", mark.display());
 
     let held = pane_in(&place, &command, dir.path(), Some(socket.clone()));
@@ -1236,7 +1237,8 @@ fn the_store_sweep_removes_only_old_entries_nothing_runs() {
 }
 
 /// Decision M: a pane's jar holds its program until spyc, its first owner,
-/// connects, so the program's start-up probes are answered by an owner.
+/// connects, so the program's start-up probes are answered by an owner, and
+/// for as long as spyc waits for it to answer.
 #[test]
 fn a_panes_jar_holds_its_program_for_its_first_owner() {
     let args = jar_args(
@@ -1244,15 +1246,17 @@ fn a_panes_jar_holds_its_program_for_its_first_owner() {
         Path::new("/w"),
         (24, 80),
         &["claude".into()],
+        place::HOLD,
     );
     let at = args
         .iter()
         .position(|a| a == "--start-on-owner")
         .expect("the jar holds the program for its owner");
     let wait: u64 = args[at + 1].to_str().unwrap().parse().unwrap();
-    assert!(
-        wait > ANSWER_WAIT.as_millis() as u64,
-        "spyc gives up before the jar does"
+    assert_eq!(
+        u128::from(wait),
+        place::HOLD.as_millis(),
+        "the jar holds the program for as long as spyc waits"
     );
     let program = args.iter().position(|a| a == "--").unwrap();
     assert!(at < program, "a flag after the program is the program's");
@@ -1379,7 +1383,6 @@ impl Drop for Ends {
 /// Test 8 of the timer brief: a jar slow to start (its binary's first run
 /// scanned under load) still gives the tab its program, run once.
 #[test]
-#[ignore = "red until a tab whose jar is slow to start still opens"]
 fn a_tab_whose_jar_is_slow_to_start_opens_with_its_program_run_once() {
     use std::os::unix::fs::PermissionsExt;
     let dir = short_dir();
@@ -1416,13 +1419,12 @@ fn a_tab_whose_jar_is_slow_to_start_opens_with_its_program_run_once() {
 /// tab takes it back is still taken back, the same program, typing reaching
 /// it, and nothing started twice.
 #[test]
-#[ignore = "red until a restored tab outwaits a jar that's slow to answer"]
 fn a_restored_tab_takes_back_a_jar_that_stalls_while_it_attaches() {
     use rustix::process::{Pid, Signal, kill_process};
     let dir = short_dir();
     let place = place_in(dir.path(), built_jar());
     let socket = place.socket(TAB);
-    let first = pane_in(&place, "exec cat", dir.path(), None);
+    let first = pane_in(&place, "cat", dir.path(), None);
     let jar = describe_field(&socket, "pid");
     let program = first.process_id();
     let _ends = Ends(vec![

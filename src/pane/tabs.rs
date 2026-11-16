@@ -572,7 +572,7 @@ pub fn strip_exit_suffix(label: &str) -> String {
     {
         return base.to_string();
     }
-    for lost in [super::jar::Lost::Gone, super::jar::Lost::Held] {
+    for lost in super::jar::Lost::ALL {
         if let Some(base) = label.strip_suffix(&format!(" [{}]", lost.label())) {
             return base.to_string();
         }
@@ -583,7 +583,7 @@ pub fn strip_exit_suffix(label: &str) -> String {
 /// What a closed tab's label adds: `exited N`, or for a jarred program whose
 /// jar went or ended its lease, why there's no exit to show.
 fn exit_suffix(status: Option<&portable_pty::ExitStatus>) -> String {
-    let lost = [super::jar::Lost::Gone, super::jar::Lost::Held]
+    let lost = super::jar::Lost::ALL
         .into_iter()
         .find(|l| status.and_then(portable_pty::ExitStatus::signal) == Some(l.label()));
     match (lost, status) {

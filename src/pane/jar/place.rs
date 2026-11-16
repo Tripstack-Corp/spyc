@@ -25,6 +25,11 @@ pub struct Place {
     pub dirs: Vec<PathBuf>,
     /// Where each jar's token is kept, `0600`, by its socket's name.
     pub tokens: PathBuf,
+    /// How long a jar started here holds its program for this spyc to
+    /// connect (decision M), and so how long spyc waits for it to answer: the
+    /// jar's clock starts after spyc's, so spyc never gives up on a jar that
+    /// may still start the program.
+    pub hold: std::time::Duration,
 }
 
 impl Place {
@@ -48,6 +53,7 @@ impl Place {
             binary,
             dirs,
             tokens,
+            hold: HOLD,
         })
     }
 
@@ -82,6 +88,11 @@ impl Place {
         Ok(())
     }
 }
+
+/// How long a pane's jar holds its program for this spyc: far longer than
+/// a connect takes, even to a jar whose first run is scanned under load, and
+/// a jar whose spyc died meanwhile ends having started nothing.
+pub const HOLD: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Start this user's jar binary store (`super::store`), once a session:
 /// at spyc's start when jars are on, so the first jar needn't wait.

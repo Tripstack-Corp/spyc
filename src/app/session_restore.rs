@@ -63,7 +63,8 @@ impl App {
             .runtime
             .every_tab_set_mut()
             .flat_map(|(_, tabs)| tabs.tabs_mut().iter_mut());
-        for entry in entries {
+        // A starting tab's waits for its pane to land (`pane_starts`).
+        for entry in entries.filter(|e| !e.pane.starting()) {
             match entry.info.pending_resume_send.take() {
                 Some(PendingResumeSend::Text { sid, after }) if now >= after => {
                     let _ = entry.pane.send_bytes(format!("/resume {sid}").as_bytes());
