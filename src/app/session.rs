@@ -510,7 +510,7 @@ impl App {
     /// [`Self::settle_autosave`] detects a genuine change without a full
     /// snapshot build (which resolves agent resume ids off the filesystem).
     /// Must track what [`Self::build_manifest`] persists, in every project.
-    fn session_fingerprint(&mut self) -> u64 {
+    pub(in crate::app) fn session_fingerprint(&mut self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for project in self.open_project_ids() {
