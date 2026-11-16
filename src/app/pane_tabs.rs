@@ -757,18 +757,26 @@ impl App {
         let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return;
         };
-        let idx = tabs.active_index();
-        let info = tabs.active_info();
-        let cmd = info.command.clone();
-        let cwd = info.cwd.clone();
-        let label = info.label.clone();
-        if crate::agent::detect(&cmd).kind() == crate::state::sessions::AgentKind::Codex
-            && info.codex_home.is_none()
+        let cmd = &tabs.active_info().command;
+        if crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex
+            && tabs.active_info().codex_home.is_none()
         {
             self.state
                 .flash_info("restart: Codex launch home is not identified yet");
             return;
         }
+        self.restart_tab_now(tabs.active_index());
+    }
+
+    /// Restart the active project's tab at `idx`, in its own slot.
+    pub(super) fn restart_tab_now(&mut self, idx: usize) {
+        let tabs = self.runtime.project().pane_tabs.as_ref();
+        let Some(info) = tabs.and_then(|t| t.tabs().get(idx)).map(|e| &e.info) else {
+            return;
+        };
+        let cmd = info.command.clone();
+        let cwd = info.cwd.clone();
+        let label = info.label.clone();
         let owner = info.claim_owner.clone();
         // Kill the outgoing child before its replacement spawns, so two agents
         // never briefly share the cwd; `replace_at` reaps the rest of the tree.

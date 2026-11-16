@@ -31,6 +31,8 @@ pub(super) struct PaneStart {
     tab: String,
     pane: anyhow::Result<Pane>,
     retake: bool,
+    /// The jar a restored or lapsed tab takes back.
+    socket: Option<std::path::PathBuf>,
 }
 
 /// What a worker does for a tab's jar.
@@ -65,9 +67,9 @@ impl JarredLaunch {
         // SPYC-TRAP(jar-off-the-loop): a jar's spec is made only on this
         // worker; with one, the launch waits on the jar.
         let spec = match taking {
-            Taking::Start(restoring) => jar::spec_for(place, tab, restoring.as_deref()),
+            Taking::Start(restoring) => jar::spec_for(place, tab, restoring.as_deref())?,
             Taking::Retake(socket) => Some(
-                jar::spec_for(place, tab, None)
+                jar::spec_for(place, tab, None)?
                     .ok_or_else(|| anyhow::anyhow!("no place for the tab's jar"))?
                     .retaking(socket.clone()),
             ),
@@ -106,7 +108,9 @@ impl App {
     }
 
     /// A tab's pane: with jars on, a stand-in, its own pane launched on a
-    /// worker; otherwise `launch`'s, its program on a PTY of spyc's.
+    /// worker; otherwise, or once the user chose to run tabs without a
+    /// usable jar (`app::jarless`), `launch`'s, its program on a PTY of
+    /// spyc's.
     pub(super) fn launch_tab_pane(
         &self,
         launch: crate::pane::Launch,
@@ -115,7 +119,7 @@ impl App {
         restoring: Option<&SavedTab>,
         wake: crate::pane::PaneWake,
     ) -> anyhow::Result<Pane> {
-        if !(jars && jar::honoured()) {
+        if !(jars && jar::honoured()) || self.runtime.jarless.chosen {
             return Pane::launch(launch, wake);
         }
         let owned = JarredLaunch {
@@ -222,6 +226,7 @@ impl App {
             .sender_waking(self.loop_waker(Wake::PaneStart));
         let place = self.runtime.jar_place.clone();
         let (tab, again) = (tab.to_string(), tab.to_string());
+        let socket_again = socket.clone();
         spawn_worker(
             results,
             move || {
@@ -231,6 +236,7 @@ impl App {
                     tab,
                     pane,
                     retake,
+                    socket,
                 }
             },
             move |panic| PaneStart {
@@ -238,6 +244,7 @@ impl App {
                 tab: again,
                 pane: Err(anyhow::anyhow!("the tab's start stopped: {panic}")),
                 retake,
+                socket: socket_again,
             },
         );
         Ok(stand_in)
@@ -262,10 +269,15 @@ impl App {
     }
 
     /// `pane` in the place of the tab `tab`'s stand-in, or, when it never
-    /// started its program, a stand-in saying why.
+    /// started its program, a stand-in saying why; one for want of a usable
+    /// jar is offered to run without one (`app::jarless`).
     fn land_pane_start(&mut self, start: PaneStart) {
         let PaneStart {
-            tab, pane, retake, ..
+            project,
+            tab,
+            pane,
+            retake,
+            socket,
         } = start;
         let wake = self.make_pane_wake();
         let Some(entry) = self
@@ -283,6 +295,11 @@ impl App {
         };
         let size = entry.pane.host.last_size;
         let started = pane.is_ok();
+        let unusable = pane
+            .as_ref()
+            .err()
+            .and_then(jar::no_usable_jar)
+            .map(str::to_string);
         let mut pane = match pane {
             Ok(pane) => pane,
             Err(e) => {
@@ -306,6 +323,11 @@ impl App {
         let stand_in = std::mem::replace(&mut entry.pane, pane);
         stand_in.shutdown_detached(END_WAIT);
         self.view.needs_full_repaint = true;
+        if let Some(why) = unusable
+            && !retake
+        {
+            self.tab_has_no_usable_jar(project, tab, socket, &why);
+        }
     }
 }
 

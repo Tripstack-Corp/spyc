@@ -498,3 +498,95 @@ fn a_tab_whose_jar_is_gone_when_taken_back_ends_jar_lost() {
         );
     });
 }
+
+/// Whether spyc is offering to run tabs without jars.
+fn offering(app: &App) -> bool {
+    matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::JarlessFallback))
+}
+
+/// No usable jar, with jars on: the tab doesn't start, says to check spyc's
+/// installation, and spyc offers to run tabs without jars. Taken, the tab's
+/// program runs once, outside any jar, and so does a tab opened after.
+#[test]
+fn with_no_usable_jar_a_tab_runs_without_one_once_the_user_says_so() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let missing = dir.path().join("missing").join("spyc-jar");
+        let mut app = jar_app(dir.path(), missing, crate::pane::jar::place::HOLD);
+        let ran = dir.path().join("ran");
+        assert!(app.open_pane_tab_in(&marking(&ran), dir.path()));
+        land(&mut app);
+        shows(&mut app, "installation");
+        assert!(offering(&app), "spyc offers to run tabs without jars");
+        assert!(!ran.exists(), "nothing ran before the user said so");
+
+        app.handle_key(key('y')).unwrap();
+        assert!(!offering(&app));
+        assert!(!tabs(&mut app).active().starting(), "started without a jar");
+        assert!(tabs(&mut app).active().jar_socket().is_none(), "no jar");
+        type_into(&mut app, b"typed\r");
+        shows(&mut app, "typed");
+        assert_eq!(ran_once(&ran), "once\n");
+        end(&mut app);
+
+        assert!(app.open_pane_tab_in("cat", dir.path()));
+        assert!(!tabs(&mut app).active().starting(), "a later tab, unasked");
+        assert!(!offering(&app));
+        end(&mut app);
+    });
+}
+
+/// Declined, a tab with no usable jar stays `[not started]`, its program
+/// never run, and spyc doesn't ask again this session.
+#[test]
+fn with_no_usable_jar_declined_tabs_stay_not_started_and_it_asks_once() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let missing = dir.path().join("missing").join("spyc-jar");
+        let mut app = jar_app(dir.path(), missing, crate::pane::jar::place::HOLD);
+        let ran = dir.path().join("ran");
+        assert!(app.open_pane_tab_in(&marking(&ran), dir.path()));
+        land(&mut app);
+        assert!(offering(&app), "spyc offers to run tabs without jars");
+        app.handle_key(key('x')).unwrap();
+        assert!(offering(&app), "a stray key doesn't answer");
+        app.handle_key(key('n')).unwrap();
+        assert!(!offering(&app));
+        assert!(
+            app.flash_text().is_some_and(|f| f.contains("jars = false")),
+            "{:?}",
+            app.flash_text()
+        );
+        eventually("the tab ended", || {
+            app.drain_pane_output();
+            tabs(&mut app).mark_exited();
+            tabs(&mut app)
+                .active_info()
+                .label
+                .ends_with("[not started]")
+        });
+
+        assert!(app.open_pane_tab_in(&marking(&ran), dir.path()));
+        land(&mut app);
+        assert!(!offering(&app), "asked once a session");
+        assert!(!ran.exists(), "no program ran");
+    });
+}
+
+/// A tab with no usable jar while another prompt is open waits for it to
+/// close: the offer comes once nothing else is asked, never over it.
+#[test]
+fn with_no_usable_jar_the_offer_waits_for_an_open_prompt() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let missing = dir.path().join("missing").join("spyc-jar");
+        let mut app = jar_app(dir.path(), missing, crate::pane::jar::place::HOLD);
+        assert!(app.open_pane_tab_in("cat", dir.path()));
+        app.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
+        land(&mut app);
+        assert!(!offering(&app), "the open prompt keeps its keys");
+        app.state.mode = Mode::Normal;
+        assert!(app.offer_jarless(), "the loop's next pass offers");
+        assert!(offering(&app));
+    });
+}

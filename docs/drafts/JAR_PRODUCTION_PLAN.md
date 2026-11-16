@@ -303,8 +303,8 @@ is how a jar knows it runs from a store.
   `spyc-jar build-info`, which prints the `SPYC_GIT_SHA` and `SPYC_BUILD_TIME`
   that `build.rs` gives both binaries of one build (they are one package). A
   copy that answers otherwise isn't used: a package upgrade landed while spyc
-  started, and spyc runs this session without jars and says so, as it does for
-  a jar that exits with 75. The run also pays the copy's first-run cost
+  started: no usable jar, as a jar that exits with 75 is, so a tab fails and
+  spyc offers to run tabs without jars (decision 6). The run also pays the copy's first-run cost
   (about 263 ms on macOS) off the loop. Two development builds at one commit
   can pass this check as each other, since `build.rs` doesn't run again
   without a new commit; their entries, and so their `build` keys, still
@@ -433,7 +433,9 @@ and is its own issue.
    every other and dies with spyc is worse than one that says it failed, and
    a fallback keeps two ways of hosting a pane alive for good. A jar slow to
    answer is waited for off the main thread, in a tab that opens at once.
-   Not decided: what a session does when the store finds no usable jar at
-   its start.
+   With no usable jar (decided 2026-11-16), the user chooses: a tab fails,
+   saying to check spyc's installation, and spyc offers once a session to run
+   tabs without jars. `[pane] jars = false` stays as spyc without jars, and
+   `jars = true` is the default on `-CURRENT` from that day.
 7. **S2b's retake gates turning jars on** (decided 2026-11-15), even as an
    opt-in: a resumed spyc takes its tabs back first.

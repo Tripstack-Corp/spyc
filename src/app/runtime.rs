@@ -270,6 +270,9 @@ pub(super) struct Runtime {
     /// The place every tab's jar starts in: this user's when `None`, a
     /// test's own otherwise.
     pub(super) jar_place: Option<crate::pane::jar::Place>,
+    /// Whether this session runs tabs without jars, there being no usable
+    /// one, and the tabs waiting on the user's answer (`app::jarless`).
+    pub(super) jarless: super::jarless::Jarless,
     /// The newest `J` default request; an answer to any other is stale.
     pub(super) jump_default_seq: u64,
     /// Where the switcher's closed rows land (`spawn_closed_rows`).
@@ -399,6 +402,7 @@ impl Runtime {
             jump_default_results: Landing::default(),
             pane_starts: Landing::default(),
             jar_place: None,
+            jarless: super::jarless::Jarless::default(),
             jump_default_seq: 0,
             closed_rows_results: Landing::default(),
             make_results: Landing::default(),

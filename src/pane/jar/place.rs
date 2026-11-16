@@ -47,7 +47,7 @@ impl Place {
         start_store()?;
         let binary = match super::store::binary() {
             super::store::Binary::Entry(e) | super::store::Binary::Beside(e, _) => e,
-            super::store::Binary::None(why) => anyhow::bail!("{why}"),
+            super::store::Binary::None(why) => return Err(super::NoUsableJar(why).into()),
         };
         let tokens = crate::state::state_root()
             .context("no state directory for jar tokens")?

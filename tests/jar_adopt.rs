@@ -1,6 +1,7 @@
 #![cfg(unix)]
 //! `kill -9` of spyc, then `spyc -r`: a tab's program, running in its jar,
 //! is taken back by the new spyc rather than started again (`[pane] jars`).
+//! And a spyc with no usable jar offers to run its tabs without one.
 //! Driven through the binary on a PTY of the test's own, with a stand-in
 //! agent, and every directory the test's own.
 // Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
@@ -35,6 +36,11 @@ const ANSWERS: &[(&[u8], &[u8])] = &[
 
 impl Spyc {
     fn start(dirs: &Dirs, args: &[&str]) -> Self {
+        Self::start_from(Path::new(env!("CARGO_BIN_EXE_spyc")), dirs, args)
+    }
+
+    /// [`Self::start`], running the spyc at `binary`.
+    fn start_from(binary: &Path, dirs: &Dirs, args: &[&str]) -> Self {
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 30,
@@ -43,7 +49,7 @@ impl Spyc {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_spyc"));
+        let mut cmd = CommandBuilder::new(binary);
         cmd.args(args);
         cmd.cwd(&dirs.project);
         cmd.env_clear();
@@ -440,4 +446,44 @@ fn startup_tabs_each_get_a_jar_of_their_own() {
     }
     assert!(!refused(), "a tab was left not started");
     assert_eq!(noted(&dirs.pidfile).len(), 2, "both programs ran");
+}
+
+/// Jars are on by default; a spyc installed without its `spyc-jar` starts
+/// no tab's program, says to check its installation, and offers to run tabs
+/// without jars. Taken, the tab's program runs.
+#[test]
+fn a_spyc_with_no_spyc_jar_beside_it_offers_to_run_tabs_without_jars() {
+    let dirs = dirs();
+    std::fs::write(
+        dirs.home.join(".spycrc.toml"),
+        format!(
+            "[pane]\ntabs = [\"sh -c 'echo $$ > {}; exec cat'\"]\n",
+            dirs.pidfile.display()
+        ),
+    )
+    .unwrap();
+    // The spyc this build made, alone in a directory: linked, so macOS
+    // doesn't scan a new copy on its first run.
+    let alone = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let binary = alone.path().join("spyc");
+    if std::fs::hard_link(env!("CARGO_BIN_EXE_spyc"), &binary).is_err() {
+        std::fs::copy(env!("CARGO_BIN_EXE_spyc"), &binary).unwrap();
+    }
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start_from(&binary, &dirs, &[]);
+    left.0.push(spyc.pid());
+    eventually("spyc offers to run tabs without jars", || {
+        spyc.shows("run without jars")
+    });
+    assert!(spyc.shows("installation"), "says to check the installation");
+    assert!(!dirs.pidfile.exists(), "a program ran before the answer");
+    spyc.type_keys(b"y");
+    eventually("the tab's program runs", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    assert!(
+        sockets_under(&dirs.runtime.join("spyc").join("jars")).is_empty(),
+        "no jar was started"
+    );
 }

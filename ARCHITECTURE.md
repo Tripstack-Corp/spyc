@@ -938,9 +938,10 @@ With `[pane] jars` on, a pane tab's program runs in a `spyc-jar`
 (`src/pane/jar/`), whose socket stands in for the PTY master and the child:
 `PtyHost` drives it through `portable-pty`'s traits, as it drives a local
 program. Only pane tabs: overlays, tasks and captures run on a PTY of spyc's
-own. A `-CURRENT` or rc build
-reads the setting; a release runs every program as before until jars are on
-by default.
+own. Jars are on by default, and `[pane] jars = false` is spyc without them:
+every program on a PTY of spyc's, ending with it. A `-CURRENT` or rc build
+reads the setting; a release runs every program as before until the release
+that turns jars on.
 
 - **A program runs in its jar or not at all** (the owner's decision of
   2026-11-15). A jar that can't be started, ends before it answers (one that
@@ -951,9 +952,18 @@ by default.
   alive. `jar::spawn` returns a jar or an error, and
   `with_jars_on_no_path_launches_the_program_outside_its_jar` holds
   `PtyHost::spawn` to one launch on a PTY of spyc's own: a tab with no jar
-  asked for. A session whose store finds no usable jar at the start still
-  runs its tabs without jars, and says so once: what it should do is not
-  decided.
+  asked for.
+- **No usable jar is the user's call** (the owner's decision of 2026-11-16,
+  `src/app/jarless.rs`). A `spyc-jar` missing from beside spyc, one that
+  can't run, one of another build, or one that doesn't speak spyc's wire
+  version fails the tab with `jar::NoUsableJar`: it ends `[not started]`,
+  saying to check spyc's installation, and spyc offers once a session, in a
+  pop-up, to run tabs without jars. Taken, each such tab starts again on a
+  PTY of spyc's, and so does every tab after until spyc quits; declined,
+  they stay `[not started]`. A restored tab whose jar may still run is never
+  started that way, since its program would run twice. Unit tests start
+  with jars off (`jar::BY_DEFAULT`), so none starts a jar in the
+  user's own runtime directory.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
   writer thread per connection, which pings whenever it's idle, so a jar that
   stops reading holds up neither the event loop nor the parser.
@@ -978,8 +988,10 @@ by default.
   whole from the `spyc-jar` beside spyc on a worker at start and run once as
   `spyc-jar build-info` to check it is this build's. Never the binary beside
   spyc, which an install may replace while spyc runs, and which a jar would
-  otherwise run by name. A copy that can't run (a `noexec` state directory)
-  leaves jars to start beside spyc; one of another build starts none. Its
+  otherwise run by name. A store that can't hold a copy that runs (a
+  `noexec` state directory) leaves jars to start beside spyc, when that one
+  runs as this build; a `spyc-jar` missing, unable to run or of another
+  build is no usable jar. Its
   sweep removes only an entry no live jar reports, not spyc's own, a day
   untouched, and nothing while any live jar won't say what it runs.
 - **A pane's jar starts its program when spyc connects** (decision M, the

@@ -16,6 +16,8 @@
 //! can't be started, ends before it answers (one that doesn't speak this
 //! spyc's wire version exits with 75 first) or doesn't answer while it holds
 //! the program fails the tab, and nothing runs (SPYC-TRAP `jar-or-nothing`).
+//! One with no usable `spyc-jar` fails with [`NoUsableJar`], and spyc offers
+//! to run tabs without jars (`app::jarless`).
 //! Every wait here blocks, so the loop never makes one: a tab's jar is
 //! started or taken back on a worker (`app::pane_starts`).
 //!
@@ -56,6 +58,38 @@ pub use snapshots::{SnapshotSink, Snapshotter};
 use link::{JarChild, JarMaster, JarReader, JarReplies, Link, ReplayGate};
 use place::{SocketState, socket_state};
 
+/// No `spyc-jar` this session can start: none beside spyc, one that can't
+/// run, or another build's. Jars on, a tab fails with it, and spyc offers to
+/// run tabs without jars (`app::jarless`).
+#[derive(Debug)]
+pub struct NoUsableJar(pub String);
+
+impl std::fmt::Display for NoUsableJar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "no usable spyc-jar: {}. Check spyc's installation: spyc-jar belongs beside spyc",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for NoUsableJar {}
+
+/// Why a tab's start failed for no usable jar, when it did.
+pub fn no_usable_jar(e: &anyhow::Error) -> Option<&str> {
+    e.downcast_ref::<NoUsableJar>().map(|n| n.0.as_str())
+}
+
+/// Whether tabs run in jars when no file of the user's says: yes, but not in
+/// a unit test, whose tabs would start jars in the user's own runtime
+/// directory. A test that wants jars turns them on, in a place of its own.
+pub const BY_DEFAULT: bool = by_default(cfg!(test));
+
+const fn by_default(unit_test: bool) -> bool {
+    !unit_test
+}
+
 /// Whether this build reads `[pane] jars`: until jars are on by default, a
 /// release runs every program as before, and only a `-CURRENT` or rc build
 /// may opt in.
@@ -68,21 +102,18 @@ fn honoured_by(version: &str) -> bool {
 }
 
 /// The jar for the tab `tab` when `[pane] jars` is `on`: `None` when it's
-/// off, this build doesn't read it, or there's nowhere to put one (said on
-/// spyc's standard error). `restoring` is the saved tab a restore opens, whose
-/// jar, still running, is taken back.
+/// off or this build doesn't read it, and an error when there's no jar to
+/// start ([`NoUsableJar`]) or nowhere to put one. `restoring` is the saved
+/// tab a restore opens, whose jar, still running, is taken back.
 pub fn wanted(
     on: bool,
     tab: &str,
     restoring: Option<&crate::state::sessions::SavedTab>,
-) -> Option<Spec> {
+) -> anyhow::Result<Option<Spec>> {
     if !on || !honoured() {
-        return None;
+        return Ok(None);
     }
-    Place::for_this_user()
-        .inspect_err(|e| eprintln!("spyc: no jar ({e:#}); the tab's program runs without one"))
-        .ok()
-        .map(|place| spec_in(place, tab, restoring))
+    Ok(Some(spec_in(Place::for_this_user()?, tab, restoring)))
 }
 
 /// [`wanted`] with jars on, for a worker: the store's check of the first jar
@@ -91,9 +122,9 @@ pub fn spec_for(
     place: Option<Place>,
     tab: &str,
     restoring: Option<&crate::state::sessions::SavedTab>,
-) -> Option<Spec> {
+) -> anyhow::Result<Option<Spec>> {
     match place {
-        Some(place) => Some(spec_in(place, tab, restoring)),
+        Some(place) => Ok(Some(spec_in(place, tab, restoring))),
         None => wanted(true, tab, restoring),
     }
 }
@@ -302,9 +333,14 @@ pub fn spawn(
         Ok(jar) => jar,
         Err(e) => {
             tokens::forget(place, &socket);
-            return Err(e).with_context(|| {
-                format!("the tab's jar, {}, didn't start", place.binary.display())
-            });
+            let why = format!("the tab's jar, {}, didn't start", place.binary.display());
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+            ) {
+                return Err(NoUsableJar(format!("{why}: {e}")).into());
+            }
+            return Err(e).context(why);
         }
     };
     // SPYC-TRAP(jar-token-stdin): the token goes on the jar's standard input,
@@ -493,10 +529,11 @@ fn answer(
             Err(e) => {
                 if let Some(status) = jar.try_wait().context("wait for spyc-jar")? {
                     if status.code() == Some(spyc_jar::cli::WIRE_NOT_SERVED) {
-                        anyhow::bail!(
+                        return Err(NoUsableJar(format!(
                             "the tab's jar doesn't speak wire version {}",
                             spyc_jar::proto::VERSION
-                        );
+                        ))
+                        .into());
                     }
                     anyhow::bail!("the tab's jar ended before it answered: {status}");
                 }

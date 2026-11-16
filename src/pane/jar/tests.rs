@@ -383,6 +383,7 @@ fn spawn_marking(place: &Place, mark: &Path) -> anyhow::Result<PtyHost> {
 /// With jars on, a tab's program runs in a jar or not at all: a jar that
 /// won't run (one that doesn't speak this wire version exits with 75) or
 /// isn't there fails the tab, says why, at once, and the program never runs.
+/// Either is no usable jar, which offers to run tabs without one.
 #[test]
 fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
     use std::os::unix::fs::PermissionsExt;
@@ -403,6 +404,11 @@ fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
         assert!(
             format!("{e:#}").contains(why),
             "{}: {e:#}",
+            binary.display()
+        );
+        assert!(
+            no_usable_jar(&e).is_some(),
+            "{}: said as no usable jar, which offers jarless tabs: {e:#}",
             binary.display()
         );
         // A jar that ended is seen at once: never the wait for one to answer.
@@ -560,7 +566,14 @@ fn only_a_current_or_rc_build_reads_the_setting() {
     assert!(honoured_by("2.5.0-CURRENT"));
     assert!(honoured_by("3.0.0-rc.1"));
     assert!(!honoured_by("2.5.0"));
-    assert!(wanted(false, "0123", None).is_none(), "off is off");
+    assert!(wanted(false, "0123", None).unwrap().is_none(), "off is off");
+}
+
+#[test]
+fn jars_are_on_by_default_but_never_for_a_unit_test() {
+    assert!(by_default(false), "a spyc runs tabs in jars unasked");
+    assert!(!by_default(true), "a unit test's tabs start no jar");
+    const { assert!(!BY_DEFAULT) };
 }
 
 /// A binary snapshot says which build made it; another build's, or one
@@ -1291,21 +1304,22 @@ fn another_builds_spyc_jar_starts_no_jars() {
     assert!(matches!(got, store::Binary::None(_)), "{got:?}");
 }
 
-/// A store copy that can't run (a state directory mounted `noexec`) leaves
-/// jars to start from the `spyc-jar` beside spyc; one that doesn't hash to
-/// its name isn't used either.
+/// A store that can't take a copy (its directory can't be written, or is
+/// mounted `noexec`) leaves jars to start from the `spyc-jar` beside spyc;
+/// an entry that doesn't hash to its name isn't used either.
 #[test]
 fn a_store_copy_that_cant_be_used_falls_back_to_the_binary_beside_spyc() {
     use std::os::unix::fs::PermissionsExt;
     let dir = short_dir();
-    let root = dir.path().join("jar-bin");
-    let garbage = dir.path().join("spyc-jar");
-    std::fs::write(&garbage, b"\x7fELF not really").unwrap();
-    let got = store::install(&root, &garbage, built_jars_build());
+    let unwritable = dir.path().join("not-a-directory");
+    std::fs::write(&unwritable, "").unwrap();
+    let got = store::install(&unwritable, &built_jar(), built_jars_build());
     assert!(
-        matches!(&got, store::Binary::Beside(at, _) if *at == garbage),
+        matches!(&got, store::Binary::Beside(at, _) if *at == built_jar()),
         "{got:?}"
     );
+
+    let root = dir.path().join("jar-bin");
 
     let source = built_jar();
     let store::Binary::Entry(entry) = store::install(&root, &source, built_jars_build()) else {
@@ -1325,6 +1339,25 @@ fn a_store_copy_that_cant_be_used_falls_back_to_the_binary_beside_spyc() {
     .unwrap();
     let got = store::install(&root, &source, built_jars_build());
     assert!(matches!(got, store::Binary::Beside(..)), "{got:?}");
+}
+
+/// No usable jar: a `spyc-jar` missing from beside spyc, or one there that
+/// can't run, is no jar this session, never one every tab then fails to
+/// start.
+#[test]
+fn a_spyc_jar_missing_or_unable_to_run_is_no_usable_jar() {
+    let dir = short_dir();
+    let root = dir.path().join("jar-bin");
+    let garbage = dir.path().join("spyc-jar");
+    std::fs::write(&garbage, b"\x7fELF not really").unwrap();
+    for source in [dir.path().join("missing").join("spyc-jar"), garbage] {
+        let got = store::install(&root, &source, built_jars_build());
+        assert!(
+            matches!(&got, store::Binary::None(why) if why.contains(&*source.to_string_lossy())),
+            "{}: {got:?}",
+            source.display()
+        );
+    }
 }
 
 /// Set `dir`'s modification time two days back.
