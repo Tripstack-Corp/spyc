@@ -109,13 +109,17 @@ the slices land runs as today.
   takes its jar back on resuming, or marks the tab `[detached]` when another
   spyc owns it (decision G). A killed jar marks its tab `[jar lost]`. On Linux
   that label waited for the next key on the spike: a reader that ends must
-  wake the loop. The repaint after a gap holds the size a row off until
-  output arrives or about 100 ms pass, then restores it: sent back to back,
-  the two sizes reached a Node program on macOS in none of 40 trials
-  (finding 9), and the fix is shown on macOS before it lands. Built: the
-  retake (`app::pane_starts`), which takes a tab whose jar ended its lease
-  back on a worker, the same program, from the jar's snapshot and replay,
-  and wakes the loop when a reader ends. Not built: the repaint after a gap.
+  wake the loop. The repaint after a gap holds the size a row off for
+  100 ms, then restores it: sent back to back, the two sizes reached a Node
+  program on macOS in none of 40 trials (finding 9). Built: the retake
+  (`app::pane_starts`), which takes a tab whose jar ended its lease back on
+  a worker, the same program, from the jar's snapshot and replay, and wakes
+  the loop when a reader ends; and the repaint after a gap (`jar::repaint`).
+  Shown on macOS before it landed: held, the Node program saw the size a row
+  off in 40 of 40 trials, idle, busy and printing every 5 ms. The plan had
+  the hold end early when output arrives; it doesn't, since bytes written
+  before the program handled the signal reach the jar after the resize, and
+  a shell then read only the size restored.
 - **S2c: tasks, captures and orphans.** A demoted pane keeps its jar, its
   owner rewriting `is` to `task`; a capture lingers a minute. `spyc --jars`
   lists jars by label (R18). A spyc that starts and finds jars no spyc owns

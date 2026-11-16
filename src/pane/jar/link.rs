@@ -13,7 +13,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use portable_pty::{Child, ChildKiller, ExitStatus, MasterPty, PtySize};
@@ -22,6 +22,7 @@ use spyc_jar::proto::{JarSignal, Msg};
 
 use super::offsets::Offsets;
 use super::place::{SocketState, socket_state};
+use super::repaint::Repaint;
 
 /// What every half of one jarred pane shares.
 pub(super) struct Link {
@@ -35,6 +36,40 @@ pub(super) struct Link {
     pub offsets: Mutex<Offsets>,
     /// When the terminal's replies may reach the program again (R15a).
     pub gate: ReplayGate,
+    /// The PTY's size as the pane has it: a repaint's size a row off is
+    /// never kept here.
+    pub size: Mutex<PtySize>,
+}
+
+impl Link {
+    /// The PTY's size as the pane has it.
+    fn rows_cols(&self) -> (u16, u16) {
+        let size = self.size.lock().unwrap_or_else(PoisonError::into_inner);
+        (size.rows, size.cols)
+    }
+
+    /// Give the program `rows` x `cols` without keeping it as the pane's
+    /// size: a repaint's size a row off.
+    fn resize_pty(&self, rows: u16, cols: u16) {
+        let _ = self.out.send(&Msg::Resize {
+            rows,
+            cols,
+            px_w: 0,
+            px_h: 0,
+        });
+    }
+
+    /// Give the program the pane's own size again, which a resize meanwhile
+    /// may have changed.
+    fn resize_pty_back(&self) {
+        let size = *self.size.lock().unwrap_or_else(PoisonError::into_inner);
+        let _ = self.out.send(&Msg::Resize {
+            rows: size.rows,
+            cols: size.cols,
+            px_w: size.pixel_width,
+            px_h: size.pixel_height,
+        });
+    }
 }
 
 /// How long after a replayed tail is handed over its queries may still be in
@@ -120,9 +155,17 @@ pub(super) fn read_frames(
     link: &Link,
     bytes: &mpsc::SyncSender<Vec<u8>>,
     socket: &std::path::Path,
+    repaint_hold: Duration,
 ) {
+    let mut repaint = Repaint::new(repaint_hold);
     loop {
-        match rx.recv(Duration::from_secs(3600)) {
+        if repaint.ran_out(Instant::now()) {
+            link.resize_pty_back();
+        }
+        let wait = repaint
+            .left(Instant::now())
+            .unwrap_or(Duration::from_secs(3600));
+        match rx.recv(wait) {
             Ok(Some(Msg::Output { offset, bytes: b })) => {
                 let end = offset + b.len() as u64;
                 let jumped = link
@@ -132,6 +175,11 @@ pub(super) fn read_frames(
                     .hand(offset, b.len() as u64);
                 if jumped && bytes.send(vec![RESYNC]).is_err() {
                     break;
+                }
+                if jumped
+                    && let Some((rows, cols)) = repaint.start(link.rows_cols(), Instant::now())
+                {
+                    link.resize_pty(rows, cols);
                 }
                 if bytes.send(b).is_err() {
                     break;
@@ -249,13 +297,16 @@ impl Write for JarReplies {
 
 pub(super) struct JarMaster {
     pub link: Arc<Link>,
-    pub size: Mutex<PtySize>,
     pub reader: Mutex<Option<JarReader>>,
 }
 
 impl MasterPty for JarMaster {
     fn resize(&self, size: PtySize) -> anyhow::Result<()> {
-        *self.size.lock().unwrap_or_else(PoisonError::into_inner) = size;
+        *self
+            .link
+            .size
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = size;
         self.link.out.send(&Msg::Resize {
             rows: size.rows,
             cols: size.cols,
@@ -265,7 +316,11 @@ impl MasterPty for JarMaster {
         Ok(())
     }
     fn get_size(&self) -> anyhow::Result<PtySize> {
-        Ok(*self.size.lock().unwrap_or_else(PoisonError::into_inner))
+        Ok(*self
+            .link
+            .size
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner))
     }
     fn try_clone_reader(&self) -> anyhow::Result<Box<dyn Read + Send>> {
         let reader = self

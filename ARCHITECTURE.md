@@ -913,6 +913,17 @@ blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
 `a_stalled_reader_does_not_freeze_a_release` and
 `a_paste_the_program_never_reads_does_not_block_its_owner`.
 
+<!-- SPYC-TRAP: jar-frame-whole -->
+A client's wait bounds only the start of a frame (`Client::recv`). Once a
+frame's first byte is in, the rest is read under an hour's timeout, since
+`read_exact` that times out partway through a frame has used up what it read,
+and the next read takes the frame's body for a length ("frame of 524386304
+bytes is over the limit"). The reader thread waited an hour, so this never
+showed until the repaint after a gap waited 100 ms. A socket also takes no
+zero timeout, and macOS refuses a new one on a socket its peer has closed, so
+the longer timeout is best effort: the rest of the frame is already buffered
+or never coming.
+
 ## A pane in a jar
 
 <!-- SPYC-TRAP: jar-or-nothing -->
@@ -1011,6 +1022,16 @@ that.
   spyc owns its jar has no link, so it never loops. A retake never starts the
   program afresh: a jar gone by then ends the tab `[jar lost]`, and the lapsed
   pane's link is severed before it's ended, so ending it signals nothing.
+- **A gap makes the program repaint** (R12c, finding 9; `jar::repaint`).
+  When the pane's stream jumps past bytes the jar dropped, the reader thread
+  gives the program its size a row off, holds it 100 ms, then gives the
+  pane's size back, as the pane has it then. Sent back to back, the two
+  sizes reached a Node program on macOS as one unchanged size, in 40 of 40
+  trials, and nothing was redrawn; held, it saw the size a row off in 40 of
+  40, idle, busy or printing. The hold isn't cut short when output arrives:
+  bytes written before the program handled the signal reach the jar after
+  the resize, and ending the hold on them sent the second size before a
+  shell read the first.
 - **A wake made before the loop runs reaches it once it does.** `[pane] tabs`
   open before `run()` installs the loop's channel, so a wake made then reads
   `Runtime::loop_wake`, which `run()` fills, rather than doing nothing for

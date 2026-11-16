@@ -65,6 +65,7 @@ fn jar_app(dir: &Path, binary: PathBuf, hold: Duration) -> App {
         dirs: vec![dir.join("spyc"), dir.join("spyc").join("jars")],
         tokens: dir.join("tokens"),
         hold,
+        repaint_hold: Duration::from_secs(2),
     });
     app
 }

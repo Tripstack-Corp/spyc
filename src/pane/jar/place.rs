@@ -30,6 +30,9 @@ pub struct Place {
     /// jar's clock starts after spyc's, so spyc never gives up on a jar that
     /// may still start the program.
     pub hold: std::time::Duration,
+    /// How long a repaint after a gap holds the program's size a row off
+    /// ([`super::repaint`]).
+    pub repaint_hold: std::time::Duration,
 }
 
 impl Place {
@@ -54,6 +57,7 @@ impl Place {
             dirs,
             tokens,
             hold: HOLD,
+            repaint_hold: super::repaint::REPAINT_HOLD,
         })
     }
 
