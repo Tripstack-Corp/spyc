@@ -1210,3 +1210,230 @@ fn a_panes_jar_holds_its_program_for_its_first_owner() {
     assert!(at < program, "a flag after the program is the program's");
     assert_eq!(args[program + 1], "claude");
 }
+
+// The ownership timers on spyc's side, each asked what a starved but live
+// jar sees when it fires: a jar that is slow, parked or not accepting is
+// never taken for gone, and its tab neither fails to open nor detaches.
+
+/// A listener whose backlog is full, as a jar's is when it isn't accepting
+/// (parked for an upgrade, stopped or starved) and connections queue.
+fn not_accepting(path: &Path) -> (rustix::fd::OwnedFd, Vec<rustix::fd::OwnedFd>) {
+    use rustix::net::{AddressFamily, SocketAddrUnix, SocketType};
+    let addr = SocketAddrUnix::new(path).unwrap();
+    let listener = rustix::net::socket(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
+    rustix::net::bind(&listener, &addr).unwrap();
+    rustix::net::listen(&listener, 1).unwrap();
+    let mut queued = Vec::new();
+    for _ in 0..64 {
+        let c = rustix::net::socket(AddressFamily::UNIX, SocketType::STREAM, None).unwrap();
+        rustix::io::ioctl_fionbio(&c, true).unwrap();
+        if rustix::net::connect(&c, &addr).is_err() {
+            break;
+        }
+        queued.push(c);
+    }
+    assert!(queued.len() < 64, "premise: the backlog fills");
+    (listener, queued)
+}
+
+/// R32: a jar is gone only when nothing holds its socket. One whose backlog
+/// is full is answered for at once as live, and the sweep keeps its socket
+/// and its token; macOS refuses a connection to a full backlog as it does
+/// one to a socket nothing listens on.
+#[test]
+#[ignore = "red until a jar is judged gone only when nothing holds its socket"]
+fn a_jar_that_isnt_accepting_is_never_judged_gone() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), PathBuf::from("/nonexistent"));
+    place.prepare().unwrap();
+    let socket = place.socket("cccc");
+    let _held = not_accepting(&socket);
+    tokens::save(&place, &socket, b"t").unwrap();
+    let (tx, rx) = mpsc::channel();
+    {
+        let place = place.clone();
+        let socket = socket.clone();
+        std::thread::spawn(move || {
+            let state = socket_state(&socket);
+            let _ = tx.send((state, place::sweep(&place, Duration::ZERO)));
+        });
+    }
+    assert_eq!(
+        rx.recv_timeout(WAIT).ok(),
+        Some((SocketState::Live, 0)),
+        "a jar with a full backlog runs, and is answered for at once"
+    );
+    assert!(socket.exists(), "its socket is kept");
+    assert!(place.tokens.join("cccc").exists(), "and its token");
+}
+
+/// Ends the processes a test started in a jar, however the test ends.
+struct Ends(Vec<i32>);
+
+impl Drop for Ends {
+    fn drop(&mut self) {
+        for &p in &self.0 {
+            if let Some(pid) = rustix::process::Pid::from_raw(p) {
+                let _ = rustix::process::kill_process(pid, rustix::process::Signal::CONT);
+                let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
+                let _ = rustix::process::kill_process(pid, rustix::process::Signal::KILL);
+            }
+        }
+    }
+}
+
+/// Test 8 of the timer brief: a jar slow to start (its binary's first run
+/// scanned under load) still gives the tab its program, run once.
+#[test]
+#[ignore = "red until a tab whose jar is slow to start still opens"]
+fn a_tab_whose_jar_is_slow_to_start_opens_with_its_program_run_once() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = short_dir();
+    let slow = dir.path().join("slow-jar");
+    std::fs::write(
+        &slow,
+        format!(
+            "#!/bin/sh\nsleep 6\nexec '{}' \"$@\"\n",
+            built_jar().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let place = place_in(dir.path(), slow);
+    let ran = dir.path().join("ran");
+    let host = spawn_in(
+        &place,
+        &format!("echo once >> {}; exec cat", ran.display()),
+        dir.path(),
+    );
+    let mut host = host.unwrap_or_else(|e| panic!("the tab didn't open: {e:#}"));
+    host.write_all(b"typed\n").unwrap();
+    read_until(&host, "typed");
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        std::fs::read_to_string(&ran).unwrap(),
+        "once\n",
+        "the program ran once"
+    );
+    host.shutdown(END);
+}
+
+/// Test 8 of the timer brief: a jar stopped for six seconds while a restored
+/// tab takes it back is still taken back, the same program, typing reaching
+/// it, and nothing started twice.
+#[test]
+#[ignore = "red until a restored tab outwaits a jar that's slow to answer"]
+fn a_restored_tab_takes_back_a_jar_that_stalls_while_it_attaches() {
+    use rustix::process::{Pid, Signal, kill_process};
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let socket = place.socket(TAB);
+    let first = pane_in(&place, "exec cat", dir.path(), None);
+    let jar = describe_field(&socket, "pid");
+    let program = first.process_id();
+    let _ends = Ends(vec![
+        program.and_then(|p| i32::try_from(p).ok()).unwrap(),
+        jar,
+    ]);
+    first.host.sever_jar();
+    drop(first);
+    let until = Instant::now() + WAIT;
+    while !spyc_jar::client::describe(&socket)
+        .unwrap()
+        .iter()
+        .any(|(k, v)| k == "owner" && v.starts_with("none"))
+    {
+        assert!(Instant::now() < until, "premise: the jar saw its owner go");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    kill_process(Pid::from_raw(jar).unwrap(), Signal::STOP).unwrap();
+    let resume = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(6));
+        kill_process(Pid::from_raw(jar).unwrap(), Signal::CONT).unwrap();
+    });
+    let second = pane_in(&place, "echo started-again", dir.path(), Some(socket));
+    resume.join().unwrap();
+    assert!(
+        second.adopted() && !second.detached(),
+        "a jar that answers late is taken back, not left detached"
+    );
+    assert_eq!(second.process_id(), program, "the same program");
+    let mut second = second;
+    second.send_bytes(b"typed\n").unwrap();
+    shows(&second, "typed");
+    assert!(!screen(&second).contains("started-again"));
+    second.shutdown_reporting(END, || {});
+}
+
+/// The longest a jar reads nothing from its owner while parked for an
+/// upgrade: reaching the park, the flush, the parked validation and its
+/// output grace, and the holder's answer (`spyc-jar`'s `upgrade.rs`:
+/// 3 + 1 + 5 + 1 + 5 s).
+const PARKED_AT_MOST: Duration = Duration::from_secs(15);
+
+/// A jar parked for an upgrade reads nothing from its owner for up to
+/// [`PARKED_AT_MOST`]. spyc's writer, holding more than the socket takes
+/// (typing, a snapshot), waits it out and delivers every byte, rather than
+/// end a connection to a jar that is only busy.
+#[test]
+#[ignore = "red until spyc's owner outwaits a jar parked for an upgrade"]
+fn an_owner_outwaits_a_jar_parked_for_its_longest_upgrade() {
+    let dir = short_dir();
+    let socket = dir.path().join("parked.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    let (tx, got) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let Ok(Some(Msg::Hello { .. })) = proto::read_msg(&mut conn) else {
+            panic!("no hello");
+        };
+        let welcome = Msg::Welcome {
+            version: proto::VERSION,
+            child_pid: std::process::id(),
+            head: 0,
+            base: 0,
+            rows: 24,
+            cols: 80,
+        };
+        proto::write_msg(&mut conn, &welcome).unwrap();
+        std::thread::sleep(PARKED_AT_MOST);
+        let mut input = 0;
+        while let Ok(Some(m)) = proto::read_msg(&mut conn) {
+            if let Msg::Input { bytes } = m {
+                input += bytes.len();
+                let _ = tx.send(input);
+            }
+        }
+    });
+    let (client, welcome) = Client::connect(&socket, Role::Owner, WAIT, b"token").unwrap();
+    let Msg::Welcome { child_pid, .. } = welcome else {
+        panic!("no welcome: {welcome:?}");
+    };
+    let fresh = Resume {
+        pid: child_pid,
+        replay: 0,
+        offsets: offsets::Offsets::new(0),
+        gate: ReplayGate::open(),
+    };
+    let jarred = connect(client, fresh, &socket, (24, 80)).unwrap();
+    let mut host = PtyHost::around_jar(jarred, (24, 80)).unwrap();
+    // Keystroke-sized batches: once the socket is full, the next one makes no
+    // progress at all, where one large frame's partial write would restart
+    // the writer's clock.
+    let batches = 400;
+    for _ in 0..batches {
+        host.write_all(&[b'x'; 256]).unwrap();
+    }
+    let pasted = batches * 256;
+    let until = Instant::now() + PARKED_AT_MOST + WAIT;
+    let mut through = 0;
+    while through < pasted {
+        match got.recv_timeout(until.saturating_duration_since(Instant::now())) {
+            Ok(n) => through = n,
+            Err(e) => panic!(
+                "spyc gave up on a parked jar with {through} of {pasted} typed bytes through: {e}"
+            ),
+        }
+    }
+}
