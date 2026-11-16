@@ -636,3 +636,30 @@ fn a_tabs_jar_knows_what_it_holds_and_hears_a_rename() {
         end(&mut app);
     });
 }
+
+/// A session saved while a tab's jar starts records no jar for it. The jar
+/// landing changes what a save records, so the session is saved again with
+/// it: otherwise, under load, a session never named the tab's jar.
+#[test]
+fn a_tabs_jar_landing_makes_the_session_save_again() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(
+            dir.path(),
+            gated_jar(dir.path()),
+            crate::pane::jar::place::HOLD,
+        );
+        assert!(app.open_pane_tab_in("cat", dir.path()));
+        eventually("the jar began", || dir.path().join("began").exists());
+        let starting = app.session_fingerprint();
+        std::fs::write(dir.path().join("go"), "").unwrap();
+        land(&mut app);
+        assert!(tabs(&mut app).active().jar_socket().is_some());
+        assert_ne!(
+            app.session_fingerprint(),
+            starting,
+            "a save made while the jar started is never made again"
+        );
+        end(&mut app);
+    });
+}
