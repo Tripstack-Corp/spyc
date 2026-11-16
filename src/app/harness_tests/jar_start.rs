@@ -619,8 +619,14 @@ fn a_tabs_jar_knows_what_it_holds_and_hears_a_rename() {
         });
         assert_eq!(jar_says(&socket, "is").as_deref(), Some("pane"));
         assert_eq!(jar_says(&socket, "agent").as_deref(), Some("other"));
-        assert_eq!(jar_says(&socket, "project").as_deref(), Some(project.as_str()));
-        assert_eq!(jar_says(&socket, "project_home").as_deref(), Some(home.as_str()));
+        assert_eq!(
+            jar_says(&socket, "project").as_deref(),
+            Some(project.as_str())
+        );
+        assert_eq!(
+            jar_says(&socket, "project_home").as_deref(),
+            Some(home.as_str())
+        );
 
         tabs(&mut app).active_info_mut().label = "renamed".into();
         app.settle_jar_info();

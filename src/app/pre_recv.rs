@@ -229,6 +229,9 @@ impl App {
         // `handle_restore_resumes`).
         self.handle_restore_resumes(now_pre, ctx);
 
+        // R18: each tab's jar told what it holds, where that changed.
+        self.settle_jar_info();
+
         // A tab with no usable jar, its offer held while another prompt was
         // open (`app::jarless`).
         if self.offer_jarless() {

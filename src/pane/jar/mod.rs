@@ -7,6 +7,7 @@
 //! - `tokens`: each jar's token, on its standard input and in a `0600` file
 //!   (R26).
 //! - `link`: the connection, its reader thread and the `portable-pty` traits.
+//! - [`listing`]: `spyc --jars`.
 //! - `offsets`: the jar offset of what the pane has parsed (finding 8).
 //! - `repaint`: the program made to draw its screen again after a gap (R12c).
 //! - [`snapshots`]: when a pane's engine is snapshotted, and its storing.
@@ -28,6 +29,7 @@
 //! started in its place (finding 7).
 
 mod link;
+pub mod listing;
 mod offsets;
 pub mod place;
 mod repaint;
@@ -228,6 +230,29 @@ impl Signals {
     /// End the connection as a crash would, signalling nothing.
     pub fn sever(&self) {
         self.0.out.close();
+    }
+
+    /// Tell the jar what it holds (R18): each key whose value it hasn't
+    /// been told yet. The jar keeps them when its owner goes.
+    pub fn tell(&self, info: &[(&str, &str)]) {
+        let mut told = self
+            .0
+            .told
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for &(key, value) in info {
+            if told.iter().any(|(k, v)| k == key && v == value) {
+                continue;
+            }
+            let msg = Msg::SetInfo {
+                key: key.to_string(),
+                value: value.to_string(),
+            };
+            if self.0.out.send(&msg).is_ok() {
+                told.retain(|(k, _)| k != key);
+                told.push((key.to_string(), value.to_string()));
+            }
+        }
     }
 }
 
@@ -575,6 +600,7 @@ fn connect(
             pixel_width: 0,
             pixel_height: 0,
         }),
+        told: Mutex::new(Vec::new()),
     });
     let (bytes_tx, bytes_rx) = mpsc::sync_channel::<Vec<u8>>(64);
     {

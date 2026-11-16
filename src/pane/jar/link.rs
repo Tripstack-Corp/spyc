@@ -39,6 +39,8 @@ pub(super) struct Link {
     /// The PTY's size as the pane has it: a repaint's size a row off is
     /// never kept here.
     pub size: Mutex<PtySize>,
+    /// What this connection last told the jar it holds (R18), by key.
+    pub told: Mutex<Vec<(String, String)>>,
 }
 
 impl Link {

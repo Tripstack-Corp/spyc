@@ -294,6 +294,13 @@ impl PtyHost {
         self.jar_socket.as_deref()
     }
 
+    /// Tell the program's jar what it holds (R18); nothing without one.
+    pub fn tell_jar(&self, info: &[(&str, &str)]) {
+        if let Some(jar) = &self.jar {
+            jar.tell(info);
+        }
+    }
+
     /// Whether the program was taken back from its jar rather than started.
     pub const fn adopted(&self) -> bool {
         self.adopted

@@ -516,7 +516,9 @@ fn spyc_jars_lists_each_jar_by_its_tab_and_owner() {
     let mut left = Leftovers(Vec::new());
     let spyc = Spyc::start(&dirs, &[]);
     left.0.push(spyc.pid());
-    eventually("the tab's program runs", || !noted(&dirs.pidfile).is_empty());
+    eventually("the tab's program runs", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     left.0.extend(noted(&dirs.pidfile));
     for socket in sockets_under(&dirs.runtime) {
         if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
