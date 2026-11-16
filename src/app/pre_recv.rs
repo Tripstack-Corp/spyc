@@ -197,6 +197,10 @@ impl App {
         if pane_draw {
             ctx.draw.mark(pane_reason);
         }
+        // A tab whose jar ended its lease is taken back (`pane_starts`).
+        if self.retake_lapsed_tabs() {
+            ctx.draw.mark(3);
+        }
 
         // MVU Phase 5: snapshot the active pane's routing flags into the
         // Model, AFTER the drain + `mark_exited` finalized `is_closed` and

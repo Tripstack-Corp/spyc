@@ -567,6 +567,7 @@ fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost>
             place: place.clone(),
             name: "0123456789abcdef".into(),
             adopt: None,
+            retake: false,
         }),
     })
 }
@@ -713,6 +714,7 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
                 place: place.clone(),
                 name: "0123456789abcdef".into(),
                 adopt: None,
+                retake: false,
             }),
         },
         std::sync::Arc::new(|| {}),
@@ -824,6 +826,7 @@ fn pane_in(place: &Place, command: &str, cwd: &Path, adopt: Option<PathBuf>) -> 
                 place: place.clone(),
                 name: TAB.into(),
                 adopt,
+                retake: false,
             }),
         },
         std::sync::Arc::new(|| {}),

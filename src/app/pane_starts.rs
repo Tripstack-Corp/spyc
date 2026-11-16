@@ -6,6 +6,12 @@
 //! pre-recv drain). A jar that never started its program leaves the tab
 //! `[not started]`, why on its screen, and `^a R` starts it again.
 //!
+//! A live tab whose jar ended this spyc's lease, as a spyc stopped past its
+//! jars' deadline finds, is taken back the same way (S2b): it stays labelled
+//! `[detached]` on a stand-in while a worker takes the jar back, and the
+//! pane starts from the jar's snapshot and replay, losing nothing the jar's
+//! ring held.
+//!
 //! What's typed into a starting tab is dropped: nothing runs to read it, and
 //! keys held back would reach a program that has drawn a prompt they weren't
 //! typed for. A tab closed or restarted while it starts takes nothing: the
@@ -24,6 +30,15 @@ pub(super) struct PaneStart {
     /// The tab's id (`TabInfo::id`): a tab restarted meanwhile has a new one.
     tab: String,
     pane: anyhow::Result<Pane>,
+    retake: bool,
+}
+
+/// What a worker does for a tab's jar.
+enum Taking {
+    /// Start one, or take a restored tab's back.
+    Start(Option<Box<SavedTab>>),
+    /// Take back the jar at this socket, which ended the tab's lease.
+    Retake(std::path::PathBuf),
 }
 
 /// What a worker launches a jarred tab's pane from: [`crate::pane::Launch`],
@@ -44,9 +59,19 @@ impl JarredLaunch {
         self,
         tab: &str,
         place: Option<jar::Place>,
-        restoring: Option<&SavedTab>,
+        taking: &Taking,
         wake: crate::pane::PaneWake,
     ) -> anyhow::Result<Pane> {
+        // SPYC-TRAP(jar-off-the-loop): a jar's spec is made only on this
+        // worker; with one, the launch waits on the jar.
+        let spec = match taking {
+            Taking::Start(restoring) => jar::spec_for(place, tab, restoring.as_deref()),
+            Taking::Retake(socket) => Some(
+                jar::spec_for(place, tab, None)
+                    .ok_or_else(|| anyhow::anyhow!("no place for the tab's jar"))?
+                    .retaking(socket.clone()),
+            ),
+        };
         let env: Vec<(&str, &str)> = self
             .extra_env
             .iter()
@@ -60,9 +85,7 @@ impl JarredLaunch {
                 cwd: &self.cwd,
                 context_path: &self.context_path,
                 extra_env: &env,
-                // SPYC-TRAP(jar-off-the-loop): a jar's spec is made only on this
-                // worker; with one, the launch waits on the jar.
-                jar: jar::spec_for(place, tab, restoring),
+                jar: spec,
             },
             wake,
         )
@@ -107,24 +130,84 @@ impl App {
                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                 .collect(),
         };
-        self.start_jarred_pane(owned, tab, restoring, wake)
+        let taking = Taking::Start(restoring.cloned().map(Box::new));
+        self.start_jarred_pane(self.state.active, owned, tab, taking, wake)
+    }
+
+    /// Take back each live tab whose jar ended this spyc's lease (decision
+    /// G): its pane in a stand-in's hands while a worker does. Whether any.
+    pub(crate) fn retake_lapsed_tabs(&mut self) -> bool {
+        let lapsed: Vec<_> = self
+            .runtime
+            .every_tab_set()
+            .flat_map(|(project, tabs)| {
+                tabs.tabs()
+                    .iter()
+                    .filter(|e| e.pane.lease_lapsed())
+                    .filter_map(move |e| {
+                        let socket = e.pane.jar_socket()?.to_path_buf();
+                        Some((
+                            project,
+                            e.info.id.clone(),
+                            e.info.command.clone(),
+                            e.info.cwd.clone(),
+                            socket,
+                            e.pane.host.last_size,
+                        ))
+                    })
+            })
+            .collect();
+        for (project, tab, command, cwd, socket, (rows, cols)) in &lapsed {
+            let launch = JarredLaunch {
+                command: command.clone(),
+                rows: *rows,
+                cols: *cols,
+                cwd: cwd.clone(),
+                context_path: self.view.project().context_path.clone(),
+                extra_env: Vec::new(),
+            };
+            let wake = self.make_pane_wake();
+            let taking = Taking::Retake(socket.clone());
+            let Ok(stand_in) = self.start_jarred_pane(*project, launch, tab, taking, wake) else {
+                continue;
+            };
+            let entry = self
+                .runtime
+                .every_tab_set_mut()
+                .find(|(p, _)| p == project)
+                .and_then(|(_, tabs)| tabs.tabs_mut().iter_mut().find(|e| &e.info.id == tab));
+            if let Some(entry) = entry {
+                let lapsed = std::mem::replace(&mut entry.pane, stand_in);
+                // Its connection is over; ending the pane must signal nothing.
+                lapsed.host.sever_jar();
+                lapsed.shutdown_detached(END_WAIT);
+            }
+        }
+        !lapsed.is_empty()
     }
 
     /// A jarred tab's stand-in pane, its own pane launched on a worker.
     fn start_jarred_pane(
         &self,
+        project: ProjectId,
         launch: JarredLaunch,
         tab: &str,
-        restoring: Option<&SavedTab>,
+        taking: Taking,
         wake: crate::pane::PaneWake,
     ) -> anyhow::Result<Pane> {
         let size = (launch.rows, launch.cols);
-        let socket = restoring.and_then(|s| s.jar_socket.clone());
-        let note = if restoring.is_some() {
-            "Taking this tab's program back from its jar…"
-        } else {
-            "Starting this tab's jar…"
+        let (note, socket) = match &taking {
+            Taking::Start(None) => ("Starting this tab's jar…", None),
+            Taking::Start(Some(saved)) => (
+                "Taking this tab's program back from its jar…",
+                saved.jar_socket.clone(),
+            ),
+            Taking::Retake(socket) => (
+                "Taking this tab's program back from its jar…",
+                Some(socket.clone()),
+            ),
         };
+        let retake = matches!(taking, Taking::Retake(_));
         let stand_in = Pane::standing_in(
             jar::starting(note, socket.as_deref(), size),
             true,
@@ -137,20 +220,24 @@ impl App {
             .runtime
             .pane_starts
             .sender_waking(self.loop_waker(Wake::PaneStart));
-        let project = self.state.active;
         let place = self.runtime.jar_place.clone();
-        let restoring = restoring.cloned();
         let (tab, again) = (tab.to_string(), tab.to_string());
         spawn_worker(
             results,
             move || {
-                let pane = launch.run(&tab, place, restoring.as_ref(), wake);
-                PaneStart { project, tab, pane }
+                let pane = launch.run(&tab, place, &taking, wake);
+                PaneStart {
+                    project,
+                    tab,
+                    pane,
+                    retake,
+                }
             },
             move |panic| PaneStart {
                 project,
                 tab: again,
                 pane: Err(anyhow::anyhow!("the tab's start stopped: {panic}")),
+                retake,
             },
         );
         Ok(stand_in)
@@ -164,11 +251,9 @@ impl App {
         }
         for start in landed {
             if start.project == self.state.active {
-                self.land_pane_start(start.tab, start.pane);
+                self.land_pane_start(start);
             } else if self.state.has_project(start.project) {
-                self.land_in(start.project, |app| {
-                    app.land_pane_start(start.tab, start.pane);
-                });
+                self.land_in(start.project, |app| app.land_pane_start(start));
             } else if let Ok(pane) = start.pane {
                 pane.shutdown_detached(END_WAIT);
             }
@@ -178,7 +263,10 @@ impl App {
 
     /// `pane` in the place of the tab `tab`'s stand-in, or, when it never
     /// started its program, a stand-in saying why.
-    fn land_pane_start(&mut self, tab: String, pane: anyhow::Result<Pane>) {
+    fn land_pane_start(&mut self, start: PaneStart) {
+        let PaneStart {
+            tab, pane, retake, ..
+        } = start;
         let wake = self.make_pane_wake();
         let Some(entry) = self
             .runtime
@@ -199,7 +287,12 @@ impl App {
             Ok(pane) => pane,
             Err(e) => {
                 let why = format!("spyc: {e:#}\n\n^a R starts it again\n");
-                match Pane::standing_in(jar::unstarted(&why, size), false, size, wake) {
+                let lost = if retake {
+                    jar::Lost::Gone
+                } else {
+                    jar::Lost::Unstarted
+                };
+                match Pane::standing_in(jar::ended(&why, lost, size), false, size, wake) {
                     Ok(pane) => pane,
                     Err(e) => {
                         self.state.flash_error(format!("pane: {e:#}"));
