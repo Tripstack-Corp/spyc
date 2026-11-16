@@ -131,6 +131,8 @@ fn run_jar() -> anyhow::Result<()> {
             .create(dir)?;
         private_dir(dir)?;
     }
+    // Before the socket: a jar whose lock is taken is a jar from then on.
+    crate::lock::take(&cfg.socket)?;
     if cfg.socket.exists() {
         if UnixStream::connect(&cfg.socket).is_ok() {
             bail!("a jar is already listening on {}", cfg.socket.display());

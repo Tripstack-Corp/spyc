@@ -67,7 +67,6 @@ fn outliving() -> Vec<&'static str> {
 /// Held while the jar runs; free within a moment of the jar being killed,
 /// though the program it started runs on.
 #[test]
-#[ignore = "red until a jar holds a lock beside its socket for its life"]
 fn a_jar_holds_its_lock_while_it_runs_and_its_program_never_does() {
     let mut jar = Jar::start(&[], &outliving());
     let mut owner = jar.connect(Role::Owner);
@@ -85,7 +84,6 @@ fn a_jar_holds_its_lock_while_it_runs_and_its_program_never_does() {
 /// validation included, and the validators and holders they started don't
 /// keep it once the jar is killed.
 #[test]
-#[ignore = "red until a jar holds a lock beside its socket for its life"]
 fn the_lock_is_held_through_every_upgrade() {
     let (mut jar, mut owner, mut seen) = counting();
     let socket = jar.socket.clone();
@@ -139,7 +137,6 @@ fn the_lock_is_held_through_every_upgrade() {
 /// A cleaner may delete the lock file as it may the socket: the jar makes
 /// it again and holds the new one.
 #[test]
-#[ignore = "red until a jar holds a lock beside its socket for its life"]
 fn a_jar_whose_lock_file_was_deleted_makes_and_holds_it_again() {
     let mut jar = Jar::start(&[], &["/bin/cat"]);
     let _owner = jar.connect(Role::Owner);

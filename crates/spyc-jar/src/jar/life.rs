@@ -28,6 +28,7 @@ pub(super) fn await_first_owner(shared: &Shared, wait: Duration) {
     let st = shared.lock();
     if shared.child_pid() == 0 && st.owner.is_none() {
         let _ = std::fs::remove_file(&shared.cfg.socket);
+        crate::lock::forget(&shared.cfg.socket);
         std::process::exit(0);
     }
 }
@@ -148,6 +149,7 @@ pub(super) fn reap(shared: &Shared) {
                 .is_some_and(|t| t.max(exited).elapsed() >= shared.cfg.linger_after_exit);
             if st.exit_acked || alone_too_long {
                 let _ = std::fs::remove_file(&shared.cfg.socket);
+                crate::lock::forget(&shared.cfg.socket);
                 std::process::exit(0);
             }
         }

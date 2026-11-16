@@ -1062,6 +1062,7 @@ fn a_jar_whose_socket_was_deleted_binds_it_again() {
     let mut jar = Jar::start(&[], &sh("sleep 1000"));
     let owner = jar.connect(Role::Owner);
     std::fs::remove_file(&jar.socket).expect("delete the socket");
+    std::fs::remove_file(spyc_jar::lock::path(&jar.socket)).expect("and its lock file");
     std::fs::remove_dir(jar.socket.parent().expect("its directory")).expect("and its directory");
     let back = (0..50).any(|_| {
         std::thread::sleep(Duration::from_millis(100));
@@ -1074,6 +1075,9 @@ fn a_jar_whose_socket_was_deleted_binds_it_again() {
             .permissions(),
     );
     assert_eq!(mode & 0o777, 0o700, "its directory is private again");
+    eventually("the lock held again", || {
+        spyc_jar::lock::state(&jar.socket) == spyc_jar::lock::LockState::Held
+    });
     let (mut reader, _) =
         Client::connect(&jar.socket, Role::Reader, WAIT, TOKEN).expect("a new connection");
     reader.send(&Msg::Ping { n: 7 }).expect("ping");

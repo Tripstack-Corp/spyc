@@ -201,6 +201,7 @@ in the output.
 | R30a | **The jar records its owner's MCP socket,** and a pane's MCP proxy asks its own jar where to reconnect | v1 | The jar is the one rendezvous that outlives every spyc. A proxy that finds its owner through its jar follows an upgrade, a crash and a project move alike, without being told the new path. It asks as a **lookup**, which needs no token ([threat model](#threat-model)). Built in stage 6 for the MCP proxy and the status hooks: after a project moved, and after a `kill -9` of spyc and `spyc -r`, a Claude tab's spyc tools answered from the new spyc without the agent restarting. | U1, U2, U13 |
 | R31 | A jar describes itself: id, instance, created time, jar version, child PID, overflow mode, linger policy | v1 | `spyc --jars` lists them, and a spyc after a crash finds them. Built in stage 4 as `key`, `value` pairs, so a newer jar adds keys an older spyc can still show; its instance and start time survive an upgrade. | U2, U10 |
 | R32 | A stale socket (its jar gone) is recognized and removed, and a live jar whose socket has gone makes it again | v1 | A crash of the jar itself mustn't leave a path that looks alive. macOS removes what's left untouched in `$TMPDIR` for days, and nothing touches a listening socket's file. Built before the freeze: every two seconds a jar checks that its path is there, and binds a new socket at it, in a `0700` directory, when it isn't. | U2 |
+| R32b | **A lock that tells busy from gone:** a jar holds an `fcntl` lock on `<socket>.lock` for its whole life, and a client reads it without connecting: held, the jar runs; free, it is gone; no file, nothing can be told | v1 | macOS refuses a connection to a full backlog as it does one to a socket nothing listens on, so a jar that wasn't accepting (parked for an upgrade, stopped, starved) looked gone, and spyc deleted its socket and its token, which can't be undone. Built: the lock is taken before the socket is bound and crosses every upgrade's `exec` (old image, part 9); nothing a jar starts holds it; a deleted lock file is made again on the socket's two-second check. | U2 |
 | R32a | **A linger policy per pane:** how long the jar keeps its program running with no owner: until an owner returns, for a set time, or not at all | v1 | With decision B, no owner means a crash. Each pane says whether its program should wait for a new spyc or end with the old one. Built in stage 4: at the end of its linger the program gets `SIGHUP`, as from a closed terminal, then `SIGKILL` two seconds later. A jar with a finite linger gives its first owner, and the successor a release names, ten seconds to connect. | U2 |
 
 ### The jar itself
@@ -758,7 +759,7 @@ Each part of the upgrade is placed by where its code runs (decision L):
 
 | Where it runs | Ships | Parts |
 |---|---|---|
-| **The old image,** the jar being upgraded | In the first release that ships a jar; it can't be added later | 1–8 below |
+| **The old image,** the jar being upgraded | In the first release that ships a jar; it can't be added later | 1–9 below |
 | **The new image,** the binary named in `upgrade` | With whichever release is first an upgrade's target; doesn't gate the first release | preventing, containing, then recovering |
 | **spyc** | Whenever | the store's contents and when spyc asks for an upgrade |
 
@@ -807,6 +808,14 @@ Each part of the upgrade is placed by where its code runs (decision L):
    `0700` and not a link. A jar that isn't running from a store (tests,
    `cargo run`, a state directory that can't execute) has none: it keeps its
    copies, written the same way, in a `0700` directory beside its socket.
+9. **The lock crosses the `exec`.** The descriptor of the jar's lock (R32b)
+   is close-on-exec until the upgrade's `exec`, which it crosses, so the
+   lock is held at every moment of the handover and the new image holds it
+   without knowing which descriptor it is. It is an `fcntl` lock, which
+   belongs to the process: the program, a validator and a holder never hold
+   it, whatever they inherit. A new image never opens the lock file while
+   it holds the lock, since closing any descriptor of the file would let go
+   of it; it makes the file again only once the file is gone.
 
 **The new image,** in this order: **prevent** (the store and the proof line,
 above), **contain** (`catch_unwind` around decoding and starting, a held mode
