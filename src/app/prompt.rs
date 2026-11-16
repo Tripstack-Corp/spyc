@@ -176,6 +176,11 @@ pub enum PromptKind {
     /// other key) requests the abort. Raised from the runaway watchdog
     /// (`settle_lua_runaway`); the worker's hard ceiling is the backstop.
     LuaRunaway,
+    /// Jars are on, and no `spyc-jar` this session can start is usable
+    /// (`app::jarless`): run tabs without jars this session? `y` does, and
+    /// starts again each tab that failed for it; `n` or `Esc` leaves them
+    /// `[not started]`; any other key re-raises it.
+    JarlessFallback,
 }
 
 impl PromptKind {

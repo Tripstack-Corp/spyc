@@ -65,9 +65,9 @@ impl JarredLaunch {
         // SPYC-TRAP(jar-off-the-loop): a jar's spec is made only on this
         // worker; with one, the launch waits on the jar.
         let spec = match taking {
-            Taking::Start(restoring) => jar::spec_for(place, tab, restoring.as_deref()),
+            Taking::Start(restoring) => jar::spec_for(place, tab, restoring.as_deref())?,
             Taking::Retake(socket) => Some(
-                jar::spec_for(place, tab, None)
+                jar::spec_for(place, tab, None)?
                     .ok_or_else(|| anyhow::anyhow!("no place for the tab's jar"))?
                     .retaking(socket.clone()),
             ),

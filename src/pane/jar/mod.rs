@@ -56,6 +56,20 @@ pub use snapshots::{SnapshotSink, Snapshotter};
 use link::{JarChild, JarMaster, JarReader, JarReplies, Link, ReplayGate};
 use place::{SocketState, socket_state};
 
+/// No `spyc-jar` this session can start: none beside spyc, one that can't
+/// run, or another build's. Jars on, a tab fails with it, and spyc offers to
+/// run tabs without jars (`app::jarless`).
+#[derive(Debug)]
+pub struct NoUsableJar(pub String);
+
+impl std::fmt::Display for NoUsableJar {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "no usable spyc-jar: {}", self.0)
+    }
+}
+
+impl std::error::Error for NoUsableJar {}
+
 /// Whether this build reads `[pane] jars`: until jars are on by default, a
 /// release runs every program as before, and only a `-CURRENT` or rc build
 /// may opt in.
@@ -75,14 +89,14 @@ pub fn wanted(
     on: bool,
     tab: &str,
     restoring: Option<&crate::state::sessions::SavedTab>,
-) -> Option<Spec> {
+) -> anyhow::Result<Option<Spec>> {
     if !on || !honoured() {
-        return None;
+        return Ok(None);
     }
-    Place::for_this_user()
+    Ok(Place::for_this_user()
         .inspect_err(|e| eprintln!("spyc: no jar ({e:#}); the tab's program runs without one"))
         .ok()
-        .map(|place| spec_in(place, tab, restoring))
+        .map(|place| spec_in(place, tab, restoring)))
 }
 
 /// [`wanted`] with jars on, for a worker: the store's check of the first jar
@@ -91,9 +105,9 @@ pub fn spec_for(
     place: Option<Place>,
     tab: &str,
     restoring: Option<&crate::state::sessions::SavedTab>,
-) -> Option<Spec> {
+) -> anyhow::Result<Option<Spec>> {
     match place {
-        Some(place) => Some(spec_in(place, tab, restoring)),
+        Some(place) => Ok(Some(spec_in(place, tab, restoring))),
         None => wanted(true, tab, restoring),
     }
 }
