@@ -893,6 +893,7 @@ blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
 
 ## A pane in a jar
 
+<!-- SPYC-TRAP: jar-or-nothing -->
 With `[pane] jars` on, a pane tab's program runs in a `spyc-jar`
 (`src/pane/jar/`), whose socket stands in for the PTY master and the child:
 `PtyHost` drives it through `portable-pty`'s traits, as it drives a local
@@ -901,10 +902,18 @@ own. A `-CURRENT` or rc build
 reads the setting; a release runs every program as before until jars are on
 by default.
 
-- **No tab fails to open for want of a jar** (finding 1). A jar that can't be
-  started, ends before it answers (one that doesn't speak spyc's wire version
-  exits with 75 first), or would sit in a directory others can reach leaves
-  the program to run without one, which spyc's standard error says.
+- **A program runs in its jar or not at all** (the owner's decision of
+  2026-11-15). A jar that can't be started, ends before it answers (one that
+  doesn't speak spyc's wire version exits with 75 first), doesn't answer in
+  time, or would sit in a directory others can reach fails the tab, and the
+  error says which. Running the program another way made a tab that looked
+  like any other and died with spyc, and kept two ways of hosting a pane
+  alive. `jar::spawn` returns a jar or an error, and
+  `with_jars_on_no_path_launches_the_program_outside_its_jar` holds
+  `PtyHost::spawn` to one launch on a PTY of spyc's own: a tab with no jar
+  asked for. A session whose store finds no usable jar at the start still
+  runs its tabs without jars, and says so once: what it should do is not
+  decided.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
   writer thread per connection, which pings whenever it's idle, so a jar that
   stops reading holds up neither the event loop nor the parser.

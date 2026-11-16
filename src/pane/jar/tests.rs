@@ -329,43 +329,84 @@ fn the_resynchronizing_byte_ends_a_sequence_cut_by_a_gap() {
     assert!(screen(&[b'\x1b', b']', b'0', b';', link::RESYNC]).contains("1;2Hafter"));
 }
 
-/// Finding 1: a jar that won't run (one that doesn't speak this wire version
-/// exits with 75) or isn't there leaves the program to run without one.
+/// A tab with jars on, its program a mark that it ran.
+fn spawn_marking(place: &Place, mark: &Path) -> anyhow::Result<PtyHost> {
+    spawn_in(
+        place,
+        &format!("touch {}", mark.display()),
+        mark.parent().unwrap(),
+    )
+}
+
+/// With jars on, a tab's program runs in a jar or not at all: a jar that
+/// won't run (one that doesn't speak this wire version exits with 75) or
+/// isn't there fails the tab, says why, at once, and the program never runs.
 #[test]
-fn a_jar_that_wont_run_leaves_the_program_to_run_without_one() {
+fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
     use std::os::unix::fs::PermissionsExt;
     let dir = short_dir();
     let refusing = dir.path().join("old-spyc-jar");
     std::fs::write(&refusing, "#!/bin/sh\nexit 75\n").unwrap();
     std::fs::set_permissions(&refusing, std::fs::Permissions::from_mode(0o755)).unwrap();
-    for binary in [refusing, dir.path().join("missing")] {
+    for (binary, why) in [
+        (refusing, "doesn't speak wire version"),
+        (dir.path().join("missing"), "didn't start"),
+    ] {
         let place = place_in(dir.path(), binary.clone());
+        let mark = dir.path().join("ran");
         let at = Instant::now();
-        let host = PtyHost::spawn(crate::pane::pty_host::PtySpec {
-            command: "printf ran",
-            rows: 24,
-            cols: 80,
-            cwd: dir.path(),
-            env: &[],
-            term: "dumb",
-            nudge_winch: false,
-            debug_dump: false,
-            exec_replace: false,
-            capture_launch_env: false,
-            jar: Some(Spec {
-                place: place.clone(),
-                name: "0123456789abcdef".into(),
-                adopt: None,
-            }),
-        })
-        .unwrap_or_else(|e| panic!("{}: the tab failed to open: {e:#}", binary.display()));
-        assert!(!host.jarred(), "{}", binary.display());
-        assert_eq!(read_bytes(&host, 3), b"ran");
+        let e = spawn_marking(&place, &mark)
+            .err()
+            .unwrap_or_else(|| panic!("{}: the tab opened without a jar", binary.display()));
+        assert!(
+            format!("{e:#}").contains(why),
+            "{}: {e:#}",
+            binary.display()
+        );
         // A jar that ended is seen at once: never the wait for one to answer.
         assert!(at.elapsed() < ANSWER_WAIT, "waited {:?}", at.elapsed());
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!mark.exists(), "{}: the program ran", binary.display());
         let left: Vec<_> = std::fs::read_dir(&place.tokens).unwrap().collect();
         assert!(left.is_empty(), "a token outlived its jar: {left:?}");
     }
+}
+
+/// Until a tab can open before its jar answers, one whose jar doesn't
+/// answer in time fails, says so, and runs nothing.
+#[test]
+fn a_tab_whose_jar_doesnt_answer_fails_and_says_so() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = short_dir();
+    let silent = dir.path().join("silent-jar");
+    std::fs::write(&silent, "#!/bin/sh\nexec sleep 60\n").unwrap();
+    std::fs::set_permissions(&silent, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let place = place_in(dir.path(), silent);
+    let mark = dir.path().join("ran");
+    let e = spawn_marking(&place, &mark).err().expect("the tab failed");
+    assert!(format!("{e:#}").contains("didn't answer within"), "{e:#}");
+    assert!(!mark.exists(), "the program ran");
+}
+
+/// The rule's one door: the only launch on a PTY of spyc's own is a tab's
+/// with jars off. Fails closed.
+#[test]
+fn with_jars_on_no_path_launches_the_program_outside_its_jar() {
+    let host = crate::guard_support::production_half(include_str!("../pty_host.rs"));
+    let calls: Vec<&str> = host
+        .lines()
+        .filter(|l| l.contains("spawn_native(") && !l.trim_start().starts_with("fn "))
+        .collect();
+    assert_eq!(calls.len(), 1, "spawn_native's callers: {calls:?}");
+    assert!(
+        calls[0].trim_start().starts_with("None => "),
+        "spawn_native only for a tab with no jar asked for: {calls:?}"
+    );
+    let jar = crate::guard_support::production_half(include_str!("mod.rs"));
+    assert!(
+        jar.contains(") -> anyhow::Result<Jarred> {"),
+        "spawn returns a jar or an error, never a request to run the program here"
+    );
 }
 
 /// Finding 14: with no runtime directory or `TMPDIR`, jars live in a

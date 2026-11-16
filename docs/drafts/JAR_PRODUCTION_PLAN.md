@@ -82,8 +82,9 @@ the slices land runs as today.
   pane keeps both snapshot forms (decision I). After a `kill -9` of spyc,
   `spyc -r` adopts the jars and replays what each program printed meanwhile.
   From the review:
-  - a jar that exits with 75 (`--wire` not spoken) leaves the program to run
-    without a jar, never a tab that fails to open (finding 1);
+  - a jar that exits with 75 (`--wire` not spoken), isn't there, or doesn't
+    answer fails the tab, which says why: with jars on, a program runs in a jar
+    or not at all (finding 1; owner's decision 6);
   - a refused adoption marks the tab `[detached]` and starts nothing, where the
     spike started a second copy of the program (7);
   - a snapshot is stored at the jar offset of the last chunk parsed, so a gap
@@ -113,7 +114,11 @@ the slices land runs as today.
 - **The release gate.** The release that turns jars on (S6) ships `spyc-jar`
   in its archives, the Homebrew formula and the apt package, and **carries S3
   too** (finding 13): the format is in the field from the first release that
-  ships a jar, so what consumes R33 is proven before it, not after.
+  ships a jar, so what consumes R33 is proven before it, not after. And jars
+  aren't turned on, even as an opt-in, until a resumed spyc takes its tabs
+  back (S2b; owner's decision 7): a spyc stopped past the owner's deadline
+  otherwise leaves every jarred tab `[detached]` for the session, which is
+  correct by the protocol and not acceptable in use.
 - **Tests,** in the repository, not the spike's harness: a `kill -9` of spyc
   and `spyc -r` adopting a running program, driven through the binary as
   `tests/mcp_proxy.rs` drives it, with a fake agent; the lease taken back and
@@ -346,7 +351,7 @@ spike when version 1 reopened; the rest land here.
 
 | Finding | Where |
 |---|---|
-| 1. Version skew in every direction | the format: built; the fallback when a jar exits with 75: S2a |
+| 1. Version skew in every direction | the format: built; a jar that exits with 75 fails the tab: S2a |
 | 2. `refused` with a reason | built; spyc acts on it: S2a, S2b |
 | 3. The blob through the holder | built |
 | 4. Blocking writes under locks | S1b (the jar), S2a (spyc) |
@@ -408,3 +413,12 @@ and is its own issue.
 5. **The upgrade step reopens version 1** (decided 2026-11-15), sorted by
    where each part's code runs, with the store, and not refrozen until
    "Refreezing" holds (`JAR_PROTOCOL.md`, decisions L and M).
+6. **With jars on, a pane's program runs in a jar or doesn't run** (decided
+   2026-11-15). spyc never launches it another way: a tab that looks like
+   every other and dies with spyc is worse than one that says it failed, and
+   a fallback keeps two ways of hosting a pane alive for good. A jar slow to
+   answer is waited for off the main thread, in a tab that opens at once.
+   Not decided: what a session does when the store finds no usable jar at
+   its start.
+7. **S2b's retake gates turning jars on** (decided 2026-11-15), even as an
+   opt-in: a resumed spyc takes its tabs back first.
