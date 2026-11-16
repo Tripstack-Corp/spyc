@@ -927,6 +927,27 @@ it names (and the token of 16 bytes or more on standard input, which then
 closes); where spyc keeps tokens; and the wording of a description's values
 and of a refusal's text, which are for people to read.
 
+### A jar's time limits
+
+A client that gives up on a jar sooner than the jar can be silent takes a busy
+jar for a gone one: it ends a connection, leaves a tab detached, or fails a
+start. So a version-1 jar publishes the limits a client may rely on, in
+`spyc_jar::limits`, and spyc asserts its own waits against them when it
+compiles:
+
+| Limit | Value | What it bounds |
+|---|---|---|
+| `PARKED_AT_MOST` | 15 s | The longest a jar reads nothing and answers nothing, parked for an upgrade: reaching the park (3 s), the flush (1 s), the parked validation (5 s) and its output (1 s), and the holder's answer (5 s). It is their sum in `upgrade.rs`, so a longer step moves it. Frames queue meanwhile and are read after. |
+| `OWNER_DEADLINE` | 10 s | How long a jar goes without hearing from its owner before it ends the owner's lease, unless `--deadline-ms` says otherwise. An owner pings more often. |
+| The start's hold | as the start says | How long a jar holds its program for a first owner (decision M). A starter waits as long for its answer. |
+
+spyc's waits that take a jar for gone outlast `PARKED_AT_MOST`: the owner
+connection's write stall (20 s) and an adoption's wait for its welcome (20 s).
+It pings every 2 s, inside `OWNER_DEADLINE`. Its shorter waits end in nothing
+that can't be undone: a restart that finds the tab's last jar still running
+after 2 s fails the start, `[not started]`, and `^a R` tries again; shutdown
+waits 2 s for an exit report, then leaves the jar to end its program alone.
+
 ### Fixtures
 
 One frame of each kind, as the spike's test pins them:

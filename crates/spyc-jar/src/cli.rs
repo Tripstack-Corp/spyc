@@ -178,7 +178,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> anyhow::Result<Config> {
         cols: 80,
         ring_cap: 4 << 20,
         window: 1 << 20,
-        deadline: Duration::from_secs(10),
+        deadline: crate::limits::OWNER_DEADLINE,
         linger_after_exit: Duration::from_secs(60),
         linger: None,
         instance: instance(),

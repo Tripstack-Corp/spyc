@@ -98,7 +98,13 @@ the slices land runs as today.
     own timer (4, spyc's side);
   - every jar starts from the store ("The jar binary store", below), never
     from the `spyc-jar` beside spyc, and a pane's jar's start holds its
-    program for its first owner (`JAR_PROTOCOL.md`, decision M).
+    program for its first owner (`JAR_PROTOCOL.md`, decision M);
+  - every wait of spyc's whose end takes a jar for gone outlasts the jar's
+    longest silence, parked for an upgrade (`spyc_jar::limits`,
+    `JAR_PROTOCOL.md` → "A jar's time limits"), checked when spyc compiles;
+    the writer's stall went from 10 s, which cut a parked jar's owner, to
+    20 s (the ownership audit's seventh finding; owner's decision: a guard,
+    not a number).
 - **S2b: losing and retaking the lease.** A spyc stopped past the deadline
   takes its jar back on resuming, or marks the tab `[detached]` when another
   spyc owns it (decision G). A killed jar marks its tab `[jar lost]`. On Linux

@@ -1521,19 +1521,13 @@ fn a_restored_tab_takes_back_a_jar_that_stalls_while_it_attaches() {
     second.shutdown_reporting(END, || {});
 }
 
-/// The longest a jar reads nothing from its owner while parked for an
-/// upgrade: reaching the park, the flush, the parked validation and its
-/// output grace, and the holder's answer (`spyc-jar`'s `upgrade.rs`:
-/// 3 + 1 + 5 + 1 + 5 s).
-const PARKED_AT_MOST: Duration = Duration::from_secs(15);
-
 /// A jar parked for an upgrade reads nothing from its owner for up to
-/// [`PARKED_AT_MOST`]. spyc's writer, holding more than the socket takes
+/// [`spyc_jar::limits::PARKED_AT_MOST`]. spyc's writer, holding more than the socket takes
 /// (typing, a snapshot), waits it out and delivers every byte, rather than
 /// end a connection to a jar that is only busy.
 #[test]
-#[ignore = "red until spyc's owner outwaits a jar parked for an upgrade"]
 fn an_owner_outwaits_a_jar_parked_for_its_longest_upgrade() {
+    use spyc_jar::limits::PARKED_AT_MOST;
     let dir = short_dir();
     let socket = dir.path().join("parked.sock");
     let listener = UnixListener::bind(&socket).unwrap();
@@ -1602,4 +1596,84 @@ fn tabs_made_together_have_sockets_of_their_own() {
         .map(|_| place.socket(&crate::pane::tabs::TabInfo::new("zsh", "/").id))
         .collect();
     assert_eq!(sockets.len(), 1000, "tabs made together shared a socket");
+}
+
+/// SPYC-TRAP `jar-outwait`: every time constant in spyc's jar code is either
+/// a wait asserted to outlast a parked jar, or here with the reason it may
+/// be shorter. A new one fails this until it is one or the other.
+#[test]
+fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
+    const OUTWAITS: [&str; 2] = ["ADOPT_WAIT", "WRITE_STALL"];
+    const SHORTER: [(&str, &str); 10] = [
+        (
+            "PING_EVERY",
+            "how often spyc speaks: asserted inside the jar's deadline",
+        ),
+        (
+            "HOLD",
+            "the jar's own hold, which spyc's answer waits out (decision M)",
+        ),
+        (
+            "ENDING_WAIT",
+            "a restart's wait for the last jar to end: running out fails the start, \
+             `[not started]`, nothing lost, and `^a R` tries again",
+        ),
+        (
+            "EXIT_WAIT",
+            "shutdown's wait for an exit report: running out leaves the jar to end \
+             its program alone, and quitting doesn't hang",
+        ),
+        ("REPLY_GRACE", "the engine's parser, not a wait on a jar"),
+        ("QUIET", "when a snapshot is taken, not a wait"),
+        ("WHILE_FLOWING", "when a snapshot is taken, not a wait"),
+        ("UNTOUCHED", "the store's sweep age, not a wait"),
+        (
+            "SWEEP_AFTER",
+            "how young a socket is left unjudged; its lock judges it, not a wait",
+        ),
+        (
+            "BUILD_INFO_WAIT",
+            "a store binary's `build-info`, not a jar",
+        ),
+    ];
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pane/jar");
+    let mut found = std::collections::BTreeSet::new();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|x| x != "rs") || path.ends_with("tests.rs") {
+            continue;
+        }
+        let src = crate::guard_support::production_half(&std::fs::read_to_string(&path).unwrap());
+        for line in src.lines() {
+            let Some((head, rest)) = line.split_once(": ") else {
+                continue;
+            };
+            if let Some(name) = head.trim_start().split("const ").nth(1)
+                && rest.contains("Duration =")
+            {
+                found.insert(name.to_string());
+            }
+        }
+    }
+    assert!(
+        found.contains("WRITE_STALL"),
+        "premise: the scan finds waits"
+    );
+    let listed: std::collections::BTreeSet<String> = OUTWAITS
+        .iter()
+        .copied()
+        .chain(SHORTER.iter().map(|(n, _)| *n))
+        .map(String::from)
+        .collect();
+    assert_eq!(
+        found, listed,
+        "a time constant in src/pane/jar outlasts a parked jar, or says why it needn't"
+    );
+    let asserted = std::fs::read_to_string(dir.join("mod.rs")).unwrap();
+    for name in OUTWAITS {
+        assert!(
+            asserted.contains(&format!("assert!(outwaits_a_parked_jar({name}))")),
+            "{name} is asserted to outlast a parked jar"
+        );
+    }
 }
