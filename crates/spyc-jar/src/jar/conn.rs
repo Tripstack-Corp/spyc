@@ -83,8 +83,18 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             continue;
         }
         // Silence between frames is timed by `last_heard`; a frame that
-        // has begun arrives whole by its deadline.
-        let msg = match proto::read_msg(&mut By::frame(&conn.sock)) {
+        // has begun arrives whole by its deadline, which for the owner is its
+        // lease's: one paused mid-frame is waited for as long as a silent one
+        // (R21), and holds off an upgrade meanwhile, which is busy.
+        let mut frame = if owner {
+            By {
+                sock: &conn.sock,
+                until: Instant::now() + shared.cfg.deadline,
+            }
+        } else {
+            By::frame(&conn.sock)
+        };
+        let msg = match proto::read_msg(&mut frame) {
             Ok(Some(m)) => m,
             Ok(None) => continue,
             Err(proto::ReadError::UnknownCritical(kind)) => {
@@ -324,11 +334,11 @@ pub const MIN_TOKEN: usize = 16;
 /// Stream the log to one connection from its cursor, after whatever waits in
 /// its outbox, then the exit once everything before it has gone out.
 ///
-/// A write that makes no progress for the jar's deadline ends the
-/// connection, and the cursor moves only after its bytes have gone, so a
-/// parked writer's cursor is exactly what was sent.
+/// The cursor moves only after its bytes have gone, so a parked writer's
+/// cursor is exactly what was sent.
 fn stream_log(shared: &Shared, id: u64, conn: &Conn) {
-    let _ = conn.sock.set_write_timeout(Some(shared.cfg.deadline));
+    // Short, so a stalled write sees its connection close.
+    let _ = conn.sock.set_write_timeout(Some(TICK));
     loop {
         let Some((queued, batch)) = next_batch(shared, id, conn) else {
             return;
@@ -339,7 +349,7 @@ fn stream_log(shared: &Shared, id: u64, conn: &Conn) {
                 bytes.extend(proto::encode(f));
             }
         }
-        if (&*conn.sock).write_all(&bytes).is_err() {
+        if !send_all(shared, conn, &bytes) {
             conn.close();
             return;
         }
@@ -354,6 +364,42 @@ fn stream_log(shared: &Shared, id: u64, conn: &Conn) {
             *c = Some(next);
         }
     }
+}
+
+/// Write `bytes` whole, or say the connection is over. A reader that takes
+/// nothing for the jar's deadline is closed. The owner is only ever waited
+/// for: its lease ends when its connection drops or it falls silent past the
+/// deadline (R21), which its reader enforces, never because it is slow to
+/// read, and the window bounds what waits for it meanwhile.
+fn send_all(shared: &Shared, conn: &Conn, bytes: &[u8]) -> bool {
+    let mut sent = 0;
+    let mut progress = Instant::now();
+    while sent < bytes.len() {
+        if conn.closed.load(Ordering::SeqCst) {
+            return false;
+        }
+        match (&*conn.sock).write(&bytes[sent..]) {
+            Ok(0) => return false,
+            Ok(n) => {
+                sent += n;
+                progress = Instant::now();
+            }
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                if conn.role != Role::Owner && progress.elapsed() >= shared.cfg.deadline {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+    true
 }
 
 /// Frames for the connection's next write, and where its cursor stands after

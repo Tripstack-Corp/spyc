@@ -42,7 +42,6 @@ fn a_jar_holding_its_program_for_a_first_owner_waits_idle_past_the_grace() {
 /// (its spyc's pane is busy) keeps the lease, its program paced meanwhile,
 /// and reads on with nothing lost.
 #[test]
-#[ignore = "red until a stalled write to a live owner keeps its lease"]
 fn an_owner_that_pings_keeps_its_lease_while_it_stops_reading() {
     let deadline = Duration::from_millis(1000);
     let mut jar = Jar::start(
@@ -93,7 +92,6 @@ fn an_owner_that_pings_keeps_its_lease_while_it_stops_reading() {
 /// spyc stopped or starved) is waited for as long as its liveness deadline,
 /// not cut sooner by the frame deadline that bounds a tokenless trickle.
 #[test]
-#[ignore = "red until an owner's frame is timed by its liveness deadline"]
 fn an_owner_paused_mid_frame_inside_its_deadline_keeps_its_lease() {
     let mut jar = Jar::start(&["--deadline-ms", "10000"], &["/bin/cat"]);
     let mut owner = jar.connect(Role::Owner);
@@ -151,4 +149,48 @@ fn a_jar_sits_idle_in_every_idle_state() {
         let spent = cpu_seconds(jar.process.id()) - at;
         assert!(spent < 0.5, "a jar {state} spent {spent} s of CPU in 12 s");
     }
+}
+
+/// An owner paused mid-frame keeps the jar's reader from a safe point, so an
+/// upgrade asked meanwhile is busy (reason 5), never cut short or failed; once
+/// the frame is whole, the next upgrade goes through.
+#[test]
+fn an_owner_paused_mid_frame_makes_an_upgrade_busy() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let frame = proto::encode(&Msg::Input {
+        bytes: b"whole-at-last\n".to_vec(),
+    });
+    let (first, rest) = frame.split_at(frame.len() / 2);
+    owner.send_raw(first).expect("the frame's first half");
+    let mut reader = jar.connect(Role::Reader);
+    let next = next_binary(jar.dir.path());
+    let ask = |reader: &mut spyc_jar::client::Client| {
+        reader
+            .send(&Msg::Upgrade {
+                binary: next.display().to_string(),
+            })
+            .expect("upgrade");
+        recv_matching(reader, |m| {
+            matches!(m, Msg::Refused { .. } | Msg::Upgraded { .. })
+        })
+    };
+    let answer = ask(&mut reader);
+    assert!(
+        matches!(
+            &answer,
+            Msg::Refused { reason, why }
+                if *reason == spyc_jar::proto::reason::UPGRADE_BUSY && why.contains("safe point")
+        ),
+        "an owner mid-frame makes the upgrade busy, its reader short of a safe point: {answer:?}"
+    );
+    owner.send_raw(rest).expect("the rest of the frame");
+    let seen = read_until(&mut owner, true, |s| s.contains("whole-at-last"));
+    assert!(seen.contains("whole-at-last"), "the owner's lease held");
+    let answer = ask(&mut reader);
+    assert!(
+        matches!(answer, Msg::Upgraded { .. }),
+        "with the frame whole, the upgrade goes through: {answer:?}"
+    );
 }
