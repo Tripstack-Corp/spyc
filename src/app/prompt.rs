@@ -190,7 +190,7 @@ impl PromptKind {
     pub const fn draws_as_popup(&self) -> bool {
         matches!(
             self,
-            Self::HookConsent { .. } | Self::ProjectTabsConsent { .. }
+            Self::HookConsent { .. } | Self::ProjectTabsConsent { .. } | Self::JarlessFallback
         )
     }
 

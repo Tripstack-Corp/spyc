@@ -284,7 +284,7 @@ pub struct PaneConfig {
     /// When true, a pane tab's program runs in a `spyc-jar`, which holds its
     /// PTY and outlives spyc (#1099). Honoured only on a `-CURRENT` or rc
     /// build ([`crate::pane::jar::honoured`]); only the user's own files
-    /// decide. Default false.
+    /// decide, else [`crate::pane::jar::BY_DEFAULT`]. False: no jars.
     pub jars: bool,
     /// Home-configured opt-in strip below the active Codex pane.
     pub agent_hud: AgentHudMode,
@@ -343,7 +343,7 @@ impl Default for PaneConfig {
             preview_pasted_images: true,
             claude_esc_guard: true,
             ctrl_w_prefix: true,
-            jars: false,
+            jars: crate::pane::jar::BY_DEFAULT,
             agent_hud: AgentHudMode::Off,
             agent_hud_resets: AgentHudResets::Clock,
             tabs: Vec::new(),
@@ -2153,20 +2153,24 @@ dir = "#222222"
     }
 
     #[test]
-    fn jars_are_off_by_default_and_only_your_own_file_turns_them_on() {
+    fn only_your_own_file_decides_whether_tabs_run_in_jars() {
+        assert_eq!(Config::default().pane.jars, crate::pane::jar::BY_DEFAULT);
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join("home.toml");
         let project = dir.path().join("project.toml");
-        assert!(!Config::default().pane.jars);
+        let jars = |home: Option<&std::path::Path>| {
+            Config::load_layered(home, &project).unwrap().pane.jars
+        };
         std::fs::write(&project, "[pane]\njars = true\n").unwrap();
-        assert!(!Config::load_layered(None, &project).unwrap().pane.jars);
+        assert_eq!(
+            jars(None),
+            crate::pane::jar::BY_DEFAULT,
+            "a project's file can't"
+        );
+        std::fs::write(&home, "[pane]\njars = false\n").unwrap();
+        assert!(!jars(Some(&home)), "yours turns them off");
         std::fs::write(&home, "[pane]\njars = true\n").unwrap();
         std::fs::write(&project, "[pane]\njars = false\n").unwrap();
-        assert!(
-            Config::load_layered(Some(&home), &project)
-                .unwrap()
-                .pane
-                .jars
-        );
+        assert!(jars(Some(&home)), "and on");
     }
 }

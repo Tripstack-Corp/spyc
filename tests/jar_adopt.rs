@@ -478,7 +478,9 @@ fn a_spyc_with_no_spyc_jar_beside_it_offers_to_run_tabs_without_jars() {
     assert!(spyc.shows("installation"), "says to check the installation");
     assert!(!dirs.pidfile.exists(), "a program ran before the answer");
     spyc.type_keys(b"y");
-    eventually("the tab's program runs", || !noted(&dirs.pidfile).is_empty());
+    eventually("the tab's program runs", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     left.0.extend(noted(&dirs.pidfile));
     assert!(
         sockets_under(&dirs.runtime.join("spyc").join("jars")).is_empty(),

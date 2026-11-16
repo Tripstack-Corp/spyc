@@ -229,6 +229,12 @@ impl App {
         // `handle_restore_resumes`).
         self.handle_restore_resumes(now_pre, ctx);
 
+        // A tab with no usable jar, its offer held while another prompt was
+        // open (`app::jarless`).
+        if self.offer_jarless() {
+            ctx.draw.mark(3);
+        }
+
         // Drain buffered FsEvents + run the trailing-debounce listing
         // refresh (see `ingest_fs_and_maybe_refresh`).
         if self.ingest_fs_and_maybe_refresh(now_pre, ctx) {

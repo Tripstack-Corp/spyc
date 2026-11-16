@@ -31,10 +31,12 @@ use spyc_jar::store::{ENTRY_FILE, MARKER};
 pub enum Binary {
     /// An entry of the store, checked.
     Entry(PathBuf),
-    /// The `spyc-jar` beside spyc: the store's copy couldn't run (a state
-    /// directory mounted `noexec`, say).
+    /// The `spyc-jar` beside spyc, which runs as this build: the store
+    /// couldn't hold a copy that runs (a state directory mounted `noexec`,
+    /// say).
     Beside(PathBuf, String),
-    /// No jars this session: the `spyc-jar` beside spyc isn't this build's.
+    /// No usable jar this session: the `spyc-jar` beside spyc is missing,
+    /// can't run, or isn't this build's.
     None(String),
 }
 
@@ -43,6 +45,13 @@ pub enum Binary {
 pub struct Build<'a> {
     pub commit: &'a str,
     pub built: &'a str,
+}
+
+impl Build<'_> {
+    /// Whether `build-info` said this build: its commit, then its time.
+    fn said_by(&self, (commit, built): &(String, String)) -> bool {
+        commit == self.commit && built == self.built
+    }
 }
 
 /// This spyc's build.
@@ -57,25 +66,40 @@ pub const UNTOUCHED: Duration = Duration::from_hours(24);
 const BUILD_INFO_WAIT: Duration = Duration::from_secs(10);
 
 /// Copy `source` into the store at `root`, check it, and say what jars start
-/// from: the entry, or `source` when the entry can't run, or nothing when
-/// `source` isn't `build`'s.
+/// from: the entry, or `source` when the store can't hold a copy that runs,
+/// or nothing when `source` is missing, can't run or isn't `build`'s.
 pub fn install(root: &Path, source: &Path, build: Build) -> Binary {
     let entry = match put(root, source) {
         Ok(entry) => entry,
-        Err(e) => return Binary::Beside(source.to_path_buf(), format!("{e:#}")),
+        Err(e) => return beside(source, build, format!("{e:#}")),
     };
     match build_info(&entry) {
-        Ok((commit, built)) if commit == build.commit && built == build.built => {
-            Binary::Entry(entry)
-        }
-        Ok((commit, built)) => Binary::None(format!(
-            "{} is another build ({commit} {built}, not {} {}): was spyc upgraded while it started?",
-            source.display(),
-            build.commit,
-            build.built
-        )),
-        Err(e) => Binary::Beside(source.to_path_buf(), format!("{e:#}")),
+        Ok(said) if build.said_by(&said) => Binary::Entry(entry),
+        Ok(said) => Binary::None(another_build(source, &said, build)),
+        Err(e) => beside(source, build, format!("{e:#}")),
     }
+}
+
+/// `source` itself, when the store has no copy that runs (`why`): only if it
+/// runs as `build`.
+fn beside(source: &Path, build: Build, why: String) -> Binary {
+    if !source.is_file() {
+        return Binary::None(format!("there is no {}", source.display()));
+    }
+    match build_info(source) {
+        Ok(said) if build.said_by(&said) => Binary::Beside(source.to_path_buf(), why),
+        Ok(said) => Binary::None(another_build(source, &said, build)),
+        Err(e) => Binary::None(format!("{} can't run ({e:#})", source.display())),
+    }
+}
+
+fn another_build(source: &Path, (commit, built): &(String, String), build: Build) -> String {
+    format!(
+        "{} is another build ({commit} {built}, not {} {}): was spyc upgraded while it started?",
+        source.display(),
+        build.commit,
+        build.built
+    )
 }
 
 /// The store's entry for `source`, written whole if it isn't there yet.
@@ -309,7 +333,7 @@ pub fn start(root: PathBuf, source: PathBuf, sockets: PathBuf) {
                     "spyc: jars start from {} this session; the store's copy can't run ({why})",
                     at.display()
                 ),
-                Binary::None(why) => eprintln!("spyc: no jars this session: {why}"),
+                Binary::None(why) => eprintln!("spyc: no usable spyc-jar this session: {why}"),
             }
             let ours = match &binary {
                 Binary::Entry(e) => e.clone(),

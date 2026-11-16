@@ -407,7 +407,7 @@ fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
             binary.display()
         );
         assert!(
-            e.chain().any(|c| c.is::<NoUsableJar>()),
+            no_usable_jar(&e).is_some(),
             "{}: said as no usable jar, which offers jarless tabs: {e:#}",
             binary.display()
         );
@@ -567,6 +567,13 @@ fn only_a_current_or_rc_build_reads_the_setting() {
     assert!(honoured_by("3.0.0-rc.1"));
     assert!(!honoured_by("2.5.0"));
     assert!(wanted(false, "0123", None).unwrap().is_none(), "off is off");
+}
+
+#[test]
+fn jars_are_on_by_default_but_never_for_a_unit_test() {
+    assert!(by_default(false), "a spyc runs tabs in jars unasked");
+    assert!(!by_default(true), "a unit test's tabs start no jar");
+    const { assert!(!BY_DEFAULT) };
 }
 
 /// A binary snapshot says which build made it; another build's, or one

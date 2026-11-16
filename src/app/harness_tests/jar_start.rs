@@ -572,3 +572,21 @@ fn with_no_usable_jar_declined_tabs_stay_not_started_and_it_asks_once() {
         assert!(!ran.exists(), "no program ran");
     });
 }
+
+/// A tab with no usable jar while another prompt is open waits for it to
+/// close: the offer comes once nothing else is asked, never over it.
+#[test]
+fn with_no_usable_jar_the_offer_waits_for_an_open_prompt() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let missing = dir.path().join("missing").join("spyc-jar");
+        let mut app = jar_app(dir.path(), missing, crate::pane::jar::place::HOLD);
+        assert!(app.open_pane_tab_in("cat", dir.path()));
+        app.state.mode = Mode::Prompting(Prompt::shell(PromptKind::Command, ":"));
+        land(&mut app);
+        assert!(!offering(&app), "the open prompt keeps its keys");
+        app.state.mode = Mode::Normal;
+        assert!(app.offer_jarless(), "the loop's next pass offers");
+        assert!(offering(&app));
+    });
+}
