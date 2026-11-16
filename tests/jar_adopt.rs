@@ -144,6 +144,11 @@ struct Dirs {
 }
 
 fn dirs() -> Dirs {
+    dirs_running("printf ready-mark; exec cat")
+}
+
+/// Directories for a spyc whose one tab notes its pid, then runs `rest`.
+fn dirs_running(rest: &str) -> Dirs {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::Builder::new()
         .prefix("ja")
@@ -167,7 +172,7 @@ fn dirs() -> Dirs {
     std::fs::write(
         d.home.join(".spycrc.toml"),
         format!(
-            "[pane]\njars = true\ntabs = [\"sh -c 'echo $$ > {}; printf ready-mark; exec cat'\"]\n",
+            "[pane]\njars = true\ntabs = [\"sh -c 'echo $$ > {}; {rest}'\"]\n",
             d.pidfile.display()
         ),
     )
@@ -300,4 +305,82 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
         !second.shows("/resume"),
         "a restore typed /resume into the running agent"
     );
+}
+
+/// S2b: a spyc stopped past its jars' deadline loses their leases; resumed, it
+/// takes its tabs back, the same program, and what it printed meanwhile shows,
+/// since it fit the jar's ring.
+#[test]
+fn a_spyc_stopped_past_the_deadline_takes_its_tabs_back() {
+    let go = std::env::temp_dir().join(format!("jar-go-{}", std::process::id()));
+    let dirs = dirs_running(&format!(
+        "printf ready-mark; while [ ! -e {} ]; do sleep 0.1; done; printf while-stopped-mark; exec cat",
+        go.display()
+    ));
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start(&dirs, &[]);
+    left.0.push(spyc.pid());
+    eventually("the tab's program starts", || dirs.pidfile.exists());
+    let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    left.0.push(agent);
+    eventually("the tab's output shows", || spyc.shows("ready-mark"));
+    let mut socket = None;
+    eventually("the session records the tab's jar", || {
+        socket = saved_jar_socket(&dirs.state);
+        socket.is_some()
+    });
+    let socket = socket.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    eventually("spyc owns the jar", || {
+        described(&socket, "owner_pid") == Some(spyc.pid().to_string())
+    });
+
+    let pid = rustix::process::Pid::from_raw(spyc.pid()).unwrap();
+    rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+    eventually("the jar ends a stopped spyc's lease", || {
+        described(&socket, "owner").is_some_and(|o| o.starts_with("none"))
+    });
+    let before = printed(&socket);
+    std::fs::write(&go, "").unwrap();
+    eventually("the program prints while spyc is stopped", || {
+        printed(&socket) > before
+    });
+    assert!(
+        !spyc.shows("while-stopped-mark"),
+        "premise: spyc was stopped"
+    );
+    rustix::process::kill_process(pid, rustix::process::Signal::CONT).unwrap();
+
+    eventually("the resumed spyc owns the jar again", || {
+        described(&socket, "owner_pid") == Some(spyc.pid().to_string())
+    });
+    eventually("what it printed meanwhile shows", || {
+        spyc.shows("while-stopped-mark")
+    });
+    let _ = std::fs::remove_file(&go);
+    assert!(alive(agent), "the program was ended");
+    let now: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(now, agent, "the program was started again");
+}
+
+/// How many bytes the jar at `socket` says its program printed.
+fn printed(socket: &Path) -> usize {
+    described(socket, "log")
+        .and_then(|l| {
+            l.split(" printed")
+                .next()
+                .and_then(|s| s.rsplit(' ').next())
+                .and_then(|n| n.parse().ok())
+        })
+        .unwrap_or(0)
 }

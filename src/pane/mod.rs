@@ -350,6 +350,20 @@ impl Pane {
         !self.starting && self.host.detached()
     }
 
+    /// Whether the program's jar ended this spyc's lease while it ran (decision
+    /// G), as it does a spyc stopped past its deadline: the jar holds the
+    /// program still, for this spyc to take back.
+    pub fn lease_lapsed(&self) -> bool {
+        self.host.jarred()
+            && self.host.closed
+            && self
+                .host
+                .exit_status
+                .as_ref()
+                .and_then(portable_pty::ExitStatus::signal)
+                == Some(jar::Lost::Held.label())
+    }
+
     /// Whether this is a stand-in for a tab whose jar is starting or being
     /// taken back: nothing runs here yet, and what's typed is dropped.
     pub const fn starting(&self) -> bool {

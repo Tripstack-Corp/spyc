@@ -373,3 +373,127 @@ fn a_restored_tab_whose_jar_is_stopped_is_taken_back_once_it_answers() {
         end(&mut app);
     });
 }
+
+/// Open a jarred tab running `cat` that notes its pid in `dir/pid`, landed;
+/// its program's pid.
+fn live_tab(app: &mut App, dir: &Path) -> i32 {
+    let pid = dir.join("pid");
+    let program = format!("sh -c 'echo $$ > {}; exec cat'", pid.display());
+    assert!(app.open_pane_tab_in(&program, dir));
+    land(app);
+    eventually("its program noted its pid", || {
+        std::fs::read_to_string(&pid).is_ok_and(|p| p.ends_with('\n'))
+    });
+    std::fs::read_to_string(&pid)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+/// End the tab's connection as its jar does a lapsed lease, and wait until
+/// spyc sees it.
+fn lapse(app: &mut App) {
+    tabs(app).active().host.sever_jar();
+    eventually("the tab's lease lapsed", || {
+        app.drain_pane_output();
+        tabs(app).active().lease_lapsed()
+    });
+}
+
+/// S2b at the tab: a tab whose jar ended its lease (as a spyc stopped past
+/// the deadline finds) is taken back, the same program, what it printed
+/// before still shown, and typing reaches it.
+#[test]
+fn a_tab_whose_jar_ended_its_lease_is_taken_back() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let program = live_tab(&mut app, dir.path());
+        type_into(&mut app, b"before\r");
+        shows(&mut app, "before");
+        lapse(&mut app);
+        assert!(app.retake_lapsed_tabs(), "the tab is taken back");
+        assert!(
+            tabs(&mut app).active().starting(),
+            "on a stand-in meanwhile"
+        );
+        land(&mut app);
+        assert!(tabs(&mut app).active().adopted(), "its jar was taken back");
+        assert_eq!(
+            tabs(&mut app).active().process_id(),
+            u32::try_from(program).ok(),
+            "the same program"
+        );
+        shows(&mut app, "before");
+        type_into(&mut app, b"after\r");
+        shows(&mut app, "after");
+        assert!(!app.retake_lapsed_tabs(), "taken back once");
+        end(&mut app);
+    });
+}
+
+/// A tab left detached because its jar answers to another spyc has no lease
+/// of this spyc's to lapse: it's never taken back, so it can't loop.
+#[test]
+fn a_detached_tab_is_not_taken_back() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = App::test_app(dir.path().to_path_buf());
+        let wake = app.make_pane_wake();
+        let mut pane = crate::pane::Pane::standing_in(
+            crate::pane::jar::ended("", crate::pane::jar::Lost::Held, (24, 80)),
+            false,
+            (24, 80),
+            wake,
+        )
+        .unwrap();
+        eventually("the detached tab ended", || {
+            pane.drain_output();
+            pane.is_closed()
+        });
+        pane.try_harvest_exit_status();
+        assert!(!pane.lease_lapsed());
+    });
+}
+
+/// A tab whose jar is gone by the time it's taken back ends `[jar lost]`,
+/// its program never started afresh.
+#[test]
+fn a_tab_whose_jar_is_gone_when_taken_back_ends_jar_lost() {
+    use rustix::process::{Pid, Signal, kill_process};
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let program = live_tab(&mut app, dir.path());
+        let socket = tabs(&mut app).active().jar_socket().unwrap().to_path_buf();
+        let jar: i32 = spyc_jar::client::describe(&socket)
+            .unwrap()
+            .into_iter()
+            .find(|(k, _)| k == "pid")
+            .map(|(_, v)| v.parse().unwrap())
+            .unwrap();
+        lapse(&mut app);
+        kill_process(Pid::from_raw(program).unwrap(), Signal::KILL).unwrap();
+        kill_process(Pid::from_raw(jar).unwrap(), Signal::KILL).unwrap();
+        eventually("the jar's lock is free", || {
+            spyc_jar::lock::state(&socket) != spyc_jar::lock::LockState::Held
+        });
+        assert!(app.retake_lapsed_tabs());
+        land(&mut app);
+        shows(&mut app, "gone");
+        eventually("the tab ended", || {
+            app.drain_pane_output();
+            tabs(&mut app).mark_exited();
+            tabs(&mut app).active_info().label.ends_with("[jar lost]")
+        });
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("pid"))
+                .unwrap()
+                .lines()
+                .count(),
+            1,
+            "the program wasn't started afresh"
+        );
+    });
+}

@@ -100,6 +100,7 @@ fn spec_in(place: Place, tab: &str, restoring: Option<&crate::state::sessions::S
         place,
         name: tab.to_string(),
         adopt: None,
+        retake: false,
     };
     match restoring {
         Some(saved) => spec.restoring(saved.jar_socket.clone()),
@@ -117,6 +118,9 @@ pub struct Spec {
     /// A restored tab's: the socket its jar was at, whose jar, still running,
     /// it takes back rather than start its program again.
     pub adopt: Option<PathBuf>,
+    /// A live tab's whose jar ended its lease: its jar is taken back, or the
+    /// tab ends, its program never started afresh.
+    pub retake: bool,
 }
 
 impl Spec {
@@ -125,6 +129,14 @@ impl Spec {
     #[must_use]
     pub fn restoring(mut self, saved: Option<PathBuf>) -> Self {
         self.adopt = Some(saved.unwrap_or_else(|| self.place.socket(&self.name)));
+        self
+    }
+
+    /// This spec for a live tab whose jar at `socket` ended its lease.
+    #[must_use]
+    pub fn retaking(mut self, socket: PathBuf) -> Self {
+        self.adopt = Some(socket);
+        self.retake = true;
         self
     }
 }
@@ -159,10 +171,10 @@ pub fn starting(note: &str, socket: Option<&Path>, size: (u16, u16)) -> Jarred {
     link::stand_in(as_screen(note).as_bytes(), socket, None, size)
 }
 
-/// A tab whose jar never started its program: `why` on its screen, the tab
-/// ended `[not started]`.
-pub fn unstarted(why: &str, size: (u16, u16)) -> Jarred {
-    link::stand_in(as_screen(why).as_bytes(), None, Some(Lost::Unstarted), size)
+/// A tab with no program here: `why` on its screen, the tab ended as `lost`
+/// labels it.
+pub fn ended(why: &str, lost: Lost, size: (u16, u16)) -> Jarred {
+    link::stand_in(as_screen(why).as_bytes(), None, Some(lost), size)
 }
 
 /// `text`'s lines as a terminal shows them.
@@ -180,7 +192,6 @@ impl Signals {
     }
 
     /// End the connection as a crash would, signalling nothing.
-    #[cfg(test)]
     pub fn sever(&self) {
         self.0.out.close();
     }
@@ -232,6 +243,9 @@ pub fn spawn(
         && socket_state(at) == SocketState::Live
     {
         return adopt(place, at, (rows, cols));
+    }
+    if spec.retake {
+        anyhow::bail!("this tab's jar has gone, and its program with it");
     }
     let socket = place.socket(&spec.name);
     match ended_within(&socket, ENDING_WAIT) {

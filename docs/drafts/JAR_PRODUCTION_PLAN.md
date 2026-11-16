@@ -106,7 +106,10 @@ the slices land runs as today.
   wake the loop. The repaint after a gap holds the size a row off until
   output arrives or about 100 ms pass, then restores it: sent back to back,
   the two sizes reached a Node program on macOS in none of 40 trials
-  (finding 9), and the fix is shown on macOS before it lands.
+  (finding 9), and the fix is shown on macOS before it lands. Built: the
+  retake (`app::pane_starts`), which takes a tab whose jar ended its lease
+  back on a worker, the same program, from the jar's snapshot and replay,
+  and wakes the loop when a reader ends. Not built: the repaint after a gap.
 - **S2c: tasks, captures and orphans.** A demoted pane keeps its jar, its
   owner rewriting `is` to `task`; a capture lingers a minute. `spyc --jars`
   lists jars by label (R18). A spyc that starts and finds jars no spyc owns
@@ -118,7 +121,8 @@ the slices land runs as today.
   aren't turned on, even as an opt-in, until a resumed spyc takes its tabs
   back (S2b; owner's decision 7): a spyc stopped past the owner's deadline
   otherwise leaves every jarred tab `[detached]` for the session, which is
-  correct by the protocol and not acceptable in use.
+  correct by the protocol and not acceptable in use. The retake is built,
+  tested end to end by `a_spyc_stopped_past_the_deadline_takes_its_tabs_back`.
 - **Tests,** in the repository, not the spike's harness: a `kill -9` of spyc
   and `spyc -r` adopting a running program, driven through the binary as
   `tests/mcp_proxy.rs` drives it, with a fake agent; the lease taken back and

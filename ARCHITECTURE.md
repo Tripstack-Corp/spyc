@@ -979,6 +979,19 @@ that.
 - **A restore's `/resume` waits for the pane.** Whether the program was taken
   back is known only when the pane lands: one taken back, or left to another
   spyc, gets none; one started afresh gets it once its banner settles.
+- **A tab whose jar ended its lease is taken back** (S2b, decision G). A spyc
+  stopped past the jar's deadline finds its connection ended with the jar
+  still holding the program; the tab stays `[detached]` on a stand-in while
+  the same worker takes the jar back, and the pane starts from the jar's
+  snapshot and replay, losing nothing the ring held. Only a tab whose own
+  link lapsed is retaken (`Pane::lease_lapsed`): one detached because another
+  spyc owns its jar has no link, so it never loops. A retake never starts the
+  program afresh: a jar gone by then ends the tab `[jar lost]`, and the lapsed
+  pane's link is severed before it's ended, so ending it signals nothing.
+- **A wake made before the loop runs reaches it once it does.** `[pane] tabs`
+  open before `run()` installs the loop's channel, so a wake made then reads
+  `Runtime::loop_wake`, which `run()` fills, rather than doing nothing for
+  good.
 
 ## A jarred program's signals go through its jar
 

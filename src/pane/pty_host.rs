@@ -300,7 +300,6 @@ impl PtyHost {
 
     /// End the jar's connection as a crash of spyc would: the program and
     /// its jar run on.
-    #[cfg(test)]
     pub(crate) fn sever_jar(&self) {
         if let Some(jar) = &self.jar {
             jar.sever();
