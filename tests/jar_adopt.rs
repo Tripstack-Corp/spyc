@@ -385,3 +385,59 @@ fn printed(socket: &Path) -> usize {
         })
         .unwrap_or(0)
 }
+
+/// The pids the tabs' programs noted in `pidfile`, one a line.
+fn noted(pidfile: &Path) -> Vec<i32> {
+    std::fs::read_to_string(pidfile)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
+}
+
+/// Every jar socket under `dir`.
+fn sockets_under(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "sock") {
+                found.push(p);
+            }
+        }
+    }
+    found
+}
+
+/// Tabs a `[pane] tabs` list starts together each get a jar of their own,
+/// though ids made together share their leading digits (a v7 UUID's are its
+/// millisecond and a counter): both programs run, and neither tab is left
+/// `[not started]` by a jar that took the other's socket.
+#[test]
+fn startup_tabs_each_get_a_jar_of_their_own() {
+    let dirs = dirs();
+    let tab = format!("sh -c 'echo $$ >> {}; exec cat'", dirs.pidfile.display());
+    std::fs::write(
+        dirs.home.join(".spycrc.toml"),
+        format!("[pane]\njars = true\ntabs = [\"{tab}\", \"{tab}\"]\n"),
+    )
+    .unwrap();
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start(&dirs, &[]);
+    left.0.push(spyc.pid());
+    let refused = || spyc.shows("not started") || spyc.shows("wrong token");
+    eventually("both tabs' programs run, or one is refused", || {
+        noted(&dirs.pidfile).len() == 2 || refused()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    for socket in sockets_under(&dirs.runtime) {
+        if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+            left.0.push(jar);
+        }
+    }
+    assert!(!refused(), "a tab was left not started");
+    assert_eq!(noted(&dirs.pidfile).len(), 2, "both programs ran");
+}
