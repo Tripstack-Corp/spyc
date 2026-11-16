@@ -872,7 +872,12 @@ standard input, which then closes. Every user can read a process's arguments,
 any process of the same user its environment, and a jar's program inherits the
 jar's environment, so a token in either would reach every agent a jar hosts.
 A jar started without one, or with one shorter than 16 bytes, refuses to run
-rather than run open.
+rather than run open. The rest of the start follows the token there
+(`spyc_jar::cli::Start`): the socket, the program, its directory, size and
+hold. Not on the command line, which `ps` shows for the jar's whole life: a
+tab's command can carry a prompt, and spyc's wrapper around it names files
+gone once spyc is. What `ps` shows is `spyc-jar`, the program's name (the
+jar's `argv[0]`, which an upgrade keeps) and `--wire`.
 
 ## A jar's threads never wait on a peer under a lock
 
@@ -933,7 +938,8 @@ by default.
   running waits up to two seconds for it to end, as a restart's does once
   its exit is acknowledged, and otherwise keeps the tab from opening.
 - **Every jar starts from spyc's store of jar binaries** (decision L,
-  `src/pane/jar/store.rs`): `<state>/jar-bin/<sha256>/spyc-jar`, copied
+  `src/pane/jar/store.rs`): `<state>/jar-bin/<version>-<hash>/spyc-jar`,
+  `<hash>` the first 12 hex digits of its SHA-256, copied
   whole from the `spyc-jar` beside spyc on a worker at start and run once as
   `spyc-jar build-info` to check it is this build's. Never the binary beside
   spyc, which an install may replace while spyc runs, and which a jar would
@@ -941,8 +947,8 @@ by default.
   leaves jars to start beside spyc; one of another build starts none. Its
   sweep removes only an entry no live jar reports, not spyc's own, a day
   untouched, and nothing while any live jar won't say what it runs.
-- **A pane's jar starts its program when spyc connects** (decision M,
-  `--start-on-owner`): the jar opens the PTY and holds the program until its
+- **A pane's jar starts its program when spyc connects** (decision M, the
+  start's `hold`): the jar opens the PTY and holds the program until its
   first owner's `hello` is accepted, then starts it before that owner's
   `welcome`, so a program's start-up probes (Claude Code's and agy's give
   about two seconds) are always answered by an owner that is there. A jar

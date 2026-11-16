@@ -1,6 +1,8 @@
 //! spyc's store of jar binaries (decision L): every jar starts from an entry
-//! here, `<state>/jar-bin/<sha256>/spyc-jar`, never from the `spyc-jar` beside
-//! spyc, which an install may replace while spyc runs.
+//! here, `<state>/jar-bin/<version>-<hash>/spyc-jar`, never from the
+//! `spyc-jar` beside spyc, which an install may replace while spyc runs.
+//! `<hash>` is the first 12 hex digits of the binary's SHA-256, so two builds
+//! of one version differ, and `ps` shows which version a jar runs.
 //!
 //! At spyc's start a worker off the loop copies the `spyc-jar` beside spyc in,
 //! hashing as it writes and writing the entry whole, then runs the copy once
@@ -113,7 +115,7 @@ fn put(root: &Path, source: &Path) -> anyhow::Result<PathBuf> {
             return Err(e);
         }
     };
-    let dir = root.join(&hash);
+    let dir = root.join(entry_name(&hash));
     let file = dir.join(ENTRY_FILE);
     if file.symlink_metadata().is_ok() {
         let _ = std::fs::remove_file(&incoming);
@@ -122,7 +124,7 @@ fn put(root: &Path, source: &Path) -> anyhow::Result<PathBuf> {
             &mut std::io::sink(),
         )?;
         if again != hash {
-            bail!("{} doesn't hash to its name", file.display());
+            bail!("{} isn't the binary its name says", file.display());
         }
         touch(&dir);
         return Ok(file);
@@ -146,6 +148,16 @@ fn put(root: &Path, source: &Path) -> anyhow::Result<PathBuf> {
         return Err(e);
     }
     Ok(file)
+}
+
+/// The entry of a binary whose SHA-256 is `sha256`, in hex: the jar's
+/// version and the hash's first 12 digits.
+fn entry_name(sha256: &str) -> String {
+    format!(
+        "{}-{}",
+        spyc_jar::PACKAGE_VERSION,
+        sha256.get(..12).unwrap_or(sha256)
+    )
 }
 
 /// Copy `from` to `to`, returning the SHA-256 of what went, in hex.

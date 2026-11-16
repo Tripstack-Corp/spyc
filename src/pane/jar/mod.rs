@@ -35,6 +35,7 @@ mod tokens;
 mod tests;
 
 use std::io::Write;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
@@ -231,6 +232,7 @@ const WRITE_STALL: Duration = Duration::from_secs(10);
 /// error, never a program run another way that would die with spyc.
 pub fn spawn(
     spec: &Spec,
+    command: &str,
     argv: &[String],
     cwd: &Path,
     (rows, cols): (u16, u16),
@@ -272,7 +274,10 @@ pub fn spawn(
     let token = tokens::new()?;
     tokens::save(place, &socket, &token)?;
     let mut cmd = Command::new(&place.binary);
-    cmd.args(jar_args(&socket, cwd, (rows, cols), argv, place.hold))
+    // What `ps` shows: the program's name and the wire version. Everything
+    // else goes on its standard input.
+    cmd.arg0(jar_name(command, argv.first().map_or("", String::as_str)))
+        .args(["--wire", &spyc_jar::proto::VERSION.to_string()])
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -287,9 +292,23 @@ pub fn spawn(
         }
     };
     // SPYC-TRAP(jar-token-stdin): the token goes on the jar's standard input,
-    // closed once written, never in its arguments or environment.
+    // closed once written, never in its arguments or environment. A long
+    // program is written on a thread: a jar that never reads it can't hold
+    // this start past `answer`'s wait.
     if let Some(mut stdin) = jar.stdin.take() {
-        let _ = stdin.write_all(&token);
+        let input = spyc_jar::cli::Start {
+            token: token.clone(),
+            socket: socket.clone(),
+            cwd: Some(cwd.to_path_buf()),
+            rows,
+            cols,
+            hold: Some(place.hold),
+            argv: argv.to_vec(),
+        }
+        .encode();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&input);
+        });
     }
     let (client, welcome) = match answer(&mut jar, &socket, &token, place.hold) {
         Ok(answered) => answered,
@@ -413,30 +432,34 @@ struct Resume {
     gate: ReplayGate,
 }
 
-/// A pane's jar's arguments: its socket, wire version and size, its program
-/// held for its first owner for `hold` (decision M), then the program.
-fn jar_args(
-    socket: &Path,
-    cwd: &Path,
-    (rows, cols): (u16, u16),
-    argv: &[String],
-    hold: Duration,
-) -> Vec<std::ffi::OsString> {
-    let mut args: Vec<std::ffi::OsString> = vec!["--socket".into(), socket.into()];
-    for (flag, value) in [
-        ("--wire", spyc_jar::proto::VERSION.to_string()),
-        ("--rows", rows.to_string()),
-        ("--cols", cols.to_string()),
-        ("--start-on-owner", hold.as_millis().to_string()),
-    ] {
-        args.push(flag.into());
-        args.push(value.into());
+/// The jar's name in `ps`: `spyc-jar` and the program the tab runs, `command`'s
+/// first word or, for a tab with none, `shell`, without its directory.
+fn jar_name(command: &str, shell: &str) -> String {
+    let words = shlex::split(command)
+        .unwrap_or_else(|| command.split_whitespace().map(String::from).collect());
+    let assignment = |w: &str| {
+        w.split_once('=').is_some_and(|(k, _)| {
+            !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    };
+    let word = words
+        .iter()
+        .map(String::as_str)
+        .find(|w| !matches!(*w, "exec" | "env" | "command") && !assignment(w))
+        .unwrap_or(shell);
+    let program: String = word
+        .rsplit('/')
+        .next()
+        .unwrap_or(word)
+        .chars()
+        .filter(|c| !c.is_control() && !c.is_whitespace())
+        .take(32)
+        .collect();
+    if program.is_empty() {
+        "spyc-jar".into()
+    } else {
+        format!("spyc-jar {program}")
     }
-    args.push("--cwd".into());
-    args.push(cwd.into());
-    args.push("--".into());
-    args.extend(argv.iter().map(Into::into));
-    args
 }
 
 /// The new jar's welcome, or why there is none: it ended first, or didn't

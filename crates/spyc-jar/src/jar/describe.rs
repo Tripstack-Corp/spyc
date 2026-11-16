@@ -19,7 +19,7 @@ pub(super) fn describe(shared: &Shared) -> Vec<(String, String)> {
             "jar",
             format!(
                 "{} {}",
-                env!("CARGO_PKG_VERSION"),
+                crate::PACKAGE_VERSION,
                 std::env::current_exe().map_or_else(|_| String::new(), |p| p.display().to_string())
             ),
         ),

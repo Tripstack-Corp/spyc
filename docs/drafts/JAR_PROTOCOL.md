@@ -623,7 +623,12 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   `--wire N`, the version its starter speaks. A jar that doesn't speak `N`, or
   is given none, exits with status 75 before it binds its socket, reads its
   token or starts the program, whatever else the line says. The flags after it
-  are that version's.
+  are that version's, and so is its standard input. In version 1 that is
+  the token, the socket, the program's directory (empty for the jar's own),
+  rows, columns, the hold in milliseconds (empty for none), the number of the
+  program's arguments and the arguments, each ended by a NUL, numbers in
+  decimal (`spyc_jar::cli::Start`); none of it on the command line, which
+  `ps` shows.
 - **The frame:** `len` (u32), `kind` (u8), `flags` (u8), the payload. `len`
   counts `kind`, `flags` and the payload, and is at most 16 MiB. Integers are
   big-endian and text is UTF-8. Flag `0x80` marks a frame critical: a jar that
@@ -792,8 +797,9 @@ Each part of the upgrade is placed by where its code runs (decision L):
    the blob, so it can't stay behind. A reader that can't is closed and
    stays behind.
 6. **A `build`.** `describe` names the store entry a jar runs from: its
-   directory's name, which for an entry spyc wrote is the SHA-256 spyc
-   computed, so two builds at one commit differ. `commit` beside it gives
+   directory's name, which for an entry spyc wrote is the jar's version and
+   the first 12 hex digits of the SHA-256 spyc computed, so two builds at one
+   commit differ. `commit` beside it gives
    the git commit, for people to read.
 7. **Validating twice.** First while nothing is parked, on a blob taken then:
    that pays a new binary's first-run cost (about 260 ms on macOS for a new
@@ -906,9 +912,10 @@ only for a change no capability can express.
 
 A version-1 jar describes itself with `id`, `instance`, `created`, `jar`,
 `build` (the name of the store entry it runs from, which for an entry spyc
-wrote is its SHA-256 in lowercase hex; decision L), `commit` (the git commit
+wrote is `<version>-<hash>`, `<hash>` the first 12 digits of its SHA-256 in
+lowercase hex; decision L), `commit` (the git commit
 it was built from, when its binary knows it), `pid`, `program`, `program_pid`
-(`0` while a jar started with `--start-on-owner` waits for its first owner;
+(`0` while a jar whose start has a hold waits for its first owner;
 decision M),
 `cwd`, `size`, `overflow`, `linger`, `owner`,
 `owner_pid` (the owner's process, when there is one), `log`, `snapshots`, and
@@ -1123,7 +1130,8 @@ Open unless marked decided:
   that has already timed out reaches the program as typed input. Claude Code
   and agy probe once, with about two seconds to answer (read from their
   binaries, not measured in a pane), so a probe asked before any owner was
-  there loses them for good. So a start flag, `--start-on-owner MS`, holds
+  there loses them for good. So the start's hold (a flag,
+  `--start-on-owner MS`, until the start moved to standard input) holds
   the program until the first owner's `hello` is accepted, and a jar whose
   first owner doesn't arrive within `MS` milliseconds exits without having
   started anything. The wait is its own setting, not the owner's liveness

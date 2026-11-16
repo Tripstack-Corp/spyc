@@ -361,6 +361,22 @@ fn a_new_image_is_told_the_image_it_replaced() {
     assert_program_survives(&mut jar, owner, "an upgrade");
 }
 
+/// A jar's name, the `argv[0]` its starter gave it and `ps` shows, crosses an
+/// upgrade's `exec`.
+#[test]
+fn a_jars_name_crosses_an_upgrade() {
+    let mut jar = Jar::start(&[], &["/bin/cat"]);
+    let mut owner = jar.connect(Role::Owner);
+    let pid = jar.process.id();
+    assert_eq!(command_line(pid), format!("{NAME} --wire 1"), "premise");
+    upgrade(&jar, &mut owner).expect("the jar upgrades");
+    let line = command_line(pid);
+    assert!(
+        line.starts_with(&format!("{NAME} resume-handover ")),
+        "{line:?}"
+    );
+}
+
 /// A new binary's first run is slow (about 263 ms on macOS for a new file):
 /// the jar pays it while it still serves the program, validating once before
 /// anything parks, and again, parked, on the real blob (decision L, part 7).
@@ -540,18 +556,19 @@ pub fn parking(socket: &std::path::Path) -> bool {
 }
 
 // Decision M: a pane's jar starts its program when its first owner's `hello`
-// is accepted (`--start-on-owner MS`), so a program's start-up probes are
+// is accepted (the start's hold), so a program's start-up probes are
 // answered by an owner that is there, never lost before one connects.
 
-/// Until its first owner, a jar started with `--start-on-owner` runs nothing
+/// Until its first owner, a jar whose start has a hold runs nothing
 /// and says so (`program_pid` 0); the owner's welcome carries the program it
 /// started, and the program's first output is there to replay.
 #[test]
 fn a_jar_started_on_owner_runs_its_program_once_the_owner_is_there() {
     let dir = socket_dir();
     let mark = dir.path().join("started");
-    let mut jar = Jar::start(
-        &["--start-on-owner", "10000"],
+    let mut jar = Jar::holding(
+        10000,
+        &[],
         &sh(&format!(
             "touch {}; printf first-words; exec cat",
             mark.display()
@@ -582,8 +599,9 @@ fn a_jar_started_on_owner_runs_its_program_once_the_owner_is_there() {
 fn a_jar_no_owner_comes_for_ends_having_started_nothing() {
     let dir = socket_dir();
     let mark = dir.path().join("started");
-    let mut jar = Jar::start(
-        &["--start-on-owner", "400"],
+    let mut jar = Jar::holding(
+        400,
+        &[],
         &sh(&format!("touch {}; exec cat", mark.display())),
     );
     assert!(jar.ended_within(WAIT), "the jar waited on for an owner");
@@ -597,8 +615,9 @@ fn a_jar_no_owner_comes_for_ends_having_started_nothing() {
 fn an_upgrade_before_the_program_starts_is_refused() {
     let dir = socket_dir();
     let mark = dir.path().join("started");
-    let mut jar = Jar::start(
-        &["--start-on-owner", "10000"],
+    let mut jar = Jar::holding(
+        10000,
+        &[],
         &sh(&format!("touch {}; exec cat", mark.display())),
     );
     let mut reader = jar.connect(Role::Reader);
