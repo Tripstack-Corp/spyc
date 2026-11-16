@@ -34,6 +34,7 @@ fn place_in(dir: &Path, binary: PathBuf) -> Place {
         dirs: vec![dir.join("spyc"), dir.join("spyc").join("jars")],
         tokens: dir.join("tokens"),
         hold: place::HOLD,
+        repaint_hold: Duration::from_secs(2),
     }
 }
 
@@ -124,7 +125,7 @@ fn host_in_fake_jar(pid: u32) -> (FakeJar, PtyHost) {
         offsets: offsets::Offsets::new(0),
         gate: ReplayGate::open(),
     };
-    let jarred = connect(client, fresh, &socket, (24, 80)).unwrap();
+    let jarred = connect(client, fresh, &socket, (24, 80), Duration::from_secs(2)).unwrap();
     let host = PtyHost::around_jar(jarred, (24, 80)).unwrap();
     let to_owner = conn_rx.recv_timeout(WAIT).unwrap();
     let jar = FakeJar {
@@ -315,6 +316,41 @@ fn offsets_follow_the_jar_across_gaps() {
     assert_eq!(o.at(16), 205);
     assert!(!o.hand(205, 1));
     assert_eq!(o.at(17), 206);
+}
+
+/// The next resize the fake jar hears.
+fn next_resize(jar: &FakeJar) -> (u16, u16) {
+    loop {
+        if let Msg::Resize { rows, cols, .. } = jar.next() {
+            return (rows, cols);
+        }
+    }
+}
+
+/// R12c, finding 9: past a gap the program is given its size a row off,
+/// held, then the pane's size: the pane's as it is when the hold ends, a
+/// resize meanwhile included. Output without a gap moves nothing.
+#[test]
+fn a_gap_holds_the_size_a_row_off_then_gives_the_panes_back() {
+    let (mut jar, mut host) = host_in_fake_jar(std::process::id());
+    let output = |offset, bytes: &[u8]| Msg::Output {
+        offset,
+        bytes: bytes.to_vec(),
+    };
+    jar.send(&output(0, b"ab"));
+    jar.send(&output(50, b"cd"));
+    assert_eq!(next_resize(&jar), (23, 80), "a row off, at the gap");
+    host.resize(30, 100).unwrap();
+    assert_eq!(next_resize(&jar), (30, 100), "the pane's resize");
+    assert_eq!(
+        next_resize(&jar),
+        (30, 100),
+        "the hold ends at the pane's size"
+    );
+    jar.send(&output(52, b"ef"));
+    jar.send(&output(90, b"gh"));
+    assert_eq!(next_resize(&jar), (29, 100), "a later gap holds again");
+    assert_eq!(next_resize(&jar), (30, 100));
 }
 
 /// The byte handed over after a gap ends whatever sequence the bytes before
@@ -970,6 +1006,92 @@ fn a_restored_tab_takes_its_running_jar_back() {
     second.shutdown_reporting(END, || {});
 }
 
+/// How many bytes the jar at `socket` has printed, and the first it still
+/// holds.
+fn log_printed_and_base(socket: &Path) -> (u64, u64) {
+    let log = spyc_jar::client::describe(socket)
+        .unwrap()
+        .into_iter()
+        .find(|(k, _)| k == "log")
+        .map(|(_, v)| v)
+        .unwrap();
+    let number = |after: &str| -> u64 {
+        log.split(after)
+            .nth(1)
+            .unwrap()
+            .split([' ', ','])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let printed = log
+        .split(" printed")
+        .next()
+        .unwrap()
+        .rsplit(' ')
+        .next()
+        .unwrap();
+    (printed.parse().unwrap(), number("from "))
+}
+
+/// R12c, finding 9: a tab taken back across a gap, whose jar dropped bytes
+/// while no spyc owned it, has its program draw its screen again: the
+/// program is given its size a row off, then its own size back.
+#[test]
+fn a_tab_taken_back_across_a_gap_has_its_program_repaint() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let socket = place.socket(TAB);
+    let go = dir.path().join("go");
+    let program = dir.path().join("program.sh");
+    std::fs::write(
+        &program,
+        format!(
+            "trap 'stty size' WINCH\n\
+             printf 'ready\\n'\n\
+             while [ ! -e {go} ]; do sleep 0.05; done\n\
+             head -c 6000000 /dev/zero | tr '\\0' x\n\
+             printf '\\nflooded\\n'\n\
+             while :; do sleep 0.05; done\n",
+            go = go.display()
+        ),
+    )
+    .unwrap();
+    let command = format!("sh {}", program.display());
+    let first = pane_in(&place, &command, dir.path(), None);
+    shows(&first, "ready");
+    first.host.sever_jar();
+    drop(first);
+    std::fs::write(&go, "").unwrap();
+    // Taken back once the flood is printed: a shell runs its trap only
+    // between commands.
+    let until = Instant::now() + WAIT;
+    while log_printed_and_base(&socket).0 < 6_000_000 {
+        assert!(
+            Instant::now() < until,
+            "premise: the program floods its jar"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        log_printed_and_base(&socket).1 > 0,
+        "premise: the jar dropped bytes"
+    );
+
+    let mut second = pane_in(&place, "echo started-again", dir.path(), Some(socket));
+    assert!(second.adopted(), "premise: the running jar was taken back");
+    shows(&second, "flooded");
+    shows(&second, "23 80");
+    shows(&second, "24 80");
+    let text = screen(&second);
+    assert!(
+        text.find("23 80") < text.find("24 80"),
+        "a row off first, then its own size: {text:?}"
+    );
+    second.shutdown_reporting(END, || {});
+}
+
 /// Finding 7: a jar another spyc still owns, or one this spyc has no token
 /// for, isn't taken, and nothing is started in its place: the tab is
 /// detached.
@@ -1565,7 +1687,7 @@ fn an_owner_outwaits_a_jar_parked_for_its_longest_upgrade() {
         offsets: offsets::Offsets::new(0),
         gate: ReplayGate::open(),
     };
-    let jarred = connect(client, fresh, &socket, (24, 80)).unwrap();
+    let jarred = connect(client, fresh, &socket, (24, 80), Duration::from_secs(2)).unwrap();
     let mut host = PtyHost::around_jar(jarred, (24, 80)).unwrap();
     // Keystroke-sized batches: once the socket is full, the next one makes no
     // progress at all, where one large frame's partial write would restart
@@ -1604,7 +1726,7 @@ fn tabs_made_together_have_sockets_of_their_own() {
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     const OUTWAITS: [&str; 2] = ["ADOPT_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 10] = [
+    const SHORTER: [(&str, &str); 11] = [
         (
             "PING_EVERY",
             "how often spyc speaks: asserted inside the jar's deadline",
@@ -1624,6 +1746,10 @@ fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
              its program alone, and quitting doesn't hang",
         ),
         ("REPLY_GRACE", "the engine's parser, not a wait on a jar"),
+        (
+            "REPAINT_HOLD",
+            "how long a repaint holds a size a row off, not a wait on a jar",
+        ),
         ("QUIET", "when a snapshot is taken, not a wait"),
         ("WHILE_FLOWING", "when a snapshot is taken, not a wait"),
         ("UNTOUCHED", "the store's sweep age, not a wait"),

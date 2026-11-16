@@ -8,6 +8,7 @@
 //!   (R26).
 //! - `link`: the connection, its reader thread and the `portable-pty` traits.
 //! - `offsets`: the jar offset of what the pane has parsed (finding 8).
+//! - `repaint`: the program made to draw its screen again after a gap (R12c).
 //! - [`snapshots`]: when a pane's engine is snapshotted, and its storing.
 //! - [`store`]: the jar binaries every jar starts from (decision L).
 //!
@@ -27,6 +28,7 @@
 mod link;
 mod offsets;
 pub mod place;
+mod repaint;
 pub mod snapshots;
 pub mod store;
 mod tokens;
@@ -349,7 +351,7 @@ pub fn spawn(
         offsets: offsets::Offsets::new(base),
         gate: ReplayGate::open(),
     };
-    connect(client, from, &socket, (rows, cols))
+    connect(client, from, &socket, (rows, cols), place.repaint_hold)
 }
 
 /// Take back the running jar at `socket`, as a restored tab's. A jar that
@@ -406,7 +408,7 @@ fn adopt(place: &Place, socket: &Path, (rows, cols): (u16, u16)) -> anyhow::Resu
         offsets,
         gate: ReplayGate::until(head),
     };
-    let jarred = connect(client, resume, socket, (rows, cols))?;
+    let jarred = connect(client, resume, socket, (rows, cols), place.repaint_hold)?;
     if (had_rows, had_cols) != (rows, cols) {
         jarred.master.resize(PtySize {
             rows,
@@ -518,6 +520,7 @@ fn connect(
     from: Resume,
     socket: &Path,
     (rows, cols): (u16, u16),
+    repaint_hold: Duration,
 ) -> anyhow::Result<Jarred> {
     let (rx, out) = client.split_queued(PING_EVERY, WRITE_STALL)?;
     out.send(&Msg::Replay { from: from.replay })?;
@@ -529,6 +532,12 @@ fn connect(
         exited: Condvar::new(),
         offsets: Mutex::new(from.offsets),
         gate: from.gate,
+        size: Mutex::new(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        }),
     });
     let (bytes_tx, bytes_rx) = mpsc::sync_channel::<Vec<u8>>(64);
     {
@@ -536,17 +545,11 @@ fn connect(
         let socket = socket.to_path_buf();
         std::thread::Builder::new()
             .name("jar-reader".into())
-            .spawn(move || link::read_frames(rx, &link, &bytes_tx, &socket))?;
+            .spawn(move || link::read_frames(rx, &link, &bytes_tx, &socket, repaint_hold))?;
     }
     Ok(Jarred {
         master: Box::new(JarMaster {
             link: Arc::clone(&link),
-            size: Mutex::new(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            }),
             reader: Mutex::new(Some(JarReader {
                 rx: bytes_rx,
                 buf: Vec::new(),
