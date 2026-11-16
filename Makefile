@@ -98,12 +98,25 @@ check: fmt-check lint test test-scripts ## Full quality gate (CI)
 .PHONY: check-ci
 check-ci: ## `check` ending in an unmissable verdict line — safe to pipe
 	@if $(MAKE) --no-print-directory check; then \
+		$(MAKE) --no-print-directory ignored-tests; \
 		echo "=== GATE: PASS ==="; \
 	else \
 		status=$$?; \
+		$(MAKE) --no-print-directory ignored-tests; \
 		echo "=== GATE: FAIL (exit $$status) ==="; \
 		exit $$status; \
 	fi
+
+# The gate's count of `#[ignore]`d tests, read from the source so no test
+# binary is missed, naming the ones landed red: each waits for the PR that
+# fixes its finding to lift it.
+.PHONY: ignored-tests
+ignored-tests: ## Count the ignored tests, naming those landed red
+	@total=$$(git grep -h -E '^[[:space:]]*#\[ignore' -- '*.rs' | wc -l | tr -d ' '); \
+	red=$$(git grep -h -E '^[[:space:]]*#\[ignore = "red until' -- '*.rs' | wc -l | tr -d ' '); \
+	echo "ignored tests: $$total, $$red of them red until a fix"; \
+	git grep -h -E '^[[:space:]]*#\[ignore = "red until' -- '*.rs' \
+		| sed -E 's/^[[:space:]]*#\[ignore = "(.*)"\]/  - \1/'
 
 # `--locked` on test/lint/build forbids implicit Cargo.lock changes —
 # CI and dev builds use the committed lockfile or fail loudly.
