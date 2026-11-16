@@ -136,7 +136,13 @@ pub(super) fn reap(shared: &Shared) {
             st.fg = fg;
             shared.cv.notify_all();
         }
-        if st.exit.is_none() && !shared.upgrading() && lingered(shared, &st) {
+        // A program held for its first owner has nothing to end: its wait is
+        // `--start-on-owner`'s, and ending it here would spin, the pid being 0.
+        if st.exit.is_none()
+            && shared.child_pid() != 0
+            && !shared.upgrading()
+            && lingered(shared, &st)
+        {
             drop(st);
             end_program(shared);
             st = shared.lock();

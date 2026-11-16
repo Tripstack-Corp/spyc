@@ -14,7 +14,6 @@ use super::*;
 /// waits past the first-owner grace without spinning, and the owner that
 /// comes inside its start wait is still given the program.
 #[test]
-#[ignore = "red until the reaper leaves a program held for its first owner alone"]
 fn a_jar_holding_its_program_for_a_first_owner_waits_idle_past_the_grace() {
     let mut jar = Jar::start(
         &["--start-on-owner", "30000", "--linger-ownerless-ms", "0"],
@@ -115,7 +114,6 @@ fn an_owner_paused_mid_frame_inside_its_deadline_keeps_its_lease() {
 /// owner past the first-owner grace, ownerless with no linger, ownerless
 /// within a finite linger, and holding an exit nobody has collected.
 #[test]
-#[ignore = "red until the reaper leaves a program held for its first owner alone"]
 fn a_jar_sits_idle_in_every_idle_state() {
     let waiting = Jar::start(
         &["--start-on-owner", "60000", "--linger-ownerless-ms", "0"],
