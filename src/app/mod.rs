@@ -138,6 +138,7 @@ mod harpoon;
 mod image_gallery;
 pub mod image_ops;
 mod inventory_ops;
+mod jar_info;
 mod jarless;
 mod jump_default;
 mod key_dispatch;

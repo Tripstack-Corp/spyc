@@ -53,16 +53,7 @@ impl Spyc {
         cmd.args(args);
         cmd.cwd(&dirs.project);
         cmd.env_clear();
-        for (k, v) in [
-            ("HOME", dirs.home.as_os_str()),
-            ("XDG_STATE_HOME", dirs.state.as_os_str()),
-            ("XDG_CONFIG_HOME", dirs.config.as_os_str()),
-            ("XDG_RUNTIME_DIR", dirs.runtime.as_os_str()),
-            ("TMPDIR", dirs.runtime.as_os_str()),
-            ("PATH", "/usr/bin:/bin".as_ref()),
-            ("SHELL", "/bin/sh".as_ref()),
-            ("TERM", "xterm-256color".as_ref()),
-        ] {
+        for (k, v) in dirs.env() {
             cmd.env(k, v);
         }
         let child = pair.slave.spawn_command(cmd).unwrap();
@@ -147,6 +138,34 @@ struct Dirs {
     runtime: PathBuf,
     project: PathBuf,
     pidfile: PathBuf,
+}
+
+impl Dirs {
+    /// A spyc's whole environment: every directory the test's own.
+    fn env(&self) -> [(&'static str, &std::ffi::OsStr); 8] {
+        [
+            ("HOME", self.home.as_os_str()),
+            ("XDG_STATE_HOME", self.state.as_os_str()),
+            ("XDG_CONFIG_HOME", self.config.as_os_str()),
+            ("XDG_RUNTIME_DIR", self.runtime.as_os_str()),
+            ("TMPDIR", self.runtime.as_os_str()),
+            ("PATH", "/usr/bin:/bin".as_ref()),
+            ("SHELL", "/bin/sh".as_ref()),
+            ("TERM", "xterm-256color".as_ref()),
+        ]
+    }
+
+    /// What `spyc --jars` prints here.
+    fn jars_listed(&self) -> String {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+            .arg("--jars")
+            .env_clear()
+            .envs(self.env())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    }
 }
 
 fn dirs() -> Dirs {
@@ -486,4 +505,30 @@ fn a_spyc_with_no_spyc_jar_beside_it_offers_to_run_tabs_without_jars() {
         sockets_under(&dirs.runtime.join("spyc").join("jars")).is_empty(),
         "no jar was started"
     );
+}
+
+/// `spyc --jars` lists this user's jars by what each holds (R18): a tab's
+/// by its label and project, with its owner; after a `kill -9` of spyc, with
+/// none, so a jar no spyc takes back can be found.
+#[test]
+fn spyc_jars_lists_each_jar_by_its_tab_and_owner() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start(&dirs, &[]);
+    left.0.push(spyc.pid());
+    eventually("the tab's program runs", || !noted(&dirs.pidfile).is_empty());
+    left.0.extend(noted(&dirs.pidfile));
+    for socket in sockets_under(&dirs.runtime) {
+        if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+            left.0.push(jar);
+        }
+    }
+    eventually("--jars names the tab, its project and owner", || {
+        let listed = dirs.jars_listed();
+        listed.contains("pane, other in p)") && listed.contains("owner connected")
+    });
+    spyc.crash();
+    eventually("--jars shows it has no owner", || {
+        dirs.jars_listed().contains("owner none")
+    });
 }
