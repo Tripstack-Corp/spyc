@@ -967,7 +967,9 @@ that turns jars on.
 - **A jar knows what it holds** (R18, `src/app/jar_info.rs`). spyc tells
   each tab's jar `is`, `pane_id`, `label`, `agent`, `project` and
   `project_home` on the loop's pass before it waits, only what changed since
-  that connection last told it, so a rename reaches the jar however made. The
+  that connection last told it, so a rename reaches the jar however made. A
+  tab demoted to a task keeps its jar, its connection moving with its
+  `PtyHost`, and the jar hears `is` = `task`; promoted back, `pane`. The
   jar keeps them when its owner goes: after a crash, `spyc --jars`
   (`jar::listing`, which only reads) names an orphaned tab by them.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one

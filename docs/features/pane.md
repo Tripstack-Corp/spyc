@@ -338,9 +338,10 @@ running, with what it printed meanwhile. A tab whose jar can't start says why
 and ends `[not started]`, and `^a R` starts it again. When no `spyc-jar`
 beside spyc is usable, spyc says to check its installation and offers, once
 a session, to run tabs without jars. `[pane] jars = false` runs every tab
-without one.
+without one. A tab sent to the background as a task (`:pane-to-task`) keeps
+its jar.
 
-`spyc --jars` lists your jars: each tab's label, whether it's a pane, its
+`spyc --jars` lists your jars: each tab's label, whether it's a pane or a task, its
 agent and project, its program's pid, and whether a spyc owns it.
 
 ## Quick Select — labelled overlay picker
