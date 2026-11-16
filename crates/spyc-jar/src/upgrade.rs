@@ -259,6 +259,10 @@ fn try_run(
     {
         let _ = sock.shutdown(std::net::Shutdown::Both);
     }
+    // SPYC-TRAP(jar-lock-crosses-exec): the lock is the process's while its
+    // descriptor stays open, so the descriptor crosses and the new image
+    // holds the lock without ever opening its file.
+    crate::lock::cross_exec(true);
     // `PREVIOUS`: the image this one runs from, for a new image that can't
     // resume to switch back to.
     let err = Command::new(binary)
@@ -271,6 +275,7 @@ fn try_run(
     if let Ok(null) = std::fs::File::open("/dev/null") {
         let _ = rustix::stdio::dup2_stdin(&null);
     }
+    crate::lock::cross_exec(false);
     end_group(&mut holder);
     drop(outs);
     drop(conns);

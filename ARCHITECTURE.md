@@ -768,6 +768,32 @@ with it. `tests/jar_process.rs`'s
 `an_upgrade_survives_unix_sockets_closing_elsewhere` runs that loop, and is
 the test to run on a Mac before touching the handover.
 
+## A jar holds a lock for its life, across every upgrade
+
+<!-- SPYC-TRAP: jar-lock-crosses-exec -->
+A connection refused at a jar's socket used to mean the jar was gone. On
+macOS it also means the jar's backlog is full, as it is when the jar isn't
+accepting (parked for an upgrade, stopped, starved) and connections queue,
+and spyc then deleted the socket and its token, which can't be undone. So a
+jar holds an `fcntl` lock on `<socket>.lock` for its whole life (R32b),
+taken before its socket is bound, and spyc reads the lock instead.
+
+The lock is the process's, not a descriptor's. The jar's descriptor is
+close-on-exec until the upgrade's `exec`, which it crosses, so the new image
+holds the lock with no moment free and without knowing which descriptor it
+is. A child never holds an `fcntl` lock, whatever it inherits. A `flock`
+lock crosses an `exec` too, but a validator or holder started after an
+upgrade would inherit it and keep it once the jar was gone. Both kinds were
+measured on macOS and Linux: over twenty `exec`s the lock was never free, an
+`fcntl` lock was free at once when the jar was killed, and a `flock` lock
+stayed held by the inheriting child.
+
+The price is that closing **any** descriptor of the file lets go of the
+process's lock on it. A jar never opens its lock file while it holds the
+lock: `lock::state` is for clients only, and the jar makes the file again
+only once a cleaner has deleted it. `tests/jar_process/lock.rs` watches the
+lock across three upgrades, a parked validation included.
+
 ## A jar's upgrade runs one file, and proves it took the blob
 
 <!-- SPYC-TRAP: jar-upgrade-one-file -->

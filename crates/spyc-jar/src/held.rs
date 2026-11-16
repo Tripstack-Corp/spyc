@@ -342,6 +342,7 @@ fn finish(held: &Held) -> ! {
     }
     if let Some(socket) = &held.socket {
         let _ = std::fs::remove_file(socket);
+        crate::lock::forget(socket);
     }
     std::process::exit(0)
 }

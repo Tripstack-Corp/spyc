@@ -11,6 +11,8 @@
 //!   `exec` (R33), and the blob that carries it; [`store`]: the one file an
 //!   upgrade runs; `held`: a new image that couldn't resume, holding the
 //!   program it was handed.
+//! - [`lock`]: the lock a jar holds beside its socket for its life, which
+//!   tells a busy jar from a gone one.
 //! - [`client`]: the owner's end of the socket, for spyc and the tests.
 //! - [`attach`]: the attach client, a raw relay to a real terminal.
 //! - [`cli`]: the `spyc-jar` command line.
@@ -26,6 +28,7 @@ pub mod client;
 pub mod handover;
 mod held;
 pub mod jar;
+pub mod lock;
 pub mod proto;
 pub mod pty;
 pub mod state;
