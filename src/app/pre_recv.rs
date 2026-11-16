@@ -9,6 +9,23 @@ use crate::Tui;
 use super::{App, ForegroundExec, RunCtx};
 
 impl App {
+    /// A landing that hands back effects: the frame marked when it changed
+    /// it, and its effects run.
+    fn take_landing(
+        &mut self,
+        (draw, effects): (bool, Vec<super::Effect>),
+        ctx: &mut RunCtx,
+        terminal: &mut Tui,
+        foreground_exec: &ForegroundExec,
+    ) {
+        if draw {
+            ctx.draw.mark(3);
+        }
+        if !effects.is_empty() {
+            self.run_effects(effects, terminal, foreground_exec);
+        }
+    }
+
     /// Land every off-thread result that arrived since the last iteration:
     /// streaming sources, worker outcomes, pager streams, pane output. Each
     /// landing is drained regardless of which wake survived coalescing.
@@ -80,21 +97,10 @@ impl App {
         // unconditional pre-recv drain as the graveyard above. Mounting can
         // return effects (a materialize kicked by a mount, a pager open), so
         // the drain hands them back to be run.
-        let (archive_draw, archive_fx) = self.apply_archive_outcomes();
-        if archive_draw {
-            ctx.draw.mark(3);
-        }
-        if !archive_fx.is_empty() {
-            self.run_effects(archive_fx, terminal, foreground_exec);
-        }
-
-        let (file_draw, file_fx) = self.apply_file_outcomes();
-        if file_draw {
-            ctx.draw.mark(3);
-        }
-        if !file_fx.is_empty() {
-            self.run_effects(file_fx, terminal, foreground_exec);
-        }
+        let landed = self.apply_archive_outcomes();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
+        let landed = self.apply_file_outcomes();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
 
         // A middle-click clipboard read that landed (woke us via
         // `Message::Wake(Wake::ClipboardPaste)`). Routing runs here, against the
@@ -105,14 +111,13 @@ impl App {
             ctx.draw.mark(3);
         }
 
-        let (paste_draw, paste_fx) = self.apply_clipboard_pastes();
-        if paste_draw {
+        let landed = self.apply_clipboard_pastes();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
+
+        // A jarred tab's pane landed (woke via `Wake::PaneStart`).
+        if self.apply_pane_starts() {
             ctx.draw.mark(3);
         }
-        if !paste_fx.is_empty() {
-            self.run_effects(paste_fx, terminal, foreground_exec);
-        }
-
         // `J`'s default path landed (woke via `Message::Wake(Wake::JumpDefault)`).
         if self.apply_jump_defaults() {
             ctx.draw.mark(3);
@@ -129,13 +134,8 @@ impl App {
 
         // Drain finished Lua runs (woke via `Message::Wake(Wake::Lua)`): apply the
         // requests the script produced, running any effects they translate to.
-        let (lua_draw, lua_fx) = self.handle_lua_done();
-        if lua_draw {
-            ctx.draw.mark(3);
-        }
-        if !lua_fx.is_empty() {
-            self.run_effects(lua_fx, terminal, foreground_exec);
-        }
+        let landed = self.handle_lua_done();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
 
         // Drain any off-thread inventory ops (yank/remove/clear/put) that landed.
         if self.apply_inventory_outcomes() {
@@ -563,6 +563,16 @@ mod tests {
                     arg == "self.runtime.pane_wake_tx.clone()"
                         || NO_LOOP_WAKE.iter().any(|(f, a, _)| *f == file && *a == arg),
                     "{file}: `.sender({arg}, …)` doesn't pass the loop's wake"
+                );
+            }
+            // A worker that may start before `run()` wakes the loop once it runs.
+            for (at, _) in src.match_indices(".sender_waking(") {
+                senders += 1;
+                assert!(
+                    src[at + ".sender_waking(".len()..]
+                        .trim_start()
+                        .starts_with("self.loop_waker("),
+                    "{file}: `.sender_waking(…)` doesn't wake the loop"
                 );
             }
         }

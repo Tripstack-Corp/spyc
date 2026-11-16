@@ -6,7 +6,7 @@
 //! `session_restore`), so they're `pub` (or `pub(super)` for those only a
 //! sibling needs).
 
-use super::{App, Effect, Mode, Pane, PaneTabs, Prompt, PromptKind, TabEntry, TabInfo, state};
+use super::{App, Effect, Mode, PaneTabs, Prompt, PromptKind, TabEntry, TabInfo, state};
 
 /// Where a freshly-spawned tab lands. `Replace` keeps the restarted tab's
 /// number: appending after a close is what shifted every later tab left (#151).
@@ -333,16 +333,18 @@ impl App {
             extra_env.push(("CODEX_HOME", home));
         }
         let jars = self.state.active_project().config.pane.jars;
+        let command = self.spawn_command(cmd).into_owned();
+        let context_path = self.view.project().context_path.clone();
         let launch = crate::pane::Launch {
-            command: &self.spawn_command(cmd),
+            command: &command,
             rows,
             cols,
             cwd,
-            context_path: &self.view.project().context_path,
+            context_path: &context_path,
             extra_env: &extra_env,
-            jar: crate::pane::jar::wanted(jars, &info.id, restoring),
+            jar: None,
         };
-        match Pane::launch(launch, wake) {
+        match self.launch_tab_pane(launch, jars, &pane_id, restoring, wake) {
             Ok(p) => {
                 if kind == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.map(std::path::Path::to_path_buf).or_else(|| {
@@ -369,18 +371,6 @@ impl App {
                 self.state.flash_error(format!("pane spawn failed: {e:#}"));
                 false
             }
-        }
-    }
-
-    /// What a pane actually runs for `cmd`: a codex pane gets `--no-daemon`
-    /// (`agent::codex_without_daemon`) unless `[pane] codex_daemon` lets it
-    /// join codex's shared server. The tab keeps `cmd` itself.
-    fn spawn_command<'a>(&self, cmd: &'a str) -> std::borrow::Cow<'a, str> {
-        let codex = crate::agent::detect(cmd).kind() == crate::state::sessions::AgentKind::Codex;
-        if codex && !self.state.active_project().config.pane.codex_daemon {
-            crate::agent::codex_without_daemon(cmd)
-        } else {
-            std::borrow::Cow::Borrowed(cmd)
         }
     }
 
@@ -460,16 +450,18 @@ impl App {
             extra_env.push(("CODEX_HOME", home));
         }
         let jars = self.state.active_project().config.pane.jars;
+        let command = self.spawn_command(cmd).into_owned();
+        let context_path = self.view.project().context_path.clone();
         let launch = crate::pane::Launch {
-            command: &self.spawn_command(cmd),
+            command: &command,
             rows,
             cols,
             cwd,
-            context_path: &self.view.project().context_path,
+            context_path: &context_path,
             extra_env: &extra_env,
-            jar: crate::pane::jar::wanted(jars, &info.id, None),
+            jar: None,
         };
-        match Pane::launch(launch, wake) {
+        match self.launch_tab_pane(launch, jars, &pane_id, None, wake) {
             Ok(p) => {
                 if info.launched_agent().kind() == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.clone().or_else(|| {

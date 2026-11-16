@@ -196,6 +196,10 @@ pub enum Wake {
     /// Payloadless, same shape as `ClipboardPaste`; `apply_jump_defaults`
     /// drains it in the pre-recv scan.
     JumpDefault,
+    /// A jarred tab's pane, launched on a worker (`start_jarred_pane`),
+    /// landed on `runtime.pane_starts`. Payloadless, same shape as
+    /// `JumpDefault`; `apply_pane_starts` drains it in the pre-recv scan.
+    PaneStart,
     /// The switcher's closed rows (`spawn_closed_rows`) were read and landed
     /// on `runtime.closed_rows_results`. Payloadless, same shape as
     /// `JumpDefault`; `apply_closed_rows` drains it in the pre-recv scan.

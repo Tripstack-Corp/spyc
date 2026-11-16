@@ -269,8 +269,7 @@ impl PtyHost {
         Ok(host)
     }
 
-    /// A host around a program already running in a jar.
-    #[cfg(test)]
+    /// A host around a program already running in a jar, or a stand-in's.
     pub(crate) fn around_jar(j: super::jar::Jarred, size: (u16, u16)) -> anyhow::Result<Self> {
         let (jar, spawned) = jar_parts(j)?;
         let mut host = Self::running(spawned, size, false);
@@ -283,7 +282,7 @@ impl PtyHost {
     fn set_jar(&mut self, jar: JarFields) {
         self.jar = jar.signals;
         self.snapshots = jar.snapshots;
-        self.jar_socket = Some(jar.socket);
+        self.jar_socket = jar.socket;
         self.adopted = jar.adoption.is_some();
         self.adoption = jar.adoption;
     }
@@ -746,7 +745,7 @@ type Spawned = (
 struct JarFields {
     signals: Option<super::jar::Signals>,
     snapshots: Option<super::jar::SnapshotSink>,
-    socket: std::path::PathBuf,
+    socket: Option<std::path::PathBuf>,
     adoption: Option<super::jar::Adoption>,
 }
 

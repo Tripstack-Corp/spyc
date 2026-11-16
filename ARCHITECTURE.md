@@ -904,9 +904,9 @@ by default.
 
 - **A program runs in its jar or not at all** (the owner's decision of
   2026-11-15). A jar that can't be started, ends before it answers (one that
-  doesn't speak spyc's wire version exits with 75 first), doesn't answer in
-  time, or would sit in a directory others can reach fails the tab, and the
-  error says which. Running the program another way made a tab that looked
+  doesn't speak spyc's wire version exits with 75 first), doesn't answer
+  while it holds the program, or would sit in a directory others can reach
+  fails the tab, which says which and ends `[not started]`. Running the program another way made a tab that looked
   like any other and died with spyc, and kept two ways of hosting a pane
   alive. `jar::spawn` returns a jar or an error, and
   `with_jars_on_no_path_launches_the_program_outside_its_jar` holds
@@ -946,12 +946,39 @@ by default.
   first owner's `hello` is accepted, then starts it before that owner's
   `welcome`, so a program's start-up probes (Claude Code's and agy's give
   about two seconds) are always answered by an owner that is there. A jar
-  whose spyc died before connecting ends after 30 s having started nothing.
+  whose spyc died before connecting ends after 30 s having started nothing,
+  and spyc waits as long for it to answer: the jar's clock starts after
+  spyc's, so spyc never gives up on a jar that may still start the program.
   Until the program starts, `describe` gives `program_pid` 0 and an upgrade
   is refused as busy.
 - **A replayed query goes unanswered** (R15a). Until the replayed tail has
   been handed to the pane, and half a second after, the terminal's answers
   are dropped: they'd answer what the program asked before the crash.
+
+## A jarred tab starts off the loop
+
+<!-- SPYC-TRAP: jar-off-the-loop -->
+Starting a tab's jar, or taking a restored tab's back, waits on the jar: the
+store's check of this session's first jar (up to 10 s), a new binary's first
+run, the 30 s a jar holds its program, an upgrade it's parked in (up to 15 s).
+None of that may freeze the loop (finding 5), so `app::pane_starts` opens the
+tab at once on a stand-in pane that says it's starting, launches the real pane
+on a worker, and puts it in the stand-in's place when it lands. Only that
+worker makes a jar's `Spec`, which is what makes a launch wait on a jar, and
+`only_a_worker_asks_for_a_tabs_jar` holds every module outside `src/pane` to
+that.
+
+- **What's typed into a starting tab is dropped.** No program runs to read
+  it, and keys held back would reach a program that has since drawn a prompt
+  they weren't typed for.
+- **A tab that never started says why.** Its stand-in ends `[not started]`
+  with the error on its screen, and `^a R` starts it again.
+- **A tab closed or restarted while it starts takes nothing.** A landing is
+  matched to its tab by id, and `^a R` gives the tab a new one, so the pane
+  that lands for a tab no longer there is ended at once, its program with it.
+- **A restore's `/resume` waits for the pane.** Whether the program was taken
+  back is known only when the pane lands: one taken back, or left to another
+  spyc, gets none; one started afresh gets it once its banner settles.
 
 ## A jarred program's signals go through its jar
 

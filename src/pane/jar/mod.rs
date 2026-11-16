@@ -11,10 +11,12 @@
 //! - [`snapshots`]: when a pane's engine is snapshotted, and its storing.
 //! - [`store`]: the jar binaries every jar starts from (decision L).
 //!
-//! A jar that can't be started, or that ends before it answers (one that
-//! doesn't speak this spyc's wire version exits with 75 first), leaves the
-//! program to run without one: a tab never fails to open for want of a jar
-//! (finding 1).
+//! With jars on, a tab's program runs in a jar or not at all: a jar that
+//! can't be started, ends before it answers (one that doesn't speak this
+//! spyc's wire version exits with 75 first) or doesn't answer while it holds
+//! the program fails the tab, and nothing runs (SPYC-TRAP `jar-or-nothing`).
+//! Every wait here blocks, so the loop never makes one: a tab's jar is
+//! started or taken back on a worker (`app::pane_starts`).
 //!
 //! A restored tab whose jar still runs takes it back, its program untouched:
 //! the pane starts from the jar's snapshot and the jar replays what the
@@ -77,15 +79,32 @@ pub fn wanted(
     Place::for_this_user()
         .inspect_err(|e| eprintln!("spyc: no jar ({e:#}); the tab's program runs without one"))
         .ok()
-        .map(|place| Spec {
-            place,
-            name: tab.to_string(),
-            adopt: None,
-        })
-        .map(|spec| match restoring {
-            Some(saved) => spec.restoring(saved.jar_socket.clone()),
-            None => spec,
-        })
+        .map(|place| spec_in(place, tab, restoring))
+}
+
+/// [`wanted`] with jars on, for a worker: the store's check of the first jar
+/// may still be running. In `place`, or this user's when `None`.
+pub fn spec_for(
+    place: Option<Place>,
+    tab: &str,
+    restoring: Option<&crate::state::sessions::SavedTab>,
+) -> Option<Spec> {
+    match place {
+        Some(place) => Some(spec_in(place, tab, restoring)),
+        None => wanted(true, tab, restoring),
+    }
+}
+
+fn spec_in(place: Place, tab: &str, restoring: Option<&crate::state::sessions::SavedTab>) -> Spec {
+    let spec = Spec {
+        place,
+        name: tab.to_string(),
+        adopt: None,
+    };
+    match restoring {
+        Some(saved) => spec.restoring(saved.jar_socket.clone()),
+        None => spec,
+    }
 }
 
 /// A pane's jar, asked for: where, and the tab's id, which names its socket.
@@ -119,8 +138,9 @@ pub struct Jarred {
     /// `None` for a detached tab, whose jar answers to someone else.
     pub signals: Option<Signals>,
     pub snapshots: Option<SnapshotSink>,
-    /// The jar's socket, which a saved session records.
-    pub socket: PathBuf,
+    /// The jar's socket, which a saved session records: `None` for a tab
+    /// whose jar hasn't been started.
+    pub socket: Option<PathBuf>,
     /// Set when a running program was taken back rather than started.
     pub adoption: Option<Adoption>,
 }
@@ -130,6 +150,24 @@ pub struct Adoption {
     /// The snapshot the pane's engine starts from; the replay begins at its
     /// offset. `None`: the replay begins at the oldest byte the jar holds.
     pub snapshot: Option<Snapshot>,
+}
+
+/// A tab's stand-ins while its jar starts or is taken back: `note` on its
+/// screen, what's typed dropped, open until spyc replaces them. `socket` is a
+/// restored tab's jar, which a session saved meanwhile still records.
+pub fn starting(note: &str, socket: Option<&Path>, size: (u16, u16)) -> Jarred {
+    link::stand_in(as_screen(note).as_bytes(), socket, None, size)
+}
+
+/// A tab whose jar never started its program: `why` on its screen, the tab
+/// ended `[not started]`.
+pub fn unstarted(why: &str, size: (u16, u16)) -> Jarred {
+    link::stand_in(as_screen(why).as_bytes(), None, Some(Lost::Unstarted), size)
+}
+
+/// `text`'s lines as a terminal shows them.
+fn as_screen(text: &str) -> String {
+    text.replace('\n', "\r\n")
 }
 
 /// Signals to a jarred program's group, which only its jar sends.
@@ -164,8 +202,10 @@ fn ended_within(socket: &Path, wait: Duration) -> SocketState {
     }
 }
 
-/// How long a new jar has to answer.
-const ANSWER_WAIT: Duration = Duration::from_secs(5);
+/// How long a running jar has to welcome this spyc and list its snapshots:
+/// past the longest it reads nothing, parked for an upgrade (3 + 1 + 5 + 1 +
+/// 5 s in `spyc-jar`'s `upgrade.rs`).
+const ADOPT_WAIT: Duration = Duration::from_secs(20);
 /// An owner with nothing to send pings this often, inside the jar's deadline.
 const PING_EVERY: Duration = Duration::from_secs(2);
 /// A jar whose socket takes no bytes for this long has stopped: the jar's own
@@ -218,7 +258,7 @@ pub fn spawn(
     let token = tokens::new()?;
     tokens::save(place, &socket, &token)?;
     let mut cmd = Command::new(&place.binary);
-    cmd.args(jar_args(&socket, cwd, (rows, cols), argv))
+    cmd.args(jar_args(&socket, cwd, (rows, cols), argv, place.hold))
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -237,7 +277,7 @@ pub fn spawn(
     if let Some(mut stdin) = jar.stdin.take() {
         let _ = stdin.write_all(&token);
     }
-    let (client, welcome) = match answer(&mut jar, &socket, &token) {
+    let (client, welcome) = match answer(&mut jar, &socket, &token, place.hold) {
         Ok(answered) => answered,
         Err(e) => {
             let _ = jar.kill();
@@ -275,7 +315,7 @@ fn adopt(place: &Place, socket: &Path, (rows, cols): (u16, u16)) -> anyhow::Resu
     let Some(token) = tokens::load(place, socket) else {
         return detached("this spyc has no token for it");
     };
-    let (mut client, welcome) = match Client::connect(socket, Role::Owner, ANSWER_WAIT, &token) {
+    let (mut client, welcome) = match Client::connect(socket, Role::Owner, ADOPT_WAIT, &token) {
         Ok(answered) => answered,
         Err(e) => return detached(&format!("{e:#}")),
     };
@@ -293,7 +333,7 @@ fn adopt(place: &Place, socket: &Path, (rows, cols): (u16, u16)) -> anyhow::Resu
     client.send(&Msg::FetchSnapshot)?;
     let mut fetched = Vec::new();
     loop {
-        match client.recv(ANSWER_WAIT)? {
+        match client.recv(ADOPT_WAIT)? {
             Some(Msg::Snapshot(Some(s))) => fetched.push(s),
             Some(Msg::Snapshot(None)) => break,
             Some(_) => {}
@@ -359,25 +399,21 @@ struct Resume {
     gate: ReplayGate,
 }
 
-/// How long a pane's jar holds its program for this spyc to connect
-/// (decision M): far longer than the connect takes, and a jar whose spyc
-/// died meanwhile ends having started nothing.
-const START_WAIT: Duration = Duration::from_secs(30);
-
 /// A pane's jar's arguments: its socket, wire version and size, its program
-/// held for its first owner (decision M), then the program.
+/// held for its first owner for `hold` (decision M), then the program.
 fn jar_args(
     socket: &Path,
     cwd: &Path,
     (rows, cols): (u16, u16),
     argv: &[String],
+    hold: Duration,
 ) -> Vec<std::ffi::OsString> {
     let mut args: Vec<std::ffi::OsString> = vec!["--socket".into(), socket.into()];
     for (flag, value) in [
         ("--wire", spyc_jar::proto::VERSION.to_string()),
         ("--rows", rows.to_string()),
         ("--cols", cols.to_string()),
-        ("--start-on-owner", START_WAIT.as_millis().to_string()),
+        ("--start-on-owner", hold.as_millis().to_string()),
     ] {
         args.push(flag.into());
         args.push(value.into());
@@ -390,13 +426,14 @@ fn jar_args(
 }
 
 /// The new jar's welcome, or why there is none: it ended first, or didn't
-/// answer within [`ANSWER_WAIT`].
+/// answer within `wait`, the time it holds its program.
 fn answer(
     jar: &mut std::process::Child,
     socket: &Path,
     token: &[u8],
+    wait: Duration,
 ) -> anyhow::Result<(Client, Msg)> {
-    let until = Instant::now() + ANSWER_WAIT;
+    let until = Instant::now() + wait;
     loop {
         match Client::connect(socket, Role::Owner, Duration::from_millis(50), token) {
             Ok(answered) => return Ok(answered),
@@ -416,7 +453,7 @@ fn answer(
                 if Instant::now() >= until {
                     return Err(e.context(format!(
                         "the tab's jar didn't answer within {} s",
-                        ANSWER_WAIT.as_secs()
+                        wait.as_secs()
                     )));
                 }
             }
@@ -469,7 +506,7 @@ fn connect(
         replies: Box::new(JarReplies(Arc::clone(&link))),
         signals: Some(Signals(Arc::clone(&link))),
         snapshots: Some(SnapshotSink(link)),
-        socket: socket.to_path_buf(),
+        socket: Some(socket.to_path_buf()),
         adoption: None,
     })
 }

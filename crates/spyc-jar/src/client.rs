@@ -38,10 +38,15 @@ pub struct Client {
     write: Arc<Mutex<UnixStream>>,
 }
 
+/// The least a connection waits for its welcome.
+const WELCOME_WAIT: Duration = Duration::from_secs(5);
+
 impl Client {
     /// Connect to the jar at `socket` as `role`, presenting its `token`
     /// (R26), and retrying until `wait` passes so a jar still starting is
     /// waited for. Returns the jar's `Welcome`, or its refusal as an error.
+    /// The welcome is waited for as long as `wait`, and never less than
+    /// [`WELCOME_WAIT`]: a jar that accepted may still be busy.
     pub fn connect(
         socket: &Path,
         role: Role,
@@ -68,7 +73,7 @@ impl Client {
             role,
             token: token.to_vec(),
         })?;
-        match client.recv(Duration::from_secs(5))? {
+        match client.recv(wait.max(WELCOME_WAIT))? {
             Some(w @ Msg::Welcome { .. }) => Ok((client, w)),
             Some(Msg::Refused { reason, why }) => Err(Refusal { reason, why }.into()),
             other => Err(anyhow::anyhow!("expected a welcome, got {other:?}")),
