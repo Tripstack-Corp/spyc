@@ -803,6 +803,23 @@ connection at once is live, and anything else is unknown, which is never
 removed, since a token deleted by mistake can't be undone. The connect never
 blocks: on Linux a blocking connect to a full backlog waits for ever.
 
+## spyc outwaits a busy jar
+
+<!-- SPYC-TRAP: jar-outwait -->
+A jar parked for an upgrade reads and answers nothing for up to 15 s
+(`spyc_jar::limits::PARKED_AT_MOST`, the sum of the upgrade's own step
+deadlines). spyc's owner connection gave up on a socket that took no bytes
+for 10 s, so typing into a tab while its jar upgraded cut the connection and
+lost the lease, though the jar was only busy. A number raised past 15 s would
+go stale the first time an upgrade step grew, so the rule is checked instead.
+`src/pane/jar/mod.rs` asserts at compile time that every wait whose end takes
+a jar for gone (`WRITE_STALL`, `ADOPT_WAIT`) outlasts `PARKED_AT_MOST`, and
+that spyc pings inside the jar's `OWNER_DEADLINE`.
+`every_wait_on_a_jar_outlasts_it_or_says_why_not` makes every time constant in
+`src/pane/jar` one of those or name why it may be shorter: a restart's wait for
+the last jar to end and shutdown's wait for an exit report end in nothing that
+can't be undone, and quitting must not hang on a jar.
+
 ## A jar's upgrade runs one file, and proves it took the blob
 
 <!-- SPYC-TRAP: jar-upgrade-one-file -->

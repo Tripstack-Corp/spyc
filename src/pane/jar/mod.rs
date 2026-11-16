@@ -215,14 +215,28 @@ fn ended_within(socket: &Path, wait: Duration) -> SocketState {
 }
 
 /// How long a running jar has to welcome this spyc and list its snapshots:
-/// past the longest it reads nothing, parked for an upgrade (3 + 1 + 5 + 1 +
-/// 5 s in `spyc-jar`'s `upgrade.rs`).
+/// past the longest it answers nothing, parked for an upgrade.
 const ADOPT_WAIT: Duration = Duration::from_secs(20);
 /// An owner with nothing to send pings this often, inside the jar's deadline.
 const PING_EVERY: Duration = Duration::from_secs(2);
-/// A jar whose socket takes no bytes for this long has stopped: the jar's own
-/// deadline for its owner.
-const WRITE_STALL: Duration = Duration::from_secs(10);
+/// A jar whose socket takes no bytes for this long has stopped, and its
+/// connection is ended: past the longest it reads nothing, parked for an
+/// upgrade.
+const WRITE_STALL: Duration = Duration::from_secs(20);
+
+/// Whether a wait on a jar outlasts the longest it can be silent, so a busy
+/// jar is never taken for a gone one (finding 7).
+const fn outwaits_a_parked_jar(wait: Duration) -> bool {
+    wait.as_millis() > spyc_jar::limits::PARKED_AT_MOST.as_millis()
+}
+
+// SPYC-TRAP(jar-outwait): a wait whose end takes a jar for gone outlasts the
+// jar's longest silence; an owner is heard from inside the jar's deadline.
+const _: () = {
+    assert!(outwaits_a_parked_jar(ADOPT_WAIT));
+    assert!(outwaits_a_parked_jar(WRITE_STALL));
+    assert!(PING_EVERY.as_millis() < spyc_jar::limits::OWNER_DEADLINE.as_millis());
+};
 
 /// Start a jar running `argv` in `cwd` at `rows` x `cols`, with `env` added
 /// to spyc's own, and take it as its owner.

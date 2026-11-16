@@ -73,19 +73,19 @@ const HOLD_BACKSTOP: Duration = Duration::from_secs(600);
 /// How often a holder looks for the jar's process to have gone.
 const PARENT_CHECK: Duration = Duration::from_millis(100);
 /// How long a holder has to say it holds the sockets, with the jar parked.
-const HOLDER_ANSWER: Duration = Duration::from_secs(5);
+pub(crate) const HOLDER_ANSWER: Duration = Duration::from_secs(5);
 /// How long the connections have to take their last frames before the
 /// handover, all of them together.
-const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
-const PARK_DEADLINE: Duration = Duration::from_secs(3);
+pub(crate) const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
+pub(crate) const PARK_DEADLINE: Duration = Duration::from_secs(3);
 /// The first validation runs while the program is served, so running out
 /// costs nothing but the wait: a long backstop, for a cold binary on a
 /// loaded machine.
 const FIRST_VALIDATION: Duration = Duration::from_secs(30);
 /// The second runs parked, on a binary whose first run is paid: short.
-const PARKED_VALIDATION: Duration = Duration::from_secs(5);
+pub(crate) const PARKED_VALIDATION: Duration = Duration::from_secs(5);
 /// How long a validator's output may trail its exit.
-const OUTPUT_GRACE: Duration = Duration::from_secs(1);
+pub(crate) const OUTPUT_GRACE: Duration = Duration::from_secs(1);
 
 /// The proof line's first field: a validator prints it, the blob's instance
 /// and the bytes it decoded.
