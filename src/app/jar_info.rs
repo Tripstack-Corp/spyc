@@ -1,5 +1,6 @@
 //! What each tab's jar knows about the tab (R18): that it holds a pane, the
-//! tab's id and label, its agent, and its project. A spyc that finds a jar no
+//! tab's id and label, its agent, and its project. A tab demoted to a task
+//! keeps its jar, which then holds a task. A spyc that finds a jar no
 //! session describes, after a crash, says what it is from these; `spyc
 //! --jars` lists jars by them. Each tab's jar is told only what changed, on
 //! the loop's pass before it waits, so a rename reaches it however made.
@@ -32,6 +33,11 @@ impl App {
                     ("project_home", home),
                 ]);
             }
+        }
+        // A task keeps the jar it had as a tab, and the tab's other keys.
+        for task in &self.runtime.background_tasks.tasks {
+            task.host
+                .tell_jar(&[("is", "task"), ("label", &task.title)]);
         }
     }
 }

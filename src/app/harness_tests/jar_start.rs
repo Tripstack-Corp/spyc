@@ -663,3 +663,42 @@ fn a_tabs_jar_landing_makes_the_session_save_again() {
         end(&mut app);
     });
 }
+
+/// S2c: a tab demoted to a task keeps its jar and its program, which goes on
+/// printing into the task, and the jar hears it holds a task; brought back
+/// as a tab, a pane again.
+#[test]
+fn a_demoted_tab_keeps_its_jar_and_the_jar_hears_it_holds_a_task() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let program = live_tab(&mut app, dir.path());
+        let socket = tabs(&mut app).active().jar_socket().unwrap().to_path_buf();
+        app.settle_jar_info();
+        eventually("the jar holds a pane", || {
+            jar_says(&socket, "is").as_deref() == Some("pane")
+        });
+
+        app.demote_pane_to_task();
+        app.settle_jar_info();
+        eventually("the jar holds a task", || {
+            jar_says(&socket, "is").as_deref() == Some("task")
+        });
+        let task = &mut app.runtime.background_tasks.tasks[0];
+        assert_eq!(task.host.jar_socket(), Some(socket.as_path()));
+        assert_eq!(task.host.process_id(), u32::try_from(program).ok());
+        task.host.write_all(b"in the task\r").unwrap();
+        eventually("the task's program printed", || {
+            app.drain_background_tasks();
+            String::from_utf8_lossy(&app.runtime.background_tasks.tasks[0].buffer)
+                .contains("in the task")
+        });
+
+        app.promote_task_to_pane(None);
+        app.settle_jar_info();
+        eventually("the jar holds a pane again", || {
+            jar_says(&socket, "is").as_deref() == Some("pane")
+        });
+        end(&mut app);
+    });
+}
