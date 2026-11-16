@@ -964,6 +964,12 @@ that turns jars on.
   started that way, since its program would run twice. Unit tests start
   with jars off (`jar::BY_DEFAULT`), so none starts a jar in the
   user's own runtime directory.
+- **A jar knows what it holds** (R18, `src/app/jar_info.rs`). spyc tells
+  each tab's jar `is`, `pane_id`, `label`, `agent`, `project` and
+  `project_home` on the loop's pass before it waits, only what changed since
+  that connection last told it, so a rename reaches the jar however made. The
+  jar keeps them when its owner goes: after a crash, `spyc --jars`
+  (`jar::listing`, which only reads) names an orphaned tab by them.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
   writer thread per connection, which pings whenever it's idle, so a jar that
   stops reading holds up neither the event loop nor the parser.

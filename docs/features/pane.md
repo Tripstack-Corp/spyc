@@ -329,6 +329,20 @@ Multiple tabs, each running an independent pty:
   start, it opens in the directory holding the archive instead, unless
   `"project_home"` has a `PROJECT_HOME` to pin it to.
 
+### Tabs in jars
+
+On development (`-CURRENT`) and release-candidate builds, each tab's program
+runs in a `spyc-jar`: a small process that holds its terminal, so the program
+outlives spyc. After a crash, `spyc -r` takes each tab's program back, still
+running, with what it printed meanwhile. A tab whose jar can't start says why
+and ends `[not started]`, and `^a R` starts it again. When no `spyc-jar`
+beside spyc is usable, spyc says to check its installation and offers, once
+a session, to run tabs without jars. `[pane] jars = false` runs every tab
+without one.
+
+`spyc --jars` lists your jars: each tab's label, whether it's a pane, its
+agent and project, its program's pid, and whether a spyc owns it.
+
 ## Quick Select — labelled overlay picker
 
 Borrowed from [WezTerm's Quick Select][wezterm-qs]. Press **`^a u`**

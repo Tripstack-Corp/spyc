@@ -275,10 +275,14 @@ host a program:
   with no owner, by label and project (built before the freeze).
 - **A task** keeps the jar it had as a pane when demoted; the owner rewrites its
   key/value entry from pane to task. Its mode and linger stay as they were.
-- **A capture** lingers a minute: a capture nobody comes back for is cleaned
-  up, since a restored session doesn't reopen it. Its output is the point, so
-  it should get `block` once R12b lands; until then a crash window can drop
-  part of it.
+- **A capture** lives until its output is read, then ends (decided by the
+  owner, 2026-11-16, replacing a minute's linger). With its owner there, the
+  jar ends once spyc has acknowledged its last byte and its exit (`ack`,
+  `ack_exit`). With none, it keeps its output until a spyc reads it: a
+  restored session reopens an unread capture, and a spyc's start offers to
+  restore or discard any that nothing comes back for. Its output is the
+  point, so it should get `block` once R12b lands; until then a crash window
+  can drop the part past its ring.
 - **spyc's outer jar** lingers until a terminal attaches again.
 
 Decided by the owner after stage 4. Lingering matters only after a crash (or

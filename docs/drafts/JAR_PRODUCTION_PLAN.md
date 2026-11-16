@@ -120,10 +120,14 @@ the slices land runs as today.
   the hold end early when output arrives; it doesn't, since bytes written
   before the program handled the signal reach the jar after the resize, and
   a shell then read only the size restored.
-- **S2c: tasks, captures and orphans.** A demoted pane keeps its jar, its
-  owner rewriting `is` to `task`; a capture lingers a minute. `spyc --jars`
-  lists jars by label (R18). A spyc that starts and finds jars no spyc owns
-  offers to restore or discard them, where the spike only flashed a notice.
+- **S2c: tasks, captures and orphans.** spyc tells each tab's jar what it
+  holds (R18: `is`, `pane_id`, `label`, `agent`, `project`, `project_home`),
+  and `spyc --jars` lists jars by them. A demoted pane keeps its jar, its
+  owner rewriting `is` to `task`. A capture runs in a jar that lives until
+  its output is read (`JAR_PROTOCOL.md`, "Tasks and captures"): it ends once
+  spyc has read its last byte, and a restored session reopens an unread
+  one. A spyc that starts and finds jars no spyc owns offers to restore or
+  discard them, where the spike only flashed a notice.
 - **The release gate.** The release that turns jars on (S6) ships `spyc-jar`
   in its archives, the Homebrew formula and the apt package, and **carries S3
   too** (finding 13): the format is in the field from the first release that
