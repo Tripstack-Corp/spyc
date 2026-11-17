@@ -673,12 +673,18 @@ fn an_upgrade_keeps_the_program_its_pty_and_every_connection() {
     let mut reader = jar.connect(Role::Reader);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
     reader.send(&Msg::Replay { from: 0 }).expect("replay");
+    // The reader reads throughout, as a real one does: one that stops lets
+    // its socket fill, its writer can't park, and the upgrade is busy.
+    let reader = std::thread::spawn(move || {
+        read_until(&mut reader, false, |s| {
+            s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. }))
+        })
+    });
     let next = next_binary(jar.dir.path());
     let mut seen = read_until(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 30)
     });
     let before = jar.process.id();
-
     owner
         .send(&Msg::Upgrade {
             binary: next.display().to_string(),
@@ -745,9 +751,7 @@ fn an_upgrade_keeps_the_program_its_pty_and_every_connection() {
     assert_unbroken(&seen);
 
     // The reader's connection crossed too, and the listener takes new ones.
-    let r = read_until(&mut reader, false, |s| {
-        s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. }))
-    });
+    let r = reader.join().expect("the reader");
     assert_eq!(r.first_offset, Some(0), "the reader replays from the start");
     let (_late, welcome) = jar.welcome(Role::Reader);
     assert!(matches!(welcome, Msg::Welcome { .. }));
