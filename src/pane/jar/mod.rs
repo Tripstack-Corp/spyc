@@ -9,6 +9,7 @@
 //! - `link`: the connection, its reader thread and the `portable-pty` traits.
 //! - [`listing`]: `spyc --jars`.
 //! - `offsets`: the jar offset of what the pane has parsed (finding 8).
+//! - [`orphans`]: jars no spyc owns, found and discarded.
 //! - `repaint`: the program made to draw its screen again after a gap (R12c).
 //! - [`snapshots`]: when a pane's engine is snapshotted, and its storing.
 //! - [`store`]: the jar binaries every jar starts from (decision L).
@@ -31,6 +32,7 @@
 mod link;
 pub mod listing;
 mod offsets;
+pub mod orphans;
 pub mod place;
 mod repaint;
 pub mod snapshots;
