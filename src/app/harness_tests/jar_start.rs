@@ -255,10 +255,14 @@ fn a_tab_whose_jar_never_answers_fails_having_run_nothing_and_starts_again() {
         });
         assert!(!ran.exists(), "the program never ran");
 
+        // The jar that answers gets a production hold: under load, starting
+        // it takes longer than the two seconds that fail the first one fast.
+        app.runtime.jar_place.as_mut().unwrap().hold = crate::pane::jar::place::HOLD;
         app.restart_active_tab_now();
         land(&mut app);
-        type_into(&mut app, b"again\r");
-        shows(&mut app, "again");
+        // Never a word the failure's own text holds ("^a R starts it again").
+        type_into(&mut app, b"restarted\r");
+        shows(&mut app, "restarted");
         assert_eq!(ran_once(&ran), "once\n");
         end(&mut app);
     });
