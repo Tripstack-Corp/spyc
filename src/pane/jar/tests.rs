@@ -592,16 +592,18 @@ fn a_binary_snapshot_carries_the_build_that_made_it() {
 /// the test binary at some depth.
 fn built_jar() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    exe.ancestors()
-        .skip(1)
-        .map(|d| d.join("spyc-jar"))
-        .find(|j| j.is_file())
-        .unwrap_or_else(|| {
-            panic!(
-                "no spyc-jar above {}: `cargo build --bin spyc-jar` (make test builds it)",
-                exe.display()
-            )
-        })
+    warmed(
+        exe.ancestors()
+            .skip(1)
+            .map(|d| d.join("spyc-jar"))
+            .find(|j| j.is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "no spyc-jar above {}: `cargo build --bin spyc-jar` (make test builds it)",
+                    exe.display()
+                )
+            }),
+    )
 }
 
 /// A tab's program on a PTY of the real jar's, as `PtyHost` spawns it.

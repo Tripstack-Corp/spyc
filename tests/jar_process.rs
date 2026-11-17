@@ -40,6 +40,19 @@ fn start(socket: &std::path::Path, hold: Option<u64>, argv: &[&str]) -> spyc_jar
     }
 }
 
+/// Run the freshly built jar once, untimed, so macOS's first-run scan of it
+/// is paid here rather than inside a test's wait.
+fn warm(jar: &str) {
+    static WARM: std::sync::Once = std::sync::Once::new();
+    WARM.call_once(|| {
+        let _ = Command::new(jar)
+            .arg("build-info")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    });
+}
+
 impl Jar {
     /// Start a jar for `argv` with `extra` options. The socket lives under
     /// `/tmp`, because macOS caps a socket's path at about 104 bytes.
@@ -98,6 +111,7 @@ impl Jar {
         let dir = socket_dir();
         let socket = dir.path().join("j.sock");
         let jar = env!("CARGO_BIN_EXE_spyc-jar");
+        warm(jar);
         // A limit goes through a shell, whose `exec` can't give the jar its name.
         let mut command = if let Some(n) = nofile {
             let mut c = Command::new("/bin/sh");

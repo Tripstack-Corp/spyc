@@ -26,11 +26,13 @@ pub(super) fn short_dir() -> tempfile::TempDir {
 /// The `spyc-jar` this build made.
 pub(super) fn built_jar() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    exe.ancestors()
-        .skip(1)
-        .map(|d| d.join("spyc-jar"))
-        .find(|j| j.is_file())
-        .expect("a built spyc-jar: make test builds it")
+    crate::pane::jar::warmed(
+        exe.ancestors()
+            .skip(1)
+            .map(|d| d.join("spyc-jar"))
+            .find(|j| j.is_file())
+            .expect("a built spyc-jar: make test builds it"),
+    )
 }
 
 /// An executable shell script at `dir/name`.
