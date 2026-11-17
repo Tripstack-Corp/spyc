@@ -420,6 +420,54 @@ fn an_ownerless_jar_drops_the_oldest_bytes_and_says_which() {
     let seen = read_until(&mut owner, true, |s| s.contains("END"));
     assert_eq!(seen.frames.first(), Some(&Msg::Gap { from: 0, to: base }));
     assert_eq!(seen.first_offset, Some(base));
+    assert_eq!(described(&jar, "overflow"), "drop");
+}
+
+/// R12b: a jar that keeps its exit until read, a `!` capture's, keeps all its
+/// output too. With no owner and its log full, the program waits to print
+/// more, and the next owner is replayed every byte from the first.
+#[test]
+fn a_captures_jar_with_no_owner_holds_its_program_rather_than_drop_output() {
+    let mut jar = Jar::keeping_its_exit(
+        &["--ring", "65536", "--window", "32768"],
+        &sh("head -c 1000000 /dev/zero | tr '\\000' b; echo; echo END"),
+    );
+    // Until the log stops growing past half the ring: the program is either
+    // waiting on it or has printed everything.
+    let printed = || {
+        let log = field(
+            &spyc_jar::client::describe(&jar.socket).expect("describe"),
+            "log",
+        );
+        let n = log.split(", ").nth(1).and_then(|s| s.split(' ').next());
+        n.and_then(|n| n.parse::<u64>().ok()).unwrap_or(0)
+    };
+    let until = Instant::now() + WAIT;
+    let mut last = 0;
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+        let now = printed();
+        if now == last && now > 32_768 {
+            break;
+        }
+        assert!(Instant::now() < until, "the log never settled: {now}");
+        last = now;
+    }
+    let (mut owner, welcome) = jar.welcome(Role::Owner);
+    let Msg::Welcome { base, .. } = welcome else {
+        unreachable!()
+    };
+    assert_eq!(base, 0, "the jar dropped the output's start");
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let seen = read_until(&mut owner, true, |s| s.contains("END"));
+    assert!(
+        !seen.frames.iter().any(|f| matches!(f, Msg::Gap { .. })),
+        "{:?}",
+        seen.frames
+    );
+    assert_eq!(seen.first_offset, Some(0));
+    assert_eq!(seen.text.iter().filter(|&&b| b == b'b').count(), 1_000_000);
+    assert_eq!(described(&jar, "overflow"), "block");
 }
 
 #[test]
