@@ -430,8 +430,18 @@ fn an_ownerless_jar_drops_the_oldest_bytes_and_says_which() {
 fn a_captures_jar_with_no_owner_holds_its_program_rather_than_drop_output() {
     let mut jar = Jar::keeping_its_exit(
         &["--ring", "65536", "--window", "32768"],
-        &sh("head -c 1000000 /dev/zero | tr '\\000' b; echo; echo END"),
+        &sh(&format!("{MILLION_BS}; echo; echo END")),
     );
+    assert_every_byte_replays(&mut jar);
+}
+
+/// Prints a million `b`s.
+const MILLION_BS: &str = "head -c 1000000 /dev/zero | tr '\\000' b";
+
+/// With no owner, `jar`'s program printed [`MILLION_BS`] past its 64 KiB
+/// ring and then `END`: once the log stops growing, a new owner is replayed
+/// every byte from the first, with no gap.
+pub(crate) fn assert_every_byte_replays(jar: &mut Jar) {
     // Until the log stops growing past half the ring: the program is either
     // waiting on it or has printed everything.
     let printed = || {
@@ -466,8 +476,11 @@ fn a_captures_jar_with_no_owner_holds_its_program_rather_than_drop_output() {
         seen.frames
     );
     assert_eq!(seen.first_offset, Some(0));
-    assert_eq!(seen.text.iter().filter(|&&b| b == b'b').count(), 1_000_000);
-    assert_eq!(described(&jar, "overflow"), "block");
+    assert_eq!(
+        String::from_utf8_lossy(&seen.text).matches('b').count(),
+        1_000_000
+    );
+    assert_eq!(described(jar, "overflow"), "block");
 }
 
 #[test]
