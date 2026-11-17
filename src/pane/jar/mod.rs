@@ -92,6 +92,28 @@ const fn by_default(unit_test: bool) -> bool {
     !unit_test
 }
 
+/// `binary`, run once untimed. A test that starts the freshly built
+/// `spyc-jar` itself, as no production start does (spyc runs a jar from its
+/// store only after `build-info` has run the copy), pays macOS's first-run
+/// scan here rather than inside a wait: under a gate's load the scan can
+/// outlast the wait, and a jar that hasn't run yet makes no socket.
+#[cfg(test)]
+pub fn warmed(binary: PathBuf) -> PathBuf {
+    static WARMED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    let mut warmed = WARMED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !warmed.contains(&binary) {
+        let _ = Command::new(&binary)
+            .arg("build-info")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        warmed.push(binary.clone());
+    }
+    binary
+}
+
 /// Whether this build reads `[pane] jars`: until jars are on by default, a
 /// release runs every program as before, and only a `-CURRENT` or rc build
 /// may opt in.

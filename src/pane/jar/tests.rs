@@ -592,16 +592,18 @@ fn a_binary_snapshot_carries_the_build_that_made_it() {
 /// the test binary at some depth.
 fn built_jar() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    exe.ancestors()
-        .skip(1)
-        .map(|d| d.join("spyc-jar"))
-        .find(|j| j.is_file())
-        .unwrap_or_else(|| {
-            panic!(
-                "no spyc-jar above {}: `cargo build --bin spyc-jar` (make test builds it)",
-                exe.display()
-            )
-        })
+    warmed(
+        exe.ancestors()
+            .skip(1)
+            .map(|d| d.join("spyc-jar"))
+            .find(|j| j.is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "no spyc-jar above {}: `cargo build --bin spyc-jar` (make test builds it)",
+                    exe.display()
+                )
+            }),
+    )
 }
 
 /// A tab's program on a PTY of the real jar's, as `PtyHost` spawns it.
@@ -644,7 +646,7 @@ fn a_program_runs_in_a_real_jar_and_ends_with_it() {
     read_until(&host, &format!("[{}]", socket.display()));
     host.write_all(b"hi\n").unwrap();
     read_until(&host, "got:hi");
-    assert_eq!(host.child.wait().unwrap().exit_code(), 3);
+    assert_eq!(recorded_exit(&mut host).exit_code(), 3);
     let until = Instant::now() + WAIT;
     while socket.exists() {
         assert!(
@@ -777,13 +779,27 @@ fn a_jar_that_never_reports_an_exit_cannot_hold_a_shutdown() {
     drop(jar);
 }
 
+/// The exit `host`'s jar connection recorded, however long a loaded machine
+/// takes to record it. Never `wait()`, whose bound (`EXIT_WAIT`) is how long
+/// a quit waits for an exit, not how long one takes to arrive.
+fn recorded_exit(host: &mut PtyHost) -> portable_pty::ExitStatus {
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(status) = host.child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(Instant::now() < until, "the connection recorded no exit");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// Decision G's labels: a connection the jar ended while it still runs
 /// leaves the tab `[detached]`; one whose jar is gone, `[jar lost]`.
 #[test]
 fn a_lost_connection_says_whether_the_jar_still_runs() {
     let (jar, mut host) = host_in_fake_jar(std::process::id());
     jar.to_owner.shutdown(std::net::Shutdown::Both).unwrap();
-    let status = host.child.wait().unwrap();
+    let status = recorded_exit(&mut host);
     assert_eq!(status.signal(), Some(Lost::Held.label()));
 
     let (mut jar, mut host) = host_in_fake_jar(std::process::id());
@@ -791,7 +807,7 @@ fn a_lost_connection_says_whether_the_jar_still_runs() {
     drop(jar.listener.take());
     std::fs::remove_file(&socket).unwrap();
     jar.to_owner.shutdown(std::net::Shutdown::Both).unwrap();
-    let status = host.child.wait().unwrap();
+    let status = recorded_exit(&mut host);
     assert_eq!(status.signal(), Some(Lost::Gone.label()));
 }
 

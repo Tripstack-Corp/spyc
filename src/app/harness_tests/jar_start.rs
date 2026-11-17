@@ -26,11 +26,13 @@ pub(super) fn short_dir() -> tempfile::TempDir {
 /// The `spyc-jar` this build made.
 pub(super) fn built_jar() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    exe.ancestors()
-        .skip(1)
-        .map(|d| d.join("spyc-jar"))
-        .find(|j| j.is_file())
-        .expect("a built spyc-jar: make test builds it")
+    crate::pane::jar::warmed(
+        exe.ancestors()
+            .skip(1)
+            .map(|d| d.join("spyc-jar"))
+            .find(|j| j.is_file())
+            .expect("a built spyc-jar: make test builds it"),
+    )
 }
 
 /// An executable shell script at `dir/name`.
@@ -255,10 +257,14 @@ fn a_tab_whose_jar_never_answers_fails_having_run_nothing_and_starts_again() {
         });
         assert!(!ran.exists(), "the program never ran");
 
+        // The jar that answers gets a production hold: under load, starting
+        // it takes longer than the two seconds that fail the first one fast.
+        app.runtime.jar_place.as_mut().unwrap().hold = crate::pane::jar::place::HOLD;
         app.restart_active_tab_now();
         land(&mut app);
-        type_into(&mut app, b"again\r");
-        shows(&mut app, "again");
+        // Never a word the failure's own text holds ("^a R starts it again").
+        type_into(&mut app, b"restarted\r");
+        shows(&mut app, "restarted");
         assert_eq!(ran_once(&ran), "once\n");
         end(&mut app);
     });
@@ -614,18 +620,17 @@ fn a_tabs_jar_knows_what_it_holds_and_hears_a_rename() {
         let project = app.state.active_project().label();
         let home = app.state.active_project().anchor().display().to_string();
         app.settle_jar_info();
+        // The jar takes the keys one at a time, and the last one told is
+        // `project_home`: once it's there, the rest are.
         eventually("the jar knows its tab", || {
-            jar_says(&socket, "pane_id").as_deref() == Some(id.as_str())
+            jar_says(&socket, "project_home").as_deref() == Some(home.as_str())
         });
+        assert_eq!(jar_says(&socket, "pane_id").as_deref(), Some(id.as_str()));
         assert_eq!(jar_says(&socket, "is").as_deref(), Some("pane"));
         assert_eq!(jar_says(&socket, "agent").as_deref(), Some("other"));
         assert_eq!(
             jar_says(&socket, "project").as_deref(),
             Some(project.as_str())
-        );
-        assert_eq!(
-            jar_says(&socket, "project_home").as_deref(),
-            Some(home.as_str())
         );
 
         tabs(&mut app).active_info_mut().label = "renamed".into();
