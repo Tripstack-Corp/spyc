@@ -145,7 +145,7 @@ in the output.
 | R10 | Stamp every event with a monotonic time | later | Gives readers without hooks a working dot, the away recap, replay timing. Moved to later by decision B: an owner is there to keep its own times. | U6, U8, U9 |
 | R11 | **While an owner is connected**, it acknowledges what it has parsed ("through offset N"), and the jar stops reading the PTY when the owner falls a window behind | v1 | A slow owner must slow the program, as `PtyHost`'s bounded channel (`READER_CHANNEL_CAP`) does today. Dropping bytes under a live owner would corrupt a plain `cat` of a big file. A jar refuses to start with a window that, with one read of the PTY, doesn't fit its ring. | all |
 | R12 | **While no owner is connected**, drop the oldest events when the ring fills (`drop`) | v1 | A crash window must never stall an agent. | U2 |
-| R12b | The `block` and `spill` modes ([below](#when-the-ring-fills-with-no-owner)) | later | Moved to later by decision B: with no long ownerless stretches, they only matter if a crashed spyc isn't relaunched. | U2 |
+| R12b | **`block`** ([below](#when-the-ring-fills-with-no-owner)) for a jar that keeps its exit until read, a `!` capture's; `spill` | `block` v1, `spill` later | Decision B moved both to later: with no long ownerless stretches, they only matter if a crashed spyc isn't relaunched. The owner brought `block` back for captures on 2026-11-17, its mode following the exit linger: the start and the upgrade blob already carry it, so neither format changed, and it outlasts a `^Z`, which rewrites a capture's `is` to `task`. | U2, U12 |
 | R12a | Mark a gap with the offsets it spans | v1 | A spyc that finds a gap forces a redraw rather than trusting a broken replay. A reader that falls behind the ring is sent the same `gap`, never a jump in the offsets. | U2, U3 |
 | R12c | **Across a gap,** spyc starts from the newest snapshot under it, applies the bytes after the gap, then makes the program repaint | v1 | Stage 4 (Q7): a repaint redraws the screen but sets no mode again. From an empty engine a full-screen Claude came back without the alternate screen, mouse reporting or bracketed paste; from the snapshot every mode matched a run that lost nothing, and the history before the gap stayed. Decided v1 by the owner. | U2 |
 | R13 | Ring, spill and snapshot sizes set per jar, with a report of what each holds | v1 | Many jars run at once; memory has to be visible and bounded. | all |
@@ -246,8 +246,8 @@ acknowledged yet (R11).
 With an owner connected, the ring never overflows: the owner's acknowledgements
 pace the program (R11). The modes below apply only while no owner is
 connected, which with decision B means after a crash, until a new spyc
-arrives. A pane's mode is chosen when it's spawned; spyc picks it and the jar
-only follows it. `drop` is v1; `block` and `spill` are later (R12b).
+arrives. A jar's mode follows its start: one that keeps its exit until read,
+a `!` capture's, gets `block`, and any other `drop` (R12b). `spill` is later.
 
 | Mode | When the ring is full | When an owner returns | For |
 |---|---|---|---|
@@ -281,8 +281,9 @@ host a program:
   `ack_exit`). With none, it keeps its output until a spyc reads it: a
   restored session reopens an unread capture, and a spyc's start offers to
   restore or discard any that nothing comes back for. Its output is the
-  point, so it should get `block` once R12b lands; until then a crash window
-  can drop the part past its ring.
+  point, so it gets `block` (R12b): with no spyc there, a capture that fills
+  its ring waits to print more until one comes back. Sent to the background
+  with `^Z`, it keeps `block`, as it keeps its exit linger.
 - **spyc's outer jar** lingers until a terminal attaches again.
 
 Decided by the owner after stage 4. Lingering matters only after a crash (or

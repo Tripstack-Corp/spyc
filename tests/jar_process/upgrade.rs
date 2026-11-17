@@ -377,6 +377,30 @@ fn a_jars_name_crosses_an_upgrade() {
     );
 }
 
+/// R12b across an upgrade: a capture's jar still holds its program rather
+/// than drop output, since the exit linger that says so crosses in the blob.
+#[test]
+fn a_captures_jar_still_loses_no_output_after_an_upgrade() {
+    let mut jar = Jar::keeping_its_exit(
+        &["--ring", "65536", "--window", "32768"],
+        &sh(&format!("read go; {MILLION_BS}; echo; echo END")),
+    );
+    let mut owner = jar.connect(Role::Owner);
+    upgrade(&jar, &mut owner).expect("the jar upgrades");
+    owner
+        .send(&Msg::Input {
+            bytes: b"\n".to_vec(),
+        })
+        .unwrap();
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    read_until(&mut owner, false, |s| !s.text.is_empty());
+    owner.drop_connection();
+    eventually("the owner's lease to end", || {
+        described(&jar, "owner") != "connected"
+    });
+    assert_every_byte_replays(&mut jar);
+}
+
 /// A new binary's first run is slow (about 263 ms on macOS for a new file):
 /// the jar pays it while it still serves the program, validating once before
 /// anything parks, and again, parked, on the real blob (decision L, part 7).

@@ -43,7 +43,15 @@ pub(super) fn describe(shared: &Shared) -> Vec<(String, String)> {
                 .map_or_else(String::new, |p| p.display().to_string()),
         ),
         ("size", format!("{}x{}", st.rows, st.cols)),
-        ("overflow", "drop".into()),
+        (
+            "overflow",
+            if shared.cfg.blocks_when_full() {
+                "block"
+            } else {
+                "drop"
+            }
+            .into(),
+        ),
         ("linger", linger(shared)),
         ("exit_linger", exit_linger(shared)),
         (
