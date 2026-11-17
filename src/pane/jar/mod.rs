@@ -98,7 +98,7 @@ const fn by_default(unit_test: bool) -> bool {
 /// scan here rather than inside a wait: under a gate's load the scan can
 /// outlast the wait, and a jar that hasn't run yet makes no socket.
 #[cfg(test)]
-pub(crate) fn warmed(binary: PathBuf) -> PathBuf {
+pub fn warmed(binary: PathBuf) -> PathBuf {
     static WARMED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
     let mut warmed = WARMED
         .lock()
