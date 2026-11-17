@@ -26,6 +26,7 @@ impl App {
                 let label = crate::pane::tabs::strip_exit_suffix(&entry.info.label);
                 entry.pane.host.tell_jar(&[
                     ("is", "pane"),
+                    ("command", &entry.info.command),
                     ("pane_id", &entry.info.id),
                     ("label", &label),
                     ("agent", agent_name(entry.info.agent().kind())),
@@ -36,13 +37,18 @@ impl App {
         }
         // A task keeps the jar it had as a tab, and the tab's other keys.
         for task in &self.runtime.background_tasks.tasks {
-            task.host
-                .tell_jar(&[("is", "task"), ("label", &task.title)]);
+            task.host.tell_jar(&[
+                ("is", "task"),
+                ("command", &task.cmd_display),
+                ("label", &task.title),
+            ]);
         }
         if let Some(capture) = &self.runtime.pending_capture {
-            capture
-                .host
-                .tell_jar(&[("is", "capture"), ("label", &capture.title)]);
+            capture.host.tell_jar(&[
+                ("is", "capture"),
+                ("command", &capture.cmd_display),
+                ("label", &capture.title),
+            ]);
         }
     }
 }

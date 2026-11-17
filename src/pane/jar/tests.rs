@@ -608,6 +608,11 @@ fn built_jar() -> PathBuf {
 
 /// A tab's program on a PTY of the real jar's, as `PtyHost` spawns it.
 fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost> {
+    spawn_named(place, "0123456789abcdef", command, cwd)
+}
+
+/// [`spawn_in`], for the tab `name`.
+fn spawn_named(place: &Place, name: &str, command: &str, cwd: &Path) -> anyhow::Result<PtyHost> {
     PtyHost::spawn(crate::pane::pty_host::PtySpec {
         command,
         rows: 24,
@@ -621,7 +626,7 @@ fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost>
         capture_launch_env: false,
         jar: Some(Spec {
             place: place.clone(),
-            name: "0123456789abcdef".into(),
+            name: name.into(),
             adopt: None,
             retake: false,
             exit_linger: None,
@@ -1778,7 +1783,16 @@ fn tabs_made_together_have_sockets_of_their_own() {
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     const OUTWAITS: [&str; 2] = ["ADOPT_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 11] = [
+    const SHORTER: [(&str, &str); 13] = [
+        (
+            "DISCARD_WAIT",
+            "a discard's wait on a jar no spyc owns, which no upgrade parks: running \
+             out fails the discard, the jar left running, nothing lost",
+        ),
+        (
+            "HANGUP_GRACE",
+            "how long a discarded program has to end on a hangup: not a wait on the jar",
+        ),
         (
             "PING_EVERY",
             "how often spyc speaks: asserted inside the jar's deadline",
@@ -1964,4 +1978,123 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
             );
         }
     }
+}
+
+/// A jar left by a crash of its spyc: a tab's, told what it holds, its
+/// connection severed. Its host is forgotten, as a crash forgets it.
+fn left_by_a_crash(place: &Place, dir: &Path) -> (PathBuf, u32) {
+    let host = spawn_named(place, "left-by-a-crash", "exec cat", dir).unwrap();
+    let socket = host.jar_socket().unwrap().to_path_buf();
+    let program = host.process_id().unwrap();
+    host.tell_jar(&[
+        ("is", "pane"),
+        ("pane_id", "tab-1"),
+        ("label", "orphaned"),
+        ("command", "cat"),
+        ("agent", "other"),
+        ("project", "work"),
+        ("project_home", "/home/work"),
+    ]);
+    let until = Instant::now() + WAIT;
+    while !spyc_jar::client::describe(&socket).is_ok_and(|f| {
+        f.iter()
+            .any(|(k, v)| k == "project_home" && v == "/home/work")
+    }) {
+        assert!(Instant::now() < until, "the jar was never told");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    host.sever_jar();
+    std::mem::forget(host);
+    // The jar hears its owner went in its own time; until then it refuses one.
+    while !spyc_jar::client::describe(&socket)
+        .is_ok_and(|f| f.iter().any(|(k, v)| k == "owner" && v.starts_with("none")))
+    {
+        assert!(Instant::now() < until, "the jar never heard its owner go");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    (socket, program)
+}
+
+fn running(pid: u32) -> bool {
+    rustix::process::Pid::from_raw(i32::try_from(pid).unwrap())
+        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
+}
+
+/// S2c: a live jar with no owner, whose token this spyc keeps, is found by
+/// what it holds; one owned, or whose token isn't here, isn't.
+#[test]
+fn jars_no_spyc_owns_are_found_by_what_they_hold() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let mut owned = spawn_in(&place, "exec cat", dir.path()).unwrap();
+    assert!(
+        orphans::find(Some(place.clone())).is_empty(),
+        "an owned jar"
+    );
+    // A host dropped leaves its jar running, as a spyc that exits does.
+    let owned_socket = owned.jar_socket().unwrap().to_path_buf();
+    owned.shutdown(Duration::from_secs(2));
+    drop(owned);
+    let until = Instant::now() + WAIT;
+    while owned_socket.exists() {
+        assert!(
+            Instant::now() < until,
+            "the owned jar ran on after its tab closed"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let (socket, program) = left_by_a_crash(&place, dir.path());
+    let mut found = Vec::new();
+    let until = Instant::now() + WAIT;
+    while found.is_empty() {
+        assert!(Instant::now() < until, "the orphan was never found");
+        found = orphans::find(Some(place.clone()));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(found.len(), 1, "{found:?}");
+    let orphan = &found[0];
+    assert_eq!(orphan.socket, socket);
+    assert_eq!(
+        (
+            orphan.is.as_str(),
+            orphan.label.as_str(),
+            orphan.command.as_str()
+        ),
+        ("pane", "orphaned", "cat")
+    );
+    assert_eq!(orphan.project_home, "/home/work");
+    assert_eq!(orphan.pane_id, "tab-1");
+
+    let token = token_of(&place, &socket);
+    let kept = std::fs::read(&token).unwrap();
+    std::fs::remove_file(&token).unwrap();
+    assert!(
+        orphans::find(Some(place.clone())).is_empty(),
+        "a jar whose token isn't here is another spyc's"
+    );
+    std::fs::write(&token, kept).unwrap();
+    orphans::discard(Some(place), &socket).unwrap();
+    assert!(
+        !running(program) || {
+            std::thread::sleep(Duration::from_secs(1));
+            !running(program)
+        }
+    );
+}
+
+/// S2c: a discarded jar ends, its program with it, its socket and token
+/// gone after.
+#[test]
+fn a_discarded_jar_ends_with_its_program() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let (socket, program) = left_by_a_crash(&place, dir.path());
+    orphans::discard(Some(place.clone()), &socket).unwrap();
+    let until = Instant::now() + WAIT;
+    while running(program) || socket.exists() {
+        assert!(Instant::now() < until, "the jar or its program ran on");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!token_of(&place, &socket).exists(), "its token was kept");
 }
