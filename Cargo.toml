@@ -212,7 +212,7 @@ tempfile = "3"
 rustix = { version = "1.1.4", features = ["process", "termios", "fs", "system", "stdio"] }
 # The jar binary store names each entry by its SHA-256 (decision L); already
 # built for termwiz and pest.
-sha2 = "0.10"
+sha2 = "0.11"
 # Portable process stats (RSS / thread count) for the activity HUD — OS
 # APIs via a safe wrapper instead of shelling out to `ps` (whose `thcount`
 # keyword isn't portable). Trimmed to the `system` feature only (no
