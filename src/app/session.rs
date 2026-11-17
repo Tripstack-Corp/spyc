@@ -240,7 +240,7 @@ impl App {
     /// order, each read inside it so the column and pane handles name its own.
     /// Shared by the quit-time [`Self::save_session`] and the debounced
     /// [`Self::autosave_session`].
-    fn build_manifest(&mut self) -> Manifest {
+    pub(in crate::app) fn build_manifest(&mut self) -> Manifest {
         // Stable per-process session id (see `AppState::session_id`) so every
         // save overwrites one `<id>.json`; fresh-millis fallback only if it was
         // somehow never assigned.
@@ -270,6 +270,7 @@ impl App {
             projects,
             scope_claims: self.state.scope_registry.clone(),
             closed_projects: self.state.closed_projects.clone(),
+            tasks: self.saved_tasks(),
         }
     }
 

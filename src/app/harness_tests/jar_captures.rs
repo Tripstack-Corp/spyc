@@ -169,3 +169,75 @@ fn a_capture_closed_while_its_jar_starts_leaves_nothing_running() {
         });
     });
 }
+
+/// S2c: a session saved while a capture runs in a jar records the capture
+/// and its jar, so a restore after a crash can take it back.
+#[test]
+fn a_saved_session_records_a_running_capture_and_its_jar() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let before = app.session_fingerprint();
+        app.start_capture("exec cat", "cat", "cat");
+        land(&mut app);
+        let socket = app
+            .runtime
+            .pending_capture
+            .as_ref()
+            .unwrap()
+            .host
+            .jar_socket();
+        let socket = socket.unwrap().to_path_buf();
+        assert_ne!(app.session_fingerprint(), before, "a save is due");
+        let saved = app.build_manifest().tasks;
+        assert_eq!(saved.len(), 1, "{saved:?}");
+        assert_eq!(saved[0].jar_socket, socket);
+        assert_eq!(saved[0].cmd_display, "cat");
+        app.background_capture();
+        let saved = app.build_manifest().tasks;
+        assert_eq!(saved.len(), 1, "a task is recorded too: {saved:?}");
+        app.runtime.background_tasks.tasks[0]
+            .host
+            .shutdown(std::time::Duration::from_millis(500));
+    });
+}
+
+/// S2c: a restore takes back a saved capture's jar as a background task,
+/// the same program, its output reaching the task, and starts nothing
+/// afresh.
+#[test]
+fn a_restore_takes_a_captures_jar_back_as_a_task() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut first = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let pid = dir.path().join("pid");
+        first.start_capture(&format!("echo $$ >> {}; exec cat", pid.display()), "x", "x");
+        land(&mut first);
+        eventually("its program noted its pid", || {
+            std::fs::read_to_string(&pid).is_ok_and(|p| p.ends_with('\n'))
+        });
+        let saved = first.build_manifest().tasks;
+        // As a crash of spyc leaves it: the jar and its program run on.
+        let capture = first.runtime.pending_capture.take().unwrap();
+        capture.host.sever_jar();
+        std::mem::forget(capture);
+
+        let mut second = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        second.restore_tasks(&saved);
+        assert_eq!(second.runtime.background_tasks.tasks.len(), 1);
+        land(&mut second);
+        let task = &mut second.runtime.background_tasks.tasks[0];
+        assert_eq!(task.host.jar_socket(), Some(saved[0].jar_socket.as_path()));
+        task.host.write_all(b"after the crash\r").unwrap();
+        eventually("the task's output", || {
+            second.drain_background_tasks();
+            String::from_utf8_lossy(&second.runtime.background_tasks.tasks[0].buffer)
+                .contains("after the crash")
+        });
+        let started = std::fs::read_to_string(&pid).unwrap();
+        assert_eq!(started.lines().count(), 1, "started afresh: {started}");
+        second.runtime.background_tasks.tasks[0]
+            .host
+            .shutdown(std::time::Duration::from_millis(500));
+    });
+}
