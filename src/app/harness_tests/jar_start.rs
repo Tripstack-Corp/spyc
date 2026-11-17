@@ -15,12 +15,9 @@ pub(super) const WAIT: Duration = Duration::from_secs(20);
 /// A test's program is ended before the test is: a pane's jar outlives it.
 const END: Duration = Duration::from_millis(500);
 
-/// A directory under `/tmp`, short enough for a socket's path on macOS.
-pub(super) fn short_dir() -> tempfile::TempDir {
-    tempfile::Builder::new()
-        .prefix("js")
-        .tempdir_in("/tmp")
-        .unwrap()
+/// A directory under `/tmp` whose jars end with it.
+pub(super) fn short_dir() -> crate::pane::jar::test_dir::TestDir {
+    crate::pane::jar::test_dir::TestDir::new("js")
 }
 
 /// The `spyc-jar` this build made.

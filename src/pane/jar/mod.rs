@@ -40,6 +40,8 @@ pub mod store;
 mod tokens;
 
 #[cfg(test)]
+pub mod test_dir;
+#[cfg(test)]
 mod tests;
 
 use std::io::Write;
