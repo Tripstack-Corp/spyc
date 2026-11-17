@@ -991,6 +991,17 @@ that turns jars on.
   on a worker as a retake (`Spec::retaking`), so a jar that's gone ends the
   task saying so and nothing starts afresh; the output replays from the
   oldest byte the jar holds.
+- **Jars no spyc owns are offered back** (S2c, `src/app/orphan_jars.rs`,
+  `jar::orphans`). Once startup has settled (no `-r` picker, no `spyc -c`
+  queued) and none of this spyc's jars is still starting or being taken
+  back, a worker looks once for live jars with no owner whose token this
+  spyc keeps: a crash's that no `spyc -r` took back. A pop-up names them;
+  `r` takes each pane back as a tab in the open project its `project_home`
+  names (else the one in view), and each task or capture as a background
+  task, through the same adoption a restore uses; `d` ends each, a hangup
+  then a kill, its exit collected so the jar ends; `Esc` leaves them
+  running. A jar whose token isn't here is another spyc's, and is never
+  offered.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
   writer thread per connection, which pings whenever it's idle, so a jar that
   stops reading holds up neither the event loop nor the parser.

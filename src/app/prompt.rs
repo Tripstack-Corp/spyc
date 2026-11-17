@@ -181,6 +181,10 @@ pub enum PromptKind {
     /// starts again each tab that failed for it; `n` or `Esc` leaves them
     /// `[not started]`; any other key re-raises it.
     JarlessFallback,
+    /// Jars no spyc owns were found at the start (`app::orphan_jars`): `r`
+    /// restores them, `d` discards them, `Esc` leaves them running; any
+    /// other key re-raises it.
+    OrphanJars,
 }
 
 impl PromptKind {
@@ -190,7 +194,10 @@ impl PromptKind {
     pub const fn draws_as_popup(&self) -> bool {
         matches!(
             self,
-            Self::HookConsent { .. } | Self::ProjectTabsConsent { .. } | Self::JarlessFallback
+            Self::HookConsent { .. }
+                | Self::ProjectTabsConsent { .. }
+                | Self::JarlessFallback
+                | Self::OrphanJars
         )
     }
 

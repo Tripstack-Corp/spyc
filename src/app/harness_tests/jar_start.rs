@@ -84,7 +84,7 @@ fn ran_once(ran: &Path) -> String {
     std::fs::read_to_string(ran).unwrap()
 }
 
-fn tabs(app: &mut App) -> &mut crate::pane::PaneTabs {
+pub(super) fn tabs(app: &mut App) -> &mut crate::pane::PaneTabs {
     app.runtime.project_mut().pane_tabs.as_mut().unwrap()
 }
 
@@ -119,7 +119,7 @@ fn shows(app: &mut App, needle: &str) {
 }
 
 /// Land the tab's pane as the loop's drain does.
-fn land(app: &mut App) {
+pub(super) fn land(app: &mut App) {
     assert!(
         app.runtime.pane_starts.wait(WAIT + WAIT),
         "the tab's pane never landed"
@@ -157,7 +157,7 @@ fn resume_due(app: &mut App) -> Resume {
     }
 }
 
-fn end(app: &mut App) {
+pub(super) fn end(app: &mut App) {
     tabs(app).active_mut().shutdown_reporting(END, || {});
 }
 
@@ -383,7 +383,7 @@ fn a_restored_tab_whose_jar_is_stopped_is_taken_back_once_it_answers() {
 
 /// Open a jarred tab running `cat` that notes its pid in `dir/pid`, landed;
 /// its program's pid.
-fn live_tab(app: &mut App, dir: &Path) -> i32 {
+pub(super) fn live_tab(app: &mut App, dir: &Path) -> i32 {
     let pid = dir.join("pid");
     let program = format!("sh -c 'echo $$ > {}; exec cat'", pid.display());
     assert!(app.open_pane_tab_in(&program, dir));

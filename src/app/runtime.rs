@@ -273,6 +273,10 @@ pub(super) struct Runtime {
     pub(super) capture_starts: Landing<super::capture_starts::CaptureStart>,
     /// The last capture jar start's id.
     pub(super) capture_start_seq: u64,
+    /// The look for jars no spyc owns, and what it found (`app::orphan_jars`).
+    pub(super) orphan_jars: super::orphan_jars::OrphanJars,
+    /// Where that look's finds land.
+    pub(super) orphan_results: Landing<Vec<crate::pane::jar::orphans::Orphan>>,
     /// The place every tab's jar starts in: this user's when `None`, a
     /// test's own otherwise.
     pub(super) jar_place: Option<crate::pane::jar::Place>,
@@ -409,6 +413,8 @@ impl Runtime {
             pane_starts: Landing::default(),
             capture_starts: Landing::default(),
             capture_start_seq: 0,
+            orphan_jars: super::orphan_jars::OrphanJars::default(),
+            orphan_results: Landing::default(),
             jar_place: None,
             jarless: super::jarless::Jarless::default(),
             jump_default_seq: 0,

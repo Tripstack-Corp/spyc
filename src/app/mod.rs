@@ -162,6 +162,7 @@ mod modal;
 mod mouse;
 mod mouse_mode;
 mod navigate;
+mod orphan_jars;
 mod pager_handler;
 mod pager_history;
 mod pager_stream;

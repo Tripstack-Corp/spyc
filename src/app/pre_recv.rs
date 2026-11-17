@@ -116,7 +116,7 @@ impl App {
 
         // A jarred tab's pane, or a capture's host, landed (woke via
         // `Wake::PaneStart`).
-        if self.apply_pane_starts() | self.apply_capture_starts() {
+        if self.apply_pane_starts() | self.apply_capture_starts() | self.apply_orphan_jars() {
             ctx.draw.mark(3);
         }
         // `J`'s default path landed (woke via `Message::Wake(Wake::JumpDefault)`).
@@ -236,6 +236,11 @@ impl App {
         // A tab with no usable jar, its offer held while another prompt was
         // open (`app::jarless`).
         if self.offer_jarless() {
+            ctx.draw.mark(3);
+        }
+        // Jars no spyc owns: looked for once startup settles, and offered once
+        // nothing else is asked (`app::orphan_jars`).
+        if self.settle_orphan_jars() | self.offer_orphan_jars() {
             ctx.draw.mark(3);
         }
 

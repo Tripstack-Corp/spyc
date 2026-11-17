@@ -339,7 +339,10 @@ and ends `[not started]`, and `^a R` starts it again. When no `spyc-jar`
 beside spyc is usable, spyc says to check its installation and offers, once
 a session, to run tabs without jars. `[pane] jars = false` runs every tab
 without one. A tab sent to the background as a task (`:pane-to-task`) keeps
-its jar.
+its jar. A spyc that starts and finds jars no spyc owns, left by a crash
+that no `spyc -r` took back, names them in a pop-up: `r` takes them back as
+tabs and tasks, still running, `d` ends them, and `Esc` leaves them
+running.
 
 `spyc --jars` lists your jars: each tab's label, whether it's a pane, a task or a `!` capture, its
 agent and project, its program's pid, and whether a spyc owns it.

@@ -1783,7 +1783,16 @@ fn tabs_made_together_have_sockets_of_their_own() {
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     const OUTWAITS: [&str; 2] = ["ADOPT_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 11] = [
+    const SHORTER: [(&str, &str); 13] = [
+        (
+            "DISCARD_WAIT",
+            "a discard's wait on a jar no spyc owns, which no upgrade parks: running \
+             out fails the discard, the jar left running, nothing lost",
+        ),
+        (
+            "HANGUP_GRACE",
+            "how long a discarded program has to end on a hangup: not a wait on the jar",
+        ),
         (
             "PING_EVERY",
             "how often spyc speaks: asserted inside the jar's deadline",

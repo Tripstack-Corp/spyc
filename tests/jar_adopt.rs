@@ -646,3 +646,43 @@ fn spyc_r_after_a_kill_takes_a_running_capture_back() {
         "the program was started again"
     );
 }
+
+/// S2c: a tab's jar a `kill -9` of spyc left, which no `spyc -r` took back,
+/// is offered at the next spyc's start; `r` takes it back, the same program
+/// running, never started again.
+#[test]
+fn the_next_spyc_offers_a_jar_no_spyc_owns_and_takes_it_back() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    eventually("the tab's program starts", || dirs.pidfile.exists());
+    let program = noted(&dirs.pidfile)[0];
+    left.0.push(program);
+    eventually("the tab's output shows", || first.shows("ready-mark"));
+    let socket = sockets_under(&dirs.runtime.join("spyc").join("jars"))
+        .pop()
+        .expect("the tab's jar");
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    eventually("the jar knows its tab", || {
+        described(&socket, "is").as_deref() == Some("pane")
+    });
+    first.crash();
+
+    std::fs::write(dirs.home.join(".spycrc.toml"), "[pane]\n").unwrap();
+    let second = Spyc::start(&dirs, &[]);
+    left.0.push(second.pid());
+    eventually("the offer", || second.shows("no spyc owns"));
+    second.type_keys(b"r");
+    eventually("the new spyc owns the jar", || {
+        described(&socket, "owner_pid") == Some(second.pid().to_string())
+    });
+    assert!(alive(program), "the program was ended");
+    assert_eq!(
+        noted(&dirs.pidfile),
+        [program],
+        "the program was started again"
+    );
+}
