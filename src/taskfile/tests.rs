@@ -50,7 +50,9 @@ fn spycs_own_makefile_lists_its_targets_with_their_labels() {
     assert_eq!(label(listed, "check"), Some("Full quality gate (CI)"));
     assert_eq!(
         label(listed, "install"),
-        Some("Install to ~/.local/bin (builds release first; override with PREFIX=/usr/local)")
+        Some(
+            "Install spyc and spyc-jar to ~/.local/bin (builds release first; override with PREFIX=/usr/local)"
+        )
     );
     assert!(
         label(listed, "fuzz").is_some_and(|l| l.starts_with("Coverage-guided fuzz")),
