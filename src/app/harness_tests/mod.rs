@@ -524,6 +524,7 @@ mod cwd_file;
 mod esc_guard;
 mod focused_column;
 mod history_editor;
+mod jar_captures;
 mod jar_start;
 mod jump_default;
 mod kitty_keys;

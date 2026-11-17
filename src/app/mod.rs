@@ -114,6 +114,7 @@ mod attention;
 mod away_recap;
 mod bootstrap;
 mod capture;
+mod capture_starts;
 mod claude_home;
 mod clipboard;
 mod codex_pin;

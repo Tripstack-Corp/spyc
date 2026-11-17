@@ -11,12 +11,12 @@ use crate::pane::jar::Place;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const WAIT: Duration = Duration::from_secs(20);
+pub(super) const WAIT: Duration = Duration::from_secs(20);
 /// A test's program is ended before the test is: a pane's jar outlives it.
 const END: Duration = Duration::from_millis(500);
 
 /// A directory under `/tmp`, short enough for a socket's path on macOS.
-fn short_dir() -> tempfile::TempDir {
+pub(super) fn short_dir() -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix("js")
         .tempdir_in("/tmp")
@@ -24,7 +24,7 @@ fn short_dir() -> tempfile::TempDir {
 }
 
 /// The `spyc-jar` this build made.
-fn built_jar() -> PathBuf {
+pub(super) fn built_jar() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     exe.ancestors()
         .skip(1)
@@ -34,7 +34,7 @@ fn built_jar() -> PathBuf {
 }
 
 /// An executable shell script at `dir/name`.
-fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+pub(super) fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let path = dir.join(name);
     std::fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
@@ -44,7 +44,7 @@ fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
 
 /// A `spyc-jar` that marks `began` and waits for `go` before it runs: its
 /// start is as slow as the test makes it.
-fn gated_jar(dir: &Path) -> PathBuf {
+pub(super) fn gated_jar(dir: &Path) -> PathBuf {
     script(
         dir,
         "gated-jar",
@@ -57,7 +57,7 @@ fn gated_jar(dir: &Path) -> PathBuf {
     )
 }
 
-fn jar_app(dir: &Path, binary: PathBuf, hold: Duration) -> App {
+pub(super) fn jar_app(dir: &Path, binary: PathBuf, hold: Duration) -> App {
     let mut app = App::test_app(dir.to_path_buf());
     app.state.active_project_mut().config.pane.jars = true;
     app.runtime.jar_place = Some(Place {
@@ -92,7 +92,7 @@ fn screen(app: &mut App) -> String {
         .with_screen(crate::pane::engine::TerminalScreen::contents)
 }
 
-fn eventually(what: &str, mut done: impl FnMut() -> bool) {
+pub(super) fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     let until = Instant::now() + WAIT;
     while !done() {
         assert!(Instant::now() < until, "never: {what}");
@@ -500,7 +500,7 @@ fn a_tab_whose_jar_is_gone_when_taken_back_ends_jar_lost() {
 }
 
 /// Whether spyc is offering to run tabs without jars.
-fn offering(app: &App) -> bool {
+pub(super) fn offering(app: &App) -> bool {
     matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::JarlessFallback))
 }
 
@@ -592,7 +592,7 @@ fn with_no_usable_jar_the_offer_waits_for_an_open_prompt() {
 }
 
 /// What the jar at `socket` says `key` is.
-fn jar_says(socket: &Path, key: &str) -> Option<String> {
+pub(super) fn jar_says(socket: &Path, key: &str) -> Option<String> {
     spyc_jar::client::describe(socket)
         .ok()?
         .into_iter()

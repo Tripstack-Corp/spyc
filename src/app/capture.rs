@@ -45,6 +45,9 @@ pub struct PendingCapture {
     /// couldn't be created (graceful fallback to `buffer`) or for a
     /// `:fg`-promoted task (whose head was already gone).
     pub full_log: Option<CaptureSpill>,
+    /// Its jar's start still under way: its host is a stand-in until that
+    /// start lands (`app::capture_starts`).
+    pub jar_start: Option<u64>,
 }
 
 /// On-disk spill of a `!` capture's full, uncapped output. Lives in the

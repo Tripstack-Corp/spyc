@@ -44,13 +44,8 @@ pub(super) fn describe(shared: &Shared) -> Vec<(String, String)> {
         ),
         ("size", format!("{}x{}", st.rows, st.cols)),
         ("overflow", "drop".into()),
-        (
-            "linger",
-            shared.cfg.linger.map_or_else(
-                || "until an owner returns".into(),
-                |d| format!("{} ms", d.as_millis()),
-            ),
-        ),
+        ("linger", linger(shared)),
+        ("exit_linger", exit_linger(shared)),
         (
             "owner",
             if st.owner.is_some() {
@@ -98,4 +93,22 @@ pub(super) fn describe(shared: &Shared) -> Vec<(String, String)> {
     let mut f: Vec<(String, String)> = f.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
     f.extend(st.info.iter().cloned());
     f
+}
+
+/// How long the program runs on with no owner (R32a).
+fn linger(shared: &Shared) -> String {
+    shared.cfg.linger.map_or_else(
+        || "until an owner returns".into(),
+        |d| format!("{} ms", d.as_millis()),
+    )
+}
+
+/// How long the program's output and exit are kept, once it has ended,
+/// for an owner that isn't there.
+fn exit_linger(shared: &Shared) -> String {
+    if shared.cfg.linger_after_exit == crate::cli::UNTIL_READ {
+        "until read".into()
+    } else {
+        format!("{} ms", shared.cfg.linger_after_exit.as_millis())
+    }
 }

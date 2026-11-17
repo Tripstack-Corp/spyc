@@ -629,10 +629,12 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   token or starts the program, whatever else the line says. The flags after it
   are that version's, and so is its standard input. In version 1 that is
   the token, the socket, the program's directory (empty for the jar's own),
-  rows, columns, the hold in milliseconds (empty for none), the number of the
-  program's arguments and the arguments, each ended by a NUL, numbers in
-  decimal (`spyc_jar::cli::Start`); none of it on the command line, which
-  `ps` shows.
+  rows, columns, the hold and the exit linger in milliseconds (each empty
+  for none; an exit linger of 2^64 - 1 keeps a capture's exit until an
+  owner collects it), the number of the program's arguments and the
+  arguments, each ended by a NUL, numbers in decimal (`spyc_jar::cli::Start`);
+  none of it on the command line, which `ps` shows. Starter and jar are
+  always one build, so the input changes with it.
 - **The frame:** `len` (u32), `kind` (u8), `flags` (u8), the payload. `len`
   counts `kind`, `flags` and the payload, and is at most 16 MiB. Integers are
   big-endian and text is UTF-8. Flag `0x80` marks a frame critical: a jar that

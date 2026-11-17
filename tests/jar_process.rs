@@ -35,6 +35,7 @@ fn start(socket: &std::path::Path, hold: Option<u64>, argv: &[&str]) -> spyc_jar
         rows: 24,
         cols: 80,
         hold: hold.map(Duration::from_millis),
+        exit_linger: None,
         argv: argv.iter().map(|a| (*a).to_string()).collect(),
     }
 }
@@ -50,6 +51,19 @@ impl Jar {
     /// when it is given.
     fn start_limited(nofile: Option<u32>, extra: &[&str], argv: &[&str]) -> Self {
         Self::spawn(nofile, &[], None, extra, argv)
+    }
+
+    /// [`Jar::start`], its exit kept until an owner collects it, as a `!`
+    /// capture's is.
+    fn keeping_its_exit(extra: &[&str], argv: &[&str]) -> Self {
+        Self::spawn_with(
+            None,
+            &[],
+            None,
+            extra,
+            argv,
+            Some(spyc_jar::cli::UNTIL_READ),
+        )
     }
 
     /// [`Jar::start`], with `env` set for the jar.
@@ -69,6 +83,17 @@ impl Jar {
         hold: Option<u64>,
         extra: &[&str],
         argv: &[&str],
+    ) -> Self {
+        Self::spawn_with(nofile, env, hold, extra, argv, None)
+    }
+
+    fn spawn_with(
+        nofile: Option<u32>,
+        env: &[(&str, &std::path::Path)],
+        hold: Option<u64>,
+        extra: &[&str],
+        argv: &[&str],
+        exit_linger: Option<Duration>,
     ) -> Self {
         let dir = socket_dir();
         let socket = dir.path().join("j.sock");
@@ -99,7 +124,13 @@ impl Jar {
             .stdin
             .take()
             .expect("the jar's stdin")
-            .write_all(&start(&socket, hold, argv).encode())
+            .write_all(
+                &spyc_jar::cli::Start {
+                    exit_linger,
+                    ..start(&socket, hold, argv)
+                }
+                .encode(),
+            )
             .expect("hand the jar its start");
         Self {
             dir,
@@ -400,6 +431,32 @@ fn the_exit_is_reported_and_collecting_it_ends_the_jar() {
         "the jar ends once its exit is collected"
     );
     assert!(!jar.socket.exists(), "and removes its socket");
+}
+
+/// S2c: a `!` capture's jar keeps its output and exit, once its program has
+/// ended with nobody there, until an owner collects them, however long past
+/// the jar's own exit linger; then it ends.
+#[test]
+fn a_captures_exit_is_kept_until_an_owner_collects_it() {
+    let mut jar = Jar::keeping_its_exit(&["--linger-ms", "300"], &sh("echo RESULT=42; exit 7"));
+    eventually("the program ended", || {
+        spyc_jar::client::describe(&jar.socket).is_ok_and(|f| field(&f, "exit") == "7")
+    });
+    assert!(
+        !jar.ended_within(Duration::from_secs(2)),
+        "the jar ended with its output unread"
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let seen = read_until(&mut owner, true, |s| {
+        s.frames.iter().any(|f| matches!(f, Msg::Exited { .. }))
+    });
+    assert!(seen.contains("RESULT=42"), "the output is all there");
+    owner.send(&Msg::AckExit).unwrap();
+    assert!(
+        jar.ended_within(Duration::from_secs(3)),
+        "the jar ends once its exit is collected"
+    );
 }
 
 /// R9a: a resize is logged at the offset it took effect.

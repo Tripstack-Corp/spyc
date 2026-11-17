@@ -137,6 +137,7 @@ fn spec_in(place: Place, tab: &str, restoring: Option<&crate::state::sessions::S
         name: tab.to_string(),
         adopt: None,
         retake: false,
+        exit_linger: None,
     };
     match restoring {
         Some(saved) => spec.restoring(saved.jar_socket.clone()),
@@ -157,6 +158,9 @@ pub struct Spec {
     /// A live tab's whose jar ended its lease: its jar is taken back, or the
     /// tab ends, its program never started afresh.
     pub retake: bool,
+    /// How long the jar keeps its program's output and exit for an owner
+    /// that isn't there (`spyc_jar::cli::Start::exit_linger`).
+    pub exit_linger: Option<Duration>,
 }
 
 impl Spec {
@@ -380,6 +384,7 @@ pub fn spawn(
             rows,
             cols,
             hold: Some(place.hold),
+            exit_linger: spec.exit_linger,
             argv: argv.to_vec(),
         }
         .encode();
