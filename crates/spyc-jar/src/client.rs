@@ -109,7 +109,13 @@ impl Client {
         loop {
             if self.read.buffer().is_empty() {
                 // A socket takes no zero timeout: the least is a millisecond.
-                self.read_timeout(wait.max(Duration::from_millis(1)))?;
+                // macOS refuses any timeout on a socket its peer has closed
+                // (a lookup's ends with its answer), whose reads don't wait.
+                if let Err(e) = self.read_timeout(wait.max(Duration::from_millis(1)))
+                    && !self.reads_at_once()
+                {
+                    return Err(e.into());
+                }
                 match self.read.fill_buf() {
                     Ok([]) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
                     Ok(_) => {}
@@ -133,6 +139,18 @@ impl Client {
                 Err(e) => return Err(e.into()),
             }
         }
+    }
+
+    /// Whether a read returns at once: bytes are waiting, or the peer has
+    /// gone.
+    fn reads_at_once(&self) -> bool {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        let mut fds = [PollFd::new(self.read.get_ref(), PollFlags::IN)];
+        let now = Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        poll(&mut fds, Some(&now)).is_ok_and(|n| n > 0)
     }
 
     fn read_timeout(&mut self, wait: Duration) -> io::Result<()> {
@@ -374,6 +392,23 @@ mod tests {
     fn next(jar: &mut UnixStream) -> Option<Msg> {
         jar.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         proto::read_msg(jar).unwrap_or_default()
+    }
+
+    /// A jar that answered and closed before the client asked again (a
+    /// lookup's, which ends with its one answer) still has its answer read:
+    /// macOS refuses a new timeout on a socket its peer has closed, and that
+    /// is no reason to lose what's in it.
+    #[test]
+    fn an_answer_from_a_jar_that_closed_is_still_read() {
+        let (mut client, mut jar) = pair();
+        assert_eq!(client.recv(Duration::from_millis(50)).unwrap(), None);
+        proto::write_msg(&mut jar, &Msg::Pong { n: 7 }).unwrap();
+        drop(jar);
+        // Another wait than the last: the socket is asked for a new timeout.
+        assert_eq!(
+            client.recv(Duration::from_millis(200)).unwrap(),
+            Some(Msg::Pong { n: 7 })
+        );
     }
 
     /// Finding 4: a jar that reads nothing holds up no sender. Sixty-four
