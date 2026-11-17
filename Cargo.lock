@@ -2879,6 +2879,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases 0.2.1",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
@@ -4334,7 +4335,7 @@ name = "spyc-jar"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "nix 0.29.0",
+ "nix 0.31.3",
  "rustix 1.1.6",
 ]
 
