@@ -534,3 +534,64 @@ fn spyc_jars_lists_each_jar_by_its_tab_and_owner() {
         dirs.jars_listed().contains("owner none")
     });
 }
+
+/// The jar socket of the first capture or task a saved session records.
+fn saved_task_socket(state: &Path) -> Option<PathBuf> {
+    let sessions = state.join("spyc").join("sessions");
+    std::fs::read_dir(sessions)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .filter_map(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .find_map(|v| Some(PathBuf::from(v["tasks"][0]["jar_socket"].as_str()?)))
+}
+
+/// S2c: a `!` capture running in a jar when spyc is killed comes back with
+/// `spyc -r` as a background task: its jar taken back by the new spyc, the
+/// same program still running, never started again.
+#[test]
+fn spyc_r_after_a_kill_takes_a_running_capture_back() {
+    let dirs = dirs();
+    std::fs::write(dirs.home.join(".spycrc.toml"), "[pane]\njars = true\n").unwrap();
+    let mut left = Leftovers(Vec::new());
+    let capture = format!(
+        "!echo $$ >> {}; printf capture-mark; exec cat",
+        dirs.pidfile.display()
+    );
+    let first = Spyc::start(&dirs, &["-c", &capture]);
+    left.0.push(first.pid());
+    eventually("the capture's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    let program = noted(&dirs.pidfile)[0];
+    left.0.push(program);
+    let mut socket = None;
+    eventually("the session records the capture's jar", || {
+        socket = saved_task_socket(&dirs.state);
+        socket.is_some()
+    });
+    let socket = socket.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.crash();
+    assert!(alive(program), "the capture's program died with spyc");
+
+    let second = Spyc::start(&dirs, &["-r"]);
+    left.0.push(second.pid());
+    eventually("the restore picker", || second.shows("Enter restore"));
+    let mut typed: Option<Instant> = None;
+    eventually("the new spyc owns the capture's jar", || {
+        if typed.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
+            second.type_keys(b"\r");
+            typed = Some(Instant::now());
+        }
+        described(&socket, "owner_pid") == Some(second.pid().to_string())
+    });
+    assert!(alive(program), "the capture's program was ended");
+    assert_eq!(
+        noted(&dirs.pidfile),
+        [program],
+        "the program was started again"
+    );
+}

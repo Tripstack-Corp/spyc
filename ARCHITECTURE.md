@@ -983,6 +983,14 @@ that turns jars on.
   jar ends as spyc acknowledges the exit, which it does as it reads it;
   after a crash, the jar waits for a spyc to read it. No usable jar fails
   the capture with why, and offers to run without jars.
+- **`spyc -r` takes captures and tasks back** (S2c,
+  `src/app/jarred_tasks.rs`). A save records each capture or background
+  task whose program runs in a jar and hasn't ended (the manifest's
+  `tasks`), and counts it as something to restore. A restore of a session
+  no other spyc runs reopens each as a background task, its jar taken back
+  on a worker as a retake (`Spec::retaking`), so a jar that's gone ends the
+  task saying so and nothing starts afresh; the output replays from the
+  oldest byte the jar holds.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
   writer thread per connection, which pings whenever it's idle, so a jar that
   stops reading holds up neither the event loop nor the parser.
