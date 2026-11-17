@@ -2005,6 +2005,13 @@ fn left_by_a_crash(place: &Place, dir: &Path) -> (PathBuf, u32) {
     }
     host.sever_jar();
     std::mem::forget(host);
+    // The jar hears its owner went in its own time; until then it refuses one.
+    while !spyc_jar::client::describe(&socket)
+        .is_ok_and(|f| f.iter().any(|(k, v)| k == "owner" && v.starts_with("none")))
+    {
+        assert!(Instant::now() < until, "the jar never heard its owner go");
+        std::thread::sleep(Duration::from_millis(20));
+    }
     (socket, program)
 }
 
@@ -2019,12 +2026,23 @@ fn running(pid: u32) -> bool {
 fn jars_no_spyc_owns_are_found_by_what_they_hold() {
     let dir = short_dir();
     let place = place_in(dir.path(), built_jar());
-    let owned = spawn_in(&place, "exec cat", dir.path()).unwrap();
+    let mut owned = spawn_in(&place, "exec cat", dir.path()).unwrap();
     assert!(
         orphans::find(Some(place.clone())).is_empty(),
         "an owned jar"
     );
+    // A host dropped leaves its jar running, as a spyc that exits does.
+    let owned_socket = owned.jar_socket().unwrap().to_path_buf();
+    owned.shutdown(Duration::from_secs(2));
     drop(owned);
+    let until = Instant::now() + WAIT;
+    while owned_socket.exists() {
+        assert!(
+            Instant::now() < until,
+            "the owned jar ran on after its tab closed"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
 
     let (socket, program) = left_by_a_crash(&place, dir.path());
     let mut found = Vec::new();
