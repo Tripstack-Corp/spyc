@@ -62,7 +62,7 @@ pub struct Manifest {
 }
 
 /// A capture or background task whose program runs in a jar.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SavedTask {
     pub title: String,
     pub cmd_display: String,

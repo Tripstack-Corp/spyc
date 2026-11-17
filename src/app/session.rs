@@ -522,6 +522,7 @@ impl App {
         // P2: a scope-registry mutation (register/release) is session-relevant
         // — it's exactly what must survive a crash mid-merge-train.
         self.state.scope_registry.hash(&mut h);
+        self.hash_saved_tasks(&mut h);
         for closed in &self.state.closed_projects {
             closed.project.anchor().hash(&mut h);
             closed.closed_secs.hash(&mut h);
@@ -568,9 +569,11 @@ impl App {
     }
 
     /// Whether a restore would bring anything back: any project's tabs (open
-    /// or kept unopened) or split, or scope claims. A cwd alone doesn't count.
+    /// or kept unopened) or split, scope claims, or a capture or task in a
+    /// jar. A cwd alone doesn't count.
     fn has_restorable_state(&mut self) -> bool {
         !self.state.scope_registry.is_empty()
+            || !self.saved_tasks().is_empty()
             || self
                 .open_project_ids()
                 .into_iter()

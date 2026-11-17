@@ -44,6 +44,26 @@ impl App {
         if !jars {
             return Ok((spawn_capture(cmd, dir, None)?, None));
         }
+        let (cmd, dir) = (cmd.to_string(), dir.to_path_buf());
+        let place = self.runtime.jar_place.clone();
+        let (host, id) = self.start_on_worker(move || start_in_jar(&cmd, &dir, place))?;
+        Ok((host, Some(id)))
+    }
+
+    /// A restored task's host, and the id of its jar's start: a stand-in
+    /// while a worker takes back the jar at `socket`, which starts nothing
+    /// afresh.
+    pub(super) fn retake_task_host(&mut self, socket: &Path) -> anyhow::Result<(PtyHost, u64)> {
+        let socket = socket.to_path_buf();
+        let place = self.runtime.jar_place.clone();
+        self.start_on_worker(move || retake_jar(socket, place))
+    }
+
+    /// A stand-in host, and the id of the start `start` makes on a worker.
+    fn start_on_worker(
+        &mut self,
+        start: impl FnOnce() -> anyhow::Result<PtyHost> + Send + 'static,
+    ) -> anyhow::Result<(PtyHost, u64)> {
         let size = capture_size();
         let stand_in = PtyHost::around_jar(jar::starting("", None, size), size)?;
         self.runtime.capture_start_seq += 1;
@@ -52,20 +72,15 @@ impl App {
             .runtime
             .capture_starts
             .sender_waking(self.loop_waker(Wake::PaneStart));
-        let place = self.runtime.jar_place.clone();
-        let (cmd, dir) = (cmd.to_string(), dir.to_path_buf());
         spawn_worker(
             results,
-            move || CaptureStart {
-                id,
-                host: start_in_jar(&cmd, &dir, place),
-            },
+            move || CaptureStart { id, host: start() },
             move |panic| CaptureStart {
                 id,
-                host: Err(anyhow::anyhow!("the capture's start stopped: {panic}")),
+                host: Err(anyhow::anyhow!("the start stopped: {panic}")),
             },
         );
-        Ok((stand_in, Some(id)))
+        Ok((stand_in, id))
     }
 
     /// Put each landed host in its capture's or task's place. Whether any
@@ -145,6 +160,17 @@ fn start_in_jar(cmd: &str, dir: &Path, place: Option<jar::Place>) -> anyhow::Res
         .ok_or_else(|| anyhow::anyhow!("this build doesn't run programs in jars"))?;
     spec.exit_linger = Some(spyc_jar::cli::UNTIL_READ);
     spawn_capture(cmd, dir, Some(spec))
+}
+
+/// Take back the jar at `socket` in `place` (this user's when `None`):
+/// never a program started afresh.
+fn retake_jar(socket: std::path::PathBuf, place: Option<jar::Place>) -> anyhow::Result<PtyHost> {
+    // SPYC-TRAP(jar-off-the-loop): only on this worker.
+    let name = uuid::Uuid::now_v7().to_string();
+    let spec = jar::spec_for(place, &name, None)?
+        .ok_or_else(|| anyhow::anyhow!("this build doesn't run programs in jars"))?
+        .retaking(socket);
+    spawn_capture("", Path::new("/"), Some(spec))
 }
 
 /// Spawn a capture's PTY, in `jar` when one is given. TERM=dumb and

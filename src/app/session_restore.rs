@@ -182,6 +182,10 @@ impl App {
         if adopt {
             self.adopt_session(manifest);
         }
+        // A running session's captures and tasks are its spyc's.
+        if !running {
+            self.restore_tasks(&manifest.tasks);
+        }
         // P2: restore the scope-coordination registry, once every
         // project's tabs are back — independent of tab-restore success. A
         // claim whose owning
