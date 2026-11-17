@@ -622,6 +622,7 @@ fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost>
             name: "0123456789abcdef".into(),
             adopt: None,
             retake: false,
+            exit_linger: None,
         }),
     })
 }
@@ -813,6 +814,7 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
                 name: "0123456789abcdef".into(),
                 adopt: None,
                 retake: false,
+                exit_linger: None,
             }),
         },
         std::sync::Arc::new(|| {}),
@@ -925,6 +927,7 @@ fn pane_in(place: &Place, command: &str, cwd: &Path, adopt: Option<PathBuf>) -> 
                 name: TAB.into(),
                 adopt,
                 retake: false,
+                exit_linger: None,
             }),
         },
         std::sync::Arc::new(|| {}),
@@ -1866,10 +1869,14 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         Poll,
         /// A limit published for clients, made from the others.
         Limit,
+        /// Never runs out: what it keeps ends on an event (a capture's exit
+        /// collected by its owner).
+        Unbounded,
     }
-    use Kind::{AfterExec, Ending, Limit, Parked, Peer, Poll, Served, Start};
-    const TIMERS: [(&str, Kind); 20] = [
+    use Kind::{AfterExec, Ending, Limit, Parked, Peer, Poll, Served, Start, Unbounded};
+    const TIMERS: [(&str, Kind); 21] = [
         ("FIRST_VALIDATION", Served),
+        ("UNTIL_READ", Unbounded),
         ("PARK_DEADLINE", Parked),
         ("FLUSH_DEADLINE", Parked),
         ("PARKED_VALIDATION", Parked),

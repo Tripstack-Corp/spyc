@@ -341,7 +341,7 @@ a session, to run tabs without jars. `[pane] jars = false` runs every tab
 without one. A tab sent to the background as a task (`:pane-to-task`) keeps
 its jar.
 
-`spyc --jars` lists your jars: each tab's label, whether it's a pane or a task, its
+`spyc --jars` lists your jars: each tab's label, whether it's a pane, a task or a `!` capture, its
 agent and project, its program's pid, and whether a spyc owns it.
 
 ## Quick Select — labelled overlay picker

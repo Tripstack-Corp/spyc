@@ -969,9 +969,20 @@ that turns jars on.
   `project_home` on the loop's pass before it waits, only what changed since
   that connection last told it, so a rename reaches the jar however made. A
   tab demoted to a task keeps its jar, its connection moving with its
-  `PtyHost`, and the jar hears `is` = `task`; promoted back, `pane`. The
-  jar keeps them when its owner goes: after a crash, `spyc --jars`
-  (`jar::listing`, which only reads) names an orphaned tab by them.
+  `PtyHost`, and the jar hears `is` = `task`; promoted back, `pane`. A
+  running `!` capture's jar hears `capture`. The jar keeps them when its
+  owner goes: after a crash, `spyc --jars` (`jar::listing`, which only
+  reads) names an orphaned tab by them.
+- **A `!` capture runs in a jar too** (S2c, `src/app/capture_starts.rs`),
+  started off the loop as a tab's is: the capture opens on a stand-in host
+  that prints nothing, and the jar's host takes its place when it lands, in
+  the capture or in the task it was sent to meanwhile (each keeps the
+  start's id until then); one closed meanwhile ends the host that lands. Its
+  jar keeps the program's output and exit until an owner collects them (the
+  start's exit linger, `spyc_jar::cli::UNTIL_READ`): with spyc there, the
+  jar ends as spyc acknowledges the exit, which it does as it reads it;
+  after a crash, the jar waits for a spyc to read it. No usable jar fails
+  the capture with why, and offers to run without jars.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
   writer thread per connection, which pings whenever it's idle, so a jar that
   stops reading holds up neither the event loop nor the parser.

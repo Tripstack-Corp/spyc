@@ -267,6 +267,12 @@ pub(super) struct Runtime {
     /// Where a jarred tab's pane lands once a worker launched it
     /// (`start_jarred_pane`); `apply_pane_starts` puts it in its tab.
     pub(super) pane_starts: Landing<super::pane_starts::PaneStart>,
+    /// Where a capture's host lands once a worker started its jar
+    /// (`capture_host`); `apply_capture_starts` puts it in its capture or
+    /// task.
+    pub(super) capture_starts: Landing<super::capture_starts::CaptureStart>,
+    /// The last capture jar start's id.
+    pub(super) capture_start_seq: u64,
     /// The place every tab's jar starts in: this user's when `None`, a
     /// test's own otherwise.
     pub(super) jar_place: Option<crate::pane::jar::Place>,
@@ -401,6 +407,8 @@ impl Runtime {
             clipboard_paste_results: Landing::default(),
             jump_default_results: Landing::default(),
             pane_starts: Landing::default(),
+            capture_starts: Landing::default(),
+            capture_start_seq: 0,
             jar_place: None,
             jarless: super::jarless::Jarless::default(),
             jump_default_seq: 0,

@@ -39,6 +39,11 @@ impl App {
             task.host
                 .tell_jar(&[("is", "task"), ("label", &task.title)]);
         }
+        if let Some(capture) = &self.runtime.pending_capture {
+            capture
+                .host
+                .tell_jar(&[("is", "capture"), ("label", &capture.title)]);
+        }
     }
 }
 

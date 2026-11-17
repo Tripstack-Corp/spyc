@@ -114,8 +114,9 @@ impl App {
         let landed = self.apply_clipboard_pastes();
         self.take_landing(landed, ctx, terminal, foreground_exec);
 
-        // A jarred tab's pane landed (woke via `Wake::PaneStart`).
-        if self.apply_pane_starts() {
+        // A jarred tab's pane, or a capture's host, landed (woke via
+        // `Wake::PaneStart`).
+        if self.apply_pane_starts() | self.apply_capture_starts() {
             ctx.draw.mark(3);
         }
         // `J`'s default path landed (woke via `Message::Wake(Wake::JumpDefault)`).

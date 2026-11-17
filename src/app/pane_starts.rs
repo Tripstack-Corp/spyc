@@ -358,7 +358,7 @@ fn settle_landed_tab(info: &mut crate::pane::tabs::TabInfo, pane: &Pane, started
 #[cfg(test)]
 mod tests {
     /// SPYC-TRAP `jar-off-the-loop`: outside `src/pane`, only this module's
-    /// worker asks for a jar, since a launch given one waits on the jar for as
+    /// worker, and `capture_starts`'s, asks for a jar, since a launch given one waits on the jar for as
     /// long as it holds the program. Anywhere else, that wait would freeze the
     /// loop.
     #[test]
@@ -392,10 +392,14 @@ mod tests {
                 }
             }
         }
+        asking.sort();
         assert_eq!(
             asking,
-            [std::path::PathBuf::from("app/pane_starts.rs")],
-            "a tab's jar is asked for off the loop"
+            [
+                std::path::PathBuf::from("app/capture_starts.rs"),
+                std::path::PathBuf::from("app/pane_starts.rs")
+            ],
+            "a tab's or capture's jar is asked for off the loop"
         );
     }
 }

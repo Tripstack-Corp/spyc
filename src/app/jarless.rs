@@ -27,6 +27,8 @@ pub(super) struct Jarless {
     /// Why no jar is usable, as the store or the jar's start said.
     why: String,
     waiting: Vec<Waiting>,
+    /// A capture failed for want of a usable jar, and waits on the answer.
+    capture: bool,
 }
 
 /// A tab that didn't start for want of a usable jar.
@@ -65,11 +67,24 @@ impl App {
         self.offer_jarless();
     }
 
-    /// Ask whether to run tabs without jars, when a tab waits on the answer
-    /// and nothing else is being asked. Whether it asked.
+    /// A capture didn't start for want of a usable jar (`why`): offer to
+    /// run without jars, unless that's been answered. The capture isn't
+    /// started again; `!!` runs it once more.
+    pub(super) fn capture_has_no_usable_jar(&mut self, why: &str) {
+        if self.runtime.jarless.asked {
+            return;
+        }
+        why.clone_into(&mut self.runtime.jarless.why);
+        self.runtime.jarless.capture = true;
+        self.offer_jarless();
+    }
+
+    /// Ask whether to run tabs without jars, when a tab or capture waits on
+    /// the answer and nothing else is being asked. Whether it asked.
     pub(super) fn offer_jarless(&mut self) -> bool {
         let jarless = &self.runtime.jarless;
-        if jarless.asked || jarless.waiting.is_empty() || !matches!(self.state.mode, Mode::Normal) {
+        let waiting = !jarless.waiting.is_empty() || jarless.capture;
+        if jarless.asked || !waiting || !matches!(self.state.mode, Mode::Normal) {
             return false;
         }
         self.state.mode = Mode::Prompting(Prompt::simple(

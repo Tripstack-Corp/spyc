@@ -126,6 +126,9 @@ fn run_jar() -> anyhow::Result<()> {
     let start = read_start()?;
     (cfg.socket, cfg.cwd, cfg.argv) = (start.socket, start.cwd, start.argv);
     (cfg.rows, cfg.cols, cfg.start_on_owner) = (start.rows, start.cols, start.hold);
+    if let Some(linger) = start.exit_linger {
+        cfg.linger_after_exit = linger;
+    }
     rustix::process::setsid().context(
         "spyc-jar: can't start its own session (started as a process group leader?); refusing to run",
     )?;
@@ -246,28 +249,38 @@ pub struct Start {
     /// accepted, and the jar ends having started nothing if none comes within
     /// this long; `None` starts it at once.
     pub hold: Option<Duration>,
+    /// How long the program's output and exit are kept once it has ended,
+    /// for an owner that isn't there; `None` for the jar's default.
+    /// [`UNTIL_READ`] keeps them until an owner collects the exit.
+    pub exit_linger: Option<Duration>,
     /// The program and its arguments.
     pub argv: Vec<String>,
 }
 
+/// An exit linger with no end: the output and exit wait for an owner to
+/// collect them (a `!` capture's).
+pub const UNTIL_READ: Duration = Duration::from_millis(u64::MAX);
+
 impl Start {
     /// The start as bytes: the token, the socket, the directory (empty for
-    /// none), rows,
-    /// columns, the hold in milliseconds (empty for none), how many arguments
-    /// there are, then the arguments, each ended by a NUL, numbers in
-    /// decimal. The count tells a start cut short from a shorter program.
+    /// none), rows, columns, the hold and the exit linger in milliseconds
+    /// (each empty for none), how many arguments there are, then the
+    /// arguments, each ended by a NUL, numbers in decimal. The count tells a
+    /// start cut short from a shorter program.
     pub fn encode(&self) -> Vec<u8> {
         use std::os::unix::ffi::OsStrExt;
-        let hold = self.hold.map(|h| h.as_millis().to_string());
+        let ms = |d: Option<Duration>| d.map(|d| d.as_millis().to_string());
+        let (hold, exit_linger) = (ms(self.hold), ms(self.exit_linger));
         let (rows, cols) = (self.rows.to_string(), self.cols.to_string());
         let count = self.argv.len().to_string();
-        let head: [&[u8]; 7] = [
+        let head: [&[u8]; 8] = [
             &self.token,
             self.socket.as_os_str().as_bytes(),
             self.cwd.as_ref().map_or(&[], |c| c.as_os_str().as_bytes()),
             rows.as_bytes(),
             cols.as_bytes(),
             hold.as_ref().map_or(&[], |h| h.as_bytes()),
+            exit_linger.as_ref().map_or(&[], |l| l.as_bytes()),
             count.as_bytes(),
         ];
         let mut out = Vec::new();
@@ -297,7 +310,18 @@ impl Start {
         if fields.pop().is_none_or(|last| !last.is_empty()) {
             bail!("its last field has no NUL");
         }
-        let [token, socket, cwd, rows, cols, hold, count, argv @ ..] = fields.as_slice() else {
+        let [
+            token,
+            socket,
+            cwd,
+            rows,
+            cols,
+            hold,
+            exit_linger,
+            count,
+            argv @ ..,
+        ] = fields.as_slice()
+        else {
             bail!("it ends before its arguments");
         };
         let token = token.trim_ascii().to_vec();
@@ -325,6 +349,11 @@ impl Start {
                 None
             } else {
                 Some(Duration::from_millis(number(hold, "hold")?))
+            },
+            exit_linger: if exit_linger.is_empty() {
+                None
+            } else {
+                Some(Duration::from_millis(number(exit_linger, "exit linger")?))
             },
             argv: argv
                 .iter()
@@ -432,6 +461,7 @@ mod tests {
             rows: 24,
             cols: 80,
             hold: None,
+            exit_linger: None,
             argv: argv.iter().map(|a| (*a).to_string()).collect(),
         }
     }
@@ -446,6 +476,7 @@ mod tests {
             rows: 61,
             cols: 397,
             hold: Some(Duration::from_secs(30)),
+            exit_linger: Some(UNTIL_READ),
             ..plain.clone()
         };
         for sent in [plain, full] {
@@ -483,9 +514,9 @@ mod tests {
         let x = not_utf8.len() - 2;
         not_utf8[x] = 0xff;
         assert!(Start::parse(&not_utf8).is_err(), "an argument not UTF-8");
-        let huge = b"0123456789abcdef0123\0/j.sock\0\x0070000\x0080\0\x001\0/bin/cat\0";
+        let huge = b"0123456789abcdef0123\0/j.sock\0\x0070000\x0080\0\0\x001\0/bin/cat\0";
         assert!(Start::parse(&huge[..]).is_err(), "rows past a u16");
-        let fine = b"0123456789abcdef0123\0/j.sock\0\x0060000\x0080\0\x001\0/bin/cat\0";
+        let fine = b"0123456789abcdef0123\0/j.sock\0\x0060000\x0080\0\0\x001\0/bin/cat\0";
         assert!(
             Start::parse(&fine[..]).is_ok(),
             "premise: only the rows are wrong"
