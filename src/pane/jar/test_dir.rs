@@ -25,7 +25,30 @@ impl TestDir {
 }
 
 impl Drop for TestDir {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        use rustix::process::{Pid, Signal, kill_process, kill_process_group};
+        for socket in sockets(self.path()) {
+            let Ok(said) = spyc_jar::client::describe(&socket) else {
+                continue;
+            };
+            let pid = |key: &str| {
+                said.iter()
+                    .find(|(k, _)| k == key)
+                    .and_then(|(_, v)| v.parse().ok())
+                    .and_then(Pid::from_raw)
+            };
+            // The program's group first: a jar ended first would leave it
+            // a moment to outlive its terminal.
+            if let Some(program) = pid("program_pid") {
+                let _ = kill_process(program, Signal::CONT);
+                let _ = kill_process_group(program, Signal::KILL);
+            }
+            if let Some(jar) = pid("pid") {
+                let _ = kill_process(jar, Signal::CONT);
+                let _ = kill_process(jar, Signal::KILL);
+            }
+        }
+    }
 }
 
 /// Every socket under `dir`, however deep.

@@ -14,12 +14,9 @@ const WAIT: Duration = Duration::from_secs(5);
 /// pane's jar waits for an owner for ever.
 const END: Duration = Duration::from_millis(500);
 
-/// A directory under `/tmp`, short enough for a socket's path on macOS.
-fn short_dir() -> tempfile::TempDir {
-    tempfile::Builder::new()
-        .prefix("jt")
-        .tempdir_in("/tmp")
-        .unwrap()
+/// A directory under `/tmp` whose jars end with it.
+fn short_dir() -> test_dir::TestDir {
+    test_dir::TestDir::new("jt")
 }
 
 /// Where `place` keeps the token of the jar at `socket`: by the socket's name.
@@ -46,7 +43,7 @@ struct FakeJar {
     /// Listening, so the jar counts as running.
     listener: Option<UnixListener>,
     socket: PathBuf,
-    _dir: tempfile::TempDir,
+    _dir: test_dir::TestDir,
 }
 
 impl FakeJar {

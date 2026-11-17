@@ -182,7 +182,7 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 struct Dirs {
-    _root: tempfile::TempDir,
+    root: tempfile::TempDir,
     home: PathBuf,
     state: PathBuf,
     config: PathBuf,
@@ -219,6 +219,35 @@ impl Dirs {
     }
 }
 
+/// Every jar still answering under the test's directories is ended with its
+/// program, however the test ended: a pane's jar waits for an owner for
+/// ever, holding a pty.
+impl Drop for Dirs {
+    fn drop(&mut self) {
+        let mut dirs = vec![self.root.path().to_path_buf()];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                use std::os::unix::fs::FileTypeExt;
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                if kind.is_dir() {
+                    dirs.push(entry.path());
+                } else if kind.is_socket() {
+                    let pid = |key| described(&entry.path(), key).and_then(|p| p.parse().ok());
+                    if let Some(p) = pid("program_pid").and_then(rustix::process::Pid::from_raw) {
+                        let _ =
+                            rustix::process::kill_process_group(p, rustix::process::Signal::KILL);
+                    }
+                    if let Some(jar) = pid("pid") {
+                        kill(jar);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn dirs() -> Dirs {
     dirs_running("printf ready-mark; exec cat")
 }
@@ -243,7 +272,7 @@ fn dirs_running(rest: &str) -> Dirs {
         runtime: at("r"),
         project: at("p"),
         pidfile: root.path().join("agent.pid"),
-        _root: root,
+        root,
     };
     std::fs::write(
         d.home.join(".spycrc.toml"),
