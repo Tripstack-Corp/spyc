@@ -34,7 +34,7 @@ to a newer release.
 # Use single-branch to avoid downloading the heavy gh-pages branch
 git clone --single-branch --branch main https://github.com/Tripstack-Corp/spyc.git
 cd spyc
-make install          # builds release + copies to ~/.local/bin (no sudo)
+make install          # builds release + copies spyc and spyc-jar to ~/.local/bin (no sudo)
 ```
 
 Make sure `~/.local/bin` is on your `PATH`. Most Linux distros include
@@ -54,8 +54,11 @@ Or build and copy manually:
 
 ```sh
 cargo build --release
-install -m 755 target/release/spyc ~/.local/bin/
+install -m 755 target/release/spyc target/release/spyc-jar ~/.local/bin/
 ```
+
+`spyc-jar` goes in the same directory as `spyc`: each tab's program runs in
+one, and spyc looks for it beside itself.
 
 `make doctor` checks that the toolchain and cross-compile prerequisites
 are present before you start.

@@ -15,6 +15,8 @@
 #   make install-debug — install symbolicated `spyc.debug` for sample/lldb/perf
 
 BINARY   := spyc
+# Installed beside spyc, which starts each pane's program in one.
+JAR      := spyc-jar
 VERSION  := $(shell grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
 DIST_DIR := dist
 
@@ -523,13 +525,15 @@ _deb:
 PREFIX ?= $(HOME)/.local
 
 .PHONY: install
-install: release ## Install to ~/.local/bin (builds release first; override with PREFIX=/usr/local)
+install: release ## Install spyc and spyc-jar to ~/.local/bin (builds release first; override with PREFIX=/usr/local)
 	install -d $(PREFIX)/bin
+	install -m 755 $(TARGET_DIR)/release/$(JAR) $(PREFIX)/bin/$(JAR)
 	install -m 755 $(TARGET_DIR)/release/$(BINARY) $(PREFIX)/bin/$(BINARY)
 ifeq ($(shell uname),Darwin)
+	codesign -s - -v $(PREFIX)/bin/$(JAR)
 	codesign -s - -v $(PREFIX)/bin/$(BINARY)
 endif
-	@echo "✓ installed $(BINARY) v$(VERSION) → $(PREFIX)/bin/$(BINARY)"
+	@echo "✓ installed $(BINARY) and $(JAR) v$(VERSION) → $(PREFIX)/bin/"
 	@case ":$$PATH:" in \
 		*":$(PREFIX)/bin:"*) ;; \
 		*) echo "  note: $(PREFIX)/bin is not on your PATH — add it to your shell rc:"; \
@@ -548,8 +552,8 @@ endif
 	@echo "  Rust symbols are kept so the profiler can resolve function names."
 
 .PHONY: uninstall
-uninstall: ## Remove from $(PREFIX)/bin
-	rm -f $(PREFIX)/bin/$(BINARY)
+uninstall: ## Remove spyc and spyc-jar from $(PREFIX)/bin
+	rm -f $(PREFIX)/bin/$(BINARY) $(PREFIX)/bin/$(JAR)
 
 .PHONY: uninstall-debug
 uninstall-debug: ## Remove spyc.debug from $(PREFIX)/bin
