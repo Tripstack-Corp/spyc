@@ -22,6 +22,8 @@ struct Spyc {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     seen: Arc<Mutex<Vec<u8>>>,
     keys: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Where it logs its standard error, one file a run.
+    stderr: PathBuf,
 }
 
 /// The queries spyc makes of its terminal, and what this one answers.
@@ -87,11 +89,41 @@ impl Spyc {
                 }
             });
         }
-        Self { child, seen, keys }
+        Self {
+            child,
+            seen,
+            keys,
+            stderr: dirs.state.join("spyc").join("stderr"),
+        }
     }
 
     fn pid(&self) -> i32 {
         i32::try_from(self.child.process_id().unwrap()).unwrap()
+    }
+
+    /// [`eventually`], saying what this spyc last drew when it never does.
+    fn eventually(&self, what: &str, mut done: impl FnMut() -> bool) {
+        let until = Instant::now() + WAIT;
+        while !done() {
+            if Instant::now() >= until {
+                let seen = String::from_utf8_lossy(&self.seen.lock().unwrap()).into_owned();
+                let at = seen.len().saturating_sub(3000);
+                let at = (at..seen.len())
+                    .find(|&i| seen.is_char_boundary(i))
+                    .unwrap_or(0);
+                let logs: String = std::fs::read_dir(&self.stderr)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+                    .collect();
+                panic!(
+                    "never: {what}; spyc's standard error:\n{logs}\nspyc last drew:\n{}",
+                    &seen[at..]
+                );
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     fn shows(&self, needle: &str) -> bool {
@@ -273,7 +305,7 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
     let mut left = Leftovers(Vec::new());
     let first = Spyc::start(&dirs, &[]);
     left.0.push(first.pid());
-    eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || dirs.pidfile.exists());
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -346,7 +378,7 @@ fn a_spyc_stopped_past_the_deadline_takes_its_tabs_back() {
     let mut left = Leftovers(Vec::new());
     let spyc = Spyc::start(&dirs, &[]);
     left.0.push(spyc.pid());
-    eventually("the tab's program starts", || dirs.pidfile.exists());
+    spyc.eventually("the tab's program starts", || dirs.pidfile.exists());
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -497,7 +529,7 @@ fn a_spyc_with_no_spyc_jar_beside_it_offers_to_run_tabs_without_jars() {
     assert!(spyc.shows("installation"), "says to check the installation");
     assert!(!dirs.pidfile.exists(), "a program ran before the answer");
     spyc.type_keys(b"y");
-    eventually("the tab's program runs", || {
+    spyc.eventually("the tab's program runs", || {
         !noted(&dirs.pidfile).is_empty()
     });
     left.0.extend(noted(&dirs.pidfile));
@@ -516,7 +548,7 @@ fn spyc_jars_lists_each_jar_by_its_tab_and_owner() {
     let mut left = Leftovers(Vec::new());
     let spyc = Spyc::start(&dirs, &[]);
     left.0.push(spyc.pid());
-    eventually("the tab's program runs", || {
+    spyc.eventually("the tab's program runs", || {
         !noted(&dirs.pidfile).is_empty()
     });
     left.0.extend(noted(&dirs.pidfile));
