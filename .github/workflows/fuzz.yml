@@ -86,7 +86,7 @@ jobs:
       # therefore builds for musl, where ASAN cannot work ("sanitizer is
       # incompatible with statically linked libc"). Hence the explicit
       # FUZZ_TRIPLE below — do not drop it.
-      - uses: taiki-e/install-action@v2.90.2
+      - uses: taiki-e/install-action@v2.90.3
         with:
           tool: cargo-fuzz
 

@@ -1,6 +1,7 @@
 #![cfg(unix)]
 //! `kill -9` of spyc, then `spyc -r`: a tab's program, running in its jar,
 //! is taken back by the new spyc rather than started again (`[pane] jars`).
+//! And a spyc with no usable jar offers to run its tabs without one.
 //! Driven through the binary on a PTY of the test's own, with a stand-in
 //! agent, and every directory the test's own.
 // Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
@@ -21,6 +22,8 @@ struct Spyc {
     child: Box<dyn portable_pty::Child + Send + Sync>,
     seen: Arc<Mutex<Vec<u8>>>,
     keys: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Where it logs its standard error, one file a run.
+    stderr: PathBuf,
 }
 
 /// The queries spyc makes of its terminal, and what this one answers.
@@ -35,6 +38,12 @@ const ANSWERS: &[(&[u8], &[u8])] = &[
 
 impl Spyc {
     fn start(dirs: &Dirs, args: &[&str]) -> Self {
+        Self::start_from(Path::new(env!("CARGO_BIN_EXE_spyc")), dirs, args)
+    }
+
+    /// [`Self::start`], running the spyc at `binary`.
+    fn start_from(binary: &Path, dirs: &Dirs, args: &[&str]) -> Self {
+        warm(binary);
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 30,
@@ -43,20 +52,11 @@ impl Spyc {
                 pixel_height: 0,
             })
             .unwrap();
-        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_spyc"));
+        let mut cmd = CommandBuilder::new(binary);
         cmd.args(args);
         cmd.cwd(&dirs.project);
         cmd.env_clear();
-        for (k, v) in [
-            ("HOME", dirs.home.as_os_str()),
-            ("XDG_STATE_HOME", dirs.state.as_os_str()),
-            ("XDG_CONFIG_HOME", dirs.config.as_os_str()),
-            ("XDG_RUNTIME_DIR", dirs.runtime.as_os_str()),
-            ("TMPDIR", dirs.runtime.as_os_str()),
-            ("PATH", "/usr/bin:/bin".as_ref()),
-            ("SHELL", "/bin/sh".as_ref()),
-            ("TERM", "xterm-256color".as_ref()),
-        ] {
+        for (k, v) in dirs.env() {
             cmd.env(k, v);
         }
         let child = pair.slave.spawn_command(cmd).unwrap();
@@ -90,11 +90,41 @@ impl Spyc {
                 }
             });
         }
-        Self { child, seen, keys }
+        Self {
+            child,
+            seen,
+            keys,
+            stderr: dirs.state.join("spyc").join("stderr"),
+        }
     }
 
     fn pid(&self) -> i32 {
         i32::try_from(self.child.process_id().unwrap()).unwrap()
+    }
+
+    /// [`eventually`], saying what this spyc last drew when it never does.
+    fn eventually(&self, what: &str, mut done: impl FnMut() -> bool) {
+        let until = Instant::now() + WAIT;
+        while !done() {
+            if Instant::now() >= until {
+                let seen = String::from_utf8_lossy(&self.seen.lock().unwrap()).into_owned();
+                let at = seen.len().saturating_sub(3000);
+                let at = (at..seen.len())
+                    .find(|&i| seen.is_char_boundary(i))
+                    .unwrap_or(0);
+                let logs: String = std::fs::read_dir(&self.stderr)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+                    .collect();
+                panic!(
+                    "never: {what}; spyc's standard error:\n{logs}\nspyc last drew:\n{}",
+                    &seen[at..]
+                );
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 
     fn shows(&self, needle: &str) -> bool {
@@ -111,6 +141,24 @@ impl Spyc {
     fn crash(mut self) {
         kill(self.pid());
         let _ = self.child.wait();
+    }
+}
+
+/// macOS scans an executable on its first run, which takes seconds for a
+/// debug build this size, and longer while a gate runs every test at once;
+/// every rebuild makes it new again. Run `binary` once, untimed, so the waits
+/// below are spent on spyc rather than the scan: a gate's failures here were
+/// spycs that had drawn nothing and logged nothing in 30 s.
+fn warm(binary: &Path) {
+    static WARMED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    let mut warmed = WARMED.lock().unwrap();
+    if !warmed.iter().any(|b| b == binary) {
+        let _ = std::process::Command::new(binary)
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        warmed.push(binary.to_path_buf());
     }
 }
 
@@ -134,7 +182,7 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
 }
 
 struct Dirs {
-    _root: tempfile::TempDir,
+    root: tempfile::TempDir,
     home: PathBuf,
     state: PathBuf,
     config: PathBuf,
@@ -143,7 +191,69 @@ struct Dirs {
     pidfile: PathBuf,
 }
 
+impl Dirs {
+    /// A spyc's whole environment: every directory the test's own.
+    fn env(&self) -> [(&'static str, &std::ffi::OsStr); 8] {
+        [
+            ("HOME", self.home.as_os_str()),
+            ("XDG_STATE_HOME", self.state.as_os_str()),
+            ("XDG_CONFIG_HOME", self.config.as_os_str()),
+            ("XDG_RUNTIME_DIR", self.runtime.as_os_str()),
+            ("TMPDIR", self.runtime.as_os_str()),
+            ("PATH", "/usr/bin:/bin".as_ref()),
+            ("SHELL", "/bin/sh".as_ref()),
+            ("TERM", "xterm-256color".as_ref()),
+        ]
+    }
+
+    /// What `spyc --jars` prints here.
+    fn jars_listed(&self) -> String {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+            .arg("--jars")
+            .env_clear()
+            .envs(self.env())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    }
+}
+
+/// Every jar still answering under the test's directories is ended with its
+/// program, however the test ended: a pane's jar waits for an owner for
+/// ever, holding a pty.
+impl Drop for Dirs {
+    fn drop(&mut self) {
+        let mut dirs = vec![self.root.path().to_path_buf()];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                use std::os::unix::fs::FileTypeExt;
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                if kind.is_dir() {
+                    dirs.push(entry.path());
+                } else if kind.is_socket() {
+                    let pid = |key| described(&entry.path(), key).and_then(|p| p.parse().ok());
+                    if let Some(p) = pid("program_pid").and_then(rustix::process::Pid::from_raw) {
+                        let _ =
+                            rustix::process::kill_process_group(p, rustix::process::Signal::KILL);
+                    }
+                    if let Some(jar) = pid("pid") {
+                        kill(jar);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn dirs() -> Dirs {
+    dirs_running("printf ready-mark; exec cat")
+}
+
+/// Directories for a spyc whose one tab notes its pid, then runs `rest`.
+fn dirs_running(rest: &str) -> Dirs {
     use std::os::unix::fs::PermissionsExt;
     let root = tempfile::Builder::new()
         .prefix("ja")
@@ -162,12 +272,12 @@ fn dirs() -> Dirs {
         runtime: at("r"),
         project: at("p"),
         pidfile: root.path().join("agent.pid"),
-        _root: root,
+        root,
     };
     std::fs::write(
         d.home.join(".spycrc.toml"),
         format!(
-            "[pane]\njars = true\ntabs = [\"sh -c 'echo $$ > {}; printf ready-mark; exec cat'\"]\n",
+            "[pane]\njars = true\ntabs = [\"sh -c 'echo $$ > {}; {rest}'\"]\n",
             d.pidfile.display()
         ),
     )
@@ -243,7 +353,7 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
     let mut left = Leftovers(Vec::new());
     let first = Spyc::start(&dirs, &[]);
     left.0.push(first.pid());
-    eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || dirs.pidfile.exists());
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -258,8 +368,9 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
     });
     let socket = socket.unwrap();
     let build = described(&socket, "build").unwrap_or_default();
+    let hash = build.strip_prefix(&format!("{}-", spyc_jar::PACKAGE_VERSION));
     assert!(
-        build.len() == 64 && build.bytes().all(|b| b.is_ascii_hexdigit()),
+        hash.is_some_and(|h| h.len() == 12 && h.bytes().all(|b| b.is_ascii_hexdigit())),
         "the pane's jar runs from a store entry, not {build:?}"
     );
     if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
@@ -299,5 +410,308 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
     assert!(
         !second.shows("/resume"),
         "a restore typed /resume into the running agent"
+    );
+}
+
+/// S2b: a spyc stopped past its jars' deadline loses their leases; resumed, it
+/// takes its tabs back, the same program, and what it printed meanwhile shows,
+/// since it fit the jar's ring.
+#[test]
+fn a_spyc_stopped_past_the_deadline_takes_its_tabs_back() {
+    let go = std::env::temp_dir().join(format!("jar-go-{}", std::process::id()));
+    let dirs = dirs_running(&format!(
+        "printf ready-mark; while [ ! -e {} ]; do sleep 0.1; done; printf while-stopped-mark; exec cat",
+        go.display()
+    ));
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start(&dirs, &[]);
+    left.0.push(spyc.pid());
+    spyc.eventually("the tab's program starts", || dirs.pidfile.exists());
+    let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    left.0.push(agent);
+    eventually("the tab's output shows", || spyc.shows("ready-mark"));
+    let mut socket = None;
+    eventually("the session records the tab's jar", || {
+        socket = saved_jar_socket(&dirs.state);
+        socket.is_some()
+    });
+    let socket = socket.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    eventually("spyc owns the jar", || {
+        described(&socket, "owner_pid") == Some(spyc.pid().to_string())
+    });
+
+    let pid = rustix::process::Pid::from_raw(spyc.pid()).unwrap();
+    rustix::process::kill_process(pid, rustix::process::Signal::STOP).unwrap();
+    eventually("the jar ends a stopped spyc's lease", || {
+        described(&socket, "owner").is_some_and(|o| o.starts_with("none"))
+    });
+    let before = printed(&socket);
+    std::fs::write(&go, "").unwrap();
+    eventually("the program prints while spyc is stopped", || {
+        printed(&socket) > before
+    });
+    assert!(
+        !spyc.shows("while-stopped-mark"),
+        "premise: spyc was stopped"
+    );
+    rustix::process::kill_process(pid, rustix::process::Signal::CONT).unwrap();
+
+    eventually("the resumed spyc owns the jar again", || {
+        described(&socket, "owner_pid") == Some(spyc.pid().to_string())
+    });
+    eventually("what it printed meanwhile shows", || {
+        spyc.shows("while-stopped-mark")
+    });
+    let _ = std::fs::remove_file(&go);
+    assert!(alive(agent), "the program was ended");
+    let now: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(now, agent, "the program was started again");
+}
+
+/// How many bytes the jar at `socket` says its program printed.
+fn printed(socket: &Path) -> usize {
+    described(socket, "log")
+        .and_then(|l| {
+            l.split(" printed")
+                .next()
+                .and_then(|s| s.rsplit(' ').next())
+                .and_then(|n| n.parse().ok())
+        })
+        .unwrap_or(0)
+}
+
+/// The pids the tabs' programs noted in `pidfile`, one a line.
+fn noted(pidfile: &Path) -> Vec<i32> {
+    std::fs::read_to_string(pidfile)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.trim().parse().ok())
+        .collect()
+}
+
+/// Every jar socket under `dir`.
+fn sockets_under(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "sock") {
+                found.push(p);
+            }
+        }
+    }
+    found
+}
+
+/// Tabs a `[pane] tabs` list starts together each get a jar of their own,
+/// though ids made together share their leading digits (a v7 UUID's are its
+/// millisecond and a counter): both programs run, and neither tab is left
+/// `[not started]` by a jar that took the other's socket.
+#[test]
+fn startup_tabs_each_get_a_jar_of_their_own() {
+    let dirs = dirs();
+    let tab = format!("sh -c 'echo $$ >> {}; exec cat'", dirs.pidfile.display());
+    std::fs::write(
+        dirs.home.join(".spycrc.toml"),
+        format!("[pane]\njars = true\ntabs = [\"{tab}\", \"{tab}\"]\n"),
+    )
+    .unwrap();
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start(&dirs, &[]);
+    left.0.push(spyc.pid());
+    let refused = || spyc.shows("not started") || spyc.shows("wrong token");
+    eventually("both tabs' programs run, or one is refused", || {
+        noted(&dirs.pidfile).len() == 2 || refused()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    for socket in sockets_under(&dirs.runtime) {
+        if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+            left.0.push(jar);
+        }
+    }
+    assert!(!refused(), "a tab was left not started");
+    assert_eq!(noted(&dirs.pidfile).len(), 2, "both programs ran");
+}
+
+/// Jars are on by default; a spyc installed without its `spyc-jar` starts
+/// no tab's program, says to check its installation, and offers to run tabs
+/// without jars. Taken, the tab's program runs.
+#[test]
+fn a_spyc_with_no_spyc_jar_beside_it_offers_to_run_tabs_without_jars() {
+    let dirs = dirs();
+    std::fs::write(
+        dirs.home.join(".spycrc.toml"),
+        format!(
+            "[pane]\ntabs = [\"sh -c 'echo $$ > {}; exec cat'\"]\n",
+            dirs.pidfile.display()
+        ),
+    )
+    .unwrap();
+    // The spyc this build made, alone in a directory: linked, so macOS
+    // doesn't scan a new copy on its first run.
+    let alone = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let binary = alone.path().join("spyc");
+    if std::fs::hard_link(env!("CARGO_BIN_EXE_spyc"), &binary).is_err() {
+        std::fs::copy(env!("CARGO_BIN_EXE_spyc"), &binary).unwrap();
+    }
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start_from(&binary, &dirs, &[]);
+    left.0.push(spyc.pid());
+    eventually("spyc offers to run tabs without jars", || {
+        spyc.shows("run without jars")
+    });
+    assert!(spyc.shows("installation"), "says to check the installation");
+    assert!(!dirs.pidfile.exists(), "a program ran before the answer");
+    spyc.type_keys(b"y");
+    spyc.eventually("the tab's program runs", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    assert!(
+        sockets_under(&dirs.runtime.join("spyc").join("jars")).is_empty(),
+        "no jar was started"
+    );
+}
+
+/// `spyc --jars` lists this user's jars by what each holds (R18): a tab's
+/// by its label and project, with its owner; after a `kill -9` of spyc, with
+/// none, so a jar no spyc takes back can be found.
+#[test]
+fn spyc_jars_lists_each_jar_by_its_tab_and_owner() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start(&dirs, &[]);
+    left.0.push(spyc.pid());
+    spyc.eventually("the tab's program runs", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    for socket in sockets_under(&dirs.runtime) {
+        if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+            left.0.push(jar);
+        }
+    }
+    eventually("--jars names the tab, its project and owner", || {
+        let listed = dirs.jars_listed();
+        listed.contains("pane, other in p)") && listed.contains("owner connected")
+    });
+    spyc.crash();
+    eventually("--jars shows it has no owner", || {
+        dirs.jars_listed().contains("owner none")
+    });
+}
+
+/// The jar socket of the first capture or task a saved session records.
+fn saved_task_socket(state: &Path) -> Option<PathBuf> {
+    let sessions = state.join("spyc").join("sessions");
+    std::fs::read_dir(sessions)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .filter_map(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .find_map(|v| Some(PathBuf::from(v["tasks"][0]["jar_socket"].as_str()?)))
+}
+
+/// S2c: a `!` capture running in a jar when spyc is killed comes back with
+/// `spyc -r` as a background task: its jar taken back by the new spyc, the
+/// same program still running, never started again.
+#[test]
+fn spyc_r_after_a_kill_takes_a_running_capture_back() {
+    let dirs = dirs();
+    std::fs::write(dirs.home.join(".spycrc.toml"), "[pane]\njars = true\n").unwrap();
+    let mut left = Leftovers(Vec::new());
+    let capture = format!(
+        "!echo $$ >> {}; printf capture-mark; exec cat",
+        dirs.pidfile.display()
+    );
+    let first = Spyc::start(&dirs, &["-c", &capture]);
+    left.0.push(first.pid());
+    eventually("the capture's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    let program = noted(&dirs.pidfile)[0];
+    left.0.push(program);
+    let mut socket = None;
+    eventually("the session records the capture's jar", || {
+        socket = saved_task_socket(&dirs.state);
+        socket.is_some()
+    });
+    let socket = socket.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.crash();
+    assert!(alive(program), "the capture's program died with spyc");
+
+    let second = Spyc::start(&dirs, &["-r"]);
+    left.0.push(second.pid());
+    eventually("the restore picker", || second.shows("Enter restore"));
+    let mut typed: Option<Instant> = None;
+    eventually("the new spyc owns the capture's jar", || {
+        if typed.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
+            second.type_keys(b"\r");
+            typed = Some(Instant::now());
+        }
+        described(&socket, "owner_pid") == Some(second.pid().to_string())
+    });
+    assert!(alive(program), "the capture's program was ended");
+    assert_eq!(
+        noted(&dirs.pidfile),
+        [program],
+        "the program was started again"
+    );
+}
+
+/// S2c: a tab's jar a `kill -9` of spyc left, which no `spyc -r` took back,
+/// is offered at the next spyc's start; `r` takes it back, the same program
+/// running, never started again.
+#[test]
+fn the_next_spyc_offers_a_jar_no_spyc_owns_and_takes_it_back() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    eventually("the tab's program starts", || dirs.pidfile.exists());
+    let program = noted(&dirs.pidfile)[0];
+    left.0.push(program);
+    eventually("the tab's output shows", || first.shows("ready-mark"));
+    let socket = sockets_under(&dirs.runtime.join("spyc").join("jars"))
+        .pop()
+        .expect("the tab's jar");
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    eventually("the jar knows its tab", || {
+        described(&socket, "is").as_deref() == Some("pane")
+    });
+    first.crash();
+
+    std::fs::write(dirs.home.join(".spycrc.toml"), "[pane]\n").unwrap();
+    let second = Spyc::start(&dirs, &[]);
+    left.0.push(second.pid());
+    eventually("the offer", || second.shows("no spyc owns"));
+    second.type_keys(b"r");
+    eventually("the new spyc owns the jar", || {
+        described(&socket, "owner_pid") == Some(second.pid().to_string())
+    });
+    assert!(alive(program), "the program was ended");
+    assert_eq!(
+        noted(&dirs.pidfile),
+        [program],
+        "the program was started again"
     );
 }

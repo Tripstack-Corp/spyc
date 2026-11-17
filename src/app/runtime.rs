@@ -94,6 +94,9 @@ pub(super) struct Runtime {
     /// Clone of the unified-channel sender; pane wake closures clone it to push
     /// `Wake::Pane`. `None` before `run()` / in the test harness.
     pub(super) pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
+    /// The same sender, for a wake made before `run()` installed it: a
+    /// startup tab's pane, and its jar's start, wake the loop once it runs.
+    pub(super) loop_wake: std::sync::Arc<std::sync::OnceLock<std::sync::mpsc::Sender<Message>>>,
     /// Monotonic `SinkId` allocator (never reused).
     pub(super) next_sink_id: u64,
     /// P3-2 crash-sufficient autosave: fingerprint of the session-relevant state
@@ -261,6 +264,25 @@ pub(super) struct Runtime {
     /// Drained by `apply_jump_defaults`, which keeps only the answer to
     /// `jump_default_seq`.
     pub(super) jump_default_results: Landing<super::jump_default::JumpDefaultAnswer>,
+    /// Where a jarred tab's pane lands once a worker launched it
+    /// (`start_jarred_pane`); `apply_pane_starts` puts it in its tab.
+    pub(super) pane_starts: Landing<super::pane_starts::PaneStart>,
+    /// Where a capture's host lands once a worker started its jar
+    /// (`capture_host`); `apply_capture_starts` puts it in its capture or
+    /// task.
+    pub(super) capture_starts: Landing<super::capture_starts::CaptureStart>,
+    /// The last capture jar start's id.
+    pub(super) capture_start_seq: u64,
+    /// The look for jars no spyc owns, and what it found (`app::orphan_jars`).
+    pub(super) orphan_jars: super::orphan_jars::OrphanJars,
+    /// Where that look's finds land.
+    pub(super) orphan_results: Landing<Vec<crate::pane::jar::orphans::Orphan>>,
+    /// The place every tab's jar starts in: this user's when `None`, a
+    /// test's own otherwise.
+    pub(super) jar_place: Option<crate::pane::jar::Place>,
+    /// Whether this session runs tabs without jars, there being no usable
+    /// one, and the tabs waiting on the user's answer (`app::jarless`).
+    pub(super) jarless: super::jarless::Jarless,
     /// The newest `J` default request; an answer to any other is stale.
     pub(super) jump_default_seq: u64,
     /// Where the switcher's closed rows land (`spawn_closed_rows`).
@@ -349,6 +371,7 @@ impl Runtime {
             git_worker_tx,
             mcp_cmd_rx,
             pane_wake_tx: None,
+            loop_wake: std::sync::Arc::default(),
             next_sink_id: 0,
             autosave_last_saved_fp: None,
             autosave_due: None,
@@ -387,6 +410,13 @@ impl Runtime {
             file_results: Landing::default(),
             clipboard_paste_results: Landing::default(),
             jump_default_results: Landing::default(),
+            pane_starts: Landing::default(),
+            capture_starts: Landing::default(),
+            capture_start_seq: 0,
+            orphan_jars: super::orphan_jars::OrphanJars::default(),
+            orphan_results: Landing::default(),
+            jar_place: None,
+            jarless: super::jarless::Jarless::default(),
             jump_default_seq: 0,
             closed_rows_results: Landing::default(),
             make_results: Landing::default(),

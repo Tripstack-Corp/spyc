@@ -39,22 +39,29 @@ impl App {
 
     /// Mint a `SinkId` and build the pane's wake closure: a cheap
     /// non-blocking send of `Wake::Pane { tab }` onto the unified
-    /// channel. Before `run()` installs `pane_wake_tx` (the test harness and
-    /// any pre-run spawn) this returns a no-op — harmless, because nothing is
-    /// running the event loop yet, so there is no idle to service (the poll
-    /// floor / `MAX_IDLE_CAP` that once backstopped this were removed in MVU
-    /// Phase 3c/3d).
+    /// channel. One made before `run()` installs the channel (a startup
+    /// tab's, and the test harness's) does nothing until it has, then wakes
+    /// the loop as any other: a pane outlives the start it was made in.
     pub(crate) fn make_pane_wake(&mut self) -> PaneWake {
         let tab = self.alloc_sink_id();
-        match &self.runtime.pane_wake_tx {
-            Some(tx) => {
-                let tx = tx.clone();
-                Arc::new(move || {
-                    let _ = tx.send(Message::Wake(Wake::Pane { tab }));
-                })
-            }
-            None => Arc::new(|| {}),
+        self.loop_waker(Wake::Pane { tab })
+    }
+
+    /// A wake that sends `kind` to the loop: through its channel, or, before
+    /// `run()` has installed one, through the one it installs.
+    pub(crate) fn loop_waker(&self, kind: Wake) -> PaneWake {
+        if let Some(tx) = &self.runtime.pane_wake_tx {
+            let tx = tx.clone();
+            return Arc::new(move || {
+                let _ = tx.send(Message::Wake(kind));
+            });
         }
+        let late = Arc::clone(&self.runtime.loop_wake);
+        Arc::new(move || {
+            if let Some(tx) = late.get() {
+                let _ = tx.send(Message::Wake(kind));
+            }
+        })
     }
 
     /// MVU Phase 3c: mint a `SinkId` and build a `Wake` for a main-loop-
@@ -173,6 +180,29 @@ mod tests {
             // pane_wake_tx is None in the test harness — firing must not panic.
             let wake = app.make_pane_wake();
             wake();
+        });
+    }
+
+    /// A pane made before `run()` installs the loop's channel, as a startup
+    /// tab's is, and a jar's start landing for it, wake the loop once it has:
+    /// its output and its close are never left for an unrelated wake.
+    #[test]
+    fn a_wake_made_before_run_reaches_the_loop_once_it_runs() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(tmp.path(), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            let pane = app.make_pane_wake();
+            let landing = app.loop_waker(Wake::PaneStart);
+            let (tx, rx) = std::sync::mpsc::channel::<Message>();
+            app.runtime.pane_wake_tx = Some(tx.clone());
+            app.runtime.loop_wake.set(tx).unwrap();
+            pane();
+            landing();
+            assert!(matches!(
+                rx.try_recv(),
+                Ok(Message::Wake(Wake::Pane { .. }))
+            ));
+            assert!(matches!(rx.try_recv(), Ok(Message::Wake(Wake::PaneStart))));
         });
     }
 }

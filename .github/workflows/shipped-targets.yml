@@ -74,7 +74,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ steps.pins.outputs.zig }}
-      - uses: taiki-e/install-action@v2.90.2
+      - uses: taiki-e/install-action@v2.90.3
         with:
           tool: cargo-zigbuild@${{ steps.pins.outputs.zigbuild }}
       - name: Link spyc

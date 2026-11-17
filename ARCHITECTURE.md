@@ -803,6 +803,30 @@ connection at once is live, and anything else is unknown, which is never
 removed, since a token deleted by mistake can't be undone. The connect never
 blocks: on Linux a blocking connect to a full backlog waits for ever.
 
+## spyc outwaits a busy jar
+
+<!-- SPYC-TRAP: jar-outwait -->
+A jar parked for an upgrade reads and answers nothing for up to 15 s
+(`spyc_jar::limits::PARKED_AT_MOST`, the sum of the upgrade's own step
+deadlines). spyc's owner connection gave up on a socket that took no bytes
+for 10 s, so typing into a tab while its jar upgraded cut the connection and
+lost the lease, though the jar was only busy. A number raised past 15 s would
+go stale the first time an upgrade step grew, so the rule is checked instead.
+`src/pane/jar/mod.rs` asserts at compile time that every wait whose end takes
+a jar for gone (`WRITE_STALL`, `ADOPT_WAIT`) outlasts `PARKED_AT_MOST`, and
+that spyc pings inside the jar's `OWNER_DEADLINE`.
+`every_wait_on_a_jar_outlasts_it_or_says_why_not` makes every time constant in
+`src/pane/jar` one of those or name why it may be shorter: a restart's wait for
+the last jar to end and shutdown's wait for an exit report end in nothing that
+can't be undone, and quitting must not hang on a jar. The jar's own timers
+are held to the same account:
+`every_timer_in_the_jar_is_classified_by_what_running_out_costs` puts every
+time constant in `spyc-jar` in a kind by what running out costs (the program
+served or parked before an upgrade's `exec`, after it, a peer's deadline, a
+start, an ending, a poll), and a parked one must be part of `PARKED_AT_MOST`.
+A running jar keeps its compiled-in timers for weeks, so each is sized for
+its kind before it ships.
+
 ## A jar's upgrade runs one file, and proves it took the blob
 
 <!-- SPYC-TRAP: jar-upgrade-one-file -->
@@ -872,7 +896,12 @@ standard input, which then closes. Every user can read a process's arguments,
 any process of the same user its environment, and a jar's program inherits the
 jar's environment, so a token in either would reach every agent a jar hosts.
 A jar started without one, or with one shorter than 16 bytes, refuses to run
-rather than run open.
+rather than run open. The rest of the start follows the token there
+(`spyc_jar::cli::Start`): the socket, the program, its directory, size and
+hold. Not on the command line, which `ps` shows for the jar's whole life: a
+tab's command can carry a prompt, and spyc's wrapper around it names files
+gone once spyc is. What `ps` shows is `spyc-jar`, the program's name (the
+jar's `argv[0]`, which an upgrade keeps) and `--wire`.
 
 ## A jar's threads never wait on a peer under a lock
 
@@ -891,6 +920,17 @@ blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
 `a_stalled_reader_does_not_freeze_a_release` and
 `a_paste_the_program_never_reads_does_not_block_its_owner`.
 
+<!-- SPYC-TRAP: jar-frame-whole -->
+A client's wait bounds only the start of a frame (`Client::recv`). Once a
+frame's first byte is in, the rest is read under an hour's timeout, since
+`read_exact` that times out partway through a frame has used up what it read,
+and the next read takes the frame's body for a length ("frame of 524386304
+bytes is over the limit"). The reader thread waited an hour, so this never
+showed until the repaint after a gap waited 100 ms. A socket also takes no
+zero timeout, and macOS refuses a new one on a socket its peer has closed, so
+the longer timeout is best effort: the rest of the frame is already buffered
+or never coming.
+
 ## A pane in a jar
 
 <!-- SPYC-TRAP: jar-or-nothing -->
@@ -898,22 +938,70 @@ With `[pane] jars` on, a pane tab's program runs in a `spyc-jar`
 (`src/pane/jar/`), whose socket stands in for the PTY master and the child:
 `PtyHost` drives it through `portable-pty`'s traits, as it drives a local
 program. Only pane tabs: overlays, tasks and captures run on a PTY of spyc's
-own. A `-CURRENT` or rc build
-reads the setting; a release runs every program as before until jars are on
-by default.
+own. Jars are on by default, and `[pane] jars = false` is spyc without them:
+every program on a PTY of spyc's, ending with it. A `-CURRENT` or rc build
+reads the setting; a release runs every program as before until the release
+that turns jars on.
 
 - **A program runs in its jar or not at all** (the owner's decision of
   2026-11-15). A jar that can't be started, ends before it answers (one that
-  doesn't speak spyc's wire version exits with 75 first), doesn't answer in
-  time, or would sit in a directory others can reach fails the tab, and the
-  error says which. Running the program another way made a tab that looked
+  doesn't speak spyc's wire version exits with 75 first), doesn't answer
+  while it holds the program, or would sit in a directory others can reach
+  fails the tab, which says which and ends `[not started]`. Running the program another way made a tab that looked
   like any other and died with spyc, and kept two ways of hosting a pane
   alive. `jar::spawn` returns a jar or an error, and
   `with_jars_on_no_path_launches_the_program_outside_its_jar` holds
   `PtyHost::spawn` to one launch on a PTY of spyc's own: a tab with no jar
-  asked for. A session whose store finds no usable jar at the start still
-  runs its tabs without jars, and says so once: what it should do is not
-  decided.
+  asked for.
+- **No usable jar is the user's call** (the owner's decision of 2026-11-16,
+  `src/app/jarless.rs`). A `spyc-jar` missing from beside spyc, one that
+  can't run, one of another build, or one that doesn't speak spyc's wire
+  version fails the tab with `jar::NoUsableJar`: it ends `[not started]`,
+  saying to check spyc's installation, and spyc offers once a session, in a
+  pop-up, to run tabs without jars. Taken, each such tab starts again on a
+  PTY of spyc's, and so does every tab after until spyc quits; declined,
+  they stay `[not started]`. A restored tab whose jar may still run is never
+  started that way, since its program would run twice. Unit tests start
+  with jars off (`jar::BY_DEFAULT`), so none starts a jar in the
+  user's own runtime directory.
+- **A jar knows what it holds** (R18, `src/app/jar_info.rs`). spyc tells
+  each tab's jar `is`, `pane_id`, `label`, `agent`, `project` and
+  `project_home` on the loop's pass before it waits, only what changed since
+  that connection last told it, so a rename reaches the jar however made. A
+  tab demoted to a task keeps its jar, its connection moving with its
+  `PtyHost`, and the jar hears `is` = `task`; promoted back, `pane`. A
+  running `!` capture's jar hears `capture`. The jar keeps them when its
+  owner goes: after a crash, `spyc --jars` (`jar::listing`, which only
+  reads) names an orphaned tab by them.
+- **A `!` capture runs in a jar too** (S2c, `src/app/capture_starts.rs`),
+  started off the loop as a tab's is: the capture opens on a stand-in host
+  that prints nothing, and the jar's host takes its place when it lands, in
+  the capture or in the task it was sent to meanwhile (each keeps the
+  start's id until then); one closed meanwhile ends the host that lands. Its
+  jar keeps the program's output and exit until an owner collects them (the
+  start's exit linger, `spyc_jar::cli::UNTIL_READ`): with spyc there, the
+  jar ends as spyc acknowledges the exit, which it does as it reads it;
+  after a crash, the jar waits for a spyc to read it. No usable jar fails
+  the capture with why, and offers to run without jars.
+- **`spyc -r` takes captures and tasks back** (S2c,
+  `src/app/jarred_tasks.rs`). A save records each capture or background
+  task whose program runs in a jar and hasn't ended (the manifest's
+  `tasks`), and counts it as something to restore. A restore of a session
+  no other spyc runs reopens each as a background task, its jar taken back
+  on a worker as a retake (`Spec::retaking`), so a jar that's gone ends the
+  task saying so and nothing starts afresh; the output replays from the
+  oldest byte the jar holds.
+- **Jars no spyc owns are offered back** (S2c, `src/app/orphan_jars.rs`,
+  `jar::orphans`). Once startup has settled (no `-r` picker, no `spyc -c`
+  queued) and none of this spyc's jars is still starting or being taken
+  back, a worker looks once for live jars with no owner whose token this
+  spyc keeps: a crash's that no `spyc -r` took back. A pop-up names them;
+  `r` takes each pane back as a tab in the open project its `project_home`
+  names (else the one in view), and each task or capture as a background
+  task, through the same adoption a restore uses; `d` ends each, a hangup
+  then a kill, its exit collected so the jar ends; `Esc` leaves them
+  running. A jar whose token isn't here is another spyc's, and is never
+  offered.
 - **Nothing spyc sends waits on the jar** (finding 4). Frames queue for one
   writer thread per connection, which pings whenever it's idle, so a jar that
   stops reading holds up neither the event loop nor the parser.
@@ -933,25 +1021,78 @@ by default.
   running waits up to two seconds for it to end, as a restart's does once
   its exit is acknowledged, and otherwise keeps the tab from opening.
 - **Every jar starts from spyc's store of jar binaries** (decision L,
-  `src/pane/jar/store.rs`): `<state>/jar-bin/<sha256>/spyc-jar`, copied
+  `src/pane/jar/store.rs`): `<state>/jar-bin/<version>-<hash>/spyc-jar`,
+  `<hash>` the first 12 hex digits of its SHA-256, copied
   whole from the `spyc-jar` beside spyc on a worker at start and run once as
   `spyc-jar build-info` to check it is this build's. Never the binary beside
   spyc, which an install may replace while spyc runs, and which a jar would
-  otherwise run by name. A copy that can't run (a `noexec` state directory)
-  leaves jars to start beside spyc; one of another build starts none. Its
+  otherwise run by name. A store that can't hold a copy that runs (a
+  `noexec` state directory) leaves jars to start beside spyc, when that one
+  runs as this build; a `spyc-jar` missing, unable to run or of another
+  build is no usable jar. Its
   sweep removes only an entry no live jar reports, not spyc's own, a day
   untouched, and nothing while any live jar won't say what it runs.
-- **A pane's jar starts its program when spyc connects** (decision M,
-  `--start-on-owner`): the jar opens the PTY and holds the program until its
+- **A pane's jar starts its program when spyc connects** (decision M, the
+  start's `hold`): the jar opens the PTY and holds the program until its
   first owner's `hello` is accepted, then starts it before that owner's
   `welcome`, so a program's start-up probes (Claude Code's and agy's give
   about two seconds) are always answered by an owner that is there. A jar
-  whose spyc died before connecting ends after 30 s having started nothing.
+  whose spyc died before connecting ends after 30 s having started nothing,
+  and spyc waits as long for it to answer: the jar's clock starts after
+  spyc's, so spyc never gives up on a jar that may still start the program.
   Until the program starts, `describe` gives `program_pid` 0 and an upgrade
   is refused as busy.
 - **A replayed query goes unanswered** (R15a). Until the replayed tail has
   been handed to the pane, and half a second after, the terminal's answers
   are dropped: they'd answer what the program asked before the crash.
+
+## A jarred tab starts off the loop
+
+<!-- SPYC-TRAP: jar-off-the-loop -->
+Starting a tab's jar, or taking a restored tab's back, waits on the jar: the
+store's check of this session's first jar (up to 10 s), a new binary's first
+run, the 30 s a jar holds its program, an upgrade it's parked in (up to 15 s).
+None of that may freeze the loop (finding 5), so `app::pane_starts` opens the
+tab at once on a stand-in pane that says it's starting, launches the real pane
+on a worker, and puts it in the stand-in's place when it lands. Only that
+worker makes a jar's `Spec`, which is what makes a launch wait on a jar, and
+`only_a_worker_asks_for_a_tabs_jar` holds every module outside `src/pane` to
+that.
+
+- **What's typed into a starting tab is dropped.** No program runs to read
+  it, and keys held back would reach a program that has since drawn a prompt
+  they weren't typed for.
+- **A tab that never started says why.** Its stand-in ends `[not started]`
+  with the error on its screen, and `^a R` starts it again.
+- **A tab closed or restarted while it starts takes nothing.** A landing is
+  matched to its tab by id, and `^a R` gives the tab a new one, so the pane
+  that lands for a tab no longer there is ended at once, its program with it.
+- **A restore's `/resume` waits for the pane.** Whether the program was taken
+  back is known only when the pane lands: one taken back, or left to another
+  spyc, gets none; one started afresh gets it once its banner settles.
+- **A tab whose jar ended its lease is taken back** (S2b, decision G). A spyc
+  stopped past the jar's deadline finds its connection ended with the jar
+  still holding the program; the tab stays `[detached]` on a stand-in while
+  the same worker takes the jar back, and the pane starts from the jar's
+  snapshot and replay, losing nothing the ring held. Only a tab whose own
+  link lapsed is retaken (`Pane::lease_lapsed`): one detached because another
+  spyc owns its jar has no link, so it never loops. A retake never starts the
+  program afresh: a jar gone by then ends the tab `[jar lost]`, and the lapsed
+  pane's link is severed before it's ended, so ending it signals nothing.
+- **A gap makes the program repaint** (R12c, finding 9; `jar::repaint`).
+  When the pane's stream jumps past bytes the jar dropped, the reader thread
+  gives the program its size a row off, holds it 100 ms, then gives the
+  pane's size back, as the pane has it then. Sent back to back, the two
+  sizes reached a Node program on macOS as one unchanged size, in 40 of 40
+  trials, and nothing was redrawn; held, it saw the size a row off in 40 of
+  40, idle, busy or printing. The hold isn't cut short when output arrives:
+  bytes written before the program handled the signal reach the jar after
+  the resize, and ending the hold on them sent the second size before a
+  shell read the first.
+- **A wake made before the loop runs reaches it once it does.** `[pane] tabs`
+  open before `run()` installs the loop's channel, so a wake made then reads
+  `Runtime::loop_wake`, which `run()` fills, rather than doing nothing for
+  good.
 
 ## A jarred program's signals go through its jar
 

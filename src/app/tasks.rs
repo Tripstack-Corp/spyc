@@ -72,6 +72,9 @@ pub struct BackgroundTask {
     /// until the child resumes; status stays Running because the
     /// child hasn't exited.
     pub paused: bool,
+    /// A capture's jar start still under way: its host is a stand-in until
+    /// that start lands (`app::capture_starts`).
+    pub jar_start: Option<u64>,
 }
 
 /// Soft cap on per-task buffered output. When exceeded, drop bytes from
@@ -158,8 +161,8 @@ impl App {
         dir: &std::path::Path,
     ) {
         let title = format!("! {title_cmd}");
-        match spawn_capture(expanded, dir) {
-            Ok(host) => {
+        match self.capture_host(expanded, dir) {
+            Ok((host, jar_start)) => {
                 // MVU Phase 3c: install the capture's channel wake (a generic
                 // SinkOutput edge — the loop re-scans on it). Survives the
                 // ^Z/:fg round-trip with the host, so no re-install there.
@@ -184,6 +187,7 @@ impl App {
                     finished: false,
                     original_id: None,
                     full_log,
+                    jar_start,
                 });
             }
             Err(e) => self.state.flash_error(format!("exec: {e:#}")),
@@ -237,6 +241,7 @@ impl App {
             has_unread_output: false,
             viewed_in_task_viewer: false,
             paused: false,
+            jar_start: capture.jar_start,
         };
         self.runtime.background_tasks.tasks.push(task);
         self.clear_pager();
@@ -578,6 +583,7 @@ impl App {
             // A `^z`-suspended tab is still stopped: it stays so, as a paused
             // task that `C` / `:resume` continues.
             paused: info.suspended,
+            jar_start: None,
         };
         self.runtime.background_tasks.tasks.push(task);
         self.view.needs_full_repaint = true;
@@ -644,6 +650,7 @@ impl App {
                     // A backgrounded task already front-trimmed its buffer, so
                     // there's no full history to spill — use the capped buffer.
                     full_log: None,
+                    jar_start: task.jar_start,
                 });
                 self.state
                     .flash_info(format!("task #{id} resumed — ^Z to background again"));
@@ -802,47 +809,6 @@ impl App {
         let id = self.runtime.background_tasks.tasks[next_pos].id;
         self.open_task_viewer(Some(id));
     }
-}
-
-/// Spawn a capture pty for a backgrounded `!` command (sole caller:
-/// `start_capture`). TERM=dumb + cat-pagers so sub-tools don't launch a
-/// nested TUI/pager against our capture pty.
-fn spawn_capture(cmd: &str, cwd: &std::path::Path) -> Result<crate::pane::pty_host::PtyHost> {
-    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-    // TERM=dumb so TUI programs refuse to run as a TUI inside our
-    // capture (the pager only renders SGR colours and CRLF, not
-    // cursor positioning / alt-screen). FORCE_COLOR / CLICOLOR_FORCE
-    // / COLORTERM ride alongside so tools that respect those (cargo,
-    // eza, bat, ripgrep) keep their colour output anyway. PAGER=cat /
-    // GIT_PAGER=cat / MANPAGER=cat stops tools that auto-invoke a
-    // sub-pager (git log, man) from launching `less` against our
-    // pty and freezing the capture.
-    let env: &[(&str, &str)] = &[
-        ("CLICOLOR_FORCE", "1"),
-        ("FORCE_COLOR", "1"),
-        ("COLORTERM", "truecolor"),
-        ("PAGER", "cat"),
-        ("GIT_PAGER", "cat"),
-        ("MANPAGER", "cat"),
-    ];
-    crate::pane::pty_host::PtyHost::spawn(crate::pane::pty_host::PtySpec {
-        command: cmd,
-        rows,
-        cols,
-        cwd,
-        env,
-        term: "dumb",
-        // No SIGWINCH nudge for captures — they aren't interactive
-        // shells with rc-file prompts to redraw.
-        nudge_winch: false,
-        // Captures don't enable the per-byte debug dump (Pane does).
-        debug_dump: false,
-        // No `exec`: a capture may be a compound command (`a && b`); exec would
-        // drop the tail. Captures are one-shot, not suspendable panes anyway.
-        exec_replace: false,
-        capture_launch_env: false,
-        jar: None,
-    })
 }
 
 #[cfg(test)]

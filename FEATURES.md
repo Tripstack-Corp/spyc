@@ -64,7 +64,7 @@ Full reference: [Browsing files](docs/features/browsing.md).
 
 ## The agent pane
 
-The bottom of the screen is a full terminal, running `claude` by default, with as many tabs as you open. Each agent tab carries an activity dot saying whether the agent is working, needs you, failed, or is done, and any program can set its tab's dot with OSC 7501. `^a z` zooms, `^a F` forks the conversation into a new tab, `^z` suspends a tab's program, `^a s` sends the selection to it, `^a v` scrolls back through its output or transcript, and `^a u` labels what it printed (URLs, paths, SHAs) to yank or open.
+The bottom of the screen is a full terminal, running `claude` by default, with as many tabs as you open. Each agent tab carries an activity dot saying whether the agent is working, needs you, failed, or is done, and any program can set its tab's dot with OSC 7501. `^a z` zooms, `^a F` forks the conversation into a new tab, `^z` suspends a tab's program, `^a s` sends the selection to it, `^a v` scrolls back through its output or transcript, and `^a u` labels what it printed (URLs, paths, SHAs) to yank or open. On development builds each tab's program runs in a jar that outlives spyc, and `spyc --jars` lists them.
 
 Full reference: [The agent pane](docs/features/pane.md).
 

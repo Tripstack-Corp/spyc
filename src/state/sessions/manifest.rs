@@ -55,6 +55,20 @@ pub struct Manifest {
     /// the switcher to reopen. A 2.3 build before them ignores the field.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub closed_projects: Vec<ClosedProject>,
+    /// The `!` captures and background tasks whose programs run in jars, for
+    /// a restore to take back (S2c). A build before them ignores the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<SavedTask>,
+}
+
+/// A capture or background task whose program runs in a jar.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SavedTask {
+    pub title: String,
+    pub cmd_display: String,
+    /// Its jar's socket, whose jar a restore takes back; never one started
+    /// afresh.
+    pub jar_socket: std::path::PathBuf,
 }
 
 /// A project a spyc closed, as it was when it closed, kept so the switcher can
@@ -151,6 +165,7 @@ impl Manifest {
             projects: vec![project],
             scope_claims: v1.scope_claims,
             closed_projects: Vec::new(),
+            tasks: Vec::new(),
         }
     }
 }
@@ -192,6 +207,7 @@ impl Manifest {
             projects: vec![project],
             scope_claims: Vec::new(),
             closed_projects: Vec::new(),
+            tasks: Vec::new(),
         }
     }
 

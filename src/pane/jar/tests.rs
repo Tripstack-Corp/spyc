@@ -14,12 +14,14 @@ const WAIT: Duration = Duration::from_secs(5);
 /// pane's jar waits for an owner for ever.
 const END: Duration = Duration::from_millis(500);
 
-/// A directory under `/tmp`, short enough for a socket's path on macOS.
-fn short_dir() -> tempfile::TempDir {
-    tempfile::Builder::new()
-        .prefix("jt")
-        .tempdir_in("/tmp")
-        .unwrap()
+/// A directory under `/tmp` whose jars end with it.
+fn short_dir() -> test_dir::TestDir {
+    test_dir::TestDir::new("jt")
+}
+
+/// Where `place` keeps the token of the jar at `socket`: by the socket's name.
+fn token_of(place: &Place, socket: &Path) -> PathBuf {
+    place.tokens.join(socket.file_stem().unwrap())
 }
 
 /// A place in `dir`, starting `binary`.
@@ -28,6 +30,8 @@ fn place_in(dir: &Path, binary: PathBuf) -> Place {
         binary,
         dirs: vec![dir.join("spyc"), dir.join("spyc").join("jars")],
         tokens: dir.join("tokens"),
+        hold: place::HOLD,
+        repaint_hold: Duration::from_secs(2),
     }
 }
 
@@ -39,7 +43,7 @@ struct FakeJar {
     /// Listening, so the jar counts as running.
     listener: Option<UnixListener>,
     socket: PathBuf,
-    _dir: tempfile::TempDir,
+    _dir: test_dir::TestDir,
 }
 
 impl FakeJar {
@@ -118,7 +122,7 @@ fn host_in_fake_jar(pid: u32) -> (FakeJar, PtyHost) {
         offsets: offsets::Offsets::new(0),
         gate: ReplayGate::open(),
     };
-    let jarred = connect(client, fresh, &socket, (24, 80)).unwrap();
+    let jarred = connect(client, fresh, &socket, (24, 80), Duration::from_secs(2)).unwrap();
     let host = PtyHost::around_jar(jarred, (24, 80)).unwrap();
     let to_owner = conn_rx.recv_timeout(WAIT).unwrap();
     let jar = FakeJar {
@@ -311,6 +315,41 @@ fn offsets_follow_the_jar_across_gaps() {
     assert_eq!(o.at(17), 206);
 }
 
+/// The next resize the fake jar hears.
+fn next_resize(jar: &FakeJar) -> (u16, u16) {
+    loop {
+        if let Msg::Resize { rows, cols, .. } = jar.next() {
+            return (rows, cols);
+        }
+    }
+}
+
+/// R12c, finding 9: past a gap the program is given its size a row off,
+/// held, then the pane's size: the pane's as it is when the hold ends, a
+/// resize meanwhile included. Output without a gap moves nothing.
+#[test]
+fn a_gap_holds_the_size_a_row_off_then_gives_the_panes_back() {
+    let (mut jar, mut host) = host_in_fake_jar(std::process::id());
+    let output = |offset, bytes: &[u8]| Msg::Output {
+        offset,
+        bytes: bytes.to_vec(),
+    };
+    jar.send(&output(0, b"ab"));
+    jar.send(&output(50, b"cd"));
+    assert_eq!(next_resize(&jar), (23, 80), "a row off, at the gap");
+    host.resize(30, 100).unwrap();
+    assert_eq!(next_resize(&jar), (30, 100), "the pane's resize");
+    assert_eq!(
+        next_resize(&jar),
+        (30, 100),
+        "the hold ends at the pane's size"
+    );
+    jar.send(&output(52, b"ef"));
+    jar.send(&output(90, b"gh"));
+    assert_eq!(next_resize(&jar), (29, 100), "a later gap holds again");
+    assert_eq!(next_resize(&jar), (30, 100));
+}
+
 /// The byte handed over after a gap ends whatever sequence the bytes before
 /// it left open, so what follows parses as the program sent it.
 #[test]
@@ -341,6 +380,7 @@ fn spawn_marking(place: &Place, mark: &Path) -> anyhow::Result<PtyHost> {
 /// With jars on, a tab's program runs in a jar or not at all: a jar that
 /// won't run (one that doesn't speak this wire version exits with 75) or
 /// isn't there fails the tab, says why, at once, and the program never runs.
+/// Either is no usable jar, which offers to run tabs without one.
 #[test]
 fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
     use std::os::unix::fs::PermissionsExt;
@@ -363,8 +403,13 @@ fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
             "{}: {e:#}",
             binary.display()
         );
+        assert!(
+            no_usable_jar(&e).is_some(),
+            "{}: said as no usable jar, which offers jarless tabs: {e:#}",
+            binary.display()
+        );
         // A jar that ended is seen at once: never the wait for one to answer.
-        assert!(at.elapsed() < ANSWER_WAIT, "waited {:?}", at.elapsed());
+        assert!(at.elapsed() < WAIT, "waited {:?}", at.elapsed());
         std::thread::sleep(Duration::from_millis(300));
         assert!(!mark.exists(), "{}: the program ran", binary.display());
         let left: Vec<_> = std::fs::read_dir(&place.tokens).unwrap().collect();
@@ -507,10 +552,10 @@ fn a_sweep_removes_only_old_sockets_whose_lock_is_free() {
     assert!(!dead.exists(), "a dead jar's socket is removed");
     assert!(!spyc_jar::lock::path(&dead).exists(), "with its lock file");
     assert!(unknown.exists(), "one with no lock file to read is kept");
-    assert!(place.tokens.join("dddd").exists(), "with its token");
+    assert!(token_of(&place, &unknown).exists(), "with its token");
     assert!(other.exists(), "only sockets are swept");
-    assert!(!place.tokens.join("bbbb").exists(), "with its token");
-    assert!(place.tokens.join("aaaa").exists());
+    assert!(!token_of(&place, &dead).exists(), "with its token");
+    assert!(token_of(&place, &live).exists());
 }
 
 #[test]
@@ -518,7 +563,14 @@ fn only_a_current_or_rc_build_reads_the_setting() {
     assert!(honoured_by("2.5.0-CURRENT"));
     assert!(honoured_by("3.0.0-rc.1"));
     assert!(!honoured_by("2.5.0"));
-    assert!(wanted(false, "0123", None).is_none(), "off is off");
+    assert!(wanted(false, "0123", None).unwrap().is_none(), "off is off");
+}
+
+#[test]
+fn jars_are_on_by_default_but_never_for_a_unit_test() {
+    assert!(by_default(false), "a spyc runs tabs in jars unasked");
+    assert!(!by_default(true), "a unit test's tabs start no jar");
+    const { assert!(!BY_DEFAULT) };
 }
 
 /// A binary snapshot says which build made it; another build's, or one
@@ -537,20 +589,27 @@ fn a_binary_snapshot_carries_the_build_that_made_it() {
 /// the test binary at some depth.
 fn built_jar() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
-    exe.ancestors()
-        .skip(1)
-        .map(|d| d.join("spyc-jar"))
-        .find(|j| j.is_file())
-        .unwrap_or_else(|| {
-            panic!(
-                "no spyc-jar above {}: `cargo build --bin spyc-jar` (make test builds it)",
-                exe.display()
-            )
-        })
+    warmed(
+        exe.ancestors()
+            .skip(1)
+            .map(|d| d.join("spyc-jar"))
+            .find(|j| j.is_file())
+            .unwrap_or_else(|| {
+                panic!(
+                    "no spyc-jar above {}: `cargo build --bin spyc-jar` (make test builds it)",
+                    exe.display()
+                )
+            }),
+    )
 }
 
 /// A tab's program on a PTY of the real jar's, as `PtyHost` spawns it.
 fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost> {
+    spawn_named(place, "0123456789abcdef", command, cwd)
+}
+
+/// [`spawn_in`], for the tab `name`.
+fn spawn_named(place: &Place, name: &str, command: &str, cwd: &Path) -> anyhow::Result<PtyHost> {
     PtyHost::spawn(crate::pane::pty_host::PtySpec {
         command,
         rows: 24,
@@ -564,8 +623,10 @@ fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost>
         capture_launch_env: false,
         jar: Some(Spec {
             place: place.clone(),
-            name: "0123456789abcdef".into(),
+            name: name.into(),
             adopt: None,
+            retake: false,
+            exit_linger: None,
         }),
     })
 }
@@ -587,7 +648,7 @@ fn a_program_runs_in_a_real_jar_and_ends_with_it() {
     read_until(&host, &format!("[{}]", socket.display()));
     host.write_all(b"hi\n").unwrap();
     read_until(&host, "got:hi");
-    assert_eq!(host.child.wait().unwrap().exit_code(), 3);
+    assert_eq!(recorded_exit(&mut host).exit_code(), 3);
     let until = Instant::now() + WAIT;
     while socket.exists() {
         assert!(
@@ -595,6 +656,50 @@ fn a_program_runs_in_a_real_jar_and_ends_with_it() {
             "the jar outlived its acknowledged exit"
         );
         std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A jar's command line, which `ps` shows anyone for the jar's whole life,
+/// is `spyc-jar`, the program's name and the wire version:
+/// never the program's arguments or where it runs, since a tab's command can
+/// carry a prompt, and spyc's wrapper around it names files gone once spyc
+/// is. Both still reach the program.
+#[test]
+fn a_jars_command_line_names_its_program_and_nothing_else() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let cwd = dir.path().join("where-the-program-runs");
+    std::fs::create_dir(&cwd).unwrap();
+    let host = spawn_in(
+        &place,
+        "sh -c 'printf \"[%s]\" \"$PWD\"; exec cat' # a-prompt-of-the-users",
+        &cwd,
+    )
+    .unwrap();
+    read_until(&host, "where-the-program-runs]");
+    let socket = place.socket("0123456789abcdef");
+    let pid = describe_field(&socket, "pid");
+    let out = std::process::Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "spyc-jar sh --wire 1"
+    );
+}
+
+/// A jar's name is the program a tab runs, past `exec`, `env` and variables
+/// set for it, without its directory; a tab with no command runs the shell.
+#[test]
+fn a_jar_is_named_for_the_program_its_tab_runs() {
+    for (command, name) in [
+        ("claude --resume 0f3c 'fix the bug'", "spyc-jar claude"),
+        ("exec env CODEX_HOME=/x /opt/bin/codex", "spyc-jar codex"),
+        ("", "spyc-jar zsh"),
+        ("FOO=1", "spyc-jar zsh"),
+    ] {
+        assert_eq!(jar_name(command, "/bin/zsh"), name, "{command:?}");
     }
 }
 
@@ -676,13 +781,27 @@ fn a_jar_that_never_reports_an_exit_cannot_hold_a_shutdown() {
     drop(jar);
 }
 
+/// The exit `host`'s jar connection recorded, however long a loaded machine
+/// takes to record it. Never `wait()`, whose bound (`EXIT_WAIT`) is how long
+/// a quit waits for an exit, not how long one takes to arrive.
+fn recorded_exit(host: &mut PtyHost) -> portable_pty::ExitStatus {
+    let until = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(status) = host.child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(Instant::now() < until, "the connection recorded no exit");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// Decision G's labels: a connection the jar ended while it still runs
 /// leaves the tab `[detached]`; one whose jar is gone, `[jar lost]`.
 #[test]
 fn a_lost_connection_says_whether_the_jar_still_runs() {
     let (jar, mut host) = host_in_fake_jar(std::process::id());
     jar.to_owner.shutdown(std::net::Shutdown::Both).unwrap();
-    let status = host.child.wait().unwrap();
+    let status = recorded_exit(&mut host);
     assert_eq!(status.signal(), Some(Lost::Held.label()));
 
     let (mut jar, mut host) = host_in_fake_jar(std::process::id());
@@ -690,7 +809,7 @@ fn a_lost_connection_says_whether_the_jar_still_runs() {
     drop(jar.listener.take());
     std::fs::remove_file(&socket).unwrap();
     jar.to_owner.shutdown(std::net::Shutdown::Both).unwrap();
-    let status = host.child.wait().unwrap();
+    let status = recorded_exit(&mut host);
     assert_eq!(status.signal(), Some(Lost::Gone.label()));
 }
 
@@ -712,6 +831,8 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
                 place: place.clone(),
                 name: "0123456789abcdef".into(),
                 adopt: None,
+                retake: false,
+                exit_linger: None,
             }),
         },
         std::sync::Arc::new(|| {}),
@@ -823,6 +944,8 @@ fn pane_in(place: &Place, command: &str, cwd: &Path, adopt: Option<PathBuf>) -> 
                 place: place.clone(),
                 name: TAB.into(),
                 adopt,
+                retake: false,
+                exit_linger: None,
             }),
         },
         std::sync::Arc::new(|| {}),
@@ -917,6 +1040,92 @@ fn a_restored_tab_takes_its_running_jar_back() {
     second.shutdown_reporting(END, || {});
 }
 
+/// How many bytes the jar at `socket` has printed, and the first it still
+/// holds.
+fn log_printed_and_base(socket: &Path) -> (u64, u64) {
+    let log = spyc_jar::client::describe(socket)
+        .unwrap()
+        .into_iter()
+        .find(|(k, _)| k == "log")
+        .map(|(_, v)| v)
+        .unwrap();
+    let number = |after: &str| -> u64 {
+        log.split(after)
+            .nth(1)
+            .unwrap()
+            .split([' ', ','])
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let printed = log
+        .split(" printed")
+        .next()
+        .unwrap()
+        .rsplit(' ')
+        .next()
+        .unwrap();
+    (printed.parse().unwrap(), number("from "))
+}
+
+/// R12c, finding 9: a tab taken back across a gap, whose jar dropped bytes
+/// while no spyc owned it, has its program draw its screen again: the
+/// program is given its size a row off, then its own size back.
+#[test]
+fn a_tab_taken_back_across_a_gap_has_its_program_repaint() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let socket = place.socket(TAB);
+    let go = dir.path().join("go");
+    let program = dir.path().join("program.sh");
+    std::fs::write(
+        &program,
+        format!(
+            "trap 'stty size' WINCH\n\
+             printf 'ready\\n'\n\
+             while [ ! -e {go} ]; do sleep 0.05; done\n\
+             head -c 6000000 /dev/zero | tr '\\0' x\n\
+             printf '\\nflooded\\n'\n\
+             while :; do sleep 0.05; done\n",
+            go = go.display()
+        ),
+    )
+    .unwrap();
+    let command = format!("sh {}", program.display());
+    let first = pane_in(&place, &command, dir.path(), None);
+    shows(&first, "ready");
+    first.host.sever_jar();
+    drop(first);
+    std::fs::write(&go, "").unwrap();
+    // Taken back once the flood is printed: a shell runs its trap only
+    // between commands.
+    let until = Instant::now() + WAIT;
+    while log_printed_and_base(&socket).0 < 6_000_000 {
+        assert!(
+            Instant::now() < until,
+            "premise: the program floods its jar"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        log_printed_and_base(&socket).1 > 0,
+        "premise: the jar dropped bytes"
+    );
+
+    let mut second = pane_in(&place, "echo started-again", dir.path(), Some(socket));
+    assert!(second.adopted(), "premise: the running jar was taken back");
+    shows(&second, "flooded");
+    shows(&second, "23 80");
+    shows(&second, "24 80");
+    let text = screen(&second);
+    assert!(
+        text.find("23 80") < text.find("24 80"),
+        "a row off first, then its own size: {text:?}"
+    );
+    second.shutdown_reporting(END, || {});
+}
+
 /// Finding 7: a jar another spyc still owns, or one this spyc has no token
 /// for, isn't taken, and nothing is started in its place: the tab is
 /// detached.
@@ -926,7 +1135,7 @@ fn a_restored_tab_whose_jar_wont_take_it_is_detached_and_starts_nothing() {
     let place = place_in(dir.path(), built_jar());
     let socket = place.socket(TAB);
     let mark = dir.path().join("ran");
-    let owner = pane_in(&place, "exec cat", dir.path(), None);
+    let owner = pane_in(&place, "cat", dir.path(), None);
     let command = format!("touch {}", mark.display());
 
     let held = pane_in(&place, &command, dir.path(), Some(socket.clone()));
@@ -940,7 +1149,7 @@ fn a_restored_tab_whose_jar_wont_take_it_is_detached_and_starts_nothing() {
 
     owner.host.sever_jar();
     drop(owner);
-    std::fs::remove_file(place.tokens.join(TAB)).unwrap();
+    std::fs::remove_file(token_of(&place, &socket)).unwrap();
     let tokenless = pane_in(&place, &command, dir.path(), Some(socket.clone()));
     assert!(tokenless.detached(), "no token for it");
 
@@ -1061,7 +1270,8 @@ fn inode(path: &Path) -> u64 {
     std::fs::metadata(path).unwrap().ino()
 }
 
-/// Decision L: this build's `spyc-jar` goes into the store under its SHA-256,
+/// Decision L: this build's `spyc-jar` goes into the store under its version
+/// and the first 12 hex digits of its SHA-256,
 /// written whole, `0555`, in a marked private directory a jar knows as a
 /// store; a second start uses that entry again, never writing it twice.
 #[test]
@@ -1074,7 +1284,12 @@ fn the_store_holds_this_build_under_its_hash() {
     let store::Binary::Entry(entry) = got else {
         panic!("this build's spyc-jar wasn't taken: {got:?}");
     };
-    assert_eq!(entry, root.join(sha256_of(&source)).join("spyc-jar"));
+    let name = format!(
+        "{}-{}",
+        spyc_jar::PACKAGE_VERSION,
+        &sha256_of(&source)[..12]
+    );
+    assert_eq!(entry, root.join(name).join("spyc-jar"));
     assert_eq!(sha256_of(&entry), sha256_of(&source));
     let mode = std::fs::metadata(&entry).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o555);
@@ -1110,21 +1325,22 @@ fn another_builds_spyc_jar_starts_no_jars() {
     assert!(matches!(got, store::Binary::None(_)), "{got:?}");
 }
 
-/// A store copy that can't run (a state directory mounted `noexec`) leaves
-/// jars to start from the `spyc-jar` beside spyc; one that doesn't hash to
-/// its name isn't used either.
+/// A store that can't take a copy (its directory can't be written, or is
+/// mounted `noexec`) leaves jars to start from the `spyc-jar` beside spyc;
+/// an entry that doesn't hash to its name isn't used either.
 #[test]
 fn a_store_copy_that_cant_be_used_falls_back_to_the_binary_beside_spyc() {
     use std::os::unix::fs::PermissionsExt;
     let dir = short_dir();
-    let root = dir.path().join("jar-bin");
-    let garbage = dir.path().join("spyc-jar");
-    std::fs::write(&garbage, b"\x7fELF not really").unwrap();
-    let got = store::install(&root, &garbage, built_jars_build());
+    let unwritable = dir.path().join("not-a-directory");
+    std::fs::write(&unwritable, "").unwrap();
+    let got = store::install(&unwritable, &built_jar(), built_jars_build());
     assert!(
-        matches!(&got, store::Binary::Beside(at, _) if *at == garbage),
+        matches!(&got, store::Binary::Beside(at, _) if *at == built_jar()),
         "{got:?}"
     );
+
+    let root = dir.path().join("jar-bin");
 
     let source = built_jar();
     let store::Binary::Entry(entry) = store::install(&root, &source, built_jars_build()) else {
@@ -1144,6 +1360,25 @@ fn a_store_copy_that_cant_be_used_falls_back_to_the_binary_beside_spyc() {
     .unwrap();
     let got = store::install(&root, &source, built_jars_build());
     assert!(matches!(got, store::Binary::Beside(..)), "{got:?}");
+}
+
+/// No usable jar: a `spyc-jar` missing from beside spyc, or one there that
+/// can't run, is no jar this session, never one every tab then fails to
+/// start.
+#[test]
+fn a_spyc_jar_missing_or_unable_to_run_is_no_usable_jar() {
+    let dir = short_dir();
+    let root = dir.path().join("jar-bin");
+    let garbage = dir.path().join("spyc-jar");
+    std::fs::write(&garbage, b"\x7fELF not really").unwrap();
+    for source in [dir.path().join("missing").join("spyc-jar"), garbage] {
+        let got = store::install(&root, &source, built_jars_build());
+        assert!(
+            matches!(&got, store::Binary::None(why) if why.contains(&*source.to_string_lossy())),
+            "{}: {got:?}",
+            source.display()
+        );
+    }
 }
 
 /// Set `dir`'s modification time two days back.
@@ -1236,27 +1471,34 @@ fn the_store_sweep_removes_only_old_entries_nothing_runs() {
 }
 
 /// Decision M: a pane's jar holds its program until spyc, its first owner,
-/// connects, so the program's start-up probes are answered by an owner.
+/// connects, so the program's start-up probes are answered by an owner, and
+/// for as long as spyc waits for it to answer. Read from what spyc hands the
+/// real jar, through a wrapper that keeps a copy.
 #[test]
 fn a_panes_jar_holds_its_program_for_its_first_owner() {
-    let args = jar_args(
-        Path::new("/s/j.sock"),
-        Path::new("/w"),
-        (24, 80),
-        &["claude".into()],
+    use std::os::unix::fs::PermissionsExt;
+    let dir = short_dir();
+    let (copy, wrapper) = (dir.path().join("start"), dir.path().join("jar"));
+    std::fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\ntee {} | exec {} \"$@\"\n",
+            copy.display(),
+            built_jar().display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let place = place_in(dir.path(), wrapper);
+    let host = spawn_in(&place, "printf up; exec cat", dir.path()).unwrap();
+    read_until(&host, "up");
+    let sent = spyc_jar::cli::Start::parse(&std::fs::read(&copy).unwrap()).unwrap();
+    assert_eq!(
+        sent.hold,
+        Some(place::HOLD),
+        "the jar holds the program for as long as spyc waits"
     );
-    let at = args
-        .iter()
-        .position(|a| a == "--start-on-owner")
-        .expect("the jar holds the program for its owner");
-    let wait: u64 = args[at + 1].to_str().unwrap().parse().unwrap();
-    assert!(
-        wait > ANSWER_WAIT.as_millis() as u64,
-        "spyc gives up before the jar does"
-    );
-    let program = args.iter().position(|a| a == "--").unwrap();
-    assert!(at < program, "a flag after the program is the program's");
-    assert_eq!(args[program + 1], "claude");
+    assert_eq!((sent.rows, sent.cols), (24, 80), "at the tab's size");
 }
 
 // The ownership timers on spyc's side, each asked what a starved but live
@@ -1332,10 +1574,7 @@ fn a_jar_holding_its_lock_is_never_judged_gone_however_busy() {
         queued.len()
     );
     assert!(socket.exists(), "its socket is kept");
-    assert!(
-        place.tokens.join("0123456789abcdef").exists(),
-        "and its token"
-    );
+    assert!(token_of(&place, &socket).exists(), "and its token");
     drop(queued);
     kill_process(Pid::from_raw(jar).unwrap(), Signal::CONT).unwrap();
     host.shutdown(END);
@@ -1358,7 +1597,7 @@ fn a_socket_without_a_lock_file_is_never_judged_gone() {
         "a full backlog and no lock file: nothing can be told, at once"
     );
     assert!(socket.exists(), "its socket is kept");
-    assert!(place.tokens.join("cccc").exists(), "and its token");
+    assert!(token_of(&place, &socket).exists(), "and its token");
 }
 
 /// Ends the processes a test started in a jar, however the test ends.
@@ -1379,7 +1618,6 @@ impl Drop for Ends {
 /// Test 8 of the timer brief: a jar slow to start (its binary's first run
 /// scanned under load) still gives the tab its program, run once.
 #[test]
-#[ignore = "red until a tab whose jar is slow to start still opens"]
 fn a_tab_whose_jar_is_slow_to_start_opens_with_its_program_run_once() {
     use std::os::unix::fs::PermissionsExt;
     let dir = short_dir();
@@ -1416,13 +1654,12 @@ fn a_tab_whose_jar_is_slow_to_start_opens_with_its_program_run_once() {
 /// tab takes it back is still taken back, the same program, typing reaching
 /// it, and nothing started twice.
 #[test]
-#[ignore = "red until a restored tab outwaits a jar that's slow to answer"]
 fn a_restored_tab_takes_back_a_jar_that_stalls_while_it_attaches() {
     use rustix::process::{Pid, Signal, kill_process};
     let dir = short_dir();
     let place = place_in(dir.path(), built_jar());
     let socket = place.socket(TAB);
-    let first = pane_in(&place, "exec cat", dir.path(), None);
+    let first = pane_in(&place, "cat", dir.path(), None);
     let jar = describe_field(&socket, "pid");
     let program = first.process_id();
     let _ends = Ends(vec![
@@ -1460,19 +1697,13 @@ fn a_restored_tab_takes_back_a_jar_that_stalls_while_it_attaches() {
     second.shutdown_reporting(END, || {});
 }
 
-/// The longest a jar reads nothing from its owner while parked for an
-/// upgrade: reaching the park, the flush, the parked validation and its
-/// output grace, and the holder's answer (`spyc-jar`'s `upgrade.rs`:
-/// 3 + 1 + 5 + 1 + 5 s).
-const PARKED_AT_MOST: Duration = Duration::from_secs(15);
-
 /// A jar parked for an upgrade reads nothing from its owner for up to
-/// [`PARKED_AT_MOST`]. spyc's writer, holding more than the socket takes
+/// [`spyc_jar::limits::PARKED_AT_MOST`]. spyc's writer, holding more than the socket takes
 /// (typing, a snapshot), waits it out and delivers every byte, rather than
 /// end a connection to a jar that is only busy.
 #[test]
-#[ignore = "red until spyc's owner outwaits a jar parked for an upgrade"]
 fn an_owner_outwaits_a_jar_parked_for_its_longest_upgrade() {
+    use spyc_jar::limits::PARKED_AT_MOST;
     let dir = short_dir();
     let socket = dir.path().join("parked.sock");
     let listener = UnixListener::bind(&socket).unwrap();
@@ -1510,7 +1741,7 @@ fn an_owner_outwaits_a_jar_parked_for_its_longest_upgrade() {
         offsets: offsets::Offsets::new(0),
         gate: ReplayGate::open(),
     };
-    let jarred = connect(client, fresh, &socket, (24, 80)).unwrap();
+    let jarred = connect(client, fresh, &socket, (24, 80), Duration::from_secs(2)).unwrap();
     let mut host = PtyHost::around_jar(jarred, (24, 80)).unwrap();
     // Keystroke-sized batches: once the socket is full, the next one makes no
     // progress at all, where one large frame's partial write would restart
@@ -1530,4 +1761,337 @@ fn an_owner_outwaits_a_jar_parked_for_its_longest_upgrade() {
             ),
         }
     }
+}
+
+/// Every tab has a socket of its own, though tabs made together share their
+/// ids' leading digits: a v7 UUID's are its millisecond and a counter.
+#[test]
+fn tabs_made_together_have_sockets_of_their_own() {
+    let place = place_in(Path::new("/x"), PathBuf::from("/j"));
+    let sockets: std::collections::HashSet<PathBuf> = (0..1000)
+        .map(|_| place.socket(&crate::pane::tabs::TabInfo::new("zsh", "/").id))
+        .collect();
+    assert_eq!(sockets.len(), 1000, "tabs made together shared a socket");
+}
+
+/// SPYC-TRAP `jar-outwait`: every time constant in spyc's jar code is either
+/// a wait asserted to outlast a parked jar, or here with the reason it may
+/// be shorter. A new one fails this until it is one or the other.
+#[test]
+fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
+    const OUTWAITS: [&str; 2] = ["ADOPT_WAIT", "WRITE_STALL"];
+    const SHORTER: [(&str, &str); 13] = [
+        (
+            "DISCARD_WAIT",
+            "a discard's wait on a jar no spyc owns, which no upgrade parks: running \
+             out fails the discard, the jar left running, nothing lost",
+        ),
+        (
+            "HANGUP_GRACE",
+            "how long a discarded program has to end on a hangup: not a wait on the jar",
+        ),
+        (
+            "PING_EVERY",
+            "how often spyc speaks: asserted inside the jar's deadline",
+        ),
+        (
+            "HOLD",
+            "the jar's own hold, which spyc's answer waits out (decision M)",
+        ),
+        (
+            "ENDING_WAIT",
+            "a restart's wait for the last jar to end: running out fails the start, \
+             `[not started]`, nothing lost, and `^a R` tries again",
+        ),
+        (
+            "EXIT_WAIT",
+            "shutdown's wait for an exit report: running out leaves the jar to end \
+             its program alone, and quitting doesn't hang",
+        ),
+        ("REPLY_GRACE", "the engine's parser, not a wait on a jar"),
+        (
+            "REPAINT_HOLD",
+            "how long a repaint holds a size a row off, not a wait on a jar",
+        ),
+        ("QUIET", "when a snapshot is taken, not a wait"),
+        ("WHILE_FLOWING", "when a snapshot is taken, not a wait"),
+        ("UNTOUCHED", "the store's sweep age, not a wait"),
+        (
+            "SWEEP_AFTER",
+            "how young a socket is left unjudged; its lock judges it, not a wait",
+        ),
+        (
+            "BUILD_INFO_WAIT",
+            "a store binary's `build-info`, not a jar",
+        ),
+    ];
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pane/jar");
+    let mut found = std::collections::BTreeSet::new();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|x| x != "rs") || path.ends_with("tests.rs") {
+            continue;
+        }
+        let src = crate::guard_support::production_half(&std::fs::read_to_string(&path).unwrap());
+        for line in src.lines() {
+            let Some((head, rest)) = line.split_once(": ") else {
+                continue;
+            };
+            if let Some(name) = head.trim_start().split("const ").nth(1)
+                && rest.contains("Duration =")
+            {
+                found.insert(name.to_string());
+            }
+        }
+    }
+    assert!(
+        found.contains("WRITE_STALL"),
+        "premise: the scan finds waits"
+    );
+    let listed: std::collections::BTreeSet<String> = OUTWAITS
+        .iter()
+        .copied()
+        .chain(SHORTER.iter().map(|(n, _)| *n))
+        .map(String::from)
+        .collect();
+    assert_eq!(
+        found, listed,
+        "a time constant in src/pane/jar outlasts a parked jar, or says why it needn't"
+    );
+    let asserted = std::fs::read_to_string(dir.join("mod.rs")).unwrap();
+    for name in OUTWAITS {
+        assert!(
+            asserted.contains(&format!("assert!(outwaits_a_parked_jar({name}))")),
+            "{name} is asserted to outlast a parked jar"
+        );
+    }
+}
+
+/// Every time constant in the `spyc-jar` crate, by what running out costs: a
+/// new timer fails this until it is classified. A running jar keeps its
+/// compiled-in timers for its whole life, so each is sized for its kind
+/// before it ships. A parked one is part of `limits::PARKED_AT_MOST`, which
+/// clients outwait (SPYC-TRAP `jar-outwait`).
+#[test]
+fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Kind {
+        /// Before an upgrade's `exec`, the program served: nothing is lost,
+        /// so a long backstop.
+        Served,
+        /// Before the `exec`, the program parked: the jar unparks and reports
+        /// busy, so short.
+        Parked,
+        /// After the `exec`: running out loses something, so it ends on an
+        /// event, and the clock is only a backstop.
+        AfterExec,
+        /// A peer's deadline: running out ends a lease or a connection, so
+        /// sized for a starved but live peer.
+        Peer,
+        /// Running out fails a jar's start; nothing running is lost.
+        Start,
+        /// Running out ends a program that is being ended anyway.
+        Ending,
+        /// How often something is looked at, not a wait.
+        Poll,
+        /// A limit published for clients, made from the others.
+        Limit,
+        /// Never runs out: what it keeps ends on an event (a capture's exit
+        /// collected by its owner).
+        Unbounded,
+    }
+    use Kind::{AfterExec, Ending, Limit, Parked, Peer, Poll, Served, Start, Unbounded};
+    const TIMERS: [(&str, Kind); 21] = [
+        ("FIRST_VALIDATION", Served),
+        ("UNTIL_READ", Unbounded),
+        ("PARK_DEADLINE", Parked),
+        ("FLUSH_DEADLINE", Parked),
+        ("PARKED_VALIDATION", Parked),
+        ("OUTPUT_GRACE", Parked),
+        ("HOLDER_ANSWER", Parked),
+        ("HOLD_BACKSTOP", AfterExec),
+        ("OWNER_DEADLINE", Peer),
+        ("FIRST_OWNER_GRACE", Peer),
+        ("FRAME_DEADLINE", Peer),
+        ("LOOKUP_DEADLINE", Peer),
+        ("WELCOME_WAIT", Peer),
+        ("REST_OF_FRAME", Peer),
+        ("WAIT", Peer),
+        ("READER_GRACE", Start),
+        ("HANGUP_GRACE", Ending),
+        ("PARENT_CHECK", Poll),
+        ("TICK", Poll),
+        ("SOCKET_CHECK", Poll),
+        ("PARKED_AT_MOST", Limit),
+    ];
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
+    let mut found = std::collections::BTreeSet::new();
+    let mut dirs = vec![src.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for line in crate::guard_support::production_half(&text).lines() {
+                let Some((head, rest)) = line.split_once(": ") else {
+                    continue;
+                };
+                if let Some(name) = head.trim_start().split("const ").nth(1)
+                    && rest.contains("Duration =")
+                {
+                    found.insert(name.to_string());
+                }
+            }
+        }
+    }
+    assert!(
+        found.contains("FIRST_VALIDATION"),
+        "premise: the scan finds timers"
+    );
+    let listed: std::collections::BTreeSet<String> =
+        TIMERS.iter().map(|(n, _)| (*n).to_string()).collect();
+    assert_eq!(
+        found, listed,
+        "every time constant in spyc-jar is classified by what running out costs"
+    );
+    let limits = std::fs::read_to_string(src.join("limits.rs")).unwrap();
+    let parked_at_most = crate::guard_support::production_half(&limits)
+        .split("pub const PARKED_AT_MOST")
+        .nth(1)
+        .and_then(|rest| rest.split(';').next())
+        .map(str::to_string)
+        .expect("PARKED_AT_MOST's definition");
+    for (name, kind) in TIMERS {
+        if kind == Parked {
+            assert!(
+                parked_at_most.contains(name),
+                "{name} parks the jar, so it is part of PARKED_AT_MOST"
+            );
+        }
+    }
+}
+
+/// A jar left by a crash of its spyc: a tab's, told what it holds, its
+/// connection severed. Its host is forgotten, as a crash forgets it.
+fn left_by_a_crash(place: &Place, dir: &Path) -> (PathBuf, u32) {
+    let host = spawn_named(place, "left-by-a-crash", "exec cat", dir).unwrap();
+    let socket = host.jar_socket().unwrap().to_path_buf();
+    let program = host.process_id().unwrap();
+    host.tell_jar(&[
+        ("is", "pane"),
+        ("pane_id", "tab-1"),
+        ("label", "orphaned"),
+        ("command", "cat"),
+        ("agent", "other"),
+        ("project", "work"),
+        ("project_home", "/home/work"),
+    ]);
+    let until = Instant::now() + WAIT;
+    while !spyc_jar::client::describe(&socket).is_ok_and(|f| {
+        f.iter()
+            .any(|(k, v)| k == "project_home" && v == "/home/work")
+    }) {
+        assert!(Instant::now() < until, "the jar was never told");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    host.sever_jar();
+    std::mem::forget(host);
+    // The jar hears its owner went in its own time; until then it refuses one.
+    while !spyc_jar::client::describe(&socket)
+        .is_ok_and(|f| f.iter().any(|(k, v)| k == "owner" && v.starts_with("none")))
+    {
+        assert!(Instant::now() < until, "the jar never heard its owner go");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    (socket, program)
+}
+
+fn running(pid: u32) -> bool {
+    rustix::process::Pid::from_raw(i32::try_from(pid).unwrap())
+        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
+}
+
+/// S2c: a live jar with no owner, whose token this spyc keeps, is found by
+/// what it holds; one owned, or whose token isn't here, isn't.
+#[test]
+fn jars_no_spyc_owns_are_found_by_what_they_hold() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let mut owned = spawn_in(&place, "exec cat", dir.path()).unwrap();
+    assert!(
+        orphans::find(Some(place.clone())).is_empty(),
+        "an owned jar"
+    );
+    // A host dropped leaves its jar running, as a spyc that exits does.
+    let owned_socket = owned.jar_socket().unwrap().to_path_buf();
+    owned.shutdown(Duration::from_secs(2));
+    drop(owned);
+    let until = Instant::now() + WAIT;
+    while owned_socket.exists() {
+        assert!(
+            Instant::now() < until,
+            "the owned jar ran on after its tab closed"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let (socket, program) = left_by_a_crash(&place, dir.path());
+    let mut found = Vec::new();
+    let until = Instant::now() + WAIT;
+    while found.is_empty() {
+        assert!(Instant::now() < until, "the orphan was never found");
+        found = orphans::find(Some(place.clone()));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(found.len(), 1, "{found:?}");
+    let orphan = &found[0];
+    assert_eq!(orphan.socket, socket);
+    assert_eq!(
+        (
+            orphan.is.as_str(),
+            orphan.label.as_str(),
+            orphan.command.as_str()
+        ),
+        ("pane", "orphaned", "cat")
+    );
+    assert_eq!(orphan.project_home, "/home/work");
+    assert_eq!(orphan.pane_id, "tab-1");
+
+    let token = token_of(&place, &socket);
+    let kept = std::fs::read(&token).unwrap();
+    std::fs::remove_file(&token).unwrap();
+    assert!(
+        orphans::find(Some(place.clone())).is_empty(),
+        "a jar whose token isn't here is another spyc's"
+    );
+    std::fs::write(&token, kept).unwrap();
+    orphans::discard(Some(place), &socket).unwrap();
+    assert!(
+        !running(program) || {
+            std::thread::sleep(Duration::from_secs(1));
+            !running(program)
+        }
+    );
+}
+
+/// S2c: a discarded jar ends, its program with it, its socket and token
+/// gone after.
+#[test]
+fn a_discarded_jar_ends_with_its_program() {
+    let dir = short_dir();
+    let place = place_in(dir.path(), built_jar());
+    let (socket, program) = left_by_a_crash(&place, dir.path());
+    orphans::discard(Some(place.clone()), &socket).unwrap();
+    let until = Instant::now() + WAIT;
+    while running(program) || socket.exists() {
+        assert!(Instant::now() < until, "the jar or its program ran on");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!token_of(&place, &socket).exists(), "its token was kept");
 }

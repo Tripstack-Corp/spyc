@@ -560,6 +560,7 @@ mod tests {
             Message::Wake(Wake::ClipboardCopy),
             Message::Wake(Wake::Wiring),
             Message::Wake(Wake::JumpDefault),
+            Message::Wake(Wake::PaneStart),
             Message::Wake(Wake::ClosedRows),
             Message::Wake(Wake::WorktreeRows),
         ];

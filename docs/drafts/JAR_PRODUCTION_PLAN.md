@@ -97,20 +97,37 @@ the slices land runs as today.
   - spyc's sender holds no lock across a socket write, and pings run on their
     own timer (4, spyc's side);
   - every jar starts from the store ("The jar binary store", below), never
-    from the `spyc-jar` beside spyc, and a pane's jar starts with
-    `--start-on-owner` (`JAR_PROTOCOL.md`, decision M).
+    from the `spyc-jar` beside spyc, and a pane's jar's start holds its
+    program for its first owner (`JAR_PROTOCOL.md`, decision M);
+  - every wait of spyc's whose end takes a jar for gone outlasts the jar's
+    longest silence, parked for an upgrade (`spyc_jar::limits`,
+    `JAR_PROTOCOL.md` → "A jar's time limits"), checked when spyc compiles;
+    the writer's stall went from 10 s, which cut a parked jar's owner, to
+    20 s (the ownership audit's seventh finding; owner's decision: a guard,
+    not a number).
 - **S2b: losing and retaking the lease.** A spyc stopped past the deadline
   takes its jar back on resuming, or marks the tab `[detached]` when another
   spyc owns it (decision G). A killed jar marks its tab `[jar lost]`. On Linux
   that label waited for the next key on the spike: a reader that ends must
-  wake the loop. The repaint after a gap holds the size a row off until
-  output arrives or about 100 ms pass, then restores it: sent back to back,
-  the two sizes reached a Node program on macOS in none of 40 trials
-  (finding 9), and the fix is shown on macOS before it lands.
-- **S2c: tasks, captures and orphans.** A demoted pane keeps its jar, its
-  owner rewriting `is` to `task`; a capture lingers a minute. `spyc --jars`
-  lists jars by label (R18). A spyc that starts and finds jars no spyc owns
-  offers to restore or discard them, where the spike only flashed a notice.
+  wake the loop. The repaint after a gap holds the size a row off for
+  100 ms, then restores it: sent back to back, the two sizes reached a Node
+  program on macOS in none of 40 trials (finding 9). Built: the retake
+  (`app::pane_starts`), which takes a tab whose jar ended its lease back on
+  a worker, the same program, from the jar's snapshot and replay, and wakes
+  the loop when a reader ends; and the repaint after a gap (`jar::repaint`).
+  Shown on macOS before it landed: held, the Node program saw the size a row
+  off in 40 of 40 trials, idle, busy and printing every 5 ms. The plan had
+  the hold end early when output arrives; it doesn't, since bytes written
+  before the program handled the signal reach the jar after the resize, and
+  a shell then read only the size restored.
+- **S2c: tasks, captures and orphans.** spyc tells each tab's jar what it
+  holds (R18: `is`, `pane_id`, `label`, `agent`, `project`, `project_home`),
+  and `spyc --jars` lists jars by them. A demoted pane keeps its jar, its
+  owner rewriting `is` to `task`. A capture runs in a jar that lives until
+  its output is read (`JAR_PROTOCOL.md`, "Tasks and captures"): it ends once
+  spyc has read its last byte, and a restored session reopens an unread
+  one. A spyc that starts and finds jars no spyc owns offers to restore or
+  discard them, where the spike only flashed a notice.
 - **The release gate.** The release that turns jars on (S6) ships `spyc-jar`
   in its archives, the Homebrew formula and the apt package, and **carries S3
   too** (finding 13): the format is in the field from the first release that
@@ -118,7 +135,8 @@ the slices land runs as today.
   aren't turned on, even as an opt-in, until a resumed spyc takes its tabs
   back (S2b; owner's decision 7): a spyc stopped past the owner's deadline
   otherwise leaves every jarred tab `[detached]` for the session, which is
-  correct by the protocol and not acceptable in use.
+  correct by the protocol and not acceptable in use. The retake is built,
+  tested end to end by `a_spyc_stopped_past_the_deadline_takes_its_tabs_back`.
 - **Tests,** in the repository, not the spike's harness: a `kill -9` of spyc
   and `spyc -r` adopting a running program, driven through the binary as
   `tests/mcp_proxy.rs` drives it, with a fake agent; the lease taken back and
@@ -272,7 +290,8 @@ On scratch sockets and directories, never a user's jars, with the release
 ### The jar binary store
 
 spyc keeps the jar binaries it starts in `jar-bin/` under its state directory,
-one entry per binary, named by its SHA-256: `jar-bin/<sha256>/spyc-jar`. Not
+one entry per binary, named by its version and the first 12 hex digits of its
+SHA-256: `jar-bin/<version>-<hash>/spyc-jar`. Not
 beside the sockets: on macOS that is `$TMPDIR`, which the system cleans. spyc
 makes `jar-bin/` `0700`, with the marker file `.spyc-jar-store` in it, which
 is how a jar knows it runs from a store.
@@ -288,8 +307,8 @@ is how a jar knows it runs from a store.
   `spyc-jar build-info`, which prints the `SPYC_GIT_SHA` and `SPYC_BUILD_TIME`
   that `build.rs` gives both binaries of one build (they are one package). A
   copy that answers otherwise isn't used: a package upgrade landed while spyc
-  started, and spyc runs this session without jars and says so, as it does for
-  a jar that exits with 75. The run also pays the copy's first-run cost
+  started: no usable jar, as a jar that exits with 75 is, so a tab fails and
+  spyc offers to run tabs without jars (decision 6). The run also pays the copy's first-run cost
   (about 263 ms on macOS) off the loop. Two development builds at one commit
   can pass this check as each other, since `build.rs` doesn't run again
   without a new commit; their entries, and so their `build` keys, still
@@ -331,7 +350,7 @@ What it closes, of the four it is meant to:
 |---|---|
 | A file swapped between validation and the `exec` | Yes, for every jar: it validates, holds and `exec`s one file in its store (or, with no store, its private copy) and never looks the named path up again. |
 | No image to switch back to after a failed resume | Yes, for a jar started from the store: `PREVIOUS` is an entry no install touches. Not for a jar started outside one (a `noexec` state directory) on macOS, and not if the state directory is deleted. Linux has `/proc/self/exe` too. |
-| A running spyc starting a newer jar from disk | Yes, while the store is in use: spyc starts jars from the entry it checked at its start. Not when the store is off. A store entry also keeps a program started late by `--start-on-owner` on the same image, since the jar starts it through its own binary (`spyc-jar pty-child`, `crates/spyc-jar/src/pty.rs:46`). |
+| A running spyc starting a newer jar from disk | Yes, while the store is in use: spyc starts jars from the entry it checked at its start. Not when the store is off. A store entry also keeps a program started late by the start's hold on the same image, since the jar starts it through its own binary (`spyc-jar pty-child`, `crates/spyc-jar/src/pty.rs:46`). |
 | A binary overwritten in place under a running jar | The store removes the exposure: no install writes into it, and nothing spyc or a jar does writes an entry twice. It doesn't fix an observed failure: the in-place `cp` probe left the jar running. Another process of the same user can still change an entry (outside the threat model), and a jar outside the store keeps the exposure. |
 
 ### Refreezing
@@ -418,7 +437,9 @@ and is its own issue.
    every other and dies with spyc is worse than one that says it failed, and
    a fallback keeps two ways of hosting a pane alive for good. A jar slow to
    answer is waited for off the main thread, in a tab that opens at once.
-   Not decided: what a session does when the store finds no usable jar at
-   its start.
+   With no usable jar (decided 2026-11-16), the user chooses: a tab fails,
+   saying to check spyc's installation, and spyc offers once a session to run
+   tabs without jars. `[pane] jars = false` stays as spyc without jars, and
+   `jars = true` is the default on `-CURRENT` from that day.
 7. **S2b's retake gates turning jars on** (decided 2026-11-15), even as an
    opt-in: a resumed spyc takes its tabs back first.

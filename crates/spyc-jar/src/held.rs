@@ -288,7 +288,7 @@ fn describe(held: &Held) -> Vec<(String, String)> {
         ("held", held.why.clone()),
         (
             "jar",
-            format!("{} {}", env!("CARGO_PKG_VERSION"), image.display()),
+            format!("{} {}", crate::PACKAGE_VERSION, image.display()),
         ),
         ("build", crate::store::build_of(&image, &copies)),
         ("commit", crate::cli::commit().to_string()),

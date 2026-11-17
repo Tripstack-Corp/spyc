@@ -110,8 +110,10 @@
 # outlives spyc. Read on development (-CURRENT) and release-candidate builds
 # only, and from your own config files, not a repo's. A tab opened while it's
 # on keeps its jar until it closes, and if spyc dies, `spyc -r` takes the
-# running program back.
-# jars = false
+# running program back. false is spyc without jars: every program ends with
+# spyc. With no usable spyc-jar, spyc says to check its installation and
+# offers to run tabs without jars for that session.
+# jars = true
 #   Keep a copy of each image you paste into an agent pane, so `^a g` can show
 #   it before you send. An agent reads the system clipboard itself on its paste
 #   key (the terminal can't carry image bytes), so spyc reads the same clipboard

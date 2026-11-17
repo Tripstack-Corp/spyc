@@ -45,6 +45,8 @@ impl App {
             PromptKind::ArchiveWriteConfirm { .. } => Self::handle_archive_write_confirm_key,
             PromptKind::ArchiveMountConfirm { .. } => Self::handle_archive_mount_confirm_key,
             PromptKind::LuaRunaway => Self::handle_lua_runaway_confirm_key,
+            PromptKind::JarlessFallback => Self::handle_jarless_fallback_key,
+            PromptKind::OrphanJars => Self::handle_orphan_jars_key,
             PromptKind::PipeConfirm { .. } => Self::handle_pipe_confirm_key,
             PromptKind::PatternPick
             | PromptKind::ShellCmd

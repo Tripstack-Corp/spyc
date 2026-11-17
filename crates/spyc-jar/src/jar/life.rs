@@ -45,7 +45,14 @@ pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
             continue;
         }
         let st = shared.lock();
-        if st.owner.is_some() && st.log.head - st.acked >= shared.cfg.window {
+        let unread = st.log.head - st.acked;
+        let full = if st.owner.is_some() {
+            unread >= shared.cfg.window
+        } else {
+            // R12b: the next read must fit in the ring beside all that's unread.
+            shared.cfg.blocks_when_full() && unread + PTY_READ as u64 > shared.cfg.ring_cap as u64
+        };
+        if full {
             let _ = shared.cv.wait_timeout(st, TICK);
             continue;
         }
@@ -137,7 +144,7 @@ pub(super) fn reap(shared: &Shared) {
             shared.cv.notify_all();
         }
         // A program held for its first owner has nothing to end: its wait is
-        // `--start-on-owner`'s, and ending it here would spin, the pid being 0.
+        // the start's hold, and ending it here would spin, the pid being 0.
         if st.exit.is_none()
             && shared.child_pid() != 0
             && !shared.upgrading()
