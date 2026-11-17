@@ -111,4 +111,20 @@ impl Pane {
         };
         Ok(Self::adopt(host, parser, wake))
     }
+
+    /// A tab's stand-in pane, around `jar`'s stand-ins (`jar::starting`,
+    /// `jar::unstarted`): `starting` while the tab's jar starts or is taken
+    /// back.
+    pub fn standing_in(
+        jar: jar::Jarred,
+        starting: bool,
+        (rows, cols): (u16, u16),
+        wake: PaneWake,
+    ) -> anyhow::Result<Self> {
+        let host = PtyHost::around_jar(jar, (rows, cols))?;
+        let parser = <PaneEngine as engine::Engine>::new(rows, cols, 10_000);
+        let mut pane = Self::adopt(host, parser, wake);
+        pane.starting = starting;
+        Ok(pane)
+    }
 }

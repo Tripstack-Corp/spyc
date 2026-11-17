@@ -38,10 +38,20 @@ pub struct Client {
     write: Arc<Mutex<UnixStream>>,
 }
 
+/// How long the rest of a frame may take once its first byte is in, however
+/// short the caller's wait: a jar mid-frame is writing, and only one gone
+/// silent that long is given up on.
+const REST_OF_FRAME: Duration = Duration::from_secs(3600);
+
+/// The least a connection waits for its welcome.
+const WELCOME_WAIT: Duration = Duration::from_secs(5);
+
 impl Client {
     /// Connect to the jar at `socket` as `role`, presenting its `token`
     /// (R26), and retrying until `wait` passes so a jar still starting is
     /// waited for. Returns the jar's `Welcome`, or its refusal as an error.
+    /// The welcome is waited for as long as `wait`, and never less than
+    /// [`WELCOME_WAIT`]: a jar that accepted may still be busy.
     pub fn connect(
         socket: &Path,
         role: Role,
@@ -68,7 +78,7 @@ impl Client {
             role,
             token: token.to_vec(),
         })?;
-        match client.recv(Duration::from_secs(5))? {
+        match client.recv(wait.max(WELCOME_WAIT))? {
             Some(w @ Msg::Welcome { .. }) => Ok((client, w)),
             Some(Msg::Refused { reason, why }) => Err(Refusal { reason, why }.into()),
             other => Err(anyhow::anyhow!("expected a welcome, got {other:?}")),
@@ -89,27 +99,66 @@ impl Client {
         w.flush()
     }
 
-    /// The next frame, or `None` when `wait` passes first.
+    /// The next frame, or `None` when `wait` passes before one begins. Once
+    /// a frame's first byte is in, the rest is read under [`REST_OF_FRAME`]:
+    /// a wait that ran out partway through would lose what was read of it.
     pub fn recv(&mut self, wait: Duration) -> anyhow::Result<Option<Msg>> {
+        use std::io::BufRead as _;
+        // SPYC-TRAP(jar-frame-whole): the wait bounds a frame's start, never
+        // its rest; a timeout mid-frame loses what was read of it.
+        loop {
+            if self.read.buffer().is_empty() {
+                // A socket takes no zero timeout: the least is a millisecond.
+                // macOS refuses any timeout on a socket its peer has closed
+                // (a lookup's ends with its answer), whose reads don't wait.
+                if let Err(e) = self.read_timeout(wait.max(Duration::from_millis(1)))
+                    && !self.reads_at_once()
+                {
+                    return Err(e.into());
+                }
+                match self.read.fill_buf() {
+                    Ok([]) => return Err(io::Error::from(io::ErrorKind::UnexpectedEof).into()),
+                    Ok(_) => {}
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        return Ok(None);
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            // macOS refuses a timeout on a socket its peer has closed, and
+            // then the rest of the frame is in the buffer or never coming.
+            let _ = self.read_timeout(wait.max(REST_OF_FRAME));
+            match proto::read_msg(&mut self.read) {
+                Ok(Some(m)) => return Ok(Some(m)),
+                Ok(None) => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+
+    /// Whether a read returns at once: bytes are waiting, or the peer has
+    /// gone.
+    fn reads_at_once(&self) -> bool {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        let mut fds = [PollFd::new(self.read.get_ref(), PollFlags::IN)];
+        let now = Timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        poll(&mut fds, Some(&now)).is_ok_and(|n| n > 0)
+    }
+
+    fn read_timeout(&mut self, wait: Duration) -> io::Result<()> {
         if self.timeout != Some(wait) {
             self.read.get_ref().set_read_timeout(Some(wait))?;
             self.timeout = Some(wait);
         }
-        loop {
-            match proto::read_msg(&mut self.read) {
-                Ok(Some(m)) => return Ok(Some(m)),
-                Ok(None) => {}
-                Err(proto::ReadError::Io(e))
-                    if matches!(
-                        e.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    return Ok(None);
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
+        Ok(())
     }
 
     /// Close both directions, as a crash would.
@@ -345,6 +394,23 @@ mod tests {
         proto::read_msg(jar).unwrap_or_default()
     }
 
+    /// A jar that answered and closed before the client asked again (a
+    /// lookup's, which ends with its one answer) still has its answer read:
+    /// macOS refuses a new timeout on a socket its peer has closed, and that
+    /// is no reason to lose what's in it.
+    #[test]
+    fn an_answer_from_a_jar_that_closed_is_still_read() {
+        let (mut client, mut jar) = pair();
+        assert_eq!(client.recv(Duration::from_millis(50)).unwrap(), None);
+        proto::write_msg(&mut jar, &Msg::Pong { n: 7 }).unwrap();
+        drop(jar);
+        // Another wait than the last: the socket is asked for a new timeout.
+        assert_eq!(
+            client.recv(Duration::from_millis(200)).unwrap(),
+            Some(Msg::Pong { n: 7 })
+        );
+    }
+
     /// Finding 4: a jar that reads nothing holds up no sender. Sixty-four
     /// MiB is far past what the socket's buffer takes.
     #[test]
@@ -366,6 +432,32 @@ mod tests {
             at.elapsed()
         );
         assert!(out.queued() > 32 << 20, "the frames wait in the queue");
+    }
+
+    /// A wait that runs out partway through a frame loses none of it: the
+    /// wait bounds a frame's start, never its rest. A zero wait is a wait
+    /// that runs out, not an error.
+    #[test]
+    fn a_frame_split_across_a_wait_arrives_whole() {
+        use std::io::Write as _;
+        let (mut client, mut jar) = pair();
+        assert_eq!(client.recv(Duration::ZERO).unwrap(), None);
+        let msg = Msg::Output {
+            offset: 7,
+            bytes: b"split across the wait".to_vec(),
+        };
+        let frame = proto::encode(&msg);
+        jar.write_all(&frame[..3]).unwrap();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            jar.write_all(&frame[3..]).unwrap();
+            std::thread::sleep(Duration::from_secs(5));
+        });
+        assert_eq!(
+            client.recv(Duration::from_millis(50)).unwrap(),
+            Some(msg),
+            "begun inside the wait, finished after it"
+        );
     }
 
     /// Pings keep the jar's deadline when the owner has nothing to say.

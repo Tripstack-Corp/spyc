@@ -394,6 +394,23 @@ impl App {
                     ("[Esc] ", "not now", KeyCode::Esc),
                 ],
             ),
+            PromptKind::OrphanJars => (
+                " spyc — jars no spyc owns ",
+                90,
+                &[
+                    ("[r] ", "restore     ", KeyCode::Char('r')),
+                    ("[d] ", "discard     ", KeyCode::Char('d')),
+                    ("[Esc] ", "not now", KeyCode::Esc),
+                ],
+            ),
+            PromptKind::JarlessFallback => (
+                " spyc — no usable spyc-jar ",
+                76,
+                &[
+                    ("[y] ", "run without jars     ", KeyCode::Char('y')),
+                    ("[n] ", "no", KeyCode::Char('n')),
+                ],
+            ),
             _ => return,
         };
 

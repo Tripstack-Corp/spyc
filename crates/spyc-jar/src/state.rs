@@ -45,6 +45,16 @@ pub struct Config {
     pub start_on_owner: Option<Duration>,
 }
 
+impl Config {
+    /// R12b: whether the program waits, with no owner and the log full,
+    /// rather than lose its oldest output. A jar that keeps its exit until
+    /// read, a `!` capture's, keeps every byte before it too, so the choice
+    /// needs nothing an upgrade doesn't already carry.
+    pub fn blocks_when_full(&self) -> bool {
+        self.linger_after_exit == crate::cli::UNTIL_READ
+    }
+}
+
 /// One entry in the log, at the offset of the next byte after it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {

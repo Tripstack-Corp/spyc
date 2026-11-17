@@ -13,6 +13,9 @@ use spyc_jar::client::Client;
 use spyc_jar::proto::{Msg, Role, SNAPSHOT_VT, Snapshot};
 
 const WAIT: Duration = Duration::from_secs(10);
+/// The name a test's jar is started under (its `argv[0]`), as spyc names a
+/// pane's jar for its program.
+const NAME: &str = "spyc-jar some-program";
 const TOKEN: &[u8] = b"test-token-0123456789";
 
 struct Jar {
@@ -20,6 +23,34 @@ struct Jar {
     socket: PathBuf,
     process: Child,
     program: Option<u32>,
+}
+
+/// A start for a jar at `socket` running `argv` at 24×80, held for its
+/// first owner for `hold` milliseconds.
+fn start(socket: &std::path::Path, hold: Option<u64>, argv: &[&str]) -> spyc_jar::cli::Start {
+    spyc_jar::cli::Start {
+        token: TOKEN.to_vec(),
+        socket: socket.to_path_buf(),
+        cwd: None,
+        rows: 24,
+        cols: 80,
+        hold: hold.map(Duration::from_millis),
+        exit_linger: None,
+        argv: argv.iter().map(|a| (*a).to_string()).collect(),
+    }
+}
+
+/// Run the freshly built jar once, untimed, so macOS's first-run scan of it
+/// is paid here rather than inside a test's wait.
+fn warm(jar: &str) {
+    static WARM: std::sync::Once = std::sync::Once::new();
+    WARM.call_once(|| {
+        let _ = Command::new(jar)
+            .arg("build-info")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    });
 }
 
 impl Jar {
@@ -32,39 +63,70 @@ impl Jar {
     /// [`Jar::start`], with the jar's open descriptors limited to `nofile`
     /// when it is given.
     fn start_limited(nofile: Option<u32>, extra: &[&str], argv: &[&str]) -> Self {
-        Self::spawn(nofile, &[], extra, argv)
+        Self::spawn(nofile, &[], None, extra, argv)
+    }
+
+    /// [`Jar::start`], its exit kept until an owner collects it, as a `!`
+    /// capture's is.
+    fn keeping_its_exit(extra: &[&str], argv: &[&str]) -> Self {
+        Self::spawn_with(
+            None,
+            &[],
+            None,
+            extra,
+            argv,
+            Some(spyc_jar::cli::UNTIL_READ),
+        )
     }
 
     /// [`Jar::start`], with `env` set for the jar.
     fn start_env(env: &[(&str, &std::path::Path)], extra: &[&str], argv: &[&str]) -> Self {
-        Self::spawn(None, env, extra, argv)
+        Self::spawn(None, env, None, extra, argv)
+    }
+
+    /// [`Jar::start`], its program held for a first owner for `ms`
+    /// (decision M).
+    fn holding(ms: u64, extra: &[&str], argv: &[&str]) -> Self {
+        Self::spawn(None, &[], Some(ms), extra, argv)
     }
 
     fn spawn(
         nofile: Option<u32>,
         env: &[(&str, &std::path::Path)],
+        hold: Option<u64>,
         extra: &[&str],
         argv: &[&str],
+    ) -> Self {
+        Self::spawn_with(nofile, env, hold, extra, argv, None)
+    }
+
+    fn spawn_with(
+        nofile: Option<u32>,
+        env: &[(&str, &std::path::Path)],
+        hold: Option<u64>,
+        extra: &[&str],
+        argv: &[&str],
+        exit_linger: Option<Duration>,
     ) -> Self {
         let dir = socket_dir();
         let socket = dir.path().join("j.sock");
         let jar = env!("CARGO_BIN_EXE_spyc-jar");
-        let mut command = match nofile {
-            Some(n) => {
-                let mut c = Command::new("/bin/sh");
-                c.args(["-c", &format!("ulimit -n {n} && exec \"$0\" \"$@\""), jar]);
-                c
-            }
-            None => Command::new(jar),
+        warm(jar);
+        // A limit goes through a shell, whose `exec` can't give the jar its name.
+        let mut command = if let Some(n) = nofile {
+            let mut c = Command::new("/bin/sh");
+            c.args(["-c", &format!("ulimit -n {n} && exec \"$0\" \"$@\""), jar]);
+            c
+        } else {
+            use std::os::unix::process::CommandExt;
+            let mut c = Command::new(jar);
+            c.arg0(NAME);
+            c
         };
         let process = command
             .envs(env.iter().copied())
             .args(["--wire", "1"])
-            .arg("--socket")
-            .arg(&socket)
             .args(extra)
-            .arg("--")
-            .args(argv)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -76,8 +138,14 @@ impl Jar {
             .stdin
             .take()
             .expect("the jar's stdin")
-            .write_all(TOKEN)
-            .expect("hand the jar its token");
+            .write_all(
+                &spyc_jar::cli::Start {
+                    exit_linger,
+                    ..start(&socket, hold, argv)
+                }
+                .encode(),
+            )
+            .expect("hand the jar its start");
         Self {
             dir,
             socket,
@@ -352,6 +420,67 @@ fn an_ownerless_jar_drops_the_oldest_bytes_and_says_which() {
     let seen = read_until(&mut owner, true, |s| s.contains("END"));
     assert_eq!(seen.frames.first(), Some(&Msg::Gap { from: 0, to: base }));
     assert_eq!(seen.first_offset, Some(base));
+    assert_eq!(described(&jar, "overflow"), "drop");
+}
+
+/// R12b: a jar that keeps its exit until read, a `!` capture's, keeps all its
+/// output too. With no owner and its log full, the program waits to print
+/// more, and the next owner is replayed every byte from the first.
+#[test]
+fn a_captures_jar_with_no_owner_holds_its_program_rather_than_drop_output() {
+    let mut jar = Jar::keeping_its_exit(
+        &["--ring", "65536", "--window", "32768"],
+        &sh(&format!("{MILLION_BS}; echo; echo END")),
+    );
+    assert_every_byte_replays(&mut jar);
+}
+
+/// Prints a million `b`s.
+const MILLION_BS: &str = "head -c 1000000 /dev/zero | tr '\\000' b";
+
+/// With no owner, `jar`'s program printed [`MILLION_BS`] past its 64 KiB
+/// ring and then `END`: once the log stops growing, a new owner is replayed
+/// every byte from the first, with no gap.
+pub(crate) fn assert_every_byte_replays(jar: &mut Jar) {
+    // Until the log stops growing past half the ring: the program is either
+    // waiting on it or has printed everything.
+    let printed = || {
+        let log = field(
+            &spyc_jar::client::describe(&jar.socket).expect("describe"),
+            "log",
+        );
+        let n = log.split(", ").nth(1).and_then(|s| s.split(' ').next());
+        n.and_then(|n| n.parse::<u64>().ok()).unwrap_or(0)
+    };
+    let until = Instant::now() + WAIT;
+    let mut last = 0;
+    loop {
+        std::thread::sleep(Duration::from_millis(500));
+        let now = printed();
+        if now == last && now > 32_768 {
+            break;
+        }
+        assert!(Instant::now() < until, "the log never settled: {now}");
+        last = now;
+    }
+    let (mut owner, welcome) = jar.welcome(Role::Owner);
+    let Msg::Welcome { base, .. } = welcome else {
+        unreachable!()
+    };
+    assert_eq!(base, 0, "the jar dropped the output's start");
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let seen = read_until(&mut owner, true, |s| s.contains("END"));
+    assert!(
+        !seen.frames.iter().any(|f| matches!(f, Msg::Gap { .. })),
+        "{:?}",
+        seen.frames
+    );
+    assert_eq!(seen.first_offset, Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&seen.text).matches('b').count(),
+        1_000_000
+    );
+    assert_eq!(described(jar, "overflow"), "block");
 }
 
 #[test]
@@ -377,6 +506,32 @@ fn the_exit_is_reported_and_collecting_it_ends_the_jar() {
         "the jar ends once its exit is collected"
     );
     assert!(!jar.socket.exists(), "and removes its socket");
+}
+
+/// S2c: a `!` capture's jar keeps its output and exit, once its program has
+/// ended with nobody there, until an owner collects them, however long past
+/// the jar's own exit linger; then it ends.
+#[test]
+fn a_captures_exit_is_kept_until_an_owner_collects_it() {
+    let mut jar = Jar::keeping_its_exit(&["--linger-ms", "300"], &sh("echo RESULT=42; exit 7"));
+    eventually("the program ended", || {
+        spyc_jar::client::describe(&jar.socket).is_ok_and(|f| field(&f, "exit") == "7")
+    });
+    assert!(
+        !jar.ended_within(Duration::from_secs(2)),
+        "the jar ended with its output unread"
+    );
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    let seen = read_until(&mut owner, true, |s| {
+        s.frames.iter().any(|f| matches!(f, Msg::Exited { .. }))
+    });
+    assert!(seen.contains("RESULT=42"), "the output is all there");
+    owner.send(&Msg::AckExit).unwrap();
+    assert!(
+        jar.ended_within(Duration::from_secs(3)),
+        "the jar ends once its exit is collected"
+    );
 }
 
 /// R9a: a resize is logged at the offset it took effect.
@@ -593,12 +748,18 @@ fn an_upgrade_keeps_the_program_its_pty_and_every_connection() {
     let mut reader = jar.connect(Role::Reader);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
     reader.send(&Msg::Replay { from: 0 }).expect("replay");
+    // The reader reads throughout, as a real one does: one that stops lets
+    // its socket fill, its writer can't park, and the upgrade is busy.
+    let reader = std::thread::spawn(move || {
+        read_until(&mut reader, false, |s| {
+            s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. }))
+        })
+    });
     let next = next_binary(jar.dir.path());
     let mut seen = read_until(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 30)
     });
     let before = jar.process.id();
-
     owner
         .send(&Msg::Upgrade {
             binary: next.display().to_string(),
@@ -665,9 +826,7 @@ fn an_upgrade_keeps_the_program_its_pty_and_every_connection() {
     assert_unbroken(&seen);
 
     // The reader's connection crossed too, and the listener takes new ones.
-    let r = read_until(&mut reader, false, |s| {
-        s.frames.iter().any(|f| matches!(f, Msg::Upgraded { .. }))
-    });
+    let r = reader.join().expect("the reader");
     assert_eq!(r.first_offset, Some(0), "the reader replays from the start");
     let (_late, welcome) = jar.welcome(Role::Reader);
     assert!(matches!(welcome, Msg::Welcome { .. }));
@@ -1205,14 +1364,18 @@ fn a_jar_asked_for_a_wire_version_it_doesnt_speak_exits_75() {
         }
         let mark = dir.path().join("ran");
         let script = format!("touch {}", mark.display());
-        let status = cmd
-            .arg("--socket")
-            .arg(&socket)
-            .args(["--", "/bin/sh", "-c", &script])
-            .stdin(Stdio::null())
+        let mut jar = cmd
+            .stdin(Stdio::piped())
             .stderr(Stdio::null())
-            .status()
+            .spawn()
             .unwrap();
+        // A jar that refuses may have gone before its start arrives.
+        let _ = jar
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&start(&socket, None, &["/bin/sh", "-c", &script]).encode());
+        let status = jar.wait().unwrap();
         assert_eq!(status.code(), Some(75), "--wire {wire:?}");
         std::thread::sleep(Duration::from_millis(200));
         assert!(
@@ -1244,15 +1407,19 @@ fn a_jar_refuses_a_socket_directory_others_could_reach() {
         let mark = dir.path().join("ran");
         let _ = std::fs::remove_file(&mark);
         let mut jar = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
-            .args(["--wire", "1", "--socket"])
-            .arg(&socket)
-            .args(["--", "/bin/sh", "-c", &format!("touch {}", mark.display())])
+            .args(["--wire", "1"])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        jar.stdin.take().unwrap().write_all(TOKEN).unwrap();
+        let touch = format!("touch {}", mark.display());
+        let started = start(&socket, None, &["/bin/sh", "-c", &touch]);
+        jar.stdin
+            .take()
+            .unwrap()
+            .write_all(&started.encode())
+            .unwrap();
         if ok {
             eventually("the program runs", || mark.exists());
             let _ = jar.kill();
@@ -1512,6 +1679,15 @@ fn connect_within(jar: &Jar, role: Role, token: &[u8], wait: Duration) -> anyhow
 /// Ask on `client` for an upgrade to a copy of the jar's binary, and return
 /// the new build, or how the jar refused. Call it once a test: the copy is
 /// running afterwards.
+/// What `ps` shows as the command line of process `pid`.
+fn command_line(pid: u32) -> String {
+    let out = Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps");
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 fn upgrade(jar: &Jar, client: &mut Client) -> Result<String, String> {
     let next = next_binary(jar.dir.path());
     client
@@ -1832,16 +2008,18 @@ fn a_paste_the_program_never_reads_does_not_block_its_owner() {
 fn a_window_must_fit_inside_the_ring() {
     let dir = socket_dir();
     let mut refused = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
-        .args(["--wire", "1", "--socket"])
-        .arg(dir.path().join("j.sock"))
-        .args(["--ring", "65536", "--", "/bin/cat"])
+        .args(["--wire", "1", "--ring", "65536"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("spawn the jar");
     // A jar that refuses its options may have gone before its token arrives.
-    let _ = refused.stdin.take().expect("stdin").write_all(TOKEN);
+    let _ = refused
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(&start(&dir.path().join("j.sock"), None, &["/bin/cat"]).encode());
     let until = Instant::now() + WAIT;
     let mut status = None;
     while status.is_none() && Instant::now() < until {

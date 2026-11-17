@@ -12,7 +12,8 @@
 //!   upgrade runs; `held`: a new image that couldn't resume, holding the
 //!   program it was handed.
 //! - [`lock`]: the lock a jar holds beside its socket for its life, which
-//!   tells a busy jar from a gone one.
+//!   tells a busy jar from a gone one; [`limits`]: the time limits a client
+//!   relies on.
 //! - [`client`]: the owner's end of the socket, for spyc and the tests.
 //! - [`attach`]: the attach client, a raw relay to a real terminal.
 //! - [`cli`]: the `spyc-jar` command line.
@@ -22,12 +23,16 @@
 
 #![forbid(unsafe_code)]
 
+/// This crate's version, as `describe` gives it and spyc names a store entry.
+pub const PACKAGE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod attach;
 pub mod cli;
 pub mod client;
 pub mod handover;
 mod held;
 pub mod jar;
+pub mod limits;
 pub mod lock;
 pub mod proto;
 pub mod pty;

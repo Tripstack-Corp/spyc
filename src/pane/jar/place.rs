@@ -25,6 +25,14 @@ pub struct Place {
     pub dirs: Vec<PathBuf>,
     /// Where each jar's token is kept, `0600`, by its socket's name.
     pub tokens: PathBuf,
+    /// How long a jar started here holds its program for this spyc to
+    /// connect (decision M), and so how long spyc waits for it to answer: the
+    /// jar's clock starts after spyc's, so spyc never gives up on a jar that
+    /// may still start the program.
+    pub hold: std::time::Duration,
+    /// How long a repaint after a gap holds the program's size a row off
+    /// ([`super::repaint`]).
+    pub repaint_hold: std::time::Duration,
 }
 
 impl Place {
@@ -39,7 +47,7 @@ impl Place {
         start_store()?;
         let binary = match super::store::binary() {
             super::store::Binary::Entry(e) | super::store::Binary::Beside(e, _) => e,
-            super::store::Binary::None(why) => anyhow::bail!("{why}"),
+            super::store::Binary::None(why) => return Err(super::NoUsableJar(why).into()),
         };
         let tokens = crate::state::state_root()
             .context("no state directory for jar tokens")?
@@ -48,6 +56,8 @@ impl Place {
             binary,
             dirs,
             tokens,
+            hold: HOLD,
+            repaint_hold: super::repaint::REPAINT_HOLD,
         })
     }
 
@@ -56,14 +66,20 @@ impl Place {
         self.dirs.last().map_or(Path::new("/"), PathBuf::as_path)
     }
 
-    /// The socket of the jar named `name`: its first 16 hex digits, inside
-    /// macOS's 104-byte limit on a socket's path.
+    /// The socket of the jar named `name`: the first 16 hex digits of the
+    /// name's SHA-256, inside macOS's 104-byte limit on a socket's path. Not
+    /// the name's own: a tab's id is a v7 UUID, whose leading digits are its
+    /// millisecond and a counter, the same for tabs made together.
     pub fn socket(&self, name: &str) -> PathBuf {
-        let id: String = name
-            .chars()
-            .filter(char::is_ascii_hexdigit)
-            .take(16)
-            .collect();
+        use sha2::{Digest, Sha256};
+        let id = Sha256::digest(name.as_bytes())
+            .iter()
+            .take(8)
+            .fold(String::new(), |mut s, b| {
+                use std::fmt::Write as _;
+                let _ = write!(s, "{b:02x}");
+                s
+            });
         self.sockets().join(format!("{id}.sock"))
     }
 
@@ -82,6 +98,11 @@ impl Place {
         Ok(())
     }
 }
+
+/// How long a pane's jar holds its program for this spyc: far longer than
+/// a connect takes, even to a jar whose first run is scanned under load, and
+/// a jar whose spyc died meanwhile ends having started nothing.
+pub const HOLD: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Start this user's jar binary store (`super::store`), once a session:
 /// at spyc's start when jars are on, so the first jar needn't wait.

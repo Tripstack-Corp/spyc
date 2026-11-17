@@ -145,7 +145,7 @@ in the output.
 | R10 | Stamp every event with a monotonic time | later | Gives readers without hooks a working dot, the away recap, replay timing. Moved to later by decision B: an owner is there to keep its own times. | U6, U8, U9 |
 | R11 | **While an owner is connected**, it acknowledges what it has parsed ("through offset N"), and the jar stops reading the PTY when the owner falls a window behind | v1 | A slow owner must slow the program, as `PtyHost`'s bounded channel (`READER_CHANNEL_CAP`) does today. Dropping bytes under a live owner would corrupt a plain `cat` of a big file. A jar refuses to start with a window that, with one read of the PTY, doesn't fit its ring. | all |
 | R12 | **While no owner is connected**, drop the oldest events when the ring fills (`drop`) | v1 | A crash window must never stall an agent. | U2 |
-| R12b | The `block` and `spill` modes ([below](#when-the-ring-fills-with-no-owner)) | later | Moved to later by decision B: with no long ownerless stretches, they only matter if a crashed spyc isn't relaunched. | U2 |
+| R12b | **`block`** ([below](#when-the-ring-fills-with-no-owner)) for a jar that keeps its exit until read, a `!` capture's; `spill` | `block` v1, `spill` later | Decision B moved both to later: with no long ownerless stretches, they only matter if a crashed spyc isn't relaunched. The owner brought `block` back for captures on 2026-11-17, its mode following the exit linger: the start and the upgrade blob already carry it, so neither format changed, and it outlasts a `^Z`, which rewrites a capture's `is` to `task`. | U2, U12 |
 | R12a | Mark a gap with the offsets it spans | v1 | A spyc that finds a gap forces a redraw rather than trusting a broken replay. A reader that falls behind the ring is sent the same `gap`, never a jump in the offsets. | U2, U3 |
 | R12c | **Across a gap,** spyc starts from the newest snapshot under it, applies the bytes after the gap, then makes the program repaint | v1 | Stage 4 (Q7): a repaint redraws the screen but sets no mode again. From an empty engine a full-screen Claude came back without the alternate screen, mouse reporting or bracketed paste; from the snapshot every mode matched a run that lost nothing, and the history before the gap stayed. Decided v1 by the owner. | U2 |
 | R13 | Ring, spill and snapshot sizes set per jar, with a report of what each holds | v1 | Many jars run at once; memory has to be visible and bounded. | all |
@@ -170,7 +170,7 @@ in the output.
 | R17c | The portable form is the formatter's emit **plus what its extras don't carry:** the primary screen and its history under a full-screen program (the formatter writes only the screen showing), soft wraps (an unwrapped emit, so the restoring engine wraps again), the saved cursor (DECSC), a cursor shape other than the default, and the title. It is checked against the binary form as a control, case by case | v1 | Measured on the spike (`PANE_JAR_SPIKE.md` → "Decision I: what a portable snapshot costs and loses"): with these, 24 of 26 cases come back exact. The two that don't are kitty keyboard flags below the top of their stack and DECSCA protection, and spyc reads neither. | U1, U11 |
 | R17d | Panes **take turns snapshotting:** a few at a time, not every pane at once | v1 | Thirty full panes snapshotting together held each pane's lock for 46 to 62 ms against 6 ms alone, enough to drop a frame. The spike lets two run at once. | all |
 | R17e | **A snapshot every five seconds while output flows,** as well as after a second of quiet | v1 | Decided by the owner after stage 4. Through a long stream the snapshot under a gap (R12c) would otherwise predate the stream, losing its start and any mode it changed. Each costs the pane's lock about 6 ms; the spike showed none during a 14-second stream without it, and one every five seconds with it. | U2 |
-| R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. Stage 6 found it needed for a jar no session describes. Built before the freeze: spyc writes `is`, `label`, `agent`, `project` and `project_home` as it opens a tab, the jar keeps them when its owner goes, and after a `kill -9` of spyc, `spyc --jars` names an orphaned tab `zsh (other in work)` rather than by its launch command. | U2, U10, U12 |
+| R18 | A small key/value store the owner writes: pane id, title, agent kind, session id, project, and whether it's a pane, a task or a capture | v1 | After a crash, a spyc learns what a jar is from the jar, even when the session manifest is stale. Stage 6 found it needed for a jar no session describes. Built before the freeze: spyc writes `is`, `label`, `agent`, `project` and `project_home` (and, since S2c, `command` and `pane_id`) as it opens a tab, the jar keeps them when its owner goes, and after a `kill -9` of spyc, `spyc --jars` names an orphaned tab `zsh (other in work)` rather than by its launch command. | U2, U10, U12 |
 | R19 | Keep all of it in memory, never on disk, except in `spill` mode. An upgrade's blob travels through the holder and a pipe, so it never touches a file | v1 | [Where the jar keeps its state](#where-the-jar-keeps-its-state). Until the review (decision K) the blob went through an unlinked file, sealed with AES-256-GCM because macOS has no `memfd`, so only ciphertext could reach a disk. The holder already lives across the `exec`, so it takes the blob and writes it into a pipe the new image reads: nothing touches a file on either platform, and no key or cipher is left in what freezes. | all |
 
 ### Connections
@@ -246,12 +246,12 @@ acknowledged yet (R11).
 With an owner connected, the ring never overflows: the owner's acknowledgements
 pace the program (R11). The modes below apply only while no owner is
 connected, which with decision B means after a crash, until a new spyc
-arrives. A pane's mode is chosen when it's spawned; spyc picks it and the jar
-only follows it. `drop` is v1; `block` and `spill` are later (R12b).
+arrives. A jar's mode follows its start: one that keeps its exit until read,
+a `!` capture's, gets `block`, and any other `drop` (R12b). `spill` is later.
 
 | Mode | When the ring is full | When an owner returns | For |
 |---|---|---|---|
-| **`drop`** (the default) | The program runs on at full speed. The jar discards the oldest events and marks the gap. | spyc starts from the newest snapshot under the gap, applies the bytes after it, and makes the program repaint by changing the PTY's size by a row and back (R12c). The repaint redraws the screen; the modes come back from the snapshot. A `SIGWINCH` with no size change repaints nothing: neither Claude Code nor spyc redrew on one (stage 0b). A full-screen program such as Claude Code redraws itself on a real change. | Agents, and anything whose durable record isn't the screen. |
+| **`drop`** (the default) | The program runs on at full speed. The jar discards the oldest events and marks the gap. | spyc starts from the newest snapshot under the gap, applies the bytes after it, and makes the program repaint by changing the PTY's size by a row and, 100 ms later, back (R12c; sent back to back, a program can read the two as one unchanged size). The repaint redraws the screen; the modes come back from the snapshot. A `SIGWINCH` with no size change repaints nothing: neither Claude Code nor spyc redrew on one (stage 0b). A full-screen program such as Claude Code redraws itself on a real change. | Agents, and anything whose durable record isn't the screen. |
 | **`block`** | The jar stops reading the PTY; the program waits on its next write. Nothing is lost. | Everything replays; no redraw needed. | Panes where every byte matters more than progress while you're away. |
 | **`spill`** | The ring overflows into a file in the jar's `0700` directory, removed when the jar ends. | Everything replays from the ring and the file. | A log you want in full, knowing the file holds whatever the program printed. |
 
@@ -275,10 +275,15 @@ host a program:
   with no owner, by label and project (built before the freeze).
 - **A task** keeps the jar it had as a pane when demoted; the owner rewrites its
   key/value entry from pane to task. Its mode and linger stay as they were.
-- **A capture** lingers a minute: a capture nobody comes back for is cleaned
-  up, since a restored session doesn't reopen it. Its output is the point, so
-  it should get `block` once R12b lands; until then a crash window can drop
-  part of it.
+- **A capture** lives until its output is read, then ends (decided by the
+  owner, 2026-11-16, replacing a minute's linger). With its owner there, the
+  jar ends once spyc has acknowledged its last byte and its exit (`ack`,
+  `ack_exit`). With none, it keeps its output until a spyc reads it: a
+  restored session reopens an unread capture, and a spyc's start offers to
+  restore or discard any that nothing comes back for. Its output is the
+  point, so it gets `block` (R12b): with no spyc there, a capture that fills
+  its ring waits to print more until one comes back. Sent to the background
+  with `^Z`, it keeps `block`, as it keeps its exit linger.
 - **spyc's outer jar** lingers until a terminal attaches again.
 
 Decided by the owner after stage 4. Lingering matters only after a crash (or
@@ -623,7 +628,14 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   `--wire N`, the version its starter speaks. A jar that doesn't speak `N`, or
   is given none, exits with status 75 before it binds its socket, reads its
   token or starts the program, whatever else the line says. The flags after it
-  are that version's.
+  are that version's, and so is its standard input. In version 1 that is
+  the token, the socket, the program's directory (empty for the jar's own),
+  rows, columns, the hold and the exit linger in milliseconds (each empty
+  for none; an exit linger of 2^64 - 1 keeps a capture's exit until an
+  owner collects it), the number of the program's arguments and the
+  arguments, each ended by a NUL, numbers in decimal (`spyc_jar::cli::Start`);
+  none of it on the command line, which `ps` shows. Starter and jar are
+  always one build, so the input changes with it.
 - **The frame:** `len` (u32), `kind` (u8), `flags` (u8), the payload. `len`
   counts `kind`, `flags` and the payload, and is at most 16 MiB. Integers are
   big-endian and text is UTF-8. Flag `0x80` marks a frame critical: a jar that
@@ -792,8 +804,9 @@ Each part of the upgrade is placed by where its code runs (decision L):
    the blob, so it can't stay behind. A reader that can't is closed and
    stays behind.
 6. **A `build`.** `describe` names the store entry a jar runs from: its
-   directory's name, which for an entry spyc wrote is the SHA-256 spyc
-   computed, so two builds at one commit differ. `commit` beside it gives
+   directory's name, which for an entry spyc wrote is the jar's version and
+   the first 12 hex digits of the SHA-256 spyc computed, so two builds at one
+   commit differ. `commit` beside it gives
    the git commit, for people to read.
 7. **Validating twice.** First while nothing is parked, on a blob taken then:
    that pays a new binary's first-run cost (about 260 ms on macOS for a new
@@ -906,9 +919,10 @@ only for a change no capability can express.
 
 A version-1 jar describes itself with `id`, `instance`, `created`, `jar`,
 `build` (the name of the store entry it runs from, which for an entry spyc
-wrote is its SHA-256 in lowercase hex; decision L), `commit` (the git commit
+wrote is `<version>-<hash>`, `<hash>` the first 12 digits of its SHA-256 in
+lowercase hex; decision L), `commit` (the git commit
 it was built from, when its binary knows it), `pid`, `program`, `program_pid`
-(`0` while a jar started with `--start-on-owner` waits for its first owner;
+(`0` while a jar whose start has a hold waits for its first owner;
 decision M),
 `cwd`, `size`, `overflow`, `linger`, `owner`,
 `owner_pid` (the owner's process, when there is one), `log`, `snapshots`, and
@@ -919,6 +933,29 @@ decision M),
 it names (and the token of 16 bytes or more on standard input, which then
 closes); where spyc keeps tokens; and the wording of a description's values
 and of a refusal's text, which are for people to read.
+
+### A jar's time limits
+
+A client that gives up on a jar sooner than the jar can be silent takes a busy
+jar for a gone one: it ends a connection, leaves a tab detached, or fails a
+start. So a version-1 jar publishes the limits a client may rely on, in
+`spyc_jar::limits`, and spyc asserts its own waits against them when it
+compiles:
+
+| Limit | Value | What it bounds |
+|---|---|---|
+| `PARKED_AT_MOST` | 15 s | The longest a jar reads nothing and answers nothing, parked for an upgrade: reaching the park (3 s), the flush (1 s), the parked validation (5 s) and its output (1 s), and the holder's answer (5 s). It is their sum in `upgrade.rs`, so a longer step moves it. Frames queue meanwhile and are read after. |
+| `OWNER_DEADLINE` | 10 s | How long a jar goes without hearing from its owner before it ends the owner's lease, unless `--deadline-ms` says otherwise. An owner pings more often. |
+| The start's hold | as the start says | How long a jar holds its program for a first owner (decision M). A starter waits as long for its answer. |
+
+Every time constant in the jar is classified by what running out costs, and
+every step that parks the jar is part of `PARKED_AT_MOST`, which a test of
+spyc's checks. spyc's waits that take a jar for gone outlast `PARKED_AT_MOST`: the owner
+connection's write stall (20 s) and an adoption's wait for its welcome (20 s).
+It pings every 2 s, inside `OWNER_DEADLINE`. Its shorter waits end in nothing
+that can't be undone: a restart that finds the tab's last jar still running
+after 2 s fails the start, `[not started]`, and `^a R` tries again; shutdown
+waits 2 s for an exit report, then leaves the jar to end its program alone.
 
 ### Fixtures
 
@@ -1123,7 +1160,8 @@ Open unless marked decided:
   that has already timed out reaches the program as typed input. Claude Code
   and agy probe once, with about two seconds to answer (read from their
   binaries, not measured in a pane), so a probe asked before any owner was
-  there loses them for good. So a start flag, `--start-on-owner MS`, holds
+  there loses them for good. So the start's hold (a flag,
+  `--start-on-owner MS`, until the start moved to standard input) holds
   the program until the first owner's `hello` is accepted, and a jar whose
   first owner doesn't arrive within `MS` milliseconds exits without having
   started anything. The wait is its own setting, not the owner's liveness

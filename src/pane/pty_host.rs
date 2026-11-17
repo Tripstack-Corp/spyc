@@ -244,6 +244,7 @@ impl PtyHost {
         let (jar, spawned) = match &spec.jar {
             Some(jar) => jar_parts(super::jar::spawn(
                 jar,
+                spec.command,
                 &argv,
                 spec.cwd,
                 (spec.rows, spec.cols),
@@ -269,8 +270,7 @@ impl PtyHost {
         Ok(host)
     }
 
-    /// A host around a program already running in a jar.
-    #[cfg(test)]
+    /// A host around a program already running in a jar, or a stand-in's.
     pub(crate) fn around_jar(j: super::jar::Jarred, size: (u16, u16)) -> anyhow::Result<Self> {
         let (jar, spawned) = jar_parts(j)?;
         let mut host = Self::running(spawned, size, false);
@@ -283,7 +283,7 @@ impl PtyHost {
     fn set_jar(&mut self, jar: JarFields) {
         self.jar = jar.signals;
         self.snapshots = jar.snapshots;
-        self.jar_socket = Some(jar.socket);
+        self.jar_socket = jar.socket;
         self.adopted = jar.adoption.is_some();
         self.adoption = jar.adoption;
     }
@@ -294,6 +294,13 @@ impl PtyHost {
         self.jar_socket.as_deref()
     }
 
+    /// Tell the program's jar what it holds (R18); nothing without one.
+    pub fn tell_jar(&self, info: &[(&str, &str)]) {
+        if let Some(jar) = &self.jar {
+            jar.tell(info);
+        }
+    }
+
     /// Whether the program was taken back from its jar rather than started.
     pub const fn adopted(&self) -> bool {
         self.adopted
@@ -301,7 +308,6 @@ impl PtyHost {
 
     /// End the jar's connection as a crash of spyc would: the program and
     /// its jar run on.
-    #[cfg(test)]
     pub(crate) fn sever_jar(&self) {
         if let Some(jar) = &self.jar {
             jar.sever();
@@ -746,7 +752,7 @@ type Spawned = (
 struct JarFields {
     signals: Option<super::jar::Signals>,
     snapshots: Option<super::jar::SnapshotSink>,
-    socket: std::path::PathBuf,
+    socket: Option<std::path::PathBuf>,
     adoption: Option<super::jar::Adoption>,
 }
 

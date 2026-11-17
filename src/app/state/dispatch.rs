@@ -382,6 +382,8 @@ impl AppState {
             | PromptKind::PipeConfirm { .. }
             | PromptKind::RestartPane
             | PromptKind::LuaRunaway
+            | PromptKind::JarlessFallback
+            | PromptKind::OrphanJars
             | PromptKind::ArchiveMountConfirm { .. }
             | PromptKind::ArchiveWriteConfirm { .. }
             | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,

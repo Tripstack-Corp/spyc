@@ -197,6 +197,11 @@ struct Cli {
     )]
     remove_agents: Option<String>,
 
+    /// List this user's jars and exit: each pane's program, by its tab and
+    /// project, with its owner, and the sockets whose jars are gone.
+    #[arg(long)]
+    jars: bool,
+
     /// Disable the embedded Lua engine for this session — no worker thread, and
     /// `map KEY lua` / init.lua won't run. The startup equivalent of `:lua off`.
     #[arg(long)]
@@ -231,7 +236,7 @@ fn cwd_file_target(cli: &Cli, env: Option<&OsStr>, launch_dir: &Path) -> Option<
     Some(launch_dir.join(path))
 }
 
-/// A one-shot setup command (`--print-config`, `--install-skill`,
+/// A one-shot command (`--print-config`, `--install-skill`, `--jars`,
 /// `--install-agents`, `--remove-agents`), run instead of the TUI. `None` when
 /// none was asked for.
 fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
@@ -241,6 +246,10 @@ fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
     }
     if cli.install_skill {
         return Some(install_skill());
+    }
+    if cli.jars {
+        pane::jar::listing::print();
+        return Some(Ok(()));
     }
     if let Some(list) = cli.install_agents.as_deref() {
         return Some(wiring::run_cli(true, list));

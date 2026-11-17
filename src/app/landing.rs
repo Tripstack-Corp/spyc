@@ -48,6 +48,12 @@ impl<T> Landing<T> {
         )
     }
 
+    /// A sender whose `wake` is fired after each send, for a worker started
+    /// before `run()`, whose wake reaches the loop once it runs.
+    pub fn sender_waking(&self, wake: Arc<dyn Fn() + Send + Sync>) -> WakingSender<T> {
+        WakingSender::new(self.tx.clone(), wake)
+    }
+
     /// Land `value` from the loop itself, which needs no wake.
     pub fn land(&self, value: T) {
         // The receiver is `self.rx`, alive as long as this sender.

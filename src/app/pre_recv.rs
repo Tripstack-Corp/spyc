@@ -9,6 +9,23 @@ use crate::Tui;
 use super::{App, ForegroundExec, RunCtx};
 
 impl App {
+    /// A landing that hands back effects: the frame marked when it changed
+    /// it, and its effects run.
+    fn take_landing(
+        &mut self,
+        (draw, effects): (bool, Vec<super::Effect>),
+        ctx: &mut RunCtx,
+        terminal: &mut Tui,
+        foreground_exec: &ForegroundExec,
+    ) {
+        if draw {
+            ctx.draw.mark(3);
+        }
+        if !effects.is_empty() {
+            self.run_effects(effects, terminal, foreground_exec);
+        }
+    }
+
     /// Land every off-thread result that arrived since the last iteration:
     /// streaming sources, worker outcomes, pager streams, pane output. Each
     /// landing is drained regardless of which wake survived coalescing.
@@ -80,21 +97,10 @@ impl App {
         // unconditional pre-recv drain as the graveyard above. Mounting can
         // return effects (a materialize kicked by a mount, a pager open), so
         // the drain hands them back to be run.
-        let (archive_draw, archive_fx) = self.apply_archive_outcomes();
-        if archive_draw {
-            ctx.draw.mark(3);
-        }
-        if !archive_fx.is_empty() {
-            self.run_effects(archive_fx, terminal, foreground_exec);
-        }
-
-        let (file_draw, file_fx) = self.apply_file_outcomes();
-        if file_draw {
-            ctx.draw.mark(3);
-        }
-        if !file_fx.is_empty() {
-            self.run_effects(file_fx, terminal, foreground_exec);
-        }
+        let landed = self.apply_archive_outcomes();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
+        let landed = self.apply_file_outcomes();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
 
         // A middle-click clipboard read that landed (woke us via
         // `Message::Wake(Wake::ClipboardPaste)`). Routing runs here, against the
@@ -105,14 +111,14 @@ impl App {
             ctx.draw.mark(3);
         }
 
-        let (paste_draw, paste_fx) = self.apply_clipboard_pastes();
-        if paste_draw {
+        let landed = self.apply_clipboard_pastes();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
+
+        // A jarred tab's pane, or a capture's host, landed (woke via
+        // `Wake::PaneStart`).
+        if self.apply_pane_starts() | self.apply_capture_starts() | self.apply_orphan_jars() {
             ctx.draw.mark(3);
         }
-        if !paste_fx.is_empty() {
-            self.run_effects(paste_fx, terminal, foreground_exec);
-        }
-
         // `J`'s default path landed (woke via `Message::Wake(Wake::JumpDefault)`).
         if self.apply_jump_defaults() {
             ctx.draw.mark(3);
@@ -129,13 +135,8 @@ impl App {
 
         // Drain finished Lua runs (woke via `Message::Wake(Wake::Lua)`): apply the
         // requests the script produced, running any effects they translate to.
-        let (lua_draw, lua_fx) = self.handle_lua_done();
-        if lua_draw {
-            ctx.draw.mark(3);
-        }
-        if !lua_fx.is_empty() {
-            self.run_effects(lua_fx, terminal, foreground_exec);
-        }
+        let landed = self.handle_lua_done();
+        self.take_landing(landed, ctx, terminal, foreground_exec);
 
         // Drain any off-thread inventory ops (yank/remove/clear/put) that landed.
         if self.apply_inventory_outcomes() {
@@ -197,6 +198,10 @@ impl App {
         if pane_draw {
             ctx.draw.mark(pane_reason);
         }
+        // A tab whose jar ended its lease is taken back (`pane_starts`).
+        if self.retake_lapsed_tabs() {
+            ctx.draw.mark(3);
+        }
 
         // MVU Phase 5: snapshot the active pane's routing flags into the
         // Model, AFTER the drain + `mark_exited` finalized `is_closed` and
@@ -224,6 +229,20 @@ impl App {
         // Session-restore: deferred `/resume` sends (see
         // `handle_restore_resumes`).
         self.handle_restore_resumes(now_pre, ctx);
+
+        // R18: each tab's jar told what it holds, where that changed.
+        self.settle_jar_info();
+
+        // A tab with no usable jar, its offer held while another prompt was
+        // open (`app::jarless`).
+        if self.offer_jarless() {
+            ctx.draw.mark(3);
+        }
+        // Jars no spyc owns: looked for once startup settles, and offered once
+        // nothing else is asked (`app::orphan_jars`).
+        if self.settle_orphan_jars() | self.offer_orphan_jars() {
+            ctx.draw.mark(3);
+        }
 
         // Drain buffered FsEvents + run the trailing-debounce listing
         // refresh (see `ingest_fs_and_maybe_refresh`).
@@ -563,6 +582,16 @@ mod tests {
                     arg == "self.runtime.pane_wake_tx.clone()"
                         || NO_LOOP_WAKE.iter().any(|(f, a, _)| *f == file && *a == arg),
                     "{file}: `.sender({arg}, …)` doesn't pass the loop's wake"
+                );
+            }
+            // A worker that may start before `run()` wakes the loop once it runs.
+            for (at, _) in src.match_indices(".sender_waking(") {
+                senders += 1;
+                assert!(
+                    src[at + ".sender_waking(".len()..]
+                        .trim_start()
+                        .starts_with("self.loop_waker("),
+                    "{file}: `.sender_waking(…)` doesn't wake the loop"
                 );
             }
         }

@@ -240,7 +240,7 @@ impl App {
     /// order, each read inside it so the column and pane handles name its own.
     /// Shared by the quit-time [`Self::save_session`] and the debounced
     /// [`Self::autosave_session`].
-    fn build_manifest(&mut self) -> Manifest {
+    pub(in crate::app) fn build_manifest(&mut self) -> Manifest {
         // Stable per-process session id (see `AppState::session_id`) so every
         // save overwrites one `<id>.json`; fresh-millis fallback only if it was
         // somehow never assigned.
@@ -270,6 +270,7 @@ impl App {
             projects,
             scope_claims: self.state.scope_registry.clone(),
             closed_projects: self.state.closed_projects.clone(),
+            tasks: self.saved_tasks(),
         }
     }
 
@@ -510,7 +511,7 @@ impl App {
     /// [`Self::settle_autosave`] detects a genuine change without a full
     /// snapshot build (which resolves agent resume ids off the filesystem).
     /// Must track what [`Self::build_manifest`] persists, in every project.
-    fn session_fingerprint(&mut self) -> u64 {
+    pub(in crate::app) fn session_fingerprint(&mut self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for project in self.open_project_ids() {
@@ -521,6 +522,7 @@ impl App {
         // P2: a scope-registry mutation (register/release) is session-relevant
         // — it's exactly what must survive a crash mid-merge-train.
         self.state.scope_registry.hash(&mut h);
+        self.hash_saved_tasks(&mut h);
         for closed in &self.state.closed_projects {
             closed.project.anchor().hash(&mut h);
             closed.closed_secs.hash(&mut h);
@@ -544,6 +546,8 @@ impl App {
                 t.info.claude_home.hash(h);
                 // `^a R` respawns in place with the same command and a new id.
                 t.info.id.hash(h);
+                // A tab's jar lands after the save its opening made.
+                t.pane.host.jar_socket().hash(h);
             }
         }
         let project = self.state.active_project();
@@ -565,9 +569,11 @@ impl App {
     }
 
     /// Whether a restore would bring anything back: any project's tabs (open
-    /// or kept unopened) or split, or scope claims. A cwd alone doesn't count.
+    /// or kept unopened) or split, scope claims, or a capture or task in a
+    /// jar. A cwd alone doesn't count.
     fn has_restorable_state(&mut self) -> bool {
         !self.state.scope_registry.is_empty()
+            || !self.saved_tasks().is_empty()
             || self
                 .open_project_ids()
                 .into_iter()

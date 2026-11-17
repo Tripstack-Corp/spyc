@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 mod manifest;
 pub use manifest::{
-    ClosedProject, Held, MANIFEST_VERSION, Manifest, SavedProject, label_of, parse_manifest,
-    project_list_label,
+    ClosedProject, Held, MANIFEST_VERSION, Manifest, SavedProject, SavedTask, label_of,
+    parse_manifest, project_list_label,
 };
 
 const MAX_SESSIONS: usize = 20;
