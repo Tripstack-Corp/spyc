@@ -43,6 +43,7 @@ impl Spyc {
 
     /// [`Self::start`], running the spyc at `binary`.
     fn start_from(binary: &Path, dirs: &Dirs, args: &[&str]) -> Self {
+        warm(binary);
         let pair = native_pty_system()
             .openpty(PtySize {
                 rows: 30,
@@ -140,6 +141,24 @@ impl Spyc {
     fn crash(mut self) {
         kill(self.pid());
         let _ = self.child.wait();
+    }
+}
+
+/// macOS scans an executable on its first run, which takes seconds for a
+/// debug build this size, and longer while a gate runs every test at once;
+/// every rebuild makes it new again. Run `binary` once, untimed, so the waits
+/// below are spent on spyc rather than the scan: a gate's failures here were
+/// spycs that had drawn nothing and logged nothing in 30 s.
+fn warm(binary: &Path) {
+    static WARMED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    let mut warmed = WARMED.lock().unwrap();
+    if !warmed.iter().any(|b| b == binary) {
+        let _ = std::process::Command::new(binary)
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        warmed.push(binary.to_path_buf());
     }
 }
 
