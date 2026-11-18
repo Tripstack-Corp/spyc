@@ -274,7 +274,7 @@ impl App {
             // `PromptResult` only maps to `Handled`/`Defer`; `OpenPager`/`Quit`
             // are unreachable here — handle defensively (no panic on the input
             // path) should the producer's result type ever widen.
-            Update::OpenPager(_) | Update::Quit => return Vec::new(),
+            Update::OpenPager(_) | Update::Quit | Update::Detach => return Vec::new(),
             Update::Defer => {}
         }
 

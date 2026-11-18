@@ -26,11 +26,15 @@ impl App {
     pub fn set_own_jar(&mut self, jar: Option<crate::pane::jar::session::OwnJar>) {
         if let Some(jar) = &jar {
             self.state.session_name = Some(jar.name().to_string());
+            self.state.session_name_fixed = true;
         }
         self.runtime.own_jar = jar;
     }
 
-    pub fn new(resume: bool, cli_color: crate::config::ColorMode) -> Self {
+    /// A spyc, its session picked with `-r` when `resume`. One that
+    /// `restores_own` (in its session's own jar) restores that session itself,
+    /// so it opens neither the startup tabs nor the picker.
+    pub fn new(resume: bool, restores_own: bool, cli_color: crate::config::ColorMode) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
             (d, None)
         } else {
@@ -182,6 +186,7 @@ impl App {
             status_flags_override: None,
             mode: Mode::Normal,
             session_name,
+            session_name_fixed: false,
             session_id,
             frecency: crate::state::Frecency::load(),
             learned: crate::state::Learned::load(),
@@ -344,7 +349,7 @@ impl App {
         // fleet at launch, or the consent prompt a project-local list needs
         // first (`startup_tabs`). Precedence: restore > an approved project
         // list > the user's list > single-tab-on-demand.
-        app.start_startup_tabs(resume);
+        app.start_startup_tabs(resume || restores_own);
 
         if resume {
             app.show_session_picker();
@@ -353,7 +358,7 @@ impl App {
         // past what's installed. Only ever for an already-installed skill (see
         // `skill::startup_offer`), and never over the resume picker — that one
         // owns the screen, and the offer is not urgent.
-        if !resume {
+        if !resume && !restores_own {
             app.maybe_offer_skill_update();
         }
         app

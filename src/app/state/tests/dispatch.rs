@@ -43,6 +43,30 @@ fn cmd_quit_defers_to_app() {
 }
 
 #[test]
+fn cmd_detach_defers_to_app() {
+    let mut s = test_state();
+    assert!(matches!(
+        s.dispatch_command("detach"),
+        CommandResult::Detach
+    ));
+    assert!(!s.should_quit);
+}
+
+#[test]
+fn a_session_in_its_own_jar_keeps_its_name() {
+    let mut s = test_state();
+    s.session_name = Some("ANISE".into());
+    s.session_name_fixed = true;
+    s.dispatch_command("name clove");
+    assert_eq!(s.session_name.as_deref(), Some("ANISE"));
+    let flash = format!("{:?}", s.flash);
+    assert!(flash.contains("jar of its own"), "{flash}");
+    s.session_name_fixed = false;
+    s.dispatch_command("name clove");
+    assert_ne!(s.session_name.as_deref(), Some("ANISE"));
+}
+
+#[test]
 fn cmd_quit_long_defers_to_app() {
     let mut s = test_state();
     assert!(matches!(s.dispatch_command("quit"), CommandResult::Quit));

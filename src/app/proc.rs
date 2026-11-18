@@ -392,6 +392,7 @@ impl super::App {
         terminal: &mut Tui,
         foreground_exec: &ForegroundExec,
     ) -> bool {
+        self.settle_detach(terminal);
         let Some(jar) = &self.runtime.own_jar else {
             return false;
         };
