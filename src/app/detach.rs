@@ -6,6 +6,12 @@
 //! jar's connection as a crash would, and becomes `spyc attach` for that jar
 //! (`hand_over`, from `lib.rs`). The spyc the jar starts restores the session
 //! by its name and takes the jars back (`restore_own_session`).
+//!
+//! `:upgrade` is the same handover to a newly installed spyc. In a plain spyc
+//! it is `^d`'s, whose jar runs the binary now installed. In spyc's own jar
+//! it is made in place: the session saved and its jars left running, spyc
+//! `exec`s the new binary, which keeps the pid the jar knows its program by,
+//! and the terminal stays attached while the new spyc restores the session.
 
 use anyhow::Context;
 
@@ -14,11 +20,61 @@ use super::proc::ForegroundExec;
 use super::tasks::TaskStatus;
 use crate::Tui;
 
-/// A plain spyc's handover, left for `lib.rs` once the loop ends.
+/// A handover, left for `lib.rs` once the loop ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Handover {
     /// The session's name: its jar's.
     pub name: String,
+    /// An upgrade in spyc's own jar: `exec` the new binary there.
+    pub in_place: bool,
+}
+
+/// The binary spyc runs from, as it was when spyc started: an install puts a
+/// new file at the path, with another inode or a later modification time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryStamp {
+    path: std::path::PathBuf,
+    inode: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl BinaryStamp {
+    /// The file at `path` now.
+    pub fn of(path: &std::path::Path) -> Option<Self> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(path).ok()?;
+        Some(Self {
+            path: path.to_path_buf(),
+            inode: meta.ino(),
+            modified: meta.modified().ok(),
+        })
+    }
+
+    /// The binary spyc runs from, now.
+    pub fn installed() -> Option<Self> {
+        installed_spyc().ok().and_then(|p| Self::of(&p))
+    }
+
+    /// Whether `now` is another file than this one: a new install.
+    pub fn replaced_by(&self, now: &Self) -> bool {
+        self.inode != now.inode || self.modified != now.modified
+    }
+}
+
+/// Where spyc runs from: the path the next install writes. Linux names a
+/// replaced binary `<path> (deleted)`.
+pub fn installed_spyc() -> anyhow::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe().context("where spyc runs from")?;
+    Ok(exe
+        .to_str()
+        .and_then(|s| s.strip_suffix(" (deleted)"))
+        .map_or(exe.clone(), std::path::PathBuf::from))
+}
+
+/// `:upgrade`: hand the session to the spyc installed since this one started.
+pub(super) const fn cmd_upgrade(app: &mut App, _args: &str) -> Vec<super::Effect> {
+    app.runtime.upgrade_pending = true;
+    Vec::new()
 }
 
 impl App {
@@ -48,8 +104,37 @@ impl App {
                 .flash_error("can't detach: the session has no name");
             return;
         };
-        self.runtime.handover = Some(Handover { name });
+        self.runtime.handover = Some(Handover {
+            name,
+            in_place: false,
+        });
         self.state.should_quit = true;
+    }
+
+    /// `:upgrade`, with the loop: only to a binary installed since spyc
+    /// started, in place in spyc's own jar, else by `^d`'s handover.
+    fn upgrade(&mut self) {
+        let now = BinaryStamp::installed();
+        let newer = match (&self.runtime.started_from, &now) {
+            (Some(then), Some(now)) => then.replaced_by(now),
+            _ => false,
+        };
+        if !newer {
+            let at = now.map_or_else(String::new, |n| format!(" at {}", n.path.display()));
+            self.state
+                .flash_error(format!("upgrade: no newer spyc is installed{at}"));
+            return;
+        }
+        match (&self.runtime.own_jar, self.state.session_name.clone()) {
+            (Some(_), Some(name)) => {
+                self.runtime.handover = Some(Handover {
+                    name,
+                    in_place: true,
+                });
+                self.state.should_quit = true;
+            }
+            _ => self.detach(),
+        }
     }
 
     /// What runs outside a jar, which a handover would end.
@@ -82,15 +167,11 @@ impl App {
     pub fn hand_over(&mut self, handover: &Handover) -> anyhow::Result<()> {
         use std::os::unix::process::CommandExt;
         let name = &handover.name;
-        // Saved as no running spyc's: this process stays alive as `spyc
-        // attach`, and a session whose spyc runs is restored as a copy.
-        let mut manifest = self.build_manifest();
-        manifest.pid = None;
-        manifest.process_started = None;
-        if let Err(e) = crate::state::sessions::save_session(&manifest) {
-            eprintln!("spyc: {name} wasn't saved ({e:#}); its tabs run on in their jars");
+        if handover.in_place {
+            return self.upgrade_in_place(name);
         }
-        let exe = std::env::current_exe().context("where spyc runs from")?;
+        self.save_released(name);
+        let exe = installed_spyc()?;
         let cwd = std::env::current_dir().context("spyc's directory")?;
         let size = crossterm::terminal::size().map_or((24, 80), |(cols, rows)| (rows, cols));
         let started =
@@ -103,6 +184,37 @@ impl App {
             .args(["attach", name])
             .exec();
         Err(err).with_context(|| format!("become `spyc attach {name}`, which you can run"))
+    }
+
+    /// An upgrade in spyc's own jar: save, leave the jars running, and `exec`
+    /// the new binary, which keeps this pid and so the jar, and restores the
+    /// session. Returns only when the `exec` fails.
+    fn upgrade_in_place(&mut self, name: &str) -> anyhow::Result<()> {
+        use std::os::unix::process::CommandExt;
+        let exe = installed_spyc()?;
+        self.save_released(name);
+        self.release_jars();
+        let err = std::process::Command::new(&exe)
+            .args(std::env::args_os().skip(1))
+            .exec();
+        Err(err).with_context(|| {
+            format!(
+                "run {}; {name}'s tabs run on in their jars: `spyc -r` takes them back",
+                exe.display()
+            )
+        })
+    }
+
+    /// Save the session as no running spyc's: this process goes on as `spyc
+    /// attach` or as the next spyc, and a session whose spyc runs is restored
+    /// as a copy.
+    fn save_released(&mut self, name: &str) {
+        let mut manifest = self.build_manifest();
+        manifest.pid = None;
+        manifest.process_started = None;
+        if let Err(e) = crate::state::sessions::save_session(&manifest) {
+            eprintln!("spyc: {name} wasn't saved ({e:#}); its tabs run on in their jars");
+        }
     }
 
     /// Leave every jar running for the next spyc, its connection ended as a
@@ -123,14 +235,19 @@ impl App {
         self.runtime.capture_spill_dir.take();
     }
 
-    /// spyc in its own jar: a `^d` writes the terminal's reset, then has the
-    /// jar end the client, which the jar does once the reset has reached it.
-    pub(super) fn settle_detach(&mut self, terminal: &mut Tui) {
+    /// `:upgrade`, and in spyc's own jar a `^d`: it writes the terminal's
+    /// reset, then has the jar end the client, which the jar does once the
+    /// reset has reached it. Whether there is anything to draw.
+    pub(super) fn settle_detach(&mut self, terminal: &mut Tui) -> bool {
+        let upgrade = std::mem::take(&mut self.runtime.upgrade_pending);
+        if upgrade {
+            self.upgrade();
+        }
         if !std::mem::take(&mut self.runtime.detach_pending) {
-            return;
+            return upgrade;
         }
         let Some(jar) = &self.runtime.own_jar else {
-            return;
+            return upgrade;
         };
         let reset = crate::terminal::detach_reset(terminal);
         if !jar.detach_client() {
@@ -139,6 +256,7 @@ impl App {
             self.state
                 .flash_error(format!("detach: the terminal's reset: {e:#}"));
         }
+        true
     }
 
     /// spyc in its own jar, at the loop's start: hear the jar, and restore the
@@ -172,6 +290,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_new_file_at_the_path_is_an_install_and_the_same_one_isnt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("spyc");
+        std::fs::write(&path, "one").unwrap();
+        let then = BinaryStamp::of(&path).unwrap();
+        assert!(!then.replaced_by(&BinaryStamp::of(&path).unwrap()));
+        let next = dir.path().join("spyc.new");
+        std::fs::write(&next, "two").unwrap();
+        std::fs::rename(&next, &path).unwrap();
+        assert!(then.replaced_by(&BinaryStamp::of(&path).unwrap()));
+    }
+
+    #[test]
     fn detach_is_refused_while_a_tab_runs_outside_a_jar() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -197,7 +328,8 @@ mod tests {
             assert_eq!(
                 app.take_handover(),
                 Some(Handover {
-                    name: "ANISE".into()
+                    name: "ANISE".into(),
+                    in_place: false,
                 })
             );
         });

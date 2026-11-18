@@ -705,6 +705,144 @@ fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 
+/// `text` without its escape sequences or spaces: what a line says, however
+/// the drawing moved the cursor between its words.
+fn squeezed(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\x1b' => match chars.next() {
+                Some('[') => {
+                    for c in chars.by_ref() {
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    for c in chars.by_ref() {
+                        if c == '\x07' {
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            c if c.is_whitespace() => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// S4: `:upgrade` in spyc's own jar hands the session to a newly installed
+/// spyc in place: the same jar and pid, the terminal still attached, the
+/// session restored and its tab taken back, its program never restarted. With
+/// nothing new installed it says so and does nothing.
+#[test]
+fn upgrade_in_a_session_jar_runs_the_new_spyc_with_the_same_tabs() {
+    let dirs = dirs();
+    // A spyc at a path of the test's own, which an install can replace.
+    let bin = dirs.root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let spyc = bin.join("spyc");
+    std::fs::copy(built, &spyc).unwrap();
+    std::fs::copy(built.with_file_name("spyc-jar"), bin.join("spyc-jar")).unwrap();
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start_from(&spyc, &dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    left.0.push(agent);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+
+    // Into the session's jar.
+    let screens = first.screens();
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.eventually("the session drawn again, from its jar", || {
+        first.screens() > screens && first.since_last_screen().contains(&name)
+    });
+    let jar_spyc = described(&socket, "program_pid").unwrap();
+    left.0.push(jar_spyc.parse().unwrap());
+    first.eventually("the jar's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+
+    // Nothing new installed: nothing happens.
+    first.type_keys(b":upgrade\r");
+    first.eventually("told no newer spyc is installed", || {
+        squeezed(&first.since_last_screen()).contains("nonewerspycisinstalled")
+    });
+
+    // An install: a new file at the path, run once so macOS has scanned it.
+    let next = bin.join("spyc.new");
+    std::fs::copy(built, &next).unwrap();
+    std::fs::rename(&next, &spyc).unwrap();
+    let _ = std::process::Command::new(&spyc).arg("--version").output();
+    let before = first.seen.lock().unwrap().len();
+    let screens = first.screens();
+    first.type_keys(b":upgrade\r");
+    first.eventually("the new spyc draws the session", || {
+        first.screens() > screens && first.since_last_screen().contains(&name)
+    });
+    // The old spyc left the terminal as it found it, then the new one took it.
+    let since = String::from_utf8_lossy(&first.seen.lock().unwrap()[before..]).into_owned();
+    let left_at = since
+        .find("\x1b[?1049l")
+        .expect("the old spyc restored the terminal");
+    assert!(
+        since[left_at..].contains("\x1b[?1049h"),
+        "the new spyc set the terminal up"
+    );
+    assert_eq!(
+        described(&socket, "program_pid").as_deref(),
+        Some(jar_spyc.as_str()),
+        "the upgrade kept the jar's program: the same pid"
+    );
+    first.eventually("the new spyc has the tab back", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+            && first.since_last_screen().contains("ready-mark")
+    });
+    let now: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(now, agent, "the tab's program was started again");
+    assert!(alive(agent));
+
+    first.type_keys(b":q\r");
+    first.eventually("spyc asks for a second `:q`", || {
+        squeezed(&first.since_last_screen()).contains("pressagaintoquit")
+    });
+    first.type_keys(b":q\r");
+    eventually("quitting ends the tab's program", || !alive(agent));
+}
+
 /// S2b: a spyc stopped past its jars' deadline loses their leases; resumed, it
 /// takes its tabs back, the same program, and what it printed meanwhile shows,
 /// since it fit the jar's ring.

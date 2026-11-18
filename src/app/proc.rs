@@ -392,14 +392,14 @@ impl super::App {
         terminal: &mut Tui,
         foreground_exec: &ForegroundExec,
     ) -> bool {
-        self.settle_detach(terminal);
+        let settled = self.settle_detach(terminal);
         let Some(jar) = &self.runtime.own_jar else {
-            return false;
+            return settled;
         };
         let attached = jar.attached();
         let attaches = jar.attaches();
         if !attached || attaches == self.runtime.attaches_seen {
-            return false;
+            return settled;
         }
         self.runtime.attaches_seen = attaches;
         match foreground_exec.with_reader_parked(|| crate::terminal::reattach(terminal)) {
