@@ -24,6 +24,10 @@ use super::place::{SocketState, socket_state, this_users_sessions, tokens_dir};
 /// jar isn't taken for one that kept its client.
 pub(super) const TAKEOVER_WAIT: Duration = Duration::from_secs(20);
 
+/// How long `spyc attach` waits for the session's spyc to come back upgraded
+/// before it attaches anyway: a spyc's start, not a wait on a jar.
+const UPGRADE_WAIT: Duration = Duration::from_secs(20);
+
 /// How often a takeover looks at the jar while it waits.
 const TAKEOVER_POLL: Duration = Duration::from_millis(50);
 
@@ -65,7 +69,7 @@ pub fn run(name: Option<&str>) -> anyhow::Result<()> {
             &mut std::io::stderr(),
         )?
     {
-        crate::mcp::ask_upgrade(program)?;
+        upgrade_first(&chosen.name, program)?;
     }
     crate::terminal::restore_on_signal();
     spyc_jar::attach::run(&chosen.socket, &token)
@@ -104,6 +108,39 @@ fn behind(socket: &Path) -> Option<(u32, PathBuf)> {
 /// to.
 const fn replaced_since(started: u64, installed: u64) -> bool {
     installed > started.saturating_add(1)
+}
+
+/// Have the session's spyc `:upgrade`, and wait for the new one before the
+/// terminal attaches, so no key is typed into a spyc as it restarts. The old
+/// spyc removes its MCP socket before its `exec` and the new one makes it
+/// again: a socket newer than the one there now, taking a connection, is the
+/// new spyc. One that doesn't come is attached to anyway, with a note.
+fn upgrade_first(name: &str, pid: u32) -> anyhow::Result<()> {
+    let socket =
+        crate::mcp::socket_path_for(pid).context("no state directory for spyc's socket")?;
+    let made = |path: &Path| {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::symlink_metadata(path)
+            .ok()
+            .map(|m| (m.ino(), m.ctime(), m.ctime_nsec()))
+    };
+    let before = made(&socket);
+    crate::mcp::ask_upgrade(pid)?;
+    let until = Instant::now() + UPGRADE_WAIT;
+    loop {
+        let now = made(&socket);
+        if now.is_some()
+            && now != before
+            && std::os::unix::net::UnixStream::connect(&socket).is_ok()
+        {
+            return Ok(());
+        }
+        if Instant::now() >= until {
+            eprintln!("spyc: {name}'s spyc hasn't come back upgraded yet; attaching anyway");
+            return Ok(());
+        }
+        std::thread::sleep(TAKEOVER_POLL);
+    }
 }
 
 /// Ask `question` on `output` and read the answer from `input`: yes unless

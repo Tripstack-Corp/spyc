@@ -1780,7 +1780,11 @@ fn tabs_made_together_have_sockets_of_their_own() {
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     const OUTWAITS: [&str; 4] = ["ADOPT_WAIT", "LINK_WAIT", "TAKEOVER_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 15] = [
+    const SHORTER: [(&str, &str); 16] = [
+        (
+            "UPGRADE_WAIT",
+            "a session's spyc restarting, not a wait on a jar: running out attaches anyway",
+        ),
         (
             "START_POLL",
             "how often a handover looks for its session jar, not a wait",
