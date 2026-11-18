@@ -441,9 +441,7 @@ impl TabInfo {
 
     pub fn new(command: impl Into<String>, cwd: impl Into<PathBuf>) -> Self {
         let command = command.into();
-        let label = command
-            .split_whitespace()
-            .next()
+        let label = crate::shell::assignments::program_word(&command)
             .unwrap_or("???")
             .to_string();
         let cwd = cwd.into();

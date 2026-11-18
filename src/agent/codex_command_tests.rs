@@ -200,3 +200,27 @@ proptest::proptest! {
         proptest::prop_assert_eq!(parsed, vec!["codex".to_string(), "--profile".to_string(), value, "fork".to_string(), SESSION.to_string()]);
     }
 }
+
+/// Leading assignments are kept ahead of the program in every rebuilt command.
+#[test]
+fn leading_assignments_survive_a_rebuild() {
+    let command = r#"CODEX_X=1 Y="a b" codex -m o3 resume OLD"#;
+    assert_eq!(
+        baseline(command).unwrap(),
+        r#"CODEX_X=1 Y="a b" codex -m o3"#
+    );
+    assert_eq!(
+        restore(command, Some(SESSION)).unwrap(),
+        format!(r#"CODEX_X=1 Y="a b" codex -m o3 resume {SESSION}"#)
+    );
+    assert_eq!(
+        fork(command, SESSION).unwrap(),
+        format!(r#"CODEX_X=1 Y="a b" codex -m o3 fork {SESSION}"#)
+    );
+    assert_eq!(
+        resume_selector(command),
+        Some(ResumeSelection {
+            selector: Some("OLD".into())
+        })
+    );
+}

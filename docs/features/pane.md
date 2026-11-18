@@ -266,7 +266,8 @@ Multiple tabs, each running an independent pty:
   command expands to the selection as it does for `!`, each path named from
   the tab's working directory, so `tail -f %` follows the highlighted file;
   `%%` is a literal `%`. A command may open with variable assignments, as
-  at a shell prompt: `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude`.
+  at a shell prompt: `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude` is still a
+  Claude tab.
 - **^a K / ^a x** close the active tab — confirms first (`y`/`N`) when the
   tab's child is still running, so a stray keystroke can't kill a live agent
   session; an already-exited tab closes silently
