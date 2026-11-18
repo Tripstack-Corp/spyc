@@ -10,7 +10,7 @@
 //! `app` calls it.
 
 use crate::keymap::Action;
-use crate::pane::{Pane, PaneTabs};
+use crate::pane::PaneTabs;
 use crate::ui::pager::PagerView;
 
 use super::activity_diagnostics::activity_dump_lines;
@@ -45,14 +45,7 @@ impl App {
         );
         let cwd = self.state.cur().listing.dir.clone();
         let wake = self.make_pane_wake();
-        match Pane::spawn(
-            &expanded,
-            rows,
-            cols,
-            &cwd,
-            &self.view.project().context_path,
-            wake,
-        ) {
+        match self.overlay_pane(&expanded, (rows, cols), &cwd, wake) {
             Ok(p) => {
                 // Initial focus on the new overlay so the user drives the
                 // subprocess directly; `^a j` hands focus to the bottom pane.
@@ -660,6 +653,28 @@ pub(super) fn cmd_setenv(app: &mut App, args: &str) -> Vec<Effect> {
     }
     app.state.dispatch_prompt(&super::PromptKind::SetEnv, args);
     Vec::new()
+}
+
+/// `:unsetenv NAME` takes back a variable `:setenv` set in this project.
+pub(super) fn cmd_unsetenv(app: &mut App, args: &str) -> Vec<Effect> {
+    let name = args.trim();
+    if name.is_empty() {
+        app.state.flash_error("unsetenv: expected NAME");
+    } else if app.state.active_project_mut().env.unset(name) {
+        app.state.flash_info(format!("unsetenv {name}"));
+    } else {
+        app.state
+            .flash_error(format!("unsetenv: :setenv set no {name} in this project"));
+    }
+    Vec::new()
+}
+
+impl App {
+    /// Keep spyc's own reads of `:setenv`'s variables
+    /// ([`crate::envset::var`]) on the project in view.
+    pub(super) fn settle_env(&self) {
+        crate::envset::follow(&self.state.active_project().env);
+    }
 }
 
 /// Outcome of parsing an optional numeric task-id `:command` argument.

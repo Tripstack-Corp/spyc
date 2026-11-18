@@ -279,6 +279,23 @@ a background task, with what it printed meanwhile; `:fg` shows it.
 - The quit confirmation (`Q`/`^D`) counts backgrounded running tasks
   alongside pane-tab processes.
 
+## Environment variables
+
+- **`:setenv NAME=VALUE`** sets a variable for every program the project in
+  view starts from then on: tabs, `!` and `$` commands, the editor. Other
+  projects don't get it, and it lasts until spyc exits. The value is
+  everything after the first `=`. A bare `:setenv` prompts for
+  `NAME=VALUE`.
+- **`:setenv -p NAME=VALUE`** also saves it with the project, so `spyc -r`
+  gives it back before the project's tabs start. The session file holds the
+  value as plain text, so keep tokens, keys and passwords out of `-p`. A
+  later plain `:setenv` of the same name stops saving it.
+- **`:unsetenv NAME`** takes back a variable `:setenv` set in this project.
+- A program already running keeps the environment it started with: restart
+  a tab (`^a R`) for it to see a change.
+- spyc's own reads (`$EDITOR`, `$PAGER`, `$SHELL`, `$SPYC_PANE_CMD`) use the
+  project in view's variables.
+
 ## spyc's stderr
 
 Whatever spyc, or a program it starts, writes to stderr while spyc is on
