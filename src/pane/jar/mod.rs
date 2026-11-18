@@ -6,6 +6,7 @@
 //!   sockets whose jars are gone (R32).
 //! - `tokens`: each jar's token, on its standard input and in a `0600` file
 //!   (R26).
+//! - [`attach`]: `spyc attach`, a terminal attached to a session's own jar.
 //! - `link`: the connection, its reader thread and the `portable-pty` traits.
 //! - [`listing`]: `spyc --jars`.
 //! - `offsets`: the jar offset of what the pane has parsed (finding 8).
@@ -30,6 +31,7 @@
 //! this one has no token for it) leaves the tab `[detached]`, and nothing is
 //! started in its place (finding 7).
 
+pub mod attach;
 mod link;
 pub mod listing;
 mod offsets;
@@ -59,6 +61,7 @@ use spyc_jar::client::{Client, Refusal};
 use spyc_jar::proto::{JarSignal, Msg, Role, Snapshot};
 use std::path::PathBuf;
 
+use attach::TAKEOVER_WAIT;
 pub use link::Lost;
 pub use place::Place;
 use session::LINK_WAIT;
@@ -327,6 +330,7 @@ const _: () = {
     assert!(outwaits_a_parked_jar(ADOPT_WAIT));
     assert!(outwaits_a_parked_jar(WRITE_STALL));
     assert!(outwaits_a_parked_jar(LINK_WAIT));
+    assert!(outwaits_a_parked_jar(TAKEOVER_WAIT));
     assert!(PING_EVERY.as_millis() < spyc_jar::limits::OWNER_DEADLINE.as_millis());
 };
 

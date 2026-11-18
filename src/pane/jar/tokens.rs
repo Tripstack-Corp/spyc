@@ -27,7 +27,11 @@ pub(super) fn new() -> anyhow::Result<Vec<u8>> {
 }
 
 fn path(place: &Place, socket: &Path) -> Option<PathBuf> {
-    Some(place.tokens.join(socket.file_stem()?))
+    path_in(&place.tokens, socket)
+}
+
+fn path_in(dir: &Path, socket: &Path) -> Option<PathBuf> {
+    Some(dir.join(socket.file_stem()?))
 }
 
 pub(super) fn save(place: &Place, socket: &Path, token: &[u8]) -> anyhow::Result<()> {
@@ -51,7 +55,12 @@ pub(super) fn save(place: &Place, socket: &Path, token: &[u8]) -> anyhow::Result
 
 /// The token saved for the jar at `socket`.
 pub(super) fn load(place: &Place, socket: &Path) -> Option<Vec<u8>> {
-    spyc_jar::client::read_token_file(&path(place, socket)?).ok()
+    load_in(&place.tokens, socket)
+}
+
+/// [`load`], from the tokens directory `dir`.
+pub(super) fn load_in(dir: &Path, socket: &Path) -> Option<Vec<u8>> {
+    spyc_jar::client::read_token_file(&path_in(dir, socket)?).ok()
 }
 
 pub(super) fn forget(place: &Place, socket: &Path) {

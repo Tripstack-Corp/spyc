@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use spyc_jar::client::Client;
 use spyc_jar::proto::{Msg, Role};
 
-use super::place::{sessions_dir, socket_dirs};
+use super::place::this_users_sessions;
 
 /// How long spyc waits on its own jar at start: past the longest a jar is
 /// silent, parked for an upgrade (asserted in `super`), so a busy jar isn't
@@ -108,11 +108,6 @@ pub fn own_jar_socket(socket: &Path, sessions: &Path) -> Option<PathBuf> {
 /// plain spyc.
 pub fn link_own() -> Option<OwnJar> {
     let env = std::env::var_os("SPYC_JAR_SOCKET")?;
-    let dirs = socket_dirs(
-        std::env::var_os("XDG_RUNTIME_DIR"),
-        std::env::var_os("TMPDIR"),
-        rustix::process::getuid().as_raw(),
-    );
     // SPYC-TRAP(own-jar-by-place): spyc is in its own jar only when the
     // socket is in the sessions directory; every pane's program has a
     // `SPYC_JAR_SOCKET` too, and a spyc run as one must not take that jar for
@@ -120,7 +115,7 @@ pub fn link_own() -> Option<OwnJar> {
     let resolved = |p: &Path| std::fs::canonicalize(p).ok();
     let given = Path::new(&env);
     let socket = resolved(given.parent()?)?.join(given.file_name()?);
-    let socket = own_jar_socket(&socket, &resolved(&sessions_dir(&dirs))?)?;
+    let socket = own_jar_socket(&socket, &resolved(&this_users_sessions())?)?;
     match link(&socket) {
         Ok(jar) => Some(jar),
         Err(e) => {

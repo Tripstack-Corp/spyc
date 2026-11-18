@@ -220,6 +220,20 @@ struct Cli {
     /// every concurrent PR collides on; exits non-zero on any real conflict.
     #[arg(long, num_args = 3, value_names = ["BASE", "CURRENT", "OTHER"], hide = true)]
     merge_driver: Option<Vec<String>>,
+
+    #[command(subcommand)]
+    sub: Option<Sub>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum Sub {
+    /// Attach this terminal to a session that runs in a jar of its own. With
+    /// no name, the one running, or a choice of several. A session attached
+    /// in another terminal moves to this one.
+    Attach {
+        /// The session's name, as spyc shows it (e.g. `CORIANDER_CLOVE`).
+        name: Option<String>,
+    },
 }
 
 /// Names the cwd file when `--cwd-file` isn't given.
@@ -240,6 +254,9 @@ fn cwd_file_target(cli: &Cli, env: Option<&OsStr>, launch_dir: &Path) -> Option<
 /// `--install-agents`, `--remove-agents`), run instead of the TUI. `None` when
 /// none was asked for.
 fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
+    if let Some(Sub::Attach { name }) = &cli.sub {
+        return Some(pane::jar::attach::run(name.as_deref()));
+    }
     if cli.print_config {
         print!("{}", config::DEFAULT_TEMPLATE);
         return Some(Ok(()));
