@@ -69,6 +69,9 @@ pub struct Mode {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub permission_mode: Option<String>,
+    /// Code Mode, from `repl-mode` records: Claude writes a script that calls
+    /// its tools, and runs it as one `REPL` call.
+    pub code_mode: Option<bool>,
 }
 
 /// `TodoWrite`'s list, as counts. The `Task*` tools that also keep a plan are
@@ -78,6 +81,23 @@ pub struct Plan {
     pub pending: u32,
     pub in_progress: u32,
     pub completed: u32,
+}
+
+/// Code Mode's scripts since the read began.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scripts {
+    /// `REPL` calls: each runs one script.
+    pub started: u32,
+    /// The tool calls the scripts made.
+    pub calls: u32,
+    /// Scripts that threw.
+    pub failed: u32,
+    /// Started in the background with no result queued yet. A result on a
+    /// line longer than the tail reads leaves its script counted here.
+    pub running: u32,
+    /// How long the latest script to finish ran, in milliseconds.
+    pub latest_ms: Option<Sample<u64>>,
+    pub longest_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,6 +143,7 @@ pub struct Snapshot {
     /// `Agent` (or older `Task`) calls: subagents started, not parallel tools.
     pub subagent_calls: u32,
     pub background_calls: u32,
+    pub scripts: Scripts,
     /// The `Agent` calls whose result was an error, newest last: the
     /// subagents they started failed.
     pub failed_agent_calls: Vec<String>,
