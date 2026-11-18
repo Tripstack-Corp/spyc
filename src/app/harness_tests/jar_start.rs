@@ -229,17 +229,20 @@ fn keys_typed_into_a_starting_tab_are_dropped() {
 fn a_tab_whose_jar_never_answers_fails_having_run_nothing_and_starts_again() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
-        let tried = dir.path().join("tried");
-        let once_silent = script(
+        // Silent until the test makes `answers`. A mark the first start wrote
+        // itself would race the hold, which kills a start slow to write it,
+        // and leave the restart silent too.
+        let answers = dir.path().join("answers");
+        let silent_until = script(
             dir.path(),
-            "silent-once",
+            "silent-until",
             &format!(
-                "if [ -e '{tried}' ]; then exec '{jar}' \"$@\"; fi\n: > '{tried}'\nexec sleep 600\n",
-                tried = tried.display(),
+                "if [ -e '{answers}' ]; then exec '{jar}' \"$@\"; fi\nexec sleep 600\n",
+                answers = answers.display(),
                 jar = built_jar().display(),
             ),
         );
-        let mut app = jar_app(dir.path(), once_silent, Duration::from_secs(2));
+        let mut app = jar_app(dir.path(), silent_until, Duration::from_secs(2));
         let ran = dir.path().join("ran");
         assert!(app.open_pane_tab_in(&marking(&ran), dir.path()));
         land(&mut app);
@@ -257,6 +260,7 @@ fn a_tab_whose_jar_never_answers_fails_having_run_nothing_and_starts_again() {
         // The jar that answers gets a production hold: under load, starting
         // it takes longer than the two seconds that fail the first one fast.
         app.runtime.jar_place.as_mut().unwrap().hold = crate::pane::jar::place::HOLD;
+        std::fs::write(&answers, "").unwrap();
         app.restart_active_tab_now();
         land(&mut app);
         // Never a word the failure's own text holds ("^a R starts it again").
