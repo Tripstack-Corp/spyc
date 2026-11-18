@@ -658,6 +658,10 @@ pub fn force_full_repaint(terminal: &mut Tui) -> Result<()> {
 }
 
 #[cfg(test)]
+#[path = "terminal_probe_tests.rs"]
+mod probe_tests;
+
+#[cfg(test)]
 mod mouse_reporting_tests {
     use super::{DisableWheelReporting, EnableWheelReporting};
     use crossterm::Command;
