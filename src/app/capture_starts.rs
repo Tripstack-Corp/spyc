@@ -41,12 +41,13 @@ impl App {
         let jars = self.state.active_project().config.pane.jars
             && jar::honoured()
             && !self.runtime.jarless.chosen;
+        let env = self.state.active_project().env.pairs();
         if !jars {
-            return Ok((spawn_capture(cmd, dir, None)?, None));
+            return Ok((spawn_capture(cmd, dir, None, &env)?, None));
         }
         let (cmd, dir) = (cmd.to_string(), dir.to_path_buf());
         let place = self.runtime.jar_place.clone();
-        let (host, id) = self.start_on_worker(move || start_in_jar(&cmd, &dir, place))?;
+        let (host, id) = self.start_on_worker(move || start_in_jar(&cmd, &dir, place, &env))?;
         Ok((host, Some(id)))
     }
 
@@ -152,14 +153,19 @@ fn capture_size() -> (u16, u16) {
 
 /// Start `cmd`'s jar in `place` (this user's when `None`), keeping its
 /// output until spyc reads it.
-fn start_in_jar(cmd: &str, dir: &Path, place: Option<jar::Place>) -> anyhow::Result<PtyHost> {
+fn start_in_jar(
+    cmd: &str,
+    dir: &Path,
+    place: Option<jar::Place>,
+    env: &[(String, String)],
+) -> anyhow::Result<PtyHost> {
     // SPYC-TRAP(jar-off-the-loop): a capture's jar is asked for only on this
     // worker.
     let name = uuid::Uuid::now_v7().to_string();
     let mut spec = jar::spec_for(place, &name, None)?
         .ok_or_else(|| anyhow::anyhow!("this build doesn't run programs in jars"))?;
     spec.exit_linger = Some(spyc_jar::cli::UNTIL_READ);
-    spawn_capture(cmd, dir, Some(spec))
+    spawn_capture(cmd, dir, Some(spec), env)
 }
 
 /// Take back the jar at `socket` in `place` (this user's when `None`):
@@ -170,12 +176,17 @@ fn retake_jar(socket: std::path::PathBuf, place: Option<jar::Place>) -> anyhow::
     let spec = jar::spec_for(place, &name, None)?
         .ok_or_else(|| anyhow::anyhow!("this build doesn't run programs in jars"))?
         .retaking(socket);
-    spawn_capture("", Path::new("/"), Some(spec))
+    spawn_capture("", Path::new("/"), Some(spec), &[])
 }
 
 /// Spawn a capture's PTY, in `jar` when one is given. TERM=dumb and
 /// cat-pagers so sub-tools don't launch a nested TUI or pager against it.
-fn spawn_capture(cmd: &str, cwd: &Path, jar: Option<jar::Spec>) -> anyhow::Result<PtyHost> {
+fn spawn_capture(
+    cmd: &str,
+    cwd: &Path,
+    jar: Option<jar::Spec>,
+    project_env: &[(String, String)],
+) -> anyhow::Result<PtyHost> {
     let (rows, cols) = capture_size();
     // TERM=dumb so TUI programs refuse to run as a TUI inside our
     // capture (the pager only renders SGR colours and CRLF, not
@@ -199,6 +210,7 @@ fn spawn_capture(cmd: &str, cwd: &Path, jar: Option<jar::Spec>) -> anyhow::Resul
         cols,
         cwd,
         env,
+        project_env,
         term: "dumb",
         // No SIGWINCH nudge for captures — they aren't interactive
         // shells with rc-file prompts to redraw.

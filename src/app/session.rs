@@ -331,6 +331,7 @@ impl App {
             tabs,
             active_tab,
             agent_hud: project.pane.agent_hud.choice,
+            env: project.env.saved(),
         }
     }
 
@@ -534,6 +535,7 @@ impl App {
     /// The active project's part of [`Self::session_fingerprint`].
     fn hash_project(&self, h: &mut std::collections::hash_map::DefaultHasher) {
         use std::hash::Hash;
+        self.state.active_project().env.saved().hash(h);
         if let Some(pt) = self.runtime.project().pane_tabs.as_ref() {
             pt.active_index().hash(h);
             for t in pt.tabs() {
@@ -588,6 +590,7 @@ impl App {
             .is_some_and(|pt| !pt.tabs().is_empty())
             || !self.state.active_project().deferred_tabs.is_empty()
             || self.state.active_project().vsplit.is_some()
+            || self.state.active_project().env.has_saved()
     }
 
     /// P3-2 crash-sufficient autosave (PRE-recv settle). Debounce: on a

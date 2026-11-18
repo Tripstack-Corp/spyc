@@ -118,6 +118,7 @@ mod tests {
             repaint_hold: Duration::from_secs(2),
         };
         let host = PtyHost::spawn(PtySpec {
+            project_env: &[],
             command: "exec cat",
             rows: 24,
             cols: 80,

@@ -959,12 +959,8 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::BrokenPipe, "got {err:?}");
     }
 
-    /// `src/envset.rs` has no thread-local test seam (its overrides are a
-    /// process-global `RwLock`, by design — they're meant to layer like the
-    /// real environment). All three precedence cases live in ONE test and run
-    /// in a fixed order, so this is the only place in the suite that ever
-    /// touches `SPYC_CLIPBOARD` and there's no cross-test ordering hazard from
-    /// the lack of an "unset" primitive.
+    /// All three precedence cases live in ONE test and run in a fixed order,
+    /// on the one test thread whose `envset` overlay they set.
     #[test]
     fn resolve_override_prefers_env_over_config_over_none() {
         assert_eq!(resolve_override(None), None, "nothing set");
