@@ -310,6 +310,25 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
+/// Answer spyc's "press again to quit" with `:q` until `quit` says it has
+/// gone. spyc quits on a second `:q` within two seconds of the first, and on
+/// a runner too slow to land it in time spyc asks again, so this answers
+/// again, as the user would.
+fn press_q_until_quit(what: &str, mut press: impl FnMut(), mut quit: impl FnMut() -> bool) {
+    let until = Instant::now() + WAIT;
+    loop {
+        press();
+        let tap = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < tap {
+            if quit() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(Instant::now() < until, "never: {what}");
+    }
+}
+
 /// What came before `needle`'s first appearance in `text`.
 fn before<'a>(text: &'a str, needle: &str) -> &'a str {
     text.find(needle).map_or(text, |at| &text[..at])
@@ -459,8 +478,22 @@ impl Attached {
     fn quit_spyc(&mut self) {
         self.type_keys(b":q\r");
         self.wait_for("spyc asks for a second `:q`", "press again to quit");
-        self.type_keys(b":q\r");
-        assert!(self.exit().success(), "{:?}", self.text());
+        let keys = Arc::clone(&self.keys);
+        let child = &mut self.child;
+        let mut status = None;
+        press_q_until_quit(
+            "spyc quits when told to",
+            || {
+                let mut w = keys.lock().unwrap();
+                // A press racing the exit meets a closed pty: nothing to tell.
+                let _ = w.write_all(b":q\r").and_then(|()| w.flush());
+            },
+            || {
+                status = child.try_wait().unwrap();
+                status.is_some()
+            },
+        );
+        assert!(status.is_some_and(|s| s.success()), "{:?}", self.text());
     }
 }
 
@@ -607,8 +640,11 @@ fn each_terminal_that_attaches_to_spycs_own_jar_is_set_up_probed_and_drawn_on() 
     // Keys reach spyc after both probes: none were taken by them.
     second.type_keys(b":q\r");
     second.wait_for("spyc asks for a second `:q`", "press again to quit");
-    second.type_keys(b":q\r");
-    eventually("spyc quits when told to", || *second.exited.lock().unwrap());
+    press_q_until_quit(
+        "spyc quits when told to",
+        || second.type_keys(b":q\r"),
+        || *second.exited.lock().unwrap(),
+    );
 }
 
 #[test]
