@@ -54,6 +54,10 @@ impl Reducer {
         result
             .tool_counts
             .sort_by(|a, b| b.calls.cmp(&a.calls).then_with(|| a.name.cmp(&b.name)));
+        result
+            .scripts
+            .tools
+            .sort_by(|a, b| b.calls.cmp(&a.calls).then_with(|| a.name.cmp(&b.name)));
         result.mode = (self.mode != Mode::default())
             .then(|| self.mode_at.or(self.clock))
             .flatten()
@@ -176,6 +180,8 @@ impl Reducer {
             scripts.failed = scripts.failed.saturating_add(1);
         } else if call.in_script {
             scripts.calls = scripts.calls.saturating_add(1);
+            let count = count_tool(&mut scripts.tools, call.name.as_deref());
+            count.calls = count.calls.saturating_add(1);
         } else if call.name.as_deref() == Some("REPL") {
             scripts.started = scripts.started.saturating_add(1);
         }
@@ -190,6 +196,7 @@ impl Reducer {
                 status: ToolStatus::Started,
                 at,
                 background: call.background,
+                in_script: call.in_script && !threw,
             },
         );
         if self.tools.len() > MAX_TOOLS {
@@ -228,6 +235,10 @@ impl Reducer {
                 calls.push(id.to_owned());
                 let over = calls.len().saturating_sub(MAX_FAILED_AGENT_CALLS);
                 calls.drain(..over);
+            }
+            if tool.in_script {
+                let count = count_tool(&mut self.snapshot.scripts.tools, name.as_deref());
+                count.failed = count.failed.saturating_add(1);
             }
             let count = self.count(name.as_deref());
             count.failed = count.failed.saturating_add(1);

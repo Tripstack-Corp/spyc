@@ -219,7 +219,16 @@ fn tools(s: &Snapshot, tail_only: bool, p: Palette) -> Row {
         running.push("REPL".to_owned());
     }
     let label = if tail_only { "recent" } else { "tools" };
-    tools_row(label, &tallies, Some(&running), p)
+    let mut row = tools_row(label, &tallies, Some(&running), p);
+    // After the calls cell: how many of them the scripts made.
+    if s.scripts.calls > 0 {
+        let in_scripts = Field(vec![
+            p.strong(&s.scripts.calls.to_string()),
+            p.label(" in scripts"),
+        ]);
+        row.cells.insert(2.min(row.cells.len()), in_scripts);
+    }
+    row
 }
 
 /// The account the tab's Claude Code sends its requests with, after the
@@ -379,6 +388,7 @@ mod tests {
                 status: ToolStatus::Started,
                 at: at(1),
                 background: false,
+                in_script: false,
             }],
             subagent_calls: 1,
             background_calls: 5,
@@ -463,11 +473,16 @@ mod tests {
         assert!(shown[3].contains("scripts 41 ✗2 ◐1"), "{shown:?}");
         assert!(shown[3].contains("calls/script 3.0"), "{shown:?}");
         assert!(shown[2].contains("◐ REPL"), "{shown:?}");
+        assert!(
+            shown[2].starts_with("│ tools       271 calls      122 in scripts   ✗ 4 failed"),
+            "{shown:?}"
+        );
 
         snapshot.scripts = Scripts::default();
         let none_yet = rows(&view(Some(&snapshot), true), 200);
         assert!(none_yet[3].contains("scripts ≥0"), "{none_yet:?}");
         assert!(!none_yet[3].contains("calls/script"), "{none_yet:?}");
+        assert!(!none_yet[2].contains("in scripts"), "{none_yet:?}");
         assert!(none_yet[2].contains("◌ none"), "{none_yet:?}");
 
         snapshot.mode.as_mut().unwrap().value.code_mode = Some(false);
@@ -587,6 +602,7 @@ mod tests {
             status: ToolStatus::Started,
             at: at(2),
             background: false,
+            in_script: false,
         });
         let line = lines(
             &view(Some(&snapshot), false),
