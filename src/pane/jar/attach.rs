@@ -5,6 +5,11 @@
 //! `owner_pid` its jar describes, is sent SIGTERM, and a `spyc attach`
 //! restores its terminal on the way out, as spyc does when killed. A jar
 //! accepts only its user's processes, so that pid is the user's own.
+//!
+//! A session whose spyc runs from the path this one does, and started before
+//! the file there was replaced, runs an install it hasn't taken: `spyc
+//! attach` offers to have it `:upgrade` first, by a notification on its MCP
+//! socket.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -49,8 +54,70 @@ pub fn run(name: Option<&str>) -> anyhow::Result<()> {
     if let Some(pid) = chosen.client {
         take_over(&chosen, pid)?;
     }
+    if let Some((program, at)) = behind(&chosen.socket)
+        && agrees(
+            &format!(
+                "spyc: {} runs a spyc older than the one installed at {}. Upgrade it? [Y/n] ",
+                chosen.name,
+                at.display()
+            ),
+            &mut std::io::stdin().lock(),
+            &mut std::io::stderr(),
+        )?
+    {
+        crate::mcp::ask_upgrade(program)?;
+    }
     crate::terminal::restore_on_signal();
     spyc_jar::attach::run(&chosen.socket, &token)
+}
+
+/// The pid of the session's spyc and the path it runs from, when the file there
+/// was replaced after it started: an install it hasn't taken. Only for one
+/// that runs from where this spyc does.
+fn behind(socket: &Path) -> Option<(u32, PathBuf)> {
+    let fields = spyc_jar::client::describe(socket).ok()?;
+    let field = |key: &str| {
+        fields
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    let pid: u32 = field("program_pid")?.parse().ok()?;
+    let here = crate::paths::installed_spyc().ok()?;
+    if Path::new(field("program")?) != here {
+        return None;
+    }
+    let started = crate::proc_group::started_epoch_secs(pid)?;
+    // The later of its modification and inode change times: a copy can carry
+    // the source's modification time, and a new file's inode changes when it
+    // is made.
+    let installed = {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(&here).ok()?;
+        u64::try_from(meta.mtime().max(meta.ctime())).ok()?
+    };
+    replaced_since(started, installed).then_some((pid, here))
+}
+
+/// Whether a file modified at `installed` came after a process started at
+/// `started`, both in epoch seconds, past the second a start time is rounded
+/// to.
+const fn replaced_since(started: u64, installed: u64) -> bool {
+    installed > started.saturating_add(1)
+}
+
+/// Ask `question` on `output` and read the answer from `input`: yes unless
+/// it starts with `n`.
+fn agrees(
+    question: &str,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> anyhow::Result<bool> {
+    write!(output, "{question}")?;
+    output.flush()?;
+    let mut line = String::new();
+    input.read_line(&mut line)?;
+    Ok(!line.trim_start().to_ascii_lowercase().starts_with('n'))
 }
 
 /// The sessions whose own jars run in `sessions`, by name.
@@ -234,6 +301,23 @@ mod tests {
         let picked = ask(&running, &mut &b"ANISE\n"[..], &mut Vec::new()).unwrap();
         assert_eq!(picked.name, "ANISE");
         assert!(ask(&running, &mut &b"3\n"[..], &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn a_file_replaced_after_the_start_is_an_install_not_taken() {
+        assert!(replaced_since(1_000, 1_100));
+        assert!(!replaced_since(1_000, 900));
+        assert!(!replaced_since(1_000, 1_001), "within the start's rounding");
+    }
+
+    #[test]
+    fn anything_but_no_agrees() {
+        let says = |answer: &str| agrees("?", &mut answer.as_bytes(), &mut Vec::new()).unwrap();
+        assert!(says("\n"));
+        assert!(says("y\n"));
+        assert!(says("Yes\n"));
+        assert!(!says("n\n"));
+        assert!(!says("No\n"));
     }
 
     #[test]

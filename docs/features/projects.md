@@ -255,7 +255,8 @@ to detach; spyc says which one doesn't.
 or a package update), and says so when there's none. In a session that runs in its own jar,
 spyc restarts in place: your terminal stays attached, your tabs come back with their programs
 untouched, and what `spyc -r` doesn't keep starts afresh. In a plain spyc, `:upgrade` is a
-`^d` whose jar runs the new spyc.
+`^d` whose jar runs the new spyc. `spyc attach` notices a session whose spyc is older than
+the one installed where it runs from, and asks whether to upgrade it before you attach.
 
 `Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `^D` detaches too: most
 terminals send it as `^d`. While a session runs in its own jar, its name is that jar's
