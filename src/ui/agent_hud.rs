@@ -917,6 +917,7 @@ mod tests {
                 status: claude::ToolStatus::Started,
                 at,
                 background: false,
+                in_script: false,
             }],
             subagent_calls: 7,
             background_calls: 5,
