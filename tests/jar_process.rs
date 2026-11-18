@@ -1500,7 +1500,6 @@ fn the_program_hears_attaches_and_detaches_its_owner() {
 /// terminal's reset before it detaches, so a reset cut short would leave the
 /// terminal in spyc's modes.
 #[test]
-#[ignore = "red until a program's detach waits for its last words to reach the owner"]
 fn a_programs_last_words_reach_a_slow_owner_before_it_is_detached() {
     let program = [env!("CARGO_BIN_EXE_spyc-jar"), "program-events"];
     let mut jar = Jar::start(&["--window", "16"], &program);

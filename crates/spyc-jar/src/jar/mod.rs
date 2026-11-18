@@ -118,6 +118,22 @@ pub(crate) struct Shared {
     pub(crate) park_cv: Condvar,
     pub(crate) pty_done: AtomicBool,
     pub(crate) waiter_done: AtomicBool,
+    /// The program's detaches, answered by the PTY pump. Taken after
+    /// `state` when both are held.
+    pub(crate) drain: Mutex<Drain>,
+}
+
+/// A program's detach waits for what it printed before asking
+/// (`conn::detach_owner`): the PTY pump answers once it finds the PTY empty
+/// after the ask, between reads, with everything read already in the log.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Drain {
+    /// How many detaches the program has asked for.
+    pub(crate) asked: u64,
+    /// The last of them the pump has answered.
+    pub(crate) answered: u64,
+    /// The log's head when it answered.
+    pub(crate) head: u64,
 }
 
 impl Shared {
@@ -145,6 +161,10 @@ impl Shared {
 
     pub(crate) fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(crate) fn drain(&self) -> MutexGuard<'_, Drain> {
+        self.drain.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub(crate) fn conns(&self) -> MutexGuard<'_, HashMap<u64, Arc<Conn>>> {
@@ -325,6 +345,7 @@ pub(crate) fn prepare(
         park_cv: Condvar::new(),
         pty_done: AtomicBool::new(pty_eof),
         waiter_done: AtomicBool::new(exited),
+        drain: Mutex::new(Drain::default()),
     });
     let conns = conns
         .into_iter()

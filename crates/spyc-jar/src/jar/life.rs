@@ -33,6 +33,18 @@ pub(super) fn await_first_owner(shared: &Shared, wait: Duration) {
     }
 }
 
+/// Answer the program's detach (`super::Drain`) once the PTY is empty: here,
+/// between reads, everything the pump has read is in the log.
+fn answer_drain(shared: &Shared, st: &State, reader: &File) {
+    let mut drain = shared.drain();
+    if drain.answered < drain.asked && !readable(reader, Duration::ZERO) {
+        drain.answered = drain.asked;
+        drain.head = st.log.head;
+        drop(drain);
+        shared.cv.notify_all();
+    }
+}
+
 /// Copy the program's output into the log, pausing while a live owner is a
 /// window behind.
 pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
@@ -45,6 +57,7 @@ pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
             continue;
         }
         let st = shared.lock();
+        answer_drain(shared, &st, &reader);
         let unread = st.log.head - st.acked;
         let full = if st.owner.is_some() {
             unread >= shared.cfg.window
