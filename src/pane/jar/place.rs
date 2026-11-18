@@ -139,6 +139,13 @@ pub(super) fn socket_dirs(
     vec![base, jars]
 }
 
+/// The directory sessions' own jars are in (`super::session`), beside the
+/// pane jars': `dirs` as [`socket_dirs`] gives them.
+pub(super) fn sessions_dir(dirs: &[PathBuf]) -> PathBuf {
+    dirs.first()
+        .map_or_else(|| PathBuf::from("/"), |base| base.join("sessions"))
+}
+
 /// `dir` is a directory, not a link, owned by this user and closed to
 /// everyone else.
 pub(super) fn private_dir(dir: &Path) -> anyhow::Result<()> {

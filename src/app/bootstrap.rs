@@ -21,6 +21,15 @@ impl App {
         self.runtime.picker = picker;
     }
 
+    /// spyc runs in its own jar (S4): the session takes the jar's name, which
+    /// is where `spyc attach` finds it.
+    pub fn set_own_jar(&mut self, jar: Option<crate::pane::jar::session::OwnJar>) {
+        if let Some(jar) = &jar {
+            self.state.session_name = Some(jar.name().to_string());
+        }
+        self.runtime.own_jar = jar;
+    }
+
     pub fn new(resume: bool, cli_color: crate::config::ColorMode) -> Self {
         let (cwd, start_error) = if let Ok(d) = std::env::current_dir() {
             (d, None)

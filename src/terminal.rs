@@ -381,7 +381,9 @@ pub fn detect_image_picker() -> Option<ratatui_image::picker::Picker> {
     Some(picker)
 }
 
-pub fn setup_terminal() -> Result<Tui> {
+/// Take the terminal for the TUI. With `probe` false, nothing is asked of it:
+/// spyc in its own jar with no terminal attached, where nothing would answer.
+pub fn setup_terminal(probe: bool) -> Result<Tui> {
     // Stash what the signal teardown needs BEFORE the terminal is touched:
     // the pre-raw termios, and the restore string (built here because the
     // handler may not build it — see `signal_terminate`).
@@ -426,14 +428,7 @@ pub fn setup_terminal() -> Result<Tui> {
     // The query result is cached in `KEYBOARD_ENHANCEMENT_SUPPORTED` so
     // `resume_tui` can re-push it after a `$EDITOR`/`;`/`$` handoff without
     // repeating the round-trip query on every return.
-    let keyboard_enhancement_supported = supports_keyboard_enhancement().unwrap_or(false);
-    KEYBOARD_ENHANCEMENT_SUPPORTED.store(keyboard_enhancement_supported, Ordering::Relaxed);
-    if keyboard_enhancement_supported {
-        let _ = execute!(
-            io::stdout(),
-            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-        );
-    }
+    push_keyboard_enhancement(probe);
     // Save the current window title so we can restore it on quit.
     // Best-effort: terminals that don't implement xterm CSI 22;0t just
     // ignore it.
@@ -441,6 +436,47 @@ pub fn setup_terminal() -> Result<Tui> {
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
+}
+
+/// Ask the terminal whether it takes the kitty keyboard flag, and push the
+/// flag when it does. With `probe` false, take it that it doesn't.
+fn push_keyboard_enhancement(probe: bool) {
+    let supported = probe && supports_keyboard_enhancement().unwrap_or(false);
+    KEYBOARD_ENHANCEMENT_SUPPORTED.store(supported, Ordering::Relaxed);
+    if supported {
+        let _ = execute!(
+            io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
+}
+
+/// A terminal attached to spyc's own jar (`pane::jar::session`). It may be
+/// another emulator than the last, at another size, with another keyboard and
+/// image protocol: set every mode again, probe it and repaint in full, as
+/// `setup_terminal` did for the first. Mouse reporting and key event types
+/// come back through their reconciles. The input reader must be parked, since
+/// both probes read the terminal's replies. The image protocol it found is
+/// returned, `None` when its probe couldn't be written.
+pub fn reattach(terminal: &mut Tui) -> Result<Option<ratatui_image::picker::Picker>> {
+    MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
+    KEY_EVENT_TYPES_ON.store(false, Ordering::Relaxed);
+    enable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        MoveTo(0, 0),
+        EnableBracketedPaste,
+        EnableAlternateScroll,
+        HideMousePointer
+    )?;
+    let picker = detect_image_picker();
+    push_keyboard_enhancement(true);
+    let _ = term_title::push();
+    terminal.hide_cursor()?;
+    force_full_repaint(terminal)?;
+    Ok(picker)
 }
 
 pub fn restore_terminal(terminal: &mut Tui) -> Result<()> {

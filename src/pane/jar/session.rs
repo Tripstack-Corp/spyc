@@ -1,0 +1,194 @@
+//! A session's own jar (S4, decision D): the jar spyc itself runs in, so a
+//! spyc outlives the terminal it was started from. It is a jar like a pane's,
+//! kept apart by where it lives: `<runtime>/spyc/sessions/<SESSION_NAME>.sock`,
+//! beside the pane jars' directory, named by the session it holds. Its name is
+//! its address, so a spyc in its own jar takes its session's name from it.
+//!
+//! spyc is in its own jar when `SPYC_JAR_SOCKET` names a socket in that
+//! directory and the jar takes spyc as its program, which the jar knows by
+//! spyc's pid. Every pane's program sees `SPYC_JAR_SOCKET` too, naming its own
+//! jar: a spyc that is a pane's program sees a pane jar's socket and runs as a
+//! plain spyc, and the pid check refuses a spyc started from a shell that
+//! inherited a session jar's.
+//!
+//! The jar tells its program when a terminal attaches and when it leaves.
+//! [`OwnJar::watch`] hears that on a thread of its own and wakes the loop,
+//! which sets the terminal up again on each attach (`app::proc`).
+
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use spyc_jar::client::Client;
+use spyc_jar::proto::{Msg, Role};
+
+use super::place::{sessions_dir, socket_dirs};
+
+/// How long spyc waits on its own jar at start: past the longest a jar is
+/// silent, parked for an upgrade (asserted in `super`), so a busy jar isn't
+/// taken for none.
+pub(super) const LINK_WAIT: Duration = Duration::from_secs(20);
+
+/// spyc's link to its own jar, as its program.
+pub struct OwnJar {
+    name: String,
+    /// Until [`Self::watch`] takes it.
+    client: Option<Client>,
+    attached: Arc<AtomicBool>,
+    attaches: Arc<AtomicU64>,
+}
+
+impl OwnJar {
+    /// The session's name: its jar's socket's.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Whether a terminal is attached.
+    pub fn attached(&self) -> bool {
+        self.attached.load(Ordering::SeqCst)
+    }
+
+    /// How many terminals have attached since spyc linked, the one attached
+    /// then not counted. Read after [`Self::attached`]: an attach is counted
+    /// before it is marked attached, so a terminal seen attached is counted.
+    pub fn attaches(&self) -> u64 {
+        self.attaches.load(Ordering::SeqCst)
+    }
+
+    /// Hear the jar's attaches and detaches on a thread of its own, calling
+    /// `wake` after each.
+    pub fn watch(&mut self, wake: impl Fn() + Send + 'static) {
+        let Some(client) = self.client.take() else {
+            return;
+        };
+        let (attached, attaches) = (Arc::clone(&self.attached), Arc::clone(&self.attaches));
+        // The jar holds no deadline over its program's connection, so the
+        // thread only waits.
+        let (mut rx, tx) = client.split();
+        let spawned = std::thread::Builder::new()
+            .name("own-jar".into())
+            .spawn(move || {
+                let _keep_open = tx;
+                loop {
+                    match rx.recv(Duration::from_secs(3600)) {
+                        Ok(Some(Msg::Attached)) => {
+                            attaches.fetch_add(1, Ordering::SeqCst);
+                            attached.store(true, Ordering::SeqCst);
+                            wake();
+                        }
+                        Ok(Some(Msg::Detached)) => {
+                            attached.store(false, Ordering::SeqCst);
+                            wake();
+                        }
+                        Ok(_) => {}
+                        Err(_) => return,
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            crate::spyc_debug!("own jar: no watcher: {e:#}");
+        }
+    }
+}
+
+/// The socket of spyc's own jar: `socket`, its `SPYC_JAR_SOCKET`, when the
+/// directory it is in is `sessions`. Both are compared as given, so the
+/// caller resolves them alike.
+pub fn own_jar_socket(socket: &Path, sessions: &Path) -> Option<PathBuf> {
+    let in_sessions = socket.parent() == Some(sessions);
+    let named = socket.extension() == Some(OsStr::new("sock"))
+        && socket.file_stem().is_some_and(|s| !s.is_empty());
+    (in_sessions && named).then(|| socket.to_path_buf())
+}
+
+/// Link to spyc's own jar when it runs in one, as its program; `None` for a
+/// plain spyc.
+pub fn link_own() -> Option<OwnJar> {
+    let env = std::env::var_os("SPYC_JAR_SOCKET")?;
+    let dirs = socket_dirs(
+        std::env::var_os("XDG_RUNTIME_DIR"),
+        std::env::var_os("TMPDIR"),
+        rustix::process::getuid().as_raw(),
+    );
+    // SPYC-TRAP(own-jar-by-place): spyc is in its own jar only when the
+    // socket is in the sessions directory; every pane's program has a
+    // `SPYC_JAR_SOCKET` too, and a spyc run as one must not take that jar for
+    // its own.
+    let resolved = |p: &Path| std::fs::canonicalize(p).ok();
+    let given = Path::new(&env);
+    let socket = resolved(given.parent()?)?.join(given.file_name()?);
+    let socket = own_jar_socket(&socket, &resolved(&sessions_dir(&dirs))?)?;
+    match link(&socket) {
+        Ok(jar) => Some(jar),
+        Err(e) => {
+            crate::spyc_debug!("own jar: {} won't take this spyc: {e:#}", socket.display());
+            None
+        }
+    }
+}
+
+/// Connect to the jar at `socket` as its program, and ask whether a terminal
+/// is attached: the jar says `attached` at once to a program that connects
+/// while it has an owner, and its description, asked after, follows that.
+fn link(socket: &Path) -> anyhow::Result<OwnJar> {
+    let (mut client, _) = Client::connect(socket, Role::Program, LINK_WAIT, b"")?;
+    client.send(&Msg::Describe)?;
+    let until = Instant::now() + LINK_WAIT;
+    let mut attached = false;
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        anyhow::ensure!(!left.is_zero(), "the jar didn't describe itself");
+        match client.recv(left)? {
+            Some(Msg::Attached) => attached = true,
+            Some(Msg::Detached) => attached = false,
+            Some(Msg::Description { fields }) => {
+                attached |= fields.iter().any(|(k, v)| k == "owner" && v == "connected");
+                break;
+            }
+            _ => {}
+        }
+    }
+    let name = socket
+        .file_stem()
+        .map_or_default(|s| s.to_string_lossy().into_owned());
+    Ok(OwnJar {
+        name,
+        client: Some(client),
+        attached: Arc::new(AtomicBool::new(attached)),
+        attaches: Arc::new(AtomicU64::new(0)),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_socket_in_the_sessions_directory_is_spycs_own_jar() {
+        let sessions = Path::new("/run/u/spyc/sessions");
+        let own = sessions.join("CORIANDER_CLOVE.sock");
+        assert_eq!(own_jar_socket(&own, sessions), Some(own.clone()));
+    }
+
+    #[test]
+    fn a_panes_jar_is_never_spycs_own() {
+        let sessions = Path::new("/run/u/spyc/sessions");
+        for socket in [
+            "/run/u/spyc/jars/0a1b2c3d4e5f6a7b.sock",
+            "/run/u/spyc/sessions/deeper/X.sock",
+            "/run/u/spyc/X.sock",
+            "/run/u/spyc/sessions/X.lock",
+            "/run/u/spyc/sessions/.sock",
+            "/elsewhere/sessions/X.sock",
+        ] {
+            assert_eq!(
+                own_jar_socket(Path::new(socket), sessions),
+                None,
+                "{socket}"
+            );
+        }
+    }
+}

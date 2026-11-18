@@ -959,6 +959,20 @@ zero timeout, and macOS refuses a new one on a socket its peer has closed, so
 the longer timeout is best effort: the rest of the frame is already buffered
 or never coming.
 
+## spyc knows its own jar by where it is
+
+<!-- SPYC-TRAP: own-jar-by-place -->
+spyc can run as the program of its session's own jar, which lets it outlive
+the terminal it started in (`src/pane/jar/session.rs`). That jar is a jar
+like a pane's, and `SPYC_JAR_SOCKET` names it, but every pane's program has a
+`SPYC_JAR_SOCKET` too, naming its own jar. A pane tab whose command is `spyc`
+makes that spyc the pane jar's program, so the jar's pid check alone would
+accept it. spyc therefore counts a jar as its own only when the socket is in
+the sessions directory, `<runtime>/spyc/sessions/<SESSION_NAME>.sock`, and the
+jar accepts it as its program. Getting this wrong fails silently: a spyc in a
+pane would set the pane's terminal up again whenever its spyc attached to that
+pane, and take the pane jar's name for its session's.
+
 ## A pane in a jar
 
 <!-- SPYC-TRAP: jar-or-nothing -->

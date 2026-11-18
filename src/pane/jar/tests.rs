@@ -1779,7 +1779,7 @@ fn tabs_made_together_have_sockets_of_their_own() {
 /// be shorter. A new one fails this until it is one or the other.
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
-    const OUTWAITS: [&str; 2] = ["ADOPT_WAIT", "WRITE_STALL"];
+    const OUTWAITS: [&str; 3] = ["ADOPT_WAIT", "LINK_WAIT", "WRITE_STALL"];
     const SHORTER: [(&str, &str); 13] = [
         (
             "DISCARD_WAIT",
