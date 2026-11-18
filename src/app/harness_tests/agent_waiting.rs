@@ -99,6 +99,75 @@ fn a_turn_that_ends_on_an_api_error_needs_the_user_and_says_why() {
     });
 }
 
+/// A `StopFailure` that arrives after the turn already ended, from a request
+/// outside any turn, ended nothing: the idle tab stays `done` without a ping,
+/// and the report is recorded but not applied.
+#[test]
+#[ignore = "red until a StopFailure outside a turn leaves an idle tab done"]
+fn an_api_error_outside_a_turn_leaves_an_idle_tab_done() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "claude");
+        hook(
+            &mut app,
+            "working",
+            &json!({"hook_event_name":"UserPromptSubmit"}),
+        );
+        assert_eq!(settle(&mut app, Instant::now()).0, AgentActivity::Working);
+        hook(&mut app, "done", &json!({"hook_event_name":"Stop"}));
+        assert_eq!(
+            settle(&mut app, Instant::now()),
+            (AgentActivity::Done, true)
+        );
+        hook(
+            &mut app,
+            "done",
+            &json!({"hook_event_name":"Notification", "notification_type":"idle_prompt"}),
+        );
+
+        let response = hook(
+            &mut app,
+            "blocked",
+            &json!({"hook_event_name":"StopFailure", "error":"server_error"}),
+        );
+        assert!(
+            matches!(&response, McpResponse::Ok { message } if message.contains("not applied")),
+            "{response:?}"
+        );
+        assert_eq!(
+            settle(&mut app, Instant::now()),
+            (AgentActivity::Done, false)
+        );
+        assert_ne!(
+            reported(&app).and_then(|r| r.note).as_deref(),
+            Some("stopped: API server error")
+        );
+    });
+}
+
+/// spyc can start, or restore a tab, while a turn runs, and so never see its
+/// prompt: a `StopFailure` on a tab with no report yet still needs the user.
+#[test]
+fn an_api_error_before_any_report_still_needs_the_user() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = agent_app(tmp.path(), "claude");
+        hook(
+            &mut app,
+            "blocked",
+            &json!({"hook_event_name":"StopFailure", "error":"server_error"}),
+        );
+        assert_eq!(
+            settle(&mut app, Instant::now()),
+            (AgentActivity::Blocked, true)
+        );
+        assert_eq!(
+            reported(&app).unwrap().note.as_deref(),
+            Some("stopped: API server error")
+        );
+    });
+}
+
 /// Claude Code's `Stop` lists the work still running; the reporter turns that
 /// turn end into `waiting`. The dot holds through the idle nudge, follows the
 /// turn the finished work starts, and pings only when the agent is done.
