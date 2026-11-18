@@ -5,7 +5,7 @@
 rustc files a linker's output under one of two lints: `linker_messages` (warn
 by default) and `linker_info` (allow by default, for output it considers
 informational, such as which macOS version an object was built for). The macOS
-jobs of `.github/workflows/shipped-targets.yml` force both on for spyc's link
+jobs of `.github/workflows/macos.yml` force both on for spyc's link
 with `--force-warn`, which no `allow` in Cargo.toml can lower.
 
 The summary groups each line of linker output with others of its kind once

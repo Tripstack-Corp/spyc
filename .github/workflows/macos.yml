@@ -1,0 +1,93 @@
+# The macOS jobs, run when what they check can change rather than on every PR:
+# macOS runners are often short, and a job that never gets one cancels after
+# 15 minutes and leaves the PR unstable for nothing. They run on a PR that
+# changes how spyc builds or links (the lockfile, a manifest, the toolchain, a
+# build script, the vendored libghostty-vt, cargo's config, the Makefile, the
+# lint config, this workflow and the linker check), on every version tag, so
+# each rc and release is checked, and by hand (`workflow_dispatch`, `gh
+# workflow run macos.yml --ref <branch>`) for a PR that changes macOS-only code.
+# Every change is also linted and built on an Apple silicon Mac before it
+# merges: the developer's own `make check-ci`.
+#
+# - `lint-macos` (`Lint macOS (fmt, clippy)`, #76): the same `make fmt-check lint` as
+#   `ci.yml`'s `lint`, so code behind `cfg(target_os = "macos")`, which the
+#   Linux clippy compiles out, is linted. Not a required context.
+# - `link`: spyc linked for both macOS targets release.yml ships, failing on a
+#   linker message. Of the linkers spyc ships through, only Apple's `ld` has
+#   reported anything, the duplicate `_memset` of #1129 among it. RUSTFLAGS
+#   force both `linker_messages` and `linker_info` on, so no `allow` in
+#   Cargo.toml can hide a message, and `scripts/linker-messages.py --deny`
+#   writes everything the linker said to the job summary, then fails on a
+#   message that is neither `linker_info` nor matched by an entry, with its
+#   issue, in `.github/linker-exceptions.txt`; or on a link it parsed no output
+#   from. No rust-cache: the repo's Actions cache sits near its 10 GB limit.
+name: macOS
+
+on:
+  pull_request:
+    paths:
+      - Cargo.lock
+      - Cargo.toml
+      - "crates/*/Cargo.toml"
+      - rust-toolchain.toml
+      - build.rs
+      - "crates/*/build.rs"
+      - "crates/spyc-vt-sys/**"
+      - ".cargo/**"
+      - Makefile
+      - clippy.toml
+      - .github/workflows/macos.yml
+      - .github/linker-exceptions.txt
+      - scripts/linker-messages.py
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# A newer push to the same ref cancels the in-flight run.
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  lint-macos:
+    name: Lint macOS (fmt, clippy)
+    # Apple silicon: spyc-vt-sys needs its vendored `aarch64-apple-darwin` archive.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain + C compiler (load-bearing for *-sys crates)
+        run: rustc --version && cargo --version && cc --version
+      # rust-cache's key carries the job id, so this cache and ci.yml's `lint`'s
+      # stay apart.
+      - uses: Swatinem/rust-cache@v2
+      - run: make fmt-check lint
+
+  link:
+    name: Link ${{ matrix.target }} (dev)
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Toolchain
+        run: rustc --version && ld -v 2>&1 | head -1 && xcrun --show-sdk-version
+      - name: Link spyc
+        env:
+          RUSTFLAGS: "--force-warn linker_messages --force-warn linker_info"
+        run: |
+          set -o pipefail
+          cargo build --locked --bin spyc --target ${{ matrix.target }} 2>&1 | tee build.log
+      - name: Linker messages
+        run: |
+          set -o pipefail
+          python3 scripts/linker-messages.py --deny .github/linker-exceptions.txt build.log \
+            | tee -a "$GITHUB_STEP_SUMMARY"

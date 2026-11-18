@@ -336,7 +336,7 @@ are the source of truth — Actions *call them* so local and CI never drift.
 
 ### `ci.yml` — quality gate (PR + push to `main`) — **IMPLEMENTED**
 - Direct port of the retired `bitbucket-pipelines.yml`: `lint` (fmt + clippy) ∥
-  `lint-macos` ∥ `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
+  `test` on PRs, plus a `coverage` job (`cargo llvm-cov --locked
   --all-targets --fail-under-lines 84`) on pushes to `main`. Supply-chain
   (cargo-deny) moved to `audit.yml` — see §6. Toolchain cached via
   `Swatinem/rust-cache`; `cargo-llvm-cov` is the same sha-pinned prebuilt binary
@@ -349,12 +349,14 @@ are the source of truth — Actions *call them* so local and CI never drift.
   renaming either one is a three-step operation: drop the old context from
   protection, merge the rename, add the new context. Renaming without that dance
   deadlocks every open PR on a context that will never report again.
-- **`lint-macos`** (`Lint macOS (fmt, clippy)`, #76) runs the same
+- **`macos.yml`'s `lint-macos`** (`Lint macOS (fmt, clippy)`, #76) runs the same
   `make fmt-check lint` on `macos-latest`, so code behind
-  `cfg(target_os = "macos")`, which the Linux clippy compiles out, is linted
-  before merge. It runs no tests and no workflow lint, and is not a required
-  context: requiring it is a change to branch protection, and once required its
-  `name` takes the same three-step rename. Together the two lint jobs cover
+  `cfg(target_os = "macos")`, which the Linux clippy compiles out, is linted.
+  macOS runners are often short, so it runs with the macOS link jobs: on a PR
+  that changes how spyc builds or links, on every version tag, and by hand
+  (`gh workflow run macos.yml --ref <branch>`); every change is also linted on
+  the developer's Apple silicon Mac by `make check-ci`. It runs no tests and no
+  workflow lint, and is not a required context. Together the two lint jobs cover
   OS-gated code both ways; `make lint-linux` stays as the local check before a
   push.
 - **Follow-up:** extend the trigger to `stable/*` / `releng/*` once Stage 2

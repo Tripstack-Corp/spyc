@@ -1,4 +1,4 @@
-# Linker messages the macOS link jobs of shipped-targets.yml let through.
+# Linker messages the macOS link jobs of macos.yml let through.
 #
 # One entry per line: a spyc issue number, then a Python regex searched in the
 # message's first line as the job summary prints it (paths and hashes
