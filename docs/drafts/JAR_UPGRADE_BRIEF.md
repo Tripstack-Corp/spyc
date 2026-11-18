@@ -148,7 +148,7 @@ In order, prevent, contain, recover:
 - **A guard for the user's real jars:** no test may start, reach or remove a
   jar in the user's socket or state directories; each test sets its own.
 - **The jar tests on macOS in CI.** The macOS job runs lint only
-  (`.github/workflows/ci.yml`, "Lint macOS"); the tests run on Ubuntu, while
+  (`.github/workflows/macos.yml`, "Lint macOS"); the tests run on Ubuntu, while
   the upgrade's riskiest behaviour (the holder, `exec` of `/dev/fd/N` refused,
   the image with no name) is macOS's.
 

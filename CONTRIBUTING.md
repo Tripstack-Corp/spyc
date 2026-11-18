@@ -379,8 +379,9 @@ Invariants no linter can infer — like that action needing
 `include-hidden-files: true` — are pinned as guard tests in `src/lib.rs`
 instead.
 
-**A linker message fails the macOS link** (`.github/workflows/shipped-targets.yml`).
-On every PR, each macOS job links spyc with
+**A linker message fails the macOS link** (`.github/workflows/macos.yml`).
+On a PR that changes how spyc builds or links, on every version tag, and when
+run by hand, each macOS job links spyc with
 `--force-warn linker_messages --force-warn linker_info`, and
 `scripts/linker-messages.py --deny` lists everything the linker said in the
 job summary. It fails on a message rustc didn't file under `linker_info`

@@ -5,16 +5,10 @@
 # check green. The musl jobs read the Zig and cargo-zigbuild versions out of
 # release.yml, so they link the way a release would.
 #
-# The macOS jobs also fail on a linker message. Of the linkers spyc ships
-# through, only Apple's `ld` has reported anything, the duplicate `_memset` of
-# #1129 among it; rust-lld and `zig cc` stayed silent. RUSTFLAGS force both
-# `linker_messages` and `linker_info` on, so no `allow` in Cargo.toml can hide
-# a message, and `scripts/linker-messages.py --deny` writes everything the
-# linker said to the job summary, then fails on a message that is neither
-# `linker_info` nor matched by an entry, with its issue, in
-# `.github/linker-exceptions.txt`; or on a link it parsed no output from.
+# The macOS targets link in macos.yml, which runs when a link can change
+# rather than on every PR, since macOS runners are often short.
 #
-# No rust-cache: the repo's Actions cache sits near its 10 GB limit, and four
+# No rust-cache: the repo's Actions cache sits near its 10 GB limit, and two
 # more caches per PR would evict main's, which the required jobs restore.
 name: Shipped targets link
 
@@ -31,29 +25,6 @@ permissions:
   contents: read
 
 jobs:
-  macos:
-    name: Link ${{ matrix.target }} (dev)
-    runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [aarch64-apple-darwin, x86_64-apple-darwin]
-    steps:
-      - uses: actions/checkout@v7
-      - name: Toolchain
-        run: rustc --version && ld -v 2>&1 | head -1 && xcrun --show-sdk-version
-      - name: Link spyc
-        env:
-          RUSTFLAGS: "--force-warn linker_messages --force-warn linker_info"
-        run: |
-          set -o pipefail
-          cargo build --locked --bin spyc --target ${{ matrix.target }} 2>&1 | tee build.log
-      - name: Linker messages
-        run: |
-          set -o pipefail
-          python3 scripts/linker-messages.py --deny .github/linker-exceptions.txt build.log \
-            | tee -a "$GITHUB_STEP_SUMMARY"
-
   musl:
     name: Link ${{ matrix.target }} (dev)
     runs-on: ubuntu-latest
