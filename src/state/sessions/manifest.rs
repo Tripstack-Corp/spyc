@@ -3,7 +3,7 @@
 //! with no `version` is a version 1 session, which reads as a manifest with one
 //! project.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -107,6 +107,10 @@ pub struct SavedProject {
     /// What `:agent hud` chose. `None` leaves the config file's preference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_hud: Option<AgentHudMode>,
+    /// What `:setenv -p` saved here, as plain text; a plain `:setenv` never
+    /// reaches the file.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 impl SavedProject {
@@ -152,6 +156,7 @@ impl Manifest {
             tabs: v1.tabs,
             active_tab: v1.active_tab,
             agent_hud: v1.agent_hud,
+            env: BTreeMap::new(),
         };
         Self {
             version: MANIFEST_VERSION,
@@ -194,6 +199,7 @@ impl Manifest {
             tabs,
             active_tab: 0,
             agent_hud: None,
+            env: BTreeMap::new(),
         };
         Self {
             version: MANIFEST_VERSION,
@@ -501,6 +507,7 @@ mod tests {
                 .collect(),
             active_tab: 0,
             agent_hud: None,
+            env: BTreeMap::new(),
         }
     }
 

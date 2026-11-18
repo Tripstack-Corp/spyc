@@ -91,6 +91,8 @@ pub struct PtySpec<'a> {
     /// supplied entries win over the defaults `PtyHost::spawn` sets
     /// (TERM, COLUMNS, LINES, plus any caller `extra_env`).
     pub env: &'a [(&'a str, &'a str)],
+    /// The project's `:setenv` variables, under every other entry.
+    pub project_env: &'a [(String, String)],
     /// Set as the child's `TERM`. `xterm-256color` for interactive
     /// panes, `dumb` for `!` captures.
     pub term: &'a str,
@@ -223,11 +225,8 @@ impl PtyHost {
         } else {
             None
         };
-        // Runtime `:s` overrides (formerly applied by mutating the
-        // process env, which children inherited). Applied before the
-        // caller's env so spec keys (TERM/COLUMNS/LINES/…) still win on
-        // collision, matching the old inherit-then-override order.
-        let mut env = crate::envset::overrides();
+        // First, so spyc's own keys (TERM/COLUMNS/LINES/…) win on collision.
+        let mut env = spec.project_env.to_vec();
         env.push(("TERM".into(), spec.term.into()));
         env.push(("COLUMNS".into(), spec.cols.to_string()));
         env.push(("LINES".into(), spec.rows.to_string()));
@@ -870,6 +869,7 @@ mod tests {
             cols: 80,
             cwd: Path::new("/tmp"),
             env: &[],
+            project_env: &[],
             term: "dumb",
             nudge_winch: false,
             debug_dump: false,

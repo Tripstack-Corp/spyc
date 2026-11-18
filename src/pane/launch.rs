@@ -15,6 +15,8 @@ pub struct Launch<'a> {
     pub cwd: &'a Path,
     pub context_path: &'a Path,
     pub extra_env: &'a [(&'a str, &'a str)],
+    /// The project's `:setenv` variables.
+    pub project_env: &'a [(String, String)],
     pub jar: Option<jar::Spec>,
 }
 
@@ -26,7 +28,9 @@ impl Pane {
     /// where the pane itself spawns — App writes one canonical file
     /// (`context::process_context_path`), but a pane can spawn in any
     /// subdir, and recomputing from `cwd` would point at a path nobody
-    /// writes.
+    /// writes. Tests' spawn: a project's tab or overlay goes through
+    /// [`Self::launch`] with its `:setenv` variables.
+    #[cfg(test)]
     pub fn spawn(
         command: &str,
         rows: u16,
@@ -38,6 +42,7 @@ impl Pane {
         Self::spawn_with_env(command, rows, cols, cwd, context_path, &[], wake)
     }
 
+    #[cfg(test)]
     pub fn spawn_with_env(
         command: &str,
         rows: u16,
@@ -55,6 +60,7 @@ impl Pane {
                 cwd,
                 context_path,
                 extra_env,
+                project_env: &[],
                 jar: None,
             },
             wake,
@@ -71,6 +77,7 @@ impl Pane {
             cwd,
             context_path,
             extra_env,
+            project_env,
             jar,
         } = launch;
         // Pane env: tell child processes (e.g. Claude CLI's MCP server)
@@ -91,6 +98,7 @@ impl Pane {
             cols,
             cwd,
             env: &env,
+            project_env,
             term: "xterm-256color",
             // Send SIGWINCH right after spawn so rc-file shells
             // (p10k / oh-my-zsh) re-query the pty size and render

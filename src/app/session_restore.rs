@@ -474,6 +474,8 @@ impl App {
         restored.deferred_tabs.clear();
         restored.home = project.home.clone().filter(|p| p.is_dir());
         restored.pane.pane_height_pct = project.pane_height_pct;
+        // Before its tabs start, so they get them.
+        restored.env = crate::envset::ProjectEnv::restored(&project.env);
         if let Some(mode) = project.agent_hud {
             restored.pane.agent_hud.choice = Some(mode);
         }
