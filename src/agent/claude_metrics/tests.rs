@@ -108,6 +108,76 @@ fn a_repeat_with_new_usage_replaces_its_count() {
     assert_eq!(snapshot.totals.output, 51);
 }
 
+/// A Code Mode script's own tool calls, as Claude Code 2.1.327 writes them:
+/// one virtual `<synthetic>` record per call, with zero usage and no
+/// request behind it, then its virtual result.
+fn script_call(second: u32, id: &str, name: &str) -> [Value; 2] {
+    let zero = json!({"input_tokens": 0, "cache_creation_input_tokens": 0,
+                      "cache_read_input_tokens": 0, "output_tokens": 0,
+                      "service_tier": null, "server_tool_use": {"web_search_requests": 0}});
+    [
+        json!({"type": "assistant", "sessionId": SESSION, "timestamp": time(second),
+               "isSidechain": false, "isVirtual": true, "madeBy": "other",
+               "message": {"id": format!("virtual-{id}"), "model": "<synthetic>",
+                           "role": "assistant", "stop_reason": "stop_sequence",
+                           "usage": zero,
+                           "content": [{"type": "tool_use", "id": id, "name": name,
+                                        "input": "{}"}]}}),
+        json!({"type": "user", "sessionId": SESSION, "timestamp": time(second),
+               "isSidechain": false, "isVirtual": true, "turnCompanion": true,
+               "message": {"content": [{"type": "tool_result", "tool_use_id": id,
+                                        "is_error": false, "content": "out"}]}}),
+    ]
+}
+
+/// A script's calls are tools the HUD counts, but no request was made for
+/// them: the context, the latest request and the totals stay the model's.
+#[test]
+#[ignore = "red until the Claude reader skips Code Mode's synthetic usage"]
+fn a_code_mode_scripts_calls_count_as_tools_not_requests() {
+    let mut records = vec![assistant(
+        "msg-1",
+        1,
+        usage(2, 30, 88_000, 400),
+        json!([{"type": "tool_use", "id": "toolu-1", "name": "REPL",
+                "input": {"code": "x"}, "caller": {"type": "direct"}}]),
+    )];
+    records.extend(script_call(2, "repl_a", "Bash"));
+    records.extend(script_call(3, "repl_b", "Read"));
+    records.push(result(4, "toolu-1", false));
+    let snapshot = fold_all(&records);
+
+    assert_eq!(snapshot.messages, 1);
+    assert_eq!(
+        snapshot.totals,
+        Usage {
+            input: 2,
+            cache_write: 30,
+            cache_read: 88_000,
+            output: 400
+        }
+    );
+    assert_eq!(snapshot.request.unwrap().value.output, 400);
+    assert_eq!(snapshot.context_tokens.unwrap().value, 2 + 30 + 88_000);
+    let calls = |name: &str| {
+        snapshot
+            .tool_counts
+            .iter()
+            .find(|count| count.name == name)
+            .map(|count| count.calls)
+    };
+    assert_eq!(
+        (calls("REPL"), calls("Bash"), calls("Read")),
+        (Some(1), Some(1), Some(1))
+    );
+    assert!(
+        snapshot
+            .tools
+            .iter()
+            .all(|tool| tool.status == ToolStatus::Completed)
+    );
+}
+
 /// After a compaction the context's size is unknown until the next request,
 /// and a record from before the boundary can't restore it. Lifetime totals
 /// carry on across it.
