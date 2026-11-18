@@ -12,7 +12,8 @@ use serde_json::{Value, json};
 
 use crate::mcp_cmd::{McpCommand, McpRequest};
 
-use super::framing::{read_lsp_message, send_message};
+use super::follow::{Failure, Upstream};
+use super::framing::read_lsp_message;
 use super::protocol::{CWD_META, Caller, PANE_ID_META, dispatch, dispatch_for};
 use super::{
     PROXY_IO_TIMEOUT, log_bodies, mcp_log, root_marker_path_in, socket_path, socket_path_for,
@@ -331,43 +332,54 @@ pub(super) fn run_proxy(
     stream: UnixStream,
     pane_id: Option<&str>,
     cwd: Option<&Path>,
+    jar: Option<&Path>,
 ) -> anyhow::Result<()> {
-    proxy_io(
+    proxy_following(
         io::stdin().lock(),
         io::stdout().lock(),
         stream,
-        pane_id,
-        cwd,
+        (pane_id, cwd, jar),
         PROXY_IO_TIMEOUT,
     )
 }
 
 /// [`run_proxy`] over any agent-side reader and writer, naming `pane_id` and
 /// `cwd` in the `initialize` it forwards, and waiting at least `io_timeout` on
-/// the server ([`PROXY_IO_TIMEOUT`] outside tests).
+/// the server ([`PROXY_IO_TIMEOUT`] outside tests), with no jar to follow.
+#[cfg(test)]
 pub(super) fn proxy_io(
-    mut stdin_reader: impl BufRead,
-    mut stdout_writer: impl Write,
+    stdin_reader: impl BufRead,
+    stdout_writer: impl Write,
     stream: UnixStream,
     pane_id: Option<&str>,
     cwd: Option<&Path>,
     io_timeout: std::time::Duration,
 ) -> anyhow::Result<()> {
-    let sock_clone = match stream.try_clone() {
-        Ok(c) => c,
-        Err(e) => {
-            mcp_log(&format!("proxy: stream clone failed: {e}"));
-            return Err(e.into());
-        }
-    };
-    // Bound socket IO (see `PROXY_IO_TIMEOUT`) so a wedged server can't hang
-    // the agent forever — `read_lsp_message` below would otherwise block
-    // indefinitely on a silent server thread. Each request's read is bounded
-    // again below, by what the server may take over it.
-    let _ = sock_clone.set_read_timeout(Some(io_timeout));
-    let _ = stream.set_write_timeout(Some(io_timeout));
-    let mut sock_reader = io::BufReader::new(sock_clone);
-    let mut sock_writer = stream;
+    proxy_following(
+        stdin_reader,
+        stdout_writer,
+        stream,
+        (pane_id, cwd, None),
+        io_timeout,
+    )
+}
+
+/// [`proxy_io`], following the pane's jar (`follow`) to the spyc that owns it
+/// when the one it reaches goes.
+pub(super) fn proxy_following(
+    mut stdin_reader: impl BufRead,
+    mut stdout_writer: impl Write,
+    stream: UnixStream,
+    (pane_id, cwd, jar): (Option<&str>, Option<&Path>, Option<&Path>),
+    io_timeout: std::time::Duration,
+) -> anyhow::Result<()> {
+    let mut upstream = Some(Upstream::new(stream, io_timeout).map_err(|e| {
+        mcp_log(&format!("proxy: stream clone failed: {e}"));
+        e
+    })?);
+    // What this session sent to bind itself to its pane, replayed to the
+    // next spyc when it follows the jar.
+    let mut binding: Vec<String> = Vec::new();
     mcp_log("proxy: ready, waiting for stdin");
 
     loop {
@@ -403,45 +415,52 @@ pub(super) fn proxy_io(
         } else {
             mcp_log(&format!("proxy: stdin → socket ({} bytes)", msg.len()));
         }
-
-        // Check if this is a request (has "id") or notification (no "id").
         let parsed = serde_json::from_str::<Value>(msg).ok();
-        let is_request = parsed.as_ref().is_none_or(|v| v.get("id").is_some()); // assume request if parse fails
-
-        // Forward to socket (Content-Length framed for the socket server).
-        send_message(&mut sock_writer, msg)?;
-
-        // Only read a response for requests (notifications get no reply).
-        if is_request {
-            let wait =
-                super::deadline::proxy_wait(parsed.as_ref().unwrap_or(&Value::Null), io_timeout);
-            let _ = sock_reader.get_ref().set_read_timeout(Some(wait));
-            let response = match read_lsp_message(&mut sock_reader) {
-                Ok(r) => r,
-                Err(e) => {
-                    // Timeout or socket error waiting for the server. Reply to
-                    // the agent with a JSON-RPC error (reusing the request id
-                    // so the client matches it) so its tool call returns an
-                    // error instead of hanging, then end the proxy cleanly —
-                    // a late reply would desync the stream framing.
-                    mcp_log(&format!("proxy: socket read error/timeout: {e}"));
-                    let id = serde_json::from_str::<Value>(msg)
-                        .ok()
+        // Assume a request if it doesn't parse: only a request gets a reply.
+        let is_request = parsed.as_ref().is_none_or(|v| v.get("id").is_some());
+        let wait = if is_request {
+            super::deadline::proxy_wait(parsed.as_ref().unwrap_or(&Value::Null), io_timeout)
+        } else {
+            io_timeout
+        };
+        let reply = match forward(
+            &mut upstream,
+            msg,
+            is_request,
+            wait,
+            (jar, &binding, io_timeout),
+        ) {
+            Ok(reply) => reply,
+            Err(e) => {
+                // No spyc answered. Reply to the agent with a JSON-RPC error
+                // (reusing the request id so the client matches it) so its tool
+                // call returns an error instead of hanging.
+                if is_request {
+                    let id = parsed
+                        .as_ref()
                         .and_then(|v| v.get("id").cloned())
                         .unwrap_or(Value::Null);
                     let err = json!({
                         "jsonrpc": "2.0",
                         "id": id,
-                        "error": {
-                            "code": -32000,
-                            "message": format!("spyc MCP server did not respond ({e})"),
-                        }
+                        "error": { "code": -32000, "message": e.message },
                     });
                     let _ = writeln!(stdout_writer, "{err}");
                     let _ = stdout_writer.flush();
+                }
+                // A spyc that went silent mid-reply could still send it, and a
+                // late reply would desync the stream's framing: end. One that
+                // went is followed again on the next request.
+                if e.silent {
                     break;
                 }
-            };
+                continue;
+            }
+        };
+        if parsed.as_ref().is_some_and(super::follow::binds) {
+            binding.push(msg.to_string());
+        }
+        if let Some(response) = reply {
             if log_bodies() {
                 mcp_log(&format!(
                     "proxy: socket → stdout ({} bytes): {}",
@@ -460,6 +479,65 @@ pub(super) fn proxy_io(
         }
     }
     Ok(())
+}
+
+/// Why [`forward`] got no reply, said to the agent.
+struct Unanswered {
+    message: String,
+    /// The spyc is there and didn't answer, rather than gone.
+    silent: bool,
+}
+
+/// Send `msg` to the spyc `upstream` reaches, following the pane's jar to the
+/// one that owns it now when that spyc has gone, within `wait`.
+fn forward(
+    upstream: &mut Option<Upstream>,
+    msg: &str,
+    is_request: bool,
+    wait: std::time::Duration,
+    (jar, binding, io_timeout): (Option<&Path>, &[String], std::time::Duration),
+) -> Result<Option<String>, Unanswered> {
+    let until = std::time::Instant::now() + wait;
+    let mut followed = false;
+    loop {
+        if upstream.is_none() {
+            // A notification waits for no one: it goes to a spyc there now.
+            let until = if is_request {
+                until
+            } else {
+                std::time::Instant::now()
+            };
+            *upstream = jar.and_then(|jar| super::follow::follow(jar, binding, io_timeout, until));
+            followed = upstream.is_some();
+        }
+        let Some(up) = upstream.as_mut() else {
+            return Err(Unanswered {
+                message: "spyc isn't running for this pane; the next call tries again".into(),
+                silent: false,
+            });
+        };
+        match up.exchange(msg, is_request, wait) {
+            Ok(reply) => return Ok(reply),
+            Err(Failure::Silent(e)) => {
+                mcp_log(&format!("proxy: socket read timeout: {e}"));
+                return Err(Unanswered {
+                    message: format!("spyc MCP server did not respond ({e})"),
+                    silent: true,
+                });
+            }
+            Err(Failure::Gone(e)) => {
+                mcp_log(&format!("proxy: the spyc went: {e}"));
+                *upstream = None;
+                // One that went right after it was followed isn't chased again.
+                if followed || jar.is_none() {
+                    return Err(Unanswered {
+                        message: format!("spyc MCP server went away ({e})"),
+                        silent: false,
+                    });
+                }
+            }
+        }
+    }
 }
 
 // ── Unix socket server (background thread) ──────────────────────

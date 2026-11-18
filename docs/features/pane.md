@@ -346,6 +346,10 @@ that no `spyc -r` took back, names them in a pop-up: `r` takes them back as
 tabs and tasks, still running, `d` ends them, and `Esc` leaves them
 running.
 
+An agent in a jarred tab keeps spyc's tools when its spyc goes: after `spyc -r` takes the tab
+back, its next tool call reaches the new spyc, and a call made while no spyc has it waits for
+one, then fails without ending the agent's connection.
+
 `spyc --jars` lists your jars: each tab's label, whether it's a pane, a task or a `!` capture, its
 agent and project, its program's pid, and whether a spyc owns it.
 

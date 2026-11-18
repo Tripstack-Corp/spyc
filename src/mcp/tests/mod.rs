@@ -1573,6 +1573,7 @@ fn status_trace_lasts_as_long_as_the_spyc_that_started_it() {
 #[test]
 fn spyc_mcp_serves_by_who_launched_the_agent() {
     let launched = |sock: bool, pane: bool| PaneEnv {
+        jar: None,
         sock: sock.then(|| PathBuf::from("/x/mcp-1.sock")),
         pane_id: pane.then(|| "tab-1".to_string()),
         context: None,
