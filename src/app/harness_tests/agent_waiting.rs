@@ -103,7 +103,6 @@ fn a_turn_that_ends_on_an_api_error_needs_the_user_and_says_why() {
 /// outside any turn, ended nothing: the idle tab stays `done` without a ping,
 /// and the report is recorded but not applied.
 #[test]
-#[ignore = "red until a StopFailure outside a turn leaves an idle tab done"]
 fn an_api_error_outside_a_turn_leaves_an_idle_tab_done() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

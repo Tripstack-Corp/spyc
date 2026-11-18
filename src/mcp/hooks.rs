@@ -45,7 +45,8 @@
 //! * `Stop`              → `done`    (the agent finished its turn)
 //! * `StopFailure`       → `blocked` (the turn ended on an API error, which
 //!   Claude fires instead of `Stop`; it won't resume by itself, and the note
-//!   names the error from the payload's closed set)
+//!   names the error from the payload's closed set). One that follows a turn
+//!   end failed outside any turn and isn't applied (`waiting::failed_outside_a_turn`).
 //!
 //! A merge splices our entries into an existing file without disturbing the
 //! user's other hooks or settings; a removal takes out only the entries we
