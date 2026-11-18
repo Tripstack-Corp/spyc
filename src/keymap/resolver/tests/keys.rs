@@ -4,15 +4,17 @@
 use super::*;
 
 #[test]
-fn ctrl_d_quits() {
-    // `^d` maps to quit; `request_quit` keeps its own two-tap confirm, so
-    // quitting stays `^d^d` with a warning. It never closes the second
-    // commander (that's `^s x`) — so quitting with `b` open preserves it for
-    // session restore.
+fn ctrl_d_detaches_and_never_quits() {
+    // `^d` detaches, and so does `^D`: a terminal without the kitty keyboard
+    // protocol sends both as one byte. `Q`, `ZZ` and `:q` quit.
     let mut r = Resolver::new();
     assert_eq!(
         feed(&mut r, ctrl('d')),
-        ResolverOutcome::Action(Action::Quit)
+        ResolverOutcome::Action(Action::Detach)
+    );
+    assert_eq!(
+        feed(&mut r, ctrl('D')),
+        ResolverOutcome::Action(Action::Detach)
     );
 }
 
@@ -102,7 +104,7 @@ fn ctrl_resets_pending_state() {
     assert!(r.is_pending());
     assert_eq!(
         feed(&mut r, ctrl('d')),
-        ResolverOutcome::Action(Action::Quit)
+        ResolverOutcome::Action(Action::Detach)
     );
     assert!(!r.is_pending());
 }

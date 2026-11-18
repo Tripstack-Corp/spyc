@@ -342,7 +342,8 @@ fn a_help_row_is_read_as_the_overlay_writes_it() {
         "Space w l|n|d",
         "H1..H9",
         "Space ] [",
-        "Q  ^D  :q  ZZ",
+        "Q  :q  ZZ",
+        "^d  :detach",
     ]
     .into_iter()
     .flat_map(help_keys)

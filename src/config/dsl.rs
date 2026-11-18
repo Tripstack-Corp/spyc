@@ -166,6 +166,7 @@ fn arg_value(tail: &str) -> Option<&str> {
 pub fn parse_action(name: &str, tail: &str) -> Result<BoundAction, String> {
     match name {
         "quit" => Ok(BoundAction::Plain(Action::Quit)),
+        "detach" => Ok(BoundAction::Plain(Action::Detach)),
         "redraw" => Ok(BoundAction::Plain(Action::Redraw)),
         "help" | "keys" => Ok(BoundAction::Plain(Action::Help)),
         "about" => Ok(BoundAction::Plain(Action::About)),

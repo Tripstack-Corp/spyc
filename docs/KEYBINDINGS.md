@@ -150,7 +150,7 @@ file view.
 | `^a b` / `^a l` | Focus the right file pane (b) |
 | `^a d` | Toggle the fade on whatever lacks the keys: the other column, the list, the pane, the scrollback or a `D` pager |
 | `^s n` | Open a second file-commander (column b, at PROJECT_HOME; top-only, `^s f` for full-height) |
-| `^s x` | Close the second file-commander (`^d` quits, keeping `b` open for `-r`) |
+| `^s x` | Close the second file-commander (quitting keeps `b` open for `-r`) |
 | `^a u` | Quick Select — labeled picker for URL/path/SHA/IP |
 | `^a .` | Menu for the active pane tab: restart, suspend, fork, rename, close and the rest, each with its key (keys as in `.`'s menu) |
 | `^a v` | Pane scrollback in the in-app pager (search, jump, visual yank) |
@@ -328,7 +328,8 @@ appear on the top bar and persist across `spyc -r`.
 | `?` / `F1` / `Space ?` | This help overlay |
 | `Space a` / `:about` | The about page |
 | `Space w l` / `Space w n` / `Space w d` | Worktree list / new / delete (`W l` / `W n` / `W d` in the file list) |
-| `Q` / `^d` / `ZZ` / `:q` | Quit, saving the session (asks first while a tab or task is still running) |
+| `Q` / `ZZ` / `:q` | Quit, saving the session and ending its tabs (asks first while a tab or task is still running) |
+| `^d` / `:detach` | Detach: spyc runs on with its tabs, and `spyc attach` brings it back |
 | `q` | Doesn't quit: flashes a hint instead, keeping the key for macro recording |
 | `gV` / `:version` | Show the spyc version |
 

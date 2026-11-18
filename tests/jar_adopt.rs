@@ -137,6 +137,25 @@ impl Spyc {
         w.flush().unwrap();
     }
 
+    /// Whether it has exited.
+    fn exited(&mut self) -> bool {
+        self.child.try_wait().unwrap().is_some()
+    }
+
+    /// What it printed after the last time it entered the alternate screen.
+    fn since_last_screen(&self) -> String {
+        let seen = String::from_utf8_lossy(&self.seen.lock().unwrap()).into_owned();
+        seen.rfind("\x1b[?1049h")
+            .map_or_else(String::new, |at| seen[at..].to_string())
+    }
+
+    /// How many times it has entered the alternate screen.
+    fn screens(&self) -> usize {
+        String::from_utf8_lossy(&self.seen.lock().unwrap())
+            .matches("\x1b[?1049h")
+            .count()
+    }
+
     /// `kill -9`, then reap it.
     fn crash(mut self) {
         kill(self.pid());
@@ -584,6 +603,106 @@ fn an_agents_mcp_proxy_follows_its_jar_to_the_spyc_that_takes_it_back() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+/// The session jar under `dirs`, once one runs: its name and socket.
+fn session_jar(dirs: &Dirs) -> Option<(String, PathBuf)> {
+    let sessions = dirs.runtime.join("spyc/sessions");
+    std::fs::read_dir(sessions)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "sock") && described(p, "pid").is_some())
+        .map(|p| (p.file_stem().unwrap().to_string_lossy().into_owned(), p))
+}
+
+/// S4: `^d` in a plain spyc hands it over to a spyc in its session's own jar,
+/// and the terminal shows the same session: the same tab, its program never
+/// restarted. A second `^d` leaves that spyc running with no terminal, and
+/// `spyc attach` from another brings it back. `:q` quits it, ending its tabs.
+#[test]
+fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    left.0.push(agent);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+
+    // The handover: the same terminal, now a client of the session's jar.
+    let screens = first.screens();
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.eventually("the session drawn again, from its jar", || {
+        first.screens() > screens && first.since_last_screen().contains(&name)
+    });
+    let jar_spyc = described(&socket, "program_pid").unwrap();
+    left.0.push(jar_spyc.parse().unwrap());
+    first.eventually("the jar's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    first.eventually("the tab's output shows again", || {
+        first.since_last_screen().contains("ready-mark")
+    });
+    assert!(!first.exited(), "the terminal's spyc became `spyc attach`");
+    let now: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(now, agent, "the tab's program was started again");
+
+    // A second `^d`: the terminal goes, reset, and spyc runs on.
+    first.type_keys(b"\x04");
+    eventually("the client leaves", || first.exited());
+    let shown = String::from_utf8_lossy(&first.seen.lock().unwrap()).into_owned();
+    let last = shown.rfind("\x1b[?1049h").unwrap();
+    // The title's restore is spyc's own reset; the client's fixed one has none.
+    assert!(
+        shown[last..].contains("\x1b[23;0t") && shown[last..].contains("\x1b[?1049l"),
+        "spyc didn't reset the terminal it left: {:?}",
+        &shown[last..]
+    );
+    assert_eq!(
+        described(&socket, "program_pid").as_deref(),
+        Some(jar_spyc.as_str())
+    );
+    assert!(alive(agent), "the tab's program ended with the terminal");
+
+    // From another terminal, the same spyc.
+    let back = Spyc::start(&dirs, &["attach"]);
+    back.eventually("the session drawn", || {
+        back.shows(&name) && back.shows("ready-mark")
+    });
+    back.type_keys(b":q\r");
+    back.eventually("spyc asks for a second `:q`", || {
+        back.shows("press again to quit")
+    });
+    back.type_keys(b":q\r");
+    eventually("quitting ends the tab's program", || !alive(agent));
 }
 
 /// S2b: a spyc stopped past its jars' deadline loses their leases; resumed, it

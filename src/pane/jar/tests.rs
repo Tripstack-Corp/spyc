@@ -1780,7 +1780,11 @@ fn tabs_made_together_have_sockets_of_their_own() {
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     const OUTWAITS: [&str; 4] = ["ADOPT_WAIT", "LINK_WAIT", "TAKEOVER_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 14] = [
+    const SHORTER: [(&str, &str); 15] = [
+        (
+            "START_POLL",
+            "how often a handover looks for its session jar, not a wait",
+        ),
         (
             "TAKEOVER_POLL",
             "how often a takeover looks at the jar, not a wait",

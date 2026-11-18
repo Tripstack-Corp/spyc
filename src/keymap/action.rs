@@ -216,7 +216,8 @@ pub enum Action {
 
     // Meta.
     Redraw, // ^L
-    Quit,   // ^D / Q / :q
+    Quit,   // Q / ZZ / :q
+    Detach, // ^d / :detach
 
     // `q` is claimed so an accidental press can't quit: it flashes a hint
     // instead. The name records what the key is being held for (vim-style macro
@@ -358,6 +359,7 @@ impl Action {
             | Self::ColorToggle
             | Self::ToggleActivity
             | Self::Quit
+            | Self::Detach
             | Self::MacroRecordReserved
             | Self::Noop
             // A project action, but the one a user reaches for from inside an
@@ -483,7 +485,7 @@ impl Action {
             Self::SetEnvPrompt => "set env var",
             Self::ToggleActivity => "toggle activity monitor",
             Self::Redraw => "redraw",
-            Self::Quit => "quit",
+            Self::Quit | Self::Detach => self.describe_leaving(),
             Self::MacroRecordReserved => "(reserved: macro recording)",
             Self::OpenTaskViewer => "open task viewer (most-recent bg task)",
             Self::ReopenLastBuffer => "reopen the most-recent closed pager buffer",
@@ -644,12 +646,29 @@ impl Action {
             Self::GotoFile | Self::GotoFileLine => self.goto_canonical_name(),
             // Meta.
             Self::Redraw => "redraw",
-            Self::Quit => "quit",
+            Self::Quit | Self::Detach => self.leaving_name(),
             Self::MacroRecordReserved => "macro_record_reserved",
             Self::OpenTaskViewer => "open_task_viewer",
             Self::ReopenLastBuffer => "reopen_last_buffer",
             Self::FindFile => "find_file",
             Self::Noop => "noop",
+        }
+    }
+
+    /// `Quit` and `Detach`: the two ways of leaving spyc.
+    const fn describe_leaving(&self) -> &'static str {
+        if matches!(self, Self::Detach) {
+            "detach (spyc runs on)"
+        } else {
+            "quit"
+        }
+    }
+
+    const fn leaving_name(&self) -> &'static str {
+        if matches!(self, Self::Detach) {
+            "detach"
+        } else {
+            "quit"
         }
     }
 

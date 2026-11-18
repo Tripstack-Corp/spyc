@@ -622,7 +622,7 @@ impl App {
             &foreground_exec,
         );
         self.wire_at_startup();
-        self.watch_own_jar();
+        self.start_own_jar(terminal, &foreground_exec);
 
         // (Pre-v1.50.84 the loop carried `last_pane_render` and
         // `last_active_drain` timestamps to throttle pane renders /

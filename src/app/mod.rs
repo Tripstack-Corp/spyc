@@ -123,6 +123,7 @@ mod commands;
 mod config;
 mod cooking;
 mod cwd_file;
+pub mod detach;
 mod effect;
 mod esc_guard;
 mod file_ops;

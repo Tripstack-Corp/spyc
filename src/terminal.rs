@@ -442,6 +442,19 @@ fn stash_restore() {
     let _ = RESTORE_SEQ.set(terminal_restore_seq());
 }
 
+/// `^d` in spyc's own jar: leave the terminal as it was before spyc, the way
+/// quitting does, before the jar ends its client. The next attach sets every
+/// mode again (`reattach`).
+pub fn detach_reset(terminal: &mut Tui) -> Result<()> {
+    use std::io::Write as _;
+    MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
+    KEY_EVENT_TYPES_ON.store(false, Ordering::Relaxed);
+    let out = terminal.backend_mut();
+    out.write_all(terminal_restore_seq().as_bytes())?;
+    out.flush()?;
+    Ok(())
+}
+
 /// `spyc attach`: a terminal showing a spyc through its jar is restored as
 /// spyc restores its own when a signal ends it. A takeover ends the old client
 /// with SIGTERM, and that terminal is then left as it was before.

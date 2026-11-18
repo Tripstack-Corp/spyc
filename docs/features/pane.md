@@ -357,7 +357,7 @@ A spyc can also run in a jar of its own, so it outlives the terminal it was star
 `spyc attach NAME` attaches your terminal to such a session by its name (the one spyc shows,
 such as `CORIANDER_CLOVE`). With no name it attaches to the one session running, or lists them
 and asks which. A session already attached in another terminal moves to yours, and that
-terminal is left as it was before spyc. `^\` detaches.
+terminal is left as it was before spyc. `^d` detaches (see [Projects and sessions](projects.md)).
 
 ## Quick Select — labelled overlay picker
 

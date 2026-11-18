@@ -548,7 +548,11 @@ const SECTIONS: &[Section] = &[
             ),
             ("^L", "redraw"),
             ("^R", "reload config (auto-reloads on save)"),
-            ("Q  ^D  :q  ZZ", "quit"),
+            ("Q  :q  ZZ", "quit, ending this spyc's tabs"),
+            (
+                "^d  :detach",
+                "detach: spyc runs on; spyc attach brings it back",
+            ),
             (
                 "q",
                 "doesn't quit: flashes a hint (kept for macro recording)",

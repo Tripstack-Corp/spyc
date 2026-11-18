@@ -369,11 +369,10 @@ impl Resolver {
         // Control-codes take priority and reset any pending state.
         if ctrl {
             let out = match ev.code {
-                // `^d`: quit, with the two-tap "press again to quit" confirm
-                // (`request_quit`). It never closes an open second commander —
-                // quitting with `b` open lets the session save + restore it (use
-                // `^s x` to close the split).
-                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::Quit),
+                // `^d`: detach, leaving spyc running in its session's jar.
+                // `^D` too: without the kitty keyboard protocol a terminal
+                // sends both as the same byte, so neither can mean quit.
+                KeyCode::Char('d' | 'D') => ResolverOutcome::Action(Action::Detach),
                 KeyCode::Char('l' | 'L') => ResolverOutcome::Action(Action::Redraw),
                 KeyCode::Char('b' | 'B') => ResolverOutcome::Action(Action::PageUp),
                 KeyCode::Char('f' | 'F') => ResolverOutcome::Action(Action::PageDown),
