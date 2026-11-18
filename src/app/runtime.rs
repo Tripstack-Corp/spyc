@@ -100,8 +100,12 @@ pub(super) struct Runtime {
     pub(super) attaches_seen: u64,
     /// A `^d` in spyc's own jar, for the loop to carry out with the terminal.
     pub(super) detach_pending: bool,
-    /// A plain spyc's handover, for `lib.rs` once the loop ends.
+    /// A handover, for `lib.rs` once the loop ends.
     pub(super) handover: Option<super::detach::Handover>,
+    /// `:upgrade`, for the loop to look for the new binary.
+    pub(super) upgrade_pending: bool,
+    /// The binary spyc started from, to tell a new install (`:upgrade`).
+    pub(super) started_from: Option<super::detach::BinaryStamp>,
     /// The same sender, for a wake made before `run()` installed it: a
     /// startup tab's pane, and its jar's start, wake the loop once it runs.
     pub(super) loop_wake: std::sync::Arc<std::sync::OnceLock<std::sync::mpsc::Sender<Message>>>,
@@ -383,6 +387,8 @@ impl Runtime {
             attaches_seen: 0,
             detach_pending: false,
             handover: None,
+            upgrade_pending: false,
+            started_from: None,
             loop_wake: std::sync::Arc::default(),
             next_sink_id: 0,
             autosave_last_saved_fp: None,

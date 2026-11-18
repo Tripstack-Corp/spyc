@@ -251,6 +251,12 @@ untouched, but what `spyc -r` doesn't keep (cursors, picks, filters, open pagers
 After that, detaching and attaching don't change anything in spyc. Every tab must run in a jar
 to detach; spyc says which one doesn't.
 
+`:upgrade` moves the session to a spyc you've installed since this one started (`make install`,
+or a package update), and says so when there's none. In a session that runs in its own jar,
+spyc restarts in place: your terminal stays attached, your tabs come back with their programs
+untouched, and what `spyc -r` doesn't keep starts afresh. In a plain spyc, `:upgrade` is a
+`^d` whose jar runs the new spyc.
+
 `Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `^D` detaches too: most
 terminals send it as `^d`. While a session runs in its own jar, its name is that jar's
 address, so `:name` can't change it.

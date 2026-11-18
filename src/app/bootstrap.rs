@@ -350,6 +350,7 @@ impl App {
         // first (`startup_tabs`). Precedence: restore > an approved project
         // list > the user's list > single-tab-on-demand.
         app.start_startup_tabs(resume || restores_own);
+        app.runtime.started_from = super::detach::BinaryStamp::installed();
 
         if resume {
             app.show_session_picker();
