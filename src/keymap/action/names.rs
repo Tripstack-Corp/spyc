@@ -140,6 +140,7 @@ pub fn action_from_name(name: &str) -> Option<Action> {
         // Meta.
         "redraw" => Action::Redraw,
         "quit" => Action::Quit,
+        "detach" => Action::Detach,
         "macro_record_reserved" => Action::MacroRecordReserved,
         "open_task_viewer" => Action::OpenTaskViewer,
         "reopen_last_buffer" => Action::ReopenLastBuffer,

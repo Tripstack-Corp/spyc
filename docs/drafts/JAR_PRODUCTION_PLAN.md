@@ -189,10 +189,12 @@ spyc started in an outer jar by its harness; the lazy entry is new.
   the handover (a mode carrying one bit, and a second way to find a session),
   an environment marker (every child inherits it), and a kind in the jar's
   description (a change to version 1, and a jar that knows what it holds).
-- **Detaching and attaching.** `^d` and `:detach` detach only when an agent, a
-  tab or a task is running; with nothing running, `^d` quits as it does today.
-  `spyc attach [name]` reattaches. `^D`, `Q`, `ZZ` and `:q` quit and end this
-  spyc's jars.
+- **Detaching and attaching** (owner, 2026-11-18). `^d` and `:detach` always
+  detach, leaving spyc running in its session's jar even with nothing running
+  (a headless spyc may have uses later). A terminal can't tell `^D` from `^d`
+  without the kitty keyboard protocol, so both detach; `Q`, `ZZ` and `:q` quit
+  and end this spyc's jars. `spyc attach [name]` reattaches. Detaching never
+  ends spyc: the agents running in its tabs need its MCP server.
 - **The attach event** sets spyc's modes, probes the terminal and repaints in
   full, on a terminal that may be another emulator. spyc hears it as the
   outer jar's program (role `program`), which version 1 carries;
@@ -212,9 +214,13 @@ spyc started in an outer jar by its harness; the lazy entry is new.
   keys a later terminal sent. Probes move to the attach, each reader ending
   with its probe, and an audit confirms spyc never waits on a terminal's
   reply.
-- **spyc upgrades inside its outer jar** by `exec`ing its new binary: the
-  same PTY, the client untouched, the Model rebuilt from the manifest. An
-  audit of the manifest confirms every field serializes or is rebuilt.
+- **spyc upgrades by a handover** (owner, 2026-11-18), the one the first `^d`
+  makes: the old spyc saves the session, leaves its jars running and ends; a
+  spyc from the new binary starts in a new session jar and takes them back,
+  and agents' MCP follows their jars across the gap (R30a). `spyc attach` from
+  a newer build offers it, and so does `:upgrade`. It replaces an `exec` inside
+  the outer jar. What `spyc -r` loses (cursors, picks, filters, pagers) a
+  handover loses too, until the manifest keeps it.
 - **Docs:** a feature page for detaching and attaching, `docs/KEYBINDINGS.md`
   and the help overlay for `^d`, and `:detach` and `:attach` for users.
 

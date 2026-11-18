@@ -75,6 +75,9 @@ impl AppState {
         if input == "q" || input == "quit" {
             return CommandResult::Quit;
         }
+        if input == "detach" {
+            return CommandResult::Detach;
+        }
 
         // :limit [token] — shares `apply_limit_token` with the `=` prompt
         // (`PromptKind::Limit`) so `:limit git` / `:limit h` behave exactly like
@@ -197,20 +200,8 @@ impl AppState {
             return self.project_command(arg);
         }
 
-        // :name [NEW] — rename session, or print current name when bare.
-        if input == "name" {
-            self.flash_info(format!("session name: {}", self.session_display()));
-            return CommandResult::Handled;
-        }
-        if let Some(arg) = input.strip_prefix("name ") {
-            match crate::state::session_names::normalize(arg) {
-                Some(norm) => {
-                    self.flash_info(format!("session name: {norm}"));
-                    self.session_name = Some(norm);
-                }
-                None => self.flash_error("name: empty after normalization"),
-            }
-            return CommandResult::Handled;
+        if let Some(done) = self.cmd_name(input) {
+            return done;
         }
 
         // :marks
@@ -407,5 +398,34 @@ impl AppState {
             | PromptKind::WorktreeNewBranch
             | PromptKind::WorktreeDeleteConfirm => PromptResult::NotHandled,
         }
+    }
+}
+
+impl AppState {
+    /// `:name [NEW]`: rename the session, or show its name when bare. A
+    /// session in its own jar keeps the name its jar's socket has.
+    fn cmd_name(&mut self, input: &str) -> Option<CommandResult> {
+        // :name [NEW] — rename session, or print current name when bare.
+        if input == "name" {
+            self.flash_info(format!("session name: {}", self.session_display()));
+            return Some(CommandResult::Handled);
+        }
+        if input.starts_with("name ") && self.session_name_fixed {
+            self.flash_error(
+                "name: this session runs in a jar of its own, named after it; quit to rename it",
+            );
+            return Some(CommandResult::Handled);
+        }
+        if let Some(arg) = input.strip_prefix("name ") {
+            match crate::state::session_names::normalize(arg) {
+                Some(norm) => {
+                    self.flash_info(format!("session name: {norm}"));
+                    self.session_name = Some(norm);
+                }
+                None => self.flash_error("name: empty after normalization"),
+            }
+            return Some(CommandResult::Handled);
+        }
+        None
     }
 }

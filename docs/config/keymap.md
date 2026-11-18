@@ -203,6 +203,7 @@ verbs above (`down`, `pick`,
 | `goto_file_line` | jump to path:line in pane output |
 | `redraw` | redraw |
 | `quit` | quit |
+| `detach` | Detach: spyc runs on with its tabs, and `spyc attach` brings it back |
 | `macro_record_reserved` | reserved for macro recording (flashes a hint) |
 | `open_task_viewer` | open task viewer (most-recent bg task) |
 | `reopen_last_buffer` | reopen the most-recent closed pager buffer |

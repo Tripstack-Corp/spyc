@@ -478,7 +478,7 @@ pub fn run() -> Result<()> {
     );
     let (mut terminal, own_jar, probe) = take_terminal()?;
     let stderr_log = stderr_capture::start();
-    let mut app = App::new(cli.resume, color_mode);
+    let mut app = App::new(cli.resume, own_jar.is_some(), color_mode);
     app.set_cwd_file(cwd_file);
     app.set_stderr_log(stderr_log);
     app.queue_startup_commands(cli.cmd);
@@ -492,12 +492,24 @@ pub fn run() -> Result<()> {
     app.set_shift_esc(crate::terminal::keyboard_enhancement_supported());
     app.set_own_jar(own_jar);
     let result = app.run(&mut terminal);
+    finish(&mut app, &mut terminal, result)
+}
+
+/// After the loop: restore the terminal, then either hand the session over
+/// (`^d` in a plain spyc, `app::detach`) or end every tab, and report.
+fn finish(app: &mut App, terminal: &mut Tui, result: Result<()>) -> Result<()> {
     mcp::cleanup_socket();
     // Restore the terminal BEFORE teardown so `run_teardown`'s "waiting for …"
     // lines land on the normal screen instead of behind the alt-screen. A
     // restore error is deferred so teardown still runs unconditionally (the
     // PR8b guarantee that pane children are always SIGTERM-graced on exit).
-    let restore = restore_terminal(&mut terminal);
+    let restore = restore_terminal(terminal);
+    if let Some(handover) = app.take_handover() {
+        mcp::stop_status_trace();
+        let _ = stderr_capture::finish();
+        restore?;
+        return app.hand_over(&handover);
+    }
     app.run_teardown();
     for note in take_worker_panics() {
         eprintln!("spyc: {note}");

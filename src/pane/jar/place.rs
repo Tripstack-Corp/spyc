@@ -81,6 +81,23 @@ impl Place {
         self.sockets().join(format!("{id}.sock"))
     }
 
+    /// Make the sessions' directory (`super::session`) this user's alone, and
+    /// say where it is.
+    pub fn prepare_sessions(&self) -> anyhow::Result<PathBuf> {
+        let base = self.dirs.first().cloned().unwrap_or_default();
+        let sessions = sessions_dir(&self.dirs);
+        for dir in [&base, &sessions] {
+            use std::os::unix::fs::DirBuilderExt;
+            match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e).with_context(|| format!("create {}", dir.display())),
+            }
+            private_dir(dir)?;
+        }
+        Ok(sessions)
+    }
+
     /// Make the socket directories this user's alone, or say why they can't
     /// be trusted.
     pub fn prepare(&self) -> anyhow::Result<()> {

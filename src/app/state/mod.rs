@@ -63,6 +63,9 @@ pub enum CommandResult {
     /// breaks the build instead of silently regressing `:q` to an
     /// "unknown command" path.
     Quit,
+    /// `:detach`: the App leaves spyc running and the terminal free
+    /// (`App::detach`), typed for the same reason as `Quit`.
+    Detach,
     /// Effects for the event loop to execute (MVU Phase 5 PR9: the
     /// carrier-unification that lets a pure-domain `:`-command emit an
     /// `Effect` — e.g. `:cd` → `Effect::ChangeDir` — instead of doing the
@@ -122,6 +125,7 @@ pub enum Update {
     Handled(Vec<Effect>),
     OpenPager(PagerRequest),
     Quit,
+    Detach,
     Defer,
 }
 
@@ -149,6 +153,7 @@ impl From<CommandResult> for Update {
                 fit_to_content: false,
             }),
             CommandResult::Quit => Self::Quit,
+            CommandResult::Detach => Self::Detach,
             CommandResult::Post(fx) => Self::Handled(fx),
             CommandResult::NotHandled => Self::Defer,
         }
@@ -333,6 +338,9 @@ pub struct AppState {
     pub status_flags_override: Option<crate::ui::status_flags::FlagsMode>,
     pub mode: Mode,
     pub session_name: Option<String>,
+    /// The session runs in its own jar, whose socket its name is: `:name`
+    /// can't change it there.
+    pub session_name_fixed: bool,
     /// Stable per-process session file id (millis timestamp), assigned once at
     /// startup and carried through restore, so every save (quit + P3-2 autosave)
     /// overwrites the same `<id>.json` instead of spawning a new file per save.
@@ -917,6 +925,7 @@ impl AppState {
             status_flags_override: None,
             mode: Mode::Normal,
             session_name: None,
+            session_name_fixed: false,
             session_id: None,
             last_search: None,
             last_captured_cmd: None,

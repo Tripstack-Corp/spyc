@@ -232,3 +232,21 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   another tab's. A `zot` tab restores with `zot --continue`, zot's most
   recent session for the directory. How each agent is resumed:
   [`docs/HARNESS.md`](../HARNESS.md).
+
+## Detaching and attaching
+
+`^d` (or `:detach`) leaves spyc running and frees your terminal, the way detaching from `screen`
+or `tmux` does. Your agents keep working, spyc keeps answering their tools, and notifications
+still arrive. `spyc attach` brings the same spyc back, in this terminal or another, over SSH
+or at another size: `spyc attach NAME` takes a session by the name spyc shows (such as
+`CORIANDER_CLOVE`), and with no name it takes the one running, or lists them and asks which.
+A session attached somewhere else moves to the terminal you attach from.
+
+The first `^d` moves spyc into a jar of its own. Your tabs come with it, their programs
+untouched, but what `spyc -r` doesn't keep (cursors, picks, filters, open pagers) starts afresh.
+After that, detaching and attaching don't change anything in spyc. Every tab must run in a jar
+to detach; spyc says which one doesn't.
+
+`Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `^D` detaches too: most
+terminals send it as `^d`. While a session runs in its own jar, its name is that jar's
+address, so `:name` can't change it.

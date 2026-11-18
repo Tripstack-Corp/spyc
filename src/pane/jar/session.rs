@@ -21,7 +21,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use spyc_jar::client::Client;
+use anyhow::Context;
+use spyc_jar::client::{Client, Sender};
 use spyc_jar::proto::{Msg, Role};
 
 use super::place::this_users_sessions;
@@ -36,6 +37,8 @@ pub struct OwnJar {
     name: String,
     /// Until [`Self::watch`] takes it.
     client: Option<Client>,
+    /// The connection's sending half, once [`Self::watch`] has split it.
+    tx: Option<Sender>,
     attached: Arc<AtomicBool>,
     attaches: Arc<AtomicU64>,
 }
@@ -58,6 +61,17 @@ impl OwnJar {
         self.attaches.load(Ordering::SeqCst)
     }
 
+    /// Have the jar end its client, once what spyc wrote before asking (its
+    /// terminal's reset) has reached it. spyc stops drawing at once rather
+    /// than when the jar says the client left. `false` when the jar can't be
+    /// asked.
+    pub fn detach_client(&self) -> bool {
+        self.attached.store(false, Ordering::SeqCst);
+        self.tx
+            .as_ref()
+            .is_some_and(|tx| tx.send(&Msg::Detach).is_ok())
+    }
+
     /// Hear the jar's attaches and detaches on a thread of its own, calling
     /// `wake` after each.
     pub fn watch(&mut self, wake: impl Fn() + Send + 'static) {
@@ -68,6 +82,7 @@ impl OwnJar {
         // The jar holds no deadline over its program's connection, so the
         // thread only waits.
         let (mut rx, tx) = client.split();
+        self.tx = Some(tx.clone());
         let spawned = std::thread::Builder::new()
             .name("own-jar".into())
             .spawn(move || {
@@ -152,9 +167,80 @@ fn link(socket: &Path) -> anyhow::Result<OwnJar> {
     Ok(OwnJar {
         name,
         client: Some(client),
+        tx: None,
         attached: Arc::new(AtomicBool::new(attached)),
         attaches: Arc::new(AtomicU64::new(0)),
     })
+}
+
+/// How often a handover looks for the jar it started to be up.
+const START_POLL: Duration = Duration::from_millis(20);
+
+/// Start the own jar of the session `name` for a handover (`app::detach`):
+/// at `sessions/<name>.sock`, running `argv` in `cwd` once a terminal
+/// attaches, and gone having run nothing if none does within the jar's hold.
+/// Its token is kept where `spyc attach` reads it.
+pub fn start(
+    name: &str,
+    argv: Vec<String>,
+    cwd: &Path,
+    (rows, cols): (u16, u16),
+) -> anyhow::Result<PathBuf> {
+    use super::place::{Place, SocketState, socket_state};
+    use std::io::Write;
+    use std::os::unix::process::CommandExt;
+    let place = Place::for_this_user()?;
+    let socket = place.prepare_sessions()?.join(format!("{name}.sock"));
+    match socket_state(&socket) {
+        SocketState::Live => anyhow::bail!("{name} already runs in a jar of its own"),
+        SocketState::Unknown => anyhow::bail!(
+            "can't tell whether {name}'s last jar still runs at {}",
+            socket.display()
+        ),
+        SocketState::Stale => {
+            std::fs::remove_file(&socket)
+                .with_context(|| format!("remove {}", socket.display()))?;
+        }
+        SocketState::Missing => {}
+    }
+    let token = super::tokens::new()?;
+    super::tokens::save(&place, &socket, &token)?;
+    let mut jar = std::process::Command::new(&place.binary)
+        .arg0(format!("spyc-jar {name}"))
+        .args(["--wire", &spyc_jar::proto::VERSION.to_string()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("start {}", place.binary.display()))?;
+    let start = spyc_jar::cli::Start {
+        token,
+        socket: socket.clone(),
+        cwd: Some(cwd.to_path_buf()),
+        rows,
+        cols,
+        hold: Some(place.hold),
+        exit_linger: None,
+        argv,
+    };
+    // SPYC-TRAP(jar-token-stdin): the token goes on the jar's standard
+    // input, never in its arguments or environment.
+    jar.stdin
+        .take()
+        .context("the jar's standard input")?
+        .write_all(&start.encode())
+        .context("hand the jar its start")?;
+    let until = Instant::now() + place.hold;
+    while socket_state(&socket) != SocketState::Live {
+        if Instant::now() >= until || jar.try_wait().is_ok_and(|exit| exit.is_some()) {
+            let _ = jar.kill();
+            let _ = jar.wait();
+            super::tokens::forget(&place, &socket);
+            anyhow::bail!("{name}'s jar didn't start");
+        }
+        std::thread::sleep(START_POLL);
+    }
+    Ok(socket)
 }
 
 #[cfg(test)]

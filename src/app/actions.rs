@@ -192,11 +192,11 @@ impl App {
                 self.open_pager_request(req);
                 return Ok(Vec::new());
             }
-            state::Update::Quit => {
-                // `ApplyResult` has no `Quit` variant, so this is
-                // unreachable today; handle defensively (no panic on a
-                // daily-driver path) in case a future Action maps to it.
-                self.request_quit();
+            leaving @ (state::Update::Quit | state::Update::Detach) => {
+                // `ApplyResult` has neither variant, so this is unreachable
+                // today; handle defensively (no panic on a daily-driver path)
+                // in case a future Action maps to one.
+                self.leave(matches!(leaving, state::Update::Detach));
                 return Ok(Vec::new());
             }
             state::Update::Defer => {}
@@ -423,7 +423,7 @@ impl App {
             Action::Redraw => {
                 self.view.needs_full_repaint = true;
             }
-            Action::Quit => self.request_quit(),
+            Action::Quit | Action::Detach => self.leave(matches!(action, Action::Detach)),
             Action::Project(crate::keymap::ProjectAction::Close) => self.close_project(),
             Action::Project(crate::keymap::ProjectAction::List) => self.open_project_switcher(),
             Action::Project(crate::keymap::ProjectAction::Attention) => self.go_to_attention(),
