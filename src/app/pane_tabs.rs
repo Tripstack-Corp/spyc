@@ -342,6 +342,7 @@ impl App {
             cwd,
             context_path: &context_path,
             extra_env: &extra_env,
+            project_env: &self.state.active_project().env.pairs(),
             jar: None,
         };
         match self.launch_tab_pane(launch, jars, &pane_id, restoring, wake) {
@@ -459,6 +460,7 @@ impl App {
             cwd,
             context_path: &context_path,
             extra_env: &extra_env,
+            project_env: &self.state.active_project().env.pairs(),
             jar: None,
         };
         match self.launch_tab_pane(launch, jars, &pane_id, None, wake) {

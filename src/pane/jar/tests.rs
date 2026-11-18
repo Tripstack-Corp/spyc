@@ -611,6 +611,7 @@ fn spawn_in(place: &Place, command: &str, cwd: &Path) -> anyhow::Result<PtyHost>
 /// [`spawn_in`], for the tab `name`.
 fn spawn_named(place: &Place, name: &str, command: &str, cwd: &Path) -> anyhow::Result<PtyHost> {
     PtyHost::spawn(crate::pane::pty_host::PtySpec {
+        project_env: &[],
         command,
         rows: 24,
         cols: 80,
@@ -821,6 +822,7 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
     let place = place_in(dir.path(), built_jar());
     let pane = crate::pane::Pane::launch(
         crate::pane::Launch {
+            project_env: &[],
             command: "sh -c 'printf hello; exec cat'",
             rows: 24,
             cols: 80,
@@ -934,6 +936,7 @@ const TAB: &str = "fedcba9876543210";
 fn pane_in(place: &Place, command: &str, cwd: &Path, adopt: Option<PathBuf>) -> crate::pane::Pane {
     crate::pane::Pane::launch(
         crate::pane::Launch {
+            project_env: &[],
             command,
             rows: 24,
             cols: 80,

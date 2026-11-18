@@ -321,23 +321,7 @@ impl AppState {
                 PromptResult::Handled
             }
             PromptKind::SetEnv => {
-                let line = buffer.trim();
-                if let Some((name, value)) = line.split_once('=') {
-                    let name = name.trim();
-                    if name.is_empty() {
-                        self.flash_error("setenv: missing variable name");
-                    } else {
-                        // Record a runtime override instead of mutating the
-                        // process env: `std::env::set_var` is unsound now
-                        // that worker threads may read env concurrently.
-                        // `envset` layers this over the real environment and
-                        // is merged into every child spawn. See `crate::envset`.
-                        crate::envset::set(name, value);
-                        self.flash_info(format!("setenv {name}={value}"));
-                    }
-                } else if !line.is_empty() {
-                    self.flash_error("setenv: expected NAME=VALUE");
-                }
+                self.set_env(buffer.trim());
                 PromptResult::Handled
             }
             PromptKind::Limit => {
@@ -398,6 +382,38 @@ impl AppState {
             | PromptKind::WorktreeNewBranch
             | PromptKind::WorktreeDeleteConfirm => PromptResult::NotHandled,
         }
+    }
+}
+
+impl AppState {
+    /// `:setenv [-p] NAME=VALUE`: the variable is the project's own, which
+    /// `crate::envset` hands to every program it starts; `-p` saves it too.
+    fn set_env(&mut self, line: &str) {
+        let (save, line) = match line.strip_prefix("-p") {
+            Some(rest) if rest.is_empty() || rest.starts_with(char::is_whitespace) => {
+                (true, rest.trim_start())
+            }
+            _ => (false, line),
+        };
+        let Some((name, value)) = line.split_once('=') else {
+            if !line.is_empty() || save {
+                self.flash_error("setenv: expected NAME=VALUE");
+            }
+            return;
+        };
+        let name = name.trim();
+        if name.is_empty() {
+            self.flash_error("setenv: missing variable name");
+            return;
+        }
+        self.active_project_mut().env.set(name, value, save);
+        self.flash_info(if save {
+            format!(
+                "setenv {name}={value}: saved with the project as plain text, so keep secrets out"
+            )
+        } else {
+            format!("setenv {name}={value}")
+        });
     }
 }
 

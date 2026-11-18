@@ -272,11 +272,9 @@ fn prompt_set_env() {
     let mut s = test_state();
     s.dispatch_prompt(&PromptKind::SetEnv, "TEST_SPYC_VAR=hello");
     assert!(matches!(s.flash.as_ref().unwrap().kind, FlashKind::Info));
-    // Verify the override was recorded (in the envset store, not the
-    // process env — `:s` no longer mutates `environ`).
     assert_eq!(
-        crate::envset::var("TEST_SPYC_VAR").as_deref(),
-        Some("hello")
+        s.active_project().env.pairs(),
+        [("TEST_SPYC_VAR".to_string(), "hello".to_string())]
     );
 }
 
