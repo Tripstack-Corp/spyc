@@ -413,6 +413,158 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
     );
 }
 
+/// An agent's MCP proxy, `spyc --mcp`, run with the environment spyc gave the
+/// agent in its tab: requests go in on its standard input, and each reply is
+/// read from its output within the test's wait.
+struct Proxy {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    replies: std::sync::mpsc::Receiver<String>,
+}
+
+impl Proxy {
+    fn start(dirs: &Dirs, agent_env: &[(String, String)]) -> Self {
+        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+            .arg("--mcp")
+            .current_dir(&dirs.project)
+            .env_clear()
+            .envs(dirs.env())
+            .envs(agent_env.iter().map(|(k, v)| (k, v)))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (tx, replies) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(stdout).lines() {
+                let Ok(line) = line else { return };
+                if tx.send(line).is_err() {
+                    return;
+                }
+            }
+        });
+        Self {
+            child,
+            stdin,
+            replies,
+        }
+    }
+
+    fn send(&mut self, message: &str) {
+        self.stdin.write_all(message.as_bytes()).unwrap();
+        self.stdin.write_all(b"\n").unwrap();
+        self.stdin.flush().unwrap();
+    }
+
+    /// The reply to a request, or `None` when the proxy ended without one.
+    fn reply(&self) -> Option<serde_json::Value> {
+        let line = self.replies.recv_timeout(WAIT).ok()?;
+        Some(serde_json::from_str(&line).unwrap())
+    }
+
+    /// The pid of the spyc that answers `get_spyc_context` as request `id`.
+    fn answering_spyc(&mut self, id: u32) -> Result<i64, String> {
+        self.send(&format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"tools/call\",\"params\":{{\"name\":\"get_spyc_context\",\"arguments\":{{}}}}}}"
+        ));
+        let reply = self.reply().ok_or("the proxy ended without a reply")?;
+        let text = reply["result"]["content"][0]["text"]
+            .as_str()
+            .ok_or_else(|| format!("no context in {reply}"))?;
+        let context: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+        context["pid"]
+            .as_i64()
+            .ok_or_else(|| format!("no pid in {context}"))
+    }
+}
+
+impl Drop for Proxy {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// R30a: an agent's MCP proxy follows its pane's jar. After a `kill -9` of
+/// spyc and `spyc -r`, the next tool call through the same proxy is answered
+/// by the spyc that took the jar back: the proxy asks its jar where its owner's
+/// MCP socket is now, rather than ending with the spyc that launched it. An
+/// agent mid-turn keeps spyc's tools across a crash, and across the handover
+/// `^d` and an upgrade make.
+#[test]
+#[ignore = "red until an agent's MCP proxy follows its jar to the spyc that owns it"]
+fn an_agents_mcp_proxy_follows_its_jar_to_the_spyc_that_takes_it_back() {
+    let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+    let env_file = probe.path().to_path_buf();
+    let dirs = dirs_running(&format!(
+        "env > {}; printf ready-mark; exec cat",
+        env_file.display()
+    ));
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    eventually("the tab's output shows", || first.shows("ready-mark"));
+    left.0.push(
+        std::fs::read_to_string(&dirs.pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap(),
+    );
+    let agent_env: Vec<(String, String)> = std::fs::read_to_string(&env_file)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| matches!(*k, "SPYC_MCP_SOCK" | "SPYC_PANE_ID" | "SPYC_JAR_SOCKET"))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    assert_eq!(
+        agent_env.len(),
+        3,
+        "the tab's program sees its spyc, pane and jar: {agent_env:?}"
+    );
+    let mut socket = None;
+    eventually("the session records the tab's jar", || {
+        socket = saved_jar_socket(&dirs.state);
+        socket.is_some()
+    });
+    let socket = socket.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+
+    let mut proxy = Proxy::start(&dirs, &agent_env);
+    proxy.send("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+    assert!(proxy.reply().is_some(), "the proxy initialized");
+    proxy.send("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+    assert_eq!(proxy.answering_spyc(2), Ok(i64::from(first.pid())));
+
+    let first_pid = first.pid();
+    first.crash();
+    let second = Spyc::start(&dirs, &["-r"]);
+    left.0.push(second.pid());
+    eventually("the restore picker", || second.shows("Enter restore"));
+    let mut typed: Option<Instant> = None;
+    eventually("the new spyc owns the jar", || {
+        if typed.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
+            second.type_keys(b"\r");
+            typed = Some(Instant::now());
+        }
+        described(&socket, "owner_pid") == Some(second.pid().to_string())
+    });
+    assert_ne!(first_pid, second.pid());
+    assert_eq!(
+        proxy.answering_spyc(3),
+        Ok(i64::from(second.pid())),
+        "the agent's next tool call reaches the spyc that took its jar back"
+    );
+}
+
 /// S2b: a spyc stopped past its jars' deadline loses their leases; resumed, it
 /// takes its tabs back, the same program, and what it printed meanwhile shows,
 /// since it fit the jar's ring.
