@@ -218,8 +218,10 @@ spyc started in an outer jar by its harness; the lazy entry is new.
   makes: the old spyc saves the session, leaves its jars running and ends; a
   spyc from the new binary starts in a new session jar and takes them back,
   and agents' MCP follows their jars across the gap (R30a). `spyc attach` from
-  a newer build offers it, and so does `:upgrade`. It replaces an `exec` inside
-  the outer jar. What `spyc -r` loses (cursors, picks, filters, pagers) a
+  a newer build offers it, and so does `:upgrade`. In spyc's own jar the new
+  spyc runs in the same jar, by `exec`: the pid the jar knows its program by
+  stays, and the terminal stays attached, while the state goes through the
+  manifest as any handover's does. What `spyc -r` loses (cursors, picks, filters, pagers) a
   handover loses too, until the manifest keeps it.
 - **Docs:** a feature page for detaching and attaching, `docs/KEYBINDINGS.md`
   and the help overlay for `^d`, and `:detach` and `:attach` for users.
