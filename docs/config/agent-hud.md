@@ -72,7 +72,13 @@ their times and outcomes. The mode row counts subagent (`Agent`) and background
 calls, then, once `TodoWrite` or `TaskCreate`/`TaskUpdate` has reported one,
 `todo`: completed over the total, with how many are in progress in brackets
 when any are. The two tools share one three-state list; nothing is shown until
-one has been used. After `hooks` and `mcp`, `org` names the organization the
+one has been used. In Code Mode, where Claude writes a script that calls its
+tools and runs it as one `REPL` call, the row adds `scripts`: how many have
+started, `✗` with how many threw and `◐` with how many are still running,
+then `calls/script`, the tool calls each made on average. A script's own
+calls count in the tools row, which names `REPL` as running while a script
+is. A session outside Code Mode that has run no script shows neither cell.
+The dump adds how long the latest script ran and the longest. After `hooks` and `mcp`, `org` names the organization the
 tab's Claude Code is logged into, cut past 32 columns, and follows a `/login`
 to another organization or a logout as Claude Code saves it. It is
 `oauthAccount.organizationName` in Claude Code's own config file, the only key

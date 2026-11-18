@@ -66,7 +66,42 @@ fn mode_row(s: &Snapshot, at_least: &str, p: Palette) -> Row {
     if let Some(cell) = todo_cell(s.plan.as_ref(), at_least, p) {
         cells.push(cell);
     }
+    cells.extend(script_cells(s, at_least, p));
     Row::new(cells)
+}
+
+/// Code Mode's scripts: how many started, `✗` for those that threw and `◐`
+/// for those still running, then how many calls each made on average.
+/// Omitted, not `--`, outside Code Mode until a script has run.
+fn script_cells(s: &Snapshot, at_least: &str, p: Palette) -> Vec<Field> {
+    let scripts = &s.scripts;
+    let code_mode = s.mode.as_ref().and_then(|mode| mode.value.code_mode);
+    if code_mode != Some(true) && scripts.started == 0 {
+        return Vec::new();
+    }
+    let mut count = p.pair(
+        "scripts",
+        p.strong(&format!("{at_least}{}", scripts.started)),
+    );
+    for (n, mark, colour) in [
+        (scripts.failed, "✗", p.bad),
+        (scripts.running, "◐", p.active),
+    ] {
+        if n > 0 {
+            count.0.push(Span::raw(" "));
+            count.0.push(p.tint(&format!("{mark}{n}"), colour));
+        }
+    }
+    let mut cells = vec![count];
+    if scripts.started > 0 {
+        let started = u64::from(scripts.started);
+        let tenths = (u64::from(scripts.calls) * 10 + started / 2) / started;
+        cells.push(p.pair(
+            "calls/script",
+            p.value(&format!("{}.{}", tenths / 10, tenths % 10)),
+        ));
+    }
+    cells
 }
 
 /// `TodoWrite`'s list, or `TaskCreate`/`TaskUpdate`'s tasks — named `todo`, not
@@ -178,6 +213,10 @@ fn tools(s: &Snapshot, tail_only: bool, p: Palette) -> Row {
         if !running.contains(&name) {
             running.push(name);
         }
+    }
+    // A script's own calls are written only once it ends.
+    if s.scripts.running > 0 && !running.iter().any(|name| name == "REPL") {
+        running.push("REPL".to_owned());
     }
     let label = if tail_only { "recent" } else { "tools" };
     tools_row(label, &tallies, Some(&running), p)
@@ -325,6 +364,7 @@ mod tests {
                     model: Some("claude-opus-5-5".into()),
                     effort: Some("xhigh".into()),
                     permission_mode: Some("auto".into()),
+                    code_mode: None,
                 },
             }),
             tool_counts: vec![
@@ -399,6 +439,39 @@ mod tests {
         let row = rows(&shown, 200)[3].clone();
         assert!(!row.contains("Explore"), "{row}");
         assert!(row.contains("Plan"), "{row}");
+    }
+
+    /// A Code Mode session's scripts: how many, how many threw or still run,
+    /// and how many calls each made, on the mode row; a running script on
+    /// the tools row.
+    #[test]
+    fn a_code_mode_session_shows_its_scripts() {
+        use crate::agent::claude_metrics::Scripts;
+        let mut snapshot = Snapshot {
+            tools: Vec::new(),
+            scripts: Scripts {
+                started: 41,
+                calls: 122,
+                failed: 2,
+                running: 1,
+                ..Scripts::default()
+            },
+            ..session()
+        };
+        snapshot.mode.as_mut().unwrap().value.code_mode = Some(true);
+        let shown = rows(&view(Some(&snapshot), false), 200);
+        assert!(shown[3].contains("scripts 41 ✗2 ◐1"), "{shown:?}");
+        assert!(shown[3].contains("calls/script 3.0"), "{shown:?}");
+        assert!(shown[2].contains("◐ REPL"), "{shown:?}");
+
+        snapshot.scripts = Scripts::default();
+        let none_yet = rows(&view(Some(&snapshot), true), 200);
+        assert!(none_yet[3].contains("scripts ≥0"), "{none_yet:?}");
+        assert!(!none_yet[3].contains("calls/script"), "{none_yet:?}");
+        assert!(none_yet[2].contains("◌ none"), "{none_yet:?}");
+
+        snapshot.mode.as_mut().unwrap().value.code_mode = Some(false);
+        assert!(!rows(&view(Some(&snapshot), false), 200)[3].contains("scripts"));
     }
 
     #[test]
