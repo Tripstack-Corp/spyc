@@ -53,6 +53,9 @@ struct Answers {
     cell_size: Option<(u16, u16)>,
     da1: bool,
     status: bool,
+    /// Type `k` in the same write as the DA1 reply, rather than once the
+    /// probe has returned.
+    key_with_da1: bool,
 }
 
 impl Answers {
@@ -61,6 +64,7 @@ impl Answers {
         cell_size: None,
         da1: false,
         status: false,
+        key_with_da1: false,
     };
 
     fn reply(self, query: Query) -> Option<Vec<u8>> {
@@ -69,7 +73,13 @@ impl Answers {
             Query::CellSize => self
                 .cell_size
                 .map(|(w, h)| format!("\x1b[6;{h};{w}t").into_bytes()),
-            Query::Da1 if self.da1 => Some(b"\x1b[?62;22c".to_vec()),
+            Query::Da1 if self.da1 => {
+                let mut reply = b"\x1b[?62;22c".to_vec();
+                if self.key_with_da1 {
+                    reply.push(b'k');
+                }
+                Some(reply)
+            }
             Query::Status if self.status => Some(b"\x1b[0n".to_vec()),
             _ => None,
         }
@@ -221,7 +231,9 @@ fn run_on_a_fake_terminal(test: &str, answers: Answers) -> Report {
     let mut lines = BufReader::new(conn.try_clone().unwrap());
     let mut probed = String::new();
     lines.read_line(&mut probed).unwrap();
-    writer.lock().unwrap().write_all(b"k").unwrap();
+    if !answers.key_with_da1 {
+        writer.lock().unwrap().write_all(b"k").unwrap();
+    }
     (&conn).write_all(b"g").unwrap();
     let mut key = String::new();
     lines.read_line(&mut key).unwrap();
@@ -238,7 +250,6 @@ fn run_on_a_fake_terminal(test: &str, answers: Answers) -> Report {
 /// A terminal that answers nothing: the probe gives up, and the key typed
 /// after it reaches spyc's reader, not a reader the probe left on stdin.
 #[test]
-#[ignore = "red until the image probe ends on its DA1 reply"]
 fn a_key_typed_after_an_unanswered_probe_reaches_spyc() {
     if let Some(sock) = std::env::var_os(CHILD) {
         return child_side(Path::new(&sock));
@@ -254,7 +265,6 @@ fn a_key_typed_after_an_unanswered_probe_reaches_spyc() {
 /// status report: the probe ends on the DA1 reply with what came before it,
 /// rather than waiting on a timer and falling back to defaults.
 #[test]
-#[ignore = "red until the image probe ends on its DA1 reply"]
 fn the_probe_ends_on_the_da1_reply_with_what_was_answered_before_it() {
     if let Some(sock) = std::env::var_os(CHILD) {
         return child_side(Path::new(&sock));
@@ -266,6 +276,7 @@ fn the_probe_ends_on_the_da1_reply_with_what_was_answered_before_it() {
             cell_size: Some((7, 15)),
             da1: true,
             status: false,
+            key_with_da1: false,
         },
     );
     assert_eq!(report.probed, "probed Kitty 7x15");
@@ -287,10 +298,32 @@ fn a_terminal_that_answers_everything_gives_its_protocol_and_cell_size() {
             cell_size: Some((7, 15)),
             da1: true,
             status: true,
+            key_with_da1: false,
         },
     );
     assert_eq!(report.probed, "probed Kitty 7x15");
     assert_eq!(report.key, "Char('k')");
+}
+
+/// A key typed in the same write as the DA1 reply: the probe stops at the
+/// reply's last byte, so the key is left for spyc's reader.
+#[test]
+fn a_key_right_behind_the_da1_reply_is_left_for_spyc() {
+    if let Some(sock) = std::env::var_os(CHILD) {
+        return child_side(Path::new(&sock));
+    }
+    let report = run_on_a_fake_terminal(
+        "terminal::probe_tests::a_key_right_behind_the_da1_reply_is_left_for_spyc",
+        Answers {
+            kitty: true,
+            cell_size: Some((7, 15)),
+            da1: true,
+            status: false,
+            key_with_da1: true,
+        },
+    );
+    assert_eq!(report.probed, "probed Kitty 7x15");
+    assert_eq!(report.key, "Char('k')", "the probe took the key");
 }
 
 /// The fake terminal reads each query whole, and waits for one cut short.

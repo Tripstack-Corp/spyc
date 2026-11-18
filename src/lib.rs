@@ -456,8 +456,8 @@ pub fn run() -> Result<()> {
     app.queue_startup_commands(cli.cmd);
     // Detect the terminal's graphics protocol (Kitty/iTerm2/Sixel/halfblocks +
     // font cell size) for inline diagram rendering — ONCE, here, before the
-    // input reader spawns, because `from_query_stdio` reads stdin/cursor
-    // responses (the #444 no-live-cursor-read rule). Best-effort.
+    // input reader spawns, because the probe reads the terminal's replies from
+    // stdin (the #444 no-live-cursor-read rule). Best-effort.
     app.set_picker(detect_image_picker());
     app.set_shift_esc(crate::terminal::keyboard_enhancement_supported());
     let result = app.run(&mut terminal);
