@@ -49,9 +49,7 @@ impl Place {
             super::store::Binary::Entry(e) | super::store::Binary::Beside(e, _) => e,
             super::store::Binary::None(why) => return Err(super::NoUsableJar(why).into()),
         };
-        let tokens = crate::state::state_root()
-            .context("no state directory for jar tokens")?
-            .join("jar-tokens");
+        let tokens = tokens_dir()?;
         Ok(Self {
             binary,
             dirs,
@@ -97,6 +95,22 @@ impl Place {
         }
         Ok(())
     }
+}
+
+/// Where this user's jars' tokens are kept, by their sockets' names.
+pub(super) fn tokens_dir() -> anyhow::Result<PathBuf> {
+    Ok(crate::state::state_root()
+        .context("no state directory for jar tokens")?
+        .join("jar-tokens"))
+}
+
+/// The directory sessions' own jars are in, for this user.
+pub(super) fn this_users_sessions() -> PathBuf {
+    sessions_dir(&socket_dirs(
+        std::env::var_os("XDG_RUNTIME_DIR"),
+        std::env::var_os("TMPDIR"),
+        rustix::process::getuid().as_raw(),
+    ))
 }
 
 /// How long a pane's jar holds its program for this spyc: far longer than

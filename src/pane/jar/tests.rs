@@ -1779,8 +1779,12 @@ fn tabs_made_together_have_sockets_of_their_own() {
 /// be shorter. A new one fails this until it is one or the other.
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
-    const OUTWAITS: [&str; 3] = ["ADOPT_WAIT", "LINK_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 13] = [
+    const OUTWAITS: [&str; 4] = ["ADOPT_WAIT", "LINK_WAIT", "TAKEOVER_WAIT", "WRITE_STALL"];
+    const SHORTER: [(&str, &str); 14] = [
+        (
+            "TAKEOVER_POLL",
+            "how often a takeover looks at the jar, not a wait",
+        ),
         (
             "DISCARD_WAIT",
             "a discard's wait on a jar no spyc owns, which no upgrade parks: running \
