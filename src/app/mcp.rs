@@ -760,12 +760,15 @@ impl App {
         } else {
             waiting::Origin::Agent
         };
-        let promoted = follow_turn(&mut entry.info, activity, origin);
+        let (promoted, outside) = follow_turn(&mut entry.info, activity, origin);
         if decision.is_ok() && waiting::held_for_turn_end(activity, origin, entry.info.turn_open) {
             return hold_waiting(&mut entry.info, idx, ttl_ms, note, now);
         }
         let verdict = waiting::meet(entry.info.reported.as_ref(), activity, origin, now);
-        let decision = decision.and_then(|a| verdict.ignored_because().map_or(Ok(a), Err));
+        let ignored = verdict
+            .ignored_because()
+            .or(outside.then_some(waiting::OUTSIDE_A_TURN));
+        let decision = decision.and_then(|a| ignored.map_or(Ok(a), Err));
         if verdict == waiting::Verdict::AbsorbTurnEnd
             && let Some(live) = entry.info.reported.as_mut()
         {
@@ -797,16 +800,24 @@ impl App {
         let pane_id = entry.info.id.clone();
         let label = entry.info.label.clone();
         self.state.agent_hud_status_reported(&pane_id);
-        McpResponse::Ok {
-            message: match decision {
-                Ok(_) => format!("status '{status}' set for pane {} ({label})", idx + 1),
-                Err(reason) => format!(
-                    "status '{status}' recorded for pane {} ({label}); not applied: {reason}",
-                    idx + 1
-                ),
-            },
-        }
+        report_answer(&status, idx + 1, &label, decision.err())
     }
+}
+
+/// What a status report answers: set, or recorded with why it wasn't applied.
+fn report_answer(
+    status: &str,
+    pane: usize,
+    label: &str,
+    ignored: Option<&str>,
+) -> crate::mcp_cmd::McpResponse {
+    let message = match ignored {
+        None => format!("status '{status}' set for pane {pane} ({label})"),
+        Some(reason) => {
+            format!("status '{status}' recorded for pane {pane} ({label}); not applied: {reason}")
+        }
+    };
+    crate::mcp_cmd::McpResponse::Ok { message }
 }
 
 /// Keep a hook event for the diagnostics, oldest dropped past the limit.
@@ -829,26 +840,29 @@ const HELD_FOR_TURN_END: &str = "held until this turn ends";
 /// Follow the agent's turn through a hook report. The turn's end makes a
 /// `waiting` the agent sent during it the live report, which then meets that
 /// end like a report sent there; any newer report from the agent replaces it.
-/// Returns whether a held report took over.
+/// Returns whether a held report took over, and whether the report is a
+/// `StopFailure` from outside any turn.
 fn follow_turn(
     info: &mut crate::pane::tabs::TabInfo,
     activity: crate::pane::AgentActivity,
     origin: crate::agent::waiting::Origin<'_>,
-) -> bool {
+) -> (bool, bool) {
     let crate::agent::waiting::Origin::Hook(event) = origin else {
         info.held_waiting = None;
-        return false;
+        return (false, false);
     };
     let was_open = info.turn_open;
+    let outside =
+        crate::agent::waiting::failed_outside_a_turn(info.reported.as_ref(), was_open, event);
     info.turn_open = crate::agent::waiting::turn_open_after(was_open, activity, event);
     if was_open
         && !info.turn_open
         && let Some(held) = info.held_waiting.take()
     {
         info.reported = Some(held);
-        return true;
+        return (true, outside);
     }
-    false
+    (false, outside)
 }
 
 /// Record the agent's own `waiting`, sent while its turn is open, to take

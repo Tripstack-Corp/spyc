@@ -61,7 +61,9 @@ probe). A reported `idle` (codex's `Interrupt` or agy's `USER_CANCELED`
 `idle` means quiet, not proof that a turn stopped or finished. A Claude turn
 that ends on an API error fires `StopFailure` instead of `Stop`; its hook
 reports `blocked`, which pings, with a note naming the error (`stopped: rate
-limit`), since that turn won't resume by itself.
+limit`), since that turn won't resume by itself. A `StopFailure` that arrives
+after the turn already ended, from a request outside any turn, is recorded but
+not applied, so an idle tab stays `done`.
 
 **Glyphs** (shape = liveness, colour = urgency):
 
