@@ -421,6 +421,9 @@ impl App {
         if !cwd_fx.is_empty() {
             self.run_effects(cwd_fx, terminal, foreground_exec);
         }
+
+        // A `:setenv` reaches spyc's own reads (`$EDITOR`, `$SHELL`, …).
+        self.settle_env();
     }
 }
 

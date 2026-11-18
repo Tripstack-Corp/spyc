@@ -48,6 +48,8 @@ pub struct Project {
     /// (`App::settle_project_configs`). `None` for a config never read from
     /// files.
     pub config_key: Option<(PathBuf, PathBuf)>,
+    /// What `:setenv` set here, for every program the project starts.
+    pub env: crate::envset::ProjectEnv,
 }
 
 impl Project {
@@ -79,6 +81,7 @@ impl Project {
             user_keymap,
             deferred_tabs: Vec::new(),
             config_key: None,
+            env: crate::envset::ProjectEnv::default(),
         }
     }
 

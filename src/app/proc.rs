@@ -217,27 +217,35 @@ impl ForegroundExec {
         args: &[String],
         pause_after: bool,
         subshell: bool,
-        cwd: Option<&std::path::Path>,
+        place: ChildPlace,
     ) -> Result<()> {
         self.park_and_wait();
-        let cmd = foreground_command(program, args, subshell, cwd);
+        let cmd = foreground_command(program, args, subshell, place);
         let r = run_child_in_foreground(terminal, cmd, pause_after, subshell);
         self.unpark_reader();
         r
     }
 }
 
-/// The child [`run_child_in_foreground`] starts: `program` in `cwd`, or where
-/// spyc is when there's none.
+/// Where a foreground child starts, and what it adds to spyc's environment.
+pub(super) struct ChildPlace<'a> {
+    /// `None`: where spyc is.
+    pub(super) cwd: Option<&'a std::path::Path>,
+    /// The project's `:setenv` variables.
+    pub(super) env: &'a [(String, String)],
+}
+
+/// The child [`run_child_in_foreground`] starts: `program` in `place`.
 fn foreground_command(
     program: &str,
     args: &[String],
     subshell: bool,
-    cwd: Option<&std::path::Path>,
+    place: ChildPlace,
 ) -> std::process::Command {
     let mut cmd = std::process::Command::new(program);
     cmd.args(args);
-    if let Some(dir) = cwd {
+    cmd.envs(place.env.iter().map(|(k, v)| (k, v)));
+    if let Some(dir) = place.cwd {
         cmd.current_dir(dir);
     }
     // process_group(0) ⇒ child becomes leader of a new process group
@@ -578,9 +586,10 @@ mod foreground_exec_tests {
     fn a_foreground_child_starts_in_the_directory_it_is_given() {
         let pwd = |cwd: Option<&std::path::Path>| {
             let args = ["-c".to_string(), "pwd -P".to_string()];
-            let out = super::foreground_command("sh", &args, false, cwd)
-                .output()
-                .expect("sh runs");
+            let out =
+                super::foreground_command("sh", &args, false, super::ChildPlace { cwd, env: &[] })
+                    .output()
+                    .expect("sh runs");
             std::path::PathBuf::from(String::from_utf8(out.stdout).unwrap().trim_end())
         };
         let dir = std::fs::canonicalize(concat!(env!("CARGO_MANIFEST_DIR"), "/docs")).unwrap();
@@ -589,5 +598,28 @@ mod foreground_exec_tests {
             pwd(None),
             std::fs::canonicalize(std::env::current_dir().unwrap()).unwrap()
         );
+    }
+
+    /// A foreground child (`$`, the editor) gets the project's `:setenv`
+    /// variables.
+    #[test]
+    fn a_foreground_child_gets_the_projects_variables() {
+        let args = [
+            "-c".to_string(),
+            "printf %s \"$SPYC_FG_ENV_TEST\"".to_string(),
+        ];
+        let env = [("SPYC_FG_ENV_TEST".to_string(), "fg".to_string())];
+        let out = super::foreground_command(
+            "sh",
+            &args,
+            false,
+            super::ChildPlace {
+                cwd: None,
+                env: &env,
+            },
+        )
+        .output()
+        .expect("sh runs");
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), "fg");
     }
 }
