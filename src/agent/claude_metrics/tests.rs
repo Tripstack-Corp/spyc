@@ -133,7 +133,6 @@ fn script_call(second: u32, id: &str, name: &str) -> [Value; 2] {
 /// A script's calls are tools the HUD counts, but no request was made for
 /// them: the context, the latest request and the totals stay the model's.
 #[test]
-#[ignore = "red until the Claude reader skips Code Mode's synthetic usage"]
 fn a_code_mode_scripts_calls_count_as_tools_not_requests() {
     let mut records = vec![assistant(
         "msg-1",
