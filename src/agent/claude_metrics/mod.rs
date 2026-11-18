@@ -98,6 +98,9 @@ pub struct Scripts {
     /// How long the latest script to finish ran, in milliseconds.
     pub latest_ms: Option<Sample<u64>>,
     pub longest_ms: Option<u64>,
+    /// The calls the scripts made, by tool, most called first, bounded as
+    /// [`Snapshot::tool_counts`] is, which counts them too.
+    pub tools: Vec<ToolCount>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +118,8 @@ pub struct Tool {
     pub at: Timestamp,
     /// Started with `run_in_background`, so its result only says it began.
     pub background: bool,
+    /// Made by a Code Mode script.
+    pub in_script: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

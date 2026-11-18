@@ -277,6 +277,45 @@ fn a_code_mode_session_counts_its_scripts_and_what_they_did() {
     assert!(!dump.contains("SENTINEL"), "{dump}");
 }
 
+/// The calls the scripts made are tallied by tool apart from the session's
+/// whole tally, which still counts them: the `REPL` calls that ran the
+/// scripts, and one that threw, are not among them.
+#[test]
+fn a_scripts_calls_are_tallied_apart_by_tool() {
+    let mut records = vec![
+        repl("msg-1", 1, "toolu-1"),
+        dispatched(2, "toolu-1", 1),
+        assistant(
+            "msg-2",
+            2,
+            usage(1, 1, 1, 1),
+            tool_use("toolu-2", "Bash", json!({})),
+        ),
+        result(2, "toolu-2", false),
+    ];
+    records.extend(script_call(3, "repl_a", "Bash"));
+    let [call, mut failed] = script_call(3, "repl_b", "Bash");
+    failed["message"]["content"][0]["is_error"] = json!(true);
+    records.extend([call, failed]);
+    records.extend(script_call(3, "repl_c", "Read"));
+    records.extend(threw(3, "repl-error-1"));
+    let snapshot = fold_all(&records);
+
+    let tally = |counts: &[ToolCount]| {
+        counts
+            .iter()
+            .map(|c| (c.name.clone(), c.calls, c.failed))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        tally(&snapshot.scripts.tools),
+        [("Bash".to_owned(), 2, 1), ("Read".to_owned(), 1, 0)]
+    );
+    let whole = tally(&snapshot.tool_counts);
+    assert!(whole.contains(&("Bash".to_owned(), 3, 1)), "{whole:?}");
+    assert!(whole.contains(&("REPL".to_owned(), 1, 1)), "{whole:?}");
+}
+
 /// Only a queued envelope's own opening tag ends a script: the same text
 /// quoted in a script's output, or in a result, is data.
 #[test]
