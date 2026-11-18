@@ -959,6 +959,23 @@ zero timeout, and macOS refuses a new one on a socket its peer has closed, so
 the longer timeout is best effort: the rest of the frame is already buffered
 or never coming.
 
+## An agent's MCP follows its pane's jar
+
+<!-- SPYC-TRAP: mcp-follows-jar -->
+An agent reaches spyc's tools through its MCP proxy, `spyc --mcp`, which
+connects to the socket of the spyc that launched the agent (`SPYC_MCP_SOCK`,
+named by that spyc's pid). The agent outlives that spyc: its tab runs in a jar,
+and after a crash and `spyc -r`, the handover `^d` makes or an upgrade, another
+spyc owns the jar. So every spyc records its MCP socket in each pane jar it
+owns, as `owner_mcp` (R30a), and the jar forgets it when that spyc goes. A proxy
+whose spyc has gone asks its jar, by `SPYC_JAR_SOCKET`, where its owner is now,
+connects there, and replays the `initialize` and `initialized` it began with
+(`src/mcp/follow.rs`). A request made while no spyc owns the jar waits for one
+within its own wait, then gets an error, and the proxy stays for the next. The
+status hooks ask the jar first too. A proxy that ended with its first spyc left
+the agent without spyc's tools for the rest of its session, and nothing said
+so: the agent's own tool calls just failed.
+
 ## spyc knows its own jar by where it is
 
 <!-- SPYC-TRAP: own-jar-by-place -->

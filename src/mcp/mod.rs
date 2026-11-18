@@ -121,6 +121,7 @@ pub fn socket_path() -> Option<PathBuf> {
 
 mod config;
 mod deadline;
+mod follow;
 mod framing;
 mod hooks;
 mod protocol;
@@ -158,6 +159,8 @@ struct PaneEnv {
     sock: Option<PathBuf>,
     pane_id: Option<String>,
     context: Option<PathBuf>,
+    /// The pane's jar, which names the spyc that owns it now (R30a).
+    jar: Option<PathBuf>,
 }
 
 impl PaneEnv {
@@ -167,6 +170,7 @@ impl PaneEnv {
             sock: var("SPYC_MCP_SOCK").map(PathBuf::from),
             pane_id: var("SPYC_PANE_ID"),
             context: var(context::CONTEXT_ENV_VAR).map(PathBuf::from),
+            jar: var("SPYC_JAR_SOCKET").map(PathBuf::from),
         }
     }
 }
@@ -252,7 +256,8 @@ fn session_id_from_hook_payload(payload: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// Where a status report goes: the socket the launching spyc named, else the
+/// Where a status report goes: the spyc that owns the pane's jar now (R30a),
+/// else the socket the launching spyc named, else the
 /// live spyc rooted above `cwd`, found the way the proxy finds it. The named
 /// socket is dead when spyc restarted under an agent that outlived it, and the
 /// restored tab kept the agent's pane id. Discovery needs that id: without one
@@ -261,6 +266,14 @@ fn session_id_from_hook_payload(payload: &str) -> Option<String> {
 fn report_stream(env_sock: &str, pane_id: Option<&str>, cwd: &Path) -> Option<UnixStream> {
     if env_sock.is_empty() {
         return None;
+    }
+    // R30a: the pane's jar names the spyc that owns it now, which a crash, a
+    // handover or an upgrade may have changed since the agent's env was set.
+    if let Some(stream) = std::env::var_os("SPYC_JAR_SOCKET")
+        .and_then(|jar| crate::pane::jar::owner_mcp(Path::new(&jar)))
+        .and_then(|path| UnixStream::connect(path).ok())
+    {
+        return Some(stream);
     }
     UnixStream::connect(env_sock).ok().or_else(|| {
         pane_id
@@ -502,11 +515,21 @@ pub fn run(project_root: PathBuf) -> anyhow::Result<()> {
         mcp_log(&format!("stdio: trying env socket {}", sock.display()));
         if let Ok(stream) = UnixStream::connect(sock) {
             mcp_log("stdio: connected via env socket, proxying");
-            return run_proxy(stream, env.pane_id.as_deref(), Some(&project_root));
+            return run_proxy(
+                stream,
+                env.pane_id.as_deref(),
+                Some(&project_root),
+                env.jar.as_deref(),
+            );
         }
     }
     if let Some(stream) = discover_live_socket(&project_root) {
-        return run_proxy(stream, env.pane_id.as_deref(), Some(&project_root));
+        return run_proxy(
+            stream,
+            env.pane_id.as_deref(),
+            Some(&project_root),
+            env.jar.as_deref(),
+        );
     }
     if route == Route::SharedDaemon {
         mcp_log("stdio: no spyc rooted at this codex session; serving no tools");

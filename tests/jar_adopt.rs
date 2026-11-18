@@ -496,7 +496,6 @@ impl Drop for Proxy {
 /// agent mid-turn keeps spyc's tools across a crash, and across the handover
 /// `^d` and an upgrade make.
 #[test]
-#[ignore = "red until an agent's MCP proxy follows its jar to the spyc that owns it"]
 fn an_agents_mcp_proxy_follows_its_jar_to_the_spyc_that_takes_it_back() {
     let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
     let env_file = probe.path().to_path_buf();
@@ -562,6 +561,28 @@ fn an_agents_mcp_proxy_follows_its_jar_to_the_spyc_that_takes_it_back() {
         proxy.answering_spyc(3),
         Ok(i64::from(second.pid())),
         "the agent's next tool call reaches the spyc that took its jar back"
+    );
+
+    // The agent's status hook reaches it too, from a directory no spyc is
+    // rooted at, where only the jar knows it.
+    let hook = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["--report-status", "working", "--status-trace"])
+        .current_dir(&dirs.home)
+        .env_clear()
+        .envs(dirs.env())
+        .envs(agent_env.iter().map(|(k, v)| (k, v)))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(hook.status.success(), "{hook:?}");
+    let log = std::fs::read_to_string(dirs.state.join("spyc/mcp.log")).unwrap_or_default();
+    assert!(
+        log.contains("report-status: sent state=working"),
+        "the hook's report reached no spyc: {}",
+        log.lines()
+            .filter(|l| l.contains("report-status"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 

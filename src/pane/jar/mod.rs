@@ -254,6 +254,22 @@ fn as_screen(text: &str) -> String {
     text.replace('\n', "\r\n")
 }
 
+/// The jar's key for its owner's MCP socket (R30a).
+const OWNER_MCP: &str = "owner_mcp";
+
+/// R30a: the MCP socket of the spyc that owns the jar at `socket`, as the jar
+/// says; `None` while no spyc owns it, or when it doesn't answer. Asked as a
+/// lookup, which needs no token, from a directory that must be this user's
+/// alone (finding 14).
+pub fn owner_mcp(socket: &Path) -> Option<std::path::PathBuf> {
+    place::private_dir(socket.parent()?).ok()?;
+    spyc_jar::client::describe(socket)
+        .ok()?
+        .into_iter()
+        .find(|(k, v)| k == OWNER_MCP && !v.is_empty())
+        .map(|(_, v)| std::path::PathBuf::from(v))
+}
+
 /// Signals to a jarred program's group, which only its jar sends.
 #[derive(Clone)]
 pub struct Signals(Arc<Link>);
@@ -625,6 +641,15 @@ fn connect(
 ) -> anyhow::Result<Jarred> {
     let (rx, out) = client.split_queued(PING_EVERY, WRITE_STALL)?;
     out.send(&Msg::Replay { from: from.replay })?;
+    // R30a: the jar names its owner's MCP socket to the pane's proxy and hooks,
+    // which follow it to this spyc after a crash, a handover or an upgrade.
+    // The jar forgets it when this connection goes.
+    if let Some(mcp) = crate::mcp::socket_path() {
+        out.send(&Msg::SetInfo {
+            key: OWNER_MCP.into(),
+            value: mcp.display().to_string(),
+        })?;
+    }
     let link = Arc::new(Link {
         out,
         pid: from.pid,
