@@ -903,6 +903,7 @@ mod tests {
                     model: Some("claude-opus-5-5".into()),
                     effort: Some("xhigh".into()),
                     permission_mode: None,
+                    code_mode: None,
                 },
             }),
             tool_counts: vec![

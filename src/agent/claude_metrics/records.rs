@@ -12,12 +12,16 @@ const MAX_BLOCKS: usize = 64;
 /// The model a record names when no request produced it, such as a Code Mode
 /// script's own tool call: its usage is zero, not a request's.
 const SYNTHETIC_MODEL: &str = "<synthetic>";
+/// How far into an envelope its opening tag may end.
+const MAX_TAG_BYTES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
     pub id: String,
     pub name: Option<String>,
     pub background: bool,
+    /// Made by a Code Mode script, not by the model directly.
+    pub in_script: bool,
     /// `TodoWrite`'s list, when this call is one.
     pub plan: Option<Plan>,
 }
@@ -54,10 +58,20 @@ pub enum Event {
         at: Timestamp,
         results: Vec<(String, bool)>,
         task: Option<TaskOutcome>,
+        /// The script a `REPL` call started in the background, by its eval id.
+        dispatched: Option<u64>,
     },
     /// A `permission-mode` record. It has no timestamp: its place in the file
     /// dates it.
     PermissionMode(String),
+    /// A `repl-mode` record, untimed like `permission-mode`.
+    CodeMode(bool),
+    /// A script's result was queued, so it has finished.
+    ScriptEnded {
+        at: Timestamp,
+        eval: u64,
+        ms: Option<u64>,
+    },
     Compaction {
         at: Timestamp,
         compaction: Compaction,
@@ -73,6 +87,8 @@ pub fn decode(value: &Value, expected_session: &str) -> Option<Event> {
     }
     match value["type"].as_str()? {
         "permission-mode" => label(&value["permissionMode"]).map(Event::PermissionMode),
+        "repl-mode" => value["replMode"].as_bool().map(Event::CodeMode),
+        "queue-operation" => script_ended(value),
         "assistant" => assistant(value),
         "user" => results(value),
         "system" if value["subtype"] == "compact_boundary" => Some(Event::Compaction {
@@ -102,8 +118,9 @@ pub fn decode_sidechain(value: &Value) -> Option<Event> {
 
 fn assistant(value: &Value) -> Option<Event> {
     let message = &value["message"];
+    let synthetic = message["model"] == SYNTHETIC_MODEL;
     let calls = blocks(&message["content"], "tool_use")
-        .filter_map(tool_call)
+        .filter_map(|block| tool_call(block, synthetic))
         .take(MAX_BLOCKS)
         .collect();
     Some(Event::Assistant {
@@ -111,19 +128,19 @@ fn assistant(value: &Value) -> Option<Event> {
         message_id: bounded_id(&message["id"])?,
         model: label(&message["model"]),
         effort: label(&value["effort"]),
-        usage: (message["model"] != SYNTHETIC_MODEL)
-            .then(|| usage(&message["usage"]))
-            .flatten(),
+        usage: (!synthetic).then(|| usage(&message["usage"])).flatten(),
         calls,
     })
 }
 
-fn tool_call(block: &Value) -> Option<ToolCall> {
+/// A `<synthetic>` record's calls are a Code Mode script's.
+fn tool_call(block: &Value, in_script: bool) -> Option<ToolCall> {
     let name = label(&block["name"]).map(tool_name);
     let input = &block["input"];
     Some(ToolCall {
         id: bounded_id(&block["id"])?,
         background: input["run_in_background"] == true,
+        in_script,
         plan: if name.as_deref() == Some("TodoWrite") {
             plan(&input["todos"])
         } else {
@@ -172,10 +189,41 @@ fn results(value: &Value) -> Option<Event> {
     if results.is_empty() && task.is_none() {
         return None;
     }
+    let result = &value["toolUseResult"];
     Some(Event::Results {
         at: timestamp(value)?,
         results,
         task,
+        dispatched: (result["asyncDispatched"] == true)
+            .then(|| number(&result["evalId"]))
+            .flatten(),
+    })
+}
+
+/// A finished script, from the opening tag of the `repl-eval` envelope its
+/// result is queued in: never what the script printed or returned, and never
+/// an envelope quoted after the start.
+fn script_ended(value: &Value) -> Option<Event> {
+    if value["operation"] != "enqueue" {
+        return None;
+    }
+    let tag = value["content"].as_str()?.strip_prefix("<event ")?;
+    let end = tag.bytes().take(MAX_TAG_BYTES).position(|b| b == b'>')?;
+    let tag = &tag[..end];
+    let attribute = |name: &str| {
+        tag.split(' ').find_map(|pair| {
+            pair.strip_prefix(name)?
+                .strip_prefix("=\"")?
+                .strip_suffix('"')
+        })
+    };
+    if attribute("kind")? != "repl-eval" {
+        return None;
+    }
+    Some(Event::ScriptEnded {
+        at: timestamp(value)?,
+        eval: attribute("eval")?.parse().ok()?,
+        ms: attribute("ms").and_then(|ms| ms.parse().ok()),
     })
 }
 
