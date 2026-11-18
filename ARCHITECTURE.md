@@ -354,6 +354,19 @@ detection that *does* need a probe (the graphics-protocol query feeding
 `detect_image_picker`) runs **once at startup, before the input reader
 spawns**, so nothing races it. Fixed 1.58.8.
 
+<!-- SPYC-TRAP: probe-reader-ends-with-probe -->
+**No reader outlives its probe.** The image probe
+(`src/terminal/image_probe.rs`) reads the terminal's replies on the calling
+thread, a byte at a time, and stops at the reply to DA1 (`ESC[c`), which it
+sends last: a terminal answers in order, so nothing it will answer comes after
+that. A timer ends it only for a terminal that answers nothing. It replaced
+`ratatui-image`'s `Picker::from_query_stdio`, which reads on a thread of its
+own and gives up on a timer, leaving that thread blocked on stdin. In the jar
+spike's stage 2b, a spyc started with no terminal attached lost the first keys
+of the terminal that attached later to that thread. A probe that reads past
+its last reply, or on a thread that outlives it, takes keys from spyc's input
+reader without any error.
+
 Distinct from that: `setup_terminal` / `resume_tui` emit a one-shot
 `Clear(ClearType::All)` (`\x1b[2J`) right after `EnterAlternateScreen`.
 This is a plain erase-display *write* with no cursor read, so it's safe
@@ -386,7 +399,7 @@ Graphics gotchas, each of which cost real debugging time:
 
 <!-- SPYC-TRAP: iterm-osc1337 -->
 - **iTerm2 (3.5+) answers the Kitty graphics probe**, so
-  `Picker::from_query_stdio` detects it as Kitty — but only iTerm2's
+  the image probe detects it as Kitty — but only iTerm2's
   *native* OSC 1337 actually paints. `detect_image_picker` forces the
   Iterm2 protocol when `TERM_PROGRAM`/`LC_TERMINAL` says iTerm. Detect
   once at startup, before the input reader spawns (the cursor-read SSH

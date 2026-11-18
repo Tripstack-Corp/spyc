@@ -3,6 +3,8 @@
 //! handlers that restore all of it when spyc is killed. Every hand-over moves
 //! fd 2 with the screen (`crate::stderr_capture`).
 
+mod image_probe;
+
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -346,14 +348,22 @@ pub fn install_signal_handlers() {
 }
 
 /// Detect the terminal graphics protocol + font cell size for inline mermaid
-/// rendering. `from_query_stdio` probes via Kitty/Sixel capability *queries*;
-/// iTerm2 answers none of them and so falls back to `Halfblocks` (which renders
+/// rendering, by asking the terminal (`image_probe`). iTerm2 answers none of
+/// the Kitty/Sixel queries and so falls back to `Halfblocks` (which renders
 /// nothing useful for a diagram). iTerm2 has its own inline-image protocol, so
 /// when the env identifies iTerm2 we force it. Returns `None` only if the query
-/// errored outright (→ mermaid `i` reports "no image protocol").
+/// couldn't be written (→ mermaid `i` reports "no image protocol").
 pub fn detect_image_picker() -> Option<ratatui_image::picker::Picker> {
     use ratatui_image::picker::{Picker, ProtocolType};
-    let mut picker = Picker::from_query_stdio().ok()?;
+    let set = |var| std::env::var(var).is_ok_and(|v| !v.is_empty());
+    let steer = image_probe::Steer {
+        tmux: Picker::halfblocks().tmux_detected(),
+        no_kitty_or_sixel: set("WEZTERM_EXECUTABLE") || set("KONSOLE_VERSION"),
+    };
+    // SPYC-TRAP(probe-reader-ends-with-probe): read the replies on this thread
+    // and stop at the DA1 reply; a reader left on stdin takes the user's keys.
+    let mut picker =
+        image_probe::probe(io::stdin(), &mut io::stdout(), steer, image_probe::BACKSTOP).ok()?;
     // SPYC-TRAP(iterm-osc1337): do not drop the iTerm2 override below — iTerm2
     // answers the Kitty probe but only its native OSC 1337 actually paints, so
     // images silently fail to render on iTerm2 without it.
