@@ -11,6 +11,7 @@
 //! - `offsets`: the jar offset of what the pane has parsed (finding 8).
 //! - [`orphans`]: jars no spyc owns, found and discarded.
 //! - `repaint`: the program made to draw its screen again after a gap (R12c).
+//! - [`session`]: a session's own jar, the one spyc itself runs in (S4).
 //! - [`snapshots`]: when a pane's engine is snapshotted, and its storing.
 //! - [`store`]: the jar binaries every jar starts from (decision L).
 //!
@@ -35,6 +36,7 @@ mod offsets;
 pub mod orphans;
 pub mod place;
 mod repaint;
+pub mod session;
 pub mod snapshots;
 pub mod store;
 mod tokens;
@@ -59,6 +61,7 @@ use std::path::PathBuf;
 
 pub use link::Lost;
 pub use place::Place;
+use session::LINK_WAIT;
 pub use snapshots::{SnapshotSink, Snapshotter};
 
 use link::{JarChild, JarMaster, JarReader, JarReplies, Link, ReplayGate};
@@ -323,6 +326,7 @@ const fn outwaits_a_parked_jar(wait: Duration) -> bool {
 const _: () = {
     assert!(outwaits_a_parked_jar(ADOPT_WAIT));
     assert!(outwaits_a_parked_jar(WRITE_STALL));
+    assert!(outwaits_a_parked_jar(LINK_WAIT));
     assert!(PING_EVERY.as_millis() < spyc_jar::limits::OWNER_DEADLINE.as_millis());
 };
 

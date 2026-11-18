@@ -206,6 +206,9 @@ pub enum Wake {
     /// on `runtime.closed_rows_results`. Payloadless, same shape as
     /// `JumpDefault`; `apply_closed_rows` drains it in the pre-recv scan.
     ClosedRows,
+    /// A terminal attached to spyc's own jar, or left it (S4). Payloadless:
+    /// `settle_own_jar` reads which at the loop's top.
+    OwnJar,
     /// `W l`'s worktrees were read and dated (`worktree_list`) and landed on
     /// `runtime.worktree_rows_results`. Payloadless, same shape as
     /// `ClosedRows`; `apply_worktree_rows` drains it in the pre-recv scan.

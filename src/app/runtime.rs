@@ -94,6 +94,10 @@ pub(super) struct Runtime {
     /// Clone of the unified-channel sender; pane wake closures clone it to push
     /// `Wake::Pane`. `None` before `run()` / in the test harness.
     pub(super) pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
+    /// spyc's link to its own jar, when it runs in one (S4).
+    pub(super) own_jar: Option<crate::pane::jar::session::OwnJar>,
+    /// The own jar's attaches the loop has set the terminal up for.
+    pub(super) attaches_seen: u64,
     /// The same sender, for a wake made before `run()` installed it: a
     /// startup tab's pane, and its jar's start, wake the loop once it runs.
     pub(super) loop_wake: std::sync::Arc<std::sync::OnceLock<std::sync::mpsc::Sender<Message>>>,
@@ -371,6 +375,8 @@ impl Runtime {
             git_worker_tx,
             mcp_cmd_rx,
             pane_wake_tx: None,
+            own_jar: None,
+            attaches_seen: 0,
             loop_wake: std::sync::Arc::default(),
             next_sink_id: 0,
             autosave_last_saved_fp: None,

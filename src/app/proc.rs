@@ -2,7 +2,8 @@
 //! input-reader thread (`ReaderHandle` / `spawn_input_reader`) and the
 //! TUI-teardown foreground-exec runner (`ForegroundExec` /
 //! `run_child_in_foreground`). Moved verbatim from `app/mod.rs` (800-LoC
-//! campaign).
+//! campaign). And a terminal attaching to spyc's own jar, which is set up with
+//! the reader parked as a foreground child's return is (`settle_own_jar`).
 
 use std::time::Duration;
 
@@ -201,6 +202,14 @@ impl ForegroundExec {
         self.reader.unpark();
     }
 
+    /// Run `f` with the reader parked, so only `f` reads the tty.
+    fn with_reader_parked<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.park_and_wait();
+        let r = f();
+        self.unpark_reader();
+        r
+    }
+
     pub(super) fn run(
         &self,
         terminal: &mut Tui,
@@ -359,6 +368,59 @@ fn paint_subshell_banner(terminal: &Tui) {
 /// accident, and this is the belt to 1002's braces.
 const fn reader_forwards(ev: &Event) -> bool {
     !matches!(ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Moved))
+}
+
+impl super::App {
+    /// Hear spyc's own jar's attaches and detaches, waking the loop for each.
+    pub(super) fn watch_own_jar(&mut self) {
+        let Some(tx) = self.runtime.pane_wake_tx.clone() else {
+            return;
+        };
+        if let Some(jar) = self.runtime.own_jar.as_mut() {
+            jar.watch(move || {
+                let _ = tx.send(Message::Wake(Wake::OwnJar));
+            });
+        }
+    }
+
+    /// A terminal attached to spyc's own jar since the last pass: set it up
+    /// and probe it with the input reader parked, then repaint in full. A
+    /// terminal that attached and left again before this pass is set up on
+    /// the next attach.
+    pub(super) fn settle_own_jar(
+        &mut self,
+        terminal: &mut Tui,
+        foreground_exec: &ForegroundExec,
+    ) -> bool {
+        let Some(jar) = &self.runtime.own_jar else {
+            return false;
+        };
+        let attached = jar.attached();
+        let attaches = jar.attaches();
+        if !attached || attaches == self.runtime.attaches_seen {
+            return false;
+        }
+        self.runtime.attaches_seen = attaches;
+        match foreground_exec.with_reader_parked(|| crate::terminal::reattach(terminal)) {
+            Ok(picker) => self.set_picker(picker),
+            Err(e) => self
+                .state
+                .flash_error(format!("the terminal that attached: {e:#}")),
+        }
+        self.set_shift_esc(crate::terminal::keyboard_enhancement_supported());
+        self.view.last_term_title = None;
+        self.view.needs_full_repaint = true;
+        true
+    }
+
+    /// Whether there is a terminal to draw on: always, but for spyc in its
+    /// own jar with none attached, or one attached and not yet set up.
+    pub(super) fn has_terminal(&self) -> bool {
+        self.runtime
+            .own_jar
+            .as_ref()
+            .is_none_or(|jar| jar.attached() && jar.attaches() == self.runtime.attaches_seen)
+    }
 }
 
 #[cfg(test)]

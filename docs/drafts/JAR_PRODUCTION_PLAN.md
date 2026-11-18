@@ -179,6 +179,16 @@ first `^d` with something running hands spyc to a spyc in an outer jar,
 through the manifest and pane-jar adoption. The spike proved the shape with
 spyc started in an outer jar by its harness; the lazy entry is new.
 
+- **A session's own jar has a place of its own** (decision D, 2026-11-17):
+  `<runtime>/spyc/sessions/<SESSION_NAME>.sock`, beside the pane jars'
+  directory. spyc is in its own jar when `SPYC_JAR_SOCKET` names a socket
+  there and the jar takes it as its program (by pid); a spyc that is a pane's
+  program sees a pane jar's socket and stays a plain spyc. The session takes
+  its jar's name, so `spyc attach NAME` connects to `sessions/NAME.sock` and a
+  bare `spyc attach` lists the directory. Rejected: a hidden flag passed by
+  the handover (a mode carrying one bit, and a second way to find a session),
+  an environment marker (every child inherits it), and a kind in the jar's
+  description (a change to version 1, and a jar that knows what it holds).
 - **Detaching and attaching.** `^d` and `:detach` detach only when an agent, a
   tab or a task is running; with nothing running, `^d` quits as it does today.
   `spyc attach [name]` reattaches. `^D`, `Q`, `ZZ` and `:q` quit and end this

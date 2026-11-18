@@ -356,6 +356,17 @@ fn install_panic_hook() {
 
 /// Binary entry point. `src/main.rs` is a thin shim that just calls this;
 /// all the real startup logic lives here so the crate can also be a library.
+/// Take the terminal, and link to spyc's own jar when it runs in one. spyc in
+/// its own jar may start with no terminal attached, and then nothing answers
+/// its probes: `false` with it, and they wait for the first attach.
+fn take_terminal() -> Result<(Tui, Option<pane::jar::session::OwnJar>, bool)> {
+    let own_jar = pane::jar::session::link_own();
+    let probe = own_jar
+        .as_ref()
+        .is_none_or(pane::jar::session::OwnJar::attached);
+    Ok((setup_terminal(probe)?, own_jar, probe))
+}
+
 pub fn run() -> Result<()> {
     install_panic_hook();
 
@@ -448,7 +459,7 @@ pub fn run() -> Result<()> {
         std::env::var_os(CWD_FILE_ENV).as_deref(),
         &std::env::current_dir().unwrap_or_default(),
     );
-    let mut terminal = setup_terminal()?;
+    let (mut terminal, own_jar, probe) = take_terminal()?;
     let stderr_log = stderr_capture::start();
     let mut app = App::new(cli.resume, color_mode);
     app.set_cwd_file(cwd_file);
@@ -458,8 +469,11 @@ pub fn run() -> Result<()> {
     // font cell size) for inline diagram rendering — ONCE, here, before the
     // input reader spawns, because the probe reads the terminal's replies from
     // stdin (the #444 no-live-cursor-read rule). Best-effort.
-    app.set_picker(detect_image_picker());
+    if probe {
+        app.set_picker(detect_image_picker());
+    }
     app.set_shift_esc(crate::terminal::keyboard_enhancement_supported());
+    app.set_own_jar(own_jar);
     let result = app.run(&mut terminal);
     mcp::cleanup_socket();
     // Restore the terminal BEFORE teardown so `run_teardown`'s "waiting for …"
