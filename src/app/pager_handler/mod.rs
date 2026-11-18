@@ -328,17 +328,35 @@ impl App {
         );
         let cwd = self.state.cur_real_dir().to_path_buf();
         let wake = self.make_pane_wake();
-        match Pane::spawn(
-            cmd,
-            rows,
-            cols,
-            &cwd,
-            &self.view.project().context_path,
-            wake,
-        ) {
+        match self.overlay_pane(cmd, (rows, cols), &cwd, wake) {
             Ok(p) => self.install_overlay_pty(p),
             Err(e) => self.state.flash_error(format!("spawn: {e:#}")),
         }
+    }
+
+    /// A top overlay's pane running `cmd`, with the project's `:setenv`
+    /// variables.
+    pub(super) fn overlay_pane(
+        &self,
+        cmd: &str,
+        (rows, cols): (u16, u16),
+        cwd: &std::path::Path,
+        wake: crate::pane::PaneWake,
+    ) -> anyhow::Result<Pane> {
+        let project_env = self.state.active_project().env.pairs();
+        Pane::launch(
+            crate::pane::Launch {
+                command: cmd,
+                rows,
+                cols,
+                cwd,
+                context_path: &self.view.project().context_path,
+                extra_env: &[],
+                project_env: &project_env,
+                jar: None,
+            },
+            wake,
+        )
     }
 
     pub(super) fn install_overlay_pty(&mut self, p: Pane) {

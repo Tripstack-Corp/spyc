@@ -140,6 +140,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("task", commands::cmd_task),
     app("task-to-pane", commands::cmd_task_to_pane),
     app("undo", commands::cmd_undo),
+    app("unsetenv", commands::cmd_unsetenv),
     app("upgrade", super::detach::cmd_upgrade),
     pure("version"),
     pure("whoami"),

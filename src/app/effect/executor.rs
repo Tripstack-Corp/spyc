@@ -305,13 +305,17 @@ impl App {
         // (SIGKILL on the agent children) without saving the session. `run`
         // already restored the TUI on the spawn-error path, so here we just
         // flash it (below) and carry on.
+        let env = self.state.active_project().env.pairs();
         let fg_result = fg.run(
             terminal,
             program,
             args,
             pause_after,
             subshell,
-            Some(self.desired_process_cwd()),
+            crate::app::proc::ChildPlace {
+                cwd: Some(self.desired_process_cwd()),
+                env: &env,
+            },
         );
         // `suspend_tui` handed mouse reporting to the child; record that so the
         // loop-bottom `settle_mouse_mode` re-enables it if the user wants it.

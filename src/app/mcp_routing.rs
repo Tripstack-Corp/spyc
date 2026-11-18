@@ -103,10 +103,11 @@ impl App {
     }
 
     /// The three records of which project is active, moved together.
-    pub(super) const fn set_active(&mut self, id: ProjectId) {
+    pub(super) fn set_active(&mut self, id: ProjectId) {
         self.state.active = id;
         self.runtime.active = id;
         self.view.active = id;
+        self.settle_env();
     }
 
     /// Serve one MCP request in the project it acts on ([`Self::mcp_target`]).

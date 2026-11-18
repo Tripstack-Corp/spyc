@@ -258,7 +258,11 @@ const SECTIONS: &[Section] = &[
                 ":activity",
                 "toggle activity monitor; :activity transparent|solid → overlay style; :activity dump → per-pane dot-status (why-status) report + MCP connections in a pager",
             ),
-            (":setenv NAME=VALUE", "set an environment variable"),
+            (
+                ":setenv [-p] NAME=VALUE",
+                "set a variable for this project (-p saves it)",
+            ),
+            (":unsetenv NAME", "take a :setenv variable back"),
             (
                 ":stderr",
                 "what spyc's own stderr received, in a pager (the status bar's ⚠N counts unseen lines)",
