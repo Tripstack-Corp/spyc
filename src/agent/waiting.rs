@@ -79,6 +79,27 @@ pub fn turn_open_after(
     }
 }
 
+/// Why a `StopFailure` that ended no turn is recorded but not applied.
+pub const OUTSIDE_A_TURN: &str = "an API error outside a turn";
+
+/// Whether a `StopFailure` arrived after the turn already ended, so a request
+/// outside any turn failed and nothing waits on the user. A tab with no report
+/// yet may be in a turn spyc never saw start, so its `StopFailure` counts.
+pub fn failed_outside_a_turn(
+    live: Option<&ReportedStatus>,
+    turn_open: bool,
+    event: Option<&StatusHookEvent>,
+) -> bool {
+    event.is_some_and(StatusHookEvent::is_stop_failure)
+        && !turn_open
+        && live.is_some_and(|r| {
+            matches!(
+                r.status,
+                AgentActivity::Done | AgentActivity::Idle | AgentActivity::Waiting
+            )
+        })
+}
+
 /// Whether a report is the agent's own `waiting` sent while its turn is open,
 /// which is held until the turn ends rather than shown at once.
 pub fn held_for_turn_end(incoming: AgentActivity, origin: Origin<'_>, turn_open: bool) -> bool {
@@ -236,6 +257,51 @@ mod tests {
             );
             assert_eq!(turn_open_after(open, Blocked, Some(&nudge)), open);
         }
+    }
+
+    /// A `StopFailure` after a turn end ended nothing; one during a turn, on a
+    /// question, or before spyc has any report for the tab still applies.
+    #[test]
+    fn only_a_stop_failure_after_a_turn_end_is_outside_a_turn() {
+        use super::failed_outside_a_turn;
+        let at = Instant::now();
+        let live = |status| ReportedStatus::new(status, at, at);
+        let failure = StatusHookEvent::from_value(&serde_json::json!({
+            "hook_event_name": "StopFailure", "error": "server_error"
+        }))
+        .unwrap();
+        let stop =
+            StatusHookEvent::from_value(&serde_json::json!({"hook_event_name": "Stop"})).unwrap();
+        for status in [Done, Idle, Waiting] {
+            assert!(
+                failed_outside_a_turn(Some(&live(status)), false, Some(&failure)),
+                "{status:?}"
+            );
+            assert!(
+                !failed_outside_a_turn(Some(&live(status)), true, Some(&failure)),
+                "{status:?}: open"
+            );
+        }
+        assert!(!failed_outside_a_turn(
+            Some(&live(Blocked)),
+            false,
+            Some(&failure)
+        ));
+        assert!(!failed_outside_a_turn(
+            Some(&live(Working)),
+            false,
+            Some(&failure)
+        ));
+        assert!(
+            !failed_outside_a_turn(None, false, Some(&failure)),
+            "no report yet"
+        );
+        assert!(!failed_outside_a_turn(
+            Some(&live(Done)),
+            false,
+            Some(&stop)
+        ));
+        assert!(!failed_outside_a_turn(Some(&live(Done)), false, None));
     }
 
     /// A turn that ends on an API error is over, though it reports `blocked`;
