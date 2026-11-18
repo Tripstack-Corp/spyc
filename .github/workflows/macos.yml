@@ -48,16 +48,17 @@ concurrency:
   group: macos-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_INCREMENTAL: "0"
-  CARGO_TERM_COLOR: always
-
 permissions:
   contents: read
 
 jobs:
   lint-macos:
     name: Lint macOS (fmt, clippy)
+    # Only here: the link jobs' log is parsed by `linker-messages.py`, and a
+    # coloured cargo log reads as one with no linker output.
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_TERM_COLOR: always
     # Apple silicon: spyc-vt-sys needs its vendored `aarch64-apple-darwin` archive.
     runs-on: macos-latest
     steps:
