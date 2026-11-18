@@ -6,6 +6,7 @@
 //! the `Tui` value directly; this module supplies the policy (which binary,
 //! which args, whether a file is viewable).
 
+pub mod assignments;
 pub mod expand;
 
 pub use expand::{PanePath, expand_percent, pane_path, pane_path_payload, shell_quote};
@@ -117,7 +118,7 @@ fn pane_invocation_for(
     // job-control wrapper survives to fight `^z`. Empty command → bare shell.
     let exec = exec_replace && !command.trim().is_empty();
     let cmd = if exec {
-        format!("exec {command}")
+        exec_command(command)
     } else {
         command.to_string()
     };
@@ -127,13 +128,30 @@ fn pane_invocation_for(
     user_shell_invocation_for(shell, &cmd, interactive_rc)
 }
 
-/// True when a command is itself a shell that sources an interactive startup
-/// file — `zsh`, `/bin/bash`, `fish -l`. Only the first word counts, so an
-/// env-prefixed or `sudo`-wrapped command doesn't match.
-fn command_is_interactive_shell(command: &str) -> bool {
-    command
+/// `command` with `exec` before its program, after any assignments it opens
+/// with: `exec FOO=1 claude` would have the shell look for a program named
+/// `FOO=1`.
+fn exec_command(command: &str) -> String {
+    match assignments::split_assignments(command) {
+        ("", _) => format!("exec {command}"),
+        (_, "") => command.to_string(),
+        (assignments, program) => format!("{assignments} exec {program}"),
+    }
+}
+
+/// The word naming the program `command` runs, past any leading assignments.
+fn program_word(command: &str) -> Option<&str> {
+    assignments::split_assignments(command)
+        .1
         .split_whitespace()
         .next()
+}
+
+/// True when a command is itself a shell that sources an interactive startup
+/// file — `zsh`, `/bin/bash`, `fish -l`, `FOO=1 zsh`. Only the program word
+/// counts, so a `sudo`- or `env`-wrapped command doesn't match.
+fn command_is_interactive_shell(command: &str) -> bool {
+    program_word(command)
         .and_then(|w| Path::new(w).file_name())
         .and_then(|n| n.to_str())
         .is_some_and(sources_interactive_rc)
@@ -155,7 +173,7 @@ fn sources_interactive_rc(basename: &str) -> bool {
 /// command spawns the bare `$SHELL`, so it counts too — and "unsure" should
 /// fall on the side of forwarding, never of swallowing a key.
 pub fn command_is_shell(command: &str) -> bool {
-    let Some(word) = command.split_whitespace().next() else {
+    let Some(word) = program_word(command) else {
         return true; // empty ⇒ bare $SHELL
     };
     Path::new(word)
@@ -301,15 +319,45 @@ mod tests {
         }
     }
 
-    // Conservative: only the first word is inspected, so anything wrapping a
+    // Conservative: only the program word is inspected, so anything wrapping a
     // shell still goes through the normal interactive path.
     #[test]
     fn pane_wrapped_shell_command_is_not_treated_as_a_shell() {
-        for cmd in ["sudo zsh", "FOO=1 zsh", "zshx", "myzsh"] {
+        for cmd in ["sudo zsh", "env FOO=1 zsh", "zshx", "myzsh"] {
             let (_, args) = pane_invocation_for(Some("/bin/zsh"), cmd, true);
             let want = vec!["-i".to_string(), "-c".to_string(), format!("exec {cmd}")];
             assert_eq!(args, want, "{cmd}");
         }
+    }
+
+    // `exec FOO=1 claude` has the shell look for a program named `FOO=1`: the
+    // assignments come first, then `exec` and the program they're for.
+    #[test]
+    fn pane_env_prefixed_command_execs_its_program() {
+        let (_, args) = pane_invocation_for(Some("/bin/zsh"), "FOO=1 BAR='a b' claude --x", true);
+        assert_eq!(args, vec!["-i", "-c", "FOO=1 BAR='a b' exec claude --x"]);
+    }
+
+    /// The requirement, run by a real shell: the program starts and sees the
+    /// variables.
+    #[test]
+    fn an_env_prefixed_pane_command_runs_with_its_variables() {
+        let command = r#"SPYC_A=1 SPYC_B="two words" sh -c 'echo "$SPYC_A:$SPYC_B"'"#;
+        let (sh, args) = pane_invocation_for(Some("/bin/sh"), command, true);
+        let out = std::process::Command::new(sh).args(&args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "1:two words\n");
+    }
+
+    // An env-prefixed shell is still a shell that sources its own rc.
+    #[test]
+    fn pane_env_prefixed_shell_command_drops_the_wrappers_rc_pass() {
+        let (_, args) = pane_invocation_for(Some("/bin/zsh"), "FOO=1 zsh", true);
+        assert_eq!(args, vec!["-c", "FOO=1 exec zsh"]);
     }
 
     // Non-exec_replace panes (captures, background tasks) keep the wrapper —
@@ -330,7 +378,15 @@ mod tests {
     fn shells_own_their_job_control() {
         // Includes the rc-less ones: `sh`/`dash` background jobs all the same,
         // so `^z` is theirs even though they take no `-i`.
-        for cmd in ["zsh", "/bin/bash", "fish -l", "sh", "dash", "tcsh"] {
+        for cmd in [
+            "zsh",
+            "/bin/bash",
+            "fish -l",
+            "sh",
+            "dash",
+            "tcsh",
+            "FOO=1 zsh",
+        ] {
             assert!(command_is_shell(cmd), "{cmd}");
         }
         // Empty ⇒ bare $SHELL. "Unsure" must forward, never swallow.
@@ -345,9 +401,9 @@ mod tests {
         for cmd in ["claude", "rmatrix", "htop", "vim src/lib.rs", "npm run dev"] {
             assert!(!command_is_shell(cmd), "{cmd}");
         }
-        // Same first-word-only conservatism as `pane_invocation`: a wrapped
+        // Same program-word-only conservatism as `pane_invocation`: a wrapped
         // shell isn't one (the wrapper is the child that sees the key).
-        for cmd in ["sudo zsh", "FOO=1 zsh", "zshx", "myzsh"] {
+        for cmd in ["sudo zsh", "env FOO=1 zsh", "zshx", "myzsh", "FOO=1 claude"] {
             assert!(!command_is_shell(cmd), "{cmd}");
         }
     }
