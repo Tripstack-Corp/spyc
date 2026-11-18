@@ -508,6 +508,16 @@ impl AppState {
         });
     }
 
+    /// Move open project `id` to `slot` (from 0) of the switcher order, the
+    /// others shifting along to make room. A slot past the end is the last.
+    pub(crate) fn move_project(&mut self, id: ProjectId, slot: usize) {
+        if let Some(from) = self.projects.iter().position(|p| p.id == id) {
+            let project = self.projects.remove(from);
+            let to = slot.min(self.projects.len());
+            self.projects.insert(to, project);
+        }
+    }
+
     /// [`Self::open_projects`], mutably.
     pub fn open_projects_mut(&mut self) -> impl Iterator<Item = &mut Project> {
         self.projects.iter_mut()

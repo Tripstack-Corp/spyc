@@ -21,8 +21,10 @@ use ratatui::text::{Line, Span};
 
 /// The switcher's title, and once closed projects are listed under the open
 /// ones, [`REOPEN_TITLE`].
-const SWITCHER_TITLE: &str = "projects — j/k+Enter or 1-9 to go, / to search, q to close";
-const REOPEN_TITLE: &str = "projects — j/k+Enter or 1-9 to go or reopen, / to search, q to close";
+const SWITCHER_TITLE: &str =
+    "projects — j/k+Enter or 1-9 to go, K/J to move, / to search, q to close";
+const REOPEN_TITLE: &str =
+    "projects — j/k+Enter or 1-9 to go or reopen, K/J to move, / to search, q to close";
 
 impl App {
     /// Go to another open project. With one project open these do nothing,
@@ -221,6 +223,43 @@ impl App {
             .enumerate()
             .map(|(i, text)| project_row(i, text, label_w))
             .collect()
+    }
+
+    /// `K` / `J` in the switcher: move the open project on `row` up or down
+    /// one slot, as `:order` would. Returns the row it moved to and the
+    /// switcher's lines drawn again; `None`, moving nothing, for a closed
+    /// project's row or a move past the first or last open project.
+    pub(super) fn move_switcher_row(
+        &mut self,
+        row: usize,
+        up: bool,
+    ) -> Option<(usize, Vec<Line<'static>>)> {
+        let id = match self.state.pending_projects.as_ref()?.get(row)? {
+            SwitcherRow::Open(id) => *id,
+            SwitcherRow::Closed(_) => return None,
+        };
+        let slot = self.state.open_projects().position(|p| p.id == id)?;
+        let to = if up { slot.checked_sub(1)? } else { slot + 1 };
+        if to >= self.state.open_projects().count() {
+            return None;
+        }
+        self.state.move_project(id, to);
+        let closed = self
+            .state
+            .pending_projects
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|row| matches!(row, SwitcherRow::Closed(_)));
+        let rows: Vec<SwitcherRow> = self
+            .state
+            .open_projects()
+            .map(|p| SwitcherRow::Open(p.id))
+            .chain(closed)
+            .collect();
+        let lines = self.switcher_lines(&rows);
+        self.state.pending_projects = Some(rows);
+        Some((to, lines))
     }
 
     /// Go to the switcher's row `idx`, or reopen the closed project it lists,
@@ -595,6 +634,41 @@ fn names_dir(path: &Path, dir: &Path) -> bool {
 fn saved_dirs(saved: &SavedProject) -> (PathBuf, PathBuf) {
     let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     (canonical(saved.anchor()), canonical(&saved.start_dir))
+}
+
+/// `:order N` moves the project in view to slot `N` of the open projects,
+/// the one order `Space 1`-`9`, `Space j`, the status bar and a saved
+/// session follow. Bare, it shows that order.
+pub(super) fn cmd_order(app: &mut App, args: &str) -> Vec<super::Effect> {
+    let open = app.state.open_projects().count();
+    if open < 2 {
+        app.state
+            .flash_error("order: one project is open, so there is nothing to order");
+        return Vec::new();
+    }
+    if args.is_empty() {
+        let order: Vec<String> = app
+            .state
+            .open_projects()
+            .enumerate()
+            .map(|(i, p)| format!("{} {}", i + 1, p.label()))
+            .collect();
+        app.state.flash_info(format!("order: {}", order.join("  ")));
+        return Vec::new();
+    }
+    match args.parse::<usize>() {
+        Ok(n) if (1..=open).contains(&n) => {
+            let id = app.state.active;
+            app.state.move_project(id, n - 1);
+            let label = app.state.active_project().label();
+            app.state
+                .flash_info(format!("order: {label} is project {n}"));
+        }
+        _ => app
+            .state
+            .flash_error(format!("usage: :order N, a slot from 1–{open}")),
+    }
+    Vec::new()
 }
 
 /// Whether one of `open`, the open projects' anchors and start dirs

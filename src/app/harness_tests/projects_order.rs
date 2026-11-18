@@ -105,7 +105,6 @@ fn saved_homes(app: &mut App, state_root: &Path) -> Vec<Value> {
 /// `:order 1` puts the project in view first and shifts the others along;
 /// it stays the project in view.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn order_1_puts_the_project_in_view_first() {
     with_three(|t| {
         let z = open_z(t);
@@ -123,7 +122,6 @@ fn order_1_puts_the_project_in_view_first() {
 
 /// A move to the middle slot, from the first.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn order_2_moves_the_first_project_to_the_middle() {
     with_three(|t| {
         open_z(t);
@@ -143,7 +141,6 @@ fn order_2_moves_the_first_project_to_the_middle() {
 
 /// The last slot is the number of projects open.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn order_n_moves_it_last() {
     with_three(|t| {
         let app = &mut t.app;
@@ -160,7 +157,6 @@ fn order_n_moves_it_last() {
 /// `Space N` goes by the new order: after `z` moves first, `Space 1` is `z`
 /// and `Space 2` is `x`.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn space_n_follows_the_new_order() {
     with_three(|t| {
         let z = open_z(t);
@@ -176,7 +172,6 @@ fn space_n_follows_the_new_order() {
 
 /// The switcher numbers its rows in the new order.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn the_switcher_lists_the_new_order() {
     with_three(|t| {
         open_z(t);
@@ -198,7 +193,6 @@ fn the_switcher_lists_the_new_order() {
 
 /// The status bar draws the projects' labels in the new order.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn the_status_bar_draws_the_new_order() {
     with_three(|t| {
         open_z(t);
@@ -217,7 +211,6 @@ fn the_status_bar_draws_the_new_order() {
 
 /// A saved session keeps the new order, so `spyc -r` brings it back.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn a_saved_session_keeps_the_new_order() {
     with_three(|t| {
         let state_root = state_root(t);
@@ -238,7 +231,6 @@ fn a_saved_session_keeps_the_new_order() {
 
 /// Bare, `:order` shows the order, numbered, and moves nothing.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn bare_order_shows_the_order() {
     with_three(|t| {
         open_z(t);
@@ -265,7 +257,6 @@ fn bare_order_shows_the_order() {
 /// A slot that isn't one, `0`, one past the end or no number at all, moves
 /// nothing and says which slots there are.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn a_slot_out_of_range_moves_nothing_and_names_the_range() {
     with_three(|t| {
         let before = homes(&t.app);
@@ -286,7 +277,6 @@ fn a_slot_out_of_range_moves_nothing_and_names_the_range() {
 /// With one project open there's nothing to put in order, and `:order` says
 /// so rather than reading as an unknown command.
 #[test]
-#[ignore = "red until :order moves the project in view"]
 fn with_one_project_open_order_says_there_is_nothing_to_order() {
     let tmp = tempfile::tempdir().unwrap();
     let base = std::fs::canonicalize(tmp.path()).unwrap();
@@ -305,5 +295,60 @@ fn with_one_project_open_order_says_there_is_nothing_to_order() {
             "{flash:?}"
         );
         assert_eq!(app.state.active, only);
+    });
+}
+
+/// `shift`+`c`, as a terminal sends a capital.
+fn shifted(c: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT)
+}
+
+/// The switcher's highlighted row.
+fn highlighted(app: &App) -> Option<usize> {
+    app.view
+        .project()
+        .pager
+        .as_ref()
+        .and_then(|v| v.picker_cursor)
+}
+
+/// `K` in the switcher moves the highlighted project up a slot, its row and
+/// the highlight with it, and goes nowhere; `J` moves it back down.
+#[test]
+fn k_and_j_in_the_switcher_move_the_highlighted_project() {
+    with_three(|t| {
+        let app = &mut t.app;
+        leader(app, 'j');
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(shifted('K')).unwrap();
+        assert_eq!(homes(app), [t.y_home.clone(), t.x_home.clone()]);
+        let rows = switcher_rows(app);
+        assert!(
+            rows[0].contains("[1]") && rows[0].contains("yproj"),
+            "{rows:#?}"
+        );
+        assert_eq!(highlighted(app), Some(0), "the highlight stayed behind");
+        assert_eq!(app.state.active, t.x, "K went to a project");
+        app.handle_key(shifted('J')).unwrap();
+        assert_eq!(homes(app), [t.x_home.clone(), t.y_home.clone()]);
+        assert_eq!(highlighted(app), Some(1), "the highlight stayed behind");
+        assert!(app.state.pending_projects.is_some(), "the switcher closed");
+    });
+}
+
+/// `K` on the first project and `J` on the last move nothing.
+#[test]
+fn k_on_the_first_and_j_on_the_last_move_nothing() {
+    with_three(|t| {
+        let before = homes(&t.app);
+        let app = &mut t.app;
+        leader(app, 'j');
+        app.handle_key(shifted('K')).unwrap();
+        assert_eq!(homes(app), before, "K on the first row moved it");
+        assert_eq!(highlighted(app), Some(0));
+        app.handle_key(key('j')).unwrap();
+        app.handle_key(shifted('J')).unwrap();
+        assert_eq!(homes(app), before, "J on the last row moved it");
+        assert_eq!(highlighted(app), Some(1));
     });
 }
