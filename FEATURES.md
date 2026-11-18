@@ -198,7 +198,8 @@ Full reference: [`CONFIGURATION.md`](CONFIGURATION.md).
   to opaque colour bands; `:activity transparent` switches back —
   either one also shows the monitor
 - **C** toggle between colour and mono themes
-- **:setenv NAME=VALUE** set an environment variable
+- **:setenv NAME=VALUE** set an environment variable for every program
+  spyc starts from then on; a bare `:setenv` prompts for `NAME=VALUE`
 - **:dump-scrollback** write the active pane's scrollback snapshot
   (one line per row) to `/tmp/spyc-scrollback.txt` — diagnostic for
   the `^a v` capture path when visible content seems to go missing

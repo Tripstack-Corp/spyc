@@ -70,3 +70,26 @@ fn the_daemon_flag_is_added_only_when_wanted_and_missing() {
         );
     });
 }
+
+/// A tab command opening with assignments is still its agent's tab: detected,
+/// labelled and decorated by the program after them.
+#[test]
+fn an_env_prefixed_agent_tab_is_that_agents() {
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(&tmp.path().join("state"), || {
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        let exe = fake_agent(&dir, "codex").display().to_string();
+        let cmd = format!("SPYC_PREFIX_TEST=1 {exe} resume abc");
+        let mut app = App::test_app(dir.clone());
+
+        assert!(app.open_pane_tab_in(&cmd, &dir));
+
+        assert_eq!(agent_argv(&dir, "codex"), ["--no-daemon", "resume", "abc"]);
+        let info = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info;
+        assert_eq!(
+            info.launched_agent().kind(),
+            crate::state::sessions::AgentKind::Codex
+        );
+        assert_eq!(info.label, exe, "labelled by its program");
+    });
+}

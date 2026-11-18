@@ -557,6 +557,7 @@ mod prompt_nudge;
 mod prompt_templates;
 mod second_commander;
 mod send_selection;
+mod setenv;
 mod startup_commands;
 mod tab_completion;
 mod tab_cwd;

@@ -166,12 +166,12 @@ pub trait AgentProfile: Sync {
     fn name(&self) -> &'static str;
     fn binary(&self) -> &'static str;
 
-    /// True if `cmd`'s first token is this agent's binary, bare or
-    /// path-qualified (`agy`, `/usr/local/bin/agy`). Equivalent to the
-    /// old `is_<agent>_command`.
+    /// True if `cmd`'s program is this agent's binary, bare or
+    /// path-qualified (`agy`, `/usr/local/bin/agy`), past any leading
+    /// assignments (`FOO=1 agy`).
     fn matches_command(&self, cmd: &str) -> bool {
-        let first = cmd.split_whitespace().next().unwrap_or("");
-        first.rsplit('/').next() == Some(self.binary())
+        let program = crate::shell::assignments::program_word(cmd).unwrap_or("");
+        program.rsplit('/').next() == Some(self.binary())
     }
 
     /// SAVE: resolve `(session_id, session_name)` to persist. Default:
@@ -423,7 +423,8 @@ fn closest_short_id<T: SessionCandidate>(
 
 // ── Profiles ──────────────────────────────────────────────────────────
 
-/// `cmd` with `--no-daemon` after its program, so codex runs this session
+/// `cmd` with `--no-daemon` after its program (past any leading
+/// assignments), so codex runs this session
 /// itself instead of on its shared background server. That server spawns every
 /// session's hooks and MCP servers with the environment of whichever codex
 /// started it, which never has this pane's `SPYC_MCP_SOCK` or `SPYC_PANE_ID`.
@@ -432,7 +433,7 @@ pub fn codex_without_daemon(cmd: &str) -> Cow<'_, str> {
     if cmd.split_whitespace().any(|t| t == "--no-daemon") {
         return Cow::Borrowed(cmd);
     }
-    let start = cmd.len() - cmd.trim_start().len();
+    let start = crate::shell::assignments::program_start(cmd);
     let end = cmd[start..]
         .find(char::is_whitespace)
         .map_or(cmd.len(), |i| start + i);
@@ -981,6 +982,28 @@ mod tests {
             codex_without_daemon("codex --no-daemon x"),
             "codex --no-daemon x"
         );
+        assert_eq!(
+            codex_without_daemon("A=1 B='x y' codex -m o3"),
+            "A=1 B='x y' codex --no-daemon -m o3"
+        );
+    }
+
+    /// A command may open with variable assignments, as at a shell prompt: the
+    /// agent is the program after them.
+    #[test]
+    fn an_env_prefixed_command_is_detected_as_its_agent() {
+        for (cmd, kind) in [
+            (
+                "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 claude",
+                AgentKind::Claude,
+            ),
+            ("A=1 B='x y' /opt/bin/codex -m o3", AgentKind::Codex),
+            ("A=1 agy", AgentKind::Agy),
+            ("env A=1 claude", AgentKind::Other),
+            ("claude=1 zsh", AgentKind::Other),
+        ] {
+            assert_eq!(detect(cmd).kind(), kind, "{cmd}");
+        }
     }
 
     /// agy's tool-permission prompt must scrape as `Blocked` — the one way agy

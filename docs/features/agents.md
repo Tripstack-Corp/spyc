@@ -259,7 +259,8 @@ running and the three most called, each marked for its own failures. A Claude
 Code tab also gets a `todo` cell once `TodoWrite` or `TaskCreate`/`TaskUpdate`
 has reported: completed over total, with how many are in progress. In Code
 Mode it adds `scripts 41 ✗2 ◐1`, the scripts started, threw and still running,
-and `calls/script`, the tool calls each made on average. Its `agents`
+and `calls/script`, the tool calls each made on average, and its tools row
+says how many of the calls the scripts made, `122 in scripts`. Its `agents`
 row ends in the subagents it runs: each one's type and the tool it runs now,
 `Explore · Grep`, or for a minute after it ends `done` or `failed`, as many as
 fit, at most four, and how many more (`+2 more`); the compact strip counts the

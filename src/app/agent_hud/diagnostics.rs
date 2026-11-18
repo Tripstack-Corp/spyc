@@ -343,8 +343,19 @@ fn claude_tool_lines(s: &claude_metrics::Snapshot, tail_only: bool) -> Vec<Strin
         }
     )];
     for count in &s.tool_counts {
+        let in_scripts = s
+            .scripts
+            .tools
+            .iter()
+            .find(|scripted| scripted.name == count.name)
+            .map_or_else(String::new, |scripted| {
+                format!(
+                    "; in scripts {} calls, {} failed",
+                    scripted.calls, scripted.failed
+                )
+            });
         out.push(format!(
-            "  {}: {} calls; {} failed",
+            "  {}: {} calls; {} failed{in_scripts}",
             count.name, count.calls, count.failed
         ));
     }
@@ -647,6 +658,7 @@ mod tests {
                 running: 1,
                 latest_ms: Some(claude_metrics::Sample { at, value: 49 }),
                 longest_ms: Some(1_020),
+                ..claude_metrics::Scripts::default()
             },
             ..Snapshot::default()
         };
@@ -678,6 +690,7 @@ mod tests {
                 status: ToolStatus::Completed,
                 at,
                 background: false,
+                in_script: false,
             }],
             tools_complete: true,
             ..Snapshot::default()
@@ -697,6 +710,26 @@ mod tests {
         );
         let partial = claude_tool_lines(&snapshot, true);
         assert!(partial[0].contains("since the read began part-way through"));
+
+        let scripted = Snapshot {
+            scripts: claude_metrics::Scripts {
+                calls: 7,
+                tools: vec![count("Tool1", 7, 1)],
+                ..claude_metrics::Scripts::default()
+            },
+            ..snapshot
+        };
+        let lines = claude_tool_lines(&scripted, false);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "  Tool1: 29 calls; 1 failed; in scripts 7 calls, 1 failed"),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == "  Tool0: 30 calls; 0 failed"),
+            "{lines:?}"
+        );
     }
 
     #[test]
