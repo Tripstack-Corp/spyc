@@ -9,6 +9,8 @@
 pub mod assignments;
 pub mod expand;
 
+use assignments::program_word;
+
 pub use expand::{PanePath, expand_percent, pane_path, pane_path_payload, shell_quote};
 
 use std::io::Read;
@@ -137,14 +139,6 @@ fn exec_command(command: &str) -> String {
         (_, "") => command.to_string(),
         (assignments, program) => format!("{assignments} exec {program}"),
     }
-}
-
-/// The word naming the program `command` runs, past any leading assignments.
-fn program_word(command: &str) -> Option<&str> {
-    assignments::split_assignments(command)
-        .1
-        .split_whitespace()
-        .next()
 }
 
 /// True when a command is itself a shell that sources an interactive startup

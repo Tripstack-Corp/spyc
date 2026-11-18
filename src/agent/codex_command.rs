@@ -134,19 +134,30 @@ fn option_parts(value: &str) -> (&str, bool) {
     }
 }
 
-fn parse(command: &str, strict: bool) -> Result<Invocation> {
-    let tokens = words(command)?;
-    let Some(executable) = tokens.first() else {
+/// Where the codex executable is among `tokens`: past any leading
+/// assignments, which a rebuild keeps ahead of it.
+fn executable_index(tokens: &[Word<'_>]) -> Result<usize> {
+    let index = tokens
+        .iter()
+        .take_while(|w| crate::shell::assignments::is_assignment(w.raw))
+        .count();
+    let Some(executable) = tokens.get(index) else {
         bail!("empty Codex command");
     };
     if executable.value.rsplit('/').next() != Some("codex") || executable.raw != executable.value {
         bail!("expected a bare or path-qualified codex executable");
     }
-    let mut retained = vec![executable.raw];
+    Ok(index)
+}
+
+fn parse(command: &str, strict: bool) -> Result<Invocation> {
+    let tokens = words(command)?;
+    let executable = executable_index(&tokens)?;
+    let mut retained: Vec<&str> = tokens[..=executable].iter().map(|w| w.raw).collect();
     let mut operation = None;
     let mut selector = None;
     let mut options = std::collections::HashSet::new();
-    let mut index = 1;
+    let mut index = executable + 1;
     while let Some(word) = tokens.get(index) {
         let value = word.value.as_str();
         if operation.is_none() && matches!(value, "resume" | "fork") {

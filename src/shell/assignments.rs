@@ -7,26 +7,37 @@
 /// this scanner can't split safely (an open quote, an operator inside an
 /// assignment word, a newline), is all rest: `("", command)`.
 pub fn split_assignments(command: &str) -> (&str, &str) {
-    let whole = ("", command.trim());
-    let mut at = 0;
-    loop {
-        let start = at + (command[at..].len() - command[at..].trim_start().len());
-        if start == command.len() {
-            return (command[..at].trim(), "");
-        }
-        let Some(end) = word_end(command, start) else {
-            return whole;
+    let start = program_start(command);
+    (command[..start].trim(), command[start..].trim())
+}
+
+/// The word naming the program `command` runs, past any leading assignments.
+pub fn program_word(command: &str) -> Option<&str> {
+    command[program_start(command)..].split_whitespace().next()
+}
+
+/// Where `command`'s program word begins: past leading blanks and
+/// assignments, or past leading blanks alone when [`split_assignments`]
+/// would leave the command whole.
+pub fn program_start(command: &str) -> usize {
+    let past_blanks = |at: usize| command.len() - command[at..].trim_start().len();
+    let first = past_blanks(0);
+    let mut at = first;
+    while at < command.len() {
+        let Some(end) = word_end(command, at) else {
+            return first;
         };
-        if !is_assignment(&command[start..end]) {
-            return (command[..at].trim(), command[start..].trim());
+        if !is_assignment(&command[at..end]) {
+            return at;
         }
-        at = end;
+        at = past_blanks(end);
     }
+    at
 }
 
 /// `NAME=…` with a POSIX name: unquoted, so the shell takes it as an
 /// assignment rather than a word.
-fn is_assignment(word: &str) -> bool {
+pub fn is_assignment(word: &str) -> bool {
     let Some((name, _)) = word.split_once('=') else {
         return false;
     };
