@@ -1493,6 +1493,47 @@ fn the_program_hears_attaches_and_detaches_its_owner() {
     });
 }
 
+/// A program that asks to detach its owner has its last words reach the owner
+/// first, however slowly the owner reads: here a window of 16 bytes holds the
+/// rest of the program's output in its PTY until the owner acknowledges, which
+/// it starts doing 2 s after the program was told to detach. spyc writes its
+/// terminal's reset before it detaches, so a reset cut short would leave the
+/// terminal in spyc's modes.
+#[test]
+#[ignore = "red until a program's detach waits for its last words to reach the owner"]
+fn a_programs_last_words_reach_a_slow_owner_before_it_is_detached() {
+    let program = [env!("CARGO_BIN_EXE_spyc-jar"), "program-events"];
+    let mut jar = Jar::start(&["--window", "16"], &program);
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).unwrap();
+    owner
+        .send(&Msg::Input {
+            bytes: b"detach\r".to_vec(),
+        })
+        .unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    let mut seen = Seen::default();
+    let until = Instant::now() + WAIT;
+    loop {
+        assert!(Instant::now() < until, "the owner was never detached");
+        match owner.recv(Duration::from_millis(200)) {
+            Ok(Some(m)) => {
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    let _ = owner.send(&Msg::Ack { offset: next });
+                }
+            }
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+    assert!(
+        seen.contains("program: bye"),
+        "its last words reached the owner: {:?}",
+        String::from_utf8_lossy(&seen.text)
+    );
+}
+
 /// Finding 5, in part: a lookup is answered once and closed.
 #[test]
 fn a_lookup_is_answered_once_and_closed() {
