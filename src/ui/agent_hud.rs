@@ -903,6 +903,7 @@ mod tests {
                     model: Some("claude-opus-5-5".into()),
                     effort: Some("xhigh".into()),
                     permission_mode: None,
+                    code_mode: None,
                 },
             }),
             tool_counts: vec![
@@ -916,6 +917,7 @@ mod tests {
                 status: claude::ToolStatus::Started,
                 at,
                 background: false,
+                in_script: false,
             }],
             subagent_calls: 7,
             background_calls: 5,

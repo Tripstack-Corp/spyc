@@ -16,35 +16,59 @@ use crate::proto::{self, Msg, Role, reason};
 use crate::state::{Event, State};
 
 /// The program asked to be detached: end the owner's connection once
-/// everything the program printed until now has gone out on it, or after a
-/// second, so its last words (its terminal restored) reach the client.
+/// everything the program printed before asking has gone out on it, so its
+/// last words (its terminal restored) reach the client. No clock decides it:
+/// the PTY pump says when all of that is in the log (`life::answer_drain`),
+/// which waits on an owner a window behind as the pump does, and an owner
+/// silent past the jar's deadline is closed by its reader regardless. An owner
+/// that leaves or is replaced meanwhile is left alone.
+// SPYC-TRAP(detach-after-last-words): the owner is closed on the pump's
+// answer and its cursor, never on a clock.
 pub(super) fn detach_owner(shared: &Arc<Shared>) {
     let shared = Arc::clone(shared);
     thread::spawn(move || {
-        // What the program wrote before asking is in the PTY by now, but
-        // perhaps not yet in the log: wait for the PTY to drain first.
-        let until = Instant::now() + Duration::from_millis(500);
-        while readable(&shared.master, Duration::ZERO) && Instant::now() < until {
-            thread::sleep(Duration::from_millis(5));
-        }
-        let (owner, head) = {
-            let st = shared.lock();
-            (st.owner, st.log.head)
+        let ask = {
+            let mut drain = shared.drain();
+            drain.asked += 1;
+            drain.asked
         };
-        let Some(conn) = owner.and_then(|id| shared.conns().get(&id).cloned()) else {
+        let mut st = shared.lock();
+        let Some(owner) = st.owner else {
             return;
         };
-        let until = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < until {
-            let sent = conn
-                .cursor
+        let head = loop {
+            if st.owner != Some(owner) {
+                return;
+            }
+            let drain = *shared.drain();
+            if drain.answered >= ask {
+                break drain.head;
+            }
+            if shared.pty_done.load(Ordering::SeqCst) {
+                break st.log.head;
+            }
+            st = shared
+                .cv
+                .wait_timeout(st, TICK)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        };
+        drop(st);
+        let Some(conn) = shared.conns().get(&owner).cloned() else {
+            return;
+        };
+        // An owner that hasn't asked for a replay is sent nothing to wait for.
+        let behind = || {
+            conn.cursor
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .is_some_and(|(_, from)| from >= head);
-            if sent {
-                break;
+                .is_some_and(|(_, from)| from < head)
+        };
+        while behind() && !conn.closed.load(Ordering::SeqCst) {
+            if shared.lock().owner != Some(owner) {
+                return;
             }
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(TICK);
         }
         conn.close();
     });

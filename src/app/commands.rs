@@ -647,10 +647,15 @@ pub(super) fn cmd_chmod(app: &mut App, _args: &str) -> Vec<Effect> {
     app.apply(&Action::ChmodAdd('x')).unwrap_or_default()
 }
 
-/// `:setenv` — open the `NAME=VALUE` env-var prompt (was `s`). `:set` is for
-/// app settings (`:set sort=…`), so the env-var setter gets its own command.
-pub(super) fn cmd_setenv(app: &mut App, _args: &str) -> Vec<Effect> {
-    app.apply(&Action::SetEnvPrompt).unwrap_or_default()
+/// `:setenv NAME=VALUE` sets the variable as the prompt would; a bare
+/// `:setenv` opens the prompt. `:set` is for app settings (`:set sort=…`),
+/// so the env-var setter gets its own command.
+pub(super) fn cmd_setenv(app: &mut App, args: &str) -> Vec<Effect> {
+    if args.is_empty() {
+        return app.apply(&Action::SetEnvPrompt).unwrap_or_default();
+    }
+    app.state.dispatch_prompt(&super::PromptKind::SetEnv, args);
+    Vec::new()
 }
 
 /// Outcome of parsing an optional numeric task-id `:command` argument.

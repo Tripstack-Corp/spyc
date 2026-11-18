@@ -299,12 +299,34 @@ fn claude_lines(s: &claude_metrics::Snapshot, tail_only: bool, now: Timestamp) -
         "subagent calls (Agent tool): {}; background calls (run_in_background): {}",
         s.subagent_calls, s.background_calls
     ));
+    out.push(script_line(s, now));
     out.push(format!(
         "organization (oauthAccount in Claude Code's .claude.json): {}",
         s.organization.as_deref().unwrap_or("-- (not logged in)")
     ));
     out.extend(claude_tool_lines(s, tail_only));
     out
+}
+
+/// Code Mode's scripts, each figure with the records it comes from.
+fn script_line(s: &claude_metrics::Snapshot, now: Timestamp) -> String {
+    let sc = &s.scripts;
+    let code_mode = match s.mode.as_ref().and_then(|m| m.value.code_mode) {
+        Some(true) => "on",
+        Some(false) => "off",
+        None => "--",
+    };
+    let latest = sc.latest_ms.as_ref().map_or_else(
+        || "--".to_owned(),
+        |ms| format!("{} ms, {}", ms.value, sample_freshness(ms, now)),
+    );
+    let longest = sc
+        .longest_ms
+        .map_or_else(|| "--".to_owned(), |ms| format!("{ms} ms"));
+    format!(
+        "scripts (Code Mode: repl-mode records; REPL calls; <synthetic> tool calls; queued repl-eval envelopes): code mode {code_mode}; {} started; {} calls made; {} threw; {} running; latest {latest}; longest {longest}",
+        sc.started, sc.calls, sc.failed, sc.running
+    )
 }
 
 /// Every tool's tally, which is complete unless the read began part-way, then
@@ -321,8 +343,19 @@ fn claude_tool_lines(s: &claude_metrics::Snapshot, tail_only: bool) -> Vec<Strin
         }
     )];
     for count in &s.tool_counts {
+        let in_scripts = s
+            .scripts
+            .tools
+            .iter()
+            .find(|scripted| scripted.name == count.name)
+            .map_or_else(String::new, |scripted| {
+                format!(
+                    "; in scripts {} calls, {} failed",
+                    scripted.calls, scripted.failed
+                )
+            });
         out.push(format!(
-            "  {}: {} calls; {} failed",
+            "  {}: {} calls; {} failed{in_scripts}",
             count.name, count.calls, count.failed
         ));
     }
@@ -596,6 +629,48 @@ mod tests {
         }));
     }
 
+    /// The dump gives Code Mode's figures, with how long scripts ran, which
+    /// the strip leaves out.
+    #[test]
+    fn the_dump_gives_code_modes_scripts_and_how_long_they_ran() {
+        let at: Timestamp = "2026-10-13T12:00:00Z".parse().unwrap();
+        let line = |s: &Snapshot| {
+            claude_lines(s, false, at)
+                .into_iter()
+                .find(|l| l.starts_with("scripts (Code Mode: "))
+                .unwrap()
+        };
+        assert!(line(&Snapshot::default()).ends_with(
+            "code mode --; 0 started; 0 calls made; 0 threw; 0 running; latest --; longest --"
+        ));
+        let snapshot = Snapshot {
+            mode: Some(claude_metrics::Sample {
+                at,
+                value: claude_metrics::Mode {
+                    code_mode: Some(true),
+                    ..claude_metrics::Mode::default()
+                },
+            }),
+            scripts: claude_metrics::Scripts {
+                started: 3,
+                calls: 7,
+                failed: 2,
+                running: 1,
+                latest_ms: Some(claude_metrics::Sample { at, value: 49 }),
+                longest_ms: Some(1_020),
+                ..claude_metrics::Scripts::default()
+            },
+            ..Snapshot::default()
+        };
+        let reported = line(&snapshot);
+        assert!(
+            reported.contains(
+                "code mode on; 3 started; 7 calls made; 2 threw; 1 running; latest 49 ms, "
+            ) && reported.ends_with("; longest 1020 ms"),
+            "{reported}"
+        );
+    }
+
     /// The dump names every tool counted, not only the recent calls the HUD
     /// keeps, and says whether the tally is the whole session.
     #[test]
@@ -615,6 +690,7 @@ mod tests {
                 status: ToolStatus::Completed,
                 at,
                 background: false,
+                in_script: false,
             }],
             tools_complete: true,
             ..Snapshot::default()
@@ -634,6 +710,26 @@ mod tests {
         );
         let partial = claude_tool_lines(&snapshot, true);
         assert!(partial[0].contains("since the read began part-way through"));
+
+        let scripted = Snapshot {
+            scripts: claude_metrics::Scripts {
+                calls: 7,
+                tools: vec![count("Tool1", 7, 1)],
+                ..claude_metrics::Scripts::default()
+            },
+            ..snapshot
+        };
+        let lines = claude_tool_lines(&scripted, false);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l == "  Tool1: 29 calls; 1 failed; in scripts 7 calls, 1 failed"),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l == "  Tool0: 30 calls; 0 failed"),
+            "{lines:?}"
+        );
     }
 
     #[test]

@@ -177,6 +177,189 @@ fn a_code_mode_scripts_calls_count_as_tools_not_requests() {
     );
 }
 
+/// `{"type":"repl-mode"}`: whether the session runs in Code Mode.
+fn code_mode(on: bool) -> Value {
+    json!({"type": "repl-mode", "replMode": on, "sessionId": SESSION})
+}
+
+/// A model message that runs one script.
+fn repl(id: &str, second: u32, call: &str) -> Value {
+    assistant(
+        id,
+        second,
+        usage(1, 1, 1, 1),
+        json!([{"type": "tool_use", "id": call, "name": "REPL",
+                "input": {"code": "x"}, "caller": {"type": "direct"}}]),
+    )
+}
+
+/// The `REPL` call's own result: the script runs on in the background.
+fn dispatched(second: u32, call: &str, eval: u64) -> Value {
+    json!({"type": "user", "sessionId": SESSION, "timestamp": time(second),
+           "toolUseResult": {"result": format!("(dispatched #{eval})"), "stdout": "",
+                             "stderr": "", "evalId": eval, "asyncDispatched": true},
+           "message": {"content": [{"type": "tool_result", "tool_use_id": call,
+                                    "content": format!("(dispatched #{eval})"), "is_error": false}]}})
+}
+
+/// The envelope a finished script's result is queued in, `body` after its tag.
+fn ended(second: u32, eval: u64, ms: u64, body: &str) -> Value {
+    json!({"type": "queue-operation", "operation": "enqueue", "sessionId": SESSION,
+           "timestamp": time(second),
+           "content": format!("<event nonce=\"n0nce\" kind=\"repl-eval\" at=\"{}\" eval=\"{eval}\" ms=\"{ms}\" status=\"settled\">\n{body}\n</event>", time(second))})
+}
+
+/// A script that threw: Claude Code adds a virtual `REPL` call that failed.
+fn threw(second: u32, id: &str) -> [Value; 2] {
+    let [mut call, mut result] = script_call(second, id, "REPL");
+    result["message"]["content"][0]["is_error"] = json!(true);
+    result["message"]["content"][0]["content"] = json!("PRIVATE_SCRIPT_ERROR_SENTINEL");
+    call["message"]["content"][0]["input"] = json!({});
+    [call, result]
+}
+
+/// Each script is one `REPL` call; what it did, whether it threw, and how
+/// long it ran come from Code Mode's own records, never from its output.
+#[test]
+fn a_code_mode_session_counts_its_scripts_and_what_they_did() {
+    let mut records = vec![
+        code_mode(true),
+        repl("msg-1", 1, "toolu-1"),
+        dispatched(2, "toolu-1", 1),
+    ];
+    records.extend(script_call(3, "repl_a", "Bash"));
+    records.extend(script_call(3, "repl_b", "Read"));
+    records.push(ended(
+        3,
+        1,
+        1_020,
+        "<result>PRIVATE_SCRIPT_OUTPUT_SENTINEL</result>",
+    ));
+    records.extend([repl("msg-2", 4, "toolu-2"), dispatched(5, "toolu-2", 2)]);
+    records.extend(threw(6, "repl-error-1"));
+    records.push(ended(
+        6,
+        2,
+        49,
+        "<error>PRIVATE_SCRIPT_ERROR_SENTINEL</error>",
+    ));
+    records.extend([repl("msg-3", 7, "toolu-3"), dispatched(8, "toolu-3", 3)]);
+    let snapshot = fold_all(&records);
+
+    assert_eq!(snapshot.mode.as_ref().unwrap().value.code_mode, Some(true));
+    let scripts = &snapshot.scripts;
+    assert_eq!(
+        (
+            scripts.started,
+            scripts.calls,
+            scripts.failed,
+            scripts.running
+        ),
+        (3, 2, 1, 1),
+        "eval 3 has not finished: {scripts:?}"
+    );
+    assert_eq!(scripts.latest_ms.as_ref().unwrap().value, 49);
+    assert_eq!(scripts.longest_ms, Some(1_020));
+    let repl = snapshot
+        .tool_counts
+        .iter()
+        .find(|count| count.name == "REPL")
+        .unwrap();
+    assert_eq!(
+        (repl.calls, repl.failed),
+        (3, 1),
+        "a script that threw is one call, failed"
+    );
+    assert!(snapshot.tools_complete);
+    assert_eq!(snapshot.messages, 3);
+    let events: Vec<Event> = records.iter().filter_map(|r| decode(r, SESSION)).collect();
+    let dump = format!("{events:?} {snapshot:?}");
+    assert!(!dump.contains("SENTINEL"), "{dump}");
+}
+
+/// The calls the scripts made are tallied by tool apart from the session's
+/// whole tally, which still counts them: the `REPL` calls that ran the
+/// scripts, and one that threw, are not among them.
+#[test]
+fn a_scripts_calls_are_tallied_apart_by_tool() {
+    let mut records = vec![
+        repl("msg-1", 1, "toolu-1"),
+        dispatched(2, "toolu-1", 1),
+        assistant(
+            "msg-2",
+            2,
+            usage(1, 1, 1, 1),
+            tool_use("toolu-2", "Bash", json!({})),
+        ),
+        result(2, "toolu-2", false),
+    ];
+    records.extend(script_call(3, "repl_a", "Bash"));
+    let [call, mut failed] = script_call(3, "repl_b", "Bash");
+    failed["message"]["content"][0]["is_error"] = json!(true);
+    records.extend([call, failed]);
+    records.extend(script_call(3, "repl_c", "Read"));
+    records.extend(threw(3, "repl-error-1"));
+    let snapshot = fold_all(&records);
+
+    let tally = |counts: &[ToolCount]| {
+        counts
+            .iter()
+            .map(|c| (c.name.clone(), c.calls, c.failed))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        tally(&snapshot.scripts.tools),
+        [("Bash".to_owned(), 2, 1), ("Read".to_owned(), 1, 0)]
+    );
+    let whole = tally(&snapshot.tool_counts);
+    assert!(whole.contains(&("Bash".to_owned(), 3, 1)), "{whole:?}");
+    assert!(whole.contains(&("REPL".to_owned(), 1, 1)), "{whole:?}");
+}
+
+/// Only a queued envelope's own opening tag ends a script: the same text
+/// quoted in a script's output, or in a result, is data.
+#[test]
+fn only_a_queued_envelopes_own_tag_ends_a_script() {
+    let running = |extra: Vec<Value>| {
+        let mut records = vec![repl("msg-1", 1, "toolu-1"), dispatched(2, "toolu-1", 1)];
+        records.extend(extra);
+        fold_all(&records).scripts.running
+    };
+    let tag = ended(3, 1, 5, "")["content"].as_str().unwrap().to_owned();
+    let mut quoted = ended(3, 9, 5, "");
+    quoted["content"] = json!(format!(
+        "<event nonce=\"x\" kind=\"repl-eval\" at=\"t\" eval=\"9\" ms=\"5\" status=\"settled\">\n<result>{tag}</result>"
+    ));
+    let mut indented = ended(3, 1, 5, "");
+    indented["content"] = json!(format!("output: {tag}"));
+    let mut removed = ended(3, 1, 5, "");
+    removed["operation"] = json!("remove");
+    let mut other_kind = ended(3, 1, 5, "");
+    other_kind["content"] = json!(tag.replace("repl-eval", "monitor"));
+    let as_result = json!({"type": "user", "sessionId": SESSION, "timestamp": time(3),
+        "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu-1", "content": tag}]}});
+    for (name, record) in [
+        ("quoted in another script's output", quoted),
+        ("not at the start", indented),
+        ("a dequeue", removed),
+        ("another kind of event", other_kind),
+        ("a tool result", as_result),
+    ] {
+        assert_eq!(running(vec![record]), 1, "{name}");
+    }
+    assert_eq!(running(vec![ended(3, 1, 5, "")]), 0);
+}
+
+/// A session that never ran a script has no Code Mode figures.
+#[test]
+fn a_session_without_code_mode_has_no_scripts() {
+    let snapshot = fold_all(&[code_mode(false), repl("msg-1", 1, "toolu-1")]);
+    assert_eq!(snapshot.mode.unwrap().value.code_mode, Some(false));
+    let none = fold_all(&[assistant("msg-1", 1, usage(1, 1, 1, 1), json!([]))]);
+    assert_eq!(none.mode.unwrap().value.code_mode, None);
+    assert_eq!(none.scripts, Scripts::default());
+}
+
 /// After a compaction the context's size is unknown until the next request,
 /// and a record from before the boundary can't restore it. Lifetime totals
 /// carry on across it.

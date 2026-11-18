@@ -900,6 +900,21 @@ attach to it. `SPYC_JAR_RESUME_FAULT` makes a debug build's resume fail at
 each step, and the tests in `tests/jar_process/contain.rs` fail with any
 part of this undone.
 
+## A program's detach waits for its last words
+
+<!-- SPYC-TRAP: detach-after-last-words -->
+A program that sends `detach` (spyc in its own jar, after writing its
+terminal's reset) has its owner's connection ended only once everything it
+printed before asking has gone out on it (`detach_owner`,
+`crates/spyc-jar/src/jar/conn.rs`). The PTY pump says when that is: it answers
+the ask when it finds the PTY empty between reads, so nothing read is still
+outside the log. Two waits on a clock came before this, and both lost the
+program's last bytes. One gave up on a PTY that couldn't drain, because the
+pump stops reading while a live owner is a window behind. The other took the
+log's head while the pump had read the last bytes and not yet logged them. A
+reset cut short leaves the user's terminal in spyc's modes, and nothing
+reports it.
+
 ## A jar's token arrives on its standard input
 
 <!-- SPYC-TRAP: jar-token-stdin -->

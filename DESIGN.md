@@ -195,7 +195,9 @@ failures of its own or `✗<n>` when it does. For Claude Code, the mode row adds
 `todo` cell — `TodoWrite`'s list, or `TaskCreate`/`TaskUpdate`'s, as completed
 over total, with how many are in progress in brackets — once one of those tools
 has reported; named `todo`, not `plan`, since that already names the account's
-rate-limit windows on the row above. After the health cells it adds `org`, the
+rate-limit windows on the row above. In Code Mode it adds `scripts`, with `✗`
+and `◐` marking those that threw and those running, and `calls/script`, and
+the tools row says how many of its calls the scripts made. After the health cells it adds `org`, the
 organization its login belongs to, or `auth` and the credential used in the
 login's place, omitted rather than `--` without either. The full list is the dump's, which
 `:agent hud dump` (or `info`) opens, and so does a double-click anywhere on the

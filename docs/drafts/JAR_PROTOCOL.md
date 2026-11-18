@@ -339,7 +339,10 @@ What shape 2 has to get right:
 4. **The real terminal is restored on detach.** The attach client can't parse,
    so it can't know which modes spyc set. On detach it sends a fixed reset:
    leave the alternate screen, end mouse reporting and bracketed paste, pop the
-   kitty keyboard flags (a stack spyc has leaked before, #696 and #710). On
+   kitty keyboard flags (a stack spyc has leaked before, #696 and #710). spyc
+   writes its own reset first and then sends `detach`, and the jar ends the
+   client only once everything spyc printed before asking has gone out to it,
+   however slowly the client reads. On
    attach spyc sets its modes again, on a terminal that may be a different
    emulator, with a different colour depth, image protocol and keyboard
    protocol.

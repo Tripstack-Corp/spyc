@@ -1,9 +1,10 @@
 //! Folds a Claude Code transcript's events into the HUD's [`Snapshot`]: usage
 //! counted once per message however many content blocks repeat it, the context's
 //! size forgotten at a compaction while lifetime totals keep, tool counts by
-//! name, and the plan from `TodoWrite` or `TaskCreate`/`TaskUpdate`.
+//! name, the plan from `TodoWrite` or `TaskCreate`/`TaskUpdate`, and Code
+//! Mode's scripts.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use jiff::Timestamp;
 
@@ -16,6 +17,10 @@ use crate::agent::metrics::{MAX_TOOLS, count_tool, replace};
 const RECENT_MESSAGES: usize = 64;
 /// The most failed `Agent` calls remembered: enough for the subagents shown.
 const MAX_FAILED_AGENT_CALLS: usize = 64;
+/// The most scripts remembered as running.
+const MAX_RUNNING_SCRIPTS: usize = 64;
+/// The id Claude Code gives the virtual `REPL` call it adds when a script throws.
+const SCRIPT_THREW: &str = "repl-error-";
 
 /// Folds transcript events in file order. A message's usage counts once
 /// however many records repeat it; a compaction ends what is known about the
@@ -35,6 +40,8 @@ pub struct Reducer {
     /// `TodoWrite`'s own full-list reports hold — published to
     /// `snapshot.plan` either way, latest timestamp winning.
     task_plan: Plan,
+    /// The eval ids of scripts started in the background and not yet finished.
+    running_scripts: BTreeSet<u64>,
 }
 
 impl Reducer {
@@ -43,8 +50,13 @@ impl Reducer {
         result.tools = self.tools.values().cloned().collect();
         result.tools.sort_by_key(|tool| tool.at);
         result.tools_complete = !self.tools_incomplete;
+        result.scripts.running = u32::try_from(self.running_scripts.len()).unwrap_or(u32::MAX);
         result
             .tool_counts
+            .sort_by(|a, b| b.calls.cmp(&a.calls).then_with(|| a.name.cmp(&b.name)));
+        result
+            .scripts
+            .tools
             .sort_by(|a, b| b.calls.cmp(&a.calls).then_with(|| a.name.cmp(&b.name)));
         result.mode = (self.mode != Mode::default())
             .then(|| self.mode_at.or(self.clock))
@@ -83,8 +95,19 @@ impl Reducer {
                     self.fold_call(call, at);
                 }
             }
-            Event::Results { at, results, task } => {
+            Event::Results {
+                at,
+                results,
+                task,
+                dispatched,
+            } => {
                 self.tick(at);
+                if let Some(eval) = dispatched {
+                    self.running_scripts.insert(eval);
+                    if self.running_scripts.len() > MAX_RUNNING_SCRIPTS {
+                        self.running_scripts.pop_first();
+                    }
+                }
                 for (id, failed) in results {
                     self.fold_result(&id, failed, at);
                 }
@@ -95,6 +118,19 @@ impl Reducer {
             Event::PermissionMode(mode) => {
                 self.mode.permission_mode = Some(mode);
                 self.mode_at = self.clock;
+            }
+            Event::CodeMode(on) => {
+                self.mode.code_mode = Some(on);
+                self.mode_at = self.clock;
+            }
+            Event::ScriptEnded { at, eval, ms } => {
+                self.tick(at);
+                self.running_scripts.remove(&eval);
+                if let Some(ms) = ms {
+                    let scripts = &mut self.snapshot.scripts;
+                    replace(&mut scripts.latest_ms, at, ms);
+                    scripts.longest_ms = Some(scripts.longest_ms.map_or(ms, |most| most.max(ms)));
+                }
             }
             Event::Compaction { at, compaction } => self.fold_compaction(at, compaction),
         }
@@ -137,8 +173,22 @@ impl Reducer {
         if matches!(call.name.as_deref(), Some("Agent" | "Task")) {
             self.snapshot.subagent_calls = self.snapshot.subagent_calls.saturating_add(1);
         }
+        // A script that threw is the `REPL` call already counted, failing.
+        let threw = call.in_script && call.id.starts_with(SCRIPT_THREW);
+        let scripts = &mut self.snapshot.scripts;
+        if threw {
+            scripts.failed = scripts.failed.saturating_add(1);
+        } else if call.in_script {
+            scripts.calls = scripts.calls.saturating_add(1);
+            let count = count_tool(&mut scripts.tools, call.name.as_deref());
+            count.calls = count.calls.saturating_add(1);
+        } else if call.name.as_deref() == Some("REPL") {
+            scripts.started = scripts.started.saturating_add(1);
+        }
         let count = self.count(call.name.as_deref());
-        count.calls = count.calls.saturating_add(1);
+        if !threw {
+            count.calls = count.calls.saturating_add(1);
+        }
         self.tools.insert(
             call.id,
             Tool {
@@ -146,6 +196,7 @@ impl Reducer {
                 status: ToolStatus::Started,
                 at,
                 background: call.background,
+                in_script: call.in_script && !threw,
             },
         );
         if self.tools.len() > MAX_TOOLS {
@@ -184,6 +235,10 @@ impl Reducer {
                 calls.push(id.to_owned());
                 let over = calls.len().saturating_sub(MAX_FAILED_AGENT_CALLS);
                 calls.drain(..over);
+            }
+            if tool.in_script {
+                let count = count_tool(&mut self.snapshot.scripts.tools, name.as_deref());
+                count.failed = count.failed.saturating_add(1);
             }
             let count = self.count(name.as_deref());
             count.failed = count.failed.saturating_add(1);
