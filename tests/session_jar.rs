@@ -315,6 +315,232 @@ fn before<'a>(text: &'a str, needle: &str) -> &'a str {
     text.find(needle).map_or(text, |at| &text[..at])
 }
 
+/// The second session the tests that need two run.
+const OTHER: &str = "SAFFRON_TEST";
+
+/// Where a session's own jar listens.
+fn session_socket(dirs: &Dirs, name: &str) -> PathBuf {
+    dirs.runtime
+        .join("spyc/sessions")
+        .join(format!("{name}.sock"))
+}
+
+/// The token `spyc attach` presents, kept where spyc keeps a session jar's.
+fn keep_token(dirs: &Dirs, name: &str) {
+    let tokens = dirs.state.join("spyc/jar-tokens");
+    std::fs::create_dir_all(&tokens).unwrap();
+    std::fs::write(tokens.join(name), TOKEN).unwrap();
+}
+
+/// A running session's own jar, its token kept for `spyc attach`.
+fn session(dirs: &Dirs, name: &str) -> Jar {
+    let jar = Jar::start(dirs, session_socket(dirs, name));
+    keep_token(dirs, name);
+    jar.wait_for_spyc();
+    jar
+}
+
+/// `spyc ARGS` on a PTY of the test's own: the user's terminal, answering
+/// spyc's queries through the jar as a terminal would.
+struct Attached {
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    seen: Arc<Mutex<Vec<u8>>>,
+    keys: Arc<Mutex<Box<dyn Write + Send>>>,
+}
+
+impl Attached {
+    fn start(dirs: &Dirs, args: &[&str]) -> Self {
+        use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+        use std::io::Read;
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 30,
+                cols: 100,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_spyc"));
+        cmd.args(args);
+        cmd.cwd(&dirs.project);
+        cmd.env_clear();
+        for (k, v) in dirs.env() {
+            cmd.env(k, v);
+        }
+        let child = pair.slave.spawn_command(cmd).unwrap();
+        drop(pair.slave);
+        let keys: Arc<Mutex<Box<dyn Write + Send>>> =
+            Arc::new(Mutex::new(pair.master.take_writer().unwrap()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        {
+            let (seen, keys) = (Arc::clone(&seen), Arc::clone(&keys));
+            std::thread::spawn(move || {
+                let _master = pair.master;
+                let mut buf = [0u8; 8192];
+                while let Ok(n) = reader.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    let chunk = &buf[..n];
+                    for (query, answer) in KITTY {
+                        let asked = chunk.windows(query.len()).filter(|w| w == query).count();
+                        for _ in 0..asked {
+                            let _ = keys.lock().unwrap().write_all(answer);
+                        }
+                    }
+                    seen.lock().unwrap().extend_from_slice(chunk);
+                }
+            });
+        }
+        Self { child, seen, keys }
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.seen.lock().unwrap()).into_owned()
+    }
+
+    fn wait_for(&self, what: &str, needle: &str) {
+        let until = Instant::now() + WAIT;
+        while !self.text().contains(needle) {
+            assert!(
+                Instant::now() < until,
+                "never: {what}; the terminal showed:\n{:?}",
+                self.text()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Wait for spyc to have drawn `name` on its screen: after the
+    /// alternate screen, so a mention before it (a list, a message) isn't
+    /// taken for the frame.
+    fn wait_drawn(&self, name: &str) {
+        let until = Instant::now() + WAIT;
+        loop {
+            let text = self.text();
+            if text
+                .rfind(ALT_SCREEN)
+                .is_some_and(|at| text[at..].contains(name))
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < until,
+                "never drew {name}; the terminal showed:\n{text:?}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn type_keys(&self, keys: &[u8]) {
+        let mut w = self.keys.lock().unwrap();
+        w.write_all(keys).unwrap();
+        w.flush().unwrap();
+    }
+
+    /// Wait for it to exit, and say how.
+    fn exit(&mut self) -> portable_pty::ExitStatus {
+        let until = Instant::now() + WAIT;
+        loop {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                return status;
+            }
+            assert!(
+                Instant::now() < until,
+                "never exited; the terminal showed:\n{:?}",
+                self.text()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Quit the spyc it shows, as the user would.
+    fn quit_spyc(&mut self) {
+        self.type_keys(b":q\r");
+        self.wait_for("spyc asks for a second `:q`", "press again to quit");
+        self.type_keys(b":q\r");
+        assert!(self.exit().success(), "{:?}", self.text());
+    }
+}
+
+impl Drop for Attached {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+#[test]
+fn spyc_attach_shows_the_session_and_a_second_attach_takes_it_over() {
+    let dirs = Dirs::new();
+    let _jar = session(&dirs, NAME);
+
+    let mut first = Attached::start(&dirs, &["attach", NAME]);
+    first.wait_drawn(NAME);
+
+    // Attached at a desk, then again from elsewhere: the second takes it.
+    let mut second = Attached::start(&dirs, &["attach"]);
+    second.wait_for("the takeover said", "taking it over");
+    second.wait_drawn(NAME);
+    let ended = first.exit();
+    assert_eq!(ended.exit_code(), 128 + 15, "the first ended by SIGTERM");
+    let shown = first.text();
+    let last_frame = shown.rfind(NAME).unwrap();
+    assert!(
+        shown[last_frame..].contains("\x1b[?1049l"),
+        "the first terminal left on spyc's screen: {:?}",
+        &shown[last_frame..]
+    );
+
+    second.quit_spyc();
+}
+
+#[test]
+fn a_bare_spyc_attach_asks_which_of_several_sessions() {
+    let dirs = Dirs::new();
+    let _first = session(&dirs, NAME);
+    let _second = session(&dirs, OTHER);
+
+    let mut terminal = Attached::start(&dirs, &["attach"]);
+    terminal.wait_for("the choice", "Attach to which?");
+    let listed = terminal.text();
+    assert!(
+        listed.contains(&format!("  1  {NAME}")) && listed.contains(&format!("  2  {OTHER}")),
+        "{listed:?}"
+    );
+    terminal.type_keys(b"2\r");
+    terminal.wait_drawn(OTHER);
+    terminal.quit_spyc();
+}
+
+#[test]
+fn spyc_attach_says_what_runs_when_no_session_matches() {
+    let dirs = Dirs::new();
+    let attach = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_spyc"))
+            .args(args)
+            .env_clear()
+            .envs(dirs.env())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let said = attach(&["attach"]);
+    assert!(
+        said.contains("no session runs in a jar of its own"),
+        "{said}"
+    );
+
+    let _jar = session(&dirs, NAME);
+    let said = attach(&["attach", "SAGE"]);
+    assert!(
+        said.contains("no session named SAGE") && said.contains(NAME),
+        "{said}"
+    );
+}
+
 #[test]
 fn each_terminal_that_attaches_to_spycs_own_jar_is_set_up_probed_and_drawn_on() {
     let dirs = Dirs::new();

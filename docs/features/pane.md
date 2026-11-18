@@ -349,6 +349,12 @@ running.
 `spyc --jars` lists your jars: each tab's label, whether it's a pane, a task or a `!` capture, its
 agent and project, its program's pid, and whether a spyc owns it.
 
+A spyc can also run in a jar of its own, so it outlives the terminal it was started in.
+`spyc attach NAME` attaches your terminal to such a session by its name (the one spyc shows,
+such as `CORIANDER_CLOVE`). With no name it attaches to the one session running, or lists them
+and asks which. A session already attached in another terminal moves to yours, and that
+terminal is left as it was before spyc. `^\` detaches.
+
 ## Quick Select — labelled overlay picker
 
 Borrowed from [WezTerm's Quick Select][wezterm-qs]. Press **`^a u`**

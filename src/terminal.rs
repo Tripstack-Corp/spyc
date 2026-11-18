@@ -384,16 +384,7 @@ pub fn detect_image_picker() -> Option<ratatui_image::picker::Picker> {
 /// Take the terminal for the TUI. With `probe` false, nothing is asked of it:
 /// spyc in its own jar with no terminal attached, where nothing would answer.
 pub fn setup_terminal(probe: bool) -> Result<Tui> {
-    // Stash what the signal teardown needs BEFORE the terminal is touched:
-    // the pre-raw termios, and the restore string (built here because the
-    // handler may not build it — see `signal_terminate`).
-    let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
-    // SAFETY: `termios` is a writable `libc::termios`.
-    if unsafe { libc::tcgetattr(libc::STDIN_FILENO, termios.as_mut_ptr()) } == 0 {
-        // SAFETY: `tcgetattr` succeeded, so it filled `termios`.
-        let _ = ORIGINAL_TERMIOS.set(unsafe { termios.assume_init() });
-    }
-    let _ = RESTORE_SEQ.set(terminal_restore_seq());
+    stash_restore();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -436,6 +427,27 @@ pub fn setup_terminal(probe: bool) -> Result<Tui> {
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
+}
+
+/// Stash what the signal teardown needs BEFORE the terminal is touched: the
+/// pre-raw termios, and the restore string (built here because the handler may
+/// not build it — see `signal_terminate`).
+fn stash_restore() {
+    let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
+    // SAFETY: `termios` is a writable `libc::termios`.
+    if unsafe { libc::tcgetattr(libc::STDIN_FILENO, termios.as_mut_ptr()) } == 0 {
+        // SAFETY: `tcgetattr` succeeded, so it filled `termios`.
+        let _ = ORIGINAL_TERMIOS.set(unsafe { termios.assume_init() });
+    }
+    let _ = RESTORE_SEQ.set(terminal_restore_seq());
+}
+
+/// `spyc attach`: a terminal showing a spyc through its jar is restored as
+/// spyc restores its own when a signal ends it. A takeover ends the old client
+/// with SIGTERM, and that terminal is then left as it was before.
+pub fn restore_on_signal() {
+    stash_restore();
+    install_signal_handlers();
 }
 
 /// Ask the terminal whether it takes the kitty keyboard flag, and push the
