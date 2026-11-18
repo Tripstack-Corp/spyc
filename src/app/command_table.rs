@@ -14,7 +14,7 @@
 //!
 //! Extracted from `app/state.rs` (MVU last-mile, Part A).
 
-use super::{App, Effect, commands, lua, make_menu, menu_hints, stderr_log};
+use super::{App, Effect, commands, lua, make_menu, menu_hints, projects, stderr_log};
 
 /// Which dispatch layer owns a named `:command`. An `App`-free routing
 /// discriminant consulted by the Model (`AppState::dispatch_command`); the
@@ -122,6 +122,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("mouse", commands::cmd_mouse),
     pure("name"),
     app("notify", commands::cmd_notify),
+    app("order", projects::cmd_order),
     app("pane-to-task", commands::cmd_pane_to_task),
     app("pause", commands::cmd_pause),
     pure("project"),

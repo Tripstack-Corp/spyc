@@ -176,7 +176,8 @@ impl App {
     }
 
     /// The project switcher (`Space j`): its keys are [`Self::numbered_picker_key`]'s,
-    /// picking with `switch_to_pending_project`.
+    /// picking with `switch_to_pending_project`, and `K` / `J`, which move the
+    /// highlighted project up or down one slot, the highlight with it.
     pub(super) fn handle_pager_project_pick(
         &mut self,
         key: KeyEvent,
@@ -184,6 +185,16 @@ impl App {
     ) -> Option<Vec<Effect>> {
         self.state.pending_projects.as_ref()?;
         self.picker_in_view(PickerKind::Projects).then_some(())?;
+        if let KeyCode::Char(c @ ('K' | 'J')) = key.code {
+            let row = active_pager_mut!(self).and_then(|v| v.picker_cursor)?;
+            if let Some((_, lines)) = self.move_switcher_row(row, c == 'K')
+                && let Some(view) = active_pager_mut!(self)
+            {
+                view.lines = lines;
+                view.picker_move(if c == 'K' { -1 } else { 1 }, viewport);
+            }
+            return Some(Vec::new());
+        }
         self.numbered_picker_key(key, viewport, Self::switch_to_pending_project)
     }
 

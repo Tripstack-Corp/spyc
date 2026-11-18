@@ -223,6 +223,10 @@ const SECTIONS: &[Section] = &[
             ),
             (":startdir [.|<path>]", "manage start directory"),
             (
+                ":order [N]",
+                "move this project to place N; bare: the order",
+            ),
+            (
                 ":name <NEW>",
                 "rename the active session (SPICE_SPICE style)",
             ),

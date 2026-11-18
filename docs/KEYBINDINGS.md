@@ -314,7 +314,7 @@ appear on the top bar and persist across `spyc -r`.
 | `gP` / `Space P` | Set `PROJECT_HOME` to current directory |
 | `Space n` | Open a directory as a project, and go to it |
 | `Space x` | Close the project in view (asks first while anything in it runs) |
-| `Space j` | List the open projects, to go to one, and those closed lately, to reopen one (`j`/`k` + Enter, or `1`-`9`) |
+| `Space j` | List the open projects, to go to one, and those closed lately, to reopen one (`j`/`k` + Enter, or `1`-`9`; `K`/`J` move the highlighted project up or down) |
 | `Space Space` | Go to the project you were in last |
 | `Space 1`..`Space 9` | Go to open project N |
 | `Space ]` / `Space [` | Go to the next / previous project, wrapping |
@@ -322,6 +322,7 @@ appear on the top bar and persist across `spyc -r`.
 | `gS` | Set start dir (target of `` ` ``) to current directory |
 | `:project [.\|<path>\|clear\|config]` | Manage `PROJECT_HOME`; `config` opens the project's own config file |
 | `:startdir [.\|<path>]` | Manage start dir |
+| `:order [N]` | Move the project in view to place N of the open projects; bare, show their order |
 | `:name <NEW>` | Rename the active session |
 | `:whoami` | Show `user@host` in the status line |
 | `Space s` / `I` | Session info (pid, rss, counts) |

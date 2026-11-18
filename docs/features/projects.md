@@ -62,7 +62,8 @@ each with the tabs it saved and how long ago it closed (`closed 5m`, `closed
 among them, nor one whose directories have all gone. A session saved by
 spyc 2.2 can't say whether that spyc has quit, so its projects come back
 through `spyc -r` instead. `j`/`k` and `Enter`, or
-`1`-`9`, go to an open project or reopen a closed one: it comes back beside
+`1`-`9`, go to an open project or reopen a closed one, and `K`/`J` move the
+highlighted open project up or down one place: it comes back beside
 the others with its columns, tabs and split as they were, as `spyc -r` brings
 a project back, and you go to it. A tab that would resume a conversation an
 agent is in, in another spyc or in one of your tabs here, starts fresh
@@ -72,8 +73,11 @@ longer listed as closed. `/` searches, and `q` closes the list. Opened from
 inside an editor, it has the keyboard until it closes, as help does.
 **`Space Space`** goes back to the project you were in last,
 **`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
-through them in the order they were opened, wrapping. With one project open
-these do nothing at all.
+through them in order, wrapping. With one project open these do nothing at
+all. Projects are in the order you opened them until **`:order N`** moves
+the one you're in to place N, the others shifting along to make room;
+`Space j`, the status bar and a saved session keep the same order. `:order`
+alone shows it.
 
 **`Space !`**, or **`^a !`** from inside an agent's pane, goes to the agent
 that needs you, in whichever project it is: the one blocked on you longest,
