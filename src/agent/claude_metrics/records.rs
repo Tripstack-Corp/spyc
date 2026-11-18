@@ -9,6 +9,9 @@ use super::{Compaction, Plan, Usage};
 
 /// At most this many tool calls, or results, are taken from one record.
 const MAX_BLOCKS: usize = 64;
+/// The model a record names when no request produced it, such as a Code Mode
+/// script's own tool call: its usage is zero, not a request's.
+const SYNTHETIC_MODEL: &str = "<synthetic>";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolCall {
@@ -41,6 +44,7 @@ pub enum Event {
         message_id: String,
         model: Option<String>,
         effort: Option<String>,
+        /// `None` for a [`SYNTHETIC_MODEL`] record.
         usage: Option<Usage>,
         calls: Vec<ToolCall>,
     },
@@ -107,7 +111,9 @@ fn assistant(value: &Value) -> Option<Event> {
         message_id: bounded_id(&message["id"])?,
         model: label(&message["model"]),
         effort: label(&value["effort"]),
-        usage: usage(&message["usage"]),
+        usage: (message["model"] != SYNTHETIC_MODEL)
+            .then(|| usage(&message["usage"]))
+            .flatten(),
         calls,
     })
 }
