@@ -47,6 +47,7 @@ mod pager_menu_tests;
 mod pane_copy_tests;
 #[cfg(test)]
 mod pane_to_task_tests;
+mod project_drag;
 #[cfg(test)]
 mod project_drag_tests;
 mod route;
@@ -127,6 +128,18 @@ pub enum MouseDragTarget {
     Pane,
     /// A charwise selection over a single-line chrome surface.
     Chrome,
+    /// A project's label dragged along the status bar ([`ProjectDrag`]).
+    Project,
+}
+
+/// A project's label held down on the status bar: the project, the place it
+/// was pressed in, and the pointer's last column, whose direction decides
+/// which labels it may pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectDrag {
+    pub id: crate::project_id::ProjectId,
+    pub from: usize,
+    pub col: u16,
 }
 
 /// A file-list row selection.
@@ -504,7 +517,7 @@ impl super::App {
             MouseSink::ClosePager => {
                 self.apply_pager_action(crate::app::pager_handler::PagerAction::Close)
             }
-            MouseSink::Project(action) => self.click_project(action),
+            MouseSink::Project(action) => self.press_project_label(ev, action),
             MouseSink::FocusPane => {
                 self.set_pane_focus(true);
                 Vec::new()

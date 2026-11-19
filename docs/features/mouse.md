@@ -187,6 +187,10 @@ takes, or keeps the hints for good, or turns them off
   until you have learned it. A click on the agent segment gives the pane the
   keyboard.
   The rest of the bar is text to select.
+- **Drag a project's label along the status bar to move it**, as `:order`
+  does. The press goes to that project, and the labels make room as you
+  drag, so the bar shows where it will land; let go and it stays there.
+  Drag it back to undo. The collapsed count (`2/4`) can't be dragged.
 - **Click beside the pager to close it**, as `q` does, when it opens as a
   box in the middle of the screen: a file you opened, `?` help, `:grep`, a
   git view. The click only closes the pager; it doesn't also act on what's

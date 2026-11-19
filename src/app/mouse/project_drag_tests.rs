@@ -76,7 +76,6 @@ fn drag_along(app: &mut App, from: (u16, u16), to: u16) -> Vec<Vec<String>> {
 /// A label dragged left onto the first one's place moves to the front, the
 /// others shifting along, and stays the project in view.
 #[test]
-#[ignore = "red until a project's label drags along the bar"]
 fn a_label_dragged_onto_the_first_moves_to_the_front() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo", "charlie"], 120);
@@ -99,7 +98,6 @@ fn a_label_dragged_onto_the_first_moves_to_the_front() {
 
 /// A label dragged right onto the last one's place moves to the end.
 #[test]
-#[ignore = "red until a project's label drags along the bar"]
 fn a_label_dragged_onto_the_last_moves_to_the_end() {
     with_mouse(|base| {
         let (mut app, ids) = projects(base, &["alpha", "bravo", "charlie"], 120);
@@ -120,7 +118,6 @@ fn a_label_dragged_onto_the_last_moves_to_the_end() {
 /// The labels move while the button is held, so the bar shows where the
 /// project will land, and dragging back puts it back.
 #[test]
-#[ignore = "red until a project's label drags along the bar"]
 fn the_order_follows_the_pointer_and_back() {
     with_mouse(|base| {
         let (mut app, _) = projects(base, &["alpha", "bravo", "charlie"], 120);
@@ -144,7 +141,6 @@ fn the_order_follows_the_pointer_and_back() {
 /// there: after the move the pointer is over the long label again, which
 /// must not send the short one back, step after step.
 #[test]
-#[ignore = "red until a project's label drags along the bar"]
 fn a_short_label_crossing_a_long_one_does_not_flip_back() {
     with_mouse(|base| {
         let (mut app, _) = projects(base, &["a-much-longer-name", "b"], 120);

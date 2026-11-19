@@ -1055,8 +1055,9 @@ fn every_cell_of_a_drawn_chip_goes_to_its_project_and_no_other_does() {
                 match (to, on_count) {
                     (Some(id), _) => {
                         assert_eq!(app.state.active, id, "width {width}, column {x}: {text:?}");
-                        assert_eq!(
-                            app.view.mouse_selection, None,
+                        assert_ne!(
+                            app.view.mouse_selection,
+                            Some(MouseDragTarget::Chrome),
                             "width {width}, column {x}: a chip is no text to select"
                         );
                     }
