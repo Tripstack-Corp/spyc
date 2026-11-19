@@ -115,6 +115,18 @@ pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
 }
 
 /// Socket path for the current process. `None` when [`state_dir`] is.
+/// Ask the spyc with `pid` to `:upgrade`: `spyc attach` from a newer
+/// install, once the user said yes.
+pub fn ask_upgrade(pid: u32) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
+    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
+        .with_context(|| format!("reach the spyc at {}", sock.display()))?;
+    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": protocol::UPGRADE_METHOD });
+    framing::send_message(&mut stream, &msg.to_string()).context("ask spyc to upgrade")?;
+    Ok(())
+}
+
 pub fn socket_path() -> Option<PathBuf> {
     socket_path_for(std::process::id())
 }

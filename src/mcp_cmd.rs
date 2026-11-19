@@ -184,6 +184,9 @@ pub enum McpCommand {
     /// entry, rewrote this directory's entry and said so (`spyc/disconnected`).
     /// Nothing this version sends; the TUI tells the user who owns the entry.
     Disconnected { new_pid: u32 },
+    /// `spyc attach` from a newer install asked this spyc to `:upgrade`
+    /// (`spyc/upgrade`). Fire-and-forget.
+    Upgrade,
     /// What Claude Code's statusline told `spyc --statusline` in a pane: the
     /// plan's rate-limit windows, the context window and the vim mode.
     /// Fire-and-forget.
@@ -232,6 +235,7 @@ impl McpCommand {
             self,
             Self::Statusline { .. }
                 | Self::Disconnected { .. }
+                | Self::Upgrade
                 | Self::ConnectionInitialized { .. }
                 | Self::ConnectionBound { .. }
                 | Self::ConnectionClosed { .. }

@@ -128,6 +128,17 @@ pub fn canonical_mount_path(path: &std::path::Path) -> PathBuf {
     out
 }
 
+/// Where spyc runs from: the path the next install writes. Linux names a
+/// replaced binary `<path> (deleted)`.
+pub fn installed_spyc() -> anyhow::Result<PathBuf> {
+    use anyhow::Context as _;
+    let exe = std::env::current_exe().context("where spyc runs from")?;
+    Ok(exe
+        .to_str()
+        .and_then(|s| s.strip_suffix(" (deleted)"))
+        .map_or(exe.clone(), PathBuf::from))
+}
+
 #[cfg(test)]
 mod containment_tests {
     use super::canonical_contains;

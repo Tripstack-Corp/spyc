@@ -843,6 +843,108 @@ fn upgrade_in_a_session_jar_runs_the_new_spyc_with_the_same_tabs() {
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 
+/// S4: `spyc attach` from an install the session's spyc hasn't taken offers
+/// the upgrade, and a yes has that spyc `:upgrade` in place before the
+/// terminal attaches. With nothing new installed it asks nothing.
+#[test]
+fn spyc_attach_from_a_newer_install_offers_the_upgrade() {
+    let dirs = dirs();
+    let bin = dirs.root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let spyc = bin.join("spyc");
+    std::fs::copy(built, &spyc).unwrap();
+    std::fs::copy(built.with_file_name("spyc-jar"), bin.join("spyc-jar")).unwrap();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start_from(&spyc, &dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    left.0.push(agent);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+
+    // Into the session's jar, then detached.
+    let screens = first.screens();
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.eventually("the session drawn again, from its jar", || {
+        first.screens() > screens && first.since_last_screen().contains(&name)
+    });
+    let jar_spyc = described(&socket, "program_pid").unwrap();
+    left.0.push(jar_spyc.parse().unwrap());
+    first.type_keys(b"\x04");
+    eventually("the client leaves", || first.exited());
+
+    // Nothing new installed: it attaches without asking.
+    let mut plain = Spyc::start_from(&spyc, &dirs, &["attach"]);
+    plain.eventually("the session drawn", || {
+        plain.since_last_screen().contains(&name)
+    });
+    assert!(
+        !plain.shows("Upgrade it?"),
+        "asked with nothing new installed"
+    );
+    plain.type_keys(b"\x04");
+    eventually("the client leaves", || plain.exited());
+
+    // An install the session's spyc hasn't taken. A start time is whole
+    // seconds, so the install has to come more than a second after it.
+    std::thread::sleep(Duration::from_secs(2));
+    let next = bin.join("spyc.new");
+    std::fs::copy(built, &next).unwrap();
+    std::fs::rename(&next, &spyc).unwrap();
+    let _ = std::process::Command::new(&spyc).arg("--version").output();
+    let second = Spyc::start_from(&spyc, &dirs, &["attach"]);
+    second.eventually("the offer", || second.shows("Upgrade it? [Y/n]"));
+    second.type_keys(b"y\r");
+    second.eventually("the session drawn", || {
+        second.since_last_screen().contains(&name)
+            && second.since_last_screen().contains("ready-mark")
+    });
+    assert_eq!(
+        described(&socket, "program_pid").as_deref(),
+        Some(jar_spyc.as_str()),
+        "upgraded in place: the same pid"
+    );
+    // The session's spyc is the new one: there's nothing newer for it now.
+    second.eventually("the new spyc has the tab back", || {
+        described(&tab_jar(&dirs), "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    second.type_keys(b":upgrade\r");
+    second.eventually("told no newer spyc is installed", || {
+        squeezed(&second.since_last_screen()).contains("nonewerspycisinstalled")
+    });
+    let now: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert_eq!(now, agent, "the tab's program was started again");
+    second.type_keys(b":q\r");
+    second.eventually("spyc asks for a second `:q`", || {
+        squeezed(&second.since_last_screen()).contains("pressagaintoquit")
+    });
+    second.type_keys(b":q\r");
+    eventually("quitting ends the tab's program", || !alive(agent));
+}
+
+/// The tab's jar, as the saved session records it.
+fn tab_jar(dirs: &Dirs) -> PathBuf {
+    saved_jar_socket(&dirs.state).expect("the session records the tab's jar")
+}
+
 /// S2b: a spyc stopped past its jars' deadline loses their leases; resumed, it
 /// takes its tabs back, the same program, and what it printed meanwhile shows,
 /// since it fit the jar's ring.

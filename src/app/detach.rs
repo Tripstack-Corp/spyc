@@ -52,23 +52,15 @@ impl BinaryStamp {
 
     /// The binary spyc runs from, now.
     pub fn installed() -> Option<Self> {
-        installed_spyc().ok().and_then(|p| Self::of(&p))
+        crate::paths::installed_spyc()
+            .ok()
+            .and_then(|p| Self::of(&p))
     }
 
     /// Whether `now` is another file than this one: a new install.
     pub fn replaced_by(&self, now: &Self) -> bool {
         self.inode != now.inode || self.modified != now.modified
     }
-}
-
-/// Where spyc runs from: the path the next install writes. Linux names a
-/// replaced binary `<path> (deleted)`.
-pub fn installed_spyc() -> anyhow::Result<std::path::PathBuf> {
-    let exe = std::env::current_exe().context("where spyc runs from")?;
-    Ok(exe
-        .to_str()
-        .and_then(|s| s.strip_suffix(" (deleted)"))
-        .map_or(exe.clone(), std::path::PathBuf::from))
 }
 
 /// `:upgrade`: hand the session to the spyc installed since this one started.
@@ -171,7 +163,7 @@ impl App {
             return self.upgrade_in_place(name);
         }
         self.save_released(name);
-        let exe = installed_spyc()?;
+        let exe = crate::paths::installed_spyc()?;
         let cwd = std::env::current_dir().context("spyc's directory")?;
         let size = crossterm::terminal::size().map_or((24, 80), |(cols, rows)| (rows, cols));
         let started =
@@ -191,7 +183,7 @@ impl App {
     /// session. Returns only when the `exec` fails.
     fn upgrade_in_place(&mut self, name: &str) -> anyhow::Result<()> {
         use std::os::unix::process::CommandExt;
-        let exe = installed_spyc()?;
+        let exe = crate::paths::installed_spyc()?;
         self.save_released(name);
         self.release_jars();
         let err = std::process::Command::new(&exe)

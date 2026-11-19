@@ -104,6 +104,10 @@ impl Caller {
 }
 
 /// Send the loop a command whose reply nobody reads.
+/// The notification `spyc attach` sends a spyc older than the one installed,
+/// once the user says yes, to have it `:upgrade`.
+pub(super) const UPGRADE_METHOD: &str = "spyc/upgrade";
+
 fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
     let (reply_tx, _) = std::sync::mpsc::channel();
     let _ = tx.send(McpRequest {
@@ -389,6 +393,11 @@ pub(super) fn dispatch_for(
         {
             let new_pid = parsed["params"]["new_pid"].as_u64().unwrap_or(0) as u32;
             tell(tx, McpCommand::Disconnected { new_pid });
+        }
+        if method == UPGRADE_METHOD
+            && let Some(tx) = cmd_tx
+        {
+            tell(tx, McpCommand::Upgrade);
         }
         return Ok(());
     }
