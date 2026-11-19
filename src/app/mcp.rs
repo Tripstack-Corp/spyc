@@ -307,17 +307,7 @@ impl App {
                     ),
                 }
             }
-            McpCommand::ClearPicks => {
-                let count = self.state.cur().picks.len();
-                self.state.cur_mut().picks.clear();
-                let next_gen = self.state.cur().list_generation.wrapping_add(1);
-                self.state.cur_mut().list_generation = next_gen;
-                self.state.flash_info("[mcp] picks cleared");
-                self.write_context();
-                McpResponse::Ok {
-                    message: format!("cleared {count} pick(s)"),
-                }
-            }
+            McpCommand::ClearPicks => self.mcp_clear_picks(),
             McpCommand::CreateWorktree { .. }
             | McpCommand::RemoveWorktree { .. }
             | McpCommand::CleanWorktree { .. } => {
@@ -451,6 +441,7 @@ impl App {
             McpCommand::Statusline { .. }
             | McpCommand::Disconnected { .. }
             | McpCommand::Upgrade
+            | McpCommand::Shutdown
             | McpCommand::ConnectionInitialized { .. }
             | McpCommand::ConnectionBound { .. }
             | McpCommand::ConnectionClosed { .. }
@@ -458,6 +449,19 @@ impl App {
                 message: "ok".into(),
             },
             McpCommand::MalformedSocketMessage { detail } => self.note_malformed(&detail),
+        }
+    }
+
+    /// `clear_picks`: in the focused column.
+    fn mcp_clear_picks(&mut self) -> crate::mcp_cmd::McpResponse {
+        let count = self.state.cur().picks.len();
+        self.state.cur_mut().picks.clear();
+        let next_gen = self.state.cur().list_generation.wrapping_add(1);
+        self.state.cur_mut().list_generation = next_gen;
+        self.state.flash_info("[mcp] picks cleared");
+        self.write_context();
+        crate::mcp_cmd::McpResponse::Ok {
+            message: format!("cleared {count} pick(s)"),
         }
     }
 
@@ -501,6 +505,12 @@ impl App {
                 self.runtime.upgrade_pending = true;
                 McpResponse::Ok {
                     message: "upgrading".into(),
+                }
+            }
+            McpCommand::Shutdown => {
+                self.end_session();
+                McpResponse::Ok {
+                    message: "shutting down".into(),
                 }
             }
             McpCommand::Disconnected { new_pid } => {

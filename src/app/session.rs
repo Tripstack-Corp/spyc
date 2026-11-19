@@ -723,6 +723,14 @@ impl App {
     /// `--cwd-file` and sets `should_quit`. Shared by `Action::Quit` (the Q / ^D keybindings)
     /// and the `:q` / `:quit` command — both paths must save and warn
     /// identically.
+    /// Save the session and quit, ending its tabs: a confirmed `:q`, and
+    /// `spyc shutdown`, which has no terminal's directory to hand back.
+    pub(super) fn end_session(&mut self) {
+        self.remember_pager_position();
+        self.save_session();
+        self.state.should_quit = true;
+    }
+
     pub fn request_quit(&mut self) {
         let now = std::time::Instant::now();
         if self
@@ -735,10 +743,8 @@ impl App {
             // resumes where we left off. Bypassed close paths
             // (typically session save → quit, no Esc) would
             // otherwise drop the in-memory scroll on the floor.
-            self.remember_pager_position();
-            self.save_session();
+            self.end_session();
             self.write_cwd_file();
-            self.state.should_quit = true;
         } else {
             self.state.quit_pending = Some(now);
             // Every project's tabs: quitting ends them all.

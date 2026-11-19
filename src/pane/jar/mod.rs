@@ -39,6 +39,7 @@ pub mod orphans;
 pub mod place;
 mod repaint;
 pub mod session;
+pub mod shutdown;
 pub mod snapshots;
 pub mod store;
 mod tokens;

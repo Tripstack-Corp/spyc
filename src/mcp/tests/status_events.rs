@@ -279,3 +279,48 @@ fn a_statusline_report_reaches_the_loop_bounded_and_unlisted() {
     .unwrap();
     assert!(!String::from_utf8(output).unwrap().contains("statusline"));
 }
+
+/// `spyc shutdown`'s request: a spyc that knows it answers and tells the loop;
+/// one that predates it answers "Method not found", and the command says that
+/// rather than waiting for a quit that never comes.
+#[test]
+fn a_shutdown_is_answered_and_an_old_spyc_says_it_cannot() {
+    let (sender, receiver) = mpsc::channel::<McpRequest>();
+    let serve_once = |old: bool| {
+        let dir = tempfile::Builder::new()
+            .prefix("sd")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let sock = dir.path().join("s.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        let sender = sender.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let request = super::super::framing::read_lsp_message(&mut reader).unwrap();
+            let mut output = Vec::new();
+            let request = if old {
+                request.replace("spyc/shutdown", "spyc/not-yet")
+            } else {
+                request
+            };
+            dispatch(&mut output, &request, Path::new("/tmp"), Some(&sender)).unwrap();
+            let mut writer = stream;
+            std::io::Write::write_all(&mut writer, &output).unwrap();
+        });
+        let answered = super::super::request_shutdown(&sock);
+        server.join().unwrap();
+        answered
+    };
+    serve_once(false).unwrap();
+    assert!(
+        matches!(receiver.try_recv().unwrap().command, McpCommand::Shutdown),
+        "the loop is told"
+    );
+    let old = serve_once(true).unwrap_err();
+    assert!(format!("{old:#}").contains("predates"), "{old:#}");
+    assert!(
+        receiver.try_recv().is_err(),
+        "an old spyc's loop hears nothing"
+    );
+}

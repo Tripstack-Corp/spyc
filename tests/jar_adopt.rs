@@ -967,6 +967,102 @@ fn spyc_attach_from_a_newer_install_offers_the_upgrade() {
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 
+/// `spyc shutdown` ends a session as `:q` would, its tabs with it, from
+/// outside it. It names what ends and asks first, and a no leaves it running;
+/// `-y` doesn't ask.
+#[test]
+fn spyc_shutdown_ends_a_detached_session_and_its_tabs() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    left.0.push(agent);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let screens = first.screens();
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.eventually("the session drawn again, from its jar", || {
+        first.screens() > screens && first.since_last_screen().contains(&name)
+    });
+    let jar_spyc: i32 = described(&socket, "program_pid").unwrap().parse().unwrap();
+    left.0.push(jar_spyc);
+    first.eventually("the jar's spyc owns the tab's jar", || {
+        described(&tab_jar(&dirs), "owner_pid") == Some(jar_spyc.to_string())
+    });
+    first.type_keys(b"\x04");
+    eventually("the client leaves", || first.exited());
+
+    let shutdown = |args: &[&str], answer: &str| {
+        let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+            .arg("shutdown")
+            .args(args)
+            .current_dir(&dirs.home)
+            .env_clear()
+            .envs(dirs.env())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(answer.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        (out.status.success(), text)
+    };
+
+    // Named, and answered no: it says what would end, and nothing does.
+    let (_, said) = shutdown(&[&name], "n\n");
+    assert!(
+        said.contains(&name) && said.contains("[y/N]") && said.contains("1 tab"),
+        "it names the session and its tab, and asks: {said}"
+    );
+    assert!(alive(agent) && alive(jar_spyc), "a no ended something");
+    assert_eq!(
+        described(&socket, "program_pid"),
+        Some(jar_spyc.to_string()),
+        "a no left the session running"
+    );
+
+    // The only session, without asking.
+    let (ok, said) = shutdown(&["-y"], "");
+    assert!(ok, "{said}");
+    assert!(!said.contains("[y/N]"), "`-y` asked: {said}");
+    eventually("the session's spyc ends", || !alive(jar_spyc));
+    eventually("its tab's program ends", || !alive(agent));
+    // Its jar keeps the exit a while for an owner, and runs nothing.
+    eventually("its jar holds only the exit", || {
+        described(&socket, "pid").is_none() || described(&socket, "exit").is_some()
+    });
+    let (ok, said) = shutdown(&["-y"], "");
+    assert!(
+        !ok && said.contains("no session runs"),
+        "with none left it says so: {said}"
+    );
+}
+
 /// The tab's jar, as the saved session records it.
 fn tab_jar(dirs: &Dirs) -> PathBuf {
     saved_jar_socket(&dirs.state).expect("the session records the tab's jar")

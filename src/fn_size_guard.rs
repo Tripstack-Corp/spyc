@@ -40,7 +40,7 @@ const FUNCTION: Rule = Rule {
             "src/app/key_dispatch/prompts.rs::App::handle_vi_prompt_key",
             133,
         ),
-        ("src/app/mcp.rs::App::execute_mcp_command", 224),
+        ("src/app/mcp.rs::App::execute_mcp_command", 216),
         ("src/app/pager_handler/file_view.rs::build_pager_view", 151),
         (
             "src/app/pager_handler/motion.rs::App::handle_pager_motion",

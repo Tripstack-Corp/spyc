@@ -118,12 +118,55 @@ pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
 /// Ask the spyc with `pid` to `:upgrade`: `spyc attach` from a newer
 /// install, once the user said yes.
 pub fn ask_upgrade(pid: u32) -> anyhow::Result<()> {
+    notify(pid, protocol::UPGRADE_METHOD)
+}
+
+/// Have the spyc of `pid` save its session and quit, ending its tabs, as
+/// `:q` would (`spyc shutdown`).
+pub fn ask_shutdown(pid: i32) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let pid = u32::try_from(pid).context("a spyc's pid is positive")?;
+    let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
+    request_shutdown(&sock)
+}
+
+/// How long `spyc shutdown` waits for a spyc to take its request: the socket
+/// thread answers it before the loop acts on it.
+const SHUTDOWN_ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Ask the spyc at `sock` to shut down, and read its answer.
+fn request_shutdown(sock: &Path) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let mut stream = std::os::unix::net::UnixStream::connect(sock)
+        .with_context(|| format!("reach the spyc at {}", sock.display()))?;
+    stream.set_read_timeout(Some(SHUTDOWN_ANSWER_WAIT))?;
+    let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": protocol::SHUTDOWN_METHOD });
+    framing::send_message(&mut stream, &msg.to_string()).context("ask spyc to shut down")?;
+    let answer = framing::read_lsp_message(&mut std::io::BufReader::new(stream))
+        .context("spyc's answer to the shutdown")?;
+    let reply: serde_json::Value = serde_json::from_str(&answer).context("spyc's answer")?;
+    if reply["error"]["code"] == -32601 {
+        anyhow::bail!(
+            "its spyc predates `spyc shutdown`: attach to it and `:q`, or have it `:upgrade` first"
+        );
+    }
+    anyhow::ensure!(
+        reply.get("error").is_none(),
+        "spyc refused the shutdown: {}",
+        reply["error"]
+    );
+    Ok(())
+}
+
+/// Send the spyc of `pid` the notification `method` on its MCP socket.
+fn notify(pid: u32, method: &str) -> anyhow::Result<()> {
     use anyhow::Context as _;
     let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
     let mut stream = std::os::unix::net::UnixStream::connect(&sock)
         .with_context(|| format!("reach the spyc at {}", sock.display()))?;
-    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": protocol::UPGRADE_METHOD });
-    framing::send_message(&mut stream, &msg.to_string()).context("ask spyc to upgrade")?;
+    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": method });
+    framing::send_message(&mut stream, &msg.to_string())
+        .with_context(|| format!("send spyc {method}"))?;
     Ok(())
 }
 

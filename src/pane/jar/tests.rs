@@ -1783,7 +1783,16 @@ fn tabs_made_together_have_sockets_of_their_own() {
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     const OUTWAITS: [&str; 4] = ["ADOPT_WAIT", "LINK_WAIT", "TAKEOVER_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 22] = [
+    const SHORTER: [(&str, &str); 24] = [
+        (
+            "SHUTDOWN_WAIT",
+            "a session's spyc quitting, not a wait on a jar: running out says it hasn't ended, \
+             and nothing is lost",
+        ),
+        (
+            "SHUTDOWN_POLL",
+            "how often `spyc shutdown` looks for the session's spyc to end, not a wait",
+        ),
         (
             "NO_REPAINT_DUE",
             "a link's reader's idle wait: it wakes on a frame, and the connection's deadline ends it",
