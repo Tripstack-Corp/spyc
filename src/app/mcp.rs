@@ -450,30 +450,33 @@ impl App {
             // Notices, which `execute_notice` took before this match.
             McpCommand::Statusline { .. }
             | McpCommand::Disconnected { .. }
+            | McpCommand::Upgrade
             | McpCommand::ConnectionInitialized { .. }
             | McpCommand::ConnectionBound { .. }
             | McpCommand::ConnectionClosed { .. }
             | McpCommand::ToolCalled { .. } => McpResponse::Ok {
                 message: "ok".into(),
             },
-            McpCommand::MalformedSocketMessage { detail } => {
-                // The socket server couldn't frame/parse a message and dropped
-                // it. Surface it — a silent drop hid the bare-newline
-                // report-status framing bug for days — and tally it under
-                // `malformed` in the `A`-overlay / `:activity dump` mcp counts.
-                *self
-                    .view
-                    .activity
-                    .mcp_tool_calls
-                    .entry("malformed".to_string())
-                    .or_insert(0) += 1;
-                self.state.flash_error(format!(
-                    "\u{26a0} MCP: dropped a malformed socket message ({detail}) — see mcp.log"
-                ));
-                McpResponse::Ok {
-                    message: "noted".into(),
-                }
-            }
+            McpCommand::MalformedSocketMessage { detail } => self.note_malformed(&detail),
+        }
+    }
+
+    /// The socket server couldn't frame or parse a message and dropped it.
+    /// Surface it (a silent drop hid the bare-newline report-status framing bug
+    /// for days) and tally it under `malformed` in the `A` overlay's and
+    /// `:activity dump`'s MCP counts.
+    fn note_malformed(&mut self, detail: &str) -> crate::mcp_cmd::McpResponse {
+        *self
+            .view
+            .activity
+            .mcp_tool_calls
+            .entry("malformed".to_string())
+            .or_insert(0) += 1;
+        self.state.flash_error(format!(
+            "\u{26a0} MCP: dropped a malformed socket message ({detail}) — see mcp.log"
+        ));
+        crate::mcp_cmd::McpResponse::Ok {
+            message: "noted".into(),
         }
     }
 
@@ -494,6 +497,12 @@ impl App {
             // Keep serving: agents this spyc launches still reach it through
             // their pane's env, and the next one it launches rewrites the entry
             // to pin nothing again.
+            McpCommand::Upgrade => {
+                self.runtime.upgrade_pending = true;
+                McpResponse::Ok {
+                    message: "upgrading".into(),
+                }
+            }
             McpCommand::Disconnected { new_pid } => {
                 self.state.flash_info(format!(
                     "MCP: an older spyc (PID {new_pid}) pinned this dir's agent config to \
