@@ -4,6 +4,7 @@
 //! what the user sees is unchanged. Outside spyc it only runs that command.
 
 use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -59,7 +60,9 @@ fn start(command: &str, input: &[u8]) -> Option<std::process::Child> {
     Some(child)
 }
 
-/// Send the projection to the spyc this pane's environment names. Best-effort.
+/// Send the projection to this pane's spyc, found as a status report finds it:
+/// the spyc that owns the pane's jar now, else the one that launched the
+/// agent, else the live one rooted above the cwd. Best-effort.
 fn forward(statusline: &Statusline) {
     if statusline.is_empty() {
         return;
@@ -69,13 +72,14 @@ fn forward(statusline: &Statusline) {
     if sock.is_empty() || pane_id.is_empty() || super::under_codex_shared_daemon() {
         return;
     }
-    forward_to(&sock, &pane_id, statusline);
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let jar = std::env::var_os("SPYC_JAR_SOCKET").map(std::path::PathBuf::from);
+    if let Some(stream) = super::report_stream(&sock, Some(&pane_id), &cwd, jar.as_deref()) {
+        send_on(stream, &pane_id, statusline);
+    }
 }
 
-fn forward_to(sock: &str, pane_id: &str, statusline: &Statusline) {
-    let Ok(mut stream) = std::os::unix::net::UnixStream::connect(sock) else {
-        return;
-    };
+fn send_on(mut stream: UnixStream, pane_id: &str, statusline: &Statusline) {
     let _ = stream.set_read_timeout(Some(FORWARD_TIMEOUT));
     let _ = stream.set_write_timeout(Some(FORWARD_TIMEOUT));
     let request = json!({
@@ -151,7 +155,7 @@ mod tests {
             }),
             ..Statusline::default()
         };
-        forward_to(sock.to_str().unwrap(), "pane-7", &statusline);
+        send_on(UnixStream::connect(&sock).unwrap(), "pane-7", &statusline);
         let sent = server.join().unwrap();
         assert_eq!(sent["method"], METHOD);
         assert_eq!(sent["params"]["pane_id"], "pane-7");
@@ -176,17 +180,15 @@ mod tests {
             }),
             ..Statusline::default()
         };
-        for sock in [silent, dir.path().join("gone.sock")] {
-            let (done, finished) = std::sync::mpsc::channel();
-            let (path, statusline) = (sock.clone(), statusline.clone());
-            std::thread::spawn(move || {
-                forward_to(path.to_str().unwrap(), "pane-7", &statusline);
-                let _ = done.send(());
-            });
-            assert!(
-                finished.recv_timeout(FORWARD_TIMEOUT * 10).is_ok(),
-                "{sock:?} held the statusline"
-            );
-        }
+        let (done, finished) = std::sync::mpsc::channel();
+        let stream = UnixStream::connect(&silent).unwrap();
+        std::thread::spawn(move || {
+            send_on(stream, "pane-7", &statusline);
+            let _ = done.send(());
+        });
+        assert!(
+            finished.recv_timeout(FORWARD_TIMEOUT * 10).is_ok(),
+            "a silent spyc held the statusline"
+        );
     }
 }

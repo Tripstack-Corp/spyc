@@ -972,7 +972,8 @@ whose spyc has gone asks its jar, by `SPYC_JAR_SOCKET`, where its owner is now,
 connects there, and replays the `initialize` and `initialized` it began with
 (`src/mcp/follow.rs`). A request made while no spyc owns the jar waits for one
 within its own wait, then gets an error, and the proxy stays for the next. The
-status hooks ask the jar first too. A proxy that ended with its first spyc left
+status hooks and the statusline forward (`spyc --statusline`) ask the jar
+first too. A proxy that ended with its first spyc left
 the agent without spyc's tools for the rest of its session, and nothing said
 so: the agent's own tool calls just failed.
 
