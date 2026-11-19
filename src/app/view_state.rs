@@ -482,6 +482,9 @@ pub struct ViewState {
     /// extend against the wrong buffer's indices. For a pager that's the slot, not
     /// the mount, because a mount can't tell `view.pager` from `view.right_pager`.
     pub(super) mouse_selection: Option<mouse::MouseDragTarget>,
+    /// The project label held down while `mouse_selection` is
+    /// [`mouse::MouseDragTarget::Project`].
+    pub(super) project_drag: Option<mouse::ProjectDrag>,
     /// A file-list row selection, kept after the drag ends so the highlight
     /// persists and a follow-up yank can still find it (same contract as the
     /// pager's charwise selection).
@@ -639,6 +642,7 @@ impl ViewState {
             scroll_last: None,
             mouse_press_forwarded: false,
             mouse_selection: None,
+            project_drag: None,
             list_selection: None,
             pane_selection: None,
             pane_selection_snapshot: None,

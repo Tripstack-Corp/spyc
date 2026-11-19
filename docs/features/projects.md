@@ -75,7 +75,8 @@ inside an editor, it has the keyboard until it closes, as help does.
 **`Space 1`..`Space 9`** to the Nth, and **`Space ]` / `Space [`** step
 through them in order, wrapping. With one project open these do nothing at
 all. Projects are in the order you opened them until **`:order N`** moves
-the one you're in to place N, the others shifting along to make room;
+the one you're in to place N, the others shifting along to make room
+(or drag its label along the status bar: [Mouse](mouse.md));
 `Space j`, the status bar and a saved session keep the same order. `:order`
 alone shows it.
 

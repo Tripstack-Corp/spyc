@@ -52,6 +52,7 @@ impl super::super::App {
                         MouseDragTarget::List(side) => self.extend_row_selection(ev, side),
                         MouseDragTarget::Pane => self.extend_pane_selection(ev),
                         MouseDragTarget::Chrome => self.extend_chrome_selection(ev),
+                        MouseDragTarget::Project => self.extend_project_drag(ev),
                     });
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
@@ -60,6 +61,7 @@ impl super::super::App {
                         MouseDragTarget::List(_) => self.finish_row_selection(ev),
                         MouseDragTarget::Pane => self.finish_pane_selection(ev),
                         MouseDragTarget::Chrome => self.finish_chrome_selection(ev),
+                        MouseDragTarget::Project => self.finish_project_drag(),
                     });
                 }
                 // Any other button mid-drag abandons the selection rather than
@@ -67,6 +69,7 @@ impl super::super::App {
                 MouseEventKind::Down(_) | MouseEventKind::Up(_) => {
                     self.clear_pane_selection();
                     self.view.mouse_selection = None;
+                    self.view.project_drag = None;
                 }
                 MouseEventKind::ScrollUp
                 | MouseEventKind::ScrollDown
