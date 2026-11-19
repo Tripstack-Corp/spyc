@@ -372,7 +372,9 @@ fn spyc_r_after_a_kill_takes_the_running_program_back() {
     let mut left = Leftovers(Vec::new());
     let first = Spyc::start(&dirs, &[]);
     left.0.push(first.pid());
-    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -525,7 +527,9 @@ fn an_agents_mcp_proxy_follows_its_jar_to_the_spyc_that_takes_it_back() {
     let mut left = Leftovers(Vec::new());
     let first = Spyc::start(&dirs, &[]);
     left.0.push(first.pid());
-    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     eventually("the tab's output shows", || first.shows("ready-mark"));
     left.0.push(
         std::fs::read_to_string(&dirs.pidfile)
@@ -653,7 +657,9 @@ fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
     let mut left = Leftovers(Vec::new());
     let mut first = Spyc::start(&dirs, &[]);
     left.0.push(first.pid());
-    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -780,7 +786,9 @@ fn upgrade_in_a_session_jar_runs_the_new_spyc_with_the_same_tabs() {
     let mut left = Leftovers(Vec::new());
     let first = Spyc::start_from(&spyc, &dirs, &[]);
     left.0.push(first.pid());
-    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -885,7 +893,9 @@ fn spyc_attach_from_a_newer_install_offers_the_upgrade() {
     let mut left = Leftovers(Vec::new());
     let mut first = Spyc::start_from(&spyc, &dirs, &[]);
     left.0.push(first.pid());
-    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -976,7 +986,9 @@ fn spyc_shutdown_ends_a_detached_session_and_its_tabs() {
     let mut left = Leftovers(Vec::new());
     let mut first = Spyc::start(&dirs, &[]);
     left.0.push(first.pid());
-    first.eventually("the tab's program starts", || dirs.pidfile.exists());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -1081,7 +1093,9 @@ fn a_spyc_stopped_past_the_deadline_takes_its_tabs_back() {
     let mut left = Leftovers(Vec::new());
     let spyc = Spyc::start(&dirs, &[]);
     left.0.push(spyc.pid());
-    spyc.eventually("the tab's program starts", || dirs.pidfile.exists());
+    spyc.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     let agent: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
@@ -1340,7 +1354,9 @@ fn the_next_spyc_offers_a_jar_no_spyc_owns_and_takes_it_back() {
     let mut left = Leftovers(Vec::new());
     let first = Spyc::start(&dirs, &[]);
     left.0.push(first.pid());
-    eventually("the tab's program starts", || dirs.pidfile.exists());
+    eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
     let program = noted(&dirs.pidfile)[0];
     left.0.push(program);
     eventually("the tab's output shows", || first.shows("ready-mark"));
