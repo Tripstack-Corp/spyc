@@ -1783,7 +1783,31 @@ fn tabs_made_together_have_sockets_of_their_own() {
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     const OUTWAITS: [&str; 4] = ["ADOPT_WAIT", "LINK_WAIT", "TAKEOVER_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 16] = [
+    const SHORTER: [(&str, &str); 22] = [
+        (
+            "NO_REPAINT_DUE",
+            "a link's reader's idle wait: it wakes on a frame, and the connection's deadline ends it",
+        ),
+        (
+            "ENDING_POLL",
+            "how often a restart looks for the last jar to end, not a wait",
+        ),
+        (
+            "ANSWER_TRY",
+            "each try to reach a starting jar, within the start's hold, not a wait",
+        ),
+        (
+            "DISCARD_POLL",
+            "how often a discard looks for the program's exit, not a wait",
+        ),
+        (
+            "BUILD_INFO_POLL",
+            "how often a store binary's `build-info` is looked at, not a wait",
+        ),
+        (
+            "WATCH_IDLE",
+            "the own-jar watcher's wait between frames: the jar holds no deadline over a program",
+        ),
         (
             "UPGRADE_WAIT",
             "a session's spyc restarting, not a wait on a jar: running out attaches anyway",
@@ -1914,9 +1938,41 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         /// Never runs out: what it keeps ends on an event (a capture's exit
         /// collected by its owner).
         Unbounded,
+        /// A command-line client's own wait (`attach`, `upgrade`, a lookup):
+        /// running out ends that command with an error; nothing in a jar is lost.
+        Command,
+        /// A floor that keeps a computed wait from being zero, which a socket
+        /// takes as none, waiting for ever.
+        Floor,
+        /// How long a jar keeps something for an owner that isn't there:
+        /// running out drops it.
+        Keep,
     }
-    use Kind::{AfterExec, Ending, Limit, Parked, Peer, Poll, Served, Start, Unbounded};
-    const TIMERS: [(&str, Kind); 21] = [
+    use Kind::{
+        AfterExec, Command, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served, Start,
+        Unbounded,
+    };
+    const TIMERS: [(&str, Kind); 41] = [
+        ("ATTACH_WAIT", Command),
+        ("ATTACH_PING", Poll),
+        ("SIZE_POLL", Poll),
+        ("SHORTEST_WAIT", Floor),
+        ("PARK_POLL", Poll),
+        ("VALIDATOR_POLL", Poll),
+        ("CONNECT_RETRY", Poll),
+        ("DESCRIBE_WAIT", Command),
+        ("DESCRIBE_POLL", Poll),
+        ("ACCEPT_RETRY", Poll),
+        ("LOCK_RETRY", Poll),
+        ("EXIT_LINGER", Keep),
+        ("COMMAND_WAIT", Command),
+        ("UPGRADE_ANSWER_WAIT", Command),
+        ("PROGRAM_EVENTS_TICK", Poll),
+        ("WRITER_TICK", Poll),
+        ("WAITER_POLL", Poll),
+        ("REAPER_TICK", Poll),
+        ("END_GRACE", Ending),
+        ("END_POLL", Poll),
         ("FIRST_VALIDATION", Served),
         ("UNTIL_READ", Unbounded),
         ("PARK_DEADLINE", Parked),
@@ -1990,6 +2046,92 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
             );
         }
     }
+}
+
+/// No timer in jar code is written inline. A `Duration` given as a number,
+/// rather than a named constant, is in neither guard above, so it ships
+/// without anyone having said what its running out costs. A conversion of a
+/// value read at run time (`from_millis(ms)`) isn't a timer and doesn't count.
+#[test]
+fn no_timer_in_jar_code_is_written_inline() {
+    /// Durations written as numbers that aren't timers, by file and line.
+    const NOT_TIMERS: [(&str, &str, &str); 3] = [
+        (
+            "handover.rs",
+            "deadline: Duration::from_secs(10),",
+            "`sample_blob`'s config, data for the blob's tests and fuzz seeds",
+        ),
+        (
+            "handover.rs",
+            "linger_after_exit: Duration::from_secs(60),",
+            "`sample_blob`'s config, data for the blob's tests and fuzz seeds",
+        ),
+        (
+            "handover.rs",
+            "linger: Some(Duration::from_secs(300)),",
+            "`sample_blob`'s config, data for the blob's tests and fuzz seeds",
+        ),
+    ];
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let inline =
+        regex::Regex::new(r"Duration::from_(secs|millis|micros|nanos)\(\s*[0-9][0-9_]*\s*\)")
+            .expect("regex");
+    let mut scanned = 0;
+    let mut named = 0;
+    let mut written_inline = Vec::new();
+    for top in ["crates/spyc-jar/src", "src/pane/jar"] {
+        let mut dirs = vec![root.join(top)];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let name = path.file_name().unwrap_or_default().to_string_lossy();
+                if path.extension().is_none_or(|x| x != "rs")
+                    || name == "tests.rs"
+                    || name == "test_dir.rs"
+                {
+                    continue;
+                }
+                scanned += 1;
+                let text = std::fs::read_to_string(&path).unwrap();
+                let mut declaring = false;
+                for (n, line) in crate::guard_support::production_half(&text)
+                    .lines()
+                    .enumerate()
+                {
+                    let constant = line.contains("const ") && line.contains("Duration");
+                    let exempt = NOT_TIMERS
+                        .iter()
+                        .any(|(file, text, _)| name == *file && line.trim() == *text);
+                    if inline.is_match(line) && !exempt {
+                        if constant || declaring {
+                            named += 1;
+                        } else {
+                            written_inline.push(format!(
+                                "{}:{}: {}",
+                                path.display(),
+                                n + 1,
+                                line.trim()
+                            ));
+                        }
+                    }
+                    declaring = constant && line.trim_end().ends_with('=');
+                }
+            }
+        }
+    }
+    assert!(
+        scanned > 20 && named > 20,
+        "premise: the scan reads jar code ({scanned} files, {named} named timers)"
+    );
+    assert!(
+        written_inline.is_empty(),
+        "name each timer as a constant and classify it:\n{}",
+        written_inline.join("\n")
+    );
 }
 
 /// A jar left by a crash of its spyc: a tab's, told what it holds, its

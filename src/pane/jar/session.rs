@@ -88,7 +88,7 @@ impl OwnJar {
             .spawn(move || {
                 let _keep_open = tx;
                 loop {
-                    match rx.recv(Duration::from_secs(3600)) {
+                    match rx.recv(WATCH_IDLE) {
                         Ok(Some(Msg::Attached)) => {
                             attaches.fetch_add(1, Ordering::SeqCst);
                             attached.store(true, Ordering::SeqCst);
@@ -172,6 +172,10 @@ fn link(socket: &Path) -> anyhow::Result<OwnJar> {
         attaches: Arc::new(AtomicU64::new(0)),
     })
 }
+
+/// The own jar's watcher's wait between frames: it wakes on one, and the jar
+/// holds no deadline over its program's connection.
+const WATCH_IDLE: Duration = Duration::from_secs(3600);
 
 /// How often a handover looks for the jar it started to be up.
 const START_POLL: Duration = Duration::from_millis(20);

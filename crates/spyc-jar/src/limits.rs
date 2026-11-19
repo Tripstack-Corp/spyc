@@ -22,6 +22,10 @@ pub const PARKED_AT_MOST: Duration = PARK_DEADLINE
     .saturating_add(OUTPUT_GRACE)
     .saturating_add(HOLDER_ANSWER);
 
+/// The least a client's computed wait may be: a socket takes a zero timeout
+/// as none, which waits for ever.
+pub const SHORTEST_WAIT: Duration = Duration::from_millis(1);
+
 /// How long a jar goes without hearing from its owner before it ends the
 /// owner's lease.
 ///

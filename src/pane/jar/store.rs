@@ -64,6 +64,8 @@ pub const OURS: Build<'static> = Build {
 pub const UNTOUCHED: Duration = Duration::from_hours(24);
 /// How long `build-info` has to answer.
 const BUILD_INFO_WAIT: Duration = Duration::from_secs(10);
+/// How often `build-info` is looked at, within [`BUILD_INFO_WAIT`].
+const BUILD_INFO_POLL: Duration = Duration::from_millis(5);
 
 /// Copy `source` into the store at `root`, check it, and say what jars start
 /// from: the entry, or `source` when the store can't hold a copy that runs,
@@ -223,7 +225,7 @@ fn build_info(binary: &Path) -> anyhow::Result<(String, String)> {
             let _ = child.wait();
             bail!("{} build-info didn't answer", binary.display());
         }
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(BUILD_INFO_POLL);
     };
     let mut out = String::new();
     if let Some(mut o) = child.stdout.take() {

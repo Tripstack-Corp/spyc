@@ -312,6 +312,11 @@ impl Signals {
 /// once its owner acknowledges the exit, within its own 200 ms tick.
 const ENDING_WAIT: Duration = Duration::from_secs(2);
 
+/// How often a restart looks for its tab's last jar to have ended.
+const ENDING_POLL: Duration = Duration::from_millis(20);
+/// How long each try to reach a jar that is starting takes, within its hold.
+const ANSWER_TRY: Duration = Duration::from_millis(50);
+
 /// The state of the jar at `socket`, once it has ended or `wait` has passed.
 fn ended_within(socket: &Path, wait: Duration) -> SocketState {
     let until = Instant::now() + wait;
@@ -320,7 +325,7 @@ fn ended_within(socket: &Path, wait: Duration) -> SocketState {
         if state != SocketState::Live || Instant::now() >= until {
             return state;
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(ENDING_POLL);
     }
 }
 
@@ -604,7 +609,7 @@ fn answer(
 ) -> anyhow::Result<(Client, Msg)> {
     let until = Instant::now() + wait;
     loop {
-        match Client::connect(socket, Role::Owner, Duration::from_millis(50), token) {
+        match Client::connect(socket, Role::Owner, ANSWER_TRY, token) {
             Ok(answered) => return Ok(answered),
             Err(e) => {
                 if let Some(status) = jar.try_wait().context("wait for spyc-jar")? {
