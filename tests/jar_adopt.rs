@@ -959,11 +959,25 @@ fn spyc_attach_from_a_newer_install_offers_the_upgrade() {
         .parse()
         .unwrap();
     assert_eq!(now, agent, "the tab's program was started again");
-    second.type_keys(b":q\r");
-    second.eventually("spyc asks for a second `:q`", || {
-        squeezed(&second.since_last_screen()).contains("pressagaintoquit")
+
+    // Upgraded in place, the spyc keeps its pid and so its start time: the
+    // next attach asks nothing, for there's nothing newer.
+    let mut second = second;
+    second.type_keys(b"\x04");
+    eventually("the client leaves", || second.exited());
+    let third = Spyc::start_from(&spyc, &dirs, &["attach"]);
+    third.eventually("the session drawn", || {
+        third.since_last_screen().contains(&name)
     });
-    second.type_keys(b":q\r");
+    assert!(
+        !third.shows("Upgrade it?"),
+        "offered the upgrade the session's spyc already took"
+    );
+    third.type_keys(b":q\r");
+    third.eventually("spyc asks for a second `:q`", || {
+        squeezed(&third.since_last_screen()).contains("pressagaintoquit")
+    });
+    third.type_keys(b":q\r");
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 

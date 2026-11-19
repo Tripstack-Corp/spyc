@@ -113,6 +113,10 @@ pub(super) const UPGRADE_METHOD: &str = "spyc/upgrade";
 /// that predates it answers "Method not found" rather than nothing.
 pub(super) const SHUTDOWN_METHOD: &str = "spyc/shutdown";
 
+/// The request `spyc attach` sends a session's spyc to learn whether a newer
+/// spyc is installed where it runs from: `{"behind": bool}`.
+pub(super) const BEHIND_METHOD: &str = "spyc/behind";
+
 fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
     let (reply_tx, _) = std::sync::mpsc::channel();
     let _ = tx.send(McpRequest {
@@ -449,6 +453,10 @@ pub(super) fn dispatch_for(
         "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx, caller),
         "ping" => send_result(w, &id, json!({})),
         super::statusline::METHOD => super::statusline::handle(w, &id, &parsed["params"], cmd_tx),
+        BEHIND_METHOD => match cmd_tx.and_then(|tx| ask(tx, McpCommand::Behind)) {
+            Some(answer) => send_result(w, &id, answer),
+            None => send_error(w, id, -32000, "spyc didn't answer"),
+        },
         SHUTDOWN_METHOD => {
             if let Some(tx) = cmd_tx {
                 tell(tx, McpCommand::Shutdown);

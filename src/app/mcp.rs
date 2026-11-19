@@ -308,6 +308,7 @@ impl App {
                 }
             }
             McpCommand::ClearPicks => self.mcp_clear_picks(),
+            McpCommand::Behind => self.answer_behind(),
             McpCommand::CreateWorktree { .. }
             | McpCommand::RemoveWorktree { .. }
             | McpCommand::CleanWorktree { .. } => {
@@ -415,11 +416,7 @@ impl App {
                     .to_string(),
                 }
             }
-            McpCommand::ListScopes => {
-                let json = serde_json::to_string(&self.state.scope_registry)
-                    .unwrap_or_else(|_| "[]".to_string());
-                McpResponse::Ok { message: json }
-            }
+            McpCommand::ListScopes => self.mcp_list_scopes(),
             McpCommand::ReleaseScope { id } => {
                 let before = self.state.scope_registry.len();
                 self.state.scope_registry.retain(|c| c.id != id);
@@ -450,6 +447,20 @@ impl App {
             },
             McpCommand::MalformedSocketMessage { detail } => self.note_malformed(&detail),
         }
+    }
+
+    /// `spyc/behind`: whether `:upgrade` would find a newer spyc installed.
+    fn answer_behind(&self) -> crate::mcp_cmd::McpResponse {
+        crate::mcp_cmd::McpResponse::Ok {
+            message: serde_json::json!({ "behind": self.newer_install().0 }).to_string(),
+        }
+    }
+
+    /// `list_scopes`: every claim, as JSON.
+    fn mcp_list_scopes(&self) -> crate::mcp_cmd::McpResponse {
+        let json =
+            serde_json::to_string(&self.state.scope_registry).unwrap_or_else(|_| "[]".to_string());
+        crate::mcp_cmd::McpResponse::Ok { message: json }
     }
 
     /// `clear_picks`: in the focused column.

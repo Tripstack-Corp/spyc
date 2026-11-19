@@ -106,11 +106,7 @@ impl App {
     /// `:upgrade`, with the loop: only to a binary installed since spyc
     /// started, in place in spyc's own jar, else by `^d`'s handover.
     fn upgrade(&mut self) {
-        let now = BinaryStamp::installed();
-        let newer = match (&self.runtime.started_from, &now) {
-            (Some(then), Some(now)) => then.replaced_by(now),
-            _ => false,
-        };
+        let (newer, now) = self.newer_install();
         if !newer {
             let at = now.map_or_else(String::new, |n| format!(" at {}", n.path.display()));
             self.state
@@ -127,6 +123,17 @@ impl App {
             }
             _ => self.detach(),
         }
+    }
+
+    /// Whether a spyc newer than this one is installed where it runs from, and
+    /// the file there now: `:upgrade`'s test, and what `spyc attach` asks.
+    pub(super) fn newer_install(&self) -> (bool, Option<BinaryStamp>) {
+        let now = BinaryStamp::installed();
+        let newer = match (&self.runtime.started_from, &now) {
+            (Some(then), Some(now)) => then.replaced_by(now),
+            _ => false,
+        };
+        (newer, now)
     }
 
     /// What runs outside a jar, which a handover would end.
