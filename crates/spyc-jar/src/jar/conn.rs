@@ -15,6 +15,9 @@ use super::{By, Conn, Shared, TICK, Who, readable};
 use crate::proto::{self, Msg, Role, reason};
 use crate::state::{Event, State};
 
+/// How often a connection's writer wakes with nothing to send.
+const WRITER_TICK: Duration = Duration::from_millis(500);
+
 /// The program asked to be detached: end the owner's connection once
 /// everything the program printed before asking has gone out on it, so its
 /// last words (its terminal restored) reach the client. No clock decides it:
@@ -488,7 +491,7 @@ fn next_batch(
         }
         st = shared
             .cv
-            .wait_timeout(st, Duration::from_millis(500))
+            .wait_timeout(st, WRITER_TICK)
             .unwrap_or_else(PoisonError::into_inner)
             .0;
     }

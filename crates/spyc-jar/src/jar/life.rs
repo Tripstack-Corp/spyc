@@ -15,6 +15,15 @@ use super::{PTY_READ, Shared, TICK, Who, readable};
 use crate::proto::JarSignal;
 use crate::state::{Event, State};
 
+/// How often the waiter looks for the program's pid, then its exit.
+const WAITER_POLL: Duration = Duration::from_millis(50);
+/// How often the reaper wakes with nothing changed.
+const REAPER_TICK: Duration = Duration::from_millis(200);
+/// How long a program has to end on `SIGHUP` before it gets `SIGKILL`.
+const END_GRACE: Duration = Duration::from_secs(2);
+/// How often the end looks for the program's exit.
+const END_POLL: Duration = Duration::from_millis(20);
+
 /// How long a jar with a finite linger waits for its first owner, or for the
 /// successor a release named: the spyc that spawned it connects within
 /// milliseconds, one taking it over within seconds.
@@ -104,7 +113,7 @@ pub(super) fn pump_pty(shared: &Shared, mut reader: File) {
 pub(super) fn wait_child(shared: &Shared) {
     // A program held for its first owner has no pid yet.
     while shared.child_pid() == 0 {
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(WAITER_POLL);
     }
     let pid = i32::try_from(shared.child_pid())
         .ok()
@@ -116,7 +125,7 @@ pub(super) fn wait_child(shared: &Shared) {
         }
         let exit = match rustix::process::waitpid(pid, WaitOptions::NOHANG) {
             Ok(None) => {
-                thread::sleep(Duration::from_millis(50));
+                thread::sleep(WAITER_POLL);
                 continue;
             }
             Ok(Some((_, status))) => match (status.exit_status(), status.terminating_signal()) {
@@ -181,7 +190,7 @@ pub(super) fn reap(shared: &Shared) {
         }
         st = shared
             .cv
-            .wait_timeout(st, Duration::from_millis(200))
+            .wait_timeout(st, REAPER_TICK)
             .unwrap_or_else(PoisonError::into_inner)
             .0;
     }
@@ -213,9 +222,9 @@ fn end_program(shared: &Shared) {
         return;
     };
     let _ = rustix::process::kill_process_group(pid, Signal::HUP);
-    let until = Instant::now() + Duration::from_secs(2);
+    let until = Instant::now() + END_GRACE;
     while shared.lock().exit.is_none() && Instant::now() < until {
-        thread::sleep(Duration::from_millis(20));
+        thread::sleep(END_POLL);
     }
     if shared.lock().exit.is_none() {
         let _ = rustix::process::kill_process_group(pid, Signal::KILL);

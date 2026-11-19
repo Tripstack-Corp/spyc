@@ -175,13 +175,16 @@ fn carried(held: &Held, sock: &UnixStream) {
     }
 }
 
+/// How often a held socket tries again after a failed accept.
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
+
 /// Take new connections: lookups are answered, nothing else is let in.
 fn accept(held: &Arc<Held>, listener: &UnixListener) -> ! {
     // The old image left it non-blocking for its own acceptor.
     let _ = listener.set_nonblocking(false);
     loop {
         let Ok((sock, _)) = listener.accept() else {
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(ACCEPT_RETRY);
             continue;
         };
         let sock = Arc::new(sock);

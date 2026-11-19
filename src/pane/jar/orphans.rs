@@ -86,6 +86,8 @@ const HANGUP_GRACE: Duration = Duration::from_secs(2);
 /// How long a discard waits on the jar: to connect, then for its program's
 /// exit once killed.
 const DISCARD_WAIT: Duration = Duration::from_secs(5);
+/// How often a discard looks for the program's exit, within [`DISCARD_WAIT`].
+const DISCARD_POLL: Duration = Duration::from_millis(200);
 
 /// End the jar at `socket` in `place` (this user's when `None`), and its
 /// program: a hangup, then a kill if it hasn't ended, its exit collected so
@@ -111,7 +113,7 @@ pub fn discard(place: Option<Place>, socket: &Path) -> anyhow::Result<()> {
     let hung_up = Instant::now();
     let mut killed: Option<Instant> = None;
     loop {
-        if let Some(Msg::Exited { .. }) = jar.recv(Duration::from_millis(200))? {
+        if let Some(Msg::Exited { .. }) = jar.recv(DISCARD_POLL)? {
             let _ = jar.send(&Msg::AckExit);
             break;
         }
