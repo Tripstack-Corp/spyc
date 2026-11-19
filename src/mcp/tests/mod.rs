@@ -928,9 +928,9 @@ fn a_status_report_finds_a_restarted_spyc() {
         let dead = dir.join("mcp-999999999.sock");
         let dead = dead.to_str().unwrap();
 
-        assert!(report_stream(dead, Some("pane"), project.path()).is_some());
-        assert!(report_stream(dead, None, project.path()).is_none());
-        assert!(report_stream("", Some("pane"), project.path()).is_none());
+        assert!(report_stream(dead, Some("pane"), project.path(), None).is_some());
+        assert!(report_stream(dead, None, project.path(), None).is_none());
+        assert!(report_stream("", Some("pane"), project.path(), None).is_none());
     });
 }
 

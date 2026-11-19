@@ -52,6 +52,7 @@ fn run(command: &str, env: &[(&str, &str)]) -> (String, i32) {
         .arg(command)
         .env_remove("SPYC_MCP_SOCK")
         .env_remove("SPYC_PANE_ID")
+        .env_remove("SPYC_JAR_SOCKET")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
     for (key, value) in env {
