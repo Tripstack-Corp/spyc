@@ -65,7 +65,7 @@ impl Client {
                 Err(e) if Instant::now() >= until => {
                     return Err(anyhow::anyhow!("connect {}: {e}", socket.display()));
                 }
-                Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                Err(_) => std::thread::sleep(CONNECT_RETRY),
             }
         };
         let mut client = Self {
@@ -111,7 +111,7 @@ impl Client {
                 // A socket takes no zero timeout: the least is a millisecond.
                 // macOS refuses any timeout on a socket its peer has closed
                 // (a lookup's ends with its answer), whose reads don't wait.
-                if let Err(e) = self.read_timeout(wait.max(Duration::from_millis(1)))
+                if let Err(e) = self.read_timeout(wait.max(crate::limits::SHORTEST_WAIT))
                     && !self.reads_at_once()
                 {
                     return Err(e.into());
@@ -312,14 +312,21 @@ pub fn answers_now(socket: &Path) -> bool {
     rustix::net::connect(&sock, &addr).is_ok()
 }
 
+/// How long [`describe`] waits to reach a jar, and then for its answer.
+const DESCRIBE_WAIT: Duration = Duration::from_secs(2);
+/// How often [`describe`] looks for the answer.
+const DESCRIBE_POLL: Duration = Duration::from_millis(200);
+/// How often a client tries again to reach a jar it couldn't yet.
+const CONNECT_RETRY: Duration = Duration::from_millis(10);
+
 /// R31: ask the jar at `socket` to describe itself, as a [`Role::Lookup`],
 /// which needs no token.
 pub fn describe(socket: &Path) -> anyhow::Result<Vec<(String, String)>> {
-    let (mut c, _) = Client::connect(socket, Role::Lookup, Duration::from_secs(2), &[])?;
+    let (mut c, _) = Client::connect(socket, Role::Lookup, DESCRIBE_WAIT, &[])?;
     c.send(&Msg::Describe)?;
-    let until = Instant::now() + Duration::from_secs(2);
+    let until = Instant::now() + DESCRIBE_WAIT;
     while Instant::now() < until {
-        if let Some(Msg::Description { fields }) = c.recv(Duration::from_millis(200))? {
+        if let Some(Msg::Description { fields }) = c.recv(DESCRIBE_POLL)? {
             return Ok(fields);
         }
     }

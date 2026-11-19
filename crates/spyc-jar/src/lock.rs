@@ -24,6 +24,9 @@ use anyhow::{Context, bail};
 use rustix::fs::FlockOperation;
 use rustix::io::Errno;
 
+/// How often a jar tries again for its lock while an old reader holds it.
+const LOCK_RETRY: Duration = Duration::from_millis(10);
+
 /// The lock file of the jar at `socket`: its path with `.lock` added.
 pub fn path(socket: &Path) -> PathBuf {
     let mut p = socket.as_os_str().to_owned();
@@ -83,7 +86,7 @@ pub(crate) fn take(socket: &Path) -> anyhow::Result<()> {
         match rustix::fs::fcntl_lock(&file, FlockOperation::NonBlockingLockExclusive) {
             Ok(()) => break,
             Err(Errno::AGAIN | Errno::ACCESS) if Instant::now() < until => {
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(LOCK_RETRY);
             }
             Err(Errno::AGAIN | Errno::ACCESS) => {
                 bail!("a jar already runs at {}", socket.display());

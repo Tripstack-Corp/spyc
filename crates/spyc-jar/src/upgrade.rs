@@ -59,6 +59,11 @@ use crate::jar::{Conn, Shared, Who};
 use crate::proto::{Msg, Role, reason};
 use crate::state::ConnState;
 
+/// How often an upgrade looks for every thread to have reached its park.
+const PARK_POLL: Duration = Duration::from_millis(20);
+/// How often an upgrade looks for the new binary's validation to end.
+const VALIDATOR_POLL: Duration = Duration::from_millis(5);
+
 /// The message that travels with the descriptors.
 pub(crate) const FDS_TAG: &[u8; 8] = b"SPYCJARF";
 /// The tag, then the holder's pid.
@@ -454,7 +459,7 @@ fn hold(
         .and_then(|()| write_until(&ours, blob, until))
         .and_then(|()| {
             let left = until.saturating_duration_since(Instant::now());
-            ours.set_read_timeout(Some(left.max(Duration::from_millis(1))))?;
+            ours.set_read_timeout(Some(left.max(crate::limits::SHORTEST_WAIT)))?;
             let mut ack = [0u8; 1];
             (&ours).read_exact(&mut ack)
         });
@@ -618,7 +623,7 @@ fn wait_parked(shared: &Shared) -> anyhow::Result<()> {
         }
         parked = shared
             .park_cv
-            .wait_timeout(parked, Duration::from_millis(20))
+            .wait_timeout(parked, PARK_POLL)
             .unwrap_or_else(PoisonError::into_inner)
             .0;
     }
@@ -704,7 +709,7 @@ fn validate(
                 binary.display()
             )));
         }
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(VALIDATOR_POLL);
     };
     if !status.success() {
         // Its reason, if it has gone with it: a child of the validator may

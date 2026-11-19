@@ -147,6 +147,10 @@ impl Link {
 /// which may begin inside one.
 pub(super) const RESYNC: u8 = 0x18;
 
+/// A link's reader's wait with no repaint due: it wakes on a frame, and the
+/// connection's own deadline ends it.
+const NO_REPAINT_DUE: Duration = Duration::from_secs(3600);
+
 /// How long [`JarChild::wait`] waits for the exit of a program it was told
 /// to kill: a jar that never reports one can't hold spyc's shutdown.
 const EXIT_WAIT: Duration = Duration::from_secs(2);
@@ -164,9 +168,7 @@ pub(super) fn read_frames(
         if repaint.ran_out(Instant::now()) {
             link.resize_pty_back();
         }
-        let wait = repaint
-            .left(Instant::now())
-            .unwrap_or(Duration::from_secs(3600));
+        let wait = repaint.left(Instant::now()).unwrap_or(NO_REPAINT_DUE);
         match rx.recv(wait) {
             Ok(Some(Msg::Output { offset, bytes: b })) => {
                 let end = offset + b.len() as u64;

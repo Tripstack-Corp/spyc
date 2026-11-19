@@ -182,7 +182,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> anyhow::Result<Config> {
         ring_cap: 4 << 20,
         window: 1 << 20,
         deadline: crate::limits::OWNER_DEADLINE,
-        linger_after_exit: Duration::from_secs(60),
+        linger_after_exit: EXIT_LINGER,
         linger: None,
         instance: instance(),
         created: std::time::SystemTime::now()
@@ -382,17 +382,27 @@ fn read_start() -> anyhow::Result<Start> {
     Start::parse(&buf).context("spyc-jar: no start on stdin; refusing to run")
 }
 
+/// How long a jar keeps its program's output and exit, once the program has
+/// ended, for an owner that isn't there.
+const EXIT_LINGER: Duration = Duration::from_secs(60);
+/// How long a command-line client waits to reach its jar.
+const COMMAND_WAIT: Duration = Duration::from_secs(5);
+/// How long `spyc-jar upgrade` waits for the jar's answer.
+const UPGRADE_ANSWER_WAIT: Duration = Duration::from_secs(10);
+/// How often `program-events` wakes with nothing heard.
+const PROGRAM_EVENTS_TICK: Duration = Duration::from_secs(60);
+
 /// `spyc-jar upgrade SOCKET TOKEN_FILE BINARY`: ask the jar at `SOCKET` to
 /// replace its binary with `BINARY`, and report how long its program went
 /// unserved.
 fn upgrade(socket: &std::path::Path, token: &[u8], binary: String) -> anyhow::Result<()> {
     use crate::client::Client;
     use crate::proto::{Msg, Role};
-    let (mut c, _) = Client::connect(socket, Role::Reader, Duration::from_secs(5), token)?;
+    let (mut c, _) = Client::connect(socket, Role::Reader, COMMAND_WAIT, token)?;
     let t0 = std::time::Instant::now();
     c.send(&Msg::Upgrade { binary })?;
     loop {
-        match c.recv(Duration::from_secs(10))? {
+        match c.recv(UPGRADE_ANSWER_WAIT)? {
             Some(Msg::Upgraded { build }) => {
                 println!(
                     "upgraded in {:.1} ms to {build}",
@@ -402,7 +412,7 @@ fn upgrade(socket: &std::path::Path, token: &[u8], binary: String) -> anyhow::Re
             }
             Some(Msg::Refused { why, .. }) => bail!("{why}"),
             Some(_) => {}
-            None => bail!("no answer within 10 s"),
+            None => bail!("no answer within {UPGRADE_ANSWER_WAIT:?}"),
         }
     }
 }
@@ -417,7 +427,7 @@ fn program_events() -> anyhow::Result<()> {
     let (client, _) = Client::connect(
         std::path::Path::new(&socket),
         Role::Program,
-        Duration::from_secs(5),
+        COMMAND_WAIT,
         b"",
     )?;
     println!("program: connected");
@@ -431,7 +441,7 @@ fn program_events() -> anyhow::Result<()> {
         }
     });
     loop {
-        match rx.recv(Duration::from_secs(60)) {
+        match rx.recv(PROGRAM_EVENTS_TICK) {
             Ok(Some(Msg::Attached)) => println!("program: attached"),
             Ok(Some(Msg::Detached)) => println!("program: detached"),
             Ok(_) => {}

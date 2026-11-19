@@ -15,6 +15,13 @@ use rustix::termios::{self, OptionalActions};
 use crate::client::Client;
 use crate::proto::{Msg, Role};
 
+/// How long `attach` waits to reach its jar.
+const ATTACH_WAIT: Duration = Duration::from_secs(5);
+/// How often an attached client with nothing to show pings its jar.
+const ATTACH_PING: Duration = Duration::from_secs(2);
+/// How often an attached client looks at its terminal's size.
+const SIZE_POLL: Duration = Duration::from_millis(250);
+
 /// `^\`, as dtach uses.
 const DETACH: u8 = 0x1c;
 
@@ -46,7 +53,7 @@ fn size() -> (u16, u16) {
 
 /// Relay until detach, exit or a lost connection; why it ended.
 fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
-    let (client, welcome) = Client::connect(socket, Role::Owner, Duration::from_secs(5), token)?;
+    let (client, welcome) = Client::connect(socket, Role::Owner, ATTACH_WAIT, token)?;
     let Msg::Welcome { head, .. } = welcome else {
         anyhow::bail!("expected a welcome");
     };
@@ -71,7 +78,7 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
         std::thread::spawn(move || {
             let mut out = std::io::stdout();
             let why = loop {
-                match rx.recv(Duration::from_secs(2)) {
+                match rx.recv(ATTACH_PING) {
                     Ok(Some(Msg::Output { offset, bytes })) => {
                         if out.write_all(&bytes).and_then(|()| out.flush()).is_err() {
                             break "the terminal went away";
@@ -102,7 +109,7 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
         std::thread::spawn(move || {
             let mut last = size();
             loop {
-                std::thread::sleep(Duration::from_millis(250));
+                std::thread::sleep(SIZE_POLL);
                 let now = size();
                 if now != last {
                     last = now;
