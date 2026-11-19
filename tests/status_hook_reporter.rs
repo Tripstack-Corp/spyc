@@ -149,7 +149,10 @@ fn run_reporter_with(
         .env("XDG_STATE_HOME", temp.path().join("state"))
         .env("HOME", temp.path())
         .env_remove("SPYC_MCP_DEBUG")
-        .env_remove("CLAUDE_CONFIG_DIR");
+        .env_remove("CLAUDE_CONFIG_DIR")
+        // The test's own tab may run in a jar whose spyc the report would
+        // reach first (R30a), rather than the socket this test listens on.
+        .env_remove("SPYC_JAR_SOCKET");
     if let Some(home) = claude_home {
         command.env("CLAUDE_CONFIG_DIR", home);
     }
@@ -500,6 +503,7 @@ fn status_hook_reporter_under_codex_shared_daemon_reports_nothing() {
         .env("HOME", temp.path())
         .env_remove("SPYC_MCP_DEBUG")
         .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("SPYC_JAR_SOCKET")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .spawn()

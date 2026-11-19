@@ -27,6 +27,7 @@ fn spawn_mcp(parent_args: &[&str], cwd: &Path, state_home: &Path) -> Command {
         .env("HOME", state_home)
         .env_remove("SPYC_MCP_SOCK")
         .env_remove("SPYC_PANE_ID")
+        .env_remove("SPYC_JAR_SOCKET")
         .env_remove("SPYC_CONTEXT")
         .env_remove("SPYC_MCP_DEBUG")
         .stdin(Stdio::piped());
