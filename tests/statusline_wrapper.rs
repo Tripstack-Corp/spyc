@@ -81,18 +81,23 @@ fn the_users_statusline_runs_once_on_the_same_input() {
     assert_eq!(code, 0);
 }
 
-/// Inside a spyc pane the projection reaches that spyc, and nothing private
-/// travels with it.
-#[test]
-fn a_pane_forwards_the_projection_to_its_spyc() {
-    let dir = tempfile::Builder::new()
-        .prefix("spyc-sl-")
-        .tempdir_in("/tmp")
-        .unwrap();
-    let sock = dir.path().join("spyc.sock");
-    let listener = UnixListener::bind(&sock).unwrap();
-    let server = std::thread::spawn(move || {
-        let (stream, _) = listener.accept().unwrap();
+/// The one request a spyc listening at `sock` receives, once one arrives within
+/// a generous wait: `None` when none does.
+fn receive_one(sock: &std::path::Path) -> std::thread::JoinHandle<Option<String>> {
+    let listener = UnixListener::bind(sock).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    std::thread::spawn(move || {
+        let until = std::time::Instant::now() + Duration::from_secs(30);
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(_) if std::time::Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(_) => return None,
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(30)))
             .unwrap();
@@ -115,8 +120,20 @@ fn a_pane_forwards_the_projection_to_its_spyc() {
         // The forwarder stops waiting at its timeout, and a loaded runner
         // can get here later than that: the reply is not what's under test.
         let _ = write!(writer, "Content-Length: {}\r\n\r\n{reply}", reply.len());
-        String::from_utf8(body).unwrap()
-    });
+        Some(String::from_utf8(body).unwrap())
+    })
+}
+
+/// Inside a spyc pane the projection reaches that spyc, and nothing private
+/// travels with it.
+#[test]
+fn a_pane_forwards_the_projection_to_its_spyc() {
+    let dir = tempfile::Builder::new()
+        .prefix("spyc-sl-")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let sock = dir.path().join("spyc.sock");
+    let server = receive_one(&sock);
     let (out, code) = run(
         &wrapper("printf ok"),
         &[
@@ -125,7 +142,7 @@ fn a_pane_forwards_the_projection_to_its_spyc() {
         ],
     );
     assert_eq!((out.as_str(), code), ("ok", 0));
-    let body = server.join().unwrap();
+    let body = server.join().unwrap().expect("the projection reached spyc");
     assert!(!body.contains("SENTINEL"), "{body}");
     let sent: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(sent["method"], "spyc/statusline");
@@ -135,4 +152,100 @@ fn a_pane_forwards_the_projection_to_its_spyc() {
         sent["params"]["statusline"]["five_hour"]["used_percent"],
         23
     );
+}
+
+/// The spyc that launched an agent may be gone: a crash and `spyc -r`, `^d`'s
+/// handover or an upgrade put another in its place. Its pane's jar names the
+/// spyc that owns it now (R30a), and the projection goes there, so the HUD
+/// keeps the tab's context and plan figures.
+#[test]
+fn a_pane_forwards_the_projection_to_the_spyc_that_owns_its_jar_now() {
+    use std::os::unix::fs::PermissionsExt;
+
+    use spyc_jar::client::Client;
+    use spyc_jar::proto::{Msg, Role};
+    // A jar's socket lives in a private directory, or spyc won't trust it.
+    let dir = tempfile::Builder::new()
+        .prefix("spyc-sl-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in("/tmp")
+        .unwrap();
+    let jar_socket = dir.path().join("j.sock");
+    let token = b"test-token-0123456789";
+    let mut jar = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
+        .args(["--wire", "1"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    jar.stdin
+        .take()
+        .unwrap()
+        .write_all(
+            &spyc_jar::cli::Start {
+                token: token.to_vec(),
+                socket: jar_socket.clone(),
+                cwd: None,
+                rows: 24,
+                cols: 80,
+                hold: None,
+                exit_linger: None,
+                argv: vec!["/bin/sleep".into(), "1000".into()],
+            }
+            .encode(),
+        )
+        .unwrap();
+    let ended = Ends(jar);
+    let (owner, _) =
+        Client::connect(&jar_socket, Role::Owner, Duration::from_secs(30), token).unwrap();
+    let now = dir.path().join("now.sock");
+    owner
+        .send(&Msg::SetInfo {
+            key: "owner_mcp".into(),
+            value: now.to_str().unwrap().into(),
+        })
+        .unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(30);
+    while !spyc_jar::client::describe(&jar_socket)
+        .unwrap_or_default()
+        .iter()
+        .any(|(k, v)| k == "owner_mcp" && !v.is_empty())
+    {
+        assert!(
+            std::time::Instant::now() < until,
+            "the jar never stored its owner"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let server = receive_one(&now);
+    let gone = dir.path().join("launcher.sock");
+    let (out, code) = run(
+        &wrapper("printf ok"),
+        &[
+            ("SPYC_MCP_SOCK", gone.to_str().unwrap()),
+            ("SPYC_PANE_ID", "pane-9"),
+            ("SPYC_JAR_SOCKET", jar_socket.to_str().unwrap()),
+        ],
+    );
+    assert_eq!((out.as_str(), code), ("ok", 0));
+    let body = server
+        .join()
+        .unwrap()
+        .expect("the projection reached the spyc that owns the jar now");
+    let sent: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(sent["params"]["pane_id"], "pane-9");
+    assert_eq!(sent["params"]["statusline"]["context"]["used_percent"], 34);
+    drop(owner);
+    drop(ended);
+}
+
+/// A process killed when the test ends, passing or not.
+struct Ends(std::process::Child);
+
+impl Drop for Ends {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }
