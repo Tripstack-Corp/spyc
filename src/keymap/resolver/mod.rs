@@ -229,6 +229,8 @@ impl Resolver {
             KeyCode::Char('?') => ResolverOutcome::Action(Action::Help),
             KeyCode::Char('a') => ResolverOutcome::Action(Action::About),
             KeyCode::Char('m') => ResolverOutcome::Action(Action::MakeMenu),
+            // From the pane `^d` is the program's, so `^a Space d` is the way.
+            KeyCode::Char('d') => ResolverOutcome::Action(Action::Detach),
             _ => ResolverOutcome::Ignored,
         };
         self.reset();
