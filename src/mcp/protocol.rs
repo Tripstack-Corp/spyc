@@ -108,8 +108,9 @@ impl Caller {
 /// once the user says yes, to have it `:upgrade`.
 pub(super) const UPGRADE_METHOD: &str = "spyc/upgrade";
 
-/// The notification `spyc shutdown` sends a session's spyc, once the user says
-/// yes, to have it save the session and quit.
+/// The request `spyc shutdown` sends a session's spyc, once the user says yes,
+/// to have it save the session and quit. A request, not a notification: a spyc
+/// that predates it answers "Method not found" rather than nothing.
 pub(super) const SHUTDOWN_METHOD: &str = "spyc/shutdown";
 
 fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
@@ -403,11 +404,6 @@ pub(super) fn dispatch_for(
         {
             tell(tx, McpCommand::Upgrade);
         }
-        if method == SHUTDOWN_METHOD
-            && let Some(tx) = cmd_tx
-        {
-            tell(tx, McpCommand::Shutdown);
-        }
         return Ok(());
     }
 
@@ -453,6 +449,12 @@ pub(super) fn dispatch_for(
         "tools/call" => handle_tools_call(w, &id, &parsed["params"], ctx_path, cmd_tx, caller),
         "ping" => send_result(w, &id, json!({})),
         super::statusline::METHOD => super::statusline::handle(w, &id, &parsed["params"], cmd_tx),
+        SHUTDOWN_METHOD => {
+            if let Some(tx) = cmd_tx {
+                tell(tx, McpCommand::Shutdown);
+            }
+            send_result(w, &id, json!({}))
+        }
         _ => send_error(w, id, -32601, &format!("Method not found: {method}")),
     }
 }

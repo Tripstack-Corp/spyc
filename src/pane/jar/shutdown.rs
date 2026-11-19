@@ -2,7 +2,8 @@
 //! in it would, from outside it. The session is chosen as `spyc attach`
 //! chooses one. It names the tabs that end with it, the pane jars whose owner
 //! is the session's spyc, and asks first unless `-y`. The session's spyc is
-//! told by a notification on its MCP socket (`spyc/shutdown`): it saves the
+//! asked on its MCP socket (`spyc/shutdown`), and one too old to know the
+//! request says so rather than nothing. It saves the
 //! session and quits, ending its tabs. Its jar keeps the exit a while for an
 //! owner, so the wait is for the exit, not for the jar.
 
@@ -49,7 +50,7 @@ pub fn run(name: Option<&str>, yes: bool) -> anyhow::Result<()> {
         eprintln!("spyc: {} runs on", chosen.name);
         return Ok(());
     }
-    crate::mcp::ask_shutdown(pid)?;
+    crate::mcp::ask_shutdown(pid).with_context(|| format!("shut down {}", chosen.name))?;
     let until = Instant::now() + SHUTDOWN_WAIT;
     while socket_state(&chosen.socket) == SocketState::Live && !ended(&chosen.socket) {
         anyhow::ensure!(
