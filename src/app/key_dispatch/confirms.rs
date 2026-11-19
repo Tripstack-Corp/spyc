@@ -40,6 +40,7 @@ impl App {
             PromptKind::SkillUpdate { .. } => Self::handle_skill_update_key,
             PromptKind::ProjectTabsConsent { .. } => Self::handle_project_tabs_consent_key,
             PromptKind::ClosePane => Self::handle_close_pane_confirm_key,
+            PromptKind::QuitConfirm => Self::handle_quit_confirm_key,
             PromptKind::CloseProject(_) => Self::handle_close_project_confirm_key,
             PromptKind::RestartPane => Self::handle_restart_pane_confirm_key,
             PromptKind::ArchiveWriteConfirm { .. } => Self::handle_archive_write_confirm_key,
@@ -197,6 +198,17 @@ impl App {
         self.state.mode = Mode::Normal;
         if confirmed {
             self.close_active_tab_now();
+        } else {
+            self.view.needs_full_repaint = true;
+        }
+        Vec::new()
+    }
+
+    /// `:q`'s confirm: `y`/`Y` quits, anything else stays.
+    pub(super) fn handle_quit_confirm_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        self.state.mode = Mode::Normal;
+        if matches!(key.code, KeyCode::Char('y' | 'Y')) {
+            self.quit_now();
         } else {
             self.view.needs_full_repaint = true;
         }

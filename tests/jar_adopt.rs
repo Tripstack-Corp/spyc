@@ -731,10 +731,10 @@ fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
         back.shows(&name) && back.shows("ready-mark")
     });
     back.type_keys(b":q\r");
-    back.eventually("spyc asks for a second `:q`", || {
-        back.shows("press again to quit")
+    back.eventually("spyc asks whether to quit", || {
+        squeezed(&back.since_last_screen()).contains("quitanyway?[y/N]")
     });
-    back.type_keys(b":q\r");
+    back.type_keys(b"y");
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 
@@ -871,10 +871,10 @@ fn upgrade_in_a_session_jar_runs_the_new_spyc_with_the_same_tabs() {
     assert!(alive(agent));
 
     first.type_keys(b":q\r");
-    first.eventually("spyc asks for a second `:q`", || {
-        squeezed(&first.since_last_screen()).contains("pressagaintoquit")
+    first.eventually("spyc asks whether to quit", || {
+        squeezed(&first.since_last_screen()).contains("quitanyway?[y/N]")
     });
-    first.type_keys(b":q\r");
+    first.type_keys(b"y");
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 
@@ -984,10 +984,10 @@ fn spyc_attach_from_a_newer_install_offers_the_upgrade() {
         "offered the upgrade the session's spyc already took"
     );
     third.type_keys(b":q\r");
-    third.eventually("spyc asks for a second `:q`", || {
-        squeezed(&third.since_last_screen()).contains("pressagaintoquit")
+    third.eventually("spyc asks whether to quit", || {
+        squeezed(&third.since_last_screen()).contains("quitanyway?[y/N]")
     });
-    third.type_keys(b":q\r");
+    third.type_keys(b"y");
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 

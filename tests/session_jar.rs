@@ -18,6 +18,8 @@ use spyc_jar::proto::{Msg, Role};
 
 const WAIT: Duration = Duration::from_secs(30);
 const TOKEN: &[u8] = b"session-jar-test-token-0123";
+/// What `:q` asks while quitting would end something.
+const QUIT_ASKS: &str = "quit anyway? [y/N]";
 const NAME: &str = "PAPRIKA_TEST";
 
 /// The queries spyc makes of its terminal: what a terminal with the kitty
@@ -310,22 +312,25 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-/// Answer spyc's "press again to quit" with `:q` until `quit` says it has
-/// gone. spyc quits on a second `:q` within two seconds of the first, and on
-/// a runner too slow to land it in time spyc asks again, so this answers
-/// again, as the user would.
-fn press_q_until_quit(what: &str, mut press: impl FnMut(), mut quit: impl FnMut() -> bool) {
+/// Quit with `:q`, as the user would: spyc quits at once with nothing to
+/// lose, and otherwise asks once, which a `y` answers. `quit` says it has
+/// gone.
+fn quit_with_q(
+    what: &str,
+    mut type_keys: impl FnMut(&[u8]),
+    mut asked: impl FnMut() -> bool,
+    mut quit: impl FnMut() -> bool,
+) {
+    type_keys(b":q\r");
     let until = Instant::now() + WAIT;
-    loop {
-        press();
-        let tap = Instant::now() + Duration::from_secs(1);
-        while Instant::now() < tap {
-            if quit() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(50));
+    let mut answered = false;
+    while !quit() {
+        if !answered && asked() {
+            type_keys(b"y");
+            answered = true;
         }
         assert!(Instant::now() < until, "never: {what}");
+        std::thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -476,18 +481,18 @@ impl Attached {
 
     /// Quit the spyc it shows, as the user would.
     fn quit_spyc(&mut self) {
-        self.type_keys(b":q\r");
-        self.wait_for("spyc asks for a second `:q`", "press again to quit");
         let keys = Arc::clone(&self.keys);
+        let seen = Arc::clone(&self.seen);
         let child = &mut self.child;
         let mut status = None;
-        press_q_until_quit(
+        quit_with_q(
             "spyc quits when told to",
-            || {
+            |typed| {
                 let mut w = keys.lock().unwrap();
-                // A press racing the exit meets a closed pty: nothing to tell.
-                let _ = w.write_all(b":q\r").and_then(|()| w.flush());
+                // A key racing the exit meets a closed pty: nothing to tell.
+                let _ = w.write_all(typed).and_then(|()| w.flush());
             },
+            || String::from_utf8_lossy(&seen.lock().unwrap()).contains(QUIT_ASKS),
             || {
                 status = child.try_wait().unwrap();
                 status.is_some()
@@ -638,11 +643,10 @@ fn each_terminal_that_attaches_to_spycs_own_jar_is_set_up_probed_and_drawn_on() 
     );
 
     // Keys reach spyc after both probes: none were taken by them.
-    second.type_keys(b":q\r");
-    second.wait_for("spyc asks for a second `:q`", "press again to quit");
-    press_q_until_quit(
+    quit_with_q(
         "spyc quits when told to",
-        || second.type_keys(b":q\r"),
+        |typed| second.type_keys(typed),
+        || second.text().contains(QUIT_ASKS),
         || *second.exited.lock().unwrap(),
     );
 }

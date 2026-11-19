@@ -104,10 +104,7 @@ impl App {
                 return Vec::new();
             }
             Update::Quit => {
-                // Same lifecycle as the Q keybinding (double-tap confirm,
-                // running-process warning, save_session on confirm). The
-                // typed variant keeps the wiring a compile-time check.
-                self.request_quit();
+                self.quit_command();
                 return Vec::new();
             }
             Update::Detach => {
