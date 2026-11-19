@@ -268,21 +268,29 @@ fn session_id_from_hook_payload(payload: &str) -> Option<String> {
         .map(String::from)
 }
 
-/// Where a status report goes: the spyc that owns the pane's jar now (R30a),
+/// Where a status report goes: the spyc that owns the pane's `jar` now (R30a),
 /// else the socket the launching spyc named, else the
 /// live spyc rooted above `cwd`, found the way the proxy finds it. The named
 /// socket is dead when spyc restarted under an agent that outlived it, and the
 /// restored tab kept the agent's pane id. Discovery needs that id: without one
 /// the report would land on whatever tab is focused. No named socket means
 /// spyc didn't launch this agent, so nothing is reported.
-fn report_stream(env_sock: &str, pane_id: Option<&str>, cwd: &Path) -> Option<UnixStream> {
+fn report_stream(
+    env_sock: &str,
+    pane_id: Option<&str>,
+    cwd: &Path,
+    jar: Option<&Path>,
+) -> Option<UnixStream> {
     if env_sock.is_empty() {
         return None;
     }
     // R30a: the pane's jar names the spyc that owns it now, which a crash, a
     // handover or an upgrade may have changed since the agent's env was set.
-    if let Some(stream) = std::env::var_os("SPYC_JAR_SOCKET")
-        .and_then(|jar| crate::pane::jar::owner_mcp(Path::new(&jar)))
+    // Like discovery, only for a report that names its pane.
+    let named = pane_id.is_some_and(|id| !id.is_empty());
+    if let Some(stream) = jar
+        .filter(|_| named)
+        .and_then(crate::pane::jar::owner_mcp)
         .and_then(|path| UnixStream::connect(path).ok())
     {
         return Some(stream);
@@ -441,7 +449,8 @@ pub fn report_status_to_socket(state: &str, trace: bool) {
         }
     }
     let cwd = std::env::current_dir().unwrap_or_default();
-    let Some(mut stream) = report_stream(&sock, pane_id.as_deref(), &cwd) else {
+    let jar = std::env::var_os("SPYC_JAR_SOCKET").map(PathBuf::from);
+    let Some(mut stream) = report_stream(&sock, pane_id.as_deref(), &cwd, jar.as_deref()) else {
         trace_log(&format!("report-status: no live spyc for {sock}"));
         return;
     };

@@ -582,6 +582,33 @@ fn an_agents_mcp_proxy_follows_its_jar_to_the_spyc_that_takes_it_back() {
         "the agent's next tool call reaches the spyc that took its jar back"
     );
 
+    // A report that names no pane reaches no spyc, though the jar knows one:
+    // it would land on whatever tab is focused.
+    let log_at = std::fs::read_to_string(dirs.state.join("spyc/mcp.log"))
+        .unwrap_or_default()
+        .len();
+    let unnamed = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["--report-status", "working", "--status-trace"])
+        .current_dir(&dirs.home)
+        .env_clear()
+        .envs(dirs.env())
+        .envs(
+            agent_env
+                .iter()
+                .filter(|(k, _)| k != "SPYC_PANE_ID")
+                .map(|(k, v)| (k, v)),
+        )
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(unnamed.status.success(), "{unnamed:?}");
+    let log = std::fs::read_to_string(dirs.state.join("spyc/mcp.log")).unwrap_or_default();
+    assert!(
+        !log[log_at..].contains("report-status: sent"),
+        "a report naming no pane reached a spyc: {}",
+        &log[log_at..]
+    );
+
     // The agent's status hook reaches it too, from a directory no spyc is
     // rooted at, where only the jar knows it.
     let hook = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
