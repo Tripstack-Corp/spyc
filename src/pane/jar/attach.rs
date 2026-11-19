@@ -48,6 +48,7 @@ pub fn run(name: Option<&str>) -> anyhow::Result<()> {
         Some(one) => one.clone(),
         None => ask(
             &running,
+            "Attach to which? ",
             &mut std::io::stdin().lock(),
             &mut std::io::stderr(),
         )?
@@ -166,7 +167,10 @@ pub fn running(sessions: &Path) -> Vec<Running> {
         .filter_map(|entry| {
             let socket = entry.path();
             let name = session_name(&socket)?;
-            (socket_state(&socket) == SocketState::Live).then(|| Running {
+            if socket_state(&socket) != SocketState::Live || ended(&socket) {
+                return None;
+            }
+            Some(Running {
                 client: client_of(&socket).ok().flatten(),
                 name,
                 socket,
@@ -175,6 +179,12 @@ pub fn running(sessions: &Path) -> Vec<Running> {
         .collect();
     found.sort_by(|a, b| a.name.cmp(&b.name));
     found
+}
+
+/// Whether the jar at `socket` holds only its program's exit: a session's jar
+/// keeps that a while for an owner, once its spyc has quit.
+pub(super) fn ended(socket: &Path) -> bool {
+    spyc_jar::client::describe(socket).is_ok_and(|fields| fields.iter().any(|(k, _)| k == "exit"))
 }
 
 /// The session a socket in the sessions directory holds.
@@ -229,10 +239,11 @@ pub fn choose<'a>(
     }
 }
 
-/// List `running` on `output` and read which one from `input`: its number
-/// or its name.
+/// List `running` on `output`, ask `question`, and read which one from
+/// `input`: its number or its name.
 pub fn ask<'a>(
     running: &'a [Running],
+    question: &str,
     input: &mut impl BufRead,
     output: &mut impl Write,
 ) -> anyhow::Result<&'a Running> {
@@ -244,7 +255,7 @@ pub fn ask<'a>(
         };
         writeln!(output, "{:>3}  {}{attached}", i + 1, r.name)?;
     }
-    write!(output, "Attach to which? ")?;
+    write!(output, "{question}")?;
     output.flush()?;
     let mut line = String::new();
     input.read_line(&mut line)?;
@@ -327,7 +338,7 @@ mod tests {
     fn asking_takes_a_number_or_a_name() {
         let running = [session("ANISE", None), session("CLOVE", Some(7))];
         let mut shown = Vec::new();
-        let picked = ask(&running, &mut &b"2\n"[..], &mut shown).unwrap();
+        let picked = ask(&running, "Attach to which? ", &mut &b"2\n"[..], &mut shown).unwrap();
         assert_eq!(picked.name, "CLOVE");
         let shown = String::from_utf8(shown).unwrap();
         assert!(shown.contains("  1  ANISE\n"), "{shown}");
@@ -335,9 +346,23 @@ mod tests {
             shown.contains("  2  CLOVE  (attached elsewhere)\n"),
             "{shown}"
         );
-        let picked = ask(&running, &mut &b"ANISE\n"[..], &mut Vec::new()).unwrap();
+        let picked = ask(
+            &running,
+            "Attach to which? ",
+            &mut &b"ANISE\n"[..],
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(picked.name, "ANISE");
-        assert!(ask(&running, &mut &b"3\n"[..], &mut Vec::new()).is_err());
+        assert!(
+            ask(
+                &running,
+                "Attach to which? ",
+                &mut &b"3\n"[..],
+                &mut Vec::new()
+            )
+            .is_err()
+        );
     }
 
     #[test]

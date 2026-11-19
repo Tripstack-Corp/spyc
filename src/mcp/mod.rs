@@ -118,12 +118,26 @@ pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
 /// Ask the spyc with `pid` to `:upgrade`: `spyc attach` from a newer
 /// install, once the user said yes.
 pub fn ask_upgrade(pid: u32) -> anyhow::Result<()> {
+    notify(pid, protocol::UPGRADE_METHOD)
+}
+
+/// Have the spyc of `pid` save its session and quit, ending its tabs, as
+/// `:q` would (`spyc shutdown`).
+pub fn ask_shutdown(pid: i32) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let pid = u32::try_from(pid).context("a spyc's pid is positive")?;
+    notify(pid, protocol::SHUTDOWN_METHOD)
+}
+
+/// Send the spyc of `pid` the notification `method` on its MCP socket.
+fn notify(pid: u32, method: &str) -> anyhow::Result<()> {
     use anyhow::Context as _;
     let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
     let mut stream = std::os::unix::net::UnixStream::connect(&sock)
         .with_context(|| format!("reach the spyc at {}", sock.display()))?;
-    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": protocol::UPGRADE_METHOD });
-    framing::send_message(&mut stream, &msg.to_string()).context("ask spyc to upgrade")?;
+    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": method });
+    framing::send_message(&mut stream, &msg.to_string())
+        .with_context(|| format!("send spyc {method}"))?;
     Ok(())
 }
 

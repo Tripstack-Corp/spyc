@@ -108,6 +108,10 @@ impl Caller {
 /// once the user says yes, to have it `:upgrade`.
 pub(super) const UPGRADE_METHOD: &str = "spyc/upgrade";
 
+/// The notification `spyc shutdown` sends a session's spyc, once the user says
+/// yes, to have it save the session and quit.
+pub(super) const SHUTDOWN_METHOD: &str = "spyc/shutdown";
+
 fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
     let (reply_tx, _) = std::sync::mpsc::channel();
     let _ = tx.send(McpRequest {
@@ -398,6 +402,11 @@ pub(super) fn dispatch_for(
             && let Some(tx) = cmd_tx
         {
             tell(tx, McpCommand::Upgrade);
+        }
+        if method == SHUTDOWN_METHOD
+            && let Some(tx) = cmd_tx
+        {
+            tell(tx, McpCommand::Shutdown);
         }
         return Ok(());
     }

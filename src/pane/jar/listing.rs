@@ -28,7 +28,7 @@ pub fn print() {
     }
 }
 
-fn sockets_in(dir: &Path) -> Vec<PathBuf> {
+pub(super) fn sockets_in(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()

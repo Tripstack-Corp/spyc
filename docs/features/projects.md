@@ -259,6 +259,9 @@ untouched, and what `spyc -r` doesn't keep starts afresh. In a plain spyc, `:upg
 `^d` whose jar runs the new spyc. `spyc attach` notices a session whose spyc is older than
 the one installed where it runs from, and asks whether to upgrade it before you attach.
 
-`Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `^D` detaches too: most
+`Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `spyc shutdown` does the same
+from outside the session, attached or not: it picks the session as `spyc attach` does, lists
+the tabs that end with it and asks first (`-y` doesn't ask). The session is saved, so `spyc -r`
+can bring it back, its programs started afresh. `^D` detaches too: most
 terminals send it as `^d`. While a session runs in its own jar, its name is that jar's
 address, so `:name` can't change it.

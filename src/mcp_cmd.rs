@@ -187,6 +187,9 @@ pub enum McpCommand {
     /// `spyc attach` from a newer install asked this spyc to `:upgrade`
     /// (`spyc/upgrade`). Fire-and-forget.
     Upgrade,
+    /// `spyc shutdown` asked this spyc to save its session and quit, ending
+    /// its tabs (`spyc/shutdown`). Fire-and-forget.
+    Shutdown,
     /// What Claude Code's statusline told `spyc --statusline` in a pane: the
     /// plan's rate-limit windows, the context window and the vim mode.
     /// Fire-and-forget.
@@ -236,6 +239,7 @@ impl McpCommand {
             Self::Statusline { .. }
                 | Self::Disconnected { .. }
                 | Self::Upgrade
+                | Self::Shutdown
                 | Self::ConnectionInitialized { .. }
                 | Self::ConnectionBound { .. }
                 | Self::ConnectionClosed { .. }

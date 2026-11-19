@@ -234,6 +234,15 @@ enum Sub {
         /// The session's name, as spyc shows it (e.g. `CORIANDER_CLOVE`).
         name: Option<String>,
     },
+    /// End a session that runs in a jar of its own, as `:q` in it would,
+    /// its tabs with it. It says what ends and asks first.
+    Shutdown {
+        /// The session's name. With none, the one running, or a choice.
+        name: Option<String>,
+        /// Don't ask.
+        #[arg(short, long)]
+        yes: bool,
+    },
 }
 
 /// Names the cwd file when `--cwd-file` isn't given.
@@ -254,8 +263,12 @@ fn cwd_file_target(cli: &Cli, env: Option<&OsStr>, launch_dir: &Path) -> Option<
 /// `--install-agents`, `--remove-agents`), run instead of the TUI. `None` when
 /// none was asked for.
 fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
-    if let Some(Sub::Attach { name }) = &cli.sub {
-        return Some(pane::jar::attach::run(name.as_deref()));
+    match &cli.sub {
+        Some(Sub::Attach { name }) => return Some(pane::jar::attach::run(name.as_deref())),
+        Some(Sub::Shutdown { name, yes }) => {
+            return Some(pane::jar::shutdown::run(name.as_deref(), *yes));
+        }
+        None => {}
     }
     if cli.print_config {
         print!("{}", config::DEFAULT_TEMPLATE);
