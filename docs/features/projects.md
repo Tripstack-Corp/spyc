@@ -240,8 +240,9 @@ spyc auto-saves your workspace on quit and can restore it on startup.
 
 ## Detaching and attaching
 
-`^d` (or `:detach`) leaves spyc running and frees your terminal, the way detaching from `screen`
-or `tmux` does. Your agents keep working, spyc keeps answering their tools, and notifications
+`^d` (or `Space d`, or `:detach`) leaves spyc running and frees your terminal, the way
+detaching from `screen` or `tmux` does. From the agent pane `^d` goes to the tab's program, so
+there it's `^a Space d`. Your agents keep working, spyc keeps answering their tools, and notifications
 still arrive. `spyc attach` brings the same spyc back, in this terminal or another, over SSH
 or at another size: `spyc attach NAME` takes a session by the name spyc shows (such as
 `CORIANDER_CLOVE`), and with no name it takes the one running, or lists them and asks which.

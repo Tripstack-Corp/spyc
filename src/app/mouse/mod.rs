@@ -1700,7 +1700,8 @@ mod tests {
             crate::set_mouse_capture_for_test(true);
             let layout = app.frame_layout(FRAME);
             let menu = open_the_leader_by_right_click(&mut app, (layout.list.x + 1, layout.list.y));
-            let on_menu = centre(menu);
+            // The border: every row fires by click.
+            let on_menu = (menu.x, menu.y);
             assert_eq!(
                 region_at(&layout, on_menu.0, on_menu.1),
                 Some(route::Region::List),
@@ -1742,12 +1743,12 @@ mod tests {
             let layout = app.frame_layout(FRAME);
             let pane = layout.pane.expect("a pane is open");
             let menu = open_the_leader_by_right_click(&mut app, (layout.list.x + 1, layout.list.y));
-            let overlap = menu.intersection(pane);
+            // The border's bottom-left corner: every row fires by click.
+            let (col, row) = (menu.x, menu.bottom() - 1);
             assert!(
-                !overlap.is_empty(),
-                "premise: the menu is drawn over the pane"
+                pane.contains(ratatui::layout::Position::new(col, row)),
+                "premise: the menu's border is drawn over the pane"
             );
-            let (col, row) = centre(overlap);
 
             // The press alone: its release would discharge the forwarded flag.
             let fx = app.handle_mouse(at(MouseEventKind::Down(MouseButton::Left), col, row));

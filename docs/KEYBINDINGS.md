@@ -330,7 +330,7 @@ appear on the top bar and persist across `spyc -r`.
 | `Space a` / `:about` | The about page |
 | `Space w l` / `Space w n` / `Space w d` | Worktree list / new / delete (`W l` / `W n` / `W d` in the file list) |
 | `Q` / `ZZ` / `:q` | Quit, saving the session and ending its tabs (asks first while a tab or task is still running) |
-| `^d` / `:detach` | Detach: spyc runs on with its tabs, and `spyc attach` brings it back |
+| `^d` / `Space d` / `:detach` | Detach: spyc runs on with its tabs, and `spyc attach` brings it back. From the agent pane, where `^d` is the program's, it's `^a Space d` |
 | `q` | Doesn't quit: flashes a hint instead, keeping the key for macro recording |
 | `gV` / `:version` | Show the spyc version |
 
@@ -338,7 +338,7 @@ The **leader** (`Space`, or `^a Space` from the agent pane) opens a
 global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
 `Space m` (the make menu), `Space p` (project home), `Space n` / `Space x` / `Space j` /
 `Space Space` / `Space 1-9` / `Space ]` `Space [` (projects), `Space !` (the agent that needs you),
-`Space s` (session info), `Space ?` (help),
+`Space s` (session info), `Space d` (detach), `Space ?` (help),
 `Space a` (about). Hold it to see the which-key popup. `W l` / `W n` /
 `W d` is a list-focus alias for the same worktree list / new / delete.
 

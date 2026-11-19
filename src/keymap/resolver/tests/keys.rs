@@ -18,6 +18,24 @@ fn ctrl_d_detaches_and_never_quits() {
     );
 }
 
+/// The leader detaches too, and `^a Space d` reaches it from the pane, where
+/// `^d` goes to the tab's program.
+#[test]
+fn the_leader_detaches_from_the_list_and_from_the_pane() {
+    let mut r = Resolver::new();
+    feed(&mut r, key(' '));
+    assert_eq!(
+        feed(&mut r, key('d')),
+        ResolverOutcome::Action(Action::Detach)
+    );
+    feed(&mut r, ctrl('a'));
+    feed(&mut r, key(' '));
+    assert_eq!(
+        feed(&mut r, key('d')),
+        ResolverOutcome::Action(Action::Detach)
+    );
+}
+
 #[test]
 fn ctrl_l_redraws() {
     let mut r = Resolver::new();

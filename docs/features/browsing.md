@@ -104,8 +104,8 @@ second, complete file list, each column labelled `a` and `b`.
   picks, filter, sort, git markers, and harpoon. It opens *top-only*
   whatever `vsplit_mode` says (the pane stays full-width below two peer
   browsers); `^s f` makes it full-height. **^s x** closes it.
-  (`^d` does *not* close it — it quits, so `^d^d` with `b` open lets the
-  session save + `-r` restore the split.)
+  (`^d` does *not* close it: it detaches, and the split comes back with
+  the session.)
   `^a a`/`^a h` focus the left commander (a), `^a b`/`^a l` the right
   (b). Everything follows the focused column: navigation, `V`/`D`
   overlays, file ops (`O`/`+`/`W`), `!`/`;`/`$` shell cwd, the MCP

@@ -60,6 +60,7 @@ fn leader_rows() -> Vec<ChordEntry> {
         Act("!", A::Project(ProjectAction::Attention)),
         Act("m", A::MakeMenu),
         Act("s", A::ShowMemory),
+        Act("d", A::Detach),
         Act("?", A::Help),
         Act("a", A::About),
     ]

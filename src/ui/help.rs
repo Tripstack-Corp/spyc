@@ -60,6 +60,7 @@ const SECTIONS: &[Section] = &[
             ),
             ("Space m", "make: a Makefile's targets, to run one"),
             ("Space s", "session info"),
+            ("Space d", "detach (^a Space d from the pane)"),
             ("Space ?", "this help"),
             ("Space a", "about spyc (:about)"),
         ],
@@ -558,7 +559,7 @@ const SECTIONS: &[Section] = &[
             ("^R", "reload config (auto-reloads on save)"),
             ("Q  :q  ZZ", "quit, ending this spyc's tabs"),
             (
-                "^d  :detach",
+                "^d  Space d  :detach",
                 "detach: spyc runs on; spyc attach brings it back",
             ),
             (
