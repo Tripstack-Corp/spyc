@@ -243,6 +243,18 @@ enum Sub {
         #[arg(short, long)]
         yes: bool,
     },
+    /// Print a session's event log, as `:events` shows it. With no name, the
+    /// one session running, or a choice of every session with a log.
+    Events {
+        /// The session's name.
+        name: Option<String>,
+        /// Only the last N lines.
+        #[arg(short = 'n', long = "lines", value_name = "N")]
+        last: Option<usize>,
+        /// Go on printing what comes after, until interrupted.
+        #[arg(short, long)]
+        follow: bool,
+    },
 }
 
 /// Names the cwd file when `--cwd-file` isn't given.
@@ -267,6 +279,9 @@ fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
         Some(Sub::Attach { name }) => return Some(pane::jar::attach::run(name.as_deref())),
         Some(Sub::Shutdown { name, yes }) => {
             return Some(pane::jar::shutdown::run(name.as_deref(), *yes));
+        }
+        Some(Sub::Events { name, last, follow }) => {
+            return Some(state::event_log::print_cli(name.as_deref(), *last, *follow));
         }
         None => {}
     }

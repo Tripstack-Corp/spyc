@@ -16,6 +16,12 @@ exclude = ["/tests/fuzz_seeds.rs"]
 [lib]
 path = "src/lib.rs"
 
+[features]
+# A jar built to differ, for CI's upgrade tests only and never released: wire
+# and handover-blob version 2, and a frame version 1 doesn't know
+# (`tests/jar_differ.rs`, `make test-jar-differ`).
+differ = []
+
 [dependencies]
 anyhow = "1"
 rustix = { version = "1.1.4", features = ["process", "fs", "termios", "pty", "event", "net", "stdio", "pipe"] }

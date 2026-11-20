@@ -240,6 +240,13 @@ pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
         drop(ticket);
     }
     conn.send(shared, &welcome);
+    #[cfg(feature = "differ")]
+    conn.send(
+        shared,
+        &Msg::Differ {
+            note: b"a jar built to differ".to_vec(),
+        },
+    );
     let owned = shared.lock().owner.is_some();
     match role {
         Role::Owner => tell_program(shared, &Msg::Attached),

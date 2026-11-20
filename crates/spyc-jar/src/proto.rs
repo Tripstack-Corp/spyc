@@ -7,8 +7,9 @@
 
 use std::io::{self, Read, Write};
 
-/// The protocol version a `hello` carries.
-pub const VERSION: u16 = 1;
+/// The protocol version a `hello` carries: the highest this side speaks. A
+/// jar built to differ (`--features differ`, CI's only) speaks 2.
+pub const VERSION: u16 = if cfg!(feature = "differ") { 2 } else { 1 };
 /// The largest frame either side accepts, payload included.
 pub const MAX_FRAME: usize = 16 << 20;
 /// Set in a frame's flags when a reader that doesn't know its kind must refuse
@@ -243,6 +244,12 @@ pub enum Msg {
     Attached,
     /// To the program: its owner went.
     Detached,
+    /// A jar built to differ says so after each welcome: a frame version 1
+    /// doesn't know, ancillary, so a version-1 reader skips it.
+    #[cfg(feature = "differ")]
+    Differ {
+        note: Vec<u8>,
+    },
 }
 
 #[derive(Debug)]
@@ -304,6 +311,8 @@ const UPGRADED: u8 = 74;
 const DESCRIPTION: u8 = 75;
 const ATTACHED: u8 = 76;
 const DETACHED: u8 = 77;
+/// The note only a jar built to differ sends: unknown to version 1.
+const DIFFER: u8 = 120;
 
 /// Every kind this version knows is critical: a reader that doesn't know one
 /// can't safely carry on without it.
@@ -381,6 +390,8 @@ fn kind_and_payload(msg: &Msg) -> (u8, Vec<u8>) {
         Msg::Detach => (DETACH, Vec::new()),
         Msg::Attached => (ATTACHED, Vec::new()),
         Msg::Detached => (DETACHED, Vec::new()),
+        #[cfg(feature = "differ")]
+        Msg::Differ { note } => (DIFFER, note.clone()),
         Msg::Upgrade { binary } => (UPGRADE, binary.as_bytes().to_vec()),
         Msg::Upgraded { build } => (UPGRADED, build.as_bytes().to_vec()),
         Msg::Describe => (DESCRIBE, Vec::new()),
@@ -437,8 +448,13 @@ pub fn encode(msg: &Msg) -> Vec<u8> {
     let mut out = Vec::with_capacity(payload.len() + 6);
     out.extend(len.to_be_bytes());
     out.push(kind);
-    // Everything is critical but the notice a newer jar sends unasked.
-    out.push(if kind == UPGRADED { 0 } else { CRITICAL });
+    // Everything is critical but the notice a newer jar sends unasked, and
+    // the note a jar built to differ sends.
+    out.push(if kind == UPGRADED || kind == DIFFER {
+        0
+    } else {
+        CRITICAL
+    });
     out.extend(payload);
     out
 }
@@ -549,6 +565,8 @@ pub fn decode(kind: u8, flags: u8, payload: &[u8]) -> Result<Option<Msg>, ReadEr
         DESCRIBE => Msg::Describe,
         DESCRIPTION => c.description()?,
         FOREGROUND => Msg::Foreground { pgid: c.u32()? },
+        #[cfg(feature = "differ")]
+        DIFFER => Msg::Differ { note: c.rest() },
         other if flags & CRITICAL != 0 => return Err(ReadError::UnknownCritical(other)),
         _ => return Ok(None),
     };
