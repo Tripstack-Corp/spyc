@@ -308,6 +308,8 @@ impl App {
         let mut pane = match pane {
             Ok(pane) => pane,
             Err(e) => {
+                self.state
+                    .note_error(&format!("tab {} didn't start: {e:#}", entry.info.label));
                 let why = format!("spyc: {e:#}\n\n^a R starts it again\n");
                 let lost = if retake {
                     jar::Lost::Gone
@@ -324,6 +326,12 @@ impl App {
             }
         };
         let _ = pane.resize(size.0, size.1);
+        if pane.adopted() {
+            self.state.note_event(&format!(
+                "{}: taken back from its jar, still running",
+                crate::pane::tabs::strip_exit_suffix(&entry.info.label)
+            ));
+        }
         settle_landed_tab(&mut entry.info, &pane, started);
         let stand_in = std::mem::replace(&mut entry.pane, pane);
         stand_in.shutdown_detached(END_WAIT);

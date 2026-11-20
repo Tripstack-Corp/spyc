@@ -98,6 +98,8 @@ pub(super) struct Runtime {
     pub(super) own_jar: Option<crate::pane::jar::session::OwnJar>,
     /// The own jar's attaches the loop has set the terminal up for.
     pub(super) attaches_seen: u64,
+    /// The session's event log has a terminal attached that hasn't left.
+    pub(super) terminal_noted: bool,
     /// A `^d` in spyc's own jar, for the loop to carry out with the terminal.
     pub(super) detach_pending: bool,
     /// A handover, for `lib.rs` once the loop ends.
@@ -393,6 +395,7 @@ impl Runtime {
             pane_wake_tx: None,
             own_jar: None,
             attaches_seen: 0,
+            terminal_noted: false,
             detach_pending: false,
             handover: None,
             upgrade_pending: false,

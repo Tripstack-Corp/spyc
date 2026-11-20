@@ -728,6 +728,8 @@ impl App {
     /// A confirmed quit: the session saved, the `--cwd-file` written, spyc
     /// gone.
     pub(super) fn quit_now(&mut self) {
+        self.state
+            .note_event("quit: the session saved, its tabs ended");
         self.end_session();
         self.write_cwd_file();
     }

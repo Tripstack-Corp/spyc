@@ -1231,6 +1231,72 @@ fn a_flash_is_in_the_sessions_event_log_and_outlives_spyc() {
     });
 }
 
+/// The session's event log follows it through `^d`'s handover into its own
+/// jar and out through `:q`, each spyc's events written before it goes.
+#[test]
+fn the_event_log_follows_a_session_through_a_handover_and_a_quit() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let screens = first.screens();
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.eventually("the session drawn again, from its jar", || {
+        first.screens() > screens && first.since_last_screen().contains(&name)
+    });
+    if let Some(spyc) = described(&socket, "program_pid").and_then(|p| p.parse().ok()) {
+        left.0.push(spyc);
+    }
+    first.type_keys(b":q\r");
+    first.eventually("spyc asks whether to quit", || {
+        squeezed(&first.since_last_screen()).contains("quitanyway?[y/N]")
+    });
+    first.type_keys(b"y");
+    eventually("the client leaves", || first.exited());
+    let log = dirs.state.join(format!("spyc/events/{name}.log"));
+    let wanted = [
+        "started, pid",
+        "detached: spyc moves into",
+        "started, pid",
+        "terminal attached",
+        "quit: the session saved",
+    ];
+    let in_order = |text: &str| {
+        let mut rest = text;
+        wanted.iter().all(|w| match rest.find(w) {
+            Some(at) => {
+                rest = &rest[at + w.len()..];
+                true
+            }
+            None => false,
+        })
+    };
+    let until = Instant::now() + WAIT;
+    let mut text = String::new();
+    while Instant::now() < until {
+        text = std::fs::read_to_string(&log).unwrap_or_default();
+        if in_order(&text) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("the session's log, not in order: {text}");
+}
+
 /// The tab's jar, as the saved session records it.
 fn tab_jar(dirs: &Dirs) -> PathBuf {
     saved_jar_socket(&dirs.state).expect("the session records the tab's jar")

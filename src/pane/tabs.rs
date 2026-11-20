@@ -820,18 +820,20 @@ impl PaneTabs {
     /// [`strip_exit_suffix`] so callers serializing tab labels (e.g.
     /// session save) can drop the runtime-only annotation before
     /// writing to disk.
-    pub fn mark_exited(&mut self) -> bool {
-        let mut changed = false;
+    /// Mark each tab whose program has ended `[exited N]`; the labels of
+    /// those newly marked.
+    pub fn mark_exited(&mut self) -> Vec<String> {
+        let mut marked = Vec::new();
         for entry in &mut self.tabs {
             if entry.pane.is_closed() && strip_exit_suffix(&entry.info.label) == entry.info.label {
                 // Retry exit status harvest if drain_output missed it.
                 entry.pane.try_harvest_exit_status();
                 let suffix = exit_suffix(entry.pane.exit_status());
                 entry.info.label = format!("{} [{suffix}]", entry.info.label);
-                changed = true;
+                marked.push(entry.info.label.clone());
             }
         }
-        changed
+        marked
     }
 
     /// Replace the tab at `idx` in place. Active index and the order of

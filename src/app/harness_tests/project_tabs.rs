@@ -406,6 +406,31 @@ fn a_report_in_another_project_lights_its_dot() {
     });
 }
 
+/// The session's event log notes an agent that turned blocked, in a project
+/// the user isn't in, once however often the activity settles.
+#[test]
+fn an_agent_turning_blocked_is_in_the_event_log_once() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Blocked, now));
+        });
+        app.make_active(t.y);
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        app.settle_events();
+        let noted: Vec<_> = app
+            .state
+            .events
+            .iter()
+            .filter(|e| e.text.contains("needs you"))
+            .collect();
+        assert_eq!(noted.len(), 1, "{noted:?}");
+    });
+}
+
 /// Set project `id`'s `[notify]`.
 fn notify_in(
     app: &mut App,
