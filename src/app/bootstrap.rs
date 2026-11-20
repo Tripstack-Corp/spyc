@@ -210,6 +210,7 @@ impl App {
             command_history: History::load_file("command_history"),
             flash: start_error.map(FlashMessage::error),
             stderr: state::StderrLog::default(),
+            events: state::EventLog::starting(&super::events::started_note()),
             user_host: user_host_string(),
             should_quit: false,
         };

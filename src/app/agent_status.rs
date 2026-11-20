@@ -290,6 +290,9 @@ struct ActivityScan<'a> {
     status_transitions: Vec<(String, AgentActivity)>,
     live_ids: HashSet<String>,
     bell_note: Option<BellNote>,
+    /// What the session's event log notes: an agent that turned blocked,
+    /// done or errored.
+    notes: Vec<(super::state::EventKind, String)>,
 }
 
 impl ActivityScan<'_> {
@@ -405,6 +408,9 @@ impl ActivityScan<'_> {
                 project: project.named.as_deref(),
                 blocked_on: entry.info.waiting_for(),
             };
+            if let Some(kind) = super::events::noted_turn(new) {
+                self.notes.push((kind, notification_text(&who, new).0));
+            }
             let plan = notification_for_transition(
                 entry.info.notified,
                 new,
@@ -825,6 +831,7 @@ impl App {
             status_transitions: Vec::new(),
             live_ids: HashSet::new(),
             bell_note: None,
+            notes: Vec::new(),
         };
         for (id, tabs) in self.runtime.every_tab_set_mut() {
             let Some(project) = notify.iter().find(|project| project.id == id) else {
@@ -845,8 +852,12 @@ impl App {
             status_transitions,
             live_ids,
             bell_note,
+            notes,
             ..
         } = scan;
+        for (kind, text) in notes {
+            self.state.events.note(kind, &text);
+        }
 
         // Fire `agent_status` for tabs whose SEMANTIC status transitioned (the
         // per-tab baseline in `fire_agent_status_event` dedups a repeat, so an

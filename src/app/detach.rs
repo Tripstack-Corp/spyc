@@ -96,6 +96,9 @@ impl App {
                 .flash_error("can't detach: the session has no name");
             return;
         };
+        self.state.note_event(&format!(
+            "detached: spyc moves into {name}'s own jar, its tabs running on"
+        ));
         self.runtime.handover = Some(Handover {
             name,
             in_place: false,
@@ -112,6 +115,12 @@ impl App {
             self.state
                 .flash_error(format!("upgrade: no newer spyc is installed{at}"));
             return;
+        }
+        if let Some(at) = &now {
+            self.state.note_event(&format!(
+                "upgrading to the spyc installed at {}",
+                at.path.display()
+            ));
         }
         match (&self.runtime.own_jar, self.state.session_name.clone()) {
             (Some(_), Some(name)) => {
@@ -165,6 +174,7 @@ impl App {
     /// `spyc attach` for it. Returns only when that fails, saying what runs on.
     pub fn hand_over(&mut self, handover: &Handover) -> anyhow::Result<()> {
         use std::os::unix::process::CommandExt;
+        self.close_event_log();
         let name = &handover.name;
         if handover.in_place {
             return self.upgrade_in_place(name);

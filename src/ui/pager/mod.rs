@@ -235,6 +235,9 @@ pub struct PagerView {
     /// When set, this pager is the `:stderr` log as it stood at this many
     /// bytes; the main loop rebuilds it once the log has grown past that.
     pub stderr_log: Option<u64>,
+    /// An `:events` pager: the log's generation it shows, to be rebuilt
+    /// when the log moves on.
+    pub events_log: Option<u64>,
     /// When set, this pager view is backed by a [`crate::app`] *pager stream*
     /// (the unified worker→pager abstraction: grep / git-view diff·show·blame /
     /// agent transcript). The main tick loop drains the active stream into this

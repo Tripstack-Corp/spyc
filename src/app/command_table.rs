@@ -14,7 +14,7 @@
 //!
 //! Extracted from `app/state.rs` (MVU last-mile, Part A).
 
-use super::{App, Effect, commands, lua, make_menu, menu_hints, projects, stderr_log};
+use super::{App, Effect, commands, events, lua, make_menu, menu_hints, projects, stderr_log};
 
 /// Which dispatch layer owns a named `:command`. An `App`-free routing
 /// discriminant consulted by the Model (`AppState::dispatch_command`); the
@@ -106,6 +106,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("date", commands::cmd_date),
     app("diff", App::cmd_diff),
     app("dump-scrollback", commands::cmd_dump_scrollback),
+    app("events", events::cmd_events),
     app("exec", commands::cmd_exec),
     app("fg", commands::cmd_fg),
     app("filetype", commands::cmd_filetype),
@@ -115,6 +116,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("hooks", commands::cmd_hooks),
     app("images", commands::cmd_images),
     pure("limit"),
+    app("log", events::cmd_events),
     app("longlist", commands::cmd_longlist),
     app("lua", lua::cmd_lua),
     app("make", make_menu::cmd_make),

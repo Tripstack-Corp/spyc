@@ -120,6 +120,7 @@ impl App {
             | self.apply_capture_starts()
             | self.apply_orphan_jars()
             | self.apply_jar_upgrades()
+            | self.apply_earlier_events()
         {
             ctx.draw.mark(3);
         }
@@ -432,6 +433,12 @@ impl App {
 
         // A `:setenv` reaches spyc's own reads (`$EDITOR`, `$SHELL`, …).
         self.settle_env();
+
+        // Last of all: what every step above flashed or noted, stamped and
+        // written to the session's event log (`app::events`).
+        if self.settle_events() {
+            ctx.draw.mark(3);
+        }
     }
 }
 

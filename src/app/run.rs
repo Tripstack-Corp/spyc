@@ -220,6 +220,7 @@ impl App {
         self.runtime.pane_wake_tx = Some(msg_tx.clone());
         let _ = self.runtime.loop_wake.set(msg_tx.clone());
         self.follow_stderr_log(msg_tx.clone());
+        self.start_event_log();
 
         let mut ctx = RunCtx {
             watch_tx,
@@ -546,6 +547,7 @@ impl App {
                     });
             }
         }
+        self.close_event_log();
     }
 
     pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {

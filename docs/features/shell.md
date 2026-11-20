@@ -160,6 +160,7 @@ reference, since no target name holds one.
   still works for ripgrep's full flag surface.
 - **`:stderr`** — what spyc's own stderr received this run, in the pager
   (see spyc's stderr, below)
+- **`:events`** / **`:log`** — the session's event log (see below)
 - **`:q`** / **`:quit`** — quit
 
 The `:` prompt keeps a history of its own, separate from the shell's:
@@ -314,3 +315,30 @@ a helper program's complaint.
 - A program that takes the terminal over (`$EDITOR`, `$PAGER`, the `$`
   subshell) writes its errors to the terminal as usual, and so does a spyc
   panic. What a harder crash prints on its way down is in the log afterwards.
+
+## The session's event log
+
+Every message the status line shows is kept, with its time, in the session's
+event log, so one that went by before you could read it is still there. So is
+each event of the session's life:
+
+- spyc starting, and `:q` or `spyc shutdown` ending it;
+- `^d` moving spyc into the session's own jar, and each terminal attaching
+  (with its size) and detaching;
+- `:upgrade`, and each tab's jar moving to the new build;
+- a tab started, taken back from its jar after a restart, failing to start,
+  or ending;
+- an agent connecting to spyc's tools or leaving them;
+- an agent that needs you, finishes or fails;
+- projects opened and closed, and config reloaded.
+
+Hints about what you just did, such as where focus went, show on the status
+line but aren't kept.
+
+- **`:events`** (or **`:log`**) opens the log in the pager, newest last, an
+  error in red. New events appear in it while it's open, and `/` searches it.
+- The log belongs to the session. It's also a file,
+  `~/.local/state/spyc/events/<SESSION>.log` (under `$XDG_STATE_HOME/spyc`
+  when that's set), so it survives a crash, `^d` and `:upgrade`: the next
+  spyc on the session shows what came before. A file past 1 MB keeps its newer
+  half.

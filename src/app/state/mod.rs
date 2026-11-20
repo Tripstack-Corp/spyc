@@ -32,6 +32,8 @@ pub use closed::{RECENTLY_CLOSED, SwitcherRow, newest_per_anchor};
 mod commander;
 pub use commander::Commander;
 mod dispatch;
+pub mod events;
+pub use events::{Event, EventKind, EventLog};
 mod flash;
 mod git;
 mod git_cache;
@@ -373,6 +375,9 @@ pub struct AppState {
     pub flash: Option<FlashMessage>,
     /// What spyc's own stderr said this run (`:stderr`).
     pub stderr: StderrLog,
+    /// The session's event log: every flash and each event of its life
+    /// (`:events`).
+    pub events: EventLog,
     pub should_quit: bool,
     pub quit_pending: Option<std::time::Instant>,
     /// Rows about to be deleted, populated while a `RemoveConfirm`
@@ -947,6 +952,7 @@ impl AppState {
             command_history: History::load_file("harness_ch"),
             flash: None,
             stderr: StderrLog::default(),
+            events: EventLog::default(),
             should_quit: false,
             quit_pending: None,
             pending_delete_preview: None,

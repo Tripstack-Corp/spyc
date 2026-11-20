@@ -200,6 +200,15 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
+/// The instrumented build's `LLVM_PROFILE_FILE`, kept through each spawned
+/// process's cleared environment: without it an instrumented spyc writes its
+/// coverage data into the directory it runs in, the test's project among them.
+fn profile_file() -> Option<&'static std::ffi::OsStr> {
+    static FILE: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+    FILE.get_or_init(|| std::env::var_os("LLVM_PROFILE_FILE"))
+        .as_deref()
+}
+
 struct Dirs {
     root: tempfile::TempDir,
     home: PathBuf,
@@ -212,8 +221,8 @@ struct Dirs {
 
 impl Dirs {
     /// A spyc's whole environment: every directory the test's own.
-    fn env(&self) -> [(&'static str, &std::ffi::OsStr); 8] {
-        [
+    fn env(&self) -> Vec<(&'static str, &std::ffi::OsStr)> {
+        let mut env = vec![
             ("HOME", self.home.as_os_str()),
             ("XDG_STATE_HOME", self.state.as_os_str()),
             ("XDG_CONFIG_HOME", self.config.as_os_str()),
@@ -222,7 +231,9 @@ impl Dirs {
             ("PATH", "/usr/bin:/bin".as_ref()),
             ("SHELL", "/bin/sh".as_ref()),
             ("TERM", "xterm-256color".as_ref()),
-        ]
+        ];
+        env.extend(profile_file().map(|file| ("LLVM_PROFILE_FILE", file)));
+        env
     }
 
     /// What `spyc --jars` prints here.
@@ -1172,6 +1183,118 @@ fn spyc_upgrades_the_jars_it_takes_back_to_its_own_build() {
         "`spyc --jars` shows the new build: {}",
         dirs.jars_listed()
     );
+}
+
+/// `:events`: a flash gone from the status row is in the session's event
+/// log, on disk as it happens, and the next spyc on the session shows it.
+#[test]
+fn a_flash_is_in_the_sessions_event_log_and_outlives_spyc() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    first.type_keys(b":upgrade\r");
+    first.eventually("the flash", || {
+        squeezed(&first.since_last_screen()).contains("nonewerspycisinstalled")
+    });
+    let events = dirs.state.join("spyc/events");
+    let logged = || {
+        std::fs::read_dir(&events)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+            .collect::<String>()
+    };
+    eventually("the session's file has the flash", || {
+        logged().contains("upgrade: no newer spyc is installed")
+    });
+    assert!(logged().contains("started, pid"), "{}", logged());
+    eventually("the session is saved", || {
+        saved_jar_socket(&dirs.state).is_some()
+    });
+
+    first.crash();
+    let second = Spyc::start(&dirs, &["-r"]);
+    left.0.push(second.pid());
+    second.eventually("the restore picker", || second.shows("Enter restore"));
+    second.type_keys(b"\r");
+    second.eventually("the session restored", || second.shows("ready-mark"));
+    second.type_keys(b":events\r");
+    second.eventually("the last spyc's flash in `:events`", || {
+        squeezed(&second.since_last_screen()).contains("upgrade:nonewerspycisinstalled")
+    });
+}
+
+/// The session's event log follows it through `^d`'s handover into its own
+/// jar and out through `:q`, each spyc's events written before it goes.
+#[test]
+fn the_event_log_follows_a_session_through_a_handover_and_a_quit() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let screens = first.screens();
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    first.eventually("the session drawn again, from its jar", || {
+        first.screens() > screens && first.since_last_screen().contains(&name)
+    });
+    if let Some(spyc) = described(&socket, "program_pid").and_then(|p| p.parse().ok()) {
+        left.0.push(spyc);
+    }
+    first.type_keys(b":q\r");
+    first.eventually("spyc asks whether to quit", || {
+        squeezed(&first.since_last_screen()).contains("quitanyway?[y/N]")
+    });
+    first.type_keys(b"y");
+    eventually("the client leaves", || first.exited());
+    let log = dirs.state.join(format!("spyc/events/{name}.log"));
+    let wanted = [
+        "started, pid",
+        "detached: spyc moves into",
+        "started, pid",
+        "terminal attached",
+        "quit: the session saved",
+    ];
+    let in_order = |text: &str| {
+        let mut rest = text;
+        wanted.iter().all(|w| match rest.find(w) {
+            Some(at) => {
+                rest = &rest[at + w.len()..];
+                true
+            }
+            None => false,
+        })
+    };
+    let until = Instant::now() + WAIT;
+    let mut text = String::new();
+    while Instant::now() < until {
+        text = std::fs::read_to_string(&log).unwrap_or_default();
+        if in_order(&text) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("the session's log, not in order: {text}");
 }
 
 /// The tab's jar, as the saved session records it.
