@@ -190,6 +190,10 @@ pub enum McpCommand {
     /// `spyc shutdown` asked this spyc to save its session and quit, ending
     /// its tabs (`spyc/shutdown`). Fire-and-forget.
     Shutdown,
+    /// `spyc attach` asks whether a spyc newer than this one is installed
+    /// where it runs from (`spyc/behind`), as `:upgrade` would find. Its
+    /// start time can't say: an upgrade in place keeps the pid.
+    Behind,
     /// What Claude Code's statusline told `spyc --statusline` in a pane: the
     /// plan's rate-limit windows, the context window and the vim mode.
     /// Fire-and-forget.

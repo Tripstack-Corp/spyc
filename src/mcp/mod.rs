@@ -130,21 +130,37 @@ pub fn ask_shutdown(pid: i32) -> anyhow::Result<()> {
     request_shutdown(&sock)
 }
 
-/// How long `spyc shutdown` waits for a spyc to take its request: the socket
-/// thread answers it before the loop acts on it.
+/// How long `spyc shutdown` and `spyc attach` wait for a spyc's answer: the
+/// socket thread answers a shutdown before the loop acts on it, and the loop
+/// answers `spyc/behind` from what it holds.
 const SHUTDOWN_ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Ask the spyc at `sock` to shut down, and read its answer.
-fn request_shutdown(sock: &Path) -> anyhow::Result<()> {
+/// Whether the spyc of `pid` finds a newer spyc installed where it runs from,
+/// as `:upgrade` would. `None` when it can't say: a spyc that predates the
+/// question, or none that answers.
+pub fn ask_behind(pid: u32) -> Option<bool> {
+    let sock = socket_path_for(pid)?;
+    request(&sock, protocol::BEHIND_METHOD).ok()?["result"]["behind"].as_bool()
+}
+
+/// Send the spyc at `sock` the request `method` and read its reply, within
+/// [`SHUTDOWN_ANSWER_WAIT`].
+fn request(sock: &Path, method: &str) -> anyhow::Result<serde_json::Value> {
     use anyhow::Context as _;
     let mut stream = std::os::unix::net::UnixStream::connect(sock)
         .with_context(|| format!("reach the spyc at {}", sock.display()))?;
     stream.set_read_timeout(Some(SHUTDOWN_ANSWER_WAIT))?;
-    let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": protocol::SHUTDOWN_METHOD });
-    framing::send_message(&mut stream, &msg.to_string()).context("ask spyc to shut down")?;
+    let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method });
+    framing::send_message(&mut stream, &msg.to_string())
+        .with_context(|| format!("send spyc {method}"))?;
     let answer = framing::read_lsp_message(&mut std::io::BufReader::new(stream))
-        .context("spyc's answer to the shutdown")?;
-    let reply: serde_json::Value = serde_json::from_str(&answer).context("spyc's answer")?;
+        .with_context(|| format!("spyc's answer to {method}"))?;
+    serde_json::from_str(&answer).with_context(|| format!("spyc's answer to {method}"))
+}
+
+/// Ask the spyc at `sock` to shut down, and read its answer.
+fn request_shutdown(sock: &Path) -> anyhow::Result<()> {
+    let reply = request(sock, protocol::SHUTDOWN_METHOD)?;
     if reply["error"]["code"] == -32601 {
         anyhow::bail!(
             "its spyc predates `spyc shutdown`: attach to it and `:q`, or have it `:upgrade` first"
