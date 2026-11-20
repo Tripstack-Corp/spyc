@@ -337,6 +337,10 @@ line but aren't kept.
 
 - **`:events`** (or **`:log`**) opens the log in the pager, newest last, an
   error in red. New events appear in it while it's open, and `/` searches it.
+- **`spyc events [NAME]`** prints a session's log from a shell, as `:events`
+  shows it, without attaching. With no name it takes the one session running,
+  or lists every session with a log, newest first, and asks which. `-n N`
+  prints only the last N lines, and `-f` goes on printing what comes after.
 - The log belongs to the session. It's also a file,
   `~/.local/state/spyc/events/<SESSION>.log` (under `$XDG_STATE_HOME/spyc`
   when that's set), so it survives a crash, `^d` and `:upgrade`: the next
