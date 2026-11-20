@@ -293,6 +293,12 @@ impl PtyHost {
         self.jar_socket.as_deref()
     }
 
+    /// The program's jar, to ask of it what takes a while (an upgrade) off the
+    /// loop; `None` without one.
+    pub fn jar_signals(&self) -> Option<super::jar::Signals> {
+        self.jar.clone()
+    }
+
     /// Tell the program's jar what it holds (R18); nothing without one.
     pub fn tell_jar(&self, info: &[(&str, &str)]) {
         if let Some(jar) = &self.jar {

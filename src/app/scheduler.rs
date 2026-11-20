@@ -104,6 +104,9 @@ pub enum Deadline {
     /// grace, then each frame. Armed only while a worker cooks, so idle stays
     /// 0 dps. PRE-recv (`settle_cooking`).
     Cooking,
+    /// When the soonest busy jar may be asked again for its upgrade
+    /// (`app::jar_upgrades`). Armed only while a busy jar waits. PRE-recv.
+    JarUpgradeRetry,
 }
 
 /// Run()-local deadline scheduler (MVU Phase 2). **Advisory** — it only

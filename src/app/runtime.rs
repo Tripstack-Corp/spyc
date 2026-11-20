@@ -289,6 +289,10 @@ pub(super) struct Runtime {
     pub(super) orphan_jars: super::orphan_jars::OrphanJars,
     /// Where that look's finds land.
     pub(super) orphan_results: Landing<Vec<crate::pane::jar::orphans::Orphan>>,
+    /// This session's upgrades of its jars (`app::jar_upgrades`).
+    pub(super) jar_upgrades: super::jar_upgrades::JarUpgrades,
+    /// What each look at a tab's jar came to: the tab's id and label too.
+    pub(super) jar_upgrade_results: Landing<(String, String, super::jar_upgrades::Looked)>,
     /// The place every tab's jar starts in: this user's when `None`, a
     /// test's own otherwise.
     pub(super) jar_place: Option<crate::pane::jar::Place>,
@@ -433,6 +437,8 @@ impl Runtime {
             capture_start_seq: 0,
             orphan_jars: super::orphan_jars::OrphanJars::default(),
             orphan_results: Landing::default(),
+            jar_upgrades: super::jar_upgrades::JarUpgrades::default(),
+            jar_upgrade_results: Landing::default(),
             jar_place: None,
             jarless: super::jarless::Jarless::default(),
             jump_default_seq: 0,

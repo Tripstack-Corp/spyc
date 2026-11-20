@@ -53,7 +53,7 @@ use std::io::Write;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
@@ -271,11 +271,74 @@ pub fn owner_mcp(socket: &Path) -> Option<std::path::PathBuf> {
         .map(|(_, v)| std::path::PathBuf::from(v))
 }
 
+/// How long spyc waits for a jar's answer to an upgrade: past the longest
+/// the jar takes to give one.
+pub const UPGRADE_WAIT: Duration =
+    spyc_jar::limits::UPGRADE_AT_MOST.saturating_add(Duration::from_secs(10));
+const _: () = assert!(UPGRADE_WAIT.as_millis() > spyc_jar::limits::UPGRADE_AT_MOST.as_millis());
+
+/// A jar's answer to an upgrade spyc asked for (S3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpgradeAnswer {
+    /// It runs the new binary now, which names this build.
+    Upgraded(String),
+    /// It couldn't start or finish now and runs on: worth asking again.
+    Busy(String),
+    /// The new binary was rejected, or the upgrade failed: the jar runs on, or
+    /// holds its program and serves nothing else.
+    Refused(String),
+    /// The connection ended before an answer.
+    Lost,
+    /// No answer within [`UPGRADE_WAIT`].
+    NoAnswer,
+}
+
+impl UpgradeAnswer {
+    /// What a `refused` answers, when its reason is an upgrade's.
+    pub fn refused(reason: u16, why: String) -> Option<Self> {
+        use spyc_jar::proto::reason::{UPGRADE_BUSY, UPGRADE_FAILED, UPGRADE_REJECTED};
+        match reason {
+            UPGRADE_BUSY => Some(Self::Busy(why)),
+            UPGRADE_REJECTED | UPGRADE_FAILED => Some(Self::Refused(why)),
+            _ => None,
+        }
+    }
+}
+
 /// Signals to a jarred program's group, which only its jar sends.
 #[derive(Clone)]
 pub struct Signals(Arc<Link>);
 
 impl Signals {
+    /// Ask the jar to run `binary` in place (R33), and wait for its answer.
+    /// The connection's own threads go on pinging and taking output meanwhile.
+    pub fn upgrade(&self, binary: &std::path::Path, wait: Duration) -> UpgradeAnswer {
+        let link = &self.0;
+        *link.upgrade.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        let ask = Msg::Upgrade {
+            binary: binary.display().to_string(),
+        };
+        if link.out.send(&ask).is_err() {
+            return UpgradeAnswer::Lost;
+        }
+        let until = Instant::now() + wait;
+        let mut answer = link.upgrade.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            if let Some(a) = answer.take() {
+                return a;
+            }
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return UpgradeAnswer::NoAnswer;
+            }
+            answer = link
+                .upgrade_answered
+                .wait_timeout(answer, left)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+
     pub fn send(&self, signal: JarSignal) -> std::io::Result<()> {
         self.0.signal(signal)
     }
@@ -671,6 +734,8 @@ fn connect(
             pixel_height: 0,
         }),
         told: Mutex::new(Vec::new()),
+        upgrade: Mutex::new(None),
+        upgrade_answered: Condvar::new(),
     });
     let (bytes_tx, bytes_rx) = mpsc::sync_channel::<Vec<u8>>(64);
     {

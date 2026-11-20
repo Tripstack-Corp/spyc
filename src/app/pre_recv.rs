@@ -116,7 +116,11 @@ impl App {
 
         // A jarred tab's pane, or a capture's host, landed (woke via
         // `Wake::PaneStart`).
-        if self.apply_pane_starts() | self.apply_capture_starts() | self.apply_orphan_jars() {
+        if self.apply_pane_starts()
+            | self.apply_capture_starts()
+            | self.apply_orphan_jars()
+            | self.apply_jar_upgrades()
+        {
             ctx.draw.mark(3);
         }
         // `J`'s default path landed (woke via `Message::Wake(Wake::JumpDefault)`).
@@ -283,6 +287,10 @@ impl App {
 
         let hud_fx = self.settle_agent_hud(now_pre, ctx);
         self.run_effects(hud_fx, terminal, foreground_exec);
+
+        // S3: one jar at a time to this build, once its tab is between turns
+        // (after the activity settle above).
+        self.settle_jar_upgrades(now_pre, ctx);
 
         // P3-1 visual bell: advance/decay the spice-heat border-pulse flash
         // (armed only after a Blocked/Done transition when `[notify].visual`

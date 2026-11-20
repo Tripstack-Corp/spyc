@@ -41,6 +41,9 @@ pub(super) struct Link {
     pub size: Mutex<PtySize>,
     /// What this connection last told the jar it holds (R18), by key.
     pub told: Mutex<Vec<(String, String)>>,
+    /// The jar's answer to the upgrade this connection asked for (S3).
+    pub upgrade: Mutex<Option<super::UpgradeAnswer>>,
+    pub upgrade_answered: Condvar,
 }
 
 impl Link {
@@ -127,6 +130,17 @@ impl ReplayGate {
 }
 
 impl Link {
+    /// Keep the jar's answer to an upgrade, and wake its waiter. A lost
+    /// connection answers only an upgrade not answered yet.
+    fn answer_upgrade(&self, answer: super::UpgradeAnswer) {
+        let mut kept = self.upgrade.lock().unwrap_or_else(PoisonError::into_inner);
+        if kept.is_none() || answer != super::UpgradeAnswer::Lost {
+            *kept = Some(answer);
+        }
+        drop(kept);
+        self.upgrade_answered.notify_all();
+    }
+
     fn set_exit(&self, status: ExitStatus) {
         self.exit
             .lock()
@@ -201,6 +215,14 @@ pub(super) fn read_frames(
                 break;
             }
             Ok(Some(Msg::Foreground { pgid })) => link.fg.store(pgid, Ordering::Relaxed),
+            Ok(Some(Msg::Upgraded { build })) => {
+                link.answer_upgrade(super::UpgradeAnswer::Upgraded(build));
+            }
+            Ok(Some(Msg::Refused { reason, why })) => {
+                if let Some(answer) = super::UpgradeAnswer::refused(reason, why) {
+                    link.answer_upgrade(answer);
+                }
+            }
             Ok(_) => {}
             Err(e) => {
                 let lost = match socket_state(socket) {
@@ -216,6 +238,7 @@ pub(super) fn read_frames(
     // Every way out above has an exit, but one that ended the loop without
     // one still mustn't leave a `wait` hanging.
     link.set_exit(ExitStatus::with_signal(Lost::Gone.label()));
+    link.answer_upgrade(super::UpgradeAnswer::Lost);
 }
 
 /// Why a pane has no program to drive and no exit from one.
