@@ -1185,6 +1185,52 @@ fn spyc_upgrades_the_jars_it_takes_back_to_its_own_build() {
     );
 }
 
+/// `:events`: a flash gone from the status row is in the session's event
+/// log, on disk as it happens, and the next spyc on the session shows it.
+#[test]
+fn a_flash_is_in_the_sessions_event_log_and_outlives_spyc() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    first.type_keys(b":upgrade\r");
+    first.eventually("the flash", || {
+        squeezed(&first.since_last_screen()).contains("nonewerspycisinstalled")
+    });
+    let events = dirs.state.join("spyc/events");
+    let logged = || {
+        std::fs::read_dir(&events)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+            .collect::<String>()
+    };
+    eventually("the session's file has the flash", || {
+        logged().contains("upgrade: no newer spyc is installed")
+    });
+    assert!(logged().contains("started, pid"), "{}", logged());
+    eventually("the session is saved", || {
+        saved_jar_socket(&dirs.state).is_some()
+    });
+
+    first.crash();
+    let second = Spyc::start(&dirs, &["-r"]);
+    left.0.push(second.pid());
+    second.eventually("the restore picker", || second.shows("Enter restore"));
+    second.type_keys(b"\r");
+    second.eventually("the session restored", || second.shows("ready-mark"));
+    second.type_keys(b":events\r");
+    second.eventually("the last spyc's flash in `:events`", || {
+        squeezed(&second.since_last_screen()).contains("upgrade:nonewerspycisinstalled")
+    });
+}
+
 /// The tab's jar, as the saved session records it.
 fn tab_jar(dirs: &Dirs) -> PathBuf {
     saved_jar_socket(&dirs.state).expect("the session records the tab's jar")
