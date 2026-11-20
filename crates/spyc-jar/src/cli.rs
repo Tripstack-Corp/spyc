@@ -109,7 +109,8 @@ fn run_jar() -> anyhow::Result<()> {
         .position(|a| a == "--wire")
         .and_then(|i| all.get(i + 1))
         .and_then(|v| v.parse::<u16>().ok());
-    if wire != Some(crate::proto::VERSION) {
+    // A jar speaks every wire version from 1 to its own.
+    if !wire.is_some_and(|w| (1..=crate::proto::VERSION).contains(&w)) {
         eprintln!(
             "spyc-jar: speaks wire version {}, asked for {wire:?}",
             crate::proto::VERSION

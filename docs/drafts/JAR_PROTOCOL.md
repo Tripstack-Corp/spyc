@@ -766,6 +766,16 @@ Each direction has one rule:
 - **Across an upgrade,** every connection keeps the version it was welcomed
   at: the new image speaks each the version it was welcomed with.
 
+CI holds both directions to these rules with a jar built to differ: this
+source with `--features differ`, which speaks wire version 2, writes a
+version-2 handover blob (version 1 with a mark after it) and reads both, and
+sends after each welcome an ancillary frame version 1 doesn't know.
+`tests/jar_differ.rs` upgrades a version-1 jar into it, the program and the
+version-1 connection running on, the frame skipped, and a newer `hello`
+welcomed at 2; and it has the jar built to differ refuse a downgrade (reason
+6) and run on. `make test` builds it apart (`make test-jar-differ`), so the
+feature never reaches a build's own jar.
+
 ### Upgrading: where each check runs
 
 A released jar can't be fixed, so whatever its image does **during** an

@@ -20,7 +20,12 @@ use crate::proto::{Role, Snapshot};
 use crate::state::{Config, ConnState, Event, Log, State};
 
 pub const MAGIC: &[u8; 8] = b"SPYCJARH";
-pub const VERSION: u16 = 1;
+/// The blob's version. A jar built to differ (`--features differ`) writes 2,
+/// a version-1 blob with a marker after it, and reads both.
+pub const VERSION: u16 = if cfg!(feature = "differ") { 2 } else { 1 };
+/// What follows a version-2 blob.
+#[cfg(feature = "differ")]
+const DIFFER_MARK: u16 = 0xD1FF;
 /// The most connections a blob may carry: one `SCM_RIGHTS` message holds them
 /// all, and Linux caps one at 253 descriptors.
 pub const MAX_CONNS: usize = 200;
@@ -147,22 +152,29 @@ pub(crate) fn encode_parts(
         put_bytes(&mut w, v.as_bytes());
     }
 
-    put_u32(&mut w, u32::try_from(conns.len()).unwrap_or(u32::MAX));
+    put_conns(&mut w, conns);
+    #[cfg(feature = "differ")]
+    put_u16(&mut w, DIFFER_MARK);
+    w
+}
+
+/// The connections, last in the blob: their count, then each.
+fn put_conns(w: &mut Vec<u8>, conns: &[ConnState]) {
+    put_u32(w, u32::try_from(conns.len()).unwrap_or(u32::MAX));
     for c in conns {
-        put_u64(&mut w, c.id);
+        put_u64(w, c.id);
         w.push(c.role as u8);
         match c.cursor {
             Some((seq, from)) => {
                 w.push(1);
-                put_u64(&mut w, seq);
-                put_u64(&mut w, from);
+                put_u64(w, seq);
+                put_u64(w, from);
             }
             None => w.push(0),
         }
         w.push(u8::from(c.exit_sent));
-        put_u32(&mut w, c.fg_sent);
+        put_u32(w, c.fg_sent);
     }
-    w
 }
 
 pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
@@ -170,7 +182,9 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     if r.take::<8>()? != *MAGIC {
         return Err(Invalid("not a handover blob"));
     }
-    if r.u16()? != VERSION {
+    // A binary takes every blob version from 1 to its own.
+    let version = r.u16()?;
+    if !(1..=VERSION).contains(&version) {
         return Err(Invalid("a handover version this binary doesn't take"));
     }
     let cfg = r.config()?;
@@ -181,6 +195,10 @@ pub fn decode(blob: &[u8]) -> Result<Handover, Invalid> {
     let log = r.log(cfg.ring_cap)?;
     let state = r.state(log)?;
     let conns = r.conns(&state)?;
+    #[cfg(feature = "differ")]
+    if version == 2 && r.u16()? != DIFFER_MARK {
+        return Err(Invalid("a version-2 blob without its mark"));
+    }
     if !r.0.is_empty() {
         return Err(Invalid("bytes after the end"));
     }
