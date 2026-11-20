@@ -349,6 +349,12 @@ pub fn start(root: PathBuf, source: PathBuf, sockets: PathBuf) {
     });
 }
 
+/// What jars start from this session, once the worker [`start`]ed has it;
+/// `None` before, without waiting.
+pub fn ready() -> Option<Binary> {
+    READY.lock().unwrap_or_else(PoisonError::into_inner).clone()
+}
+
 /// What jars start from this session, waiting for the worker [`start`]ed.
 pub fn binary() -> Binary {
     let mut ready = READY.lock().unwrap_or_else(PoisonError::into_inner);

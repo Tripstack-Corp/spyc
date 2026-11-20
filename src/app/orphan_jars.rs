@@ -31,13 +31,7 @@ impl App {
     /// jar of this spyc's is still being started or taken back. Whether it
     /// started.
     pub(super) fn settle_orphan_jars(&mut self) -> bool {
-        if self.runtime.orphan_jars.looked
-            || !self.jars_wanted()
-            || self.state.pending_sessions.is_some()
-            || !self.state.startup_commands.is_empty()
-            || self.runtime.lua_events.startup_pending
-            || self.jar_start_pending()
-        {
+        if self.runtime.orphan_jars.looked || !self.startup_settled_for_jars() {
             return false;
         }
         self.runtime.orphan_jars.looked = true;
@@ -52,6 +46,17 @@ impl App {
             |_| Vec::new(),
         );
         true
+    }
+
+    /// Whether this session runs programs in jars, and startup has settled:
+    /// no session waits to be restored, no startup command or Lua startup is
+    /// pending, and no jar of this spyc's is still being started or taken back.
+    pub(super) fn startup_settled_for_jars(&self) -> bool {
+        self.jars_wanted()
+            && self.state.pending_sessions.is_none()
+            && self.state.startup_commands.is_empty()
+            && !self.runtime.lua_events.startup_pending
+            && !self.jar_start_pending()
     }
 
     /// Whether this session runs programs in jars.

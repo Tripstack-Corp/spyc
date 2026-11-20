@@ -781,6 +781,22 @@ with it. `tests/jar_process.rs`'s
 `an_upgrade_survives_unix_sockets_closing_elsewhere` runs that loop, and is
 the test to run on a Mac before touching the handover.
 
+## spyc upgrades its jars one at a time, between turns
+
+A jar replaces its binary only when spyc asks (R33), and spyc asks only for its
+own build: the store entry it starts jars from (`app::jar_upgrades`). An
+upgrade has no rollback, so spyc takes one tab at a time, the first proving the
+step before any other is touched, and never one whose agent is mid-turn
+(working, blocked or waiting) or whose jar is still starting. Each look asks
+the jar what it runs first, and confirms after an upgrade that it runs this
+build. A busy refusal (no safe point in time) is asked again after 10 s, 30 s
+and 90 s, then left for the next start; a rejected or failed upgrade stops
+upgrades for the session, since the next would meet the same binary. spyc
+waits for an answer past `spyc_jar::limits::UPGRADE_AT_MOST`, the jar's
+longest path to one (`UPGRADE_WAIT`, asserted when it compiles): a requester
+that gives up sooner reports a failed upgrade that then succeeds. The
+connection's own threads keep pinging and taking output while it waits.
+
 ## A jar holds a lock for its life, across every upgrade
 
 <!-- SPYC-TRAP: jar-lock-crosses-exec -->

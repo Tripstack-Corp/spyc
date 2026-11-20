@@ -1089,6 +1089,91 @@ fn spyc_shutdown_ends_a_detached_session_and_its_tabs() {
     );
 }
 
+/// S3: agents started on one install run on under the next. A spyc started
+/// after an install takes each tab's jar back and upgrades it to its own
+/// build: the same jar and the same program, now running the new build.
+#[test]
+fn spyc_upgrades_the_jars_it_takes_back_to_its_own_build() {
+    let dirs = dirs();
+    let bin = dirs.root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let spyc = bin.join("spyc");
+    std::fs::copy(built, &spyc).unwrap();
+    // Two builds of the jar: bytes past the end change its hash, so its
+    // store entry and the build it names, and nothing it does.
+    let install_jar = |mark: &[u8]| {
+        let next = bin.join("spyc-jar.new");
+        std::fs::copy(built.with_file_name("spyc-jar"), &next).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&next)
+            .unwrap()
+            .write_all(mark)
+            .unwrap();
+        std::fs::rename(&next, bin.join("spyc-jar")).unwrap();
+    };
+    install_jar(b"build-a");
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start_from(&spyc, &dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    let agent = noted(&dirs.pidfile)[0];
+    left.0.push(agent);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    eventually("the session records the tab's jar", || {
+        saved_jar_socket(&dirs.state).is_some()
+    });
+    let socket = tab_jar(&dirs);
+    let jar: i32 = described(&socket, "pid").unwrap().parse().unwrap();
+    left.0.push(jar);
+    let a = described(&socket, "build").unwrap();
+    assert!(!a.is_empty(), "the jar runs from the store");
+
+    first.crash();
+    install_jar(b"build-b");
+    let second = Spyc::start_from(&spyc, &dirs, &["-r"]);
+    left.0.push(second.pid());
+    second.eventually("the restore picker", || second.shows("Enter restore"));
+    let mut typed: Option<Instant> = None;
+    second.eventually("the new spyc owns the jar", || {
+        if typed.is_none_or(|t| t.elapsed() >= Duration::from_secs(2)) {
+            second.type_keys(b"\r");
+            typed = Some(Instant::now());
+        }
+        described(&socket, "owner_pid") == Some(second.pid().to_string())
+    });
+    let mut now = None;
+    second.eventually("the tab's jar runs the new build", || {
+        now = described(&socket, "build").filter(|b| !b.is_empty() && *b != a);
+        now.is_some()
+    });
+    assert_eq!(
+        described(&socket, "pid"),
+        Some(jar.to_string()),
+        "upgraded in place: the same jar"
+    );
+    assert_eq!(
+        described(&socket, "program_pid"),
+        Some(agent.to_string()),
+        "the same program, never restarted"
+    );
+    assert!(alive(agent), "the program ran on");
+    assert_eq!(
+        described(&socket, "owner_pid"),
+        Some(second.pid().to_string()),
+        "spyc still owns it"
+    );
+    let now = now.unwrap();
+    assert!(
+        dirs.jars_listed().contains(&format!("build {now}")),
+        "`spyc --jars` shows the new build: {}",
+        dirs.jars_listed()
+    );
+}
+
 /// The tab's jar, as the saved session records it.
 fn tab_jar(dirs: &Dirs) -> PathBuf {
     saved_jar_socket(&dirs.state).expect("the session records the tab's jar")

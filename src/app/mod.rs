@@ -141,6 +141,7 @@ mod image_gallery;
 pub mod image_ops;
 mod inventory_ops;
 mod jar_info;
+mod jar_upgrades;
 mod jarless;
 mod jarred_tasks;
 mod jump_default;

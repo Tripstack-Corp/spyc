@@ -350,8 +350,13 @@ An agent in a jarred tab keeps spyc's tools when its spyc goes: after `spyc -r` 
 back, its next tool call reaches the new spyc, and a call made while no spyc has it waits for
 one, then fails without ending the agent's connection.
 
+A spyc started after you install a new one moves each tab's jar to the new build in place: the
+same program, still running. It takes one tab at a time, each between an agent's turns, and the
+tab's output pauses for a few seconds while its jar switches over. A jar that can't switch says
+why, and the rest stay on the build they run.
+
 `spyc --jars` lists your jars: each tab's label, whether it's a pane, a task or a `!` capture, its
-agent and project, its program's pid, and whether a spyc owns it.
+agent and project, its program's pid, the build its jar runs, and whether a spyc owns it.
 
 A spyc can also run in a jar of its own, so it outlives the terminal it was started in.
 `spyc attach NAME` attaches your terminal to such a session by its name (the one spyc shows,

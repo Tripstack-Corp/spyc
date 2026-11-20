@@ -75,8 +75,9 @@ fn line(socket: &Path, now: u64) -> String {
         },
     );
     format!(
-        "{id}  {what}  pid {}  up {up}  owner {}  linger {}  log {}",
+        "{id}  {what}  pid {}  up {up}  build {}  owner {}  linger {}  log {}",
         get("program_pid"),
+        get("build"),
         get("owner"),
         get("linger"),
         get("log")
