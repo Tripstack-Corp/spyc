@@ -1961,7 +1961,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         AfterExec, Command, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served, Start,
         Unbounded,
     };
-    const TIMERS: [(&str, Kind); 41] = [
+    const TIMERS: [(&str, Kind); 42] = [
         ("ATTACH_WAIT", Command),
         ("ATTACH_PING", Poll),
         ("SIZE_POLL", Poll),
@@ -2003,6 +2003,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         ("TICK", Poll),
         ("SOCKET_CHECK", Poll),
         ("PARKED_AT_MOST", Limit),
+        ("UPGRADE_AT_MOST", Limit),
     ];
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
     let mut found = std::collections::BTreeSet::new();

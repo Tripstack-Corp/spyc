@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use crate::upgrade::{
-    FLUSH_DEADLINE, HOLDER_ANSWER, OUTPUT_GRACE, PARK_DEADLINE, PARKED_VALIDATION,
+    FIRST_VALIDATION, FLUSH_DEADLINE, HOLDER_ANSWER, OUTPUT_GRACE, PARK_DEADLINE, PARKED_VALIDATION,
 };
 
 /// The longest a jar reads nothing from its clients and answers none of them.
@@ -21,6 +21,15 @@ pub const PARKED_AT_MOST: Duration = PARK_DEADLINE
     .saturating_add(PARKED_VALIDATION)
     .saturating_add(OUTPUT_GRACE)
     .saturating_add(HOLDER_ANSWER);
+
+/// The longest a jar takes to answer an upgrade with `upgraded` or `refused`.
+///
+/// The first validation of the new binary and its output, while the program
+/// is still served, then the parked path. A requester that waits less reports
+/// a failed upgrade that then succeeds.
+pub const UPGRADE_AT_MOST: Duration = FIRST_VALIDATION
+    .saturating_add(OUTPUT_GRACE)
+    .saturating_add(PARKED_AT_MOST);
 
 /// The least a client's computed wait may be: a socket takes a zero timeout
 /// as none, which waits for ever.

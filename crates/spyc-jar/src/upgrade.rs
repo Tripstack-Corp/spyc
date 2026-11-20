@@ -86,7 +86,7 @@ pub(crate) const PARK_DEADLINE: Duration = Duration::from_secs(3);
 /// The first validation runs while the program is served, so running out
 /// costs nothing but the wait: a long backstop, for a cold binary on a
 /// loaded machine.
-const FIRST_VALIDATION: Duration = Duration::from_secs(30);
+pub(crate) const FIRST_VALIDATION: Duration = Duration::from_secs(30);
 /// The second runs parked, on a binary whose first run is paid: short.
 pub(crate) const PARKED_VALIDATION: Duration = Duration::from_secs(5);
 /// How long a validator's output may trail its exit.
