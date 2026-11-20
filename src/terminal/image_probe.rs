@@ -87,12 +87,22 @@ fn readable(fd: impl AsFd, wait: Duration) -> bool {
 }
 
 /// Whether `poll_once`, which waits at most the time it is given, finds a
-/// byte to read within `wait`.
+/// byte to read within `wait`. A signal that interrupts it (`EINTR`) doesn't
+/// end the wait: the `SIGWINCH` of a terminal resized as it attaches arrives
+/// mid-probe, and a probe ended there left its answers for the kitty
+/// keyboard check, which read the DA1 reply as no kitty support.
 fn wait_readable(
     wait: Duration,
     mut poll_once: impl FnMut(Duration) -> rustix::io::Result<bool>,
 ) -> bool {
-    matches!(poll_once(wait), Ok(true))
+    let deadline = Instant::now() + wait;
+    loop {
+        match poll_once(deadline.saturating_duration_since(Instant::now())) {
+            Ok(ready) => return ready,
+            Err(rustix::io::Errno::INTR) if Instant::now() < deadline => {}
+            Err(_) => return false,
+        }
+    }
 }
 
 /// The terminal's answers, taken a byte at a time.
@@ -191,7 +201,6 @@ mod tests {
     /// terminal resized while it attaches does, doesn't end it: ended, the
     /// probe lost its answers to the kitty keyboard check that followed.
     #[test]
-    #[ignore = "red until a signal no longer ends the image probe's wait"]
     fn an_interrupted_wait_goes_on_waiting() {
         let mut calls = 0;
         let ready = wait_readable(Duration::from_secs(2), |_| {
