@@ -125,6 +125,15 @@ ignored-tests: ## Count the ignored tests, naming those landed red
 .PHONY: test
 test: target-cap ## Run all tests (--workspace: spyc-vt-sys is a member and must be gated too)
 	cargo test --locked --workspace --all-targets
+	$(MAKE) --no-print-directory test-jar-differ
+
+# S3: upgrades both ways between this jar and one built to differ (wire and
+# blob version 2, a frame version 1 doesn't know), built apart so the feature
+# never reaches this build's own jar.
+.PHONY: test-jar-differ
+test-jar-differ: ## Upgrade tests against a jar built to differ (part of make test)
+	cargo build --locked --bin spyc-jar --features spyc-jar/differ --target-dir $(TARGET_DIR)/differ
+	SPYC_JAR_DIFFER_BIN=$(TARGET_DIR)/differ/debug/spyc-jar cargo test --locked --test jar_differ -- --include-ignored
 
 .PHONY: lint
 lint: target-cap ## Clippy with pedantic + nursery
