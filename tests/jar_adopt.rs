@@ -200,6 +200,15 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
+/// The instrumented build's `LLVM_PROFILE_FILE`, kept through each spawned
+/// process's cleared environment: without it an instrumented spyc writes its
+/// coverage data into the directory it runs in, the test's project among them.
+fn profile_file() -> Option<&'static std::ffi::OsStr> {
+    static FILE: std::sync::OnceLock<Option<std::ffi::OsString>> = std::sync::OnceLock::new();
+    FILE.get_or_init(|| std::env::var_os("LLVM_PROFILE_FILE"))
+        .as_deref()
+}
+
 struct Dirs {
     root: tempfile::TempDir,
     home: PathBuf,
@@ -212,8 +221,8 @@ struct Dirs {
 
 impl Dirs {
     /// A spyc's whole environment: every directory the test's own.
-    fn env(&self) -> [(&'static str, &std::ffi::OsStr); 8] {
-        [
+    fn env(&self) -> Vec<(&'static str, &std::ffi::OsStr)> {
+        let mut env = vec![
             ("HOME", self.home.as_os_str()),
             ("XDG_STATE_HOME", self.state.as_os_str()),
             ("XDG_CONFIG_HOME", self.config.as_os_str()),
@@ -222,7 +231,9 @@ impl Dirs {
             ("PATH", "/usr/bin:/bin".as_ref()),
             ("SHELL", "/bin/sh".as_ref()),
             ("TERM", "xterm-256color".as_ref()),
-        ]
+        ];
+        env.extend(profile_file().map(|file| ("LLVM_PROFILE_FILE", file)));
+        env
     }
 
     /// What `spyc --jars` prints here.
