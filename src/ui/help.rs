@@ -269,6 +269,10 @@ const SECTIONS: &[Section] = &[
                 "what spyc's own stderr received, in a pager (the status bar's ⚠N counts unseen lines)",
             ),
             (
+                ":events  :log",
+                "the session's event log: every message the status line showed, with its time",
+            ),
+            (
                 ":hints",
                 "the menu hints that have faded; :hints reset brings them back",
             ),

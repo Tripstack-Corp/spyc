@@ -126,6 +126,7 @@ mod cwd_file;
 pub mod detach;
 mod effect;
 mod esc_guard;
+mod events;
 mod file_ops;
 mod find_picker;
 mod focus;

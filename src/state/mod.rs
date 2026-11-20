@@ -9,6 +9,7 @@ pub mod codex_history;
 pub mod codex_images;
 pub mod codex_transcript;
 pub mod cursor;
+pub mod event_log;
 pub mod frecency;
 pub mod graveyard;
 pub mod harpoon;
