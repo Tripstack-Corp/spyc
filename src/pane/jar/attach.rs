@@ -6,10 +6,12 @@
 //! restores its terminal on the way out, as spyc does when killed. A jar
 //! accepts only its user's processes, so that pid is the user's own.
 //!
-//! A session whose spyc runs from the path this one does, and started before
-//! the file there was replaced, runs an install it hasn't taken: `spyc
-//! attach` offers to have it `:upgrade` first, by a notification on its MCP
-//! socket.
+//! A session whose spyc runs from the path this one does, and finds a newer
+//! spyc installed there, as `:upgrade` would, runs an install it hasn't
+//! taken: `spyc attach` asks it (`spyc/behind`) and offers to have it
+//! `:upgrade` first, by a notification on its MCP socket. Its start time
+//! can't say, since an upgrade in place keeps the pid; it is only the answer
+//! for a spyc that predates the question.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -92,6 +94,12 @@ fn behind(socket: &Path) -> Option<(u32, PathBuf)> {
     if Path::new(field("program")?) != here {
         return None;
     }
+    // The spyc knows what it runs: an upgrade in place keeps its pid, and so
+    // the start time below.
+    if let Some(behind) = crate::mcp::ask_behind(pid) {
+        return behind.then_some((pid, here));
+    }
+    // A spyc that predates the question: its start time is the best there is.
     let started = crate::proc_group::started_epoch_secs(pid)?;
     // The later of its modification and inode change times: a copy can carry
     // the source's modification time, and a new file's inode changes when it
