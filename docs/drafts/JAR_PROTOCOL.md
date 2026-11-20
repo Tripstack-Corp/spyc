@@ -948,6 +948,7 @@ compiles:
 | Limit | Value | What it bounds |
 |---|---|---|
 | `PARKED_AT_MOST` | 15 s | The longest a jar reads nothing and answers nothing, parked for an upgrade: reaching the park (3 s), the flush (1 s), the parked validation (5 s) and its output (1 s), and the holder's answer (5 s). It is their sum in `upgrade.rs`, so a longer step moves it. Frames queue meanwhile and are read after. |
+| `UPGRADE_AT_MOST` | 46 s | The longest a jar takes to answer an upgrade with `upgraded` or `refused`: the first validation of the new binary (30 s) and its output (1 s), while the program is still served, then `PARKED_AT_MOST`. A requester waits past it, or reports a failed upgrade that then succeeds; `spyc-jar upgrade` does. |
 | `OWNER_DEADLINE` | 10 s | How long a jar goes without hearing from its owner before it ends the owner's lease, unless `--deadline-ms` says otherwise. An owner pings more often. |
 | The start's hold | as the start says | How long a jar holds its program for a first owner (decision M). A starter waits as long for its answer. |
 

@@ -387,8 +387,11 @@ fn read_start() -> anyhow::Result<Start> {
 const EXIT_LINGER: Duration = Duration::from_secs(60);
 /// How long a command-line client waits to reach its jar.
 const COMMAND_WAIT: Duration = Duration::from_secs(5);
-/// How long `spyc-jar upgrade` waits for the jar's answer.
-const UPGRADE_ANSWER_WAIT: Duration = Duration::from_secs(10);
+/// How long `spyc-jar upgrade` waits for the jar's answer: past the longest
+/// the jar takes to give one.
+const UPGRADE_ANSWER_WAIT: Duration =
+    crate::limits::UPGRADE_AT_MOST.saturating_add(Duration::from_secs(10));
+const _: () = assert!(UPGRADE_ANSWER_WAIT.as_millis() > crate::limits::UPGRADE_AT_MOST.as_millis());
 /// How often `program-events` wakes with nothing heard.
 const PROGRAM_EVENTS_TICK: Duration = Duration::from_secs(60);
 
@@ -400,9 +403,13 @@ fn upgrade(socket: &std::path::Path, token: &[u8], binary: String) -> anyhow::Re
     use crate::proto::{Msg, Role};
     let (mut c, _) = Client::connect(socket, Role::Reader, COMMAND_WAIT, token)?;
     let t0 = std::time::Instant::now();
+    let until = t0 + UPGRADE_ANSWER_WAIT;
     c.send(&Msg::Upgrade { binary })?;
     loop {
-        match c.recv(UPGRADE_ANSWER_WAIT)? {
+        let left = until
+            .saturating_duration_since(std::time::Instant::now())
+            .max(crate::limits::SHORTEST_WAIT);
+        match c.recv(left)? {
             Some(Msg::Upgraded { build }) => {
                 println!(
                     "upgraded in {:.1} ms to {build}",
