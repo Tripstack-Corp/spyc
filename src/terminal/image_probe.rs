@@ -76,12 +76,23 @@ fn query(steer: Steer) -> String {
 /// Whether `fd` has a byte to read within `wait`.
 fn readable(fd: impl AsFd, wait: Duration) -> bool {
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
-    let mut fds = [PollFd::new(&fd, PollFlags::IN)];
-    let ts = Timespec {
-        tv_sec: i64::try_from(wait.as_secs()).unwrap_or(i64::MAX),
-        tv_nsec: i64::from(wait.subsec_nanos()),
-    };
-    matches!(poll(&mut fds, Some(&ts)), Ok(n) if n > 0)
+    wait_readable(wait, |left| {
+        let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+        let ts = Timespec {
+            tv_sec: i64::try_from(left.as_secs()).unwrap_or(i64::MAX),
+            tv_nsec: i64::from(left.subsec_nanos()),
+        };
+        poll(&mut fds, Some(&ts)).map(|n| n > 0)
+    })
+}
+
+/// Whether `poll_once`, which waits at most the time it is given, finds a
+/// byte to read within `wait`.
+fn wait_readable(
+    wait: Duration,
+    mut poll_once: impl FnMut(Duration) -> rustix::io::Result<bool>,
+) -> bool {
+    matches!(poll_once(wait), Ok(true))
 }
 
 /// The terminal's answers, taken a byte at a time.
@@ -174,6 +185,49 @@ mod tests {
 
     fn read_all(replies: &mut Replies, bytes: &[u8]) -> Option<usize> {
         bytes.iter().position(|&b| replies.push(b))
+    }
+
+    /// A signal that interrupts the wait (`EINTR`), as the `SIGWINCH` of a
+    /// terminal resized while it attaches does, doesn't end it: ended, the
+    /// probe lost its answers to the kitty keyboard check that followed.
+    #[test]
+    #[ignore = "red until a signal no longer ends the image probe's wait"]
+    fn an_interrupted_wait_goes_on_waiting() {
+        let mut calls = 0;
+        let ready = wait_readable(Duration::from_secs(2), |_| {
+            calls += 1;
+            if calls == 1 {
+                Err(rustix::io::Errno::INTR)
+            } else {
+                Ok(true)
+            }
+        });
+        assert!(ready, "the interrupted wait gave up");
+        assert_eq!(calls, 2);
+    }
+
+    /// Interrupted again and again, the wait still ends at its backstop.
+    #[test]
+    fn an_interrupted_wait_still_ends_at_its_backstop() {
+        let wait = Duration::from_millis(50);
+        let started = Instant::now();
+        let ready = wait_readable(wait, |left| {
+            std::thread::sleep(left.min(Duration::from_millis(5)));
+            Err(rustix::io::Errno::INTR)
+        });
+        assert!(!ready);
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "it kept waiting"
+        );
+    }
+
+    /// Any other failure ends the wait with nothing to read.
+    #[test]
+    fn a_wait_that_fails_otherwise_finds_nothing() {
+        assert!(!wait_readable(Duration::from_secs(2), |_| Err(
+            rustix::io::Errno::BADF
+        )));
     }
 
     #[test]
