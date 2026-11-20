@@ -107,6 +107,15 @@ impl App {
     }
 
     /// The active tab's label, so a confirm can name what it is about to kill.
+    /// What a focus hint calls the pane: its active tab, or `pane`.
+    fn focus_label(&self) -> String {
+        self.runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or_else(|| "pane".to_string(), |t| t.active_info().label.clone())
+    }
+
     fn active_tab_label(&self) -> String {
         self.runtime
             .project()
@@ -356,7 +365,8 @@ impl App {
                 }
                 self.state.active_project_mut().focus = state::Focus::Pane;
                 self.state
-                    .flash_info(format!("pane: {cmd} (^W k for list)"));
+                    .flash_hint(format!("pane: {cmd} (^W k for list)"));
+                self.state.note_tab_started(cmd, restoring.is_some());
                 let entry = TabEntry::new(p, info);
                 match (self.runtime.project_mut().pane_tabs.as_mut(), slot) {
                     (Some(tabs), TabSlot::Replace(idx)) => tabs.replace_at(idx, entry),
@@ -836,13 +846,8 @@ impl App {
         if self.right_column_focused() {
             if want_pane && self.runtime.project().pane_tabs.is_some() {
                 self.state.active_project_mut().focus = state::Focus::Pane;
-                let label = self
-                    .runtime
-                    .project()
-                    .pane_tabs
-                    .as_ref()
-                    .map_or("pane", |t| t.active_info().label.as_str());
-                self.state.flash_info(format!("focus: {label}"));
+                let label = self.focus_label();
+                self.state.flash_hint(format!("focus: {label}"));
                 self.view.needs_full_repaint = true;
             }
             return;
@@ -865,17 +870,12 @@ impl App {
             want_pane,
         );
         if self.state.pane_focused() {
-            let label = self
-                .runtime
-                .project()
-                .pane_tabs
-                .as_ref()
-                .map_or("pane", |t| t.active_info().label.as_str());
-            self.state.flash_info(format!("focus: {label}"));
+            let label = self.focus_label();
+            self.state.flash_hint(format!("focus: {label}"));
         } else if self.column_focused(state::Side::Right) {
             // The right column owns the keyboard — its list, preview, or its own
             // `V`/`D` overlay (any surface in `b`).
-            self.state.flash_info("focus: b (right)");
+            self.state.flash_hint("focus: b (right)");
         } else {
             // When a `;cmd` overlay is showing the spyc-list slot, the
             // "non-pane" side is the overlay subprocess, not the file
@@ -886,7 +886,7 @@ impl App {
             } else {
                 "spyc"
             };
-            self.state.flash_info(format!("focus: {label}"));
+            self.state.flash_hint(format!("focus: {label}"));
         }
     }
 

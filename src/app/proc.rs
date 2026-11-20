@@ -406,7 +406,19 @@ impl super::App {
         };
         let attached = jar.attached();
         let attaches = jar.attaches();
-        if !attached || attaches == self.runtime.attaches_seen {
+        // The first terminal may have attached before spyc heard the jar, so
+        // whether one is attached is what the log follows, as well as each
+        // new attach.
+        let new_client = attached && attaches != self.runtime.attaches_seen;
+        if attached && (new_client || !self.runtime.terminal_noted) {
+            let (cols, rows) = crossterm::terminal::size().unwrap_or_default();
+            self.state
+                .note_event(&format!("terminal attached, {cols}x{rows}"));
+        } else if !attached && self.runtime.terminal_noted {
+            self.state.note_event("terminal detached: spyc runs on");
+        }
+        self.runtime.terminal_noted = attached;
+        if !new_client {
             return settled;
         }
         self.runtime.attaches_seen = attaches;

@@ -348,7 +348,7 @@ impl App {
             } else {
                 state::Focus::FileList
             };
-        self.state.flash_info(match side {
+        self.state.flash_hint(match side {
             state::Side::Left => "focus: a (left)",
             state::Side::Right => "focus: b (right)",
         });

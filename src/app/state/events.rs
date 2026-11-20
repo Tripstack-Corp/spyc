@@ -64,6 +64,14 @@ pub struct EventLog {
 }
 
 impl EventLog {
+    /// A log whose first event is `text`: a spyc's start, noted before
+    /// anything it does.
+    pub fn starting(text: &str) -> Self {
+        let mut log = Self::default();
+        log.note(EventKind::Info, text);
+        log
+    }
+
     /// Note an event. The same text noted again straight after is one event.
     pub fn note(&mut self, kind: EventKind, text: &str) {
         let text = text.trim().replace('\n', " \u{23ce} ");
