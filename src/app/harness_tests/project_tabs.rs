@@ -212,6 +212,45 @@ fn the_quit_confirm_counts_a_tab_in_another_project() {
     });
 }
 
+/// `:q` with a tab running, in a project the user isn't in, asks once and
+/// waits: `n` stays, however long it took, and `y` quits.
+#[test]
+fn the_quit_command_asks_once_and_quits_on_yes() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let asking = |app: &App| {
+        matches!(&app.state.mode, Mode::Prompting(p)
+            if matches!(p.kind, PromptKind::QuitConfirm) && p.prefix.contains("1 running process"))
+    };
+    with_two(|t| {
+        let app = &mut t.app;
+        app.open_tab_in_project(t.x, &t.x_home);
+        app.make_active(t.y);
+        app.dispatch_command("q");
+        assert!(asking(app), "no confirm: {:?}", app.flash_text());
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.state.should_quit && !asking(app), "a no quit");
+        app.dispatch_command("quit");
+        assert!(asking(app), "asked again");
+        std::thread::sleep(Duration::from_millis(2100));
+        app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(
+            app.state.should_quit,
+            "a yes, past the keys' window, didn't quit"
+        );
+    });
+}
+
+/// `:q` with nothing running quits at once: there's nothing to lose.
+#[test]
+fn the_quit_command_with_nothing_running_quits_at_once() {
+    with_two(|t| {
+        t.app.dispatch_command("q");
+        assert!(t.app.state.should_quit, "{:?}", t.app.flash_text());
+    });
+}
+
 /// The activity monitor's `panes:` cell counts every project's tabs.
 #[test]
 fn the_pane_count_covers_every_project() {

@@ -717,13 +717,7 @@ impl App {
         self.view.project_mut().pager = Some(PagerView::new_plain("session info", lines));
     }
 
-    /// Run the canonical quit lifecycle: first call arms a 2-second
-    /// confirm window (and flashes any running-process count); a
-    /// second call inside that window persists the session, writes the
-    /// `--cwd-file` and sets `should_quit`. Shared by `Action::Quit` (the Q / ^D keybindings)
-    /// and the `:q` / `:quit` command — both paths must save and warn
-    /// identically.
-    /// Save the session and quit, ending its tabs: a confirmed `:q`, and
+    /// Save the session and quit, ending its tabs: a confirmed quit, and
     /// `spyc shutdown`, which has no terminal's directory to hand back.
     pub(super) fn end_session(&mut self) {
         self.remember_pager_position();
@@ -731,6 +725,43 @@ impl App {
         self.state.should_quit = true;
     }
 
+    /// A confirmed quit: the session saved, the `--cwd-file` written, spyc
+    /// gone.
+    pub(super) fn quit_now(&mut self) {
+        self.end_session();
+        self.write_cwd_file();
+    }
+
+    /// What quitting would lose, for a confirm to name: unwritten archive
+    /// changes, else the processes it ends (every project's tabs and tasks).
+    /// `None` when nothing would be lost.
+    pub(super) fn what_quitting_ends(&mut self) -> Option<String> {
+        let running_panes: usize = self
+            .runtime
+            .every_tab_set()
+            .map(|(_, tabs)| tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count())
+            .sum();
+        let running = running_panes + self.runtime.background_tasks.running_count();
+        // Pending archive changes live only in memory, so quitting drops them.
+        self.scan_archive_edits();
+        let dirty_archives = self.dirty_mounts().len();
+        if dirty_archives > 0 {
+            Some(format!(
+                "{dirty_archives} archive(s) have unwritten changes (:archive write)"
+            ))
+        } else if running > 0 {
+            Some(format!(
+                "{running} running process{}",
+                if running == 1 { "" } else { "es" }
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// `Q` and `ZZ`: the first press arms a 2-second window and flashes what
+    /// quitting would lose; a second press inside it quits. One keystroke is
+    /// easy to hit by mistake, so even a quit that loses nothing asks.
     pub fn request_quit(&mut self) {
         let now = std::time::Instant::now();
         if self
@@ -738,40 +769,27 @@ impl App {
             .quit_pending
             .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2))
         {
-            // If a file pager is open, capture its scroll before
-            // shutdown so reopening the file in the next session
-            // resumes where we left off. Bypassed close paths
-            // (typically session save → quit, no Esc) would
-            // otherwise drop the in-memory scroll on the floor.
-            self.end_session();
-            self.write_cwd_file();
+            self.quit_now();
         } else {
             self.state.quit_pending = Some(now);
-            // Every project's tabs: quitting ends them all.
-            let running_panes: usize = self
-                .runtime
-                .every_tab_set()
-                .map(|(_, tabs)| tabs.tabs().iter().filter(|e| !e.pane.is_closed()).count())
-                .sum();
-            let running_bg = self.runtime.background_tasks.running_count();
-            let running = running_panes + running_bg;
-            // Pending archive changes live only in memory, so quitting drops
-            // them. Name that on the first tap, where the double-tap confirm
-            // already gives the user somewhere to stop.
-            self.scan_archive_edits();
-            let dirty_archives = self.dirty_mounts();
-            if !dirty_archives.is_empty() {
-                self.state.flash_info(format!(
-                    "{} archive(s) have unwritten changes (:archive write) — press again to quit",
-                    dirty_archives.len()
+            let said = self.what_quitting_ends().map_or_else(
+                || "press again to quit".to_string(),
+                |what| format!("{what} — press again to quit"),
+            );
+            self.state.flash_info(said);
+        }
+    }
+
+    /// `:q` / `:quit`, typed on purpose: it quits at once when nothing would
+    /// be lost, and otherwise asks once, `[y/N]`, with no window to beat.
+    pub(super) fn quit_command(&mut self) {
+        match self.what_quitting_ends() {
+            None => self.quit_now(),
+            Some(what) => {
+                self.state.mode = super::Mode::Prompting(super::Prompt::simple(
+                    super::PromptKind::QuitConfirm,
+                    format!("{what} — quit anyway? [y/N] "),
                 ));
-            } else if running > 0 {
-                self.state.flash_info(format!(
-                    "{running} running process{} — press again to quit",
-                    if running == 1 { "" } else { "es" }
-                ));
-            } else {
-                self.state.flash_info("press again to quit");
             }
         }
     }

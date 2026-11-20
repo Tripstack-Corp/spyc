@@ -353,6 +353,7 @@ impl AppState {
             | PromptKind::SkillUpdate { .. }
             | PromptKind::ProjectTabsConsent { .. }
             | PromptKind::ClosePane
+            | PromptKind::QuitConfirm
             | PromptKind::CloseProject(_)
             | PromptKind::PipeConfirm { .. }
             | PromptKind::RestartPane

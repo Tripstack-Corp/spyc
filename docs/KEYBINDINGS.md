@@ -329,7 +329,7 @@ appear on the top bar and persist across `spyc -r`.
 | `?` / `F1` / `Space ?` | This help overlay |
 | `Space a` / `:about` | The about page |
 | `Space w l` / `Space w n` / `Space w d` | Worktree list / new / delete (`W l` / `W n` / `W d` in the file list) |
-| `Q` / `ZZ` / `:q` | Quit, saving the session and ending its tabs (asks first while a tab or task is still running) |
+| `Q` / `ZZ` / `:q` | Quit, saving the session and ending its tabs. `Q` and `ZZ` want a second press within two seconds; `:q` quits at once, or asks `[y/N]` while a tab or task is still running |
 | `^d` / `Space d` / `:detach` | Detach: spyc runs on with its tabs, and `spyc attach` brings it back. From the agent pane, where `^d` is the program's, it's `^a Space d` |
 | `q` | Doesn't quit: flashes a hint instead, keeping the key for macro recording |
 | `gV` / `:version` | Show the spyc version |
