@@ -362,6 +362,10 @@ pub(super) struct Runtime {
     /// This run's stderr log (`crate::stderr_capture`); `None` when stderr
     /// wasn't redirected.
     pub(super) stderr_log: Option<std::path::PathBuf>,
+    /// The writer of the session's event log, once `run` started it.
+    pub(super) event_writer: Option<super::events::EventWriter>,
+    /// The session's lines from before this spyc, read back by the writer.
+    pub(super) events_earlier: Landing<Vec<String>>,
     /// The worker following `stderr_log`: it reads what is appended and wakes
     /// the loop with `Wake::Stderr` (`App::apply_stderr`).
     pub(super) stderr_follow:
@@ -459,6 +463,8 @@ impl Runtime {
             shift_esc: false,
             cwd_file: None,
             stderr_log: None,
+            event_writer: None,
+            events_earlier: Landing::default(),
             stderr_follow: None,
         }
     }

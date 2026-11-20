@@ -31,6 +31,7 @@ impl PagerView {
             no_history: false,
             task_id: None,
             stderr_log: None,
+            events_log: None,
             stream_id: None,
             columns: 1,
             source_path: None,

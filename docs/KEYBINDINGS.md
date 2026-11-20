@@ -364,6 +364,7 @@ to open them in the current listing dir.
 | `:skill` | Agent skill: `status` / `update` / `remove` / `ask` |
 | `:lua` | Lua engine: `status` / `on` / `off` / `reload` |
 | `:stderr` | What spyc's own stderr received this run, in the pager; the status bar's `⚠N` counts lines not yet seen, and clicking it opens this too |
+| `:events` / `:log` | The session's event log in the pager, newest last: every message the status line showed, with its time, kept across crashes, `^d` and `:upgrade` |
 | `:prompt` | Type a `[prompts]` template into the active pane tab (`:prompt <name>`); bare `:prompt` lists them |
 | `:notify test` | Fire every notification channel to verify setup |
 | `:date` | Show date/time (UTC) |
