@@ -166,6 +166,11 @@ fn agrees(
     Ok(!line.trim_start().to_ascii_lowercase().starts_with('n'))
 }
 
+/// This user's sessions whose own jars run, by name.
+pub fn running_here() -> Vec<Running> {
+    running(&this_users_sessions())
+}
+
 /// The sessions whose own jars run in `sessions`, by name.
 pub fn running(sessions: &Path) -> Vec<Running> {
     let mut found: Vec<Running> = std::fs::read_dir(sessions)

@@ -4,6 +4,9 @@
 //! lines back for the Model and appends after them; a session renamed, or
 //! restored under another name, carries what it wrote to the new name's file.
 //! Past [`CAP`] bytes a file keeps its newer half.
+//!
+//! `spyc events [NAME] [-n N] [-f]` prints a session's log from a shell
+//! ([`print_cli`]), and with `-f` follows it, across a trim's rewrite too.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -125,6 +128,171 @@ fn carry(dir: &Path, from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::remove_file(from)
 }
 
+/// How often `spyc events -f` looks for more.
+const FOLLOW_POLL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// `spyc events [NAME] [-n N] [-f]`: the session's log, each line as
+/// `:events` shows it, the last `last` of them when given; with `follow`,
+/// then what comes after, until interrupted.
+pub fn print_cli(name: Option<&str>, last: Option<usize>, follow: bool) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    let dir = super::state_root()
+        .context("no state directory: spyc keeps no event logs")?
+        .join("events");
+    let name = if let Some(name) = name {
+        name.to_string()
+    } else {
+        let running: Vec<String> = crate::pane::jar::attach::running_here()
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        choose(
+            &dir,
+            &running,
+            &mut std::io::stdin().lock(),
+            &mut std::io::stderr(),
+        )?
+    };
+    let path = file_for(&dir, &name).with_context(|| format!("{name:?} isn't a session's name"))?;
+    anyhow::ensure!(path.is_file(), "{name} has no event log");
+    let colour = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let mut out = std::io::stdout().lock();
+    let lines = read_lines(&path);
+    let skip = last.map_or(0, |n| lines.len().saturating_sub(n));
+    for line in &lines[skip..] {
+        writeln!(out, "{}", shown(line, colour))?;
+    }
+    out.flush()?;
+    if !follow {
+        return Ok(());
+    }
+    let mut seen = lines.last().cloned();
+    let mut inode = inode_of(&path);
+    let mut offset = std::fs::metadata(&path).map_or(0, |m| m.len());
+    loop {
+        std::thread::sleep(FOLLOW_POLL);
+        let now = inode_of(&path);
+        let fresh = if now == inode {
+            appended(&path, &mut offset)
+        } else {
+            // A trim rewrote the file: what follows the last line printed.
+            inode = now;
+            let all = read_lines(&path);
+            offset = std::fs::metadata(&path).map_or(0, |m| m.len());
+            let from = seen
+                .as_ref()
+                .and_then(|s| all.iter().rposition(|l| l == s))
+                .map_or(0, |at| at + 1);
+            all[from..].to_vec()
+        };
+        for line in &fresh {
+            writeln!(out, "{}", shown(line, colour))?;
+        }
+        if let Some(line) = fresh.last() {
+            seen = Some(line.clone());
+            out.flush()?;
+        }
+    }
+}
+
+fn inode_of(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| m.ino())
+}
+
+/// The whole lines appended to `path` past `offset`, which moves past them.
+fn appended(path: &Path, offset: &mut u64) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return Vec::new();
+    };
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(*offset)).is_err() || file.read_to_end(&mut bytes).is_err() {
+        return Vec::new();
+    }
+    let whole = bytes.iter().rposition(|b| *b == b'\n').map_or(0, |n| n + 1);
+    *offset += whole as u64;
+    String::from_utf8_lossy(&bytes[..whole])
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
+/// A line of the file as `:events` shows it: its time from the month on,
+/// then what happened, an error in red when `colour`.
+fn shown(line: &str, colour: bool) -> String {
+    let mut parts = line.splitn(3, "  ");
+    let (Some(at), Some(kind), Some(text)) = (parts.next(), parts.next(), parts.next()) else {
+        return line.to_string();
+    };
+    let when = at.get(5..).unwrap_or(at);
+    match (kind, colour) {
+        ("E", true) => format!("{when}  \x1b[31m{text}\x1b[0m"),
+        _ => format!("{when}  {text}"),
+    }
+}
+
+/// Which session's log, when none was named: the one session `running`,
+/// else a choice of every session with a log, newest first.
+fn choose(
+    dir: &Path,
+    running: &[String],
+    input: &mut impl std::io::BufRead,
+    output: &mut impl std::io::Write,
+) -> anyhow::Result<String> {
+    if let [one] = running {
+        return Ok(one.clone());
+    }
+    let logs = logs_newest_first(dir);
+    match logs.as_slice() {
+        [] => anyhow::bail!("no session has an event log yet"),
+        [one] => return Ok(one.clone()),
+        _ => {}
+    }
+    for (i, name) in logs.iter().enumerate() {
+        let here = if running.contains(name) {
+            "  (running)"
+        } else {
+            ""
+        };
+        writeln!(output, "{:>3}  {name}{here}", i + 1)?;
+    }
+    write!(output, "Show which? ")?;
+    output.flush()?;
+    let mut answer = String::new();
+    input.read_line(&mut answer)?;
+    let answer = answer.trim();
+    answer
+        .parse::<usize>()
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .and_then(|i| logs.get(i))
+        .or_else(|| logs.iter().find(|n| *n == answer))
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("{answer:?} is none of them"))
+}
+
+/// The sessions with a log in `dir`, the one written last first.
+fn logs_newest_first(dir: &Path) -> Vec<String> {
+    let mut logs: Vec<(std::time::SystemTime, String)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path
+                .file_name()?
+                .to_str()?
+                .strip_suffix(".log")?
+                .to_string();
+            let written = entry.metadata().ok()?.modified().ok()?;
+            Some((written, name))
+        })
+        .collect();
+    logs.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    logs.into_iter().map(|(_, name)| name).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -161,6 +329,65 @@ mod tests {
         assert_eq!(
             read_lines(&events.join("CLOVE.log")),
             ["clove's", "old", "new"]
+        );
+    }
+
+    #[test]
+    fn a_line_shows_as_events_shows_it() {
+        let error = "2026-11-20 06:30:31  E  jar upgrade stopped";
+        assert_eq!(shown(error, false), "11-20 06:30:31  jar upgrade stopped");
+        assert_eq!(
+            shown(error, true),
+            "11-20 06:30:31  \x1b[31mjar upgrade stopped\x1b[0m"
+        );
+        assert_eq!(
+            shown("2026-11-20 06:30:31  I  two  spaces", true),
+            "11-20 06:30:31  two  spaces"
+        );
+        assert_eq!(shown("not a line of ours", true), "not a line of ours");
+    }
+
+    #[test]
+    fn following_reads_only_whole_lines_appended() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("S.log");
+        std::fs::write(&path, "one\n").unwrap();
+        let mut offset = 4;
+        std::fs::write(&path, "one\ntwo\nthr").unwrap();
+        assert_eq!(appended(&path, &mut offset), ["two"]);
+        std::fs::write(&path, "one\ntwo\nthree\n").unwrap();
+        assert_eq!(appended(&path, &mut offset), ["three"]);
+        assert_eq!(appended(&path, &mut offset), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_choice_lists_the_logs_newest_first_and_takes_a_number_or_a_name() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, age) in [("OLD", 100), ("NEW", 0)] {
+            let path = dir.path().join(format!("{name}.log"));
+            std::fs::write(&path, "x\n").unwrap();
+            let at = std::time::SystemTime::now() - std::time::Duration::from_secs(age);
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(at)
+                .unwrap();
+        }
+        assert_eq!(logs_newest_first(dir.path()), ["NEW", "OLD"]);
+        let mut shown = Vec::new();
+        let picked = choose(dir.path(), &[], &mut &b"2\n"[..], &mut shown).unwrap();
+        assert_eq!(picked, "OLD");
+        assert!(String::from_utf8(shown).unwrap().contains("  1  NEW"));
+        assert_eq!(
+            choose(dir.path(), &[], &mut &b"NEW\n"[..], &mut Vec::new()).unwrap(),
+            "NEW"
+        );
+        assert!(choose(dir.path(), &[], &mut &b"9\n"[..], &mut Vec::new()).is_err());
+        assert_eq!(
+            choose(dir.path(), &["OLD".into()], &mut &b""[..], &mut Vec::new()).unwrap(),
+            "OLD",
+            "the one session running, without asking"
         );
     }
 

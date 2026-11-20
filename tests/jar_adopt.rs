@@ -1204,6 +1204,69 @@ fn a_flash_is_in_the_sessions_event_log_and_outlives_spyc() {
         logged().contains("upgrade: no newer spyc is installed")
     });
     assert!(logged().contains("started, pid"), "{}", logged());
+
+    // `spyc events NAME` prints it from a shell; `-n 1` only the last line;
+    // `-f` goes on with what comes after.
+    let name = std::fs::read_dir(&events)
+        .unwrap()
+        .flatten()
+        .find_map(|e| {
+            e.path()
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+        })
+        .unwrap();
+    let events_cmd = |args: &[&str]| {
+        let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"));
+        cmd.arg("events")
+            .args(args)
+            .current_dir(&dirs.home)
+            .env_clear()
+            .envs(dirs.env());
+        cmd
+    };
+    let printed = events_cmd(&[&name]).output().unwrap();
+    let printed = String::from_utf8_lossy(&printed.stdout).into_owned();
+    assert!(
+        printed.contains("upgrade: no newer spyc is installed") && printed.contains("started, pid"),
+        "{printed}"
+    );
+    let last = events_cmd(&[&name, "-n", "1"]).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&last.stdout).lines().count(),
+        1,
+        "{last:?}"
+    );
+    let mut follow = events_cmd(&[&name, "-f"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    left.0.push(i32::try_from(follow.id()).unwrap());
+    let mut out = follow.stdout.take().unwrap();
+    let (more_tx, more) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = std::io::Read::read(&mut out, &mut buf) {
+            if n == 0 {
+                break;
+            }
+            let _ = more_tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+        }
+    });
+    first.type_keys(b":whoami\r");
+    let mut seen = String::new();
+    let until = Instant::now() + WAIT;
+    while !seen.contains('@') {
+        assert!(
+            Instant::now() < until,
+            "`-f` never printed the new flash: {seen}"
+        );
+        if let Ok(chunk) = more.recv_timeout(Duration::from_millis(100)) {
+            seen.push_str(&chunk);
+        }
+    }
+    let _ = follow.kill();
+    let _ = follow.wait();
     eventually("the session is saved", || {
         saved_jar_socket(&dirs.state).is_some()
     });
