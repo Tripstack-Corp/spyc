@@ -15,21 +15,18 @@ use super::{App, Effect, Wake};
 use crate::state::event_log::Write;
 use crate::ui::pager::PagerView;
 
-/// The writer, and the session name it was last told.
+/// The writer, the session name it was last told, and its thread, which a
+/// spyc on its way out waits for so nothing noted is lost.
 pub(super) struct EventWriter {
     tx: Sender<Write>,
     told: Option<String>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl App {
-    /// Start the writer, once `run` can wake the loop, and note the start.
+    /// Start the writer, once `run` can wake the loop. A start error spyc
+    /// set before the loop ran is noted too.
     pub(super) fn start_event_log(&mut self) {
-        let pid = std::process::id();
-        self.state.note_event(&format!(
-            "spyc {} ({}) started, pid {pid}",
-            crate::VERSION,
-            env!("SPYC_GIT_SHA")
-        ));
         if let Some(flash) = self.state.flash.clone()
             && matches!(flash.kind, super::FlashKind::Error)
         {
@@ -42,10 +39,26 @@ impl App {
             .runtime
             .events_earlier
             .sender_waking(self.loop_waker(Wake::PaneStart));
-        let tx = crate::state::event_log::spawn(root.join("events"), move |lines| {
+        let (tx, thread) = crate::state::event_log::spawn(root.join("events"), move |lines| {
             let _ = landed.send(lines);
         });
-        self.runtime.event_writer = Some(EventWriter { tx, told: None });
+        self.runtime.event_writer = Some(EventWriter {
+            tx,
+            told: None,
+            thread,
+        });
+    }
+
+    /// On the way out (quit, handover, upgrade): write what was noted since
+    /// the last pass, and wait for the writer to finish. Once a run.
+    pub(crate) fn close_event_log(&mut self) {
+        self.settle_events();
+        if let Some(EventWriter { tx, thread, .. }) = self.runtime.event_writer.take() {
+            drop(tx);
+            if let Some(thread) = thread {
+                let _ = thread.join();
+            }
+        }
     }
 
     /// Stamp what was noted since the last pass, keep it, and have it
@@ -128,6 +141,22 @@ impl App {
         true
     }
 
+    /// What the session's event log calls the tab `pane_id` names: its label,
+    /// or what it is when it names none.
+    pub(super) fn tab_label_of(&self, pane_id: Option<&str>) -> String {
+        let Some(id) = pane_id else {
+            return "an agent outside any tab".into();
+        };
+        self.runtime
+            .every_tab_set()
+            .flat_map(|(_, tabs)| tabs.tabs().iter())
+            .find(|e| e.info.id == id)
+            .map_or_else(
+                || "a tab that's gone".into(),
+                |e| crate::pane::tabs::strip_exit_suffix(&e.info.label),
+            )
+    }
+
     /// `:events`: the log in the pager, newest last.
     pub(super) fn open_events(&mut self) -> Vec<Effect> {
         let mut view = events_view(&self.state.events, self.state.session_display());
@@ -135,6 +164,26 @@ impl App {
         self.set_pager(view);
         Vec::new()
     }
+}
+
+/// The kind an agent's turn is noted as, when it is: one that needs the user,
+/// finished, or failed.
+pub(super) const fn noted_turn(new: crate::pane::AgentActivity) -> Option<EventKind> {
+    use crate::pane::AgentActivity::{Blocked, Done, Error};
+    match new {
+        Blocked | Done => Some(EventKind::Info),
+        Error => Some(EventKind::Error),
+        _ => None,
+    }
+}
+
+/// The note a spyc's start is: the first event of its log.
+pub(super) fn started_note() -> String {
+    format!(
+        "spyc {} started, pid {}",
+        crate::VERSION,
+        std::process::id()
+    )
 }
 
 /// `:events` / `:log`.
@@ -200,6 +249,43 @@ mod tests {
         assert!(shown(&app).contains("a later flash"));
         app.dispatch_command("log");
         assert!(shown(&app).contains("a later flash"), ":log is :events");
+    }
+
+    fn noted(app: &App) -> Vec<String> {
+        app.state.events.iter().map(|e| e.text.clone()).collect()
+    }
+
+    /// `:q` is noted, and a hint about where focus went isn't.
+    #[test]
+    fn a_quit_is_noted_and_a_focus_hint_is_not() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.state.flash_hint("focus: claude");
+        app.dispatch_command("q");
+        app.settle_events();
+        let noted = noted(&app);
+        assert!(noted.iter().any(|e| e.starts_with("quit:")), "{noted:?}");
+        assert!(!noted.iter().any(|e| e.contains("focus:")), "{noted:?}");
+    }
+
+    /// An agent's MCP connection is noted as it comes and goes.
+    #[test]
+    fn an_mcp_connection_is_noted_as_it_comes_and_goes() {
+        use crate::mcp_cmd::McpCommand;
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = App::test_app(tmp.path().to_path_buf());
+        app.execute_mcp_command(McpCommand::ConnectionInitialized {
+            conn: 7,
+            pane_id: None,
+        });
+        app.execute_mcp_command(McpCommand::ConnectionClosed { conn: 7 });
+        app.settle_events();
+        let noted = noted(&app);
+        assert!(
+            noted.contains(&"MCP: an agent outside any tab connected".to_string())
+                && noted.contains(&"MCP: an agent outside any tab disconnected".to_string()),
+            "{noted:?}"
+        );
     }
 
     /// The session's earlier events, read back from its file, come first.

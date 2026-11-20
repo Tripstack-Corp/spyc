@@ -40,6 +40,29 @@ impl AppState {
         self.events.note(EventKind::Info, text);
     }
 
+    /// Note a tab started fresh in the session's log; one restored is noted
+    /// as it's taken back or started, so not here.
+    pub fn note_tab_started(&mut self, command: &str, restored: bool) {
+        if !restored {
+            self.note_event(&format!("tab started: {command}"));
+        }
+    }
+
+    /// Note something that went wrong in the session's log without flashing
+    /// it.
+    pub fn note_error(&mut self, text: &str) {
+        self.events.note(EventKind::Error, text);
+    }
+
+    /// Flash a hint about what the user just did (where focus went), which
+    /// tells the session's log nothing: it isn't noted.
+    pub fn flash_hint<S: Into<String>>(&mut self, text: S) {
+        self.flash = Some(FlashMessage {
+            text: text.into(),
+            kind: FlashKind::Info,
+        });
+    }
+
     /// Announce work that is starting, to be replaced or cleared when it lands.
     ///
     /// A flash has no lifetime of its own — it shows until something else

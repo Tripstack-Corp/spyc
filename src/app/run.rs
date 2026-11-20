@@ -547,6 +547,7 @@ impl App {
                     });
             }
         }
+        self.close_event_log();
     }
 
     pub fn run(&mut self, terminal: &mut Tui) -> Result<()> {

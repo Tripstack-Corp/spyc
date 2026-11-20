@@ -519,6 +519,8 @@ impl App {
                 }
             }
             McpCommand::Shutdown => {
+                self.state
+                    .note_event("`spyc shutdown` asked: saving the session and quitting");
                 self.end_session();
                 McpResponse::Ok {
                     message: "shutting down".into(),
@@ -534,6 +536,8 @@ impl App {
                 }
             }
             McpCommand::ConnectionInitialized { conn, pane_id } => {
+                let who = self.tab_label_of(pane_id.as_deref());
+                self.state.note_event(&format!("MCP: {who} connected"));
                 self.view.activity.mcp_connections.insert(
                     conn,
                     super::activity::McpConnection {
@@ -556,7 +560,10 @@ impl App {
                 }
             }
             McpCommand::ConnectionClosed { conn } => {
-                self.view.activity.mcp_connections.remove(&conn);
+                if let Some(gone) = self.view.activity.mcp_connections.remove(&conn) {
+                    let who = self.tab_label_of(gone.pane_id.as_deref());
+                    self.state.note_event(&format!("MCP: {who} disconnected"));
+                }
                 McpResponse::Ok {
                     message: "ok".into(),
                 }

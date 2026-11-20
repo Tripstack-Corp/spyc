@@ -460,11 +460,17 @@ impl App {
         // Mark exited tabs AFTER drain so the Closed event has been processed
         // and `is_closed()` returns true; the "[exited N]" label appears
         // immediately.
+        let mut exited = Vec::new();
         for (project, tabs) in self.runtime.every_tab_set_mut() {
-            if tabs.mark_exited() && project == in_view {
+            let marked = tabs.mark_exited();
+            if !marked.is_empty() && project == in_view {
                 needs_draw = true;
                 draw_reason = 3;
             }
+            exited.extend(marked);
+        }
+        for label in exited {
+            self.state.note_event(&format!("tab ended: {label}"));
         }
         (needs_draw, draw_reason)
     }

@@ -22,13 +22,18 @@ pub enum Write {
 pub const CAP: u64 = 1 << 20;
 
 /// Start the writer for files in `dir`; `earlier` hears each session's lines
-/// from before, once it's named.
-pub fn spawn(dir: PathBuf, earlier: impl Fn(Vec<String>) + Send + 'static) -> Sender<Write> {
+/// from before, once it's named. The thread ends once every sender has gone
+/// and it has written what they sent; `None` when it couldn't start.
+pub fn spawn(
+    dir: PathBuf,
+    earlier: impl Fn(Vec<String>) + Send + 'static,
+) -> (Sender<Write>, Option<std::thread::JoinHandle<()>>) {
     let (tx, rx) = channel();
-    std::thread::Builder::new()
+    let thread = std::thread::Builder::new()
         .name("event-log".into())
         .spawn(move || run(&dir, &rx, &earlier))
-        .map_or_else(|_| channel().0, |_| tx)
+        .ok();
+    (tx, thread)
 }
 
 fn run(dir: &Path, rx: &Receiver<Write>, earlier: &dyn Fn(Vec<String>)) {
@@ -132,7 +137,7 @@ mod tests {
         let events = dir.path().join("events");
         append(&events, &events.join("SAGE.log"), &["old".into()]).unwrap();
         let (heard_tx, heard) = channel();
-        let tx = spawn(events.clone(), move |lines| {
+        let (tx, thread) = spawn(events.clone(), move |lines| {
             let _ = heard_tx.send(lines);
         });
         tx.send(Write::Session("SAGE".into())).unwrap();
@@ -151,10 +156,7 @@ mod tests {
             ["clove's"]
         );
         drop(tx);
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while events.join("SAGE.log").exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        thread.unwrap().join().unwrap();
         assert!(!events.join("SAGE.log").exists());
         assert_eq!(
             read_lines(&events.join("CLOVE.log")),

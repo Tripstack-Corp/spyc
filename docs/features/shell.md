@@ -319,7 +319,21 @@ a helper program's complaint.
 ## The session's event log
 
 Every message the status line shows is kept, with its time, in the session's
-event log, so one that went by before you could read it is still there.
+event log, so one that went by before you could read it is still there. So is
+each event of the session's life:
+
+- spyc starting, and `:q` or `spyc shutdown` ending it;
+- `^d` moving spyc into the session's own jar, and each terminal attaching
+  (with its size) and detaching;
+- `:upgrade`, and each tab's jar moving to the new build;
+- a tab started, taken back from its jar after a restart, failing to start,
+  or ending;
+- an agent connecting to spyc's tools or leaving them;
+- an agent that needs you, finishes or fails;
+- projects opened and closed, and config reloaded.
+
+Hints about what you just did, such as where focus went, show on the status
+line but aren't kept.
 
 - **`:events`** (or **`:log`**) opens the log in the pager, newest last, an
   error in red. New events appear in it while it's open, and `/` searches it.
