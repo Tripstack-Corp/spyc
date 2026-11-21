@@ -397,7 +397,11 @@ release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal 
 		target/aarch64-apple-darwin/release/$(BINARY) \
 		target/x86_64-apple-darwin/release/$(BINARY) \
 		-output $(DIST_DIR)/$(BINARY)-macos-universal
-	@echo "→ $(DIST_DIR)/$(BINARY)-macos-universal"
+	lipo -create \
+		target/aarch64-apple-darwin/release/$(JAR) \
+		target/x86_64-apple-darwin/release/$(JAR) \
+		-output $(DIST_DIR)/$(JAR)-macos-universal
+	@echo "→ $(DIST_DIR)/$(BINARY)-macos-universal, $(DIST_DIR)/$(JAR)-macos-universal"
 	@ls -lh $(DIST_DIR)/$(BINARY)-macos-universal
 	@file $(DIST_DIR)/$(BINARY)-macos-universal
 
@@ -450,6 +454,10 @@ dist: release-macos-universal release-linux-x86 release-linux-arm ## Build all p
 		$(DIST_DIR)/$(BINARY)-linux-x86_64
 	cp target/aarch64-unknown-linux-musl/release/$(BINARY) \
 		$(DIST_DIR)/$(BINARY)-linux-aarch64
+	cp target/x86_64-unknown-linux-musl/release/$(JAR) \
+		$(DIST_DIR)/$(JAR)-linux-x86_64
+	cp target/aarch64-unknown-linux-musl/release/$(JAR) \
+		$(DIST_DIR)/$(JAR)-linux-aarch64
 	@echo ""
 	@echo "=== dist/ ==="
 	@ls -lh $(DIST_DIR)/
@@ -491,12 +499,12 @@ DEB_MAINTAINER ?= Derek Marshall <derek.marshall@tripstack.com>
 DEB_VERSION := $(subst -,~,$(VERSION))
 
 .PHONY: deb-x86
-deb-x86: ## Package the built Linux x86_64 binary → dist/spyc_<version>_amd64.deb
+deb-x86: ## Package the built Linux x86_64 spyc and spyc-jar → dist/spyc_<version>_amd64.deb
 	@$(MAKE) --no-print-directory _deb ARCH=amd64 \
 		SRC=target/x86_64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: deb-arm
-deb-arm: ## Package the built Linux aarch64 binary → dist/spyc_<version>_arm64.deb
+deb-arm: ## Package the built Linux aarch64 spyc and spyc-jar → dist/spyc_<version>_arm64.deb
 	@$(MAKE) --no-print-directory _deb ARCH=arm64 \
 		SRC=target/aarch64-unknown-linux-musl/release/$(BINARY)
 
@@ -521,6 +529,11 @@ _deb:
 	@rm -rf "$(DIST_DIR)/deb-$(ARCH)"
 	@mkdir -p "$(DIST_DIR)/deb-$(ARCH)/DEBIAN" "$(DIST_DIR)/deb-$(ARCH)/usr/bin"
 	@install -m 0755 "$(SRC)" "$(DIST_DIR)/deb-$(ARCH)/usr/bin/$(BINARY)"
+	@# spyc-jar, built beside spyc. A release from before it shipped has none,
+	@# and apt.yml rebuilds that release's deb without it.
+	@if [ -f "$(dir $(SRC))$(JAR)" ]; then \
+		install -m 0755 "$(dir $(SRC))$(JAR)" "$(DIST_DIR)/deb-$(ARCH)/usr/bin/$(JAR)"; \
+	fi
 	@printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s\nSection: utils\nPriority: optional\nHomepage: https://github.com/Tripstack-Corp/spyc\nDescription: Keyboard-driven, MCP-native terminal file commander\n' \
 		"$(BINARY)" "$(DEB_VERSION)" "$(ARCH)" "$(DEB_MAINTAINER)" \
 		> "$(DIST_DIR)/deb-$(ARCH)/DEBIAN/control"

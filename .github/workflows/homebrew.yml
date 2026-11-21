@@ -106,6 +106,8 @@ jobs:
           awk -v v="$V" -v m="$MAC" -v x="$LX" -v a="$LA" -v macos="$MACOS_MIN" -v out="$f.new" '
             /^ *depends_on macos: /             { next }
             /^  version "/                      { sub(/"[^"]*"/, "\"" v "\""); vseen = 1 }
+            /^ *bin\.install "spyc"$/           { sub(/"spyc"$/, "\"spyc\", \"spyc-jar\"") }
+            /^ *bin\.install "spyc", "spyc-jar"$/ { jseen = 1 }
             /url ".*-macos-universal\.tar\.gz"/ { want = m; tag = "macos-universal" }
             /url ".*-linux-x86_64\.tar\.gz"/    { want = x; tag = "linux-x86_64" }
             /url ".*-linux-aarch64\.tar\.gz"/   { want = a; tag = "linux-aarch64" }
@@ -117,6 +119,7 @@ jobs:
             /^  on_macos do$/                   { print "    depends_on macos: :" macos > out; mseen = 1 }
             END {
               if (bad) exit 1
+              if (!jseen) { print "no `bin.install \"spyc\"` line to install spyc-jar with"; exit 1 }
               if (!vseen) { print "no `version \"...\"` line to bump"; exit 1 }
               if (!mseen) { print "no `on_macos do` block for the macOS requirement"; exit 1 }
               if (want != "") { print "url for " tag " has no sha256 under it"; exit 1 }
@@ -125,7 +128,7 @@ jobs:
             }
           ' "$f" || { rm -f "$f.new"; echo "formula layout unexpected — bailing"; exit 1; }
           mv "$f.new" "$f"
-          echo "--- updated formula ---"; grep -E 'version "|sha256 "|depends_on macos:' "$f"
+          echo "--- updated formula ---"; grep -E 'version "|sha256 "|depends_on macos:|bin\.install' "$f"
 
       - name: Commit + push to the tap
         run: |

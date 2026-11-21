@@ -1,4 +1,5 @@
-"""The Homebrew formula asks for the macOS spyc is built for.
+"""The Homebrew formula asks for the macOS spyc is built for, and installs
+spyc-jar beside spyc.
 
 `.cargo/config.toml` sets `MACOSX_DEPLOYMENT_TARGET`, and
 `.github/workflows/homebrew.yml` writes `depends_on macos: :$MACOS_MIN` into
@@ -50,6 +51,14 @@ class Spyc < Formula
       sha256 "0000000000000000000000000000000000000000000000000000000000000003"
     end
   end
+
+  def install
+    if build.head?
+      system "cargo", "install", *std_cargo_args
+    else
+      bin.install "spyc"
+    end
+  end
 end
 """
 
@@ -63,6 +72,14 @@ def rewrite_step():
     body = step.split("run: |\n", 1)[1]
     script = "\n".join(line[10:] for line in body.splitlines())
     return macos, script
+
+
+def write_sums(d):
+    """A SHA256SUMS naming each of 2.5.0's tarballs."""
+    Path(d, "SHA256SUMS").write_text(
+        "".join(f"{c * 64}  spyc-v2.5.0-{name}.tar.gz\n"
+                for c, name in [("a", "macos-universal"), ("b", "linux-x86_64"),
+                                ("c", "linux-aarch64")]), encoding="utf-8")
 
 
 class HomebrewMacosFloor(unittest.TestCase):
@@ -96,6 +113,35 @@ class HomebrewMacosFloor(unittest.TestCase):
                 self.assertIn(f"  on_macos do\n    depends_on macos: :{macos}\n    on_arm do\n", out)
                 self.assertIn('  version "2.5.0"', out)
             self.assertIn('depends_on "rust" => :build', out)
+
+    def test_the_rewrite_installs_spyc_jar_beside_spyc_once(self):
+        macos, script = rewrite_step()
+        script = script.replace("${{ steps.ver.outputs.version }}", "2.5.0")
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "tap/Formula").mkdir(parents=True)
+            formula = Path(d, "tap/Formula/spyc.rb")
+            formula.write_text(FORMULA, encoding="utf-8")
+            write_sums(d)
+            for run in (1, 2):
+                r = subprocess.run(["bash", "-c", script], cwd=d, env={"MACOS_MIN": macos, "PATH": "/usr/bin:/bin"},
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, f"run {run}: {r.stdout}{r.stderr}")
+                out = formula.read_text(encoding="utf-8")
+                self.assertEqual(out.count('bin.install "spyc", "spyc-jar"\n'), 1, f"run {run}: {out}")
+                self.assertNotIn('bin.install "spyc"\n', out)
+
+    def test_the_rewrite_fails_without_a_bin_install_line(self):
+        macos, script = rewrite_step()
+        script = script.replace("${{ steps.ver.outputs.version }}", "2.5.0")
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "tap/Formula").mkdir(parents=True)
+            Path(d, "tap/Formula/spyc.rb").write_text(
+                FORMULA.replace('bin.install "spyc"', 'libexec.install "spyc"'), encoding="utf-8")
+            write_sums(d)
+            r = subprocess.run(["bash", "-c", script], cwd=d, env={"MACOS_MIN": macos, "PATH": "/usr/bin:/bin"},
+                               capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("to install spyc-jar with", r.stdout)
 
     def test_the_rewrite_fails_without_an_on_macos_block(self):
         macos, script = rewrite_step()

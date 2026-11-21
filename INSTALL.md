@@ -55,7 +55,8 @@ sudo apt install spyc
 
 Download a tarball from the
 [Releases page](https://github.com/Tripstack-Corp/spyc/releases), verify
-it, and put the binary on your `PATH`:
+it, and put both its binaries on your `PATH`, side by side: `spyc` runs each
+pane tab's program in a `spyc-jar` it looks for beside itself.
 
 ```sh
 # pick the asset for your platform:
@@ -63,7 +64,7 @@ it, and put the binary on your `PATH`:
 #   spyc-<tag>-linux-x86_64.tar.gz      static, musl
 #   spyc-<tag>-linux-aarch64.tar.gz     static, musl
 tar xzf spyc-<tag>-<platform>.tar.gz
-install -m 755 spyc ~/.local/bin/
+install -m 755 spyc spyc-jar ~/.local/bin/
 ```
 
 Every release ships a `SHA256SUMS` file plus keyless signatures — verify

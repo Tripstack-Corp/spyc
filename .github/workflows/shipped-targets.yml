@@ -1,4 +1,4 @@
-# Link spyc for every target release.yml ships, in the dev profile, on every
+# Link spyc and spyc-jar for every target release.yml ships, in the dev profile, on every
 # PR. release.yml runs only on a tag, so a toolchain or dependency change that
 # breaks a release link stays invisible until the release: rustc 1.100 broke
 # the aarch64-musl link under cargo-zigbuild before 0.23 (#1154) with every PR
@@ -48,7 +48,7 @@ jobs:
       - uses: taiki-e/install-action@v2.90.3
         with:
           tool: cargo-zigbuild@${{ steps.pins.outputs.zigbuild }}
-      - name: Link spyc
+      - name: Link spyc and spyc-jar
         run: |
           ulimit -n 8192
-          cargo zigbuild --locked --bin spyc --target ${{ matrix.target }}
+          cargo zigbuild --locked --bin spyc --bin spyc-jar --target ${{ matrix.target }}
