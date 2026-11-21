@@ -12,6 +12,12 @@
 //! `:upgrade` first, by a notification on its MCP socket. Its start time
 //! can't say, since an upgrade in place keeps the pid; it is only the answer
 //! for a spyc that predates the question.
+//!
+//! It refuses to run inside spyc, as tmux refuses to nest: from a pane, or
+//! from anything a spyc or a pane's program started, the session would show
+//! inside one of its own panes, and every key and every frame would go round.
+//! `--force` attaches anyway, as `^d`'s handover does in the terminal spyc
+//! already holds.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -44,7 +50,14 @@ pub struct Running {
 
 /// `spyc attach [NAME]`: attach to the session `name`, or the one running,
 /// until this terminal detaches or spyc quits.
-pub fn run(name: Option<&str>) -> anyhow::Result<()> {
+pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
+    let pane = std::env::var_os("SPYC_PANE_ID");
+    let jar = std::env::var_os("SPYC_JAR_SOCKET").map(PathBuf::from);
+    if !force && let Some(why) = inside_spyc(pane.as_deref(), jar.as_deref()) {
+        anyhow::bail!(
+            "{why}: attaching here would show spyc inside itself. `spyc attach --force` attaches anyway"
+        );
+    }
     let running = running(&this_users_sessions());
     let chosen = match choose(&running, name).map_err(anyhow::Error::msg)? {
         Some(one) => one.clone(),
@@ -76,6 +89,25 @@ pub fn run(name: Option<&str>) -> anyhow::Result<()> {
     }
     crate::terminal::restore_on_signal();
     spyc_jar::attach::run(&chosen.socket, &token)
+}
+
+/// Why this shell runs inside spyc, where attaching would nest a session in
+/// itself: `pane` (`SPYC_PANE_ID`) is set, or `jar` (`SPYC_JAR_SOCKET`) names
+/// a jar that runs, or one that can't be told from a gone one. `None` when
+/// neither says so.
+fn inside_spyc(pane: Option<&std::ffi::OsStr>, jar: Option<&Path>) -> Option<String> {
+    if pane.is_some_and(|p| !p.is_empty()) {
+        return Some("this shell runs in a spyc pane (`SPYC_PANE_ID` is set)".into());
+    }
+    let jar = jar.filter(|j| !j.as_os_str().is_empty())?;
+    match socket_state(jar) {
+        SocketState::Live => Some(format!("this shell runs in a spyc jar ({})", jar.display())),
+        SocketState::Unknown => Some(format!(
+            "this shell may run in a spyc jar ({}), which can't be told from a gone one",
+            jar.display()
+        )),
+        SocketState::Stale | SocketState::Missing => None,
+    }
 }
 
 /// The pid of the session's spyc and the path it runs from, when the file there
@@ -317,6 +349,18 @@ fn take_over(session: &Running, pid: i32) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pane_or_a_jar_that_runs_says_this_shell_is_inside_spyc() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("gone.sock");
+        assert!(inside_spyc(Some("pane-1".as_ref()), None).is_some());
+        assert!(inside_spyc(Some("pane-1".as_ref()), Some(&gone)).is_some());
+        assert_eq!(inside_spyc(Some("".as_ref()), None), None);
+        assert_eq!(inside_spyc(None, Some(&gone)), None, "a jar long gone");
+        assert_eq!(inside_spyc(None, Some(Path::new(""))), None);
+        assert_eq!(inside_spyc(None, None), None);
+    }
 
     fn session(name: &str, client: Option<i32>) -> Running {
         Running {

@@ -246,7 +246,9 @@ there it's `^a Space d`. Your agents keep working, spyc keeps answering their to
 still arrive. `spyc attach` brings the same spyc back, in this terminal or another, over SSH
 or at another size: `spyc attach NAME` takes a session by the name spyc shows (such as
 `CORIANDER_CLOVE`), and with no name it takes the one running, or lists them and asks which.
-A session attached somewhere else moves to the terminal you attach from.
+A session attached somewhere else moves to the terminal you attach from. From inside spyc,
+a pane or a shell spyc started, `spyc attach` refuses, since the session would show inside
+one of its own panes; `spyc attach --force` attaches anyway.
 
 The first `^d` moves spyc into a jar of its own. Your tabs come with it, their programs
 untouched, but what `spyc -r` doesn't keep (cursors, picks, filters, open pagers) starts afresh.
