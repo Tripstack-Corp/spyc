@@ -165,10 +165,18 @@ jobs:
             rm -rf target/x86_64-unknown-linux-musl target/aarch64-unknown-linux-musl
             mkdir -p target/x86_64-unknown-linux-musl/release \
                      target/aarch64-unknown-linux-musl/release
-            tar xzf tarballs/spyc-*-linux-x86_64.tar.gz -C tarballs spyc
-            mv tarballs/spyc target/x86_64-unknown-linux-musl/release/spyc
-            tar xzf tarballs/spyc-*-linux-aarch64.tar.gz -C tarballs spyc
-            mv tarballs/spyc target/aarch64-unknown-linux-musl/release/spyc
+            # spyc, and spyc-jar where the release shipped one (`make deb`
+            # packages it when it's there).
+            for arch in x86_64 aarch64; do
+              rm -rf unpacked && mkdir unpacked
+              tar xzf tarballs/spyc-*-linux-${arch}.tar.gz -C unpacked
+              for bin in spyc spyc-jar; do
+                if [ -f "unpacked/$bin" ]; then
+                  mv "unpacked/$bin" "target/${arch}-unknown-linux-musl/release/$bin"
+                fi
+              done
+            done
+            rm -rf unpacked
             make deb VERSION="$ver"
             cp dist/spyc_*.deb aptrepo/
             rm -f dist/spyc_*.deb

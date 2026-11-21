@@ -11,6 +11,8 @@
 #   spyc-<tag>-linux-x86_64.tar.gz      static, musl
 #   spyc-<tag>-linux-aarch64.tar.gz     static, musl
 #   SHA256SUMS                          checksums over all three tarballs
+# Each tarball holds `spyc` and `spyc-jar`, which runs beside it, with the
+# LICENSE and README.
 #
 # Signing is keyless — no stored secrets (RELEASE_ENGINEERING.md §13.8):
 #   - GitHub build-provenance attestations   verify: `gh attestation verify <file>`
@@ -56,7 +58,8 @@ jobs:
       - name: Package tarball
         run: |
           install -m 0755 dist/spyc-macos-universal spyc
-          tar -czf "spyc-${GITHUB_REF_NAME}-macos-universal.tar.gz" spyc LICENSE README.md
+          install -m 0755 dist/spyc-jar-macos-universal spyc-jar
+          tar -czf "spyc-${GITHUB_REF_NAME}-macos-universal.tar.gz" spyc spyc-jar LICENSE README.md
       - uses: actions/upload-artifact@v7
         with:
           name: macos-universal
@@ -90,9 +93,11 @@ jobs:
       - name: Package tarballs
         run: |
           install -m 0755 target/x86_64-unknown-linux-musl/release/spyc spyc
-          tar -czf "spyc-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" spyc LICENSE README.md
+          install -m 0755 target/x86_64-unknown-linux-musl/release/spyc-jar spyc-jar
+          tar -czf "spyc-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" spyc spyc-jar LICENSE README.md
           install -m 0755 target/aarch64-unknown-linux-musl/release/spyc spyc
-          tar -czf "spyc-${GITHUB_REF_NAME}-linux-aarch64.tar.gz" spyc LICENSE README.md
+          install -m 0755 target/aarch64-unknown-linux-musl/release/spyc-jar spyc-jar
+          tar -czf "spyc-${GITHUB_REF_NAME}-linux-aarch64.tar.gz" spyc spyc-jar LICENSE README.md
       - uses: actions/upload-artifact@v7
         with:
           name: linux-musl

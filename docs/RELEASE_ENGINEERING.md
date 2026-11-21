@@ -392,7 +392,9 @@ are the source of truth — Actions *call them* so local and CI never drift.
   than `make dist` / `make dist-checksums`, which build *all* platforms on one
   host); a final `publish` job downloads the artifacts, computes `SHA256SUMS`,
   and creates the release with `gh release create` (no third-party publish
-  action). Three platform tarballs ship (macOS universal counts once). Signing
+  action). Three platform tarballs ship (macOS universal counts once), each
+  holding `spyc` and `spyc-jar`, which the `.deb`s and the Homebrew formula
+  install side by side (`scripts/test_release_ships_spyc_jar.py`). Signing
   is **keyless only** — build-provenance attestations + a cosign-signed
   `SHA256SUMS.cosign.bundle`; GPG (`make dist-sign`), the Homebrew tap, and the
   hand-written highlights block are fast-follows. Zig for the musl cross-links
