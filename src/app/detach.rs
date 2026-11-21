@@ -195,7 +195,9 @@ impl App {
             format!("{name}'s tabs run on in their jars: `spyc -r` takes them back")
         })?;
         let err = std::process::Command::new(&exe)
-            .args(["attach", name])
+            // `--force`: this terminal shows this spyc already, so nothing nests,
+            // though a spyc started in another's pane has that pane's env.
+            .args(["attach", "--force", name])
             .exec();
         Err(err).with_context(|| format!("become `spyc attach {name}`, which you can run"))
     }
