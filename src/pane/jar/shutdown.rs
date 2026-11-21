@@ -98,7 +98,7 @@ fn what_ends(session: &Running, tabs: &[String]) -> String {
 }
 
 /// The pid of the spyc a session's jar runs.
-fn program_pid(socket: &Path) -> Option<i32> {
+pub fn program_pid(socket: &Path) -> Option<i32> {
     field(&spyc_jar::client::describe(socket).ok()?, "program_pid")?
         .parse()
         .ok()

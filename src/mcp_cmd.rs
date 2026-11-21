@@ -194,6 +194,10 @@ pub enum McpCommand {
     /// where it runs from (`spyc/behind`), as `:upgrade` would find. Its
     /// start time can't say: an upgrade in place keeps the pid.
     Behind,
+    /// `:attach project` in another spyc asks this one to let its session
+    /// go (`spyc/release`): saved as no running spyc's, its jars let go, and
+    /// spyc gone. The answer names the session's file.
+    Release,
     /// What Claude Code's statusline told `spyc --statusline` in a pane: the
     /// plan's rate-limit windows, the context window and the vim mode.
     /// Fire-and-forget.

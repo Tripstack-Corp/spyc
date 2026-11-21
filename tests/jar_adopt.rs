@@ -768,7 +768,9 @@ fn dirs_with_agent(rest: &str) -> Dirs {
 /// tab's program runs on, taken back by the spyc the new session's jar
 /// starts, and the spyc it left runs on without it. The agent's MCP proxy
 /// follows its jar there, its scope claim goes with it, and so does the
-/// `blocked` it reported before the move, which it won't report again.
+/// `blocked` it reported before the move, which it won't report again. Then
+/// `:attach project NAME` brings it all back, the session's spyc gone and its
+/// file with it.
 #[test]
 fn detach_project_moves_a_project_and_its_agent_into_a_session_of_its_own() {
     let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
@@ -911,6 +913,60 @@ fn detach_project_moves_a_project_and_its_agent_into_a_session_of_its_own() {
     back.eventually("the tab's dot is blocked", || {
         squeezed(&back.since_last_screen()).contains("dot=blocked")
     });
+
+    // And back: `:attach` lists the session, and `:attach project NAME`
+    // brings its project home, its tab, claim and blocked agent with it.
+    first.type_keys(b":attach\r");
+    first.eventually("the session listed, attached", || {
+        squeezed(&first.since_last_screen()).contains(&format!("{name}attached"))
+    });
+    first.type_keys(b"q");
+    first.type_keys(format!(":attach project {name}\r").as_bytes());
+    let first_pid = first.pid().to_string();
+    first.eventually("this spyc owns the tab's jar again", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(first_pid.as_str())
+    });
+    let moved_pid: i32 = moved_spyc.parse().unwrap();
+    eventually("the session's spyc has gone", || !alive(moved_pid));
+    assert_eq!(
+        described(&tab_socket, "program_pid"),
+        Some(agent.to_string()),
+        "the tab's program was started again"
+    );
+    assert_eq!(
+        proxy.answering_spyc(5),
+        Ok(i64::from(first.pid())),
+        "the agent's MCP followed its jar home"
+    );
+    proxy.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"list_scopes\",\"arguments\":{}}}",
+    );
+    let scopes = proxy.reply().unwrap().to_string();
+    assert!(
+        scopes.contains("src/moved.rs"),
+        "the claim stayed behind: {scopes}"
+    );
+    let dumped = squeezed(&first.since_last_screen())
+        .matches("dot=blocked")
+        .count();
+    first.type_keys(b":activity dump\r");
+    first.eventually("the tab's dot is blocked here too", || {
+        squeezed(&first.since_last_screen())
+            .matches("dot=blocked")
+            .count()
+            > dumped
+    });
+    let named = format!("\"name\": \"{name}\"");
+    let left_behind: Vec<_> = std::fs::read_dir(dirs.state.join("spyc/sessions"))
+        .unwrap()
+        .flatten()
+        .filter(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains(&named)))
+        .map(|e| e.path())
+        .collect();
+    assert!(
+        left_behind.is_empty(),
+        "{name}'s file stayed: {left_behind:?}"
+    );
 }
 
 /// `text` without its escape sequences or spaces: what a line says, however

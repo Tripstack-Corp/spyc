@@ -146,7 +146,7 @@ impl App {
     }
 
     /// What runs outside a jar, which a handover would end.
-    fn unjarred(&self) -> Option<String> {
+    pub(super) fn unjarred(&self) -> Option<String> {
         for (_, tabs) in self.runtime.every_tab_set() {
             if let Some(entry) = tabs
                 .tabs()
@@ -233,7 +233,7 @@ impl App {
 
     /// Leave every jar running for the next spyc, its connection ended as a
     /// crash would, and clear what this spyc kept for itself.
-    fn release_jars(&mut self) {
+    pub(super) fn release_jars(&mut self) {
         for (_, tabs) in self.runtime.every_tab_set() {
             for entry in tabs.tabs() {
                 entry.pane.host.sever_jar();

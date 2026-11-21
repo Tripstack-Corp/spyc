@@ -14,6 +14,17 @@
 //! blocked on a prompt reports nothing until it's answered. An agent's MCP
 //! proxy follows its jar to the new spyc (R30a): this spyc closes the moved
 //! panes' connections on their next message, unanswered (`mcp::panes_moved`).
+//!
+//! `:attach project NAME` is the way back: another running session's projects
+//! come into this spyc. `:attach` lists the sessions there are. This spyc asks
+//! that session's spyc to let its session go (`spyc/release`), which saves it
+//! as no running spyc's, synced to disk, before it lets any jar go, answers
+//! with the file, and quits without saving again or signalling a program. This
+//! spyc then opens each of the file's projects beside its own, taking their
+//! jars back as `spyc -r` does, with their claims and last reports, saves its
+//! own session, and only then removes the other's file. A project it couldn't
+//! open stays in that file for `spyc -r`. An agent's MCP proxy follows its jar
+//! once the spyc it reached has gone.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -25,7 +36,8 @@ use super::state::ProjectId;
 use super::{App, Effect};
 use crate::pane::jar::session::Begin;
 use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
-use crate::state::sessions::{MANIFEST_VERSION, Manifest, SavedLive};
+use crate::state::scope_registry::ScopeClaim;
+use crate::state::sessions::{Held, MANIFEST_VERSION, Manifest, SavedLive};
 
 /// `:detach`, and `:detach project [name]`.
 pub(super) fn cmd_detach(app: &mut App, args: &str) -> Vec<Effect> {
@@ -126,23 +138,15 @@ impl App {
     /// with its tabs' scope claims and last status reports, and no running
     /// spyc's, so the spyc its jar starts restores it whole.
     pub(super) fn moved_manifest(&mut self, id: ProjectId, name: &str) -> Manifest {
-        let mut project = self.closed_snapshot(id).project;
-        let now = Instant::now();
-        let (owners, live): (HashSet<String>, HashMap<String, SavedLive>) =
-            self.in_project(id, |app| {
-                let tabs = app.runtime.project().pane_tabs.as_ref();
-                let tabs = tabs.map_or(&[][..], |t| t.tabs());
-                let owners = tabs.iter().map(|e| e.info.claim_owner.clone()).collect();
-                let live = tabs
-                    .iter()
-                    .filter_map(|e| Some((e.info.id.clone(), saved_live(&e.info, now)?)))
-                    .collect();
-                (owners, live)
-            });
-        for tab in &mut project.tabs {
-            tab.live = live.get(&tab.pane_id).cloned();
-        }
-        Manifest {
+        let project = self.closed_snapshot(id).project;
+        let owners: HashSet<String> = self.in_project(id, |app| {
+            let tabs = app.runtime.project().pane_tabs.as_ref();
+            tabs.map_or(&[][..], |t| t.tabs())
+                .iter()
+                .map(|e| e.info.claim_owner.clone())
+                .collect()
+        });
+        let mut manifest = Manifest {
             version: MANIFEST_VERSION,
             id: u64::try_from(crate::sysinfo::epoch_nanos() / 1_000_000).unwrap_or(u64::MAX),
             epoch_secs: crate::sysinfo::epoch_secs(),
@@ -161,6 +165,22 @@ impl App {
             projects: vec![project],
             closed_projects: Vec::new(),
             tasks: Vec::new(),
+        };
+        self.carry_live(&mut manifest);
+        manifest
+    }
+
+    /// Give each tab `manifest` saves the status its agent last reported here.
+    fn carry_live(&self, manifest: &mut Manifest) {
+        let now = Instant::now();
+        let live: HashMap<String, SavedLive> = self
+            .runtime
+            .every_tab_set()
+            .flat_map(|(_, tabs)| tabs.tabs())
+            .filter_map(|e| Some((e.info.id.clone(), saved_live(&e.info, now)?)))
+            .collect();
+        for tab in manifest.projects.iter_mut().flat_map(|p| &mut p.tabs) {
+            tab.live = live.get(&tab.pane_id).cloned();
         }
     }
 
@@ -255,6 +275,263 @@ impl App {
         }
         drawn
     }
+}
+
+/// `:attach`, and `:attach project NAME`.
+pub(super) fn cmd_attach(app: &mut App, args: &str) -> Vec<Effect> {
+    match super::command_table::split_name_args(args.trim()) {
+        ("", _) => app.list_sessions(),
+        ("project", name) if !name.is_empty() => app.attach_project(name),
+        _ => app.state.flash_error(format!(
+            "attach {}: `:attach`, or `:attach project NAME`",
+            args.trim()
+        )),
+    }
+    Vec::new()
+}
+
+/// Another session's spyc, asked to let its session go: the file it saved.
+pub(super) struct Released {
+    name: String,
+    session: Result<u64, String>,
+}
+
+impl App {
+    /// `:attach`: the other sessions running, each with its projects.
+    fn list_sessions(&mut self) {
+        let own = self.state.session_name.clone().unwrap_or_default();
+        let others: Vec<_> = crate::pane::jar::attach::running_here()
+            .into_iter()
+            .filter(|r| r.name != own)
+            .collect();
+        if others.is_empty() {
+            self.state.flash_info("attach: no other session runs");
+            return;
+        }
+        let saved = crate::state::sessions::load_manifests();
+        let mut lines: Vec<String> = others
+            .iter()
+            .map(|r| {
+                let projects = saved
+                    .iter()
+                    .filter(|m| m.name == r.name)
+                    .max_by_key(|m| m.epoch_secs)
+                    .map_or_else(
+                        || "(not saved yet)".to_string(),
+                        |m| crate::state::sessions::project_list_label(&m.projects),
+                    );
+                let terminal = if r.client.is_some() {
+                    "attached"
+                } else {
+                    "detached"
+                };
+                format!("{:<24} {terminal:<9} {projects}", r.name)
+            })
+            .collect();
+        lines.push(String::new());
+        lines.push("`:attach project NAME` brings a session's projects into this spyc".into());
+        self.view.project_mut().pager =
+            Some(crate::ui::pager::PagerView::new_plain("sessions", lines));
+    }
+
+    /// `:attach project NAME`: ask session `name`'s spyc, on a worker, to let
+    /// its session go for this one to take.
+    fn attach_project(&mut self, name: &str) {
+        if self.state.session_name.as_deref() == Some(name) {
+            self.state
+                .flash_error(format!("attach project: {name} is this session"));
+            return;
+        }
+        let Some(session) = crate::pane::jar::attach::running_here()
+            .into_iter()
+            .find(|r| r.name == name)
+        else {
+            self.state.flash_error(format!(
+                "attach project: no session named {name} runs; `:attach` lists them"
+            ));
+            return;
+        };
+        if let Some(open) = self.open_here_too(name) {
+            self.state.flash_error(format!(
+                "attach project: {name}'s project {open} is open here too"
+            ));
+            return;
+        }
+        self.state
+            .note_event(&format!("attaching {name}'s projects"));
+        let results = self
+            .runtime
+            .attach_releases
+            .sender_waking(self.loop_waker(Wake::PaneStart));
+        let (for_work, named) = (name.to_string(), name.to_string());
+        let socket = session.socket;
+        spawn_worker(
+            results,
+            move || Released {
+                name: for_work,
+                session: release(&socket),
+            },
+            move |why| Released {
+                name: named,
+                session: Err(why),
+            },
+        );
+    }
+
+    /// A project session `name` last saved that is open here as well, which
+    /// two spycs can't both have: its label.
+    fn open_here_too(&self, name: &str) -> Option<String> {
+        let saved = crate::state::sessions::load_manifests()
+            .into_iter()
+            .filter(|m| m.name == name)
+            .max_by_key(|m| m.epoch_secs)?;
+        saved
+            .projects
+            .iter()
+            .find(|p| self.project_at_saved(p).is_some())
+            .map(|p| p.label.clone())
+    }
+
+    /// What the asked spycs let go. Whether there is anything to draw.
+    pub(crate) fn apply_attach_releases(&mut self) -> bool {
+        let landed = self.runtime.attach_releases.drain();
+        let drawn = !landed.is_empty();
+        for Released { name, session } in landed {
+            let manifest = session.and_then(|id| {
+                crate::state::sessions::load_manifests()
+                    .into_iter()
+                    .find(|m| m.id == id)
+                    .ok_or_else(|| format!("the session it saved ({id}) isn't there"))
+            });
+            match manifest {
+                Ok(manifest) => self.take_session(&name, &manifest),
+                Err(why) => self
+                    .state
+                    .flash_error(format!("attach project {name}: {why}")),
+            }
+        }
+        drawn
+    }
+
+    /// Open each of `manifest`'s projects beside this spyc's, their jars taken
+    /// back, with their claims and tasks; save this session, then remove that
+    /// one's file, unless a project of it couldn't open.
+    pub(super) fn take_session(&mut self, name: &str, manifest: &Manifest) {
+        let held = Held::by_running(&crate::state::sessions::load_manifests());
+        // A tab that moved away from this spyc and comes back is answered here.
+        let panes: Vec<String> = manifest
+            .projects
+            .iter()
+            .flat_map(|p| &p.tabs)
+            .map(|t| t.pane_id.clone())
+            .collect();
+        crate::mcp::panes_returned(&panes);
+        let (mut opened, mut stayed) = (Vec::new(), Vec::new());
+        for saved in &manifest.projects {
+            match self.restore_out_of_view(saved, false, &held) {
+                Some(project) => opened.push((project.id, saved.label.clone())),
+                None => stayed.push(saved.label.clone()),
+            }
+        }
+        self.take_claims(&manifest.scope_claims);
+        self.restore_tasks(&manifest.tasks);
+        self.record_open_roots();
+        if let Some((first, _)) = opened.first() {
+            self.switch_project(*first);
+        }
+        // SPYC-TRAP(move-saved-before-release): this session holds the
+        // projects on disk before the file that held them goes.
+        let mut own = self.build_manifest();
+        self.carry_live(&mut own);
+        let kept = crate::state::sessions::save_session_durably(&own);
+        if kept.is_ok() {
+            self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+        }
+        if kept.is_ok()
+            && stayed.is_empty()
+            && let Err(e) = crate::state::sessions::remove_session(manifest.id)
+        {
+            crate::spyc_debug!("attach: {name}'s file stays: {e:#}");
+        }
+        let labels: Vec<&str> = opened.iter().map(|(_, l)| l.as_str()).collect();
+        if stayed.is_empty() {
+            self.state
+                .flash_info(format!("attached {name}'s projects: {}", labels.join(", ")));
+        } else {
+            self.state.flash_error(format!(
+                "attached {name}'s projects but {}, which stayed in its saved session: \
+                 `spyc -r` takes them back",
+                stayed.join(", ")
+            ));
+        }
+    }
+
+    /// Take `claims` into this spyc's registry, each keeping its id unless a
+    /// claim here has it.
+    fn take_claims(&mut self, claims: &[ScopeClaim]) {
+        for claim in claims {
+            let mut claim = claim.clone();
+            let registry = &self.state.scope_registry;
+            if registry.iter().any(|c| c.id == claim.id) {
+                claim.id = registry.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+            }
+            self.state.scope_registry.push(claim);
+        }
+    }
+
+    /// `spyc/release`, from `:attach project` in another spyc: save the
+    /// session as no running spyc's, synced, let every jar go, and quit
+    /// without saving again or signalling a program. Refused while something
+    /// would end with this spyc.
+    pub(super) fn release_session(&mut self) -> crate::mcp_cmd::McpResponse {
+        use crate::mcp_cmd::McpResponse;
+        if let Some(what) = self.what_cant_be_released() {
+            return McpResponse::Error {
+                message: format!("{what}, so it stays"),
+            };
+        }
+        let mut manifest = self.build_manifest();
+        manifest.pid = None;
+        manifest.process_started = None;
+        self.carry_live(&mut manifest);
+        if let Err(e) = crate::state::sessions::save_session_durably(&manifest) {
+            return McpResponse::Error {
+                message: format!("its session wasn't saved, so it stays: {e:#}"),
+            };
+        }
+        self.release_jars();
+        self.runtime.released = true;
+        self.state
+            .note_event("released: another spyc takes this session's projects");
+        self.state.should_quit = true;
+        McpResponse::Ok {
+            message: serde_json::json!({ "session": manifest.id }).to_string(),
+        }
+    }
+
+    /// What would end, or not come along, if this spyc let its session go.
+    fn what_cant_be_released(&mut self) -> Option<String> {
+        if let Some(what) = self.unjarred() {
+            return Some(format!("{what} runs outside a jar"));
+        }
+        // Collected first: each look goes into its project, which needs `self`.
+        let ids: Vec<ProjectId> = self.state.open_projects().map(|p| p.id).collect();
+        for id in ids {
+            if let Some(what) = self.what_cant_move(id) {
+                return Some(what);
+            }
+        }
+        None
+    }
+}
+
+/// Ask the spyc session jar `socket` runs to let its session go: the file it
+/// saved.
+fn release(socket: &std::path::Path) -> Result<u64, String> {
+    let pid = crate::pane::jar::shutdown::program_pid(socket)
+        .and_then(|p| u32::try_from(p).ok())
+        .ok_or("its jar names no spyc")?;
+    crate::mcp::ask_release(pid).map_err(|e| format!("{e:#}"))
 }
 
 /// A session name no running session and no saved one has.

@@ -206,6 +206,10 @@ type ConversationClaims =
 
 impl App {
     pub fn save_session(&mut self) {
+        // A session let go to another spyc is that spyc's to save now.
+        if self.runtime.released {
+            return;
+        }
         // SPYC-TRAP(session-prune-by-last-save): every file holds a picker slot,
         // so an empty quit writes nothing new. An existing file is still
         // overwritten, or tabs closed before quitting would come back on `-r`.
@@ -232,6 +236,9 @@ impl App {
     /// summary), returning whether the write succeeded. Called by
     /// [`Self::settle_autosave`] when the debounce window elapses.
     pub(super) fn autosave_session(&mut self) -> bool {
+        if self.runtime.released {
+            return false;
+        }
         let manifest = self.build_manifest();
         crate::state::sessions::save_session(&manifest).is_ok()
     }

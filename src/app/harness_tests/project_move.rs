@@ -135,3 +135,134 @@ fn the_moved_session_holds_the_project_its_claims_and_its_agents_reports() {
         assert_eq!(claims, [1]);
     });
 }
+
+#[test]
+fn attaching_this_sessions_own_projects_is_refused() {
+    with_two(|app, _, _, _| {
+        app.state.session_name = Some("OWN_NAME".into());
+        super::super::project_move::cmd_attach(app, "project OWN_NAME");
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(flash.contains("OWN_NAME is this session"), "{flash}");
+        super::super::project_move::cmd_attach(app, "nonsense");
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(flash.contains(":attach project NAME"), "{flash}");
+    });
+}
+
+/// `spyc/release` with a tab outside a jar: refused, nothing saved, spyc on.
+#[test]
+fn a_session_with_a_tab_outside_a_jar_isnt_released() {
+    with_two(|app, [x, _], homes, state| {
+        agent_tab_in(app, x, &homes[0], "claude");
+        let answer = app.release_session();
+        assert!(
+            matches!(&answer, crate::mcp_cmd::McpResponse::Error { message } if message.contains("outside a jar")),
+            "{answer:?}"
+        );
+        assert!(!app.state.should_quit);
+        assert_eq!(saved_files(state), 0);
+    });
+}
+
+/// A released session is saved once, as no running spyc's, with its claims;
+/// spyc quits, and saves nothing over it on the way.
+#[test]
+fn a_released_session_is_saved_once_for_the_spyc_that_takes_it() {
+    with_two(|app, _, _, state| {
+        app.state.session_name = Some("GIVEN_AWAY".into());
+        claim(app, 1, String::new(), "src/x.rs");
+        let crate::mcp_cmd::McpResponse::Ok { message } = app.release_session() else {
+            panic!("refused");
+        };
+        let id = serde_json::from_str::<serde_json::Value>(&message).unwrap()["session"]
+            .as_u64()
+            .unwrap();
+        assert!(app.state.should_quit);
+        let saved = crate::state::sessions::load_manifests();
+        let [manifest] = saved.as_slice() else {
+            panic!("{saved:?}");
+        };
+        assert_eq!((manifest.id, manifest.pid), (id, None));
+        assert_eq!(manifest.projects.len(), 2);
+        assert_eq!(manifest.scope_claims.len(), 1);
+        let written = std::fs::read_dir(state.join("sessions"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let before = std::fs::read_to_string(&written).unwrap();
+        app.save_session();
+        assert_eq!(
+            std::fs::read_to_string(&written).unwrap(),
+            before,
+            "saved over"
+        );
+        assert_eq!(saved_files(state), 1);
+    });
+}
+
+/// A spyc that let its session go ends no program on its way out: they're
+/// the other spyc's now.
+#[test]
+fn a_released_spycs_teardown_leaves_its_programs_running() {
+    with_two(|app, [x, _], homes, _| {
+        agent_tab_in(app, x, &homes[0], "claude");
+        let pid = app.as_project(x, |app| {
+            app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0]
+                .pane
+                .process_id()
+                .unwrap()
+        });
+        app.runtime.released = true;
+        app.run_teardown();
+        let alive = |pid: u32| {
+            rustix::process::Pid::from_raw(i32::try_from(pid).unwrap())
+                .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
+        };
+        assert!(alive(pid), "teardown ended the tab's program");
+        app.runtime.released = false;
+        app.run_teardown();
+    });
+}
+
+/// Taking a released session: its projects open beside this spyc's, its
+/// claims come too, one renumbered whose id a claim here has, and its file
+/// goes once this session is saved.
+#[test]
+fn a_taken_session_opens_beside_this_one_and_its_file_goes() {
+    with_two(|app, [x, y], homes, _| {
+        let elsewhere = homes[0].parent().unwrap().join("zproj");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let z = app.add_test_project(&elsewhere);
+        app.make_active(x);
+        let given = app.moved_manifest(z, "GIVEN_AWAY");
+        app.forget_project(z, "moved");
+        let mut given = given;
+        given.scope_claims.push(ScopeClaim {
+            id: 7,
+            owner: String::new(),
+            owner_label: "claude".into(),
+            paths: vec!["src/z.rs".into()],
+            intent: ScopeIntent::Editing,
+            pr: None,
+            note: None,
+            claimed_at_secs: 0,
+        });
+        crate::state::sessions::save_session_durably(&given).unwrap();
+        claim(app, 7, String::new(), "src/here.rs");
+        app.take_session("GIVEN_AWAY", &given);
+        assert_eq!(app.state.open_projects().count(), 3);
+        assert!(
+            app.state.active != x && app.state.active != y,
+            "the user isn't in it"
+        );
+        let ids: Vec<u64> = app.state.scope_registry.iter().map(|c| c.id).collect();
+        assert_eq!(ids, [7, 8]);
+        let names: Vec<String> = crate::state::sessions::load_manifests()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert!(!names.contains(&"GIVEN_AWAY".to_string()), "{names:?}");
+    });
+}

@@ -535,7 +535,13 @@ impl App {
         // drop, but do it explicitly so the temp files don't linger if the
         // process exits without unwinding). Capture buffers are session-scoped.
         self.runtime.capture_spill_dir.take();
-        for (_, tabs) in self.runtime.every_tab_set_mut() {
+        // A session let go to another spyc keeps its programs: theirs now.
+        let ending = if self.runtime.released {
+            Vec::new()
+        } else {
+            self.runtime.every_tab_set_mut().collect()
+        };
+        for (_, tabs) in ending {
             for entry in tabs.tabs_mut() {
                 let label = entry.info.label.clone();
                 let pid = entry.pane.process_id();
