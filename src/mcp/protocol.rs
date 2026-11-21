@@ -87,29 +87,10 @@ pub(super) struct Caller {
     initialized: bool,
 }
 
-/// The panes whose projects moved to a session of their own (`:detach
-/// project`). A connection bound to one is closed on its next message,
-/// unanswered, so its proxy follows the pane's jar to the spyc that has it now
-/// (R30a) and sends the message there.
-static MOVED_PANES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
-
-/// Mark `panes` moved ([`MOVED_PANES`]).
-pub fn panes_moved(panes: impl IntoIterator<Item = String>) {
-    MOVED_PANES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .extend(panes);
-}
-
 impl Caller {
     /// Whether its pane moved to another spyc.
     pub(super) fn moved(&self) -> bool {
-        self.pane_id.as_ref().is_some_and(|id| {
-            MOVED_PANES
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .contains(id)
-        })
+        self.pane_id.as_deref().is_some_and(super::moved::is_moved)
     }
 
     pub(super) fn connection(conn: u64) -> Self {
@@ -140,6 +121,37 @@ pub(super) const SHUTDOWN_METHOD: &str = "spyc/shutdown";
 /// The request `spyc attach` sends a session's spyc to learn whether a newer
 /// spyc is installed where it runs from: `{"behind": bool}`.
 pub(super) const BEHIND_METHOD: &str = "spyc/behind";
+
+/// The request `:attach project` sends another session's spyc to have it let
+/// its session go for the asking spyc to take: `{"session": <id>}`, the file
+/// it saved.
+pub(super) const RELEASE_METHOD: &str = "spyc/release";
+
+/// How long the socket thread waits for the loop to release its session: a
+/// save, which resolves each agent's conversation from its files.
+const RELEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The loop's JSON answer to `command`, or its error, within `wait`.
+fn ask_within(
+    tx: &std::sync::mpsc::Sender<McpRequest>,
+    command: McpCommand,
+    wait: std::time::Duration,
+) -> Result<Value, String> {
+    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    tx.send(McpRequest {
+        command,
+        reply: reply_tx,
+        project: None,
+    })
+    .map_err(|_| "spyc's loop has gone".to_string())?;
+    match reply_rx.recv_timeout(wait) {
+        Ok(McpResponse::Ok { message }) => {
+            serde_json::from_str(&message).map_err(|e| e.to_string())
+        }
+        Ok(McpResponse::Error { message }) => Err(message),
+        Err(_) => Err("spyc didn't answer".into()),
+    }
+}
 
 fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
     let (reply_tx, _) = std::sync::mpsc::channel();
@@ -481,6 +493,13 @@ pub(super) fn dispatch_for(
             Some(answer) => send_result(w, &id, answer),
             None => send_error(w, id, -32000, "spyc didn't answer"),
         },
+        RELEASE_METHOD => {
+            match cmd_tx.map(|tx| ask_within(tx, McpCommand::Release, RELEASE_WAIT)) {
+                Some(Ok(answer)) => send_result(w, &id, answer),
+                Some(Err(why)) => send_error(w, id, -32000, &why),
+                None => send_error(w, id, -32000, "spyc didn't answer"),
+            }
+        }
         SHUTDOWN_METHOD => {
             if let Some(tx) = cmd_tx {
                 tell(tx, McpCommand::Shutdown);

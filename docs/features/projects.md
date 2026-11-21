@@ -267,6 +267,12 @@ and an agent that was waiting on you still shows it. `spyc attach NAME` reaches 
 session. The only project open stays (`^d` detaches all of spyc), and so does one with a
 tab outside a jar, a tab still starting, or an editor open.
 
+`:attach` lists the other sessions running, each with its projects and whether a terminal is
+attached to it. `:attach project NAME` brings that session's projects into this spyc, beside
+yours, their tabs running on and their claims and waiting agents with them, and that session
+ends: a terminal attached to it is let go. It's refused while one of its projects is open here
+too, or while it has a tab outside a jar, a tab still starting or an editor open.
+
 `Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `spyc shutdown` does the same
 from outside the session, attached or not: it picks the session as `spyc attach` does, lists
 the tabs that end with it and asks first (`-y` doesn't ask). The session is saved, so `spyc -r`

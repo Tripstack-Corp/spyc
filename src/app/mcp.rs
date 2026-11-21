@@ -309,6 +309,7 @@ impl App {
             }
             McpCommand::ClearPicks => self.mcp_clear_picks(),
             McpCommand::Behind => self.answer_behind(),
+            McpCommand::Release => self.release_session(),
             McpCommand::CreateWorktree { .. }
             | McpCommand::RemoveWorktree { .. }
             | McpCommand::CleanWorktree { .. } => {

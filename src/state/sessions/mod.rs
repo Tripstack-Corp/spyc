@@ -250,6 +250,14 @@ fn session_file_name(id: u64) -> String {
     format!("{id}.json")
 }
 
+/// Remove the session saved under `id`: one another spyc has taken whole
+/// (`:attach project`), now saved in that spyc's own.
+pub fn remove_session(id: u64) -> std::io::Result<()> {
+    let dir = sessions_dir()
+        .ok_or_else(|| std::io::Error::other("no state directory to remove the session from"))?;
+    std::fs::remove_file(dir.join(session_file_name(id)))
+}
+
 /// Whether a restore point is already saved under `id`.
 pub fn session_exists(id: u64) -> bool {
     sessions_dir().is_some_and(|dir| dir.join(session_file_name(id)).is_file())

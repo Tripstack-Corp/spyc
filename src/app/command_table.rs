@@ -101,6 +101,7 @@ pub const COMMAND_TABLE: &[CommandSpec] = &[
     app("activity", commands::cmd_activity),
     app("agent", commands::cmd_agent),
     app("archive", commands::cmd_archive),
+    app("attach", project_move::cmd_attach),
     app("bnext", commands::cmd_bnext),
     app("bprev", commands::cmd_bprev),
     pure("cd"),

@@ -297,6 +297,11 @@ pub(super) struct Runtime {
     pub(super) jar_upgrade_results: Landing<(String, String, super::jar_upgrades::Looked)>,
     /// A detached project's session jar, started or not (`project_move`).
     pub(super) moved_starts: Landing<super::project_move::MovedStart>,
+    /// Another session's spyc, asked to let its session go (`:attach project`).
+    pub(super) attach_releases: Landing<super::project_move::Released>,
+    /// This spyc let its session go to another (`spyc/release`): it saves
+    /// nothing more and signals no tab on its way out.
+    pub(super) released: bool,
     /// The place every tab's jar starts in: this user's when `None`, a
     /// test's own otherwise.
     pub(super) jar_place: Option<crate::pane::jar::Place>,
@@ -449,6 +454,8 @@ impl Runtime {
             jar_upgrades: super::jar_upgrades::JarUpgrades::default(),
             jar_upgrade_results: Landing::default(),
             moved_starts: Landing::default(),
+            attach_releases: Landing::default(),
+            released: false,
             jar_place: None,
             jarless: super::jarless::Jarless::default(),
             jump_default_seq: 0,
