@@ -53,6 +53,7 @@ struct JarredLaunch {
     context_path: std::path::PathBuf,
     extra_env: Vec<(String, String)>,
     project_env: Vec<(String, String)>,
+    ssh_agent: Option<std::path::PathBuf>,
 }
 
 impl JarredLaunch {
@@ -89,6 +90,7 @@ impl JarredLaunch {
                 context_path: &self.context_path,
                 extra_env: &env,
                 project_env: &self.project_env,
+                ssh_agent: self.ssh_agent.as_deref(),
                 jar: spec,
             },
             wake,
@@ -136,6 +138,7 @@ impl App {
                 .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
                 .collect(),
             project_env: launch.project_env.to_vec(),
+            ssh_agent: launch.ssh_agent.map(std::path::Path::to_path_buf),
         };
         let taking = Taking::Start(restoring.cloned().map(Box::new));
         self.start_jarred_pane(self.state.active, owned, tab, taking, wake)
@@ -174,6 +177,7 @@ impl App {
                 extra_env: Vec::new(),
                 // A retake starts nothing.
                 project_env: Vec::new(),
+                ssh_agent: None,
             };
             let wake = self.make_pane_wake();
             let taking = Taking::Retake(socket.clone());

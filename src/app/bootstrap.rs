@@ -29,6 +29,8 @@ impl App {
             self.state.session_name_fixed = true;
         }
         self.runtime.own_jar = jar;
+        // The agent of the terminal that attached, which `spyc attach` named.
+        self.follow_attached_agent();
     }
 
     /// A spyc, its session picked with `-r` when `resume`. One that

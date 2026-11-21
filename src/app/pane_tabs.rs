@@ -344,6 +344,7 @@ impl App {
         let jars = self.state.active_project().config.pane.jars;
         let command = self.spawn_command(cmd).into_owned();
         let context_path = self.view.project().context_path.clone();
+        let ssh_agent = self.tab_ssh_agent(&pane_id);
         let launch = crate::pane::Launch {
             command: &command,
             rows,
@@ -352,6 +353,7 @@ impl App {
             context_path: &context_path,
             extra_env: &extra_env,
             project_env: &self.state.active_project().env.pairs(),
+            ssh_agent: ssh_agent.as_deref(),
             jar: None,
         };
         match self.launch_tab_pane(launch, jars, &pane_id, restoring, wake) {
@@ -463,6 +465,7 @@ impl App {
         let jars = self.state.active_project().config.pane.jars;
         let command = self.spawn_command(cmd).into_owned();
         let context_path = self.view.project().context_path.clone();
+        let ssh_agent = self.tab_ssh_agent(&pane_id);
         let launch = crate::pane::Launch {
             command: &command,
             rows,
@@ -471,6 +474,7 @@ impl App {
             context_path: &context_path,
             extra_env: &extra_env,
             project_env: &self.state.active_project().env.pairs(),
+            ssh_agent: ssh_agent.as_deref(),
             jar: None,
         };
         match self.launch_tab_pane(launch, jars, &pane_id, None, wake) {
@@ -943,53 +947,6 @@ impl App {
         match self.focused_side() {
             state::Side::Right => self.view.project().pager_right.as_ref().map(|v| v.mount),
             state::Side::Left => self.view.project().pager.as_ref().map(|v| v.mount),
-        }
-    }
-
-    /// `:dump-scrollback` diagnostic. Runs the same drain +
-    /// snapshot path as `^a-v`, then writes the captured lines as
-    /// plain text to `/tmp/spyc-scrollback.txt`. Tail the file to
-    /// confirm whether content visible on the live pane (HUD
-    /// overlays, etc.) is actually reaching our terminal engine at
-    /// snapshot time.
-    pub fn dump_scrollback_snapshot(&mut self) {
-        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
-            self.state.flash_error("dump-scrollback: no pane open");
-            return;
-        };
-        let active = tabs.active_mut();
-        for _ in 0..3 {
-            active.drain_output();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        active.drain_output();
-        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
-        let mut out = String::new();
-        for line in &lines {
-            for span in &line.spans {
-                out.push_str(&span.content);
-            }
-            out.push('\n');
-        }
-        // Owner-only (0600) in the state dir, not the old world-readable,
-        // symlink-followable `/tmp/spyc-scrollback.txt` (pane scrollback can
-        // contain anything the agent printed). Truncate so each dump is a
-        // fresh snapshot.
-        let name = "spyc-scrollback.txt";
-        let display = crate::state::state_file_path(name)
-            .map_or_else(|| name.to_string(), |p| p.display().to_string());
-        match crate::state::open_state_file_truncate(name) {
-            Some(mut f) => match std::io::Write::write_all(&mut f, out.as_bytes()) {
-                Ok(()) => self
-                    .state
-                    .flash_info(format!("wrote {} lines to {display}", lines.len())),
-                Err(e) => self
-                    .state
-                    .flash_error(format!("dump-scrollback: write failed: {e:#}")),
-            },
-            None => self
-                .state
-                .flash_error("dump-scrollback: no state dir for the output file".to_string()),
         }
     }
 }

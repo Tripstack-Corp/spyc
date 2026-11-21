@@ -12,6 +12,9 @@
 //! `:upgrade` first, by a notification on its MCP socket. Its start time
 //! can't say, since an upgrade in place keeps the pid; it is only the answer
 //! for a spyc that predates the question.
+//!
+//! The terminal's SSH agent goes with it: `spyc attach` names it, and the
+//! session's spyc points its tabs there (`pane::ssh_agent`).
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -58,6 +61,7 @@ pub fn run(name: Option<&str>) -> anyhow::Result<()> {
     };
     let token = super::tokens::load_in(&tokens_dir()?, &chosen.socket)
         .with_context(|| format!("no token kept for {}", chosen.name))?;
+    follow_this_agent(&chosen.name);
     if let Some(pid) = chosen.client {
         take_over(&chosen, pid)?;
     }
@@ -76,6 +80,19 @@ pub fn run(name: Option<&str>) -> anyhow::Result<()> {
     }
     crate::terminal::restore_on_signal();
     spyc_jar::attach::run(&chosen.socket, &token)
+}
+
+/// Point session `name`'s agent link at this terminal's SSH agent, which its
+/// spyc points its tabs at once this terminal attaches (`pane::ssh_agent`).
+/// With no agent here, the tabs keep theirs.
+fn follow_this_agent(name: &str) {
+    use crate::pane::ssh_agent;
+    let (Some(dir), Some(agent)) = (ssh_agent::links_dir(), ssh_agent::from_env()) else {
+        return;
+    };
+    if let Err(e) = agent.and_then(|a| ssh_agent::point(&ssh_agent::session_link(&dir, name), &a)) {
+        eprintln!("spyc: {name}'s tabs keep the SSH agent they have: {e:#}");
+    }
 }
 
 /// The pid of the session's spyc and the path it runs from, when the file there
