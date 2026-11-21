@@ -543,6 +543,7 @@ mod process_cwd;
 mod program_status;
 mod project_config;
 mod project_landings;
+mod project_move;
 mod project_switch;
 mod project_tabs;
 mod projects_attention;

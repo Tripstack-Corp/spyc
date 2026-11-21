@@ -351,6 +351,7 @@ fn a_restored_tab_whose_jar_is_stopped_is_taken_back_once_it_answers() {
             agent_hint: None,
             unopened: false,
             jar_socket: Some(socket),
+            live: None,
         };
         assert!(app.spawn_pane_tab(
             &program,

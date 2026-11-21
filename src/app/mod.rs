@@ -181,6 +181,7 @@ mod pre_recv;
 mod preview_ops;
 mod proc;
 mod process_cwd;
+mod project_move;
 mod project_switch;
 mod projects;
 mod prompt;

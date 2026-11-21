@@ -87,7 +87,31 @@ pub(super) struct Caller {
     initialized: bool,
 }
 
+/// The panes whose projects moved to a session of their own (`:detach
+/// project`). A connection bound to one is closed on its next message,
+/// unanswered, so its proxy follows the pane's jar to the spyc that has it now
+/// (R30a) and sends the message there.
+static MOVED_PANES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Mark `panes` moved ([`MOVED_PANES`]).
+pub fn panes_moved(panes: impl IntoIterator<Item = String>) {
+    MOVED_PANES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .extend(panes);
+}
+
 impl Caller {
+    /// Whether its pane moved to another spyc.
+    pub(super) fn moved(&self) -> bool {
+        self.pane_id.as_ref().is_some_and(|id| {
+            MOVED_PANES
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(id)
+        })
+    }
+
     pub(super) fn connection(conn: u64) -> Self {
         Self {
             conn: Some(conn),

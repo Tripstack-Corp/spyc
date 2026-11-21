@@ -121,6 +121,25 @@ pub struct SavedTab {
     /// again from an environment that may have changed (finding 14).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jar_socket: Option<PathBuf>,
+    /// What the tab's agent last reported, saved only when its project moves
+    /// to a session of its own (`:detach project`): an agent blocked on a
+    /// prompt reports nothing more until it's answered, so the spyc that
+    /// takes the tab learns it from the one that had it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<SavedLive>,
+}
+
+/// A tab's last status report, as a moved project carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedLive {
+    /// The reported state's name (`AgentActivity::name`).
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_on: Option<String>,
+    /// How long the report had left to live, in milliseconds.
+    pub left_ms: u64,
 }
 
 // Serde's skip callback receives a reference to the field.
@@ -199,14 +218,31 @@ pub fn save_session(manifest: &Manifest) -> std::io::Result<()> {
     let Some(dir) = sessions_dir() else {
         return Ok(());
     };
-    std::fs::create_dir_all(&dir)?;
-    let path = dir.join(session_file_name(manifest.id));
-    let json = serde_json::to_string_pretty(manifest).map_err(std::io::Error::other)?;
     // Atomic write (temp + rename) so a SIGKILL mid-write can't leave a
     // truncated/corrupt `<id>.json` — the crash-sufficiency contract the P3-2
     // debounced autosave relies on (and a free win for the quit-time save).
-    crate::fs::write_atomic(&path, json.as_bytes())?;
-    prune_old(&dir, &path);
+    save_in(&dir, manifest, crate::fs::write_atomic)
+}
+
+/// [`save_session`], on disk before it returns, and an error with nowhere to
+/// save it: a moved project's tabs are found by this file once spyc lets
+/// their jars go (finding 6).
+pub fn save_session_durably(manifest: &Manifest) -> std::io::Result<()> {
+    let dir = sessions_dir()
+        .ok_or_else(|| std::io::Error::other("no state directory to save the session in"))?;
+    save_in(&dir, manifest, crate::fs::write_durable)
+}
+
+fn save_in(
+    dir: &std::path::Path,
+    manifest: &Manifest,
+    write: fn(&std::path::Path, &[u8]) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join(session_file_name(manifest.id));
+    let json = serde_json::to_string_pretty(manifest).map_err(std::io::Error::other)?;
+    write(&path, json.as_bytes())?;
+    prune_old(dir, &path);
     Ok(())
 }
 

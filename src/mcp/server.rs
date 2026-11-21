@@ -696,6 +696,10 @@ fn serve_connection(
                 break;
             }
         };
+        if caller.moved() {
+            mcp_log("socket: its pane moved to another spyc; closed unanswered");
+            break;
+        }
         dispatch_for(writer, &msg, ctx_path, Some(cmd_tx), caller)?;
     }
     Ok(())

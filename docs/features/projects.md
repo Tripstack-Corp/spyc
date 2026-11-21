@@ -260,6 +260,13 @@ untouched, and what `spyc -r` doesn't keep starts afresh. In a plain spyc, `:upg
 `^d` whose jar runs the new spyc. `spyc attach` notices a session whose spyc is older than
 the one installed where it runs from, and asks whether to upgrade it before you attach.
 
+`:detach project` takes one project out of spyc and leaves it running as a session of its
+own, under a new name that spyc shows: the project in view, or `:detach project NAME` for
+another open one. Its tabs keep running, its agents keep spyc's tools and their scope claims,
+and an agent that was waiting on you still shows it. `spyc attach NAME` reaches the new
+session. The only project open stays (`^d` detaches all of spyc), and so does one with a
+tab outside a jar, a tab still starting, or an editor open.
+
 `Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `spyc shutdown` does the same
 from outside the session, attached or not: it picks the session as `spyc attach` does, lists
 the tabs that end with it and asks first (`-y` doesn't ask). The session is saved, so `spyc -r`

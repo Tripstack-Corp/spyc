@@ -75,9 +75,7 @@ impl AppState {
         if input == "q" || input == "quit" {
             return CommandResult::Quit;
         }
-        if input == "detach" {
-            return CommandResult::Detach;
-        }
+        // Bare `:detach` and `:detach project` are the App's (`project_move`).
 
         // :limit [token] — shares `apply_limit_token` with the `=` prompt
         // (`PromptKind::Limit`) so `:limit git` / `:limit h` behave exactly like

@@ -232,6 +232,10 @@ pub struct TabInfo {
     /// command is still visibly unsubmitted — async startup work can
     /// eat a lone Enter seconds after the banner looks settled.
     pub pending_resume_send: Option<PendingResumeSend>,
+    /// The status its agent last reported in the spyc its project moved from
+    /// (`SavedTab::live`), until the tab lands: taken if its program was taken
+    /// back from its jar, dropped if it was started again.
+    pub carried_live: Option<crate::state::sessions::SavedLive>,
     /// Phase seed for the "spicy pulse" animation: a per-tab `u64` added
     /// (wrapping) to the shared anim frame before the colour lookup, so every
     /// tab starts at a distinct point in the 6-phase cycle and the dots don't
@@ -473,6 +477,7 @@ impl TabInfo {
             status_hooks_at_spawn: false,
             status_hooks_restart_needed: false,
             pending_resume_send: None,
+            carried_live: None,
             anim_phase_offset,
             spawn_at: std::time::Instant::now(),
             spawn_epoch_secs: crate::sysinfo::epoch_secs(),
@@ -1040,6 +1045,7 @@ mod tests {
             agent_hint: None,
             unopened: false,
             jar_socket: None,
+            live: None,
         })
         .expect("SavedTab serializes");
         assert!(

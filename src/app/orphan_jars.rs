@@ -262,6 +262,7 @@ fn saved_tab(o: Orphan) -> SavedTab {
         },
         agent_hint: None,
         unopened: false,
+        live: None,
         jar_socket: Some(o.socket),
     }
 }
