@@ -65,9 +65,6 @@ pub enum CommandResult {
     /// breaks the build instead of silently regressing `:q` to an
     /// "unknown command" path.
     Quit,
-    /// `:detach`: the App leaves spyc running and the terminal free
-    /// (`App::detach`), typed for the same reason as `Quit`.
-    Detach,
     /// Effects for the event loop to execute (MVU Phase 5 PR9: the
     /// carrier-unification that lets a pure-domain `:`-command emit an
     /// `Effect` — e.g. `:cd` → `Effect::ChangeDir` — instead of doing the
@@ -127,7 +124,6 @@ pub enum Update {
     Handled(Vec<Effect>),
     OpenPager(PagerRequest),
     Quit,
-    Detach,
     Defer,
 }
 
@@ -155,7 +151,6 @@ impl From<CommandResult> for Update {
                 fit_to_content: false,
             }),
             CommandResult::Quit => Self::Quit,
-            CommandResult::Detach => Self::Detach,
             CommandResult::Post(fx) => Self::Handled(fx),
             CommandResult::NotHandled => Self::Defer,
         }

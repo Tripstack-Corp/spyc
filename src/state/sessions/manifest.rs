@@ -503,6 +503,7 @@ mod tests {
                     agent_hint: None,
                     unopened: false,
                     jar_socket: None,
+                    live: None,
                 })
                 .collect(),
             active_tab: 0,

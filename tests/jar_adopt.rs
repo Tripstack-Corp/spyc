@@ -749,6 +749,170 @@ fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 
+/// [`dirs_running`], its one tab saying it hosts Claude (`[[pane.tab]] agent`),
+/// so its status reports count.
+fn dirs_with_agent(rest: &str) -> Dirs {
+    let d = dirs_running(rest);
+    std::fs::write(
+        d.home.join(".spycrc.toml"),
+        format!(
+            "[pane]\njars = true\n\n[[pane.tab]]\ncommand = \"sh -c 'echo $$ > {}; {rest}'\"\nagent = \"claude\"\n",
+            d.pidfile.display()
+        ),
+    )
+    .unwrap();
+    d
+}
+
+/// S5: `:detach project NAME` moves a project into a session of its own. Its
+/// tab's program runs on, taken back by the spyc the new session's jar
+/// starts, and the spyc it left runs on without it. The agent's MCP proxy
+/// follows its jar there, its scope claim goes with it, and so does the
+/// `blocked` it reported before the move, which it won't report again.
+#[test]
+fn detach_project_moves_a_project_and_its_agent_into_a_session_of_its_own() {
+    let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+    let env_file = probe.path().to_path_buf();
+    let dirs = dirs_with_agent(&format!(
+        "env > {}; printf ready-mark; exec cat",
+        env_file.display()
+    ));
+    let elsewhere = dirs.root.path().join("elsewhere-proj");
+    std::fs::create_dir(&elsewhere).unwrap();
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    // spyc asks once whether to wire Claude up; no.
+    first.eventually("the agent-wiring question", || {
+        squeezed(&first.since_last_screen()).contains("[y]yes[n]no")
+    });
+    first.type_keys(b"n");
+    let agent = noted(&dirs.pidfile)[0];
+    left.0.push(agent);
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let agent_env: Vec<(String, String)> = std::fs::read_to_string(&env_file)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| matches!(*k, "SPYC_MCP_SOCK" | "SPYC_PANE_ID" | "SPYC_JAR_SOCKET"))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+    // The agent claims a file and blocks on a prompt.
+    let mut proxy = Proxy::start(&dirs, &agent_env);
+    proxy.send("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+    assert!(proxy.reply().is_some(), "the proxy initialized");
+    proxy.send("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+    proxy.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"register_scope\",\"arguments\":{\"paths\":[\"src/moved.rs\"],\"intent\":\"editing\"}}}",
+    );
+    let claimed = proxy.reply().unwrap();
+    assert!(claimed.get("error").is_none(), "{claimed}");
+    let blocked = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["--report-status", "blocked"])
+        .current_dir(&dirs.home)
+        .env_clear()
+        .envs(dirs.env())
+        .envs(agent_env.iter().map(|(k, v)| (k, v)))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(blocked.status.success(), "{blocked:?}");
+
+    // A second project, then the first detached by its name.
+    first.type_keys(b" n");
+    first.eventually("the open-project prompt", || first.shows("open project:"));
+    // The prompt starts at the directory in view: cleared first.
+    first.type_keys(format!("\x15{}\r", elsewhere.display()).as_bytes());
+    first.eventually("the second project opens", || {
+        std::fs::read_dir(dirs.state.join("spyc"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".spyc-context-")
+            })
+            .any(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("elsewhere-proj")))
+    });
+    let project = dirs
+        .project
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    first.type_keys(format!(":detach project {project}\r").as_bytes());
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let mut moved_spyc = None;
+    first.eventually("the session's spyc runs", || {
+        moved_spyc = described(&socket, "program_pid");
+        moved_spyc.is_some()
+    });
+    let moved_spyc = moved_spyc.unwrap();
+    left.0.push(moved_spyc.parse().unwrap());
+    first.eventually("the session's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(moved_spyc.as_str())
+    });
+    first.eventually("the spyc it left says where it went", || {
+        squeezed(&first.since_last_screen()).contains(&format!("runsonassession{name}"))
+    });
+    assert!(alive(agent), "the tab's program ended with the move");
+    assert_eq!(
+        described(&tab_socket, "program_pid"),
+        Some(agent.to_string()),
+        "the tab's program was started again"
+    );
+    assert!(alive(first.pid()), "the spyc it left runs on");
+
+    // The agent's next tool call reaches the new spyc, which has its claim.
+    assert_eq!(
+        proxy.answering_spyc(3),
+        Ok(moved_spyc.parse::<i64>().unwrap()),
+        "the agent's MCP followed its jar"
+    );
+    proxy.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"list_scopes\",\"arguments\":{}}}",
+    );
+    let scopes = proxy.reply().unwrap().to_string();
+    assert!(
+        scopes.contains("src/moved.rs"),
+        "the claim stayed behind: {scopes}"
+    );
+
+    // And it knows the agent is blocked, though the agent said so only before.
+    let back = Spyc::start(&dirs, &["attach", &name]);
+    left.0.push(back.pid());
+    back.eventually("the session drawn, its tab with it", || {
+        let shown = squeezed(&back.since_last_screen());
+        shown.contains(&name) && shown.contains("ready-mark")
+    });
+    back.type_keys(b":activity dump\r");
+    back.eventually("the tab's dot is blocked", || {
+        squeezed(&back.since_last_screen()).contains("dot=blocked")
+    });
+}
+
 /// `text` without its escape sequences or spaces: what a line says, however
 /// the drawing moved the cursor between its words.
 fn squeezed(text: &str) -> String {

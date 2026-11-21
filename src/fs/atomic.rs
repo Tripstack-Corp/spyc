@@ -33,6 +33,18 @@ pub fn write_atomic_with_permissions(
     write_atomic_inner(path, contents, Some(permissions))
 }
 
+/// [`write_atomic`], on disk before it returns: the contents synced before
+/// the rename, and the directory after it, so a crash or a power cut once it
+/// has returned can't lose the file.
+pub fn write_durable(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    tmp.write_all(contents)?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    std::fs::File::open(dir)?.sync_all()
+}
+
 fn write_atomic_inner(
     path: &Path,
     contents: &[u8],

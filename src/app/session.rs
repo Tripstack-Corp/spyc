@@ -231,7 +231,7 @@ impl App {
     /// P3-2 debounced autosave: persist the current session silently (no exit
     /// summary), returning whether the write succeeded. Called by
     /// [`Self::settle_autosave`] when the debounce window elapses.
-    fn autosave_session(&mut self) -> bool {
+    pub(super) fn autosave_session(&mut self) -> bool {
         let manifest = self.build_manifest();
         crate::state::sessions::save_session(&manifest).is_ok()
     }
@@ -416,6 +416,7 @@ impl App {
                             agent_hint: t.info.agent_hint,
                             unopened: false,
                             jar_socket: t.pane.jar_socket().map(std::path::Path::to_path_buf),
+                            live: None,
                         }
                     })
                     .collect()
@@ -1230,6 +1231,7 @@ mod tests {
                     agent_hint: None,
                     unopened: false,
                     jar_socket: None,
+                    live: None,
                 });
             crate::state::sessions::save_session(&saved).expect("seed the restore point");
 
@@ -1803,6 +1805,7 @@ mod tests {
             agent_hint: None,
             unopened: false,
             jar_socket: None,
+            live: None,
         };
         let one = Manifest::one_project(1, 0, "ONE", "/w/spyc", vec![tab("vim"), tab("zsh")]);
         let row = super::picker_row(0, &one, false, false);

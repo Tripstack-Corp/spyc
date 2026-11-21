@@ -219,6 +219,7 @@ pub use hooks::{
     codex_hooks_json_without_spyc, find_on_path, merged_agy_status_hooks_json,
     merged_status_hooks_json, spyc_binary,
 };
+pub use protocol::panes_moved;
 pub use server::{cleanup_socket, record_roots, start_socket_server, sweep_orphan_root_markers};
 
 use server::{discover_live_socket, run_direct, run_inert, run_proxy};

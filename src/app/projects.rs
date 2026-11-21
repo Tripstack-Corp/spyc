@@ -551,11 +551,19 @@ impl App {
     /// - it is kept as a save writes it, taken before its tabs shut down, for
     ///   `Space j` to reopen ([`Self::closed_snapshot`]).
     pub(super) fn drop_project(&mut self, id: ProjectId) {
+        let snapshot = self.closed_snapshot(id);
+        self.forget_project(id, "the project this agent belongs to has closed");
+        self.state.remember_closed(snapshot);
+    }
+
+    /// Drop project `id`, out of view, as [`Self::drop_project`] does but for
+    /// keeping it to reopen. A wait one of its tabs' claims parked is answered
+    /// with `why`.
+    pub(super) fn forget_project(&mut self, id: ProjectId, why: &str) {
         assert_ne!(
             id, self.state.active,
             "a project is dropped once the user is out of it"
         );
-        let snapshot = self.closed_snapshot(id);
         let mut owners = HashSet::new();
         if let Some(mut project) = self.runtime.remove_project(id) {
             if let Some(tabs) = project.pane_tabs.as_mut() {
@@ -578,7 +586,7 @@ impl App {
         self.runtime.scope_waiters = waiting;
         for wait in closed {
             let _ = wait.reply.send(McpResponse::Error {
-                message: "the project this agent belongs to has closed".into(),
+                message: why.into(),
             });
         }
         if let Some(view) = self.view.remove_project(id) {
@@ -588,13 +596,12 @@ impl App {
         if self.state.last_project == Some(id) {
             self.state.last_project = None;
         }
-        self.state.remember_closed(snapshot);
         self.record_open_roots();
     }
 
     /// Where the user lands as project `id`, the one in view, closes: the
     /// project they were in last, else the next one, else the one before.
-    fn landing_after(&self, id: ProjectId) -> Option<ProjectId> {
+    pub(super) fn landing_after(&self, id: ProjectId) -> Option<ProjectId> {
         let ids: Vec<ProjectId> = self.state.open_projects().map(|p| p.id).collect();
         let here = ids.iter().position(|p| *p == id)?;
         self.state

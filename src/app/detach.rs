@@ -183,8 +183,13 @@ impl App {
         let exe = crate::paths::installed_spyc()?;
         let cwd = std::env::current_dir().context("spyc's directory")?;
         let size = crossterm::terminal::size().map_or((24, 80), |(cols, rows)| (rows, cols));
-        let started =
-            crate::pane::jar::session::start(name, vec![exe.display().to_string()], &cwd, size);
+        let started = crate::pane::jar::session::start(
+            name,
+            vec![exe.display().to_string()],
+            &cwd,
+            size,
+            crate::pane::jar::session::Begin::OnAttach,
+        );
         self.release_jars();
         started.with_context(|| {
             format!("{name}'s tabs run on in their jars: `spyc -r` takes them back")

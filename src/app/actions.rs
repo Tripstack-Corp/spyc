@@ -192,11 +192,11 @@ impl App {
                 self.open_pager_request(req);
                 return Ok(Vec::new());
             }
-            leaving @ (state::Update::Quit | state::Update::Detach) => {
-                // `ApplyResult` has neither variant, so this is unreachable
+            state::Update::Quit => {
+                // `ApplyResult` has no such variant, so this is unreachable
                 // today; handle defensively (no panic on a daily-driver path)
                 // in case a future Action maps to one.
-                self.leave(matches!(leaving, state::Update::Detach));
+                self.leave(false);
                 return Ok(Vec::new());
             }
             state::Update::Defer => {}

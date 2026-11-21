@@ -420,6 +420,7 @@ impl App {
                 entry.info.claim_owner.clone_from(&tab.claim_owner);
             }
             entry.info.claude_home.clone_from(&tab.claude_home);
+            entry.info.carried_live.clone_from(&tab.live);
             if let crate::agent::ResumeAction::ClaudeStdin { session_id } = plan.resume {
                 // Pin the exact session this pane is resuming so the next
                 // save persists it directly, never re-deriving it from the

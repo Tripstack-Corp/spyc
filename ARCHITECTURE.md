@@ -1007,6 +1007,14 @@ jar accepts it as its program. Getting this wrong fails silently: a spyc in a
 pane would set the pane's terminal up again whenever its spyc attached to that
 pane, and take the pane jar's name for its session's.
 
+<!-- SPYC-TRAP: move-saved-before-release -->
+`:detach project` (`src/app/project_move.rs`) saves the project it moves as a
+session of its own, synced to disk, before it ends its connection to any of
+the project's jars. The jars run on either way, but only that file says where
+they are and whose they are now: the spike let them go first, so a spyc that
+died between the two left every jar running for no spyc to find (finding 6). A
+save that fails stops the move with nothing let go.
+
 ## A pane in a jar
 
 <!-- SPYC-TRAP: jar-or-nothing -->

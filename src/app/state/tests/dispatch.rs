@@ -47,7 +47,7 @@ fn cmd_detach_defers_to_app() {
     let mut s = test_state();
     assert!(matches!(
         s.dispatch_command("detach"),
-        CommandResult::Detach
+        CommandResult::NotHandled
     ));
     assert!(!s.should_quit);
 }

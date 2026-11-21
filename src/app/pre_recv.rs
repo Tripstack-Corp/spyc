@@ -120,6 +120,7 @@ impl App {
             | self.apply_capture_starts()
             | self.apply_orphan_jars()
             | self.apply_jar_upgrades()
+            | self.apply_moved_starts()
             | self.apply_earlier_events()
         {
             ctx.draw.mark(3);

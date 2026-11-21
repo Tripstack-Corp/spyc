@@ -295,6 +295,8 @@ pub(super) struct Runtime {
     pub(super) jar_upgrades: super::jar_upgrades::JarUpgrades,
     /// What each look at a tab's jar came to: the tab's id and label too.
     pub(super) jar_upgrade_results: Landing<(String, String, super::jar_upgrades::Looked)>,
+    /// A detached project's session jar, started or not (`project_move`).
+    pub(super) moved_starts: Landing<super::project_move::MovedStart>,
     /// The place every tab's jar starts in: this user's when `None`, a
     /// test's own otherwise.
     pub(super) jar_place: Option<crate::pane::jar::Place>,
@@ -446,6 +448,7 @@ impl Runtime {
             orphan_results: Landing::default(),
             jar_upgrades: super::jar_upgrades::JarUpgrades::default(),
             jar_upgrade_results: Landing::default(),
+            moved_starts: Landing::default(),
             jar_place: None,
             jarless: super::jarless::Jarless::default(),
             jump_default_seq: 0,

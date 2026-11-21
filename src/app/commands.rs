@@ -107,10 +107,6 @@ impl App {
                 self.quit_command();
                 return Vec::new();
             }
-            Update::Detach => {
-                self.detach();
-                return Vec::new();
-            }
             Update::Defer => {}
         }
 

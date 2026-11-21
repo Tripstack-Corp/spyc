@@ -333,6 +333,7 @@ impl App {
             ));
         }
         settle_landed_tab(&mut entry.info, &pane, started);
+        super::project_move::land_carried_status(&mut entry.info, pane.adopted());
         let stand_in = std::mem::replace(&mut entry.pane, pane);
         stand_in.shutdown_detached(END_WAIT);
         self.view.needs_full_repaint = true;
