@@ -383,23 +383,23 @@ release-tag: ## Step 2 of 2, on main after the release PR merged: VERSION=x.y.z 
 .PHONY: release-macos-arm
 release-macos-arm: target-cap ## macOS Apple Silicon (aarch64)
 	cargo build $(RELEASE_FLAGS) --target aarch64-apple-darwin
-	@echo "→ target/aarch64-apple-darwin/release/$(BINARY)"
+	@echo "→ $(TARGET_DIR)/aarch64-apple-darwin/release/$(BINARY)"
 
 .PHONY: release-macos-x86
 release-macos-x86: target-cap ## macOS Intel (x86_64)
 	cargo build $(RELEASE_FLAGS) --target x86_64-apple-darwin
-	@echo "→ target/x86_64-apple-darwin/release/$(BINARY)"
+	@echo "→ $(TARGET_DIR)/x86_64-apple-darwin/release/$(BINARY)"
 
 .PHONY: release-macos-universal
 release-macos-universal: release-macos-arm release-macos-x86 ## macOS Universal binary (arm64 + x86_64)
 	@mkdir -p $(DIST_DIR)
 	lipo -create \
-		target/aarch64-apple-darwin/release/$(BINARY) \
-		target/x86_64-apple-darwin/release/$(BINARY) \
+		$(TARGET_DIR)/aarch64-apple-darwin/release/$(BINARY) \
+		$(TARGET_DIR)/x86_64-apple-darwin/release/$(BINARY) \
 		-output $(DIST_DIR)/$(BINARY)-macos-universal
 	lipo -create \
-		target/aarch64-apple-darwin/release/$(JAR) \
-		target/x86_64-apple-darwin/release/$(JAR) \
+		$(TARGET_DIR)/aarch64-apple-darwin/release/$(JAR) \
+		$(TARGET_DIR)/x86_64-apple-darwin/release/$(JAR) \
 		-output $(DIST_DIR)/$(JAR)-macos-universal
 	@echo "→ $(DIST_DIR)/$(BINARY)-macos-universal, $(DIST_DIR)/$(JAR)-macos-universal"
 	@ls -lh $(DIST_DIR)/$(BINARY)-macos-universal
@@ -435,28 +435,28 @@ release-linux-x86: target-cap zigbuild-check ## Linux x86_64 (static, musl)
 	@# (zigbuild cache is separate from cargo build and can go stale).
 	@touch src/main.rs
 	ulimit -n 8192; cargo zigbuild $(RELEASE_FLAGS) --target x86_64-unknown-linux-musl
-	@echo "→ target/x86_64-unknown-linux-musl/release/$(BINARY)"
-	@ls -lh target/x86_64-unknown-linux-musl/release/$(BINARY)
+	@echo "→ $(TARGET_DIR)/x86_64-unknown-linux-musl/release/$(BINARY)"
+	@ls -lh $(TARGET_DIR)/x86_64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: release-linux-arm
 release-linux-arm: target-cap zigbuild-check ## Linux aarch64 (static, musl)
 	@touch src/main.rs
 	ulimit -n 8192; cargo zigbuild $(RELEASE_FLAGS) --target aarch64-unknown-linux-musl
-	@echo "→ target/aarch64-unknown-linux-musl/release/$(BINARY)"
-	@ls -lh target/aarch64-unknown-linux-musl/release/$(BINARY)
+	@echo "→ $(TARGET_DIR)/aarch64-unknown-linux-musl/release/$(BINARY)"
+	@ls -lh $(TARGET_DIR)/aarch64-unknown-linux-musl/release/$(BINARY)
 
 # ---------- Distribution -----------------------------------------------------
 
 .PHONY: dist
 dist: release-macos-universal release-linux-x86 release-linux-arm ## Build all platforms → dist/
 	@mkdir -p $(DIST_DIR)
-	cp target/x86_64-unknown-linux-musl/release/$(BINARY) \
+	cp $(TARGET_DIR)/x86_64-unknown-linux-musl/release/$(BINARY) \
 		$(DIST_DIR)/$(BINARY)-linux-x86_64
-	cp target/aarch64-unknown-linux-musl/release/$(BINARY) \
+	cp $(TARGET_DIR)/aarch64-unknown-linux-musl/release/$(BINARY) \
 		$(DIST_DIR)/$(BINARY)-linux-aarch64
-	cp target/x86_64-unknown-linux-musl/release/$(JAR) \
+	cp $(TARGET_DIR)/x86_64-unknown-linux-musl/release/$(JAR) \
 		$(DIST_DIR)/$(JAR)-linux-x86_64
-	cp target/aarch64-unknown-linux-musl/release/$(JAR) \
+	cp $(TARGET_DIR)/aarch64-unknown-linux-musl/release/$(JAR) \
 		$(DIST_DIR)/$(JAR)-linux-aarch64
 	@echo ""
 	@echo "=== dist/ ==="
@@ -501,12 +501,12 @@ DEB_VERSION := $(subst -,~,$(VERSION))
 .PHONY: deb-x86
 deb-x86: ## Package the built Linux x86_64 spyc and spyc-jar → dist/spyc_<version>_amd64.deb
 	@$(MAKE) --no-print-directory _deb ARCH=amd64 \
-		SRC=target/x86_64-unknown-linux-musl/release/$(BINARY)
+		SRC=$(TARGET_DIR)/x86_64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: deb-arm
 deb-arm: ## Package the built Linux aarch64 spyc and spyc-jar → dist/spyc_<version>_arm64.deb
 	@$(MAKE) --no-print-directory _deb ARCH=arm64 \
-		SRC=target/aarch64-unknown-linux-musl/release/$(BINARY)
+		SRC=$(TARGET_DIR)/aarch64-unknown-linux-musl/release/$(BINARY)
 
 .PHONY: deb
 deb: deb-x86 deb-arm ## Package both Linux .debs (binaries must already be built)
