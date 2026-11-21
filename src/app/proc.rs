@@ -422,6 +422,7 @@ impl super::App {
             return settled;
         }
         self.runtime.attaches_seen = attaches;
+        self.follow_attached_agent();
         match foreground_exec.with_reader_parked(|| crate::terminal::reattach(terminal)) {
             Ok(picker) => self.set_picker(picker),
             Err(e) => self
