@@ -248,7 +248,9 @@ or at another size: `spyc attach NAME` takes a session by the name spyc shows (s
 `CORIANDER_CLOVE`), and with no name it takes the one running, or lists them and asks which.
 A session attached somewhere else moves to the terminal you attach from. From inside spyc,
 a pane or a shell spyc started, `spyc attach` refuses, since the session would show inside
-one of its own panes; `spyc attach --force` attaches anyway.
+one of its own panes; `spyc attach --force` attaches anyway. Your tabs reach the SSH agent
+of the terminal attached now: after you attach from a new SSH login, an agent's `git push`
+uses that login's agent, though the program started under another.
 
 The first `^d` moves spyc into a jar of its own. Your tabs come with it, their programs
 untouched, but what `spyc -r` doesn't keep (cursors, picks, filters, open pagers) starts afresh.

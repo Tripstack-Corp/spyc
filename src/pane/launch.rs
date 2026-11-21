@@ -17,6 +17,8 @@ pub struct Launch<'a> {
     pub extra_env: &'a [(&'a str, &'a str)],
     /// The project's `:setenv` variables.
     pub project_env: &'a [(String, String)],
+    /// The tab's SSH agent link (`super::ssh_agent`), its `SSH_AUTH_SOCK`.
+    pub ssh_agent: Option<&'a Path>,
     pub jar: Option<jar::Spec>,
 }
 
@@ -61,6 +63,7 @@ impl Pane {
                 context_path,
                 extra_env,
                 project_env: &[],
+                ssh_agent: None,
                 jar: None,
             },
             wake,
@@ -78,6 +81,7 @@ impl Pane {
             context_path,
             extra_env,
             project_env,
+            ssh_agent,
             jar,
         } = launch;
         // Pane env: tell child processes (e.g. Claude CLI's MCP server)
@@ -91,6 +95,10 @@ impl Pane {
         env.push((crate::context::CONTEXT_ENV_VAR, context_str.as_str()));
         env.push(("COLORTERM", "truecolor"));
         env.extend(extra_env.iter().copied());
+        let agent = ssh_agent.map(|a| a.to_string_lossy().into_owned());
+        if let Some(agent) = &agent {
+            env.push(("SSH_AUTH_SOCK", agent.as_str()));
+        }
 
         let mut host = PtyHost::spawn(PtySpec {
             command,

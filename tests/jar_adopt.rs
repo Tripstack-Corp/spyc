@@ -41,8 +41,22 @@ impl Spyc {
         Self::start_from(Path::new(env!("CARGO_BIN_EXE_spyc")), dirs, args)
     }
 
+    /// [`Self::start`], with `env` added to its environment.
+    fn start_env(dirs: &Dirs, args: &[&str], env: &[(&str, &std::ffi::OsStr)]) -> Self {
+        Self::start_from_env(Path::new(env!("CARGO_BIN_EXE_spyc")), dirs, args, env)
+    }
+
     /// [`Self::start`], running the spyc at `binary`.
     fn start_from(binary: &Path, dirs: &Dirs, args: &[&str]) -> Self {
+        Self::start_from_env(binary, dirs, args, &[])
+    }
+
+    fn start_from_env(
+        binary: &Path,
+        dirs: &Dirs,
+        args: &[&str],
+        extra: &[(&str, &std::ffi::OsStr)],
+    ) -> Self {
         warm(binary);
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -57,6 +71,9 @@ impl Spyc {
         cmd.cwd(&dirs.project);
         cmd.env_clear();
         for (k, v) in dirs.env() {
+            cmd.env(k, v);
+        }
+        for (k, v) in extra {
             cmd.env(k, v);
         }
         let child = pair.slave.spawn_command(cmd).unwrap();
@@ -966,6 +983,86 @@ fn detach_project_moves_a_project_and_its_agent_into_a_session_of_its_own() {
     assert!(
         left_behind.is_empty(),
         "{name}'s file stayed: {left_behind:?}"
+    );
+}
+
+/// #904: a tab reaches the SSH agent of the terminal its spyc has now. It is
+/// given a link of its own as its `SSH_AUTH_SOCK`, and after `^d` and a
+/// `spyc attach` from a login with another agent, the same link, in the same
+/// running program's environment, reaches that one.
+#[test]
+fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
+    use std::os::unix::fs::PermissionsExt;
+    let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+    let seen = probe.path().to_path_buf();
+    let dirs = dirs_running(&format!(
+        "echo $SSH_AUTH_SOCK > {}; printf ready-mark; exec cat",
+        seen.display()
+    ));
+    let agents = tempfile::Builder::new()
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir_in("/tmp")
+        .unwrap();
+    let (a, b) = (agents.path().join("a"), agents.path().join("b"));
+    let _first_agent = std::os::unix::net::UnixListener::bind(&a).unwrap();
+    let second_agent = std::os::unix::net::UnixListener::bind(&b).unwrap();
+    let real = |p: &Path| std::fs::canonicalize(p).ok();
+    let mut left = Leftovers(Vec::new());
+
+    let mut first = Spyc::start_env(&dirs, &[], &[("SSH_AUTH_SOCK", a.as_os_str())]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.push(noted(&dirs.pidfile)[0]);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let tab_agent = PathBuf::from(std::fs::read_to_string(&seen).unwrap().trim());
+    assert_ne!(
+        tab_agent, a,
+        "the tab was given the agent, not a link to it"
+    );
+    assert_eq!(real(&tab_agent), real(&a));
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+
+    // `^d` into the session's own jar, then `^d` again: the terminal goes.
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    first.eventually("the session drawn again, from its jar", || {
+        let shown = first.since_last_screen();
+        shown.contains(&name) && shown.contains("ready-mark")
+    });
+    let jar_spyc = described(&socket, "program_pid").unwrap();
+    left.0.push(jar_spyc.parse().unwrap());
+    first.eventually("the session's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    first.type_keys(b"\x04");
+    eventually("the terminal leaves", || first.exited());
+
+    // From another login, with another agent.
+    let back = Spyc::start_env(&dirs, &["attach"], &[("SSH_AUTH_SOCK", b.as_os_str())]);
+    left.0.push(back.pid());
+    back.eventually("the session drawn", || {
+        squeezed(&back.since_last_screen()).contains("ready-mark")
+    });
+    eventually("the tab's link reaches the new agent", || {
+        real(&tab_agent) == real(&b)
+    });
+    std::os::unix::net::UnixStream::connect(&tab_agent).unwrap();
+    second_agent.set_nonblocking(true).unwrap();
+    assert!(
+        second_agent.accept().is_ok(),
+        "the tab's link reached another agent"
     );
 }
 

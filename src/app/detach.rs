@@ -275,6 +275,58 @@ impl App {
         true
     }
 
+    /// The link tab `pane_id`'s program is given as its `SSH_AUTH_SOCK`,
+    /// pointed at this spyc's terminal's agent (`pane::ssh_agent`); `None`
+    /// with no agent, and the program keeps the one spyc has.
+    pub(super) fn tab_ssh_agent(&self, pane_id: &str) -> Option<std::path::PathBuf> {
+        use crate::pane::ssh_agent;
+        let agent = self.runtime.ssh_agent.as_ref()?;
+        let link = ssh_agent::tab_link(&ssh_agent::links_dir()?, pane_id);
+        match ssh_agent::point(&link, agent) {
+            Ok(()) => Some(link),
+            Err(e) => {
+                crate::spyc_debug!("ssh agent: no link for tab {pane_id}: {e:#}");
+                None
+            }
+        }
+    }
+
+    /// A terminal attached to spyc's own jar: when `spyc attach` named its
+    /// agent, every tab's link points there now (`pane::ssh_agent`).
+    pub(super) fn follow_attached_agent(&mut self) {
+        use crate::pane::ssh_agent;
+        let (Some(jar), Some(dir)) = (&self.runtime.own_jar, ssh_agent::links_dir()) else {
+            return;
+        };
+        let Some(agent) = ssh_agent::pointed_at(&ssh_agent::session_link(&dir, jar.name())) else {
+            return;
+        };
+        if self.runtime.ssh_agent.as_ref() == Some(&agent) {
+            return;
+        }
+        let ids: Vec<String> = self
+            .runtime
+            .every_tab_set()
+            .flat_map(|(_, tabs)| tabs.tabs().iter().map(|e| e.info.id.clone()))
+            .collect();
+        let moved = !ids.is_empty();
+        for id in ids {
+            let link = ssh_agent::tab_link(&dir, &id);
+            if std::fs::symlink_metadata(&link).is_ok()
+                && let Err(e) = ssh_agent::point(&link, &agent)
+            {
+                crate::spyc_debug!("ssh agent: tab {id} keeps its agent: {e:#}");
+            }
+        }
+        if moved {
+            self.state.note_event(&format!(
+                "SSH agent: the tabs reach {} now",
+                agent.display()
+            ));
+        }
+        self.runtime.ssh_agent = Some(agent);
+    }
+
     /// spyc in its own jar, at the loop's start: hear the jar, and restore the
     /// session of its name.
     pub(super) fn start_own_jar(&mut self, terminal: &mut Tui, foreground_exec: &ForegroundExec) {

@@ -353,6 +353,7 @@ impl App {
                 context_path: &self.view.project().context_path,
                 extra_env: &[],
                 project_env: &project_env,
+                ssh_agent: None,
                 jar: None,
             },
             wake,

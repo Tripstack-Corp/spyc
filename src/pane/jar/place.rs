@@ -122,7 +122,7 @@ pub(super) fn tokens_dir() -> anyhow::Result<PathBuf> {
 }
 
 /// The directory sessions' own jars are in, for this user.
-pub(super) fn this_users_sessions() -> PathBuf {
+pub fn this_users_sessions() -> PathBuf {
     sessions_dir(&socket_dirs(
         std::env::var_os("XDG_RUNTIME_DIR"),
         std::env::var_os("TMPDIR"),
