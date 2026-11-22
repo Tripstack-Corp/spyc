@@ -650,6 +650,23 @@ pub(super) fn handle_socket_connection(
     ctx_path: &Path,
     cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
 ) -> io::Result<()> {
+    let me = rustix::process::geteuid().as_raw();
+    handle_connection_of(me, stream, ctx_path, cmd_tx)
+}
+
+/// [`handle_socket_connection`] for a peer of user `uid` only (#74): another
+/// user's process, or one the kernel can't name, is refused before a byte of
+/// it is read. The socket's `0600` mode is the first fence.
+pub(super) fn handle_connection_of(
+    uid: u32,
+    stream: UnixStream,
+    ctx_path: &Path,
+    cmd_tx: &std::sync::mpsc::Sender<McpRequest>,
+) -> io::Result<()> {
+    if !spyc_jar::jar::peer_is(&stream, uid) {
+        mcp_log("socket: refused a connection from another user");
+        return Ok(());
+    }
     let mut reader = io::BufReader::new(stream.try_clone()?);
     // Bound writes so a stalled client (proxy) can't wedge this server thread
     // indefinitely. The read is intentionally left blocking — the loop waits

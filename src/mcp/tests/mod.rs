@@ -13,7 +13,9 @@ use crate::mcp_cmd::McpCommand;
 
 use super::framing::{read_lsp_message, send_message};
 use super::protocol::dispatch;
-use super::server::{collect_project_pids_in, discover_live_socket, handle_socket_connection};
+use super::server::{
+    collect_project_pids_in, discover_live_socket, handle_connection_of, handle_socket_connection,
+};
 use super::*;
 
 mod attribution;
@@ -1604,4 +1606,39 @@ fn the_inert_server_offers_nothing() {
     assert_eq!(call["error"]["code"], -32601);
     assert!(reply(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
     assert!(reply("not json").is_none());
+}
+
+/// #74: the socket serves only its own user's processes. A peer of another
+/// user, here this process's own socket told to expect someone else, gets
+/// nothing: the connection closes before a byte of it is read.
+#[test]
+fn a_connection_from_another_user_is_refused_unread() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx_path = context::context_path(tmp.path());
+    let me = rustix::process::geteuid().as_raw();
+    for (expected, answered) in [(me, true), (me.wrapping_add(1), false)] {
+        let (client, server) = UnixStream::pair().unwrap();
+        let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
+        let path = ctx_path.clone();
+        let served = std::thread::spawn(move || {
+            handle_connection_of(expected, server, &path, &cmd_tx).unwrap_or(());
+        });
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        let mut reader = io::BufReader::new(client.try_clone().unwrap());
+        let mut writer = client;
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}).to_string();
+        // A refused peer may find the connection gone before it writes.
+        let _ = send_message(&mut writer, &body);
+        let reply = read_lsp_message(&mut reader);
+        assert_eq!(
+            reply.as_ref().is_ok_and(|r| r.contains("get_spyc_context")),
+            answered,
+            "expecting user {expected}: {reply:?}"
+        );
+        drop(writer);
+        drop(reader);
+        served.join().unwrap();
+    }
 }

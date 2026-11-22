@@ -317,12 +317,16 @@ the bump gate. `deny.toml` records the same.
   prove origin and would not survive notarization. A real Developer ID
   requires Apple Developer enrollment and is out of scope; the
   provenance attestation is the origin proof instead.
-- **The MCP socket is owner-only, and that is the whole boundary.**
+- **The MCP socket serves your user only, and that is the whole boundary.**
   `start_socket_server` wraps the bind in `umask(0o077)` so the socket
   lands 0700, and refuses to serve at all rather than fall back to a
-  world-writable `/tmp`. But anyone running as your user on the same
-  machine can still open it and exercise the MCP tool surface: we rely
-  on user-process isolation, not on stricter ACLs.
+  world-writable `/tmp`. Each connection is then checked against the
+  kernel's record of who opened it (`SO_PEERCRED` on Linux,
+  `getpeereid` on macOS), as `spyc-jar`'s sockets are, and another
+  user's, or one the kernel can't name, is closed before a byte of it is
+  read. But anyone running as your user on the same machine can still open
+  it and exercise the MCP tool surface: we rely on user-process isolation,
+  not on stricter ACLs.
 - **Wiring an agent puts spyc in every session of it,** not only those spyc
   launches: saying yes at its first launch (or `spyc --install-agents`) adds
   spyc's status hooks and MCP entry to the agent's own configuration. The hooks

@@ -57,7 +57,8 @@ use anyhow::Context;
 use crate::proto::{Msg, Role};
 use crate::state::{Config, ConnState, Log, State};
 
-pub(crate) use accept::{no_sigpipe, peer_is};
+pub(crate) use accept::no_sigpipe;
+pub use accept::peer_is;
 pub use conn::MIN_TOKEN;
 pub(crate) use input::Inbox;
 pub(crate) use outbox::Outbox;
