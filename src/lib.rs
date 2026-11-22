@@ -233,6 +233,10 @@ enum Sub {
     Attach {
         /// The session's name, as spyc shows it (e.g. `CORIANDER_CLOVE`).
         name: Option<String>,
+        /// Attach from inside spyc too: a pane, or a shell a spyc started,
+        /// which would show the session inside itself.
+        #[arg(long)]
+        force: bool,
     },
     /// End a session that runs in a jar of its own, as `:q` in it would,
     /// its tabs with it. It says what ends and asks first.
@@ -276,7 +280,9 @@ fn cwd_file_target(cli: &Cli, env: Option<&OsStr>, launch_dir: &Path) -> Option<
 /// none was asked for.
 fn run_setup_command(cli: &Cli) -> Option<Result<()>> {
     match &cli.sub {
-        Some(Sub::Attach { name }) => return Some(pane::jar::attach::run(name.as_deref())),
+        Some(Sub::Attach { name, force }) => {
+            return Some(pane::jar::attach::run(name.as_deref(), *force));
+        }
         Some(Sub::Shutdown { name, yes }) => {
             return Some(pane::jar::shutdown::run(name.as_deref(), *yes));
         }

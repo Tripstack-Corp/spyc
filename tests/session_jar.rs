@@ -590,6 +590,42 @@ fn spyc_attach_says_what_runs_when_no_session_matches() {
     );
 }
 
+/// `spyc attach` from inside spyc, a pane or a shell a spyc started, would
+/// show the session inside itself: it refuses, unless forced. A jar long gone
+/// says nothing.
+#[test]
+fn spyc_attach_from_inside_spyc_is_refused_unless_forced() {
+    let dirs = Dirs::new();
+    let _jar = session(&dirs, NAME);
+    let live = session_socket(&dirs, NAME);
+    let gone = dirs.runtime.join("spyc/jars/gone.sock");
+    let attach = |inside: (&str, &std::ffi::OsStr), args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_spyc"))
+            .args(args)
+            .env_clear()
+            .envs(dirs.env())
+            .env(inside.0, inside.1)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    };
+    let pane = ("SPYC_PANE_ID", std::ffi::OsStr::new("a-pane"));
+    let said = attach(pane, &["attach", NAME]);
+    assert!(
+        said.contains("runs in a spyc pane") && said.contains("--force"),
+        "{said}"
+    );
+    let said = attach(("SPYC_JAR_SOCKET", live.as_os_str()), &["attach", NAME]);
+    assert!(said.contains("runs in a spyc jar"), "{said}");
+    // Past the check, to a session that doesn't run.
+    let said = attach(pane, &["attach", "--force", "SAGE"]);
+    assert!(said.contains("no session named SAGE"), "{said}");
+    let said = attach(("SPYC_JAR_SOCKET", gone.as_os_str()), &["attach", "SAGE"]);
+    assert!(said.contains("no session named SAGE"), "{said}");
+}
+
 #[test]
 fn each_terminal_that_attaches_to_spycs_own_jar_is_set_up_probed_and_drawn_on() {
     let dirs = Dirs::new();
