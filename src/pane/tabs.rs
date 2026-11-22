@@ -265,9 +265,9 @@ pub struct TabInfo {
     /// or the one its saved session recorded (`agent::claude_home`). `None`
     /// until either, when its launch record and then spyc's own apply.
     pub claude_home: Option<PathBuf>,
-    /// The latest statusline report from this tab's Claude Code (`spyc
-    /// --statusline`), with when it arrived.
-    pub claude_statusline: Option<(crate::agent::claude_statusline::Statusline, jiff::Timestamp)>,
+    /// The latest statusline report from this tab's Claude Code or Antigravity
+    /// (`spyc --statusline`), with when it arrived.
+    pub statusline: Option<(crate::agent::claude_statusline::Statusline, jiff::Timestamp)>,
     /// Which credential this tab's Claude Code sends its requests with, as its
     /// status hook last reported.
     pub claude_credential: Option<crate::agent::claude_credential::Credential>,
@@ -484,7 +484,7 @@ impl TabInfo {
             codex_session_id: None,
             codex_home: None,
             claude_home: None,
-            claude_statusline: None,
+            statusline: None,
             claude_credential: None,
             live_session_id: None,
             scrape_status: None,

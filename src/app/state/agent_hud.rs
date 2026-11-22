@@ -7,6 +7,7 @@ use jiff::Timestamp;
 
 use crate::agent::tail::Availability;
 use crate::agent::{agy_metrics, claude_metrics, codex_metrics};
+use crate::config::agent_hud::{HUD_CACHE_COLD_SECS, HUD_CACHE_WARN_SECS};
 use crate::config::{AgentHudMode, HUD_STALE_AFTER_SECS};
 
 /// Whose session files feed the strip.
@@ -189,6 +190,7 @@ impl Update {
                     s.context_tokens.as_ref().map(|v| v.at),
                     s.mode.as_ref().map(|v| v.at),
                     s.compaction.as_ref().map(|v| v.at),
+                    s.last_tps.as_ref().map(|v| v.at),
                 ]
             }
         };
@@ -314,24 +316,46 @@ impl AgentHudState {
         self.update.as_ref().filter(|u| u.is_for(binding))
     }
 
-    /// The next finite freshness edge. Old samples arm nothing at idle.
+    /// The next finite freshness or prompt-cache TTL edge. Old samples arm
+    /// nothing at idle.
     pub fn next_expiry(&self, now: Timestamp) -> Option<i64> {
-        self.sample_seconds()
+        self.expiry_edges()
             .into_iter()
-            .filter_map(|at| at.checked_add(HUD_STALE_AFTER_SECS + 1))
             .filter(|at| *at > now.as_second())
             .min()
     }
 
     pub fn advance_time(&mut self, now: Timestamp) -> bool {
         let changed = self.as_of.is_some_and(|old| {
-            self.sample_seconds().into_iter().any(|at| {
-                old.as_second().saturating_sub(at) <= HUD_STALE_AFTER_SECS
-                    && now.as_second().saturating_sub(at) > HUD_STALE_AFTER_SECS
-            })
+            let old = old.as_second();
+            let now = now.as_second();
+            self.expiry_edges()
+                .into_iter()
+                .any(|edge| old < edge && now >= edge)
         });
         self.as_of = Some(now);
         changed
+    }
+
+    fn expiry_edges(&self) -> Vec<i64> {
+        let mut edges: Vec<i64> = self
+            .sample_seconds()
+            .into_iter()
+            .filter_map(|at| at.checked_add(HUD_STALE_AFTER_SECS + 1))
+            .collect();
+        if let Some(Update::Agy(u)) = self.update.as_ref()
+            && let Some(req) = u.snapshot.request.as_ref()
+            && req.value.context() > 0
+        {
+            let at = req.at.as_second();
+            if let Some(warn) = at.checked_add(HUD_CACHE_WARN_SECS) {
+                edges.push(warn);
+            }
+            if let Some(cold) = at.checked_add(HUD_CACHE_COLD_SECS) {
+                edges.push(cold);
+            }
+        }
+        edges
     }
 
     fn sample_seconds(&self) -> Vec<i64> {
@@ -654,5 +678,63 @@ mod tests {
             model.set_target(Some(claude_target)).is_none(),
             "one report, one retry"
         );
+    }
+
+    #[test]
+    fn agy_prompt_cache_arms_finite_warn_and_cold_edges_and_then_goes_silent() {
+        let mut model = AgentHudState::default();
+        let target = Target {
+            feed: Feed::Agy,
+            pane_id: "pane-agy".into(),
+            session_id: "sess-agy".into(),
+            home: PathBuf::from("/home/agy"),
+        };
+        let Some(ConsumerChange::Start(Binding::Agy(binding))) = model.set_target(Some(target))
+        else {
+            panic!("expected agy start");
+        };
+        let at: Timestamp = "2026-10-14T12:00:00Z".parse().unwrap();
+        let snapshot = agy_metrics::Snapshot {
+            request: Some(agy_metrics::Sample {
+                at,
+                value: agy_metrics::Usage {
+                    input: 100,
+                    cache_write: 0,
+                    cache_read: 900,
+                    output: 50,
+                },
+            }),
+            ..agy_metrics::Snapshot::default()
+        };
+        model.accept(
+            Update::Agy(Box::new(agy_metrics::Update {
+                binding,
+                availability: Availability::Available,
+                tail_only: false,
+                snapshot,
+            })),
+            (100, 1),
+            at,
+        );
+        // First edge: 61s freshness expiry.
+        assert_eq!(model.next_expiry(at), Some(at.as_second() + 61));
+        let t1 = Timestamp::from_second(at.as_second() + 61).unwrap();
+        assert!(model.advance_time(t1));
+        // Second edge: 180s prompt-cache warning.
+        assert_eq!(
+            model.next_expiry(t1),
+            Some(at.as_second() + HUD_CACHE_WARN_SECS)
+        );
+        let t2 = Timestamp::from_second(at.as_second() + HUD_CACHE_WARN_SECS).unwrap();
+        assert!(model.advance_time(t2));
+        // Third edge: 240s prompt-cache cold.
+        assert_eq!(
+            model.next_expiry(t2),
+            Some(at.as_second() + HUD_CACHE_COLD_SECS)
+        );
+        let t3 = Timestamp::from_second(at.as_second() + HUD_CACHE_COLD_SECS).unwrap();
+        assert!(model.advance_time(t3));
+        // Silent at idle afterwards.
+        assert_eq!(model.next_expiry(t3), None);
     }
 }

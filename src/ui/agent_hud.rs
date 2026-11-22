@@ -101,6 +101,7 @@ pub enum Metrics<'a> {
     Agy {
         snapshot: Option<&'a agy_metrics::Snapshot>,
         tail_only: bool,
+        reported: AgyReported<'a>,
     },
 }
 
@@ -115,6 +116,15 @@ pub struct Reported<'a> {
     pub plan: Option<&'a crate::agent::claude_statusline::Statusline>,
     /// Which credential this tab's Claude Code sends its requests with.
     pub credential: Option<crate::agent::claude_credential::Credential>,
+}
+
+/// What Antigravity's statusline (through `spyc --statusline`) reported: this
+/// tab's context share, model, effort, mode and live subagents, plus the
+/// newest multi-bucket quota snapshot any Antigravity tab sent.
+#[derive(Clone, Copy, Default)]
+pub struct AgyReported<'a> {
+    pub statusline: Option<&'a crate::agent::claude_statusline::Statusline>,
+    pub plan: Option<&'a crate::agent::agy_statusline::AgyStatusline>,
 }
 
 /// What the tab's status hooks have shown.
@@ -218,7 +228,8 @@ pub fn lines(
         Metrics::Agy {
             snapshot,
             tail_only,
-        } => agy::rows(snapshot, tail_only, view, p),
+            reported,
+        } => agy::rows(snapshot, tail_only, reported, view, p),
     };
     let mut rows = vec![activity(view, p), agent.usage];
     let mut measured = Vec::new();
@@ -227,7 +238,8 @@ pub fn lines(
         mode_row.cells.push(hooks(view.hooks, p));
         mode_row.cells.push(mcp(view.mcp_connections, p));
         mode_row.cells.extend(claude::organization(view, p));
-        mode_row.trailer = claude::subagents(view, p);
+        mode_row.cells.extend(agy::plan_tier(view, p));
+        mode_row.trailer = claude::subagents(view, p).or_else(|| agy::subagents(view, p));
         rows.push(agent.tools);
         match thinking_row(view, p) {
             // The mode row still sizes the columns, so none moves as the
@@ -238,7 +250,9 @@ pub fn lines(
             }
             None => rows.push(mode_row),
         }
-    } else if let Some(field) = claude::running_subagents(view, p) {
+    } else if let Some(field) =
+        claude::running_subagents(view, p).or_else(|| agy::running_subagents(view, p))
+    {
         rows[1].trailer = Some(Trailer::Field(field));
     }
     // The rows below hang from the dot, each heading under the activity label.
@@ -663,41 +677,64 @@ fn thinking_row(view: &HudView<'_>, p: Palette) -> Option<Row> {
 
 /// The model and effort, from either agent's latest mode report.
 fn model(view: &HudView<'_>, p: Palette) -> Field {
-    let reported = match view.metrics {
+    let reported: Option<(Option<&str>, Option<&str>, bool)> = match view.metrics {
         Metrics::Codex(snapshot) => snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
             (
-                &m.value.model,
-                &m.value.effort,
+                m.value.model.as_deref(),
+                m.value.effort.as_deref(),
                 view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
             )
         }),
         Metrics::Claude { snapshot, .. } => snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
             (
-                &m.value.model,
-                &m.value.effort,
+                m.value.model.as_deref(),
+                m.value.effort.as_deref(),
                 view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
             )
         }),
-        Metrics::Agy { snapshot, .. } => snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
-            (
-                &m.value.model,
-                &None,
-                view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
-            )
-        }),
+        Metrics::Agy {
+            snapshot, reported, ..
+        } => reported
+            .statusline
+            .and_then(|r| r.agy.as_ref())
+            .filter(|a| a.model.is_some())
+            .map(|a| (a.model.as_deref(), a.effort.as_deref(), false))
+            .or_else(|| {
+                snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
+                    (
+                        m.value.model.as_deref(),
+                        None,
+                        view.now.is_some_and(|now| m.is_stale_at(now, STALE)),
+                    )
+                })
+            }),
     };
     let Some((model, effort, stale)) = reported else {
         return Field(vec![p.label("model --")]);
     };
-    let mut spans = vec![model.as_deref().map_or_else(
+    let mut spans = vec![model.map_or_else(
         || p.label("model --"),
         |model| p.strong(model.trim_prefix("claude-")),
     )];
-    if let Some(effort) = effort.as_deref() {
+    if let Some(effort) = effort
+        && !model.is_some_and(|m| model_includes_effort(m, effort))
+    {
         spans.push(Span::raw(" "));
         spans.push(p.label(effort));
     }
     dim_if(Field(spans), stale)
+}
+
+/// True when `model` already ends with `(<effort>)` case-insensitively, as
+/// Antigravity's `Gemini 4 Neon (High)` does alongside `model.effort = "high"`.
+fn model_includes_effort(model: &str, effort: &str) -> bool {
+    let Some(inner) = model.trim_end().strip_suffix(')') else {
+        return false;
+    };
+    let Some((_, tail)) = inner.rsplit_once('(') else {
+        return false;
+    };
+    tail.trim().eq_ignore_ascii_case(effort.trim())
 }
 
 const STALE: i64 = crate::config::HUD_STALE_AFTER_SECS;
@@ -1395,6 +1432,7 @@ mod tests {
             metrics: Metrics::Agy {
                 snapshot: Some(snapshot),
                 tail_only: false,
+                reported: AgyReported::default(),
             },
             availability: Some(Availability::Available),
             now: None,

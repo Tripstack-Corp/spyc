@@ -1,12 +1,14 @@
-//! What spyc keeps of the input Claude Code gives its `statusLine` command: the
-//! plan's rate-limit windows and the context window, as Claude Code itself
-//! computed them, and the mode of its `/vim` prompt. The cwd, transcript path,
-//! cost, model and everything else stay behind; only this projection travels to
-//! spyc.
+//! What spyc keeps of the input Claude Code or Antigravity (`agy`) gives its
+//! `statusLine` command: the context window, plan rate-limit windows, `/vim`
+//! prompt mode, and (for Antigravity) the bounded [`AgyStatusline`] projection.
+//! The cwd, transcript path, email, cost and everything else stay behind; only
+//! this projection travels to spyc.
 
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+pub use super::agy_statusline::AgyStatusline;
 
 /// Statusline input past this size isn't projected. It still reaches the
 /// wrapped command whole.
@@ -23,6 +25,10 @@ pub struct Statusline {
     /// know reads as none, from Claude Code and from the wire alike.
     #[serde(default, deserialize_with = "known_vim_mode")]
     pub vim_mode: Option<VimMode>,
+    /// Antigravity-specific statusline fields (multi-bucket quotas, model,
+    /// effort, plan tier, sandbox, live subagents, tasks and queue).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agy: Option<AgyStatusline>,
 }
 
 impl Statusline {
@@ -31,6 +37,7 @@ impl Statusline {
             && self.five_hour.is_none()
             && self.seven_day.is_none()
             && self.vim_mode.is_none()
+            && self.agy.is_none()
     }
 
     /// The bounds [`project`] holds an input to, for one that arrived already
@@ -57,6 +64,10 @@ impl Statusline {
             five_hour: window(self.five_hour),
             seven_day: window(self.seven_day),
             vim_mode: self.vim_mode,
+            agy: self
+                .agy
+                .map(AgyStatusline::bounded)
+                .filter(|a| !a.is_empty()),
         }
     }
 }
@@ -120,11 +131,18 @@ pub struct RateWindow {
 /// The projection of one statusline input. Absent, malformed and out-of-range
 /// fields are dropped, never guessed.
 pub fn project(payload: &Value) -> Statusline {
+    project_at(payload, Timestamp::now().as_second())
+}
+
+/// [`project`] at an explicit Unix timestamp (used for Antigravity quota
+/// buckets that carry only `reset_in_seconds`).
+pub fn project_at(payload: &Value, now_secs: i64) -> Statusline {
     let context = &payload["context_window"];
     let limits = &payload["rate_limits"];
     Statusline {
         session_id: payload["session_id"]
             .as_str()
+            .or_else(|| payload["conversation_id"].as_str())
             .filter(|id| crate::state::sessions::is_uuid(id))
             .map(str::to_owned),
         context: context["context_window_size"]
@@ -137,6 +155,7 @@ pub fn project(payload: &Value) -> Statusline {
         five_hour: window(&limits["five_hour"]),
         seven_day: window(&limits["seven_day"]),
         vim_mode: VimMode::known(&payload["vim"]["mode"]),
+        agy: super::agy_statusline::project_at(payload, now_secs),
     }
 }
 
@@ -289,6 +308,7 @@ mod tests {
                 resets_at: Some(-1),
             }),
             vim_mode: Some(VimMode::Normal),
+            agy: None,
         }
         .bounded();
         assert_eq!(wire.session_id, None);
@@ -348,5 +368,39 @@ mod tests {
         wire.as_object_mut().unwrap().remove("vim_mode");
         let read: Statusline = serde_json::from_value(wire).unwrap();
         assert_eq!(read.vim_mode, None, "an older forwarder sends none");
+    }
+
+    #[test]
+    fn an_agy_statusline_projects_and_round_trips_through_the_wire() {
+        let payload = json!({
+            "conversation_id": SESSION,
+            "product": "antigravity",
+            "model": {
+                "id": "Gemini 4 Neon (High)",
+                "display_name": "Gemini 4 Neon (High)",
+                "effort": "high"
+            },
+            "context_window": {
+                "context_window_size": 1_048_576,
+                "used_percentage": 18.4
+            },
+            "exceeds_200k_tokens": false,
+            "plan_tier": "Google AI Pro",
+            "quota": {
+                "gemini-5h": {
+                    "remaining_fraction": 0.7505,
+                    "reset_time": "2026-11-22T16:27:31.000Z"
+                }
+            },
+            "vim": { "mode": "INSERT" }
+        });
+        let projected = project_at(&payload, 1_795_000_000);
+        assert_eq!(projected.session_id.as_deref(), Some(SESSION));
+        assert_eq!(projected.context.unwrap().used_percent, Some(18));
+        assert_eq!(projected.vim_mode, Some(VimMode::Insert));
+        assert!(projected.agy.is_some());
+        let wire = serde_json::to_value(&projected).unwrap();
+        let decoded: Statusline = serde_json::from_value(wire).unwrap();
+        assert_eq!(decoded.bounded(), projected);
     }
 }

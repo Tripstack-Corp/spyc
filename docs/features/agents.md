@@ -273,11 +273,17 @@ Antigravity (`agy`) tab is `working` and has recorded reasoning in this turn,
 its fourth row reads `thinking` and the reasoning's latest line, cut from the
 left with `…` so the newest words stay in view, and **`^a t`** pages the
 session's whole thinking history. Usage scopes
-stay separate, and unavailable context occupancy and limits stay explicit. A
-Claude Code tab's context is a token count, followed by Claude Code's own
-percentage and the plan's five-hour and seven-day usage once spyc's statusline
-wrapper forwards them, each with when it resets: local clock time (`↻3:40pm`,
-`↻Thu 9am`), or the time left with `[pane] agent_hud_resets = "countdown"`. `:agent hud off` stops collection; `:agent hud dump` (or
+stay separate, and unavailable context occupancy and limits stay explicit. For
+Claude Code and Antigravity (`agy`), context is a token count followed by the
+agent's own window percentage and its five-hour and seven-day quota usage once
+spyc's `statusLine` wrapper forwards them, each with when it resets: local
+clock time (`↻3:40pm`, `↻Thu 9am`), or the time left with
+`[pane] agent_hud_resets = "countdown"`. Antigravity tabs also show Google AI
+Pro's `argon` weekly quota when active or half-spent, a pace run-out estimate
+(`~…`) when burning faster than linear window pace, prompt-cache cold cues
+(`3m` / `cold`), step throughput (`t/s`), and on the mode row `background`,
+`queued`, approval mode, `sandbox`, `plan` tier and live running subagents.
+`:agent hud off` stops collection; `:agent hud dump` (or
 `info`), or a double-click on the strip, opens saveable source and freshness
 diagnostics with every tool's tally. A drag across the strip copies its text.
 The strip always leaves the agent at least six rows, and costs nothing while

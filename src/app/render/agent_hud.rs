@@ -2,10 +2,10 @@
 
 use ratatui::{Frame, layout::Rect};
 
-use crate::agent::claude_statusline::Statusline;
 use crate::agent::tail::Availability;
 use crate::pane::AgentActivity;
-use crate::ui::agent_hud::{self, Attention, Hooks, HudView, Metrics, Reported};
+use crate::state::sessions::AgentKind;
+use crate::ui::agent_hud::{self, AgyReported, Attention, Hooks, HudView, Metrics, Reported};
 
 use super::super::state::agent_hud::{Feed, Update};
 
@@ -116,13 +116,43 @@ impl App {
 }
 
 impl App {
-    /// The plan windows the strip shows, which only a Claude Code tab's has.
-    pub(in crate::app) fn agent_hud_plan(&self) -> Option<&Statusline> {
-        let tabs = self.runtime.project().pane_tabs.as_ref()?;
+    /// Reset timestamps (Unix seconds) for the plan windows the strip shows
+    /// on the active Claude Code or Antigravity tab.
+    pub(in crate::app) fn agent_hud_reset_timestamps(&self) -> Vec<i64> {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
+            return Vec::new();
+        };
         let info = &tabs.tabs()[tabs.active_index()].info;
         match metrics_of(self.active_agent_hud_update(), tabs, info) {
-            Metrics::Claude { reported, .. } => reported.plan,
-            _ => None,
+            Metrics::Claude { reported, .. } => reported
+                .plan
+                .into_iter()
+                .flat_map(|plan| [plan.five_hour, plan.seven_day])
+                .flatten()
+                .filter_map(|w| w.resets_at)
+                .collect(),
+            Metrics::Agy {
+                snapshot, reported, ..
+            } => {
+                let model = reported
+                    .statusline
+                    .and_then(|s| s.agy.as_ref())
+                    .and_then(|a| a.model.as_deref())
+                    .or_else(|| {
+                        snapshot
+                            .and_then(|s| s.mode.as_ref())
+                            .and_then(|m| m.value.model.as_deref())
+                    });
+                reported.plan.map_or_default(|plan| {
+                    let active = plan.active_quotas(model);
+                    [active.five_hour, active.seven_day, active.argon]
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|b| b.resets_at)
+                        .collect()
+                })
+            }
+            Metrics::Codex(_) => Vec::new(),
         }
     }
 }
@@ -143,14 +173,15 @@ fn activity_note(info: &crate::pane::tabs::TabInfo) -> Option<std::borrow::Cow<'
     }
 }
 
-/// What the tabs' statuslines reported: this tab's context share, when its
-/// report is about this tab's session, and the newest plan windows any tab saw.
+/// What the tabs' statuslines reported for Claude Code: this tab's context
+/// share, when its report is about this tab's session, and the newest plan
+/// windows any Claude tab saw.
 fn reported<'a>(
     tabs: &'a crate::pane::PaneTabs,
     info: &'a crate::pane::tabs::TabInfo,
 ) -> Reported<'a> {
     let context_percent = info
-        .claude_statusline
+        .statusline
         .as_ref()
         .filter(|(report, _)| {
             report.session_id.is_none() || report.session_id == info.live_session_id
@@ -159,7 +190,8 @@ fn reported<'a>(
     let plan = tabs
         .tabs()
         .iter()
-        .filter_map(|entry| entry.info.claude_statusline.as_ref())
+        .filter(|entry| entry.info.agent().kind() == AgentKind::Claude)
+        .filter_map(|entry| entry.info.statusline.as_ref())
         .filter(|(report, _)| report.five_hour.is_some() || report.seven_day.is_some())
         .max_by_key(|(_, at)| *at)
         .map(|(report, _)| report);
@@ -168,6 +200,34 @@ fn reported<'a>(
         plan,
         credential: info.claude_credential,
     }
+}
+
+/// What the tabs' statuslines reported for Antigravity: this tab's own report
+/// (model, context share, mode, sandbox, live subagents) and the newest quota
+/// snapshot any Antigravity tab saw.
+fn agy_reported<'a>(
+    tabs: &'a crate::pane::PaneTabs,
+    info: &'a crate::pane::tabs::TabInfo,
+) -> AgyReported<'a> {
+    let statusline = info
+        .statusline
+        .as_ref()
+        .filter(|(report, _)| {
+            report.session_id.is_none() || report.session_id == info.live_session_id
+        })
+        .map(|(report, _)| report);
+    let plan = tabs
+        .tabs()
+        .iter()
+        .filter(|entry| entry.info.agent().kind() == AgentKind::Agy)
+        .filter_map(|entry| entry.info.statusline.as_ref())
+        .filter_map(|(report, at)| {
+            let agy = report.agy.as_ref()?;
+            (!agy.quotas.is_empty()).then_some((agy, *at))
+        })
+        .max_by_key(|(_, at)| *at)
+        .map(|(agy, _)| agy);
+    AgyReported { statusline, plan }
 }
 
 /// The agent's own metrics for the strip, from its update and the tabs'
@@ -189,6 +249,7 @@ fn metrics_of<'a>(
         Some(Update::Agy(u)) => Metrics::Agy {
             snapshot: (u.availability == Availability::Available).then_some(&u.snapshot),
             tail_only: u.tail_only,
+            reported: agy_reported(tabs, info),
         },
         None => match super::super::agent_hud::feed(info.agent().kind()) {
             Some(Feed::Claude) => Metrics::Claude {
@@ -199,6 +260,7 @@ fn metrics_of<'a>(
             Some(Feed::Agy) => Metrics::Agy {
                 snapshot: None,
                 tail_only: false,
+                reported: agy_reported(tabs, info),
             },
             _ => Metrics::Codex(None),
         },

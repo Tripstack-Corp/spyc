@@ -20,7 +20,7 @@ pub mod project_file;
 /// always loads cleanly with the current `Config` schema.
 pub const DEFAULT_TEMPLATE: &str = include_str!("default.spycrc.toml");
 
-mod agent_hud;
+pub mod agent_hud;
 pub use agent_hud::{AgentHudMode, AgentHudResets, HUD_STALE_AFTER_SECS};
 mod ui;
 pub use ui::{MenuHints, UiConfig};

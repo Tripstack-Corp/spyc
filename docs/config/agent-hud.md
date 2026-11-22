@@ -135,20 +135,35 @@ transcript not found yet is looked up again on the tab's next status report.
 
 For an Antigravity (`agy`) tab, `context` is the input plus prompt-cache-read
 tokens from the latest request, or `--` after a compaction until the next
-request; `out` is the output of every distinct planner response since the read
-began, `hit` the share of input read from the prompt cache, and `compacted` the
-compactions seen. When a long transcript was read from part-way through, these
-counts carry `≥` and the tools row reads `recent`. The tools row counts every
-call and failure, names what is running with `◐`, and lists the three most
-called, each marked `✓` or `✗<n>` by its own failures; spyc's own MCP calls
-keep `spyc:`, while other `call_mcp_tool` servers read `mcp`. The mode row
-counts subagent (`invoke_subagent`) calls as `agents`, followed by `hooks` and
-`mcp`. While the agent is `working` and a planner response in the current
-turn has recorded reasoning, that row reads `thinking` and the reasoning's
-latest line instead, cut from the left with `…` so the newest words stay in
-view. The mode row comes back when the turn settles; a new prompt or a
-compaction clears the line. `^a t` pages the session's whole thinking
-history. The strip reads
+request. When `agy` is wired (the first-launch `[Y/n]`, or `:hooks on agy`),
+spyc wraps `statusLine` in `~/.gemini/antigravity-cli/settings.json` with
+`spyc --statusline` — preserving any existing command such as `agy-powerline`
+or `faiz-dash` and restoring it on `:hooks off agy` — so the strip also shows
+Antigravity's own window percentage beside `context` (tinted red once past
+200k tokens), followed by the active model's `5h` and `7d` quota windows (and
+Google AI Pro's `argon` weekly bucket when active or at least half-spent).
+Each quota window shows its share used, when it resets (following
+`agent_hud_resets`), and an estimated run-out time (`~…`) when burning faster
+than linear window pace; `:agent hud dump` lists every bucket to two decimal
+places with its pace delta. Next come `hit`, the share of input read from the
+prompt cache (adding `3m` in amber at 3 minutes idle and `cold` in red at 4
+minutes, armed as two finite edges with zero idle wakes), `out`, the output of
+every distinct planner response since the read began, effective step-to-step
+throughput (`t/s`) while fresh, and `compacted`, the compactions seen. When a
+long transcript was read from part-way through, these counts carry `≥` and the
+tools row reads `recent`. The tools row counts every call and failure, names
+what is running with `◐`, and lists the three most called, each marked `✓` or
+`✗<n>` by its own failures; spyc's own MCP calls keep `spyc:`, while other
+`call_mcp_tool` servers read `mcp`. The mode row counts subagent
+(`invoke_subagent`) calls as `agents`, adds `background`, `queued`, approval
+mode, `sandbox` and active custom `agent` when reported by `statusLine`,
+followed by `hooks`, `mcp`, `plan` (the account's plan tier), and a trailer of
+live running subagents (compact mode shows `subagents N`). While the agent is
+`working` and a planner response in the current turn has recorded reasoning,
+that row reads `thinking` and the reasoning's latest line instead, cut from the
+left with `…` so the newest words stay in view. The mode row comes back when
+the turn settles; a new prompt or a compaction clears the line. `^a t` pages
+the session's whole thinking history. The strip reads
 `~/.gemini/antigravity-cli/brain/<session>/.system_generated/logs/transcript.jsonl`
 under `$HOME` as spyc's environment names it at startup, using the conversation
 UUID reported by the tab's status hooks or named by `--conversation`.

@@ -9,6 +9,77 @@ use crate::config::AgentHudResets;
 const MINUTE: i64 = 60;
 const HOUR: i64 = 60 * MINUTE;
 const DAY: i64 = 24 * HOUR;
+/// Suppress noisy pace projections during the first 10 minutes of a window.
+const MIN_PACE_ELAPSED_SECS: i64 = 10 * MINUTE;
+
+/// Format basis points (`0..=10_000`) to two decimal places (e.g. `24.95%`).
+#[must_use]
+pub fn format_pct_2dp(x100: u16) -> String {
+    let clamped = x100.min(10_000);
+    format!("{}.{:02}%", clamped / 100, clamped % 100)
+}
+
+/// Whole percentage points ahead of (`> 0`) or behind (`< 0`) linear window
+/// pace: `used% - elapsed%`. `None` before [`MIN_PACE_ELAPSED_SECS`] or when
+/// the window bounds don't match.
+#[must_use]
+pub fn pace_delta_points(
+    used_percent_x100: u16,
+    resets_at: i64,
+    window_secs: i64,
+    now: Timestamp,
+) -> Option<i16> {
+    let left = resets_at.checked_sub(now.as_second())?;
+    if left <= 0 || left >= window_secs || window_secs <= 0 {
+        return None;
+    }
+    let elapsed = window_secs - left;
+    if elapsed < MIN_PACE_ELAPSED_SECS {
+        return None;
+    }
+    let elapsed_x100 = elapsed.checked_mul(10_000)? / window_secs;
+    let diff = i64::from(used_percent_x100.min(10_000)) - elapsed_x100;
+    let rounded = if diff >= 0 {
+        (diff + 50) / 100
+    } else {
+        (diff - 50) / 100
+    };
+    i16::try_from(rounded).ok()
+}
+
+/// Estimated time until a quota window runs out (`~1h12m`) at the current
+/// window burn rate. `None` when on or under pace, already empty, or too early
+/// in the window.
+#[must_use]
+pub fn pace_runout(
+    used_percent_x100: u16,
+    resets_at: i64,
+    window_secs: i64,
+    now: Timestamp,
+) -> Option<String> {
+    let used = i64::from(used_percent_x100.min(10_000));
+    if used <= 0 || used >= 10_000 {
+        return None;
+    }
+    let left = resets_at.checked_sub(now.as_second())?;
+    if left <= 0 || left >= window_secs || window_secs <= 0 {
+        return None;
+    }
+    let elapsed = window_secs - left;
+    if elapsed < MIN_PACE_ELAPSED_SECS {
+        return None;
+    }
+    let elapsed_x100 = elapsed.checked_mul(10_000)? / window_secs;
+    if used <= elapsed_x100 {
+        return None;
+    }
+    let rem_x100 = 10_000 - used;
+    let run_out_secs = elapsed.checked_mul(rem_x100)? / used;
+    if run_out_secs <= 0 || run_out_secs >= left {
+        return None;
+    }
+    Some(format!("~{}", countdown(run_out_secs)))
+}
 
 /// The label for a window resetting at `resets_at` (Unix seconds), or `None`
 /// once that has passed: the report then describes a window that's gone.
@@ -235,5 +306,31 @@ mod tests {
             );
             assert_ne!(label_at(next), label_at(start), "changed at {next}");
         }
+    }
+
+    #[test]
+    fn pace_helpers_format_two_decimals_and_forecast_only_when_burning_fast() {
+        assert_eq!(format_pct_2dp(0), "0.00%");
+        assert_eq!(format_pct_2dp(2495), "24.95%");
+        assert_eq!(format_pct_2dp(10_000), "100.00%");
+
+        let five_h = 5 * HOUR;
+        let now = at(utc(12, 0));
+        // Too early (only 5m elapsed): suppressed.
+        let early_reset = now.as_second() + five_h - 5 * MINUTE;
+        assert_eq!(pace_delta_points(5000, early_reset, five_h, now), None);
+        assert_eq!(pace_runout(5000, early_reset, five_h, now), None);
+
+        // 2h elapsed (40% of 5h), 25% used -> under pace (-15%), no run-out.
+        let reset = now.as_second() + 3 * HOUR;
+        assert_eq!(pace_delta_points(2500, reset, five_h, now), Some(-15));
+        assert_eq!(pace_runout(2500, reset, five_h, now), None);
+
+        // 2h elapsed (40% of 5h), 75% used -> +35% over pace; 25% left at 37.5%/h = 40m.
+        assert_eq!(pace_delta_points(7500, reset, five_h, now), Some(35));
+        assert_eq!(
+            pace_runout(7500, reset, five_h, now).as_deref(),
+            Some("~40m")
+        );
     }
 }

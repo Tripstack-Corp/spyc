@@ -78,8 +78,8 @@ impl App {
             .is_some_and(|strip| (strip.y..strip.bottom()).contains(&y))
     }
 
-    /// A statusline report from `pane_id`'s Claude Code. Only a live tab running
-    /// Claude Code keeps one.
+    /// A statusline report from `pane_id`'s Claude Code or Antigravity tab.
+    /// Only a live tab running one of those agents keeps one.
     pub(super) fn land_statusline(
         &mut self,
         pane_id: &str,
@@ -90,9 +90,12 @@ impl App {
         };
         if let Some(entry) = tabs.tabs_mut().iter_mut().find(|e| e.info.id == pane_id)
             && !entry.pane.is_closed()
-            && entry.info.agent().kind() == AgentKind::Claude
+            && matches!(
+                entry.info.agent().kind(),
+                AgentKind::Claude | AgentKind::Agy
+            )
         {
-            entry.info.claude_statusline = Some((statusline, Timestamp::now()));
+            entry.info.statusline = Some((statusline, Timestamp::now()));
         }
     }
 
@@ -235,12 +238,10 @@ impl App {
     /// When the strip's plan cells next change on their own: a window
     /// resetting, or a countdown ticking over.
     fn agent_hud_reset_edge(&self, now: Timestamp) -> Option<i64> {
-        let plan = self.agent_hud_plan()?;
         let style = self.state.active_project().config.pane.agent_hud_resets;
-        [plan.five_hour, plan.seven_day]
+        self.agent_hud_reset_timestamps()
             .into_iter()
-            .flatten()
-            .filter_map(|w| crate::ui::agent_hud::resets::next_change(w.resets_at?, now, style))
+            .filter_map(|at| crate::ui::agent_hud::resets::next_change(at, now, style))
             .min()
     }
 
