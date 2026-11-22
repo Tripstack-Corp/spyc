@@ -15,6 +15,7 @@ pub mod input;
 pub mod pathref;
 pub mod quick_select;
 pub mod snapshot;
+pub mod ssh_agent;
 pub mod tabs;
 mod widget;
 

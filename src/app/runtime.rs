@@ -98,6 +98,9 @@ pub(super) struct Runtime {
     pub(super) own_jar: Option<crate::pane::jar::session::OwnJar>,
     /// The own jar's attaches the loop has set the terminal up for.
     pub(super) attaches_seen: u64,
+    /// The SSH agent this spyc's tabs reach through their links: its
+    /// terminal's (`pane::ssh_agent`).
+    pub(super) ssh_agent: Option<std::path::PathBuf>,
     /// The session's event log has a terminal attached that hasn't left.
     pub(super) terminal_noted: bool,
     /// A `^d` in spyc's own jar, for the loop to carry out with the terminal.
@@ -402,6 +405,13 @@ impl Runtime {
             pane_wake_tx: None,
             own_jar: None,
             attaches_seen: 0,
+            // Not a unit test's: its tabs would link into this user's own
+            // runtime directory.
+            ssh_agent: if cfg!(test) {
+                None
+            } else {
+                crate::pane::ssh_agent::from_env().and_then(Result::ok)
+            },
             terminal_noted: false,
             detach_pending: false,
             handover: None,

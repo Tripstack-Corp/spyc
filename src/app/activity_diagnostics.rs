@@ -1,7 +1,7 @@
 //! Agent activity source and hook-readiness diagnostics: `:why-status` (the
 //! active tab) and `:activity dump` (every tab, in every project, each under
 //! its project's heading while several are open) print one shared per-tab
-//! report.
+//! report. `:dump-scrollback` writes the active tab's scrollback as text.
 
 use std::time::Instant;
 
@@ -351,4 +351,53 @@ fn source_lines(e: &TabEntry, now: Instant) -> Vec<String> {
         }
     }
     out
+}
+
+impl App {
+    /// `:dump-scrollback` diagnostic. Runs the same drain +
+    /// snapshot path as `^a-v`, then writes the captured lines as
+    /// plain text to `/tmp/spyc-scrollback.txt`. Tail the file to
+    /// confirm whether content visible on the live pane (HUD
+    /// overlays, etc.) is actually reaching our terminal engine at
+    /// snapshot time.
+    pub fn dump_scrollback_snapshot(&mut self) {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
+            self.state.flash_error("dump-scrollback: no pane open");
+            return;
+        };
+        let active = tabs.active_mut();
+        for _ in 0..3 {
+            active.drain_output();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        active.drain_output();
+        let lines = active.with_screen_mut(crate::ui::scrollback::lines_from_scrollback);
+        let mut out = String::new();
+        for line in &lines {
+            for span in &line.spans {
+                out.push_str(&span.content);
+            }
+            out.push('\n');
+        }
+        // Owner-only (0600) in the state dir, not the old world-readable,
+        // symlink-followable `/tmp/spyc-scrollback.txt` (pane scrollback can
+        // contain anything the agent printed). Truncate so each dump is a
+        // fresh snapshot.
+        let name = "spyc-scrollback.txt";
+        let display = crate::state::state_file_path(name)
+            .map_or_else(|| name.to_string(), |p| p.display().to_string());
+        match crate::state::open_state_file_truncate(name) {
+            Some(mut f) => match std::io::Write::write_all(&mut f, out.as_bytes()) {
+                Ok(()) => self
+                    .state
+                    .flash_info(format!("wrote {} lines to {display}", lines.len())),
+                Err(e) => self
+                    .state
+                    .flash_error(format!("dump-scrollback: write failed: {e:#}")),
+            },
+            None => self
+                .state
+                .flash_error("dump-scrollback: no state dir for the output file".to_string()),
+        }
+    }
 }
