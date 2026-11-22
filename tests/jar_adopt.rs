@@ -1066,6 +1066,55 @@ fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
     );
 }
 
+/// #904: in its own jar, spyc sends what goes to a terminal by the terminal
+/// attached now, not the one it started in. A session started locally and
+/// attached from an SSH login copies a path back through that terminal (OSC
+/// 52), as a spyc started over SSH does, rather than into a clipboard on a
+/// machine the user isn't at.
+#[test]
+fn a_session_attached_over_ssh_copies_through_the_terminal() {
+    let dirs = dirs();
+    std::fs::write(dirs.project.join("copied-file.txt"), "").unwrap();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.push(noted(&dirs.pidfile)[0]);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+
+    // `^d` into the session's own jar, then `^d` again: the terminal goes.
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    first.eventually("the session drawn again, from its jar", || {
+        let shown = first.since_last_screen();
+        shown.contains(&name) && shown.contains("ready-mark")
+    });
+    left.0
+        .push(described(&socket, "program_pid").unwrap().parse().unwrap());
+    first.type_keys(b"\x04");
+    eventually("the terminal leaves", || first.exited());
+
+    let ssh = std::ffi::OsStr::new("192.0.2.1 50000 192.0.2.2 22");
+    let back = Spyc::start_env(&dirs, &["attach"], &[("SSH_CONNECTION", ssh)]);
+    left.0.push(back.pid());
+    back.eventually("the session drawn", || {
+        squeezed(&back.since_last_screen()).contains("copied-file.txt")
+    });
+    back.type_keys(b"\x01k");
+    std::thread::sleep(Duration::from_millis(300));
+    back.type_keys(b"yf");
+    back.eventually("the path comes back as OSC 52", || {
+        back.since_last_screen().contains("\x1b]52;")
+    });
+}
+
 /// `text` without its escape sequences or spaces: what a line says, however
 /// the drawing moved the cursor between its words.
 fn squeezed(text: &str) -> String {

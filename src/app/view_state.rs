@@ -443,11 +443,15 @@ pub struct ViewState {
     /// index so terminals that can't parse 24-bit SGR (old GNU screen) still get
     /// colours. `hud_truecolor` is derived from this — they never disagree.
     pub(super) color_depth: crate::ui::color_depth::ColorDepth,
-    /// Whether spyc is running over SSH (`$SSH_CONNECTION`/`$SSH_TTY`/`$SSH_CLIENT`),
-    /// snapshotted once at construction (doesn't change mid-session). Drives the
-    /// P3-1 `desktop_via = "auto"` routing — OSC-9 (client-side) over SSH, the OS
-    /// notifier locally — so the pure `notification_for_transition` never reads env.
+    /// Whether what spyc sends its terminal goes over SSH. Drives the P3-1
+    /// `desktop_via = "auto"` routing (OSC-9, client-side, over SSH; the OS
+    /// notifier locally) and the clipboard's, so the pure
+    /// `notification_for_transition` never reads env. From spyc's own
+    /// `$SSH_CONNECTION`/`$SSH_TTY`/`$SSH_CLIENT` at start ([`Self::ssh_at_start`]);
+    /// in spyc's own jar, from the terminal attached now (`app::proc`).
     pub(super) is_ssh: bool,
+    /// Whether spyc itself started over SSH.
+    pub(super) ssh_at_start: bool,
     /// The reader's time zone, for the agent strip's plan resets in clock time.
     /// UTC here, so tests never depend on the machine's zone; the live app takes
     /// the system's at startup and `settle_agent_hud` keeps it current.
@@ -631,9 +635,8 @@ impl ViewState {
             // actually emit (forcing `--color 256` also disables the RGB gradient).
             hud_truecolor: color_depth == ColorDepth::TrueColor,
             color_depth,
-            is_ssh: std::env::var_os("SSH_CONNECTION").is_some()
-                || std::env::var_os("SSH_TTY").is_some()
-                || std::env::var_os("SSH_CLIENT").is_some(),
+            is_ssh: started_over_ssh(),
+            ssh_at_start: started_over_ssh(),
             local_tz: jiff::tz::TimeZone::UTC,
             // `setup_terminal` starts us in 1007 alternate-scroll, so the
             // terminal is NOT in real mouse reporting yet. `settle_mouse_mode`
@@ -724,4 +727,11 @@ pub(super) struct TabState {
     pub(super) matches: Vec<String>,
     /// 0 = list was just shown (first Tab). 1+ = cycling through matches.
     pub(super) cycle_index: usize,
+}
+
+/// Whether this process runs over SSH, by its environment.
+fn started_over_ssh() -> bool {
+    std::env::var_os("SSH_CONNECTION").is_some()
+        || std::env::var_os("SSH_TTY").is_some()
+        || std::env::var_os("SSH_CLIENT").is_some()
 }

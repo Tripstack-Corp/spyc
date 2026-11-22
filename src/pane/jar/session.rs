@@ -35,6 +35,7 @@ pub(super) const LINK_WAIT: Duration = Duration::from_secs(20);
 /// spyc's link to its own jar, as its program.
 pub struct OwnJar {
     name: String,
+    socket: PathBuf,
     /// Until [`Self::watch`] takes it.
     client: Option<Client>,
     /// The connection's sending half, once [`Self::watch`] has split it.
@@ -47,6 +48,17 @@ impl OwnJar {
     /// The session's name: its jar's socket's.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Whether the terminal attached now reaches this machine over SSH, as its
+    /// client told the jar (`spyc_jar::attach::TERMINAL_KEY`); `None` when it
+    /// didn't say (an older client) or the jar can't be asked.
+    pub fn terminal_over_ssh(&self) -> Option<bool> {
+        let fields = spyc_jar::client::describe(&self.socket).ok()?;
+        let (_, kind) = fields
+            .iter()
+            .find(|(k, _)| k == spyc_jar::attach::TERMINAL_KEY)?;
+        Some(kind == spyc_jar::attach::terminal_kind(true))
     }
 
     /// Whether a terminal is attached.
@@ -166,6 +178,7 @@ fn link(socket: &Path) -> anyhow::Result<OwnJar> {
         .map_or_default(|s| s.to_string_lossy().into_owned());
     Ok(OwnJar {
         name,
+        socket: socket.to_path_buf(),
         client: Some(client),
         tx: None,
         attached: Arc::new(AtomicBool::new(attached)),
