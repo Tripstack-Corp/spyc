@@ -27,20 +27,35 @@ fn submit(app: &mut App, text: &str) {
     press(app, KeyCode::Enter);
 }
 
-/// `^a c` with `cmd` at its first prompt. The cwd prompt is left up.
-fn ask_for_a_tab(app: &mut App, cmd: &str) {
+/// `^a` then `key`, with `cmd` at the first prompt.
+fn ask_for_a_tab_with(app: &mut App, key: char, cmd: &str) {
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL))
         .unwrap();
-    press(app, KeyCode::Char('c'));
+    press(app, KeyCode::Char(key));
     submit(app, cmd);
 }
 
-/// `^a c` with `cmd`, then `Enter` on the cwd it offers, which it hands back.
+/// `^a C` with `cmd` at its first prompt. The cwd prompt is left up.
+fn ask_for_a_tab(app: &mut App, cmd: &str) {
+    ask_for_a_tab_with(app, 'C', cmd);
+}
+
+/// `^a c` with `cmd`: no cwd prompt follows.
+fn new_tab(app: &mut App, cmd: &str) {
+    ask_for_a_tab_with(app, 'c', cmd);
+    assert!(
+        !matches!(app.state.mode, Mode::Prompting(_)),
+        "`^a c` asked for more: {:?}",
+        app.flash_text()
+    );
+}
+
+/// `^a C` with `cmd`, then `Enter` on the cwd it offers, which it hands back.
 fn new_tab_where_offered(app: &mut App, cmd: &str) -> String {
     ask_for_a_tab(app, cmd);
     let offered = match &app.state.mode {
         Mode::Prompting(p) if matches!(p.kind, PromptKind::PaneNewTabCwd) => p.buffer.clone(),
-        _ => panic!("`^a c` asked for no cwd: {:?}", app.flash_text()),
+        _ => panic!("`^a C` asked for no cwd: {:?}", app.flash_text()),
     };
     press(app, KeyCode::Enter);
     offered
@@ -117,9 +132,10 @@ fn beside_a_mount(test: impl FnOnce(&Path, &mut App)) {
     });
 }
 
-/// `^a c` inside an archive offers, starts in and records the directory
-/// holding it, under each `[pane] new_tab_cwd`: a project with no home and no
-/// repository in an archive leaves each with the column's directory.
+/// `^a c` inside an archive starts in and records the directory holding it,
+/// under each `[pane] new_tab_cwd`: a project with no home and no repository
+/// in an archive leaves each with the column's directory, which is also the
+/// project's start dir.
 #[test]
 fn a_new_tab_inside_an_archive_starts_in_the_directory_holding_it() {
     for mode in [
@@ -130,14 +146,26 @@ fn a_new_tab_inside_an_archive_starts_in_the_directory_holding_it() {
         inside_a_mount(|root, app| {
             app.state.active_project_mut().config.pane.new_tab_cwd = mode;
 
-            let offered = new_tab_where_offered(app, TAB);
+            new_tab(app, TAB);
 
             let (pid, recorded) = newest_tab(app);
             wait_until_in(pid, root);
-            assert_eq!(offered, root.display().to_string(), "{mode:?} offered");
             assert_eq!(recorded, root, "{mode:?}: the tab records");
         });
     }
+}
+
+/// `^a C` inside an archive offers the directory holding it.
+#[test]
+fn a_new_tab_asked_for_inside_an_archive_offers_the_directory_holding_it() {
+    inside_a_mount(|root, app| {
+        let offered = new_tab_where_offered(app, TAB);
+
+        let (pid, recorded) = newest_tab(app);
+        wait_until_in(pid, root);
+        assert_eq!(offered, root.display().to_string());
+        assert_eq!(recorded, root, "the tab records");
+    });
 }
 
 /// A cwd cleared from the prompt asks for the default one, which inside an
@@ -188,11 +216,11 @@ fn a_new_tab_inside_an_archive_still_starts_at_the_project_home() {
         app.state.active_project_mut().home = Some(home.clone());
         app.state.active_project_mut().config.pane.new_tab_cwd = NewTabCwd::ProjectHome;
 
-        let offered = new_tab_where_offered(app, TAB);
+        new_tab(app, TAB);
 
-        let (pid, _) = newest_tab(app);
+        let (pid, recorded) = newest_tab(app);
         wait_until_in(pid, &home);
-        assert_eq!(offered, home.display().to_string());
+        assert_eq!(recorded, home);
     });
 }
 
@@ -205,11 +233,10 @@ fn a_new_tab_beside_a_mounted_archive_starts_in_the_column() {
             app.state.active_project_mut().config.pane.new_tab_cwd = mode;
             let work = root.join("work");
 
-            let offered = new_tab_where_offered(app, TAB);
+            new_tab(app, TAB);
 
             let (pid, recorded) = newest_tab(app);
             wait_until_in(pid, &work);
-            assert_eq!(offered, work.display().to_string(), "{mode:?} offered");
             assert_eq!(recorded, work, "{mode:?}: the tab records");
         });
     }

@@ -598,27 +598,34 @@ impl AppState {
     }
 
     /// The working directory a freshly-spawned pane tab opens in, honouring
-    /// `[pane] new_tab_cwd`. `WorktreeRoot` (the default) anchors the pane to
-    /// the focused column's worktree/repo root (`gw`'s target); `ProjectHome`
-    /// anchors to the sticky session project root; `BrowseDir` opens at the
-    /// focused column's current listing dir. `WorktreeRoot`/`ProjectHome` fall
-    /// back to the browse dir when their target is unresolved, as it always is
-    /// inside an archive mount, where the browse dir is the one holding the
-    /// archive ([`Self::cur_real_dir`]). Goes through `cur()` so a focused
-    /// second commander is honoured — and so a pane launched from the pane
-    /// view follows the last-focused column, the one `^a k` returns to
-    /// (`columns_are_addressed_through_handles`).
+    /// `[pane] new_tab_cwd` ([`Self::pane_cwd_for`]).
     pub fn default_pane_cwd(&self) -> std::path::PathBuf {
+        self.pane_cwd_for(self.active_project().config.pane.new_tab_cwd)
+    }
+
+    /// Where a pane tab opens under `mode`. `ProjectHome` is the sticky
+    /// session project root, or the project's start dir when it has none;
+    /// `WorktreeRoot` the focused column's worktree/repo root (`gw`'s
+    /// target); `BrowseDir` the focused column's current listing dir.
+    /// `WorktreeRoot` falls back to the browse dir when there's no repo, as
+    /// there never is inside an archive mount, where the browse dir is the one
+    /// holding the archive ([`Self::cur_real_dir`]). Goes through `cur()` so a
+    /// focused second commander is honoured, and so a pane launched from the
+    /// pane view follows the last-focused column, the one `^a k` returns to
+    /// (`columns_are_addressed_through_handles`).
+    pub fn pane_cwd_for(&self, mode: crate::config::NewTabCwd) -> std::path::PathBuf {
         let p = self.active_project();
         let browse_dir = || self.cur_real_dir().to_path_buf();
-        match p.config.pane.new_tab_cwd {
+        match mode {
             crate::config::NewTabCwd::WorktreeRoot => self
                 .cur()
                 .git_cache
                 .current_repo_root
                 .clone()
                 .unwrap_or_else(browse_dir),
-            crate::config::NewTabCwd::ProjectHome => p.home.clone().unwrap_or_else(browse_dir),
+            crate::config::NewTabCwd::ProjectHome => {
+                p.home.clone().unwrap_or_else(|| p.start_dir.clone())
+            }
             crate::config::NewTabCwd::BrowseDir => browse_dir(),
         }
     }

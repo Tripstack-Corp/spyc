@@ -200,6 +200,7 @@ fn tab_rows(t: TabFacts) -> Vec<ChordEntry> {
         (true, "^a v", A::PaneScrollEnter),
         (true, "^a u", A::QuickSelectOpen),
         (true, "^a c", A::PaneNewTab),
+        (true, "^a C", A::PaneNewTabAskCwd),
         (!t.exited, ":pane-to-task", A::PaneToTask),
         (true, "yp (list)", A::YankPrompt),
         (true, "ya (list)", A::YankScrollback),

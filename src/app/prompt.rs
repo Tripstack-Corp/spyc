@@ -92,9 +92,13 @@ pub enum PromptKind {
     SetEnv,
     /// `!` — capture command output with ANSI colours, show in in-app pager.
     ShellCmdCaptured,
-    /// New pane tab step 1: command to run.
-    PaneNewTabCmd,
-    /// New pane tab step 2: working directory.
+    /// New pane tab step 1: command to run. `ask_cwd` (`^a C`) asks for the
+    /// working directory next; without it (`^a c`) the tab opens in
+    /// `[pane] new_tab_cwd`.
+    PaneNewTabCmd {
+        ask_cwd: bool,
+    },
+    /// New pane tab step 2 (`^a C` only): working directory.
     PaneNewTabCwd,
     /// Rename the active pane tab.
     PaneRenameTab,
@@ -304,9 +308,8 @@ impl App {
             }
             PromptKind::CopyTo => self.run_selection_to(&prompt.buffer, false),
             PromptKind::MoveTo => self.run_selection_to(&prompt.buffer, true),
-            PromptKind::PaneNewTabCwd => {
-                self.open_prompted_pane_tab(prompt.buffer.trim());
-                Vec::new()
+            PromptKind::PaneNewTabCmd { .. } | PromptKind::PaneNewTabCwd => {
+                self.open_prompted_pane_tab(&prompt)
             }
             PromptKind::ProjectOpen => {
                 self.open_project_typed(&prompt.buffer);

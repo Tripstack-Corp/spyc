@@ -59,7 +59,7 @@ impl App {
             | PromptKind::NewFile
             | PromptKind::SetEnv
             | PromptKind::ShellCmdCaptured
-            | PromptKind::PaneNewTabCmd
+            | PromptKind::PaneNewTabCmd { .. }
             | PromptKind::PaneNewTabCwd
             | PromptKind::PaneRenameTab
             | PromptKind::WorktreeNewBranch

@@ -282,6 +282,7 @@ impl Resolver {
             KeyCode::Char('n' | ']') => ResolverOutcome::Action(Action::PaneNextTab),
             KeyCode::Char('p' | '[') => ResolverOutcome::Action(Action::PanePrevTab),
             KeyCode::Char('c') => ResolverOutcome::Action(Action::PaneNewTab),
+            KeyCode::Char('C') => ResolverOutcome::Action(Action::PaneNewTabAskCwd),
             KeyCode::Char('K' | 'x' | 'X') => ResolverOutcome::Action(Action::PaneCloseTab),
             KeyCode::Char(c @ '1'..='9') => {
                 ResolverOutcome::Action(Action::PaneTabByIndex(c as u8 - b'0'))
@@ -290,7 +291,7 @@ impl Resolver {
             KeyCode::Char('R') => ResolverOutcome::Action(Action::PaneRestartTab),
             KeyCode::Char('F') => ResolverOutcome::Action(Action::PaneForkTab),
             // Pane toggle / resize / scroll.
-            KeyCode::Char('\\' | 'C') => ResolverOutcome::Action(Action::TogglePane),
+            KeyCode::Char('\\') => ResolverOutcome::Action(Action::TogglePane),
             KeyCode::Char('+' | '=') => ResolverOutcome::Action(Action::PaneGrow),
             KeyCode::Char('-' | '_') => ResolverOutcome::Action(Action::PaneShrink),
             KeyCode::Char('z' | 'Z') => ResolverOutcome::Action(Action::TogglePaneZoom),
