@@ -885,7 +885,7 @@ fn detach_project_moves_a_project_and_its_agent_into_a_session_of_its_own() {
     }
     let mut moved_spyc = None;
     first.eventually("the session's spyc runs", || {
-        moved_spyc = described(&socket, "program_pid");
+        moved_spyc = described(&socket, "program_pid").filter(|p| p != "0");
         moved_spyc.is_some()
     });
     let moved_spyc = moved_spyc.unwrap();
@@ -1030,6 +1030,7 @@ fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
     let tab_socket = tab_socket.unwrap();
 
     // `^d` into the session's own jar, then `^d` again: the terminal goes.
+    let screens = first.screens();
     first.type_keys(b"\x04");
     let mut session = None;
     first.eventually("a session jar", || {
@@ -1037,11 +1038,18 @@ fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
         session.is_some()
     });
     let (name, socket) = session.unwrap();
+    // A new screen, drawn from the jar: the one before `^d` showed both too.
     first.eventually("the session drawn again, from its jar", || {
         let shown = first.since_last_screen();
-        shown.contains(&name) && shown.contains("ready-mark")
+        first.screens() > screens && shown.contains(&name) && shown.contains("ready-mark")
     });
-    let jar_spyc = described(&socket, "program_pid").unwrap();
+    // The jar reports 0 while it holds its program for the first owner.
+    let mut jar_spyc = None;
+    first.eventually("the session's spyc runs", || {
+        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        jar_spyc.is_some()
+    });
+    let jar_spyc = jar_spyc.unwrap();
     left.0.push(jar_spyc.parse().unwrap());
     first.eventually("the session's spyc owns the tab's jar", || {
         described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
