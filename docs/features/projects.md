@@ -283,3 +283,23 @@ the tabs that end with it and asks first (`-y` doesn't ask). The session is save
 can bring it back, its programs started afresh. `^D` detaches too: most
 terminals send it as `^d`. While a session runs in its own jar, its name is that jar's
 address, so `:name` can't change it.
+
+### Attaching over SSH
+
+`ssh -t host spyc attach` reaches a session from another machine: `-t` gives the
+command a terminal. To give a key that can do nothing else, add it to
+`~/.ssh/authorized_keys` on the machine spyc runs on with a forced command, naming spyc by
+its full path, since a forced command may not see the `PATH` your interactive shell sets:
+
+```
+command="/home/you/.local/bin/spyc attach",restrict,pty,agent-forwarding ssh-ed25519 AAAA… spyc-attach
+```
+
+`restrict` turns everything off, and `pty` and `agent-forwarding` turn back on what an
+attach needs: a terminal, and your SSH agent for your tabs' `git push`. A login with that
+key attaches to the one session running, or asks which.
+
+On macOS, access to devices on your local network belongs to the app a program was started
+from. A session started from a terminal app keeps that app's permission, so once the app
+quits, your tabs may lose that access (`No route to host`). Start a session you'll keep
+from a terminal you keep running.
