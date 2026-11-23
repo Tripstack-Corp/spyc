@@ -322,19 +322,44 @@ fn prompt_pattern_pick() {
     );
 }
 
+/// `^a C`: the command is kept, and the directory is asked for next, offering
+/// the focused column's worktree root whatever `[pane] new_tab_cwd` says.
 #[test]
-fn prompt_pane_new_tab_cmd_stashes() {
+fn prompt_pane_new_tab_cmd_asking_for_a_cwd_offers_the_worktree_root() {
     let mut s = test_state();
-    s.dispatch_prompt(&PromptKind::PaneNewTabCmd, "bash");
+    s.active_project_mut().home = Some(PathBuf::from("/tmp/home"));
+    s.cur_mut().git_cache.current_repo_root = Some(PathBuf::from("/tmp/worktree"));
+    s.dispatch_prompt(&PromptKind::PaneNewTabCmd { ask_cwd: true }, "bash");
     assert_eq!(s.pending_new_tab_cmd.as_deref(), Some("bash"));
-    assert!(matches!(s.mode, Mode::Prompting(_)));
+    match &s.mode {
+        Mode::Prompting(p) => {
+            assert!(matches!(p.kind, PromptKind::PaneNewTabCwd), "{}", p.prefix);
+            assert_eq!(p.buffer, "/tmp/worktree");
+        }
+        Mode::Normal => panic!("no cwd prompt"),
+    }
+}
+
+/// `^a c`: the command is kept and no directory is asked for; the App starts
+/// the tab.
+#[test]
+fn prompt_pane_new_tab_cmd_without_a_cwd_asks_nothing_more() {
+    let mut s = test_state();
+    assert!(matches!(
+        s.dispatch_prompt(&PromptKind::PaneNewTabCmd { ask_cwd: false }, "bash"),
+        PromptResult::NotHandled
+    ));
+    assert_eq!(s.pending_new_tab_cmd.as_deref(), Some("bash"));
+    assert!(!matches!(s.mode, Mode::Prompting(_)), "a prompt is up");
 }
 
 #[test]
 fn prompt_pane_new_tab_cmd_empty_is_noop() {
-    let mut s = test_state();
-    s.dispatch_prompt(&PromptKind::PaneNewTabCmd, "");
-    assert!(s.pending_new_tab_cmd.is_none());
+    for ask_cwd in [false, true] {
+        let mut s = test_state();
+        s.dispatch_prompt(&PromptKind::PaneNewTabCmd { ask_cwd }, "");
+        assert!(s.pending_new_tab_cmd.is_none());
+    }
 }
 
 #[test]

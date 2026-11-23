@@ -262,7 +262,10 @@ in [`docs/HARNESS.md`](../HARNESS.md).
 
 Multiple tabs, each running an independent pty:
 
-- **^a c** new tab (prompts for command and working directory). `%` in the
+- **^a c** new tab: asks for the command and opens it in the default cwd
+  (below), the project home unless you've changed it. **^a C** asks for the
+  command and then the working directory, offering the focused column's
+  worktree root, for a tab that should run somewhere else. `%` in the
   command expands to the selection as it does for `!`, each path named from
   the tab's working directory, so `tail -f %` follows the highlighted file;
   `%%` is a literal `%`. A command may open with variable assignments, as
@@ -322,14 +325,14 @@ Multiple tabs, each running an independent pty:
   driver to codex (or anything else) by adding
   `[pane]\ndefault_command = "codex"` to your config.
 - **Default cwd** for a new pane (`^a c` and bare-spawn / `F9 resume`)
-  follows `[pane] new_tab_cwd`: `"worktree_root"` (default) anchors it
-  to the focused column's worktree/repo root — `gw`'s target, and the
-  column `^a k` returns to, so a pane opened while browsing a linked
-  worktree lands there; `"project_home"` pins it to `PROJECT_HOME`
-  regardless of the focused worktree; `"browse_dir"` opens it in the
-  focused column's current dir. Inside an archive, where no program can
-  start, it opens in the directory holding the archive instead, unless
-  `"project_home"` has a `PROJECT_HOME` to pin it to.
+  follows `[pane] new_tab_cwd`: `"project_home"` (default) pins it to
+  `PROJECT_HOME`, wherever the columns are browsing, or to the project's
+  start dir when it has no home; `"worktree_root"` anchors it to the
+  focused column's worktree/repo root — `gw`'s target, and the column
+  `^a k` returns to, so a pane opened while browsing a linked worktree
+  lands there; `"browse_dir"` opens it in the focused column's current
+  dir. Inside an archive, where no program can start, `"worktree_root"`
+  and `"browse_dir"` open it in the directory holding the archive instead.
 
 ### Tabs in jars
 

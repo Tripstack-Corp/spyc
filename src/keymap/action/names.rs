@@ -171,6 +171,7 @@ fn pane_action_from_name(name: &str) -> Option<Action> {
         "pane_scroll_enter" => Action::PaneScrollEnter,
         "pane_scroll_save" => Action::PaneScrollSave,
         "pane_new_tab" => Action::PaneNewTab,
+        "pane_new_tab_ask_cwd" => Action::PaneNewTabAskCwd,
         "pane_close_tab" => Action::PaneCloseTab,
         "pane_tab_by_index" => Action::PaneTabByIndex(1),
         "pane_next_tab" => Action::PaneNextTab,

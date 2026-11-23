@@ -311,12 +311,16 @@ const SECTIONS: &[Section] = &[
     Section {
         title: "Split pane (^a prefix, ^w also works)",
         rows: &[
-            ("^\\  F10  ^a \\  ^a C", "toggle the bottom pane (claude)"),
+            ("^\\  F10  ^a \\", "toggle the bottom pane (claude)"),
             ("F9", "open pane with claude --resume"),
             ("^a j / ^a k", "focus pane (down) / list (up)"),
             ("^a n  ^a ]", "next tab"),
             ("^a p  ^a [", "prev tab"),
-            ("^a c", "new pane tab (prompt for command + cwd)"),
+            (
+                "^a c",
+                "new pane tab (prompt for command; opens in the project home)",
+            ),
+            ("^a C", "new pane tab (prompt for command + cwd)"),
             (
                 "^a K  ^a x",
                 "close active pane tab (confirms if its child is still running)",

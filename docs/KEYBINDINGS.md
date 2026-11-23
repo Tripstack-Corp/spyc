@@ -126,10 +126,11 @@ file view.
 
 | Key | Action |
 |-----|--------|
-| `^\` / `F10` / `^a \` / `^a C` | Toggle pane |
+| `^\` / `F10` / `^a \` | Toggle pane |
 | `F9` | Open pane with `claude --resume` |
 | `^a j` / `^a k` | Switch focus |
-| `^a c` | New tab |
+| `^a c` | New tab: asks for the command, opens in the project home |
+| `^a C` | New tab: asks for the command, then the directory |
 | `^a n` / `^a ]` | Next tab |
 | `^a p` / `^a [` | Prev tab |
 | `^a K` / `^a x` | Close tab (confirms first while its child is still running) |
@@ -346,10 +347,10 @@ global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
 `W d` is a list-focus alias for the same worktree list / new / delete.
 
 `PROJECT_HOME` is auto-set on startup if the launch directory contains
-`.git`. New pane tabs default their cwd to the focused column's
-worktree/repo root (`gw`'s target); set `[pane] new_tab_cwd =
-"project_home"` to pin them to `PROJECT_HOME` instead, or `"browse_dir"`
-to open them in the current listing dir.
+`.git`. New pane tabs open in `PROJECT_HOME`, or the project's start dir
+when it has none; set `[pane] new_tab_cwd = "worktree_root"` to open them
+at the focused column's worktree/repo root (`gw`'s target) instead, or
+`"browse_dir"` to open them in the current listing dir.
 
 ## Display & config
 

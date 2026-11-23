@@ -146,11 +146,11 @@ take the place of both) and persist across `spyc -r`.
   `:name <NEW>` renames the session (normalized to
   `[A-Z0-9_]`); the session segment's menu opens the `:` line holding
   `name` and the current name, to edit. `:whoami` flashes `user@host`.
-- **New pane tabs** default their cwd to the focused column's
-  worktree/repo root (`gw`'s target), falling back to the current
-  listing dir when there's no repo. Set `[pane] new_tab_cwd` in
-  `.spycrc.toml` to `"project_home"` (pin to `PROJECT_HOME`) or
-  `"browse_dir"` (open in the current listing dir, "open here").
+- **New pane tabs** open in `PROJECT_HOME`, or the start dir when the
+  project has no home (`^a C` asks where instead). Set
+  `[pane] new_tab_cwd` in `.spycrc.toml` to `"worktree_root"` (the
+  focused column's worktree/repo root, `gw`'s target) or `"browse_dir"`
+  (open in the current listing dir, "open here").
 - **Session names** are generated at session creation from ~30
   spices, joined pairwise: `CUMIN_SAFFRON`, `HARISSA_SUMAC`, etc.
   Shown as the primary column in the `-r` session picker so you can
