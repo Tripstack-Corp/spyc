@@ -150,8 +150,8 @@ fn keys_typed_before_the_client_attaches_are_dropped() {
         std::thread::sleep(Duration::from_millis(20));
     }
 
-    keys.write_all(b"late\r").unwrap();
-    keys.flush().unwrap();
+    // The jar names its owner as the client connects, a moment before the
+    // client relays keys: type until the program answers.
     let until = Instant::now() + WAIT;
     while !shown().contains("got=late") {
         assert!(
@@ -159,7 +159,9 @@ fn keys_typed_before_the_client_attaches_are_dropped() {
             "keys typed now never arrived: {}",
             shown()
         );
-        std::thread::sleep(Duration::from_millis(20));
+        keys.write_all(b"late\r").unwrap();
+        keys.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(250));
     }
     assert!(
         !shown().contains("got=early"),
@@ -251,13 +253,14 @@ impl Attached {
                 }
             });
         }
-        let attached = Self {
+        let mut attached = Self {
             client,
             keys,
             seen,
             paused,
         };
         attached.wait_attached(jar);
+        attached.type_until_shown("ready");
         attached
     }
 
@@ -281,6 +284,23 @@ impl Attached {
     fn type_keys(&mut self, keys: &[u8]) {
         self.keys.write_all(keys).unwrap();
         self.keys.flush().unwrap();
+    }
+
+    /// Type `line` until the program answers it. The jar names its owner as
+    /// the client connects, a moment before the client relays keys, and keys
+    /// typed before then go nowhere.
+    fn type_until_shown(&mut self, line: &str) {
+        let answer = format!("got={line}");
+        let until = Instant::now() + WAIT;
+        while !self.shown().contains(&answer) {
+            assert!(
+                Instant::now() < until,
+                "never shown: {answer}; the terminal showed: {}",
+                self.shown()
+            );
+            self.type_keys(format!("{line}\r").as_bytes());
+            std::thread::sleep(Duration::from_millis(250));
+        }
     }
 
     /// Wait for the jar to have this client as its owner.
@@ -365,8 +385,7 @@ fn a_client_stopped_past_the_deadline_attaches_again() {
     term.type_keys(b"blind\r");
     kill_process(pid, Signal::CONT).unwrap();
     term.wait_attached(&jar);
-    term.type_keys(b"back\r");
-    term.wait_shown("got=back");
+    term.type_until_shown("back");
     assert!(term.running(), "the client ended: {}", term.shown());
     assert!(
         !term.shown().contains("got=blind"),
