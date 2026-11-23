@@ -142,10 +142,16 @@ struct Jar {
 
 impl Jar {
     fn start(dirs: &Dirs, socket: PathBuf) -> Self {
+        Self::start_with(dirs, socket, &[])
+    }
+
+    /// [`Self::start`], with the jar's flags after `--wire`.
+    fn start_with(dirs: &Dirs, socket: PathBuf, flags: &[&str]) -> Self {
         let spyc = Path::new(env!("CARGO_BIN_EXE_spyc"));
         let binary = spyc.with_file_name("spyc-jar");
         let mut process = Command::new(&binary)
             .args(["--wire", &spyc_jar::proto::VERSION.to_string()])
+            .args(flags)
             .env_clear()
             .envs(dirs.env())
             .stdin(Stdio::piped())
@@ -696,6 +702,67 @@ fn each_terminal_that_attaches_to_spycs_own_jar_is_set_up_probed_and_drawn_on() 
         || second.text().contains(QUIT_ASKS),
         || *second.exited.lock().unwrap(),
     );
+}
+
+/// The session's event log says why each terminal left spyc's own jar: one
+/// whose connection closed, one that went silent past the jar's deadline, and
+/// one spyc detached, which says nothing more.
+#[test]
+fn the_event_log_says_why_a_terminal_left() {
+    let dirs = Dirs::new();
+    let jar = Jar::start_with(
+        &dirs,
+        dirs.runtime
+            .join("spyc/sessions")
+            .join(format!("{NAME}.sock")),
+        &["--deadline-ms", "2000"],
+    );
+    jar.wait_for_spyc();
+    let log = dirs.state.join(format!("spyc/events/{NAME}.log"));
+    let detaches = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| l.contains("terminal detached"))
+            .map(|l| l.split_once("terminal detached").unwrap().1.to_string())
+            .collect::<Vec<_>>()
+    };
+    let next_detach = |seen: usize| {
+        let until = Instant::now() + WAIT;
+        loop {
+            if let Some(line) = detaches().get(seen) {
+                return line.clone();
+            }
+            assert!(
+                Instant::now() < until,
+                "no detach noted after {seen}: {:?}",
+                std::fs::read_to_string(&log)
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+
+    let closing = Terminal::attach(&jar, (30, 100), PLAIN);
+    closing.wait_for("the session drawn", NAME);
+    closing.close();
+    assert_eq!(next_detach(0), ", its connection closed: spyc runs on");
+
+    // Drawn on, then nothing from it.
+    let silent = Terminal::attach(&jar, (30, 100), PLAIN);
+    silent.wait_for("the session drawn again", NAME);
+    assert_eq!(
+        next_detach(1),
+        ", silent past the jar's deadline: spyc runs on"
+    );
+    assert_eq!(jar.described("owner_left").as_deref(), Some("silent"));
+
+    let detached = Terminal::attach(&jar, (30, 100), PLAIN);
+    detached.wait_for("the session drawn a third time", NAME);
+    detached.type_keys(b"\x04");
+    assert_eq!(next_detach(2), ": spyc runs on");
+    eventually("the jar says spyc detached it", || {
+        jar.described("owner_left").as_deref() == Some("detached")
+    });
 }
 
 #[test]

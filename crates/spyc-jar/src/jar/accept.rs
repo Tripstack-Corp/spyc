@@ -220,6 +220,7 @@ pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
         std::process::exit(1);
     }
     if role == Role::Owner {
+        st.info.retain(|(k, _)| k != crate::state::OWNER_LEFT);
         st.owner = Some(id);
         st.had_owner = true;
         st.ownerless_since = None;

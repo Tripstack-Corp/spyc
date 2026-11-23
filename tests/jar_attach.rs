@@ -33,6 +33,11 @@ impl Drop for Jar {
 
 impl Jar {
     fn start() -> Self {
+        Self::start_with(&[])
+    }
+
+    /// [`Self::start`], with the jar's flags after `--wire 1`.
+    fn start_with(flags: &[&str]) -> Self {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::Builder::new()
             .prefix("jt")
@@ -42,6 +47,7 @@ impl Jar {
         let socket = dir.path().join("j.sock");
         let mut process = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
             .args(["--wire", "1"])
+            .args(flags)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -158,4 +164,39 @@ fn keys_typed_before_the_client_attaches_are_dropped() {
         shown()
     );
     let _ = client.kill();
+}
+
+/// A jar says why its owner left (`owner_left`), so a client that sees its
+/// connection close can ask: one that sent nothing for the jar's deadline
+/// went silent, and one that closed its connection closed it. An owner that
+/// connects clears it.
+#[test]
+fn a_jar_says_why_its_owner_left() {
+    use spyc_jar::client::Client;
+    use spyc_jar::proto::Role;
+    let jar = Jar::start_with(&["--deadline-ms", "1000"]);
+    let owner_gone = |what: &str| {
+        let until = Instant::now() + WAIT;
+        loop {
+            if let Some(why) = jar.described("owner_left") {
+                return why;
+            }
+            assert!(Instant::now() < until, "{what}: the owner never left");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+
+    // Connected, then nothing more.
+    let (silent, _) = Client::connect(&jar.socket, Role::Owner, WAIT, TOKEN).unwrap();
+    assert_eq!(owner_gone("silent"), "silent");
+    drop(silent);
+
+    let (closing, _) = Client::connect(&jar.socket, Role::Owner, WAIT, TOKEN).unwrap();
+    assert_eq!(
+        jar.described("owner_left"),
+        None,
+        "an owner connected, and the last one's reason stayed"
+    );
+    closing.drop_connection();
+    assert_eq!(owner_gone("closed"), "closed");
 }
