@@ -345,9 +345,9 @@ fn a_terminal_slow_to_read_keeps_its_session() {
 
 /// A client stopped past the jar's deadline, as a computer's sleep can stop
 /// it, is dropped by the jar. Once it runs again it attaches again by
-/// itself, and what is typed then reaches the program.
+/// itself, and what is typed then reaches the program; what was typed while
+/// it was dropped was typed blind, and doesn't.
 #[test]
-#[ignore = "red until the attach client attaches again when its jar drops it"]
 fn a_client_stopped_past_the_deadline_attaches_again() {
     use rustix::process::{Pid, Signal, kill_process};
     let jar = Jar::start_with(&["--deadline-ms", "3000"]);
@@ -362,9 +362,15 @@ fn a_client_stopped_past_the_deadline_attaches_again() {
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+    term.type_keys(b"blind\r");
     kill_process(pid, Signal::CONT).unwrap();
     term.wait_attached(&jar);
     term.type_keys(b"back\r");
     term.wait_shown("got=back");
     assert!(term.running(), "the client ended: {}", term.shown());
+    assert!(
+        !term.shown().contains("got=blind"),
+        "keys typed while the client was dropped reached the program: {}",
+        term.shown()
+    );
 }
