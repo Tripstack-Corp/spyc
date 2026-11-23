@@ -33,5 +33,10 @@ make vendor-ghostty
 IN_CONTAINER
 )
 
+# ghostty's dependencies, kept between runs (#1153; scripts/vendor-ghostty.sh).
+packages="${XDG_CACHE_HOME:-$HOME/.cache}/spyc/zig-packages"
+mkdir -p "$packages"
+
 "$engine" run --rm -v "$(pwd):/src" -w /src -e ZIG_VERSION="$zig_version" \
+    -v "$packages:/zig-packages" -e ZIG_PACKAGE_CACHE=/zig-packages \
     docker.io/library/ubuntu:24.04 bash -c "$in_container"

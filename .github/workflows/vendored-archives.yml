@@ -45,8 +45,9 @@ jobs:
         id: zig
         run: echo "version=$(cat crates/spyc-vt-sys/REQUIRED_ZIG)" >> "$GITHUB_OUTPUT"
       # setup-zig installs ziglang.org's build of that version, the one the
-      # committed archives are made with. No cache: the recipe uses a private
-      # global cache, so a restored one would only be saved again unused.
+      # committed archives are made with. Not its cache: the recipe uses a
+      # private global cache, so a restored one would only be saved again
+      # unused. Only the package cache crosses runs (below).
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ steps.zig.outputs.version }}
@@ -55,7 +56,20 @@ jobs:
       # with LLVM 20's llvm-objcopy, the first with Mach-O support for it.
       - name: Install llvm-objcopy 20
         run: sudo apt-get install -y -qq llvm-20
+      # ghostty's dependencies, by content hash, for the pin and this zig
+      # (#1153): with them, the recipe fetches nothing. A miss fetches as before.
+      - name: Read the pin
+        id: pin
+        run: |
+          commit=$(sed -n 's/^pub const GHOSTTY_COMMIT: &str = "\(.*\)";$/\1/p' crates/spyc-vt-sys/src/pin.rs)
+          echo "commit=${commit:?no GHOSTTY_COMMIT in pin.rs}" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/zig-packages
+          key: zig-packages-${{ steps.zig.outputs.version }}-${{ steps.pin.outputs.commit }}
       - name: Rebuild from the pinned source and compare checksums
+        env:
+          ZIG_PACKAGE_CACHE: ${{ runner.temp }}/zig-packages
         run: |
           cp crates/spyc-vt-sys/vendor/CHECKSUMS /tmp/CHECKSUMS.committed
           make vendor-ghostty
