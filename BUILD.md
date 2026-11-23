@@ -144,6 +144,20 @@ make dist-sign               # GPG-sign the checksums (set GPG_KEY=<id>)
 Linux binaries are statically linked against musl, so they run on any
 distro without a libc dependency.
 
+### Release binary size
+
+Each binary a release ships, `spyc` and `spyc-jar` for each platform, has a
+size budget in [`scripts/binary-size-budgets`](scripts/binary-size-budgets),
+in bytes. `make size-check` builds this machine's release binaries as the
+release does and holds each to its budget: on a Mac the universal pair, on
+Linux the musl pair. `release.yml` checks all six before it publishes, and CI
+checks Linux x86_64 on `main` after each merge.
+
+A budget is a ratchet, like the file-size guards. When a binary outgrows its
+budget, raise that one in a commit of its own that says what grew and why: a
+new dependency, a feature, a toolchain change. Set it about 10% over the new
+size, so the next notable growth is noticed too.
+
 ## Debian package
 
 `make deb` wraps a built Linux binary into a `.deb` (requires

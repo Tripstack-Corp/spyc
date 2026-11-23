@@ -1,0 +1,15 @@
+# Release binary size budgets, in bytes (#933): each binary a release ships,
+# held to its budget by scripts/binary-size.sh (`make size-check`, release.yml,
+# and CI on main). A ratchet: raise one only in a commit of its own that says
+# what grew and why, about 10% over the new size. BUILD.md, "Release binary size".
+#
+# Set 2026-11-23 at the release builds of main (0dc2b60a) plus 10%, rounded up:
+#   spyc-macos-universal 52198144, spyc-jar-macos-universal 1738272,
+#   spyc-linux-x86_64 29386728, spyc-jar-linux-x86_64 952608,
+#   spyc-linux-aarch64 25515784, spyc-jar-linux-aarch64 883912.
+spyc-macos-universal      57500000
+spyc-jar-macos-universal   2000000
+spyc-linux-x86_64         32400000
+spyc-jar-linux-x86_64      1100000
+spyc-linux-aarch64        28100000
+spyc-jar-linux-aarch64     1000000
