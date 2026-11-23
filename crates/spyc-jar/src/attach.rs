@@ -47,6 +47,15 @@ pub fn run(socket: &Path, token: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The key the attached client sets in its jar (R18): `ssh` when this
+/// terminal reaches its machine over SSH, else `local`.
+pub const TERMINAL_KEY: &str = "terminal";
+
+/// [`TERMINAL_KEY`]'s value for a terminal that is, or isn't, over SSH.
+pub const fn terminal_kind(ssh: bool) -> &'static str {
+    if ssh { "ssh" } else { "local" }
+}
+
 fn size() -> (u16, u16) {
     termios::tcgetwinsize(std::io::stdout().as_fd()).map_or((24, 80), |w| (w.ws_row, w.ws_col))
 }
@@ -58,6 +67,12 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
         anyhow::bail!("expected a welcome");
     };
     let (mut rx, tx) = client.split();
+    // What kind of terminal this is, sent before any input: the program reads
+    // it once a terminal attaches (spyc routes OSC 52 and 9 by it).
+    tx.send(&Msg::SetInfo {
+        key: TERMINAL_KEY.into(),
+        value: terminal_kind(std::env::var_os("SSH_CONNECTION").is_some()).into(),
+    })?;
     tx.send(&Msg::Replay { from: head })?;
     // The jar tells its program this owner attached (`attached`), and the
     // program repaints for it; this terminal's size is all it needs from here.
