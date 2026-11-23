@@ -668,10 +668,7 @@ impl App {
         view.pane_scroll = true;
         let pager_config = &self.state.active_project().config.pager;
         view.tab_width = pager_config.tab_width;
-        // Line numbers on by default: a gutter the live pane never has,
-        // so it reads at a glance as "scrolled back, not live" (and `:N`
-        // / `V` line targeting is legible). `l` toggles it off;
-        // `[pager] scrollback_line_numbers = false` opens without it.
+        // `[pager] scrollback_line_numbers` (default off); `l` toggles.
         view.show_line_numbers = pager_config.scrollback_line_numbers;
         view.no_history = true;
         view.wrap = true;
