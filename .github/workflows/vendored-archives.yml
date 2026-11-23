@@ -60,7 +60,9 @@ jobs:
       # (#1153): with them, the recipe fetches nothing. A miss fetches as before.
       - name: Read the pin
         id: pin
-        run: echo "commit=$(sed -n 's/^pub const GHOSTTY_COMMIT: &str = "\(.*\)";$/\1/p' crates/spyc-vt-sys/src/pin.rs)" >> "$GITHUB_OUTPUT"
+        run: |
+          commit=$(sed -n 's/^pub const GHOSTTY_COMMIT: &str = "\(.*\)";$/\1/p' crates/spyc-vt-sys/src/pin.rs)
+          echo "commit=${commit:?no GHOSTTY_COMMIT in pin.rs}" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/zig-packages
