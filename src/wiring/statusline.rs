@@ -5,11 +5,14 @@
 //! the same input; its output is unchanged.
 //!
 //! The wrapper carries the user's command inside it rather than in a file of
-//! spyc's: removing spyc restores it exactly. A `settings.json` synced to a
-//! machine without spyc still runs it, through the `command -v` guard, and one
-//! whose spyc predates `--statusline` runs it through the `||` fallback: such a
-//! spyc fails before it reads its input, and `spyc --statusline` exits 0 once it
-//! has run the command, so the fallback never runs it twice.
+//! spyc's: removing spyc restores it exactly. An empty `statusLine`
+//! placeholder (such as `agy`'s default `{"type": "", "command": "",
+//! "enabled": true}`) counts as having no statusline, so removing spyc drops
+//! the `statusLine` key. A `settings.json` synced to a machine without spyc
+//! still runs it, through the `command -v` guard, and one whose spyc predates
+//! `--statusline` runs it through the `||` fallback: such a spyc fails before
+//! it reads its input, and `spyc --statusline` exits 0 once it has run the
+//! command, so the fallback never runs it twice.
 
 use serde_json::{Value, json};
 
@@ -104,9 +107,10 @@ pub(super) fn settings_with(text: &str, spyc: &str) -> Option<String> {
 }
 
 /// Like [`settings_with`], for an Antigravity (`agy`) `settings.json`: when
-/// spyc adds a bare `statusLine` where the user had none, it sets
-/// `stack_with_default: true` so `agy` keeps its built-in status bar visible.
-/// An existing user statusline keeps its own fields untouched.
+/// spyc adds a bare `statusLine` (or fills an empty placeholder) where the
+/// user had none, it sets `stack_with_default: true` unless already set, so
+/// `agy` keeps its built-in status bar visible. An existing user statusline
+/// keeps its own fields untouched.
 pub(super) fn settings_with_stack(text: &str, spyc: &str) -> Option<String> {
     settings_with_inner(text, spyc, true)
 }
@@ -127,12 +131,22 @@ fn settings_with_inner(text: &str, spyc: &str, stack_with_default: bool) -> Opti
             };
             obj.insert("statusLine".into(), entry);
         }
+        Some(line) if is_empty_placeholder(line) => {
+            line["type"] = Value::String("command".into());
+            line["command"] = Value::String(wrap(None, spyc));
+            if stack_with_default && line.get("stack_with_default").is_none() {
+                line["stack_with_default"] = Value::Bool(true);
+            }
+        }
         Some(line) => {
             // A NUL can't be quoted for a shell, so such a command is left alone.
             if let Some(command) = wrappable(line).filter(|c| !c.contains('\0')) {
                 let original = unwrap(&command).unwrap_or(Wrapped::Command(command));
                 line["command"] = Value::String(wrap(original.command(), spyc));
-                if stack_with_default && original == Wrapped::Nothing {
+                if stack_with_default
+                    && original == Wrapped::Nothing
+                    && line.get("stack_with_default").is_none()
+                {
                     line["stack_with_default"] = Value::Bool(true);
                 }
             }
@@ -165,6 +179,31 @@ pub(super) fn settings_without(text: &str) -> Option<Removal> {
     let empty = obj.is_empty();
     let text = serde_json::to_string_pretty(&root).ok()? + "\n";
     Some(Removal::Rest { text, empty })
+}
+
+/// Whether `text`'s `statusLine` explicitly sets `enabled: false`.
+pub(super) fn is_disabled(text: &str) -> bool {
+    serde_json::from_str::<Value>(text)
+        .ok()
+        .and_then(|root| root.pointer("/statusLine/enabled")?.as_bool())
+        == Some(false)
+}
+
+/// Whether `line` is an enabled empty `statusLine` placeholder (such as `agy`'s
+/// default `{"type": "", "command": "", "enabled": true}`) with no command of
+/// its own.
+fn is_empty_placeholder(line: &Value) -> bool {
+    let Some(obj) = line.as_object() else {
+        return false;
+    };
+    if obj.get("enabled") == Some(&Value::Bool(false)) {
+        return false;
+    }
+    let typed = obj.get("type").is_none_or(|t| t == "command" || t == "");
+    let empty_cmd = obj
+        .get("command")
+        .is_none_or(|c| c.as_str().is_some_and(|s| s.trim().is_empty()));
+    typed && empty_cmd
 }
 
 /// A statusline's command, when it is one spyc can wrap.
@@ -298,6 +337,89 @@ mod tests {
             panic!("user statusline must unwrap");
         };
         assert_eq!(text, user);
+    }
+
+    #[test]
+    fn empty_statusline_placeholder_is_wired_as_bare_and_explicit_stack_false_is_kept() {
+        // agy initializes settings.json with an empty statusLine placeholder.
+        let placeholder = serde_json::to_string_pretty(&json!({
+            "statusLine": { "type": "", "command": "", "enabled": true }
+        }))
+        .unwrap()
+            + "\n";
+        let wired = settings_with_stack(&placeholder, "spyc").unwrap();
+        assert_eq!(
+            settings_with_stack(&wired, "spyc").unwrap(),
+            wired,
+            "idempotent"
+        );
+        let parsed: Value = serde_json::from_str(&wired).unwrap();
+        assert_eq!(parsed["statusLine"]["type"], "command");
+        assert_eq!(
+            unwrap(parsed["statusLine"]["command"].as_str().unwrap()),
+            Some(Wrapped::Nothing)
+        );
+        assert_eq!(parsed["statusLine"]["stack_with_default"], true);
+        assert_eq!(parsed["statusLine"]["enabled"], true);
+        let Some(Removal::Rest { text, empty }) = settings_without(&wired) else {
+            panic!("wired placeholder must remove cleanly");
+        };
+        assert_eq!(text.trim(), "{}");
+        assert!(empty);
+
+        // An empty command with type "command" or an empty object is also bare,
+        // never wrapped as an empty user shell command (both agy and claude).
+        for empty_case in [
+            r#"{"statusLine":{"type":"command","command":""}}"#,
+            r#"{"statusLine":{"type":"command","command":"   "}}"#,
+            r#"{"statusLine":{}}"#,
+        ] {
+            let wired = settings_with_stack(empty_case, "spyc").unwrap();
+            let parsed: Value = serde_json::from_str(&wired).unwrap();
+            assert_eq!(parsed["statusLine"]["type"], "command", "{empty_case}");
+            assert_eq!(
+                unwrap(parsed["statusLine"]["command"].as_str().unwrap()),
+                Some(Wrapped::Nothing),
+                "{empty_case}"
+            );
+            assert_eq!(parsed["statusLine"]["stack_with_default"], true);
+
+            let claude_wired = settings_with(empty_case, "spyc").unwrap();
+            let parsed: Value = serde_json::from_str(&claude_wired).unwrap();
+            assert_eq!(parsed["statusLine"]["type"], "command", "{empty_case}");
+            assert_eq!(
+                unwrap(parsed["statusLine"]["command"].as_str().unwrap()),
+                Some(Wrapped::Nothing),
+                "{empty_case}"
+            );
+            assert!(parsed["statusLine"].get("stack_with_default").is_none());
+            assert!(matches!(
+                settings_without(&claude_wired),
+                Some(Removal::Rest { empty: true, .. })
+            ));
+        }
+
+        // A disabled placeholder is left alone so spyc never claims it is active.
+        let disabled = serde_json::to_string_pretty(&json!({
+            "statusLine": { "type": "", "command": "", "enabled": false }
+        }))
+        .unwrap()
+            + "\n";
+        assert!(is_disabled(&disabled));
+        assert!(!is_disabled(&placeholder));
+        assert_eq!(settings_with_stack(&disabled, "spyc").unwrap(), disabled);
+
+        // An explicit stack_with_default: false on spyc's bare wrapper stays false.
+        let opted_out = serde_json::to_string_pretty(&json!({
+            "statusLine": {
+                "type": "command",
+                "command": wrap(None, "spyc"),
+                "stack_with_default": false,
+            }
+        }))
+        .unwrap()
+            + "\n";
+        assert_eq!(settings_with_stack(&opted_out, "spyc").unwrap(), opted_out);
     }
 
     /// The wrapper as a shell runs it: with spyc, spyc gets the original as one
