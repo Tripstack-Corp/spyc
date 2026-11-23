@@ -189,6 +189,7 @@ impl Update {
                     s.context_tokens.as_ref().map(|v| v.at),
                     s.mode.as_ref().map(|v| v.at),
                     s.compaction.as_ref().map(|v| v.at),
+                    s.last_tps.as_ref().map(|v| v.at),
                 ]
             }
         };

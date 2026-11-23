@@ -138,14 +138,17 @@ impl Part {
     }
 }
 
-/// One agent's wiring: its status hooks and its MCP entry.
+/// One agent's wiring: its status hooks, its MCP entry, and an optional
+/// separate `statusLine` file (Antigravity keeps `statusLine` in
+/// `~/.gemini/antigravity-cli/settings.json` rather than its hooks file).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
     pub hooks: Part,
     pub hooks_file: PathBuf,
     pub mcp: Part,
     pub mcp_file: PathBuf,
-    /// What the user should know beyond the two parts.
+    pub statusline: Option<(Part, PathBuf)>,
+    /// What the user should know beyond the parts above.
     pub notes: Vec<String>,
 }
 

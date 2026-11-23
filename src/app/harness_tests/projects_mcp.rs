@@ -511,7 +511,7 @@ fn a_statusline_from_another_projects_claude_tab_reaches_it() {
         });
         p.wire(move |c| c.call("spyc/statusline", params));
         p.app
-            .as_project(project, |app| info(app, pane).claude_statusline.is_some())
+            .as_project(project, |app| info(app, pane).statusline.is_some())
     }
     with_projects(|p| {
         let (a, a_pane, b, b_pane) = (p.app.state.active, p.a_pane.clone(), p.b, p.b_pane.clone());

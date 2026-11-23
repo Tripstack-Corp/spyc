@@ -127,7 +127,7 @@ impl App {
             enabled: self.state.active_project().config.pane.claude_esc_guard,
             claude: info.is_some_and(|info| info.agent().kind() == AgentKind::Claude),
             working: info.is_some_and(|info| info.activity == AgentActivity::Working),
-            vim_mode: info.and_then(|info| info.claude_statusline.as_ref()?.0.vim_mode),
+            vim_mode: info.and_then(|info| info.statusline.as_ref()?.0.vim_mode),
         }
     }
 }

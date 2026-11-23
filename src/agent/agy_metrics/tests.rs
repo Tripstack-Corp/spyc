@@ -1099,3 +1099,66 @@ fn only_the_users_own_prompt_starts_a_turn() {
     assert_eq!(decode(&injected), None);
     assert_eq!(reasoning(&reducer).as_deref(), Some("Mid-turn."));
 }
+
+#[test]
+fn effective_throughput_measures_step_to_step_and_ignores_user_think_time() {
+    let mut reducer = Reducer::default();
+    fold(
+        &mut reducer,
+        &json!({
+            "type": "PLANNER_RESPONSE",
+            "step_index": 1,
+            "created_at": "2026-10-14T10:00:00Z",
+            "input_tokens": 1000,
+            "cache_read_tokens": 0,
+            "output_tokens": 200,
+            "tool_calls": [{"name": "view_file"}]
+        }),
+    );
+    assert!(reducer.snapshot().last_tps.is_none());
+    fold(
+        &mut reducer,
+        &json!({
+            "type": "VIEW_FILE",
+            "step_index": 2,
+            "status": "DONE",
+            "created_at": "2026-10-14T10:00:04Z"
+        }),
+    );
+    assert_eq!(reducer.snapshot().last_tps.unwrap().value, 50);
+
+    // Next response followed by USER_INPUT must not overwrite last_tps with idle think time.
+    fold(
+        &mut reducer,
+        &json!({
+            "type": "PLANNER_RESPONSE",
+            "step_index": 3,
+            "created_at": "2026-10-14T10:00:10Z",
+            "input_tokens": 1000,
+            "cache_read_tokens": 0,
+            "output_tokens": 100
+        }),
+    );
+    fold(
+        &mut reducer,
+        &json!({
+            "type": "USER_INPUT",
+            "source": "USER_EXPLICIT",
+            "step_index": 4,
+            "created_at": "2026-10-14T10:01:50Z",
+            "content": "next question"
+        }),
+    );
+    fold(
+        &mut reducer,
+        &json!({
+            "type": "PLANNER_RESPONSE",
+            "step_index": 5,
+            "created_at": "2026-10-14T10:01:52Z",
+            "input_tokens": 1000,
+            "cache_read_tokens": 0,
+            "output_tokens": 100
+        }),
+    );
+    assert_eq!(reducer.snapshot().last_tps.unwrap().value, 50);
+}

@@ -93,6 +93,9 @@ pub struct Snapshot {
     pub tool_counts: Vec<ToolCount>,
     /// `invoke_subagent` calls: subagents started.
     pub subagent_calls: u32,
+    /// Effective output throughput (tokens/sec) of the latest completed planner
+    /// response, from step-to-step elapsed time.
+    pub last_tps: Option<Sample<u32>>,
 }
 
 #[cfg(test)]

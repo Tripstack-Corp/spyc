@@ -59,7 +59,7 @@ fn forget_agent(info: &mut TabInfo) {
     info.notified = crate::pane::AgentActivity::Unknown;
     info.unseen_done = None;
     info.live_session_id = None;
-    info.claude_statusline = None;
+    info.statusline = None;
     info.claude_credential = None;
     info.codex_session_id = None;
     info.codex_home = None;
