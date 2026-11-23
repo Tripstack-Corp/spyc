@@ -1085,6 +1085,7 @@ fn a_session_attached_over_ssh_copies_through_the_terminal() {
     first.eventually("the tab's output shows", || first.shows("ready-mark"));
 
     // `^d` into the session's own jar, then `^d` again: the terminal goes.
+    let screens = first.screens();
     first.type_keys(b"\x04");
     let mut session = None;
     first.eventually("a session jar", || {
@@ -1092,12 +1093,18 @@ fn a_session_attached_over_ssh_copies_through_the_terminal() {
         session.is_some()
     });
     let (name, socket) = session.unwrap();
+    // A new screen, drawn from the jar: the one before `^d` showed both too.
     first.eventually("the session drawn again, from its jar", || {
         let shown = first.since_last_screen();
-        shown.contains(&name) && shown.contains("ready-mark")
+        first.screens() > screens && shown.contains(&name) && shown.contains("ready-mark")
     });
-    left.0
-        .push(described(&socket, "program_pid").unwrap().parse().unwrap());
+    // The jar reports 0 while it holds its program for the first owner.
+    let mut jar_spyc = None;
+    first.eventually("the session's spyc runs", || {
+        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        jar_spyc.is_some()
+    });
+    left.0.push(jar_spyc.unwrap().parse().unwrap());
     first.type_keys(b"\x04");
     eventually("the terminal leaves", || first.exited());
 
