@@ -466,6 +466,31 @@ dist: release-macos-universal release-linux-x86 release-linux-arm ## Build all p
 	@file $(DIST_DIR)/$(BINARY)-linux-x86_64
 	@file $(DIST_DIR)/$(BINARY)-linux-aarch64
 
+# Release binary sizes against scripts/binary-size-budgets (#933): this
+# machine's shipped binaries, built as a release builds them. BUILD.md,
+# "Release binary size", says how to raise a budget.
+SIZE_HOST := $(shell uname -s)-$(shell uname -m)
+.PHONY: size-check
+size-check: ## Build this machine's release binaries and hold each to its size budget
+ifneq ($(filter Darwin-%,$(SIZE_HOST)),)
+	@$(MAKE) --no-print-directory release-macos-universal
+	scripts/binary-size.sh \
+		spyc-macos-universal=$(DIST_DIR)/$(BINARY)-macos-universal \
+		spyc-jar-macos-universal=$(DIST_DIR)/$(JAR)-macos-universal
+else ifeq ($(SIZE_HOST),Linux-x86_64)
+	@$(MAKE) --no-print-directory release-linux-x86
+	scripts/binary-size.sh \
+		spyc-linux-x86_64=$(TARGET_DIR)/x86_64-unknown-linux-musl/release/$(BINARY) \
+		spyc-jar-linux-x86_64=$(TARGET_DIR)/x86_64-unknown-linux-musl/release/$(JAR)
+else ifeq ($(SIZE_HOST),Linux-aarch64)
+	@$(MAKE) --no-print-directory release-linux-arm
+	scripts/binary-size.sh \
+		spyc-linux-aarch64=$(TARGET_DIR)/aarch64-unknown-linux-musl/release/$(BINARY) \
+		spyc-jar-linux-aarch64=$(TARGET_DIR)/aarch64-unknown-linux-musl/release/$(JAR)
+else
+	@echo "size-check: no shipped binaries are built on $(SIZE_HOST)"; exit 1
+endif
+
 .PHONY: dist-checksums
 dist-checksums: dist ## Generate SHA-256 checksums
 	cd $(DIST_DIR) && shasum -a 256 $(BINARY)-* > checksums-sha256.txt
