@@ -1,8 +1,9 @@
 //! Gate criteria for the scrollback budget, with the SHIPPED configuration.
 //!
 //! Two assertions, per `docs/archive/V2_2_PLAN.md` §8:
-//!   1. realistic content retains **≥ budget minus one page** — the safety
-//!      valve never binds on content a user could legitimately produce;
+//!   1. the safety valve never binds on content a user could legitimately
+//!      produce: fed past the budget a step at a time, realistic content keeps
+//!      exactly the rows it keeps with no byte limit, after every step (#1147);
 //!   2. a pathological stream demonstrably **does** bind it, page-granular
 //!      truncation and all — the safety path is tested, not theoretical.
 //!
@@ -16,49 +17,26 @@ use vt_engine_spike::engines::Vt100Engine;
 /// spyc's default, from `Pane::spawn_with_env`.
 const BUDGET: usize = 10_000;
 
-/// One page of libghostty grid space, per its header ("about 400KB").
-const PAGE_BYTES: usize = 400 * 1024;
-
-/// Rows in a page at the heavy rate the ceiling is derived from — the
-/// tolerance for "approximately respected".
-fn page_rows() -> usize {
-    PAGE_BYTES / spyc_vt_sys_rate()
-}
-
-/// Kept as a function so the constant has one home even in this probe.
-#[cfg(feature = "ghostty")]
-fn spyc_vt_sys_rate() -> usize {
-    spyc_vt_sys::scrollback::BYTES_PER_ROW_HEAVY
-}
-#[cfg(not(feature = "ghostty"))]
-fn spyc_vt_sys_rate() -> usize {
-    929
-}
-
 fn plain(n: usize) -> Vec<u8> {
-    let mut v = Vec::new();
-    for i in 0..n {
-        v.extend_from_slice(
-            format!("line {i:06} with about forty characters of text\r\n").as_bytes(),
-        );
-    }
-    v
+    (0..n).flat_map(plain_row).collect()
+}
+
+fn plain_row(i: usize) -> Vec<u8> {
+    format!("line {i:06} with about forty characters of text\r\n").into_bytes()
 }
 
 /// Heavy but legitimate: an agent CLI's styled frame.
 fn heavy(n: usize) -> Vec<u8> {
-    let mut v = Vec::new();
-    for i in 0..n {
-        v.extend_from_slice(
-            format!(
-                "\x1b[38;5;244m│\x1b[0m \x1b[1;36m{i:05}\x1b[0m \
+    (0..n).flat_map(heavy_row).collect()
+}
+
+fn heavy_row(i: usize) -> Vec<u8> {
+    format!(
+        "\x1b[38;5;244m│\x1b[0m \x1b[1;36m{i:05}\x1b[0m \
 \x1b[38;2;180;200;255mtool\x1b[0m\x1b[2m·\x1b[0m\x1b[33mRead\x1b[0m \
 \u{2500}\u{2500} \u{3042}\u{1F600} e\u{0301} \x1b[4mpath/to/file.rs\x1b[0m\r\n"
-            )
-            .as_bytes(),
-        );
-    }
-    v
+    )
+    .into_bytes()
 }
 
 /// Pathological: a distinct truecolour pair and a grapheme cluster in EVERY
@@ -89,7 +67,6 @@ fn retained<E: Engine>(feed: &[u8]) -> usize {
 }
 
 fn main() {
-    let tolerance = page_rows();
     println!("scrollback budget at the SHIPPED configuration");
     #[cfg(feature = "ghostty")]
     {
@@ -101,41 +78,67 @@ fn main() {
             l.max_bytes as f64 / 1048576.0
         );
     }
-    println!("  tolerance for \"approximately respected\": one page = {tolerance} rows");
     println!("  (libghostty prunes whole pages, so the retained count quantises)");
     println!();
 
     // 15,000 rows into a 10,000-row budget: both engines must discard.
     const FED: usize = 15_000;
     println!("ASSERTION 1 — realistic content must NOT bind the valve");
-    println!("  {:<28} {:>10} {:>10} {:>8}", "corpus / engine", "retained", "floor", "verdict");
-    let floor = BUDGET - tolerance;
+    println!("  vt100, for contrast: its line limit is exact");
     for (label, feed) in [("plain", plain(FED)), ("heavy", heavy(FED))] {
         let v = retained::<Vt100Engine>(&feed);
+        println!("    {label:<6} {FED} rows fed, {v} kept");
+    }
+    #[cfg_attr(not(feature = "ghostty"), allow(unused_mut))]
+    let mut failed = false;
+    #[cfg(feature = "ghostty")]
+    {
+        let shipped = spyc_vt_sys::scrollback::limits_for_row_budget(BUDGET).max_bytes;
         println!(
-            "  {:<28} {v:>10} {floor:>10} {:>8}",
-            format!("{label} / vt100"),
-            if v >= floor { "ok" } else { "UNDER" }
+            "  ghostty: {SWEEP} rows fed {STEP} at a time; after every step the rows kept at the"
         );
-        #[cfg(feature = "ghostty")]
-        {
-            let gh = retained::<vt_engine_spike::engines::GhosttyEngine>(&feed);
-            println!(
-                "  {:<28} {gh:>10} {floor:>10} {:>8}",
-                format!("{label} / ghostty"),
-                if gh >= floor { "ok" } else { "UNDER" }
-            );
+        println!("  shipped ceiling must equal the rows kept with no byte limit at all");
+        let corpora: [(&str, fn(usize) -> Vec<u8>); 2] =
+            [("plain", plain_row), ("heavy", heavy_row)];
+        for (label, row) in corpora {
+            let with_valve = ghostty_sweep(row, shipped);
+            let without = ghostty_sweep(row, usize::MAX);
+            let differs = with_valve.iter().zip(&without).position(|(a, b)| a != b);
+            // Past the budget the line limit prunes whole pages, so the count
+            // saws between the budget and about a page under it.
+            let past = (BUDGET / STEP)..;
+            let low = with_valve[past.clone()].iter().min().copied().unwrap_or(0);
+            let high = with_valve[past].iter().max().copied().unwrap_or(0);
+            match differs {
+                None => println!(
+                    "    {label:<6} ok: identical at all {} steps; kept {low}..={high} past the budget",
+                    with_valve.len()
+                ),
+                Some(i) => {
+                    failed = true;
+                    println!(
+                        "    {label:<6} BOUND at {} rows fed: {} kept, {} with no byte limit",
+                        (i + 1) * STEP,
+                        with_valve[i],
+                        without[i]
+                    );
+                }
+            }
         }
     }
-
     println!();
     println!("ASSERTION 2 — pathological content must bind it");
     let path = pathological(4_000, 80);
-    println!("  input: 4,000 rows, {} KiB ({} B/row)", path.len() / 1024, path.len() / 4_000);
+    println!(
+        "  input: 4,000 rows, {} KiB ({} B/row)",
+        path.len() / 1024,
+        path.len() / 4_000
+    );
     #[cfg(feature = "ghostty")]
     {
         let gh = retained::<vt_engine_spike::engines::GhosttyEngine>(&path);
         let available = 4_000 - 24;
+        failed |= gh >= available;
         println!(
             "  ghostty retained {gh} of {available} available -> {}",
             if gh < available {
@@ -165,4 +168,60 @@ fn main() {
     // will hold the full row budget of pathological content.
     let v = retained::<Vt100Engine>(&path);
     println!("  vt100 retained {v} — it has no byte ceiling to bind");
+    if failed {
+        std::process::exit(1);
+    }
+}
+
+/// Rows of the sweep, fed this many at a time.
+#[cfg(feature = "ghostty")]
+const SWEEP: usize = 60_000;
+#[cfg(feature = "ghostty")]
+const STEP: usize = 250;
+
+/// Rows ghostty keeps after each step of feeding `row`'s corpus, at the
+/// shipped line limit and a byte ceiling of `max_bytes` (`usize::MAX` is none).
+#[cfg(feature = "ghostty")]
+fn ghostty_sweep(row: fn(usize) -> Vec<u8>, max_bytes: usize) -> Vec<usize> {
+    use spyc_vt_sys::ffi::{self, GhosttyTerminalData as Data, GhosttyTerminalOption as Opt};
+    let mut t: ffi::GhosttyTerminal = std::ptr::null_mut();
+    // SAFETY: `t` is a valid out-pointer; a null allocator selects the default.
+    let made = unsafe { ffi::ghostty_terminal_new(std::ptr::null(), &raw mut t, 80, 24) };
+    assert_eq!(made, spyc_vt_sys::SUCCESS);
+    let lines = BUDGET;
+    // SAFETY: `t` is live; each option reads one `usize` through its pointer.
+    unsafe {
+        ffi::ghostty_terminal_set(
+            t,
+            Opt::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+            (&raw const lines).cast(),
+        );
+        ffi::ghostty_terminal_set(
+            t,
+            Opt::GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+            (&raw const max_bytes).cast(),
+        );
+    }
+    let mut kept = Vec::with_capacity(SWEEP / STEP);
+    for step in 0..SWEEP / STEP {
+        let bytes: Vec<u8> = (step * STEP..(step + 1) * STEP).flat_map(row).collect();
+        for c in bytes.chunks(8192) {
+            // SAFETY: `t` is live and `c` is a valid slice for its length.
+            unsafe { ffi::ghostty_terminal_vt_write(t, c.as_ptr(), c.len()) };
+        }
+        let mut rows: usize = 0;
+        // SAFETY: `t` is live; the data is one `usize` written through the pointer.
+        let ok = unsafe {
+            ffi::ghostty_terminal_get(
+                t,
+                Data::GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS,
+                (&raw mut rows).cast(),
+            )
+        };
+        assert_eq!(ok, spyc_vt_sys::SUCCESS);
+        kept.push(rows);
+    }
+    // SAFETY: `t` came from `ghostty_terminal_new` and is not used again.
+    unsafe { ffi::ghostty_terminal_free(t) };
+    kept
 }
