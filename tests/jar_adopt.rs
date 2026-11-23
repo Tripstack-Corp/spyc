@@ -885,7 +885,7 @@ fn detach_project_moves_a_project_and_its_agent_into_a_session_of_its_own() {
     }
     let mut moved_spyc = None;
     first.eventually("the session's spyc runs", || {
-        moved_spyc = described(&socket, "program_pid");
+        moved_spyc = described(&socket, "program_pid").filter(|p| p != "0");
         moved_spyc.is_some()
     });
     let moved_spyc = moved_spyc.unwrap();
@@ -1030,6 +1030,7 @@ fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
     let tab_socket = tab_socket.unwrap();
 
     // `^d` into the session's own jar, then `^d` again: the terminal goes.
+    let screens = first.screens();
     first.type_keys(b"\x04");
     let mut session = None;
     first.eventually("a session jar", || {
@@ -1037,11 +1038,18 @@ fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
         session.is_some()
     });
     let (name, socket) = session.unwrap();
+    // A new screen, drawn from the jar: the one before `^d` showed both too.
     first.eventually("the session drawn again, from its jar", || {
         let shown = first.since_last_screen();
-        shown.contains(&name) && shown.contains("ready-mark")
+        first.screens() > screens && shown.contains(&name) && shown.contains("ready-mark")
     });
-    let jar_spyc = described(&socket, "program_pid").unwrap();
+    // The jar reports 0 while it holds its program for the first owner.
+    let mut jar_spyc = None;
+    first.eventually("the session's spyc runs", || {
+        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        jar_spyc.is_some()
+    });
+    let jar_spyc = jar_spyc.unwrap();
     left.0.push(jar_spyc.parse().unwrap());
     first.eventually("the session's spyc owns the tab's jar", || {
         described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
@@ -1064,6 +1072,62 @@ fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
         second_agent.accept().is_ok(),
         "the tab's link reached another agent"
     );
+}
+
+/// #904: in its own jar, spyc sends what goes to a terminal by the terminal
+/// attached now, not the one it started in. A session started locally and
+/// attached from an SSH login copies a path back through that terminal (OSC
+/// 52), as a spyc started over SSH does, rather than into a clipboard on a
+/// machine the user isn't at.
+#[test]
+fn a_session_attached_over_ssh_copies_through_the_terminal() {
+    let dirs = dirs();
+    std::fs::write(dirs.project.join("copied-file.txt"), "").unwrap();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.push(noted(&dirs.pidfile)[0]);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+
+    // `^d` into the session's own jar, then `^d` again: the terminal goes.
+    let screens = first.screens();
+    first.type_keys(b"\x04");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    // A new screen, drawn from the jar: the one before `^d` showed both too.
+    first.eventually("the session drawn again, from its jar", || {
+        let shown = first.since_last_screen();
+        first.screens() > screens && shown.contains(&name) && shown.contains("ready-mark")
+    });
+    // The jar reports 0 while it holds its program for the first owner.
+    let mut jar_spyc = None;
+    first.eventually("the session's spyc runs", || {
+        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        jar_spyc.is_some()
+    });
+    left.0.push(jar_spyc.unwrap().parse().unwrap());
+    first.type_keys(b"\x04");
+    eventually("the terminal leaves", || first.exited());
+
+    let ssh = std::ffi::OsStr::new("192.0.2.1 50000 192.0.2.2 22");
+    let back = Spyc::start_env(&dirs, &["attach"], &[("SSH_CONNECTION", ssh)]);
+    left.0.push(back.pid());
+    back.eventually("the session drawn", || {
+        squeezed(&back.since_last_screen()).contains("copied-file.txt")
+    });
+    back.type_keys(b"\x01k");
+    std::thread::sleep(Duration::from_millis(300));
+    back.type_keys(b"yf");
+    back.eventually("the path comes back as OSC 52", || {
+        back.since_last_screen().contains("\x1b]52;")
+    });
 }
 
 /// `text` without its escape sequences or spaces: what a line says, however

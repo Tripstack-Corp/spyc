@@ -378,6 +378,20 @@ const fn reader_forwards(ev: &Event) -> bool {
     !matches!(ev, Event::Mouse(m) if matches!(m.kind, MouseEventKind::Moved))
 }
 
+/// Whether what spyc sends its terminal goes over SSH, for spyc in its own jar:
+/// as the attached terminal's client said (`told`), else as spyc started; with
+/// none attached, no, since an escape would reach no one and the OS notifier
+/// might.
+const fn over_ssh(attached: bool, told: Option<bool>, at_start: bool) -> bool {
+    if !attached {
+        return false;
+    }
+    match told {
+        Some(ssh) => ssh,
+        None => at_start,
+    }
+}
+
 impl super::App {
     /// Hear spyc's own jar's attaches and detaches, waking the loop for each.
     pub(super) fn watch_own_jar(&mut self) {
@@ -416,6 +430,8 @@ impl super::App {
                 .note_event(&format!("terminal attached, {cols}x{rows}"));
         } else if !attached && self.runtime.terminal_noted {
             self.state.note_event("terminal detached: spyc runs on");
+            // OSC 9 and 52 would reach no one.
+            self.view.is_ssh = over_ssh(false, None, self.view.ssh_at_start);
         }
         self.runtime.terminal_noted = attached;
         if !new_client {
@@ -430,6 +446,14 @@ impl super::App {
                 .flash_error(format!("the terminal that attached: {e:#}")),
         }
         self.set_shift_esc(crate::terminal::keyboard_enhancement_supported());
+        // Read after the probe: its reply came through the client after the
+        // client named its terminal.
+        let told = self
+            .runtime
+            .own_jar
+            .as_ref()
+            .and_then(crate::pane::jar::session::OwnJar::terminal_over_ssh);
+        self.view.is_ssh = over_ssh(true, told, self.view.ssh_at_start);
         self.view.last_term_title = None;
         self.view.needs_full_repaint = true;
         true
@@ -442,6 +466,29 @@ impl super::App {
             .own_jar
             .as_ref()
             .is_none_or(|jar| jar.attached() && jar.attaches() == self.runtime.attaches_seen)
+    }
+}
+
+#[cfg(test)]
+mod over_ssh_tests {
+    use super::over_ssh;
+
+    #[test]
+    fn the_attached_terminal_says_whether_it_is_over_ssh_and_none_attached_is_local() {
+        assert!(
+            over_ssh(true, Some(true), false),
+            "an SSH client to a local spyc"
+        );
+        assert!(
+            !over_ssh(true, Some(false), true),
+            "a local client to a spyc started over SSH"
+        );
+        assert!(
+            over_ssh(true, None, true),
+            "a client that didn't say: as spyc started"
+        );
+        assert!(!over_ssh(true, None, false));
+        assert!(!over_ssh(false, Some(true), true), "none attached");
     }
 }
 
