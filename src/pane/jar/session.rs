@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context;
 use spyc_jar::client::{Client, Sender};
 use spyc_jar::proto::{Msg, Role};
+use spyc_jar::state::{OWNER_LEFT, OwnerLeft};
 
 use super::place::this_users_sessions;
 
@@ -59,6 +60,15 @@ impl OwnJar {
             .iter()
             .find(|(k, _)| k == spyc_jar::attach::TERMINAL_KEY)?;
         Some(kind == spyc_jar::attach::terminal_kind(true))
+    }
+
+    /// Why the terminal attached last left, as the jar recorded it. `None`
+    /// when the jar can't be asked or doesn't say: one built before it did,
+    /// or one still ending a terminal spyc detached.
+    pub fn why_left(&self) -> Option<OwnerLeft> {
+        let fields = spyc_jar::client::describe(&self.socket).ok()?;
+        let (_, word) = fields.iter().find(|(k, _)| k == OWNER_LEFT)?;
+        OwnerLeft::from_word(word)
     }
 
     /// Whether a terminal is attached.

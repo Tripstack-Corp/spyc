@@ -13,7 +13,7 @@ use super::describe::describe;
 use super::life::deliver;
 use super::{By, Conn, Shared, TICK, Who, readable};
 use crate::proto::{self, Msg, Role, reason};
-use crate::state::{Event, State};
+use crate::state::{Event, OWNER_LEFT, OwnerLeft, State};
 
 /// How often a connection's writer wakes with nothing to send.
 const WRITER_TICK: Duration = Duration::from_millis(500);
@@ -73,8 +73,25 @@ pub(super) fn detach_owner(shared: &Arc<Shared>) {
             }
             thread::sleep(TICK);
         }
+        owner_leaves(&shared, owner, OwnerLeft::Detached);
         conn.close();
     });
+}
+
+/// Say why owner `id` leaves (`OWNER_LEFT`), before its connection closes,
+/// so a client that sees it close finds the reason when it asks. An owner
+/// already gone or replaced is left alone.
+fn owner_leaves(shared: &Shared, id: u64, why: OwnerLeft) {
+    let mut st = shared.lock();
+    if st.owner == Some(id) {
+        set_info(&mut st, OWNER_LEFT, why.word());
+    }
+}
+
+/// Set the pair `key` among the owner's, replacing any it had.
+fn set_info(st: &mut State, key: &str, value: &str) {
+    st.info.retain(|(k, _)| k != key);
+    st.info.push((key.to_string(), value.to_string()));
 }
 
 /// A connection after its `hello`: a writer thread streaming the log, and
@@ -101,6 +118,7 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
         }
         if !readable(&*conn.sock, TICK) {
             if owner && last_heard.elapsed() >= shared.cfg.deadline {
+                owner_leaves(shared, id, OwnerLeft::Silent);
                 break;
             }
             // A lookup asks one thing, at once.
@@ -127,6 +145,11 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
             Err(proto::ReadError::UnknownCritical(kind)) => {
                 send(&Msg::Unsupported { kind });
                 continue;
+            }
+            // A frame begun and left unfinished past the lease's deadline.
+            Err(proto::ReadError::Io(e)) if owner && e.kind() == std::io::ErrorKind::TimedOut => {
+                owner_leaves(shared, id, OwnerLeft::Silent);
+                break;
             }
             Err(_) => break,
         };
@@ -221,11 +244,7 @@ fn act(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>, msg: Msg) -> Next {
             // among them, is never read.
             return Next::End;
         }
-        Msg::SetInfo { key, value } if owner => {
-            let mut st = shared.lock();
-            st.info.retain(|(k, _)| *k != key);
-            st.info.push((key, value));
-        }
+        Msg::SetInfo { key, value } if owner => set_info(&mut shared.lock(), &key, &value),
         Msg::Describe => {
             send(&Msg::Description {
                 fields: describe(shared),
@@ -341,6 +360,10 @@ pub(super) fn release(shared: &Shared, id: u64) {
         st.owner = None;
         st.ownerless_since = Some(Instant::now());
         st.info.retain(|(k, _)| k != "owner_mcp");
+        // Unless it was told why as it went, it closed its connection.
+        if !st.info.iter().any(|(k, _)| k == OWNER_LEFT) {
+            set_info(&mut st, OWNER_LEFT, OwnerLeft::Closed.word());
+        }
     }
     drop(st);
     if was_owner {

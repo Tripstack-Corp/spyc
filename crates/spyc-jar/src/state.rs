@@ -162,6 +162,41 @@ pub struct State {
     pub info: Vec<(String, String)>,
 }
 
+/// The key of the pair a jar sets among the owner's (`State::info`) as its
+/// owner leaves, saying why: a client that sees its connection close asks,
+/// and an owner that connects clears it.
+pub const OWNER_LEFT: &str = "owner_left";
+
+/// Why a jar's owner left, as [`OWNER_LEFT`] says it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnerLeft {
+    /// The program asked the jar to end its client (`Msg::Detach`).
+    Detached,
+    /// It sent nothing for the jar's deadline (R21), and the jar closed it.
+    Silent,
+    /// Its connection closed, or sent what the jar couldn't read.
+    Closed,
+}
+
+impl OwnerLeft {
+    /// The value of the [`OWNER_LEFT`] pair.
+    pub const fn word(self) -> &'static str {
+        match self {
+            Self::Detached => "detached",
+            Self::Silent => "silent",
+            Self::Closed => "closed",
+        }
+    }
+
+    /// The reason an [`OWNER_LEFT`] value names; `None` for one this
+    /// version doesn't know.
+    pub fn from_word(word: &str) -> Option<Self> {
+        [Self::Detached, Self::Silent, Self::Closed]
+            .into_iter()
+            .find(|w| w.word() == word)
+    }
+}
+
 /// What a connection is, apart from its socket: enough to resume it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConnState {

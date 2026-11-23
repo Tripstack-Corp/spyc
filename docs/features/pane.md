@@ -364,6 +364,11 @@ such as `CORIANDER_CLOVE`). With no name it attaches to the one session running,
 and asks which. A session already attached in another terminal moves to yours, and that
 terminal is left as it was before spyc. `^d` detaches (see [Projects and sessions](projects.md)).
 
+A terminal stays attached while the computer sleeps. If the session drops it because `spyc
+attach` couldn't run for a while, as can happen when the computer briefly wakes in the
+background, it attaches again by itself once it runs, and spyc redraws. Keys typed
+meanwhile are dropped. `^d`, `^\`, and the session ending still end it.
+
 ## Quick Select — labelled overlay picker
 
 Borrowed from [WezTerm's Quick Select][wezterm-qs]. Press **`^a u`**

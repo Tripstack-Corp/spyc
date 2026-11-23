@@ -392,6 +392,18 @@ const fn over_ssh(attached: bool, told: Option<bool>, at_start: bool) -> bool {
     }
 }
 
+/// The event noted as the terminal leaves spyc's own jar, saying why when
+/// it didn't detach.
+fn detached_note(why: Option<spyc_jar::state::OwnerLeft>) -> String {
+    use spyc_jar::state::OwnerLeft;
+    let how = match why {
+        Some(OwnerLeft::Silent) => ", silent past the jar's deadline",
+        Some(OwnerLeft::Closed) => ", its connection closed",
+        Some(OwnerLeft::Detached) | None => "",
+    };
+    format!("terminal detached{how}: spyc runs on")
+}
+
 impl super::App {
     /// Hear spyc's own jar's attaches and detaches, waking the loop for each.
     pub(super) fn watch_own_jar(&mut self) {
@@ -429,7 +441,7 @@ impl super::App {
             self.state
                 .note_event(&format!("terminal attached, {cols}x{rows}"));
         } else if !attached && self.runtime.terminal_noted {
-            self.state.note_event("terminal detached: spyc runs on");
+            self.state.note_event(&detached_note(jar.why_left()));
             // OSC 9 and 52 would reach no one.
             self.view.is_ssh = over_ssh(false, None, self.view.ssh_at_start);
         }
