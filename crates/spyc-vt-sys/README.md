@@ -75,6 +75,14 @@ number can compile different code. The script also uses a private global zig
 cache, because zig keys its cache on the version string: a shared cache would
 hand this build objects an earlier, different zig build made.
 
+Only fetched packages cross runs. Zig stores each under its content hash, in
+the global cache's `p/`. With `ZIG_PACKAGE_CACHE` naming a directory, the
+script copies its packages in before building, and this run's back once it
+succeeds. CI keeps that directory with `actions/cache`, keyed on the zig version
+and the pin, and the container target mounts `~/.cache/spyc/zig-packages`. The
+script fetches every dependency first (`zig build --fetch=all`), and only the
+fetch is retried, up to three times.
+
 The result is byte-for-byte reproducible, which the
 [`Vendored archives`](../../.github/workflows/vendored-archives.yml) workflow
 checks on every tag and on any PR that touches the archives, the pin or the

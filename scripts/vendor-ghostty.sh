@@ -37,6 +37,31 @@ fi
 git -C "$SRC" fetch --depth=1 origin "$PIN" 2>/dev/null || git -C "$SRC" fetch origin
 git -C "$SRC" checkout -q "$PIN"
 
+# ghostty's dependencies (#1153). Only the package cache, `p/`, crosses runs:
+# zig stores each fetched package there by its content hash, and compiled
+# objects (`o/`, `h/`, `z/`) stay private to this run, as above. With
+# ZIG_PACKAGE_CACHE naming a directory (CI's cache, the container's mount),
+# its packages come in first and this run's go back once it succeeds.
+if [ -n "${ZIG_PACKAGE_CACHE:-}" ] && [ -d "$ZIG_PACKAGE_CACHE/p" ]; then
+    mkdir -p "$ZIG_GLOBAL_CACHE_DIR"
+    cp -R "$ZIG_PACKAGE_CACHE/p" "$ZIG_GLOBAL_CACHE_DIR/"
+    echo "packages: $(ls "$ZIG_GLOBAL_CACHE_DIR/p" | wc -l | tr -d ' ') from $ZIG_PACKAGE_CACHE"
+fi
+# Every dependency, lazy ones too, before any build: a fetch is the network's
+# part, and the only one retried. Its failures (a reset connection, a DNS
+# miss, an oversized header) passed on a retry every time; a build's failure
+# fails the run.
+fetched=
+for try in 1 2 3; do
+    if ( cd "$SRC" && zig build --fetch=all ); then
+        fetched=1
+        break
+    fi
+    echo "fetching ghostty's dependencies failed (try $try of 3)"
+    sleep $((try * 10))
+done
+[ -n "$fetched" ] || { echo "could not fetch ghostty's dependencies"; exit 1; }
+
 # Re-archive deterministically. zig's archive is not reproducible as built: a
 # Linux one names each member by its absolute path in the build cache, which
 # changes every run, and a darwin one's symbol table records the build time and
@@ -124,6 +149,14 @@ for pair in $TARGETS; do
     fi
     printf "  ok %s B\n" "$sz"
 done
+
+if [ -n "${ZIG_PACKAGE_CACHE:-}" ]; then
+    mkdir -p "$ZIG_PACKAGE_CACHE"
+    rm -rf "$ZIG_PACKAGE_CACHE/p.new"
+    cp -R "$ZIG_GLOBAL_CACHE_DIR/p" "$ZIG_PACKAGE_CACHE/p.new"
+    rm -rf "$ZIG_PACKAGE_CACHE/p"
+    mv "$ZIG_PACKAGE_CACHE/p.new" "$ZIG_PACKAGE_CACHE/p"
+fi
 
 ( cd "$CRATE/vendor" && shasum -a 256 ./*/libghostty-vt.a > CHECKSUMS )
 echo "refreshed $CRATE/vendor/CHECKSUMS:"
