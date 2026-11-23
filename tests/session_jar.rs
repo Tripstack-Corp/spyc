@@ -550,6 +550,24 @@ fn spyc_attach_shows_the_session_and_a_second_attach_takes_it_over() {
     second.quit_spyc();
 }
 
+/// `^d` in a session reached by `spyc attach` ends the client: it attaches
+/// again only to a jar that dropped it for silence, never one spyc detached.
+#[test]
+fn a_detach_in_spyc_ends_spyc_attach() {
+    let dirs = Dirs::new();
+    let _jar = session(&dirs, NAME);
+    let mut term = Attached::start(&dirs, &["attach", NAME]);
+    term.wait_drawn(NAME);
+    term.type_keys(b"\x04");
+    let status = term.exit();
+    assert!(status.success(), "{:?}", term.text());
+    assert!(
+        term.text().ends_with("[detached]\r\n"),
+        "the client didn't say it was detached: {:?}",
+        term.text()
+    );
+}
+
 #[test]
 fn a_bare_spyc_attach_asks_which_of_several_sessions() {
     let dirs = Dirs::new();
