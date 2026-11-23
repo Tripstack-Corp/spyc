@@ -1963,10 +1963,11 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         AfterExec, Command, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served, Start,
         Unbounded,
     };
-    const TIMERS: [(&str, Kind); 42] = [
+    const TIMERS: [(&str, Kind); 43] = [
         ("ATTACH_WAIT", Command),
         ("ATTACH_PING", Poll),
         ("SIZE_POLL", Poll),
+        ("WRITE_STALL", Peer),
         ("SHORTEST_WAIT", Floor),
         ("PARK_POLL", Poll),
         ("VALIDATOR_POLL", Poll),

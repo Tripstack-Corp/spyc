@@ -321,7 +321,6 @@ impl Drop for Attached {
 /// jar, so the jar never takes it for gone. A terminal app paused while its
 /// computer sleeps reads nothing.
 #[test]
-#[ignore = "red until the attach client answers its jar while its terminal is slow"]
 fn a_terminal_slow_to_read_keeps_its_session() {
     let jar = Jar::start_running(
         &["--deadline-ms", "4000"],
