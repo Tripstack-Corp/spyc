@@ -33,6 +33,7 @@ impl App {
     /// per-worktree harpoon list after every action. Cheap: a no-op for a
     /// column whose [`AppState::harpoon_root`] matches its loaded list.
     pub fn apply(&mut self, action: &Action) -> Result<Vec<Effect>> {
+        crate::crash_report::note_action(action.canonical_name());
         let result = self.apply_inner(action);
         self.reconcile_harpoon();
         result
