@@ -203,6 +203,7 @@ pub(super) fn status(env: &Env) -> Status {
         hooks_file: hooks.path.clone(),
         mcp: mcp_status(env),
         mcp_file: claude_json(env),
+        statusline: None,
         notes: Vec::new(),
     })
 }
@@ -213,6 +214,7 @@ pub(super) fn install(env: &Env) -> Status {
         hooks_file: hooks.path.clone(),
         mcp: mcp_install(env),
         mcp_file: claude_json(env),
+        statusline: None,
         notes: Vec::new(),
     })
 }
@@ -223,6 +225,7 @@ pub(super) fn remove(env: &Env) -> Status {
         hooks_file: hooks.path.clone(),
         mcp: mcp_remove(env),
         mcp_file: claude_json(env),
+        statusline: None,
         notes: Vec::new(),
     })
 }

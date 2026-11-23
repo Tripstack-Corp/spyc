@@ -199,7 +199,12 @@ rate-limit windows on the row above. In Code Mode it adds `scripts`, with `✗`
 and `◐` marking those that threw and those running, and `calls/script`, and
 the tools row says how many of its calls the scripts made. After the health cells it adds `org`, the
 organization its login belongs to, or `auth` and the credential used in the
-login's place, omitted rather than `--` without either. The full list is the dump's, which
+login's place, omitted rather than `--` without either. For Antigravity (`agy`),
+when wired with `spyc --statusline`, the usage row likewise adds its context
+share, active-model `5h`/`7d` (and `argon`) quota windows (with pace run-out
+estimates in `countdown` mode) and step throughput (`t/s`), and the mode row
+adds `background`, `queued`, approval mode, `sandbox`, `plan` tier and a live
+running-subagent trailer. The full list is the dump's, which
 `:agent hud dump` (or `info`) opens, and so does a double-click anywhere on the
 strip. The strip is spyc's text, never the child's input: a press there selects,
 a drag copies, and the wheel does nothing.

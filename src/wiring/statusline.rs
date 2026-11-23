@@ -1,7 +1,8 @@
-//! claude's `statusLine`, wrapped so its input reaches spyc. Claude Code hands
-//! the plan's rate limits and the context window only to the statusline
-//! command, so spyc runs first, forwards them to its own pane, then runs the
-//! command the user had, on the same input; its output is unchanged.
+//! Claude Code's and Antigravity's (`agy`) `statusLine`, wrapped so its input
+//! reaches spyc. Both agents hand their context-window share and rate-limit
+//! windows only to the statusline command, so spyc runs first, forwards a
+//! bounded projection to its own pane, then runs the command the user had on
+//! the same input; its output is unchanged.
 //!
 //! The wrapper carries the user's command inside it rather than in a file of
 //! spyc's: removing spyc restores it exactly. A `settings.json` synced to a
@@ -95,24 +96,45 @@ pub(super) fn unwrap(command: &str) -> Option<Wrapped> {
     }
 }
 
-/// `text`, a claude `settings.json`, with its statusline wrapped. A statusline
-/// spyc can't wrap (not a `command`) is left as it is; one already wrapped is
-/// rewrapped around the same command, so this is idempotent.
+/// `text`, a Claude Code `settings.json`, with its `statusLine` wrapped. A
+/// statusline spyc can't wrap (not a `command`) is left as it is; one already
+/// wrapped is rewrapped around the same command, so this is idempotent.
 pub(super) fn settings_with(text: &str, spyc: &str) -> Option<String> {
+    settings_with_inner(text, spyc, false)
+}
+
+/// Like [`settings_with`], for an Antigravity (`agy`) `settings.json`: when
+/// spyc adds a bare `statusLine` where the user had none, it sets
+/// `stack_with_default: true` so `agy` keeps its built-in status bar visible.
+/// An existing user statusline keeps its own fields untouched.
+pub(super) fn settings_with_stack(text: &str, spyc: &str) -> Option<String> {
+    settings_with_inner(text, spyc, true)
+}
+
+fn settings_with_inner(text: &str, spyc: &str, stack_with_default: bool) -> Option<String> {
     let mut root: Value = serde_json::from_str(text).ok()?;
     let obj = root.as_object_mut()?;
     match obj.get_mut("statusLine") {
         None => {
-            obj.insert(
-                "statusLine".into(),
-                json!({ "type": "command", "command": wrap(None, spyc) }),
-            );
+            let entry = if stack_with_default {
+                json!({
+                    "type": "command",
+                    "command": wrap(None, spyc),
+                    "stack_with_default": true,
+                })
+            } else {
+                json!({ "type": "command", "command": wrap(None, spyc) })
+            };
+            obj.insert("statusLine".into(), entry);
         }
         Some(line) => {
             // A NUL can't be quoted for a shell, so such a command is left alone.
             if let Some(command) = wrappable(line).filter(|c| !c.contains('\0')) {
                 let original = unwrap(&command).unwrap_or(Wrapped::Command(command));
                 line["command"] = Value::String(wrap(original.command(), spyc));
+                if stack_with_default && original == Wrapped::Nothing {
+                    line["stack_with_default"] = Value::Bool(true);
+                }
             }
         }
     }
@@ -240,6 +262,42 @@ mod tests {
             "a kind spyc can't wrap is left"
         );
         assert_eq!(settings_with("[]", "spyc"), None);
+    }
+
+    #[test]
+    fn stack_with_default_keeps_agys_builtin_footer_only_when_spyc_adds_statusline() {
+        let bare = settings_with_stack("{}", "spyc").unwrap();
+        let parsed: Value = serde_json::from_str(&bare).unwrap();
+        assert_eq!(parsed["statusLine"]["stack_with_default"], true);
+        assert_eq!(
+            unwrap(parsed["statusLine"]["command"].as_str().unwrap()),
+            Some(Wrapped::Nothing)
+        );
+        let Some(Removal::Rest { text, empty }) = settings_without(&bare) else {
+            panic!("bare stacked statusline must remove cleanly");
+        };
+        assert_eq!(text.trim(), "{}");
+        assert!(empty);
+
+        // An existing bare spyc wrapper without stack_with_default is upgraded.
+        let unstacked = settings_with("{}", "spyc").unwrap();
+        let upgraded = settings_with_stack(&unstacked, "spyc").unwrap();
+        let parsed: Value = serde_json::from_str(&upgraded).unwrap();
+        assert_eq!(parsed["statusLine"]["stack_with_default"], true);
+
+        // A user's own statusLine command keeps its own fields untouched.
+        let user = serde_json::to_string_pretty(&json!({
+            "statusLine": { "type": "command", "command": HUD }
+        }))
+        .unwrap()
+            + "\n";
+        let wrapped = settings_with_stack(&user, "spyc").unwrap();
+        let parsed: Value = serde_json::from_str(&wrapped).unwrap();
+        assert!(parsed["statusLine"].get("stack_with_default").is_none());
+        let Some(Removal::Rest { text, .. }) = settings_without(&wrapped) else {
+            panic!("user statusline must unwrap");
+        };
+        assert_eq!(text, user);
     }
 
     /// The wrapper as a shell runs it: with spyc, spyc gets the original as one

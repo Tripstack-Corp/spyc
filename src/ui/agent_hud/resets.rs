@@ -9,6 +9,127 @@ use crate::config::AgentHudResets;
 const MINUTE: i64 = 60;
 const HOUR: i64 = 60 * MINUTE;
 const DAY: i64 = 24 * HOUR;
+/// Suppress noisy pace projections during the first 10 minutes of a window.
+const MIN_PACE_ELAPSED_SECS: i64 = 10 * MINUTE;
+
+/// Format basis points (`0..=10_000`) to two decimal places (e.g. `24.95%`).
+#[must_use]
+pub fn format_pct_2dp(x100: u16) -> String {
+    let clamped = x100.min(10_000);
+    format!("{}.{:02}%", clamped / 100, clamped % 100)
+}
+
+/// Whole percentage points ahead of (`> 0`) or behind (`< 0`) linear window
+/// pace: `used% - elapsed%`. `None` before [`MIN_PACE_ELAPSED_SECS`] or when
+/// the window bounds don't match.
+#[must_use]
+pub fn pace_delta_points(
+    used_percent_x100: u16,
+    resets_at: i64,
+    window_secs: i64,
+    now: Timestamp,
+) -> Option<i16> {
+    let left = resets_at.checked_sub(now.as_second())?;
+    if left <= 0 || left >= window_secs || window_secs <= 0 {
+        return None;
+    }
+    let elapsed = window_secs - left;
+    if elapsed < MIN_PACE_ELAPSED_SECS {
+        return None;
+    }
+    let elapsed_x100 = elapsed.checked_mul(10_000)? / window_secs;
+    let diff = i64::from(used_percent_x100.min(10_000)) - elapsed_x100;
+    let rounded = if diff >= 0 {
+        (diff + 50) / 100
+    } else {
+        (diff - 50) / 100
+    };
+    i16::try_from(rounded).ok()
+}
+
+/// Estimated time until a quota window runs out (`~1h12m`) at the current
+/// window burn rate. `None` when on or under pace, already empty, or too early
+/// in the window.
+#[must_use]
+pub fn pace_runout(
+    used_percent_x100: u16,
+    resets_at: i64,
+    window_secs: i64,
+    now: Timestamp,
+) -> Option<String> {
+    let used = i64::from(used_percent_x100.min(10_000));
+    if used <= 0 || used >= 10_000 {
+        return None;
+    }
+    let left = resets_at.checked_sub(now.as_second())?;
+    if left <= 0 || left >= window_secs || window_secs <= 0 {
+        return None;
+    }
+    let elapsed = window_secs - left;
+    if elapsed < MIN_PACE_ELAPSED_SECS {
+        return None;
+    }
+    let elapsed_x100 = elapsed.checked_mul(10_000)? / window_secs;
+    if used <= elapsed_x100 {
+        return None;
+    }
+    let rem_x100 = 10_000 - used;
+    let run_out_secs = elapsed.checked_mul(rem_x100)? / used;
+    if run_out_secs <= 0 || run_out_secs >= left {
+        return None;
+    }
+    Some(format!("~{}", countdown(run_out_secs)))
+}
+
+/// The next instant [`pace_runout`] changes on its own: appearing past the
+/// 10-minute warm-up, ticking to a new minute/hour, or disappearing once
+/// elapsed time catches up to linear pace. Called only in
+/// [`AgentHudResets::Countdown`], so `clock` mode wakes only at window reset.
+#[must_use]
+pub fn next_pace_change(
+    used_percent_x100: u16,
+    resets_at: i64,
+    window_secs: i64,
+    now: Timestamp,
+) -> Option<i64> {
+    let used = i64::from(used_percent_x100.min(10_000));
+    if used <= 0 || used >= 10_000 || window_secs <= 0 {
+        return None;
+    }
+    let now_s = now.as_second();
+    let left = resets_at.checked_sub(now_s)?;
+    if left <= 0 || left >= window_secs {
+        return None;
+    }
+    let start = resets_at.checked_sub(window_secs)?;
+    let elapsed = now_s - start;
+    // Exact second where `elapsed * 10_000 / window_secs >= used`, which is
+    // also where `run_out_secs >= left` and the estimate disappears.
+    let on_pace_elapsed = (window_secs.checked_mul(used)? + 9_999) / 10_000;
+    let on_pace_at = start.checked_add(on_pace_elapsed)?;
+    if now_s >= on_pace_at {
+        return None;
+    }
+    let rem = 10_000 - used;
+    let first_positive_elapsed = (used + rem - 1) / rem;
+    if elapsed < MIN_PACE_ELAPSED_SECS {
+        let appear_at = start.checked_add(MIN_PACE_ELAPSED_SECS.max(first_positive_elapsed))?;
+        return (appear_at < on_pace_at && appear_at < resets_at).then_some(appear_at);
+    }
+    let run_out = elapsed.checked_mul(rem)? / used;
+    if run_out <= 0 {
+        let appear_at = start.checked_add(first_positive_elapsed)?;
+        return (appear_at < on_pace_at && appear_at < resets_at).then_some(appear_at);
+    }
+    if run_out >= left {
+        return None;
+    }
+    let step = if run_out >= DAY { HOUR } else { MINUTE };
+    let next_run_out = (run_out / step + 1).checked_mul(step)?;
+    let next_elapsed = (next_run_out.checked_mul(used)? + rem - 1) / rem;
+    let tick_at = start.checked_add(next_elapsed)?;
+    Some(tick_at.min(on_pace_at).min(resets_at).max(now_s + 1))
+}
 
 /// The label for a window resetting at `resets_at` (Unix seconds), or `None`
 /// once that has passed: the report then describes a window that's gone.
@@ -234,6 +355,61 @@ mod tests {
                 "unchanged before {next}"
             );
             assert_ne!(label_at(next), label_at(start), "changed at {next}");
+        }
+    }
+
+    #[test]
+    fn pace_helpers_format_two_decimals_and_forecast_only_when_burning_fast() {
+        assert_eq!(format_pct_2dp(0), "0.00%");
+        assert_eq!(format_pct_2dp(2495), "24.95%");
+        assert_eq!(format_pct_2dp(10_000), "100.00%");
+
+        let five_h = 5 * HOUR;
+        let now = at(utc(12, 0));
+        // Too early (only 5m elapsed): suppressed.
+        let early_reset = now.as_second() + five_h - 5 * MINUTE;
+        assert_eq!(pace_delta_points(5000, early_reset, five_h, now), None);
+        assert_eq!(pace_runout(5000, early_reset, five_h, now), None);
+
+        // 2h elapsed (40% of 5h), 25% used -> under pace (-15%), no run-out.
+        let reset = now.as_second() + 3 * HOUR;
+        assert_eq!(pace_delta_points(2500, reset, five_h, now), Some(-15));
+        assert_eq!(pace_runout(2500, reset, five_h, now), None);
+
+        // 2h elapsed (40% of 5h), 75% used -> +35% over pace; 25% left at 37.5%/h = 40m.
+        assert_eq!(pace_delta_points(7500, reset, five_h, now), Some(35));
+        assert_eq!(
+            pace_runout(7500, reset, five_h, now).as_deref(),
+            Some("~40m")
+        );
+
+        // Every wake `next_pace_change` asks for lands on the exact second
+        // `pace_runout`'s label changes (warm-up, minute tick, hour tick, or
+        // crossing back under pace).
+        let seven_d = 7 * DAY;
+        for (used, win, elapsed_offset) in [
+            (7500, five_h, 5 * MINUTE),
+            (7500, five_h, 2 * HOUR),
+            (7500, five_h, 3 * HOUR + 44 * MINUTE),
+            (8000, seven_d, 2 * DAY),
+            (9999, five_h, 15 * MINUTE),
+        ] {
+            let win_start = utc(0, 0);
+            let resets_at = win_start + win;
+            let start = win_start + elapsed_offset;
+            let next =
+                next_pace_change(used, resets_at, win, at(start)).expect("expected a pace change");
+            assert!(next > start, "{used}/{win}/{elapsed_offset}");
+            assert_eq!(
+                pace_runout(used, resets_at, win, at(next - 1)),
+                pace_runout(used, resets_at, win, at(start)),
+                "unchanged before {next}"
+            );
+            assert_ne!(
+                pace_runout(used, resets_at, win, at(next)),
+                pace_runout(used, resets_at, win, at(start)),
+                "changed at {next}"
+            );
         }
     }
 }

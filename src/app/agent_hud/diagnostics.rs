@@ -1,5 +1,7 @@
 //! Explicit source diagnostics retain only the collector's bounded projection.
 
+use std::fmt::Write as _;
+
 use jiff::Timestamp;
 
 use crate::agent::agy_metrics;
@@ -7,6 +9,8 @@ use crate::agent::claude_metrics;
 use crate::agent::codex_metrics::{Sample, Snapshot, Tokens};
 use crate::agent::tail::Availability;
 use crate::config::HUD_STALE_AFTER_SECS;
+use crate::state::sessions::AgentKind;
+use crate::ui::agent_hud::resets;
 
 use super::super::state::agent_hud::{Feed, Update};
 use super::App;
@@ -377,13 +381,13 @@ fn claude_tool_lines(s: &claude_metrics::Snapshot, tail_only: bool) -> Vec<Strin
     out
 }
 
-/// What `spyc --statusline` forwarded: this tab's report, and the plan windows
-/// from the newest report any tab sent.
+/// What `spyc --statusline` forwarded for Claude Code: this tab's report, and
+/// the plan windows from the newest report any Claude tab sent.
 fn statusline_lines(
     tabs: &crate::pane::PaneTabs,
     info: &crate::pane::tabs::TabInfo,
 ) -> Vec<String> {
-    let Some((report, at)) = info.claude_statusline.as_ref() else {
+    let Some((report, at)) = info.statusline.as_ref() else {
         return vec![
             "statusline (spyc --statusline): no report from this tab. claude's statusLine runs it once spyc's wiring is in place (:hooks on claude).".to_owned(),
         ];
@@ -409,7 +413,8 @@ fn statusline_lines(
     let newest = tabs
         .tabs()
         .iter()
-        .filter_map(|entry| Some((&entry.info.id, entry.info.claude_statusline.as_ref()?)))
+        .filter(|entry| entry.info.agent().kind() == AgentKind::Claude)
+        .filter_map(|entry| Some((&entry.info.id, entry.info.statusline.as_ref()?)))
         .filter(|(_, (r, _))| r.five_hour.is_some() || r.seven_day.is_some())
         .max_by_key(|(_, (_, at))| *at);
     let Some((pane, (plan, at))) = newest else {
@@ -429,6 +434,137 @@ fn statusline_lines(
                     .map_or("--".to_owned(), |t| t.to_string());
                 format!("    {name}: {}% used; resets at {resets}", w.used_percent)
             },
+        ));
+    }
+    out
+}
+
+/// What `spyc --statusline` forwarded for Antigravity: this tab's report, and
+/// every quota bucket from the newest Antigravity report any tab sent.
+fn agy_statusline_lines(
+    tabs: &crate::pane::PaneTabs,
+    info: &crate::pane::tabs::TabInfo,
+    now: Timestamp,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    match info.statusline.as_ref() {
+        None => {
+            out.push(
+                "statusline (spyc --statusline): no report from this tab. agy's statusLine runs it once spyc's wiring is in place (:hooks on agy).".to_owned(),
+            );
+        }
+        Some((report, at)) => {
+            let session = match report.session_id.as_deref() {
+                None => "no session named",
+                Some(id) if Some(id) == info.live_session_id.as_deref() => "this tab's session",
+                Some(_) => "another session, so its context share isn't shown",
+            };
+            out.push(format!(
+                "statusline (spyc --statusline): reported at {at}; {session}"
+            ));
+            out.push(report.context.map_or_else(
+                || "  context window: not reported".to_owned(),
+                |c| {
+                    let over = report.agy.as_ref().is_some_and(|a| a.exceeds_200k);
+                    let flag = if over { "; exceeds 200k" } else { "" };
+                    format!(
+                        "  context window: {} tokens; {} used{flag} (Antigravity's own share)",
+                        c.size,
+                        c.used_percent.map_or("--".to_owned(), |p| format!("{p}%"))
+                    )
+                },
+            ));
+            if let Some(agy) = report.agy.as_ref() {
+                out.extend(agy_statusline_detail_lines(agy));
+            }
+        }
+    }
+    out.extend(agy_quota_lines(tabs, now));
+    out
+}
+
+fn agy_statusline_detail_lines(agy: &crate::agent::agy_statusline::AgyStatusline) -> Vec<String> {
+    let mut out = Vec::new();
+    let sandbox = match agy.sandbox {
+        None => "--",
+        Some(s) if !s.enabled => "off",
+        Some(s) if s.allow_network == Some(false) => "on (no network)",
+        Some(_) => "on",
+    };
+    out.push(format!(
+        "  model: {}; effort: {}; plan tier: {}",
+        agy.model.as_deref().unwrap_or("--"),
+        agy.effort.as_deref().unwrap_or("--"),
+        agy.plan_tier.as_deref().unwrap_or("--"),
+    ));
+    out.push(format!(
+        "  approval mode: {}; sandbox: {}; active agent: {}; tasks: {}; queued: {}",
+        agy.approval_mode.as_deref().unwrap_or("--"),
+        sandbox,
+        agy.active_agent.as_deref().unwrap_or("default"),
+        agy.task_count,
+        agy.pending_input_count,
+    ));
+    if !agy.subagents.is_empty() {
+        let running = agy.subagents.iter().filter(|s| s.running).count();
+        let names: Vec<String> = agy
+            .subagents
+            .iter()
+            .map(|s| {
+                format!(
+                    "{} ({})",
+                    s.name,
+                    if s.running { "running" } else { "done" }
+                )
+            })
+            .collect();
+        out.push(format!(
+            "  subagents ({running} running, {} total): {}",
+            agy.subagents.len(),
+            names.join(", ")
+        ));
+    }
+    out
+}
+
+fn agy_quota_lines(tabs: &crate::pane::PaneTabs, now: Timestamp) -> Vec<String> {
+    let newest = tabs
+        .tabs()
+        .iter()
+        .filter(|entry| entry.info.agent().kind() == AgentKind::Agy)
+        .filter_map(|entry| {
+            let (report, at) = entry.info.statusline.as_ref()?;
+            let agy = report.agy.as_ref()?;
+            (!agy.quotas.is_empty()).then_some((&entry.info.id, agy, *at))
+        })
+        .max_by_key(|(_, _, at)| *at);
+    let Some((pane, agy, at)) = newest else {
+        return vec!["  quotas: none reported".to_owned()];
+    };
+    let mut out = vec![format!(
+        "  quotas, the newest report from any agy tab (pane {pane}, at {at}):"
+    )];
+    for q in &agy.quotas {
+        let used = resets::format_pct_2dp(q.used_percent_x100);
+        let rem = resets::format_pct_2dp(q.remaining_percent_x100());
+        let reset = q
+            .resets_at
+            .and_then(|secs| Timestamp::from_second(secs).ok())
+            .map_or_else(|| "--".to_owned(), |t| t.to_string());
+        let mut extra = String::new();
+        if q.disabled {
+            extra.push_str("; disabled");
+        } else if let (Some(at), Some(win)) = (q.resets_at, q.window_secs()) {
+            if let Some(delta) = resets::pace_delta_points(q.used_percent_x100, at, win, now) {
+                let _ = write!(extra, "; pace {delta:+}%");
+            }
+            if let Some(runout) = resets::pace_runout(q.used_percent_x100, at, win, now) {
+                let _ = write!(extra, " (runs out in {runout})");
+            }
+        }
+        out.push(format!(
+            "    {}: {used} used ({rem} left); resets at {reset}{extra}",
+            q.key
         ));
     }
     out
@@ -488,6 +624,7 @@ fn agent_info_lines(
             "Agy home (spyc's environment): {}",
             tilde(app.state.active_project().pane.agent_hud.agy_home.as_ref())
         ));
+        out.extend(agy_statusline_lines(tabs, info, Timestamp::now()));
     } else {
         out.push(format!(
             "pinned thread: {}",
@@ -553,6 +690,27 @@ fn agy_lines(s: &agy_metrics::Snapshot, tail_only: bool, now: Timestamp) -> Vec<
         "subagent calls (invoke_subagent): {}",
         s.subagent_calls
     ));
+    if let Some(req) = s.request.as_ref()
+        && req.value.context() > 0
+    {
+        let hit = req
+            .value
+            .cache_read
+            .saturating_mul(100)
+            .checked_div(req.value.context())
+            .unwrap_or(0);
+        out.push(format!(
+            "prompt cache (latest request): {hit}% hit; {}",
+            sample_freshness(req, now)
+        ));
+    }
+    if let Some(tps) = s.last_tps.as_ref() {
+        out.push(format!(
+            "effective throughput (step-to-step): {} tok/s; {}",
+            tps.value,
+            sample_freshness(tps, now)
+        ));
+    }
     out.extend(agy_tool_lines(s, tail_only));
     out
 }

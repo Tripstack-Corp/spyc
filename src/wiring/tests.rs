@@ -135,6 +135,7 @@ fn a_second_install_writes_nothing() {
         s.home(".claude/settings.json"),
         s.home(".gemini/config/hooks.json"),
         s.home(".gemini/config/mcp_config.json"),
+        s.home(".gemini/antigravity-cli/settings.json"),
         s.home(".codex/hooks.json"),
         s.home(".codex/config.toml"),
     ];
@@ -211,6 +212,7 @@ fn an_unparseable_file_is_refused_byte_for_byte() {
         s.home(".claude/settings.json"),
         s.home(".gemini/config/hooks.json"),
         s.home(".gemini/config/mcp_config.json"),
+        s.home(".gemini/antigravity-cli/settings.json"),
         s.home(".codex/hooks.json"),
         s.home(".codex/config.toml"),
     ];
@@ -796,4 +798,78 @@ fn claude_wiring_wraps_the_users_statusline_and_gives_it_back() {
     );
     remove(AgentKind::Claude, &s.env).unwrap();
     assert_eq!(std::fs::read_to_string(&settings).unwrap(), original);
+}
+
+#[test]
+fn agy_wiring_wraps_the_users_statusline_and_gives_it_back() {
+    let s = Sandbox::new();
+    let settings = s.home(".gemini/antigravity-cli/settings.json");
+    // Clean config: Absent before install, stacked with agy's default footer after.
+    assert_eq!(
+        status(AgentKind::Agy, &s.env).unwrap().statusline,
+        Some((Part::Absent, settings.clone()))
+    );
+    let clean = install(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(clean.statusline, Some((Part::Current, settings.clone())));
+    assert_eq!(json(&settings)["statusLine"]["stack_with_default"], true);
+    let moved_env = Env {
+        spyc: "/other/bin/spyc".to_string(),
+        ..s.env.clone()
+    };
+    assert_eq!(
+        status(AgentKind::Agy, &moved_env).unwrap().statusline,
+        Some((Part::Outdated, settings.clone()))
+    );
+    let removed = remove(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(removed.statusline, Some((Part::Absent, settings.clone())));
+
+    // Existing user statusLine: wrapped verbatim without adding stack_with_default.
+    let mine = r"'/opt/homebrew/bin/node' '/Users/me/.agy-powerline/statusline.js'";
+    let original = serde_json::to_string_pretty(&serde_json::json!({
+        "theme": "dark",
+        "statusLine": { "type": "command", "command": mine }
+    }))
+    .unwrap()
+        + "\n";
+    s.put(&settings, &original);
+    assert_eq!(
+        status(AgentKind::Agy, &s.env).unwrap().statusline,
+        Some((Part::Absent, settings.clone()))
+    );
+    let installed = install(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(installed.hooks, Part::Current);
+    assert_eq!(
+        installed.statusline,
+        Some((Part::Current, settings.clone()))
+    );
+    assert!(installed.notes.is_empty(), "{installed:?}");
+    let v = json(&settings);
+    assert!(v["statusLine"].get("stack_with_default").is_none());
+    let command = v["statusLine"]["command"].as_str().unwrap().to_owned();
+    assert!(command.contains("--statusline"), "{command}");
+    assert_eq!(
+        super::statusline::unwrap(&command),
+        Some(super::statusline::Wrapped::Command(mine.to_owned()))
+    );
+    let after_remove = remove(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(
+        after_remove.statusline,
+        Some((Part::Absent, settings.clone()))
+    );
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), original);
+}
+
+#[test]
+fn agy_wiring_leaves_unparseable_settings_alone_as_refused() {
+    let s = Sandbox::new();
+    let settings = s.home(".gemini/antigravity-cli/settings.json");
+    let broken = "{ \"statusLine\": ";
+    s.put(&settings, broken);
+    let st = install(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(st.hooks, Part::Current);
+    assert!(
+        matches!(st.statusline, Some((Part::Refused(_), ref p)) if p == &settings),
+        "{st:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), broken);
 }

@@ -1,7 +1,8 @@
-//! `spyc --statusline`: what Claude Code's `statusLine` runs once spyc's
-//! wiring wraps it. It forwards the projection of its input to the spyc pane it
-//! runs in, then runs the user's own statusline command on the same input, so
-//! what the user sees is unchanged. Outside spyc it only runs that command.
+//! `spyc --statusline`: what Claude Code's or Antigravity's `statusLine` runs
+//! once spyc's wiring wraps it. It forwards the projection of its input to the
+//! spyc pane it runs in, then runs the user's own statusline command on the
+//! same input, so what the user sees is unchanged. Outside spyc it only runs
+//! that command.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;

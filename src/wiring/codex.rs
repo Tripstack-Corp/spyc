@@ -192,6 +192,7 @@ fn report(env: &Env, hooks: &FilePart, hooks_part: Part, mcp: &FilePart, mcp_par
         hooks_file: hooks.path.clone(),
         mcp: mcp_part,
         mcp_file: mcp.path.clone(),
+        statusline: None,
     }
 }
 

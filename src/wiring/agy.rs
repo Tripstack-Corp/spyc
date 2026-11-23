@@ -1,23 +1,29 @@
-//! agy's user scope, `~/.gemini/config/`, which only `$HOME` relocates: its
-//! hooks in `hooks.json` as the `spyc-status` set, which agy collapses by name
-//! across scopes, and its MCP servers in `mcp_config.json`.
+//! agy's user scope, `~/.gemini/`, which only `$HOME` relocates: its hooks in
+//! `~/.gemini/config/hooks.json` as the `spyc-status` set (which agy collapses
+//! by name across scopes), its MCP servers in `~/.gemini/config/mcp_config.json`,
+//! and its `statusLine` wrapper in `~/.gemini/antigravity-cli/settings.json`.
 
-use super::{Env, FilePart, Part, Status, file, foreign_spyc_server, json_object};
+use super::{Env, FilePart, Part, Status, file, foreign_spyc_server, json_object, statusline};
 
 fn dir(env: &Env) -> std::path::PathBuf {
     env.home.join(".gemini/config")
 }
 
-/// The hooks file and the MCP file.
-pub(super) fn files(env: &Env) -> [std::path::PathBuf; 2] {
+fn settings_path(env: &Env) -> std::path::PathBuf {
+    env.home.join(".gemini/antigravity-cli/settings.json")
+}
+
+/// The hooks file, the MCP file, and the CLI settings file holding `statusLine`.
+pub(super) fn files(env: &Env) -> [std::path::PathBuf; 3] {
     [
         dir(env).join("hooks.json"),
         dir(env).join("mcp_config.json"),
+        settings_path(env),
     ]
 }
 
-/// Run `f` over agy's two parts.
-fn with_parts<R>(env: &Env, f: impl FnOnce(&FilePart, &FilePart) -> R) -> R {
+/// Run `f` over agy's three parts: hooks, MCP, and `statusLine`.
+fn with_parts<R>(env: &Env, f: impl FnOnce(&FilePart, &FilePart, &FilePart) -> R) -> R {
     let dir = dir(env);
     let hooks_with = |existing: Option<&str>| {
         crate::mcp::merged_agy_status_hooks_json(existing, &env.spyc)
@@ -42,33 +48,51 @@ fn with_parts<R>(env: &Env, f: impl FnOnce(&FilePart, &FilePart) -> R) -> R {
         without: &|text| json_object(crate::mcp::mcp_json_without_spyc(text)),
         blocked,
     };
-    f(&hooks, &mcp)
+    let sl_with = |existing: Option<&str>| {
+        statusline::settings_with_stack(existing.unwrap_or("{}"), &env.spyc)
+            .ok_or_else(|| "refusing to overwrite — not a JSON object".to_string())
+    };
+    let sl = FilePart {
+        path: settings_path(env),
+        with: &sl_with,
+        without: &|text| json_object(statusline::settings_without(text)),
+        blocked: None,
+    };
+    f(&hooks, &mcp, &sl)
 }
 
-fn report(hooks: &FilePart, hooks_part: Part, mcp: &FilePart, mcp_part: Part) -> Status {
+fn report(
+    hooks: &FilePart,
+    hooks_part: Part,
+    mcp: &FilePart,
+    mcp_part: Part,
+    sl: &FilePart,
+    sl_part: Part,
+) -> Status {
     Status {
         hooks: hooks_part,
         hooks_file: hooks.path.clone(),
         mcp: mcp_part,
         mcp_file: mcp.path.clone(),
+        statusline: Some((sl_part, sl.path.clone())),
         notes: Vec::new(),
     }
 }
 
 pub(super) fn status(env: &Env) -> Status {
-    with_parts(env, |hooks, mcp| {
-        report(hooks, hooks.status(), mcp, mcp.status())
+    with_parts(env, |hooks, mcp, sl| {
+        report(hooks, hooks.status(), mcp, mcp.status(), sl, sl.status())
     })
 }
 
 pub(super) fn install(env: &Env) -> Status {
-    with_parts(env, |hooks, mcp| {
-        report(hooks, hooks.install(), mcp, mcp.install())
+    with_parts(env, |hooks, mcp, sl| {
+        report(hooks, hooks.install(), mcp, mcp.install(), sl, sl.install())
     })
 }
 
 pub(super) fn remove(env: &Env) -> Status {
-    with_parts(env, |hooks, mcp| {
-        report(hooks, hooks.remove(), mcp, mcp.remove())
+    with_parts(env, |hooks, mcp, sl| {
+        report(hooks, hooks.remove(), mcp, mcp.remove(), sl, sl.remove())
     })
 }

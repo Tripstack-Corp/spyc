@@ -50,6 +50,7 @@ pub struct Reducer {
     turn_at: Option<Timestamp>,
     turn_step: Option<u64>,
     reasoning_step: Option<u64>,
+    last_planner: Option<(u64, Timestamp, u64)>,
 }
 
 impl Reducer {
@@ -86,6 +87,7 @@ impl Reducer {
                     return;
                 };
                 self.close_older_pending_tools(step, at);
+                self.finish_planner_tps(Some(step), at);
                 if let Some(reasoning) = reasoning
                     && self.should_record_reasoning(at, step)
                 {
@@ -97,6 +99,9 @@ impl Reducer {
                 }
                 if let Some(usage) = usage {
                     self.fold_usage(step, usage, at);
+                    if usage.output > 0 {
+                        self.last_planner = Some((step, at, usage.output));
+                    }
                 }
                 for (i, call) in calls.into_iter().enumerate() {
                     let id = format!("{step}:{i}");
@@ -111,13 +116,17 @@ impl Reducer {
                 record_type,
             } => {
                 self.tick(at);
+                self.finish_planner_tps(step_index, at);
                 let Some(step) = step_index else {
                     self.tools_incomplete = true;
                     return;
                 };
                 self.fold_result(step, failed, at, record_type.as_deref());
             }
-            Event::Checkpoint { at, step_index } => self.fold_compaction(at, step_index),
+            Event::Checkpoint { at, step_index } => {
+                self.finish_planner_tps(step_index, at);
+                self.fold_compaction(at, step_index);
+            }
             Event::UserInput { at, step_index } => self.fold_turn_boundary(at, step_index),
             Event::Model {
                 at,
@@ -137,6 +146,31 @@ impl Reducer {
 
     fn tick(&mut self, at: Timestamp) {
         self.clock = Some(self.clock.map_or(at, |clock| clock.max(at)));
+    }
+
+    /// Estimate effective output tokens/sec from a completed planner response
+    /// to the next non-prompt event in the transcript.
+    fn finish_planner_tps(&mut self, next_step: Option<u64>, at: Timestamp) {
+        let Some((prev_step, prev_at, output)) = self.last_planner else {
+            return;
+        };
+        if next_step.is_some_and(|s| s <= prev_step) {
+            return;
+        }
+        self.last_planner = None;
+        let dt = at.as_second().saturating_sub(prev_at.as_second());
+        if !(1..=300).contains(&dt) {
+            return;
+        }
+        let Ok(dt_u64) = u64::try_from(dt) else {
+            return;
+        };
+        let tps = (output + dt_u64 / 2) / dt_u64;
+        if let Ok(tps) = u32::try_from(tps)
+            && tps > 0
+        {
+            replace(&mut self.snapshot.last_tps, at, tps);
+        }
     }
 
     fn fold_usage(&mut self, step: u64, usage: Usage, at: Timestamp) {
@@ -225,6 +259,7 @@ impl Reducer {
     /// A prompt starts a turn: the last turn's reasoning goes, and a planner
     /// response from before the prompt can't bring it back.
     fn fold_turn_boundary(&mut self, at: Option<Timestamp>, step_index: Option<u64>) {
+        self.last_planner = None;
         if let Some(at) = at {
             self.tick(at);
             self.turn_at = Some(self.turn_at.map_or(at, |prev| prev.max(at)));

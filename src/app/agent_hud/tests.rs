@@ -1298,7 +1298,7 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
                 .iter_mut()
                 .find(|e| &e.info.id == id)
                 .unwrap();
-            entry.info.claude_statusline.as_mut().unwrap().1 =
+            entry.info.statusline.as_mut().unwrap().1 =
                 Timestamp::from_second(1_791_892_800 + second).unwrap();
         }
         app.land_statusline("no-such-pane", Statusline::default());
@@ -1313,7 +1313,7 @@ fn statusline_reports_reach_the_strip_and_the_dump() {
         app.land_statusline(&codex_id, Statusline::default());
         let tabs = app.runtime.project_mut().pane_tabs.as_mut().unwrap();
         assert!(
-            tabs.active_info().claude_statusline.is_none(),
+            tabs.active_info().statusline.is_none(),
             "only a Claude Code tab keeps a report"
         );
         tabs.switch_to(1);
@@ -1938,5 +1938,124 @@ fn the_compact_hud_counts_the_running_subagents() {
         let mut app = claude_app(tmp.path(), &home, "compact");
         let mut ctx = RunCtx::for_test();
         wait_hud_line(&mut app, &mut ctx, 1, "subagents 2");
+    });
+}
+
+#[test]
+fn agy_statusline_reports_reach_the_strip_and_the_dump() {
+    use crate::agent::agy_statusline::{ARGON_BUCKET, AgyStatusline, AgySubagent, QuotaBucket};
+    use crate::agent::claude_statusline::{ContextWindow, Statusline};
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (200, 32);
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.agy_home = Some(tmp.path().to_path_buf());
+        let tab = agy_entry(&mut app, tmp.path(), Some(SESSION));
+        let pane_id = tab.info.id.clone();
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(tab));
+        app.cmd_agent_hud("full");
+
+        let future_reset = Timestamp::now().as_second() + 2 * 3600;
+        app.land_statusline(
+            &pane_id,
+            Statusline {
+                context: Some(ContextWindow {
+                    size: 1_048_576,
+                    used_percent: Some(18),
+                }),
+                agy: Some(AgyStatusline {
+                    model: Some("Gemini 4 Neon (High)".into()),
+                    effort: Some("high".into()),
+                    plan_tier: Some("Google AI Pro".into()),
+                    approval_mode: Some("auto".into()),
+                    quotas: vec![
+                        QuotaBucket {
+                            key: "gemini-5h".into(),
+                            used_percent_x100: 2495,
+                            resets_at: Some(future_reset),
+                            disabled: false,
+                        },
+                        QuotaBucket {
+                            key: ARGON_BUCKET.into(),
+                            used_percent_x100: 6250,
+                            resets_at: Some(future_reset + 86_400),
+                            disabled: false,
+                        },
+                    ],
+                    subagents: vec![AgySubagent {
+                        name: "research".into(),
+                        running: true,
+                    }],
+                    task_count: 1,
+                    ..AgyStatusline::default()
+                }),
+                ..Statusline::default()
+            },
+        );
+        let mut ctx = RunCtx::for_test();
+        app.settle_agent_hud(std::time::Instant::now(), &mut ctx);
+        let rect = app
+            .frame_layout(ratatui::layout::Rect::new(0, 0, 200, 32))
+            .agent_hud
+            .unwrap();
+        let rendered: Vec<String> = app
+            .agent_hud_lines(rect)
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert!(rendered[0].contains("Gemini 4 Neon (High)"), "{rendered:?}");
+        assert!(rendered[1].contains("18%"), "{rendered:?}");
+        assert!(rendered[1].contains("5h 25%"), "{rendered:?}");
+        assert!(rendered[1].contains("argon 63%"), "{rendered:?}");
+        assert!(rendered[3].contains("background 1"), "{rendered:?}");
+        assert!(rendered[3].contains("plan Google AI Pro"), "{rendered:?}");
+        assert!(rendered[3].contains("research · running"), "{rendered:?}");
+
+        // `:agent hud dump` includes exact 2dp quotas and statusline metadata.
+        app.cmd_agent_hud("dump");
+        let dump = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(dump.contains("24.95% used (75.05% left)"), "{dump}");
+        assert!(dump.contains("62.50% used (37.50% left)"), "{dump}");
+        assert!(dump.contains("plan tier: Google AI Pro"), "{dump}");
+
+        // Visible argon (>=50%) arms a reset window; hidden argon (<50%) does not.
+        assert_eq!(app.agent_hud_reset_windows().len(), 2);
+        app.land_statusline(
+            &pane_id,
+            Statusline {
+                agy: Some(AgyStatusline {
+                    model: Some("Gemini 4 Neon (High)".into()),
+                    quotas: vec![
+                        QuotaBucket {
+                            key: "gemini-5h".into(),
+                            used_percent_x100: 2495,
+                            resets_at: Some(future_reset),
+                            disabled: false,
+                        },
+                        QuotaBucket {
+                            key: ARGON_BUCKET.into(),
+                            used_percent_x100: 1000,
+                            resets_at: Some(future_reset + 86_400),
+                            disabled: false,
+                        },
+                    ],
+                    ..AgyStatusline::default()
+                }),
+                ..Statusline::default()
+            },
+        );
+        assert_eq!(app.agent_hud_reset_windows().len(), 1);
     });
 }
