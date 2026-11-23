@@ -4,6 +4,7 @@
 //! spyc-jar attach …` would reach spyc's outer jar. It puts the terminal in raw mode, sends what is typed as input, writes
 //! output back, and on detach (`^\`) or the program's exit sends a fixed reset:
 //! a relay that doesn't parse can't know which modes the program turned on.
+//! What was typed before it attached is dropped, as typed blind.
 
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
@@ -37,6 +38,9 @@ pub fn run(socket: &Path, token: &[u8]) -> anyhow::Result<()> {
     let mut raw = saved.clone();
     raw.make_raw();
     termios::tcsetattr(stdin.as_fd(), OptionalActions::Now, &raw)?;
+    // Keys typed before the program could be seen were typed blind: they
+    // would land wherever its focus is now. Drop them, never queue them.
+    let _ = termios::tcflush(stdin.as_fd(), termios::QueueSelector::IFlush);
     let ended = relay(socket, token);
     let mut out = std::io::stdout();
     let _ = out.write_all(RESET);
@@ -45,6 +49,15 @@ pub fn run(socket: &Path, token: &[u8]) -> anyhow::Result<()> {
     let why = ended?;
     eprintln!("[{why}]");
     Ok(())
+}
+
+/// The key the attached client sets in its jar (R18): `ssh` when this
+/// terminal reaches its machine over SSH, else `local`.
+pub const TERMINAL_KEY: &str = "terminal";
+
+/// [`TERMINAL_KEY`]'s value for a terminal that is, or isn't, over SSH.
+pub const fn terminal_kind(ssh: bool) -> &'static str {
+    if ssh { "ssh" } else { "local" }
 }
 
 fn size() -> (u16, u16) {
@@ -58,6 +71,12 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
         anyhow::bail!("expected a welcome");
     };
     let (mut rx, tx) = client.split();
+    // What kind of terminal this is, sent before any input: the program reads
+    // it once a terminal attaches (spyc routes OSC 52 and 9 by it).
+    tx.send(&Msg::SetInfo {
+        key: TERMINAL_KEY.into(),
+        value: terminal_kind(std::env::var_os("SSH_CONNECTION").is_some()).into(),
+    })?;
     tx.send(&Msg::Replay { from: head })?;
     // The jar tells its program this owner attached (`attached`), and the
     // program repaints for it; this terminal's size is all it needs from here.
