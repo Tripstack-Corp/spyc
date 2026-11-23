@@ -705,6 +705,13 @@ the release builds of `cd413b07`:
 | macOS, arm64 and x86_64 | libSystem | libSystem | libSystem | libSystem | libSystem | `nm -m`: each is `(undefined) external ... (from libSystem)` |
 | `x86_64-unknown-linux-musl` | musl | `compiler_rt` | `compiler_rt` | musl | musl | each function's bytes in spyc compared with the objects the linker had |
 | `aarch64-unknown-linux-musl` | musl | `compiler_rt` | `compiler_rt` | musl | musl | the same |
+| `x86_64-unknown-linux-gnu` | glibc | glibc | glibc | glibc | glibc | `nm -D`: each is an import, `memset@GLIBC_2.2.5` |
+
+No release ships `x86_64-unknown-linux-gnu`; it is what `cargo install` builds
+on glibc Linux, and what CI tests. That binary also defines `ceilf`, `floorf`,
+`fma`, `fmaf`, `fmodf` and `roundf` as weak globals. They are Rust's own
+`compiler_builtins`, the same size as the copies in the toolchain's rlib, not the
+archive's.
 
 On the musl targets, "musl" and "`compiler_rt`" are Zig's: `release.yml` links
 them with `cargo zigbuild` and Zig 0.14.0, which adds its own musl `libc.a`
@@ -751,7 +758,10 @@ a recipe that skips the localization brings one back.
 `scripts/check-libsystem-binding.sh` checks a macOS binary against
 `vendor/LIBC_SYMBOLS`: `tests/libsystem_binding.rs` runs it on the test build,
 and the release workflow on both slices of the universal artifact before
-upload. `scripts/test_vendored_archives.py` checks the committed archives, and
+upload. `scripts/check-linux-libc-binding.sh` checks a glibc Linux binary the
+same way, allowing only `compiler_builtins`' own copies, and
+`tests/libc_binding.rs` runs it on CI's test build. Neither check can apply to a
+static musl binary, which defines every C library function itself. `scripts/test_vendored_archives.py` checks the committed archives, and
 the vendored-archives job the ones it rebuilds. The evidence, with the commands that reproduce it, is in
 [`spikes/zig-macho-weak-export/`](spikes/zig-macho-weak-export/README.md).
 
