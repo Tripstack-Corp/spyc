@@ -451,9 +451,8 @@ pub struct PagerConfig {
     /// with a `→` marker; with `w` off the tab is plain indentation.
     /// Clamped to at least 1 on load (a 0-width tab would vanish).
     pub tab_width: usize,
-    /// Whether the `^a v` scrollback opens with line numbers. Default on:
-    /// a gutter the live pane never has, so the view reads as scrolled
-    /// back. `l` still toggles it once open.
+    /// Whether the `^a v` scrollback opens with line numbers. Default off;
+    /// `l` still toggles it once open.
     pub scrollback_line_numbers: bool,
 }
 
@@ -461,7 +460,7 @@ impl Default for PagerConfig {
     fn default() -> Self {
         Self {
             tab_width: 4,
-            scrollback_line_numbers: true,
+            scrollback_line_numbers: false,
         }
     }
 }
@@ -1326,13 +1325,13 @@ mod tests {
     }
 
     #[test]
-    fn pager_scrollback_line_numbers_defaults_on_and_parses_off() {
-        assert!(Config::default().pager.scrollback_line_numbers);
+    fn pager_scrollback_line_numbers_defaults_off_and_parses_on() {
+        assert!(!Config::default().pager.scrollback_line_numbers);
         let tmp = tempdir().unwrap();
         let path = tmp.path().join("rc.toml");
-        std::fs::write(&path, "[pager]\nscrollback_line_numbers = false\n").unwrap();
+        std::fs::write(&path, "[pager]\nscrollback_line_numbers = true\n").unwrap();
         let cfg = Config::load_from(&[Some(&path)]).unwrap();
-        assert!(!cfg.pager.scrollback_line_numbers);
+        assert!(cfg.pager.scrollback_line_numbers);
         assert_eq!(cfg.pager.tab_width, 4, "an unset sibling keeps its default");
     }
 
