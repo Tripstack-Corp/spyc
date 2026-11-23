@@ -5,6 +5,12 @@
 //! output back, and on detach (`^\`) or the program's exit sends a fixed reset:
 //! a relay that doesn't parse can't know which modes the program turned on.
 //! What was typed before it attached is dropped, as typed blind.
+//!
+//! Its frames go out through an [`Outbox`](crate::client::Outbox), whose
+//! writer pings the jar whenever it has had nothing to send. A write to a
+//! terminal that has stopped reading (a terminal app paused while its
+//! computer sleeps) waits on the output thread alone, and the jar still
+//! hears from its owner inside the deadline.
 
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
@@ -18,8 +24,19 @@ use crate::proto::{Msg, Role};
 
 /// How long `attach` waits to reach its jar.
 const ATTACH_WAIT: Duration = Duration::from_secs(5);
-/// How often an attached client with nothing to show pings its jar.
+/// How often an attached client with nothing to send pings its jar.
 const ATTACH_PING: Duration = Duration::from_secs(2);
+/// A jar whose socket takes no bytes for this long has stopped: past the
+/// longest it reads nothing, parked for an upgrade.
+const WRITE_STALL: Duration = Duration::from_secs(20);
+
+// SPYC-TRAP(jar-outwait): the client is heard from inside the jar's deadline,
+// and outwaits the jar's longest silence before taking it for gone.
+const _: () = {
+    assert!(ATTACH_PING.as_millis() < crate::limits::OWNER_DEADLINE.as_millis());
+    assert!(WRITE_STALL.as_millis() > crate::limits::PARKED_AT_MOST.as_millis());
+};
+
 /// How often an attached client looks at its terminal's size.
 const SIZE_POLL: Duration = Duration::from_millis(250);
 
@@ -70,7 +87,7 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
     let Msg::Welcome { head, .. } = welcome else {
         anyhow::bail!("expected a welcome");
     };
-    let (mut rx, tx) = client.split();
+    let (mut rx, tx) = client.split_queued(ATTACH_PING, WRITE_STALL)?;
     // What kind of terminal this is, sent before any input: the program reads
     // it once a terminal attaches (spyc routes OSC 52 and 9 by it).
     tx.send(&Msg::SetInfo {
@@ -110,12 +127,8 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
                         let _ = tx.send(&Msg::AckExit);
                         break "the program exited";
                     }
-                    Ok(Some(_)) => {}
-                    Ok(None) => {
-                        if tx.send(&Msg::Ping { n: 0 }).is_err() {
-                            break "the connection closed";
-                        }
-                    }
+                    // The outbox pings while there is nothing to send.
+                    Ok(Some(_) | None) => {}
                     Err(_) => break "the connection closed",
                 }
             };
