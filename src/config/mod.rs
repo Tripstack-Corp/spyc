@@ -213,21 +213,21 @@ struct FileLayout {
 
 /// Working directory a freshly-spawned pane tab opens in (the `^a c`
 /// prompt pre-fill and the bare-spawn / `F9 resume` paths).
-/// `WorktreeRoot` (the default) anchors new panes to the focused column's
-/// worktree/repo root — `gw`'s target and the column `^a k` returns to — so
-/// a pane opened while browsing a linked worktree lands at that worktree's
-/// root. `ProjectHome` pins to the sticky session project root regardless of
-/// the focused worktree; `BrowseDir` opens "here" — the current listing dir.
-/// `WorktreeRoot`/`ProjectHome` fall back to the browse dir when their target
-/// is unresolved (no repo / PROJECT_HOME unset).
+/// `ProjectHome` (the default) pins new panes to the sticky session project
+/// root, wherever the columns are browsing, and falls back to the project's
+/// start dir when it has no home. `WorktreeRoot` anchors them to the focused
+/// column's worktree/repo root — `gw`'s target and the column `^a k` returns
+/// to — so a pane opened while browsing a linked worktree lands at that
+/// worktree's root; `BrowseDir` opens "here", the current listing dir.
+/// `WorktreeRoot` falls back to the browse dir when there's no repo.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NewTabCwd {
     /// The focused column's worktree/repo root (`gw`'s target).
-    #[default]
     WorktreeRoot,
     /// The sticky session project root (`PROJECT_HOME`). Accepts the
     /// `project_root` spelling as an alias.
+    #[default]
     #[serde(alias = "project_root")]
     ProjectHome,
     /// The focused column's current listing dir ("open here").
@@ -1112,8 +1112,8 @@ mod tests {
     }
 
     #[test]
-    fn new_tab_cwd_defaults_to_worktree_root() {
-        assert_eq!(Config::default().pane.new_tab_cwd, NewTabCwd::WorktreeRoot);
+    fn new_tab_cwd_defaults_to_project_home() {
+        assert_eq!(Config::default().pane.new_tab_cwd, NewTabCwd::ProjectHome);
     }
 
     #[test]

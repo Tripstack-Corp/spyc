@@ -329,7 +329,7 @@ enum HistoryBucket {
 
 const fn history_bucket_for(kind: Option<&PromptKind>) -> HistoryBucket {
     match kind {
-        Some(PromptKind::PaneNewTabCmd) => HistoryBucket::PaneCmd,
+        Some(PromptKind::PaneNewTabCmd { .. }) => HistoryBucket::PaneCmd,
         Some(PromptKind::PaneNewTabCwd) => HistoryBucket::PaneCwd,
         Some(PromptKind::Jump) => HistoryBucket::Jump,
         Some(PromptKind::Command) => HistoryBucket::Command,

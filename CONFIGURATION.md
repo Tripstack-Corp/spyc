@@ -75,7 +75,7 @@ status_flags = "auto"          # status-bar state: only what differs, short when
 [pane]
 default_command = "claude"     # pre-filled into the `^a c` new-tab prompt
 tabs = ["claude", "zsh"]       # open these tabs at launch (a repo's list asks first; see below)
-new_tab_cwd = "worktree_root"  # focused column's worktree root (gw's target); or "project_home" (PROJECT_HOME), "browse_dir" (the focused column's dir)
+new_tab_cwd = "project_home"   # where `^a c` opens a tab: PROJECT_HOME (else the start dir); or "worktree_root" (focused column's worktree root, gw's target), "browse_dir" (the focused column's dir)
 claude_transcript_scrollback = false  # `^a v` reads Claude's JSONL transcript instead of terminal scrollback
                                       # (only decides which comes up FIRST — `T` swaps in the view, and the
                                       #  transcript is used regardless when there's no terminal capture)
