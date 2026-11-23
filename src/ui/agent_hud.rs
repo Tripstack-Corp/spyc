@@ -22,6 +22,8 @@ mod claude;
 mod codex;
 pub mod resets;
 
+pub use agy::ARGON_SURFACE_USED_PCT;
+
 /// Spaces between columns.
 const GAP: usize = 3;
 /// Value columns are at least this wide, so a count gaining a digit rarely

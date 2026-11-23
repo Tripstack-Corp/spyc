@@ -25,8 +25,11 @@ fn kinds(list: &str) -> Result<Vec<AgentKind>> {
 }
 
 fn report(kind: AgentKind, st: &Status, installing: bool) {
+    let sl = st.statusline.as_ref().map_or_else(String::new, |(p, f)| {
+        format!("; statusLine {}", describe(p, f, installing))
+    });
     println!(
-        "\u{1f336}\u{fe0f} {}: hooks {}; MCP {}",
+        "\u{1f336}\u{fe0f} {}: hooks {}; MCP {}{sl}",
         name(kind),
         describe(&st.hooks, &st.hooks_file, installing),
         describe(&st.mcp, &st.mcp_file, installing),
@@ -56,7 +59,8 @@ pub fn run_cli(installing: bool, list: &str) -> Result<()> {
         .expect("KINDS are wired here");
         report(kind, &st, installing);
         refused += [&st.hooks, &st.mcp]
-            .iter()
+            .into_iter()
+            .chain(st.statusline.as_ref().map(|(p, _)| p))
             .filter(|p| matches!(p, Part::Refused(_)))
             .count();
         if installing && st.hooks.in_place() {

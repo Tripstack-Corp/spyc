@@ -49,7 +49,7 @@ fn with_parts<R>(env: &Env, f: impl FnOnce(&FilePart, &FilePart, &FilePart) -> R
         blocked,
     };
     let sl_with = |existing: Option<&str>| {
-        statusline::settings_with(existing.unwrap_or("{}"), &env.spyc)
+        statusline::settings_with_stack(existing.unwrap_or("{}"), &env.spyc)
             .ok_or_else(|| "refusing to overwrite — not a JSON object".to_string())
     };
     let sl = FilePart {
@@ -69,24 +69,13 @@ fn report(
     sl: &FilePart,
     sl_part: Part,
 ) -> Status {
-    let mut notes = Vec::new();
-    match sl_part {
-        Part::Refused(why) => notes.push(format!(
-            "statusLine in {} left alone: {why}",
-            crate::paths::display_tilde(&sl.path)
-        )),
-        Part::Blocked(why) => notes.push(format!(
-            "statusLine in {} blocked: {why}",
-            crate::paths::display_tilde(&sl.path)
-        )),
-        _ => {}
-    }
     Status {
         hooks: hooks_part,
         hooks_file: hooks.path.clone(),
         mcp: mcp_part,
         mcp_file: mcp.path.clone(),
-        notes,
+        statusline: Some((sl_part, sl.path.clone())),
+        notes: Vec::new(),
     }
 }
 

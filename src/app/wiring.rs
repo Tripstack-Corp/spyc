@@ -198,14 +198,32 @@ impl App {
             wiring::describe(&after.hooks, &after.hooks_file, installing),
             wiring::describe(&after.mcp, &after.mcp_file, installing),
         );
+        if let Some((part, file)) = &after.statusline {
+            let _ = write!(
+                text,
+                "; statusLine {}",
+                wiring::describe(part, file, installing)
+            );
+        }
         let live = crate::agent::profile_for(outcome.kind)
             .status_hooks()
             .is_some_and(|support| support.live_reload);
-        let wrote = outcome
+        let wrote_hooks = outcome
             .before
             .as_ref()
-            .is_none_or(|before| before.hooks != wiring::Part::Current);
-        if installing && wrote && after.hooks == wiring::Part::Current && !live {
+            .is_none_or(|before| before.hooks != wiring::Part::Current)
+            && after.hooks == wiring::Part::Current;
+        let wrote_sl = after
+            .statusline
+            .as_ref()
+            .is_some_and(|(part, _)| *part == wiring::Part::Current)
+            && outcome.before.as_ref().is_none_or(|before| {
+                before
+                    .statusline
+                    .as_ref()
+                    .is_none_or(|(part, _)| *part != wiring::Part::Current)
+            });
+        if installing && (wrote_hooks || wrote_sl) && !live {
             self.flag_wiring_restart(outcome.kind);
             let _ = write!(text, " — restart {name} to load them");
         }
@@ -213,7 +231,8 @@ impl App {
             let _ = write!(text, "; {note}");
         }
         let failed = [&after.hooks, &after.mcp]
-            .iter()
+            .into_iter()
+            .chain(after.statusline.as_ref().map(|(p, _)| p))
             .any(|part| matches!(part, wiring::Part::Refused(_)));
         if failed {
             self.state.flash_error(text);

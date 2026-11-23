@@ -280,9 +280,9 @@ spyc's `statusLine` wrapper forwards them, each with when it resets: local
 clock time (`↻3:40pm`, `↻Thu 9am`), or the time left with
 `[pane] agent_hud_resets = "countdown"`. Antigravity tabs also show Google AI
 Pro's `argon` weekly quota when active or half-spent, a pace run-out estimate
-(`~…`) when burning faster than linear window pace, prompt-cache cold cues
-(`3m` / `cold`), step throughput (`t/s`), and on the mode row `background`,
-`queued`, approval mode, `sandbox`, `plan` tier and live running subagents.
+(`~…`) in `countdown` mode when burning faster than linear window pace, step
+throughput (`t/s`), and on the mode row `background`, `queued`, approval mode,
+`sandbox`, `plan` tier and live running subagents.
 `:agent hud off` stops collection; `:agent hud dump` (or
 `info`), or a double-click on the strip, opens saveable source and freshness
 diagnostics with every tool's tally. A drag across the strip copies its text.

@@ -9,7 +9,6 @@ use crate::agent::claude_metrics;
 use crate::agent::codex_metrics::{Sample, Snapshot, Tokens};
 use crate::agent::tail::Availability;
 use crate::config::HUD_STALE_AFTER_SECS;
-use crate::config::agent_hud::{HUD_CACHE_COLD_SECS, HUD_CACHE_WARN_SECS};
 use crate::state::sessions::AgentKind;
 use crate::ui::agent_hud::resets;
 
@@ -700,16 +699,9 @@ fn agy_lines(s: &agy_metrics::Snapshot, tail_only: bool, now: Timestamp) -> Vec<
             .saturating_mul(100)
             .checked_div(req.value.context())
             .unwrap_or(0);
-        let age = now.as_second().saturating_sub(req.at.as_second()).max(0);
-        let state = if age >= HUD_CACHE_COLD_SECS {
-            "cold"
-        } else if age >= HUD_CACHE_WARN_SECS {
-            "3m warning"
-        } else {
-            "warm"
-        };
         out.push(format!(
-            "prompt cache (latest request): {hit}% hit; idle {age}s ({state})"
+            "prompt cache (latest request): {hit}% hit; {}",
+            sample_freshness(req, now)
         ));
     }
     if let Some(tps) = s.last_tps.as_ref() {

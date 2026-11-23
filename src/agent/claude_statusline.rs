@@ -221,6 +221,7 @@ mod tests {
                 "used_percentage": 33.66,
                 "remaining_percentage": 66.34
             },
+            "exceeds_200k_tokens": false,
             "rate_limits": {
                 "five_hour": {"used_percentage": 23.4, "resets_at": 1_791_900_000},
                 "seven_day": {"used_percentage": 61, "resets_at": "2026-10-16T09:00:00Z"}

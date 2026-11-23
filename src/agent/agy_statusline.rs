@@ -164,9 +164,9 @@ impl AgyStatusline {
                 q.resets_at = q.resets_at.filter(|at| *at > 0);
                 Some(q)
             })
-            .take(MAX_QUOTAS)
             .collect();
         quotas.sort_by(|a, b| a.key.cmp(&b.key));
+        quotas.truncate(MAX_QUOTAS);
         let mut subagents: Vec<AgySubagent> = self
             .subagents
             .into_iter()
@@ -237,15 +237,10 @@ impl AgyStatusline {
 }
 
 /// Whether `payload` carries Antigravity-specific statusline fields (so a
-/// Claude Code payload is never misread as Antigravity).
+/// Claude Code payload — which also documents `exceeds_200k_tokens` — is never
+/// misread as Antigravity).
 pub fn is_agy_payload(payload: &Value) -> bool {
-    payload["product"].as_str() == Some("antigravity")
-        || payload["quota"].is_object()
-        || payload["plan_tier"].is_string()
-        || payload["cycle_mode"].is_string()
-        || payload["sandbox"].is_object()
-        || payload["subagents"].is_array()
-        || payload["exceeds_200k_tokens"].is_boolean()
+    payload["product"].as_str() == Some("antigravity") || payload["quota"].is_object()
 }
 
 /// Project one Antigravity `statusLine` payload at `now_secs` (Unix seconds,
@@ -534,9 +529,29 @@ mod tests {
             "session_id": "c1a0de00-0000-4000-8000-000000000001",
             "model": { "id": "claude-opus-5-5", "display_name": "PRIVATE_MODEL_SENTINEL" },
             "context_window": { "context_window_size": 1_000_000, "used_percentage": 33.66 },
+            "exceeds_200k_tokens": false,
             "rate_limits": { "five_hour": { "used_percentage": 23.4 } }
         });
         assert!(!is_agy_payload(&claude));
         assert!(project_at(&claude, 1_795_000_000).is_none());
+    }
+
+    #[test]
+    fn bounded_sorts_quotas_before_truncating_like_project_quotas() {
+        let mut raw = AgyStatusline::default();
+        for key in [
+            "z-1", "y-1", "x-1", "w-1", "v-1", "u-1", "t-1", "s-1", "a-1",
+        ] {
+            raw.quotas.push(QuotaBucket {
+                key: key.into(),
+                used_percent_x100: 1000,
+                resets_at: None,
+                disabled: false,
+            });
+        }
+        let bounded = raw.bounded();
+        assert_eq!(bounded.quotas.len(), MAX_QUOTAS);
+        assert_eq!(bounded.quotas[0].key, "a-1");
+        assert!(bounded.quotas.iter().all(|q| q.key != "z-1"));
     }
 }

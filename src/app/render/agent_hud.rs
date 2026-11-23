@@ -115,10 +115,19 @@ impl App {
     }
 }
 
+/// A visible plan window whose reset or countdown pace estimate can change on
+/// its own as time passes.
+pub(in crate::app) struct ResetWindow {
+    pub resets_at: i64,
+    /// `(used_percent_x100, window_secs)` when the strip shows a pace run-out
+    /// estimate in `countdown` mode.
+    pub pace: Option<(u16, i64)>,
+}
+
 impl App {
-    /// Reset timestamps (Unix seconds) for the plan windows the strip shows
-    /// on the active Claude Code or Antigravity tab.
-    pub(in crate::app) fn agent_hud_reset_timestamps(&self) -> Vec<i64> {
+    /// Visible plan windows whose resets (or countdown pace estimates) need
+    /// wake edges on the active Claude Code or Antigravity tab.
+    pub(in crate::app) fn agent_hud_reset_windows(&self) -> Vec<ResetWindow> {
         let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
             return Vec::new();
         };
@@ -129,7 +138,12 @@ impl App {
                 .into_iter()
                 .flat_map(|plan| [plan.five_hour, plan.seven_day])
                 .flatten()
-                .filter_map(|w| w.resets_at)
+                .filter_map(|w| {
+                    Some(ResetWindow {
+                        resets_at: w.resets_at?,
+                        pace: None,
+                    })
+                })
                 .collect(),
             Metrics::Agy {
                 snapshot, reported, ..
@@ -145,10 +159,18 @@ impl App {
                     });
                 reported.plan.map_or_default(|plan| {
                     let active = plan.active_quotas(model);
-                    [active.five_hour, active.seven_day, active.argon]
+                    let argon = active
+                        .argon
+                        .filter(|b| b.used_percent() >= agent_hud::ARGON_SURFACE_USED_PCT);
+                    [active.five_hour, active.seven_day, argon]
                         .into_iter()
                         .flatten()
-                        .filter_map(|b| b.resets_at)
+                        .filter_map(|b| {
+                            Some(ResetWindow {
+                                resets_at: b.resets_at?,
+                                pace: b.window_secs().map(|w| (b.used_percent_x100, w)),
+                            })
+                        })
                         .collect()
                 })
             }

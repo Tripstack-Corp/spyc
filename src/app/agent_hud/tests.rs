@@ -2029,5 +2029,33 @@ fn agy_statusline_reports_reach_the_strip_and_the_dump() {
         assert!(dump.contains("24.95% used (75.05% left)"), "{dump}");
         assert!(dump.contains("62.50% used (37.50% left)"), "{dump}");
         assert!(dump.contains("plan tier: Google AI Pro"), "{dump}");
+
+        // Visible argon (>=50%) arms a reset window; hidden argon (<50%) does not.
+        assert_eq!(app.agent_hud_reset_windows().len(), 2);
+        app.land_statusline(
+            &pane_id,
+            Statusline {
+                agy: Some(AgyStatusline {
+                    model: Some("Gemini 4 Neon (High)".into()),
+                    quotas: vec![
+                        QuotaBucket {
+                            key: "gemini-5h".into(),
+                            used_percent_x100: 2495,
+                            resets_at: Some(future_reset),
+                            disabled: false,
+                        },
+                        QuotaBucket {
+                            key: ARGON_BUCKET.into(),
+                            used_percent_x100: 1000,
+                            resets_at: Some(future_reset + 86_400),
+                            disabled: false,
+                        },
+                    ],
+                    ..AgyStatusline::default()
+                }),
+                ..Statusline::default()
+            },
+        );
+        assert_eq!(app.agent_hud_reset_windows().len(), 1);
     });
 }

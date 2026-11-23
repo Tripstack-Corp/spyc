@@ -4,14 +4,14 @@
 //! window share when `spyc --statusline` has reported one. Active-model quota
 //! windows (`5h`, `7d`, and Google AI Pro's Argon weekly bucket when active or
 //! half-spent) follow immediately so they survive narrow splits, ahead of
-//! prompt-cache hit rate (with 3m/4m cold-TTL cues), output tokens, effective
-//! throughput (`t/s`) and compactions.
+//! prompt-cache hit rate, output tokens, effective throughput (`t/s`) and
+//! compactions.
 
 use ratatui::text::Span;
 
 use crate::agent::agy_metrics::{Snapshot, ToolStatus};
 use crate::agent::agy_statusline::{AgyStatusline, QuotaBucket};
-use crate::config::agent_hud::{HUD_CACHE_COLD_SECS, HUD_CACHE_WARN_SECS};
+use crate::config::AgentHudResets;
 
 use super::{
     AgentRows, AgyReported, Field, HudView, MAX_CELL, Metrics, Palette, Row, STALE, Tally, Trailer,
@@ -21,7 +21,7 @@ use super::{
 /// The most live subagents the `agents` row names, room allowing; the rest it counts.
 const NAMED_SUBAGENTS: usize = 4;
 /// Separate Argon weekly usage share at or above which it surfaces on non-Argon tabs.
-const ARGON_SURFACE_USED_PCT: u8 = 50;
+pub const ARGON_SURFACE_USED_PCT: u8 = 50;
 
 pub(super) fn rows(
     snapshot: Option<&Snapshot>,
@@ -111,7 +111,7 @@ fn usage(
     let t = s.totals;
     let mut cells = vec![Field(vec![p.heading("context")]), Field(context)];
     cells.extend(plan_cells(Some(s), reported, view, p));
-    cells.push(cache_hit_cell(s, view, p));
+    cells.push(cache_hit_cell(s, p));
     cells.push(p.pair(
         "out",
         p.value(&format!("{at_least}{}", short_count(t.output))),
@@ -128,7 +128,7 @@ fn usage(
     Row::new(cells)
 }
 
-fn cache_hit_cell(s: &Snapshot, view: &HudView<'_>, p: Palette) -> Field {
+fn cache_hit_cell(s: &Snapshot, p: Palette) -> Field {
     let t = s.totals;
     let sent = t.context();
     let hit = t
@@ -136,20 +136,7 @@ fn cache_hit_cell(s: &Snapshot, view: &HudView<'_>, p: Palette) -> Field {
         .saturating_mul(100)
         .checked_div(sent)
         .map_or_else(|| p.label("--"), |pct| p.value(&format!("{pct}%")));
-    let mut field = p.pair("hit", hit);
-    if let (Some(req), Some(now)) = (s.request.as_ref(), view.now)
-        && req.value.context() > 0
-    {
-        let age = now.as_second().saturating_sub(req.at.as_second());
-        if age >= HUD_CACHE_COLD_SECS {
-            field.0.push(Span::raw(" "));
-            field.0.push(p.tint("cold", p.bad));
-        } else if age >= HUD_CACHE_WARN_SECS {
-            field.0.push(Span::raw(" "));
-            field.0.push(p.tint("3m", p.warn));
-        }
-    }
-    field
+    p.pair("hit", hit)
 }
 
 fn plan_cells(
@@ -201,7 +188,8 @@ fn render_quota_window(name: &str, bucket: &QuotaBucket, view: &HudView<'_>, p: 
         field.0.push(Span::raw(" "));
         field.0.push(p.label(&format!("\u{21bb}{label}")));
     }
-    if let (Some((at, now)), Some(window_secs)) = (reset, bucket.window_secs())
+    if view.resets == AgentHudResets::Countdown
+        && let (Some((at, now)), Some(window_secs)) = (reset, bucket.window_secs())
         && let Some(runout) = resets::pace_runout(bucket.used_percent_x100, at, window_secs, now)
     {
         let colour = if used >= 80 { p.bad } else { p.warn };
@@ -547,48 +535,12 @@ mod tests {
         // Compact mode surfaces running subagents count.
         let compact = lines(&v, AgentHudMode::Compact, 240, &theme)[1].to_string();
         assert!(compact.contains("subagents 1"), "{compact:?}");
-    }
 
-    #[test]
-    fn prompt_cache_ttl_warns_at_three_minutes_and_reads_cold_at_four() {
-        let theme = Theme::default();
-        let snapshot = session();
-        let mut v = view(Some(&snapshot), false);
-
-        v.now = Some(at(1 + 179));
-        let warm = rows(&v, 160)[1].clone();
-        assert!(warm.contains("hit 95%"), "{warm}");
-        assert!(!warm.contains("3m") && !warm.contains("cold"), "{warm}");
-
-        v.now = Some(at(1 + 180));
-        let warn_line = lines(&v, AgentHudMode::Full, 160, &theme).swap_remove(1);
-        assert!(warn_line.to_string().contains("hit 95% 3m"), "{warn_line}");
-        assert_eq!(
-            warn_line
-                .spans
-                .iter()
-                .find(|s| s.content == "3m")
-                .unwrap()
-                .style
-                .fg,
-            Some(theme.prompt_prefix)
-        );
-
-        v.now = Some(at(1 + 240));
-        let cold_line = lines(&v, AgentHudMode::Full, 160, &theme).swap_remove(1);
-        assert!(
-            cold_line.to_string().contains("hit 95% cold"),
-            "{cold_line}"
-        );
-        assert_eq!(
-            cold_line
-                .spans
-                .iter()
-                .find(|s| s.content == "cold")
-                .unwrap()
-                .style
-                .fg,
-            Some(theme.diff_del_fg)
-        );
+        // Clock mode omits the time-varying run-out estimate so an idle strip
+        // never freezes a stale countdown.
+        v.resets = crate::config::AgentHudResets::Clock;
+        let clock_usage = lines(&v, AgentHudMode::Full, 240, &theme)[1].to_string();
+        assert!(clock_usage.contains("5h 75%"), "{clock_usage}");
+        assert!(!clock_usage.contains("~40m"), "{clock_usage}");
     }
 }

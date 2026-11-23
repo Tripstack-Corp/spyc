@@ -3,10 +3,6 @@
 use serde::{Deserialize, Serialize};
 
 pub const HUD_STALE_AFTER_SECS: i64 = 60;
-/// Idle seconds since an Antigravity turn before the prompt cache warns.
-pub const HUD_CACHE_WARN_SECS: i64 = 180;
-/// Idle seconds since an Antigravity turn before the prompt cache reads cold.
-pub const HUD_CACHE_COLD_SECS: i64 = 240;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

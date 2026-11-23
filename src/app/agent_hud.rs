@@ -236,12 +236,28 @@ impl App {
     }
 
     /// When the strip's plan cells next change on their own: a window
-    /// resetting, or a countdown ticking over.
+    /// resetting, a countdown ticking over, or (in `countdown` mode) a pace
+    /// run-out estimate changing or clearing.
     fn agent_hud_reset_edge(&self, now: Timestamp) -> Option<i64> {
         let style = self.state.active_project().config.pane.agent_hud_resets;
-        self.agent_hud_reset_timestamps()
+        self.agent_hud_reset_windows()
             .into_iter()
-            .filter_map(|at| crate::ui::agent_hud::resets::next_change(at, now, style))
+            .flat_map(|w| {
+                let reset = crate::ui::agent_hud::resets::next_change(w.resets_at, now, style);
+                let pace = (style == crate::config::AgentHudResets::Countdown)
+                    .then_some(w.pace)
+                    .flatten()
+                    .and_then(|(used_x100, win_secs)| {
+                        crate::ui::agent_hud::resets::next_pace_change(
+                            used_x100,
+                            w.resets_at,
+                            win_secs,
+                            now,
+                        )
+                    });
+                [reset, pace]
+            })
+            .flatten()
             .min()
     }
 
