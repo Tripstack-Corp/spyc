@@ -324,7 +324,9 @@ each event of the session's life:
 
 - spyc starting, and `:q` or `spyc shutdown` ending it;
 - `^d` moving spyc into the session's own jar, and each terminal attaching
-  (with its size) and detaching;
+  (with its size) and detaching. A terminal you didn't detach says why it
+  left: its connection closed, or it went silent past the jar's deadline, as
+  a terminal can while the computer sleeps;
 - `:upgrade`, and each tab's jar moving to the new build;
 - a tab started, taken back from its jar after a restart, failing to start,
   or ending;

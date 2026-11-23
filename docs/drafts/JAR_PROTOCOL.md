@@ -940,7 +940,11 @@ decision M),
 `cwd`, `size`, `overflow`, `linger`, `owner`,
 `owner_pid` (the owner's process, when there is one), `log`, `snapshots`, and
 `exit` once its program has ended, then every pair its owner set (spyc's `is`,
-`label`, `agent`, `project`, `project_home` and `owner_mcp`).
+`label`, `agent`, `project`, `project_home` and `owner_mcp`). Among them the
+jar sets `owner_left` as its owner leaves, before it closes the connection:
+`detached` when the program asked (`detach`), `silent` past the deadline
+(R21), else `closed`. An owner that connects clears it, so a client that sees
+its connection close can ask why.
 
 **Not frozen:** the start's flags after `--wire`, which belong to the version
 it names (and the token of 16 bytes or more on standard input, which then
