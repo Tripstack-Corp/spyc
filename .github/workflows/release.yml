@@ -55,6 +55,9 @@ jobs:
       # vendored-libc-symbols).
       - name: Check the artifact's libSystem bindings
         run: scripts/check-libsystem-binding.sh dist/spyc-macos-universal
+      # Each binary under its size budget before anything ships (#933).
+      - name: Check the binaries' sizes
+        run: scripts/binary-size.sh spyc-macos-universal=dist/spyc-macos-universal spyc-jar-macos-universal=dist/spyc-jar-macos-universal
       - name: Package tarball
         run: |
           install -m 0755 dist/spyc-macos-universal spyc
@@ -90,6 +93,14 @@ jobs:
         run: |
           make release-linux-x86
           make release-linux-arm
+      # Each binary under its size budget before anything ships (#933).
+      - name: Check the binaries' sizes
+        run: |
+          scripts/binary-size.sh \
+            spyc-linux-x86_64=target/x86_64-unknown-linux-musl/release/spyc \
+            spyc-jar-linux-x86_64=target/x86_64-unknown-linux-musl/release/spyc-jar \
+            spyc-linux-aarch64=target/aarch64-unknown-linux-musl/release/spyc \
+            spyc-jar-linux-aarch64=target/aarch64-unknown-linux-musl/release/spyc-jar
       - name: Package tarballs
         run: |
           install -m 0755 target/x86_64-unknown-linux-musl/release/spyc spyc

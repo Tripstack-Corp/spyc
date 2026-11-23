@@ -157,3 +157,30 @@ jobs:
         env:
           CARGO_TARGET_DIR: target-cov
         run: cargo llvm-cov --locked --all-targets --fail-under-lines 84
+
+  size:
+    name: Release binary size (Linux x86_64)
+    # MAIN-ONLY, beside coverage: a release build per PR would double the PR
+    # path. Growth past a budget shows the day it merges, and release.yml
+    # checks every shipped binary before it publishes (#933).
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The release's own Zig and cargo-zigbuild, read out of release.yml as
+      # shipped-targets.yml reads them.
+      - name: Read release.yml's Zig and cargo-zigbuild versions
+        id: pins
+        run: |
+          zig=$(grep -A2 'mlugg/setup-zig' .github/workflows/release.yml | sed -n 's/^ *version: *//p' | head -1)
+          zigbuild=$(grep -o 'cargo-zigbuild@[0-9][0-9.]*' .github/workflows/release.yml | head -1 | cut -d@ -f2)
+          echo "zig=${zig:?no Zig version in release.yml}" >> "$GITHUB_OUTPUT"
+          echo "zigbuild=${zigbuild:?no cargo-zigbuild@version in release.yml}" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.pins.outputs.zig }}
+      - uses: taiki-e/install-action@v2.90.3
+        with:
+          tool: cargo-zigbuild@${{ steps.pins.outputs.zigbuild }}
+      - name: Build as the release does, and check the sizes
+        run: make size-check
