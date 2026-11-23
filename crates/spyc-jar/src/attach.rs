@@ -4,6 +4,7 @@
 //! spyc-jar attach …` would reach spyc's outer jar. It puts the terminal in raw mode, sends what is typed as input, writes
 //! output back, and on detach (`^\`) or the program's exit sends a fixed reset:
 //! a relay that doesn't parse can't know which modes the program turned on.
+//! What was typed before it attached is dropped, as typed blind.
 
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
@@ -37,6 +38,9 @@ pub fn run(socket: &Path, token: &[u8]) -> anyhow::Result<()> {
     let mut raw = saved.clone();
     raw.make_raw();
     termios::tcsetattr(stdin.as_fd(), OptionalActions::Now, &raw)?;
+    // Keys typed before the program could be seen were typed blind: they
+    // would land wherever its focus is now. Drop them, never queue them.
+    let _ = termios::tcflush(stdin.as_fd(), termios::QueueSelector::IFlush);
     let ended = relay(socket, token);
     let mut out = std::io::stdout();
     let _ = out.write_all(RESET);
