@@ -1493,6 +1493,38 @@ fn the_program_hears_attaches_and_detaches_its_owner() {
     });
 }
 
+/// Finding 12: a program hears one `attached` for each owner, however its own
+/// connection and the owner's race. An owner that connects as the program
+/// does, here at once, used to be told to it twice: once by the owner's
+/// arrival and once by the program's, both read after either had registered.
+#[test]
+fn a_program_hears_one_attached_per_owner_however_the_connections_race() {
+    let program = [env!("CARGO_BIN_EXE_spyc-jar"), "program-events"];
+    for round in 0..40 {
+        let mut jar = Jar::start(&[], &program);
+        let mut owner = jar.connect(Role::Owner);
+        owner.send(&Msg::Replay { from: 0 }).unwrap();
+        let mut seen = read_until(&mut owner, true, |s| s.contains("program: attached"));
+        // A second one would follow at once: give it time to show.
+        let until = Instant::now() + Duration::from_millis(300);
+        while Instant::now() < until {
+            if let Ok(Some(m)) = owner.recv(Duration::from_millis(50)) {
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    let _ = owner.send(&Msg::Ack { offset: next });
+                }
+            }
+        }
+        let heard = String::from_utf8_lossy(&seen.text)
+            .matches("program: attached")
+            .count();
+        assert_eq!(
+            heard, 1,
+            "round {round}: the program heard {heard} for one owner"
+        );
+    }
+}
+
 /// A program that asks to detach its owner has its last words reach the owner
 /// first, however slowly the owner reads: here a window of 16 bytes holds the
 /// rest of the program's output in its PTY until the owner acknowledges, which
