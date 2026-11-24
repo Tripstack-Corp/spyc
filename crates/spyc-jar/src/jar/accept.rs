@@ -181,10 +181,15 @@ pub(super) fn queue_for_program(shared: &Shared, msg: &Msg) {
 /// One new connection, holding `ticket` among the tokenless: its `hello`,
 /// then [`run_conn`].
 pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
+    serve_as(shared, sock, ticket, rustix::process::geteuid().as_raw());
+}
+
+/// [`serve`], for a jar whose user is `uid`.
+fn serve_as(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64, uid: u32) {
     let ticket = Ticket(shared, ticket);
     // Another user's process is refused before a byte of it is read, whatever
     // token it holds; the jar's directory being `0700` is the first fence.
-    if !peer_is(&sock, rustix::process::geteuid().as_raw()) {
+    if !peer_is(&sock, uid) {
         return;
     }
     let _ = sock.set_write_timeout(Some(LOOKUP_DEADLINE));
@@ -320,6 +325,10 @@ pub(super) fn same_token(want: &[u8], got: &[u8]) -> bool {
 #[cfg(test)]
 mod peer_tests {
     use super::*;
+    use std::io::Write;
+    use std::os::unix::net::UnixListener;
+    use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn a_peer_is_known_by_its_user() {
@@ -327,5 +336,112 @@ mod peer_tests {
         let me = rustix::process::geteuid().as_raw();
         assert!(peer_is(&a, me), "this process's own socket is this user's");
         assert!(!peer_is(&a, me.wrapping_add(1)), "and no other user's");
+    }
+
+    /// A directory under `/tmp` (a socket's path is short), removed when
+    /// it is dropped.
+    struct Dir(PathBuf);
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A jar set up and nothing started: no thread, no program.
+    fn a_jar(dir: &Dir) -> Arc<Shared> {
+        let cfg = crate::state::Config {
+            socket: dir.0.join("j.sock"),
+            argv: vec!["/bin/sh".into()],
+            cwd: None,
+            rows: 24,
+            cols: 80,
+            ring_cap: 1 << 16,
+            window: 1 << 12,
+            deadline: Duration::from_secs(10),
+            linger_after_exit: Duration::from_secs(1),
+            linger: None,
+            instance: 1,
+            created: 0,
+            start_on_owner: Some(Duration::from_secs(60)),
+        };
+        let (master, slave) = crate::pty::open(&cfg).expect("a PTY");
+        let listener = UnixListener::bind(&cfg.socket).expect("bind");
+        let state = State {
+            log: crate::state::Log {
+                events: std::collections::VecDeque::new(),
+                next_seq: 0,
+                head: 0,
+                base: 0,
+                held: 0,
+                cap: cfg.ring_cap,
+            },
+            owner: None,
+            acked: 0,
+            snapshots: Vec::new(),
+            exit: None,
+            exit_acked: false,
+            pty_eof: false,
+            rows: cfg.rows,
+            cols: cfg.cols,
+            next_conn: 1,
+            ownerless_since: None,
+            fg: 0,
+            had_owner: false,
+            token: b"0123456789abcdef".to_vec(),
+            info: Vec::new(),
+        };
+        super::super::prepare(cfg, state, (0, Some(slave)), master, listener, Vec::new())
+            .expect("a jar")
+            .shared
+    }
+
+    /// Review finding F6 (R26): a connection is served only when its peer is
+    /// the jar's user. Served as a jar of another user, the test's own
+    /// connection must be closed before a byte of it is read; served as its
+    /// own, the same connection is welcomed. Without the check both are.
+    #[test]
+    fn a_connection_from_another_user_is_closed_unheard() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after the epoch")
+            .as_nanos();
+        let dir = Dir(PathBuf::from(format!(
+            "/tmp/jar-peer-{}-{nanos}",
+            std::process::id()
+        )));
+        std::fs::create_dir(&dir.0).expect("a directory");
+        let shared = a_jar(&dir);
+        let me = rustix::process::geteuid().as_raw();
+        let ask = |uid: u32| {
+            let (mut client, jar) = UnixStream::pair().expect("socketpair");
+            let hello = Msg::Hello {
+                version: 1,
+                role: Role::Lookup,
+                token: Vec::new(),
+            };
+            client.write_all(&proto::encode(&hello)).expect("hello");
+            client
+                .write_all(&proto::encode(&Msg::Ping { n: 1 }))
+                .expect("ping");
+            client
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .expect("a timeout");
+            let shared = Arc::clone(&shared);
+            let serving = std::thread::spawn(move || serve_as(&shared, Arc::new(jar), 0, uid));
+            let answer = proto::read_msg(&mut client);
+            serving.join().expect("served");
+            answer
+        };
+        let own = ask(me);
+        assert!(
+            matches!(own, Ok(Some(Msg::Welcome { .. }))),
+            "a connection of the jar's user is welcomed: {own:?}"
+        );
+        let other = ask(me.wrapping_add(1));
+        assert!(
+            !matches!(other, Ok(Some(_))),
+            "one the jar's user didn't make is closed unheard: {other:?}"
+        );
     }
 }

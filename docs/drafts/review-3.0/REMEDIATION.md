@@ -25,7 +25,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | A13 (the specification's prose) | C | | | | open |
 | D7 (token rotation no code performs) | C | | | | open |
 | E6's sentence under "Who may connect" | C | | | | open |
-| F6 (no test of the peer-user check) | C | | | | open |
+| F6 (no test of the peer-user check) | C | `a_connection_from_another_user_is_closed_unheard` (unit, `accept.rs`), seen failing with M3 | `test/jar-peer-user` | pending | fixed on the branch, awaiting the refuter |
 | F7 (no test of `SO_NOSIGPIPE`) | C | `a_validator_gone_mid_blob_does_not_end_a_jar_whose_exec_failed`, seen failing on macOS with M12 | `fix/jar-sigpipe` | pending | fixed on the branch, awaiting the refuter |
 | S6: `honoured()` removed, with F1 and G1 | D | | | | open |
 | F2 (`spyc-jar` in lockstep with spyc) | D | | | | open |
