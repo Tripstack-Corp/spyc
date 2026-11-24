@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{AgentKind, SavedTab, SavedVsplit};
+use super::{AgentKind, SavedColumn, SavedTab, SavedVsplit};
 use crate::config::AgentHudMode;
 use crate::project_id::ProjectId;
 use crate::state::scope_registry::ScopeClaim;
@@ -97,6 +97,9 @@ pub struct SavedProject {
     /// The vertical split, with column `b`'s directory or the previewed file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vsplit: Option<SavedVsplit>,
+    /// Column `a`'s cursor, picks and filter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left_column: Option<SavedColumn>,
     pub pane_height_pct: u16,
     #[serde(default)]
     pub pane_focused: bool,
@@ -151,6 +154,7 @@ impl Manifest {
             start_dir: v1.cwd,
             left_cwd: None,
             vsplit: v1.vsplit,
+            left_column: None,
             pane_height_pct: v1.pane_height_pct,
             pane_focused: v1.pane_focused,
             tabs: v1.tabs,
@@ -194,6 +198,7 @@ impl Manifest {
             start_dir: dir.clone(),
             left_cwd: Some(dir),
             vsplit: None,
+            left_column: None,
             pane_height_pct: 30,
             pane_focused: false,
             tabs,
@@ -485,6 +490,7 @@ mod tests {
             start_dir: PathBuf::from("/w").join(label),
             left_cwd: None,
             vsplit: None,
+            left_column: None,
             pane_height_pct: 30,
             pane_focused: false,
             tabs: (0..tabs)

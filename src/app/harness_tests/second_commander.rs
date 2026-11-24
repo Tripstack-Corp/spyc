@@ -356,6 +356,7 @@ fn a_split_whose_column_was_inside_an_archive_still_restores() {
             focus_right: false,
             preview_path: None,
             right_cwd: Some(archive.join("src")),
+            right_column: None,
         };
         app.restore_vsplit(&inside, false);
 
@@ -404,6 +405,7 @@ fn restore_vsplit_drops_blank_split_and_clamps_width() {
             focus_right: false,
             preview_path: Some(dir.join("vanished.md")),
             right_cwd: None,
+            right_column: None,
         };
         app.restore_vsplit(&gone, false);
         assert!(
@@ -425,6 +427,7 @@ fn restore_vsplit_drops_blank_split_and_clamps_width() {
             focus_right: false,
             preview_path: Some(f.clone()),
             right_cwd: None,
+            right_column: None,
         };
         app.restore_vsplit(&ok, false);
         assert_eq!(

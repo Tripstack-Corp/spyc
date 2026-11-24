@@ -172,7 +172,12 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   the spice-themed session name, `PROJECT_HOME`, the start directory, and
   the vertical split (its shape plus the second commander's cwd, or the
   preview file) — restored on `-r`, reopening columns `a` and `b` where you
-  left them. A column `a` whose directory has gone opens at `PROJECT_HOME`.
+  left them. Each column also keeps the file under its cursor, its picks and
+  its `=` filter, which come back with it when it reopens in the same
+  directory: a pick of a file that has gone is dropped, and the cursor lands on
+  the first row when its file has gone. A cursor move alone doesn't make the
+  autosave write, so after a crash the cursor is where the last save found
+  it. A column `a` whose directory has gone opens at `PROJECT_HOME`.
   Sessions saved by an older spyc still restore. A quit with
   nothing to restore (no tabs, split or scope claims) saves nothing, so it
   doesn't take a picker slot; a restored session is still updated.
@@ -255,7 +260,8 @@ uses that login's agent, though the program started under another. Notifications
 route them: through it over SSH, and with none attached, to this machine's notifier.
 
 The first `^d` moves spyc into a jar of its own. Your tabs come with it, their programs
-untouched, but what `spyc -r` doesn't keep (cursors, picks, filters, open pagers) starts afresh.
+untouched, and each column's cursor, picks and filter come back, but what `spyc -r` doesn't keep
+(open pagers, a `/` search) starts afresh.
 After that, detaching and attaching don't change anything in spyc. Every tab must run in a jar
 to detach; spyc says which one doesn't.
 

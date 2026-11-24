@@ -222,8 +222,9 @@ spyc started in an outer jar by its harness; the lazy entry is new.
   a newer build offers it, and so does `:upgrade`. In spyc's own jar the new
   spyc runs in the same jar, by `exec`: the pid the jar knows its program by
   stays, and the terminal stays attached, while the state goes through the
-  manifest as any handover's does. What `spyc -r` loses (cursors, picks, filters, pagers) a
-  handover loses too, until the manifest keeps it.
+  manifest as any handover's does. What `spyc -r` loses (open pagers, a `/` search) a
+  handover loses too; the manifest keeps each column's cursor, picks and filter
+  (#1308).
 - **Docs:** a feature page for detaching and attaching, `docs/KEYBINDINGS.md`
   and the help overlay for `^d`, and `:detach` and `:attach` for users.
 

@@ -363,6 +363,13 @@ impl App {
                 match self.state.chdir_side(Side::Left, dir) {
                     Ok(()) => {
                         self.state.set_start_dir(&start_dir);
+                        if let Some(saved) = project
+                            .left_column
+                            .as_ref()
+                            .filter(|_| project.left_cwd.as_deref() == Some(dir))
+                        {
+                            self.state.restore_column(Side::Left, saved);
+                        }
                         return Some(Vec::new());
                     }
                     Err(e) => failure = Some(format!("session chdir: {e:#}")),
@@ -636,6 +643,13 @@ impl App {
                 v.width_pct = width_pct;
                 v.mode = mode;
                 v.focus = focus;
+            }
+            if let Some(saved) = sv.right_column.as_ref().filter(|_| {
+                self.state
+                    .get_col(Side::Right)
+                    .is_some_and(|c| c.listing.dir == *right_cwd)
+            }) {
+                self.state.restore_column(Side::Right, saved);
             }
             // `open_second_commander_at` forces `state.focus = FileList`;
             // re-apply the saved region focus (the pane block may have wanted
