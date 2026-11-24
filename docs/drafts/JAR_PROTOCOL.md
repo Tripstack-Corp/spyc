@@ -1,13 +1,15 @@
 # The jar: its requirements and version 1
 
-**Status:** version 1 **reopened** on 2026-11-15 for the upgrade step
-(decision L), and not frozen again until the conditions in
-[`JAR_PRODUCTION_PLAN.md`](JAR_PRODUCTION_PLAN.md) → "Refreezing" hold. It
-froze once after the spike built every v1 verdict below, reopened on
-2026-11-12 for three changes an external review found it needed (decision K),
-and froze again with them made and tested. No byte of any frame and nothing in
-the blob's layout changes in this reopening;
-[Version 1 on the wire](#version-1-on-the-wire) is the format, byte for byte.
+**Status:** version 1 is **frozen**, again on 2026-11-24 (decision N), and the
+first release that ships jars fixes it for good. It froze once after the spike
+built every v1 verdict below. It reopened on 2026-11-12 for three changes an
+external review found it needed (decision K), and froze again with them made
+and tested. It reopened on 2026-11-15 for the upgrade step (decision L), and
+froze again once the conditions in
+[`JAR_PRODUCTION_PLAN.md`](JAR_PRODUCTION_PLAN.md) → "Refreezing" held. No
+byte of any frame and nothing in the blob's layout changed in that last
+reopening; [Version 1 on the wire](#version-1-on-the-wire) is the format, byte
+for byte.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099).
 **Tested by:** [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md), which builds a minimal
 jar, measures it, and reports which of these requirements survive.
@@ -1190,6 +1192,21 @@ Open unless marked decided:
   attached. The start's flags after `--wire` aren't frozen, and an upgrade
   isn't accepted before the program has started (reason 5), so the blob
   always has a program to describe.
+- **N. Decided: version 1 freezes again** (2026-11-24). The conditions in
+  `JAR_PRODUCTION_PLAN.md` → "Refreezing" all hold on `main`:
+  - the store's design has merged (`src/pane/jar/store.rs`);
+  - `fake` and `swap` pass, the program surviving each
+    (`tests/jar_process/upgrade.rs`);
+  - the jar built to differ passes in both directions: a version 1 jar
+    upgrades into it, and it refuses a downgrade with its program running
+    on (`tests/jar_differ.rs`, run by `make test`).
+
+  `tests/wire_v1.rs` still pins every frame and the sample blob byte for
+  byte, unchanged since the codec merged. What the first released jar does
+  in an upgrade's old image is fixed for every jar it starts. From here a
+  change arrives as [How the protocol grows](#how-the-protocol-grows) says:
+  a capability, an ancillary message, or, for what neither can carry, a new
+  version that a version 1 jar upgrades into.
 
 Smaller ones: the keyboard's idle gap (about a second is proposed); `spill`
 stays opt-in; R29, status for readers.
