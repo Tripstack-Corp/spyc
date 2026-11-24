@@ -62,12 +62,17 @@ struct Ticket<'a>(&'a Shared, u64);
 
 impl Drop for Ticket<'_> {
     fn drop(&mut self) {
-        self.0
-            .tokenless
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .retain(|(t, _)| *t != self.1);
+        let_go(self.0, self.1);
     }
+}
+
+/// Give up `ticket`'s place among the tokenless.
+pub(super) fn let_go(shared: &Shared, ticket: u64) {
+    shared
+        .tokenless
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|(t, _)| *t != ticket);
 }
 
 /// R26: the user at the other end of `stream`.

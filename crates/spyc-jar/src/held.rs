@@ -78,20 +78,31 @@ pub fn hold(crossed: Crossed, cause: &str) -> ! {
         childless_cv: Condvar::new(),
         lookups: Mutex::new(VecDeque::new()),
     });
+    // A thread the OS refuses here (review finding B1) costs what it would
+    // have done, never what is held: undrained, the program waits on a full
+    // terminal; unreaped, the jar ends with its last connection instead.
     if let Some(pty) = held.master.as_ref().and_then(|m| m.try_clone().ok()) {
         let held = Arc::clone(&held);
-        thread::spawn(move || drain(&held, File::from(pty)));
+        let _ = crate::threads::start("held-drain", move || drain(&held, File::from(pty)));
     }
     {
         let held = Arc::clone(&held);
-        thread::spawn(move || reap(&held));
+        let _ = crate::threads::start("held-reaper", move || reap(&held));
     }
     if conns.is_empty() {
         end(&held);
     }
     for sock in conns {
-        let held = Arc::clone(&held);
-        thread::spawn(move || carried(&held, &sock));
+        let sock = Arc::new(sock);
+        let started = {
+            let held = Arc::clone(&held);
+            let sock = Arc::clone(&sock);
+            crate::threads::start("held-conn", move || carried(&held, &sock))
+        };
+        if started.is_err() {
+            let _ = sock.shutdown(std::net::Shutdown::Both);
+            gone(&held);
+        }
     }
     if let Some(listener) = listener {
         accept(&held, &listener);
@@ -167,6 +178,11 @@ fn carried(held: &Held, sock: &UnixStream) {
         }
     }
     let _ = sock.shutdown(std::net::Shutdown::Both);
+    gone(held);
+}
+
+/// A connection that crossed has gone; the jar ends with the last.
+fn gone(held: &Held) {
     let mut open = held.open.lock().unwrap_or_else(PoisonError::into_inner);
     *open = open.saturating_sub(1);
     if *open == 0 {
@@ -197,14 +213,24 @@ fn accept(held: &Arc<Held>, listener: &UnixListener) -> ! {
                 }
             }
         }
-        let held = Arc::clone(held);
-        thread::spawn(move || {
-            lookup(&held, &sock);
+        let forget = |held: &Held, sock: &Arc<UnixStream>| {
             held.lookups
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .retain(|s| !Arc::ptr_eq(s, &sock));
-        });
+                .retain(|s| !Arc::ptr_eq(s, sock));
+        };
+        let started = {
+            let held = Arc::clone(held);
+            let sock = Arc::clone(&sock);
+            crate::threads::start("held-lookup", move || {
+                lookup(&held, &sock);
+                forget(&held, &sock);
+            })
+        };
+        if started.is_err() {
+            let _ = sock.shutdown(std::net::Shutdown::Both);
+            forget(held, &sock);
+        }
     }
 }
 

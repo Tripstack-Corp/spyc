@@ -27,9 +27,9 @@ const WRITER_TICK: Duration = Duration::from_millis(500);
 /// that leaves or is replaced meanwhile is left alone.
 // SPYC-TRAP(detach-after-last-words): the owner is closed on the pump's
 // answer and its cursor, never on a clock.
-pub(super) fn detach_owner(shared: &Arc<Shared>) {
+pub(super) fn detach_owner(shared: &Arc<Shared>) -> std::io::Result<()> {
     let shared = Arc::clone(shared);
-    thread::spawn(move || {
+    crate::threads::start("jar-detach", move || {
         let ask = {
             let mut drain = shared.drain();
             drain.asked += 1;
@@ -75,7 +75,8 @@ pub(super) fn detach_owner(shared: &Arc<Shared>) {
         }
         owner_leaves(&shared, owner, OwnerLeft::Detached);
         conn.close();
-    });
+    })
+    .map(drop)
 }
 
 /// Say why owner `id` leaves (`OWNER_LEFT`), before its connection closes,
@@ -99,15 +100,27 @@ fn set_info(st: &mut State, key: &str, value: &str) {
 pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
     let owner = conn.role == Role::Owner;
     let lookup = conn.role == Role::Lookup;
-    let writer = (!lookup).then(|| {
-        let shared = Arc::clone(shared);
-        let conn = Arc::clone(conn);
-        thread::spawn(move || {
-            stream_log(&shared, id, &conn);
-            conn.writer_done.store(true, Ordering::SeqCst);
-            shared.park_cv.notify_all();
-        })
-    });
+    let writer = if lookup {
+        None
+    } else {
+        let started = {
+            let shared = Arc::clone(shared);
+            let conn = Arc::clone(conn);
+            crate::threads::start("jar-writer", move || {
+                stream_log(&shared, id, &conn);
+                conn.writer_done.store(true, Ordering::SeqCst);
+                shared.park_cv.notify_all();
+            })
+        };
+        // A connection the jar has no writer for (review finding B1) ends
+        // here, and an owner's lease with it, as if it had closed.
+        let Ok(writer) = started else {
+            conn.close();
+            release(shared, id);
+            return;
+        };
+        Some(writer)
+    };
     let send = |msg: &Msg| conn.send(shared, msg);
     let lookup_deadline = crate::limits::stretched(crate::limits::Stretch::Lookup, LOOKUP_DEADLINE);
     let mut last_heard = Instant::now();
@@ -207,7 +220,14 @@ fn act(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>, msg: Msg) -> Next {
                 return Next::End;
             }
         }
-        Msg::Detach => detach_owner(shared),
+        Msg::Detach => {
+            if let Err(e) = detach_owner(shared) {
+                send(&Msg::Refused {
+                    reason: reason::UNSPECIFIED,
+                    why: format!("the owner wasn't detached: no thread for it: {e}"),
+                });
+            }
+        }
         // Every snapshot held, then `Snapshot(None)` to end the list.
         Msg::FetchSnapshot => {
             let snaps = shared.lock().snapshots.clone();
@@ -216,7 +236,7 @@ fn act(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>, msg: Msg) -> Next {
             }
             send(&Msg::Snapshot(None));
         }
-        Msg::Upgrade { binary } => crate::upgrade::begin(shared, Arc::clone(conn), binary),
+        Msg::Upgrade { binary } => crate::upgrade::begin(shared, conn, binary),
         Msg::Release { token } if owner && token.len() < MIN_TOKEN => {
             send(&Msg::Refused {
                 reason: reason::INVALID,

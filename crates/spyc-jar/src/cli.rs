@@ -440,14 +440,15 @@ fn program_events() -> anyhow::Result<()> {
     )?;
     println!("program: connected");
     let (mut rx, tx) = client.split();
-    std::thread::spawn(move || {
+    crate::threads::start("program-input", move || {
         for line in std::io::stdin().lines() {
             if line.is_ok_and(|l| l.trim() == "detach") {
                 println!("program: bye");
                 let _ = tx.send(&Msg::Detach);
             }
         }
-    });
+    })
+    .context("a thread for the program's input")?;
     loop {
         match rx.recv(PROGRAM_EVENTS_TICK) {
             Ok(Some(Msg::Attached)) => println!("program: attached"),

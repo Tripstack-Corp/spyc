@@ -411,55 +411,116 @@ pub(crate) fn prepare(
     })
 }
 
+/// Where a jar's threads wait until every one of them has started: `Some`
+/// once it is settled whether they run (`true`) or go untouched.
+#[derive(Default)]
+struct Gate {
+    open: Mutex<Option<bool>>,
+    cv: Condvar,
+}
+
+impl Gate {
+    /// Wait until it is settled, and say whether to run.
+    fn wait(&self) -> bool {
+        let open = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        *self
+            .cv
+            .wait_while(open, |o| o.is_none())
+            .unwrap_or_else(PoisonError::into_inner)
+            == Some(true)
+    }
+
+    fn settle(&self, run: bool) {
+        *self.open.lock().unwrap_or_else(PoisonError::into_inner) = Some(run);
+        self.cv.notify_all();
+    }
+}
+
+/// A thread of a jar's start, and what it runs.
+type Job = (&'static str, Box<dyn FnOnce() + Send>);
+
 impl Ready {
     /// Start the jar's threads and serve its socket until the jar ends.
     /// Never returns on success: the reaper ends the process.
     pub(crate) fn serve(self) -> anyhow::Result<()> {
+        let shared = self.launch()?;
+        accept_loop(&shared)
+    }
+
+    /// Start the jar's threads, all or none: each waits at a gate until
+    /// every one has started, and a thread the OS refuses (review finding B1)
+    /// fails the start with the others gone untouched, so a new image still
+    /// holds what crossed. The acceptor is left to the caller.
+    pub(crate) fn launch(self) -> anyhow::Result<Arc<Shared>> {
         let Self {
             shared,
             reader,
             input,
             conns,
         } = self;
+        let mut jobs: Vec<Job> = Vec::new();
         for (id, conn) in conns {
             let shared = Arc::clone(&shared);
-            thread::spawn(move || {
-                let build = crate::store::build_of(
-                    &crate::upgrade::own_image(),
-                    &crate::upgrade::copies_dir(&shared),
-                );
-                conn.send(&shared, &Msg::Upgraded { build });
-                conn::run_conn(&shared, id, &conn);
-            });
+            jobs.push((
+                "jar-resumed",
+                Box::new(move || {
+                    let build = crate::store::build_of(
+                        &crate::upgrade::own_image(),
+                        &crate::upgrade::copies_dir(&shared),
+                    );
+                    conn.send(&shared, &Msg::Upgraded { build });
+                    conn::run_conn(&shared, id, &conn);
+                }),
+            ));
         }
         if !shared.pty_done.load(Ordering::SeqCst) {
             let shared = Arc::clone(&shared);
-            thread::spawn(move || life::pump_pty(&shared, reader));
+            jobs.push(("jar-pty", Box::new(move || life::pump_pty(&shared, reader))));
         }
         {
             let shared = Arc::clone(&shared);
-            thread::spawn(move || input::feed_pty(&shared, input));
+            jobs.push((
+                "jar-input",
+                Box::new(move || input::feed_pty(&shared, input)),
+            ));
         }
         if !shared.waiter_done.load(Ordering::SeqCst) {
             let shared = Arc::clone(&shared);
-            thread::spawn(move || life::wait_child(&shared));
+            jobs.push(("jar-waiter", Box::new(move || life::wait_child(&shared))));
         }
         {
             let shared = Arc::clone(&shared);
-            thread::spawn(move || life::reap(&shared));
+            jobs.push(("jar-reaper", Box::new(move || life::reap(&shared))));
         }
         if let Some(wait) = shared.cfg.start_on_owner
             && shared.child_pid() == 0
         {
             let shared = Arc::clone(&shared);
-            thread::spawn(move || life::await_first_owner(&shared, wait));
+            jobs.push((
+                "jar-first-owner",
+                Box::new(move || life::await_first_owner(&shared, wait)),
+            ));
         }
-        accept_loop(&shared)
+        let gate = Arc::new(Gate::default());
+        for (name, job) in jobs {
+            let waits = Arc::clone(&gate);
+            let started = crate::threads::start(name, move || {
+                if waits.wait() {
+                    job();
+                }
+            });
+            if let Err(e) = started {
+                gate.settle(false);
+                return Err(anyhow::Error::new(e).context(format!("start the jar's {name} thread")));
+            }
+        }
+        gate.settle(true);
+        Ok(shared)
     }
 }
 
 /// Take new connections until the jar ends.
-fn accept_loop(shared: &Arc<Shared>) -> ! {
+pub(crate) fn accept_loop(shared: &Arc<Shared>) -> ! {
     let mut checked = Instant::now();
     loop {
         if shared.upgrading() {
@@ -493,8 +554,17 @@ fn accept_loop(shared: &Arc<Shared>) -> ! {
         let _ = stream.set_nonblocking(false);
         let sock = Arc::new(stream);
         let ticket = accept::admit(shared, &sock);
-        let shared = Arc::clone(shared);
-        thread::spawn(move || accept::serve(&shared, sock, ticket));
+        let started = {
+            let shared = Arc::clone(shared);
+            let sock = Arc::clone(&sock);
+            crate::threads::start("jar-conn", move || accept::serve(&shared, sock, ticket))
+        };
+        // A connection the jar has no thread for (review finding B1) is
+        // closed unanswered, and the jar takes the next.
+        if started.is_err() {
+            accept::let_go(shared, ticket);
+            let _ = sock.shutdown(std::net::Shutdown::Both);
+        }
     }
 }
 

@@ -2216,6 +2216,48 @@ fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     }
 }
 
+/// Review finding B1: no thread in the `spyc-jar` crate starts with a bare
+/// `std::thread::spawn`, which panics when the OS refuses a thread (ending
+/// the jar on its main thread, or leaving a lease or an upgrade claimed on
+/// another). Every one goes through `threads::start`, which hands the
+/// refusal back for the site to fail what wanted the thread.
+#[test]
+fn every_thread_the_jar_starts_can_be_refused() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
+    let mut bare = Vec::new();
+    let mut started = 0;
+    let mut dirs = vec![src];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let text =
+                crate::guard_support::production_half(&std::fs::read_to_string(&path).unwrap());
+            for line in text
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//") && l.contains("thread::spawn"))
+            {
+                bare.push(format!("{}: {}", path.display(), line.trim()));
+            }
+            started += text.matches("threads::start(").count();
+        }
+    }
+    assert!(
+        started >= 15,
+        "premise: the scan finds the jar's threads, {started} of them"
+    );
+    assert!(
+        bare.is_empty(),
+        "a bare thread::spawn panics when the OS refuses a thread; use threads::start: {bare:#?}"
+    );
+}
+
 /// Every time constant in the `spyc-jar` crate, by what running out costs: a
 /// new timer fails this until it is classified. A running jar keeps its
 /// compiled-in timers for its whole life, so each is sized for its kind

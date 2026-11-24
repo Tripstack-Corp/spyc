@@ -17,6 +17,7 @@
 //! - [`client`]: the owner's end of the socket, for spyc and the tests.
 //! - [`attach`]: the attach client, a raw relay to a real terminal.
 //! - [`cli`]: the `spyc-jar` command line.
+//! - `threads`: every thread the crate starts, the OS's refusal an error.
 //!
 //! `tests/wire_v1.rs` pins version 1's bytes; the `jar_frame` and
 //! `jar_handover` fuzz targets hammer both parsers.
@@ -38,4 +39,5 @@ pub mod proto;
 pub mod pty;
 pub mod state;
 pub mod store;
+mod threads;
 pub mod upgrade;
