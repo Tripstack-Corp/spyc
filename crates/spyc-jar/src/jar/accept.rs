@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use super::conn::{LOOKUP_DEADLINE, run_conn};
-use super::{By, Conn, Outbox, Shared};
+use super::{By, Conn, Outbox, Shared, State};
 use crate::proto::{self, Msg, Role, reason};
 
 /// The most tokenless connections open at once.
@@ -130,9 +130,14 @@ pub fn no_sigpipe(stream: &UnixStream) {
 #[cfg(not(target_os = "macos"))]
 pub const fn no_sigpipe(_stream: &UnixStream) {}
 
-/// Tell every connection of the program's own (role `program`) that `msg`
-/// happened: an owner attached or went.
-pub(super) fn tell_program(shared: &Shared, msg: &Msg) {
+/// Queue for every connection of the program's own (role `program`) that
+/// `msg` happened: an owner attached or went. The caller holds the state's
+/// lock and wakes the writers once it lets go.
+// SPYC-TRAP(jar-program-hears-each-owner-once): who is told is settled under
+// the state's lock, as the owner changes; read after it, a program connecting
+// beside an owner heard it twice, and an owner's going could follow the next's
+// coming.
+pub(super) fn queue_for_program(shared: &Shared, msg: &Msg) {
     let programs: Vec<Arc<Conn>> = shared
         .conns()
         .values()
@@ -140,7 +145,7 @@ pub(super) fn tell_program(shared: &Shared, msg: &Msg) {
         .cloned()
         .collect();
     for c in programs {
-        c.send(shared, msg);
+        c.queue(msg);
     }
 }
 
@@ -236,25 +241,48 @@ pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
     };
     let _ = sock.set_write_timeout(None);
     let conn = register(shared, id, role, sock);
-    drop(st);
-    if role != Role::Lookup {
+    if role == Role::Lookup {
+        drop(st);
+        for msg in greeting(welcome) {
+            conn.send(shared, &msg);
+        }
+    } else {
+        for msg in greeting(welcome) {
+            conn.queue(&msg);
+        }
+        tell_program_if_owned(shared, &st, &conn);
+        drop(st);
+        shared.cv.notify_all();
         drop(ticket);
     }
-    conn.send(shared, &welcome);
+    run_conn(shared, id, &conn);
+}
+
+/// What a connection hears first: its `welcome`, and in a jar built to
+/// differ, a frame version 1 doesn't know.
+fn greeting(welcome: Msg) -> Vec<Msg> {
+    #[cfg_attr(
+        not(feature = "differ"),
+        expect(unused_mut, reason = "only the jar built to differ adds")
+    )]
+    let mut msgs = vec![welcome];
     #[cfg(feature = "differ")]
-    conn.send(
-        shared,
-        &Msg::Differ {
-            note: b"a jar built to differ".to_vec(),
-        },
-    );
-    let owned = shared.lock().owner.is_some();
-    match role {
-        Role::Owner => tell_program(shared, &Msg::Attached),
-        Role::Program if owned => conn.send(shared, &Msg::Attached),
+    msgs.push(Msg::Differ {
+        note: b"a jar built to differ".to_vec(),
+    });
+    msgs
+}
+
+/// Queue the program's `attached` for `conn`, just registered under `st`:
+/// when it is an owner, or the program connecting while an owner is there.
+fn tell_program_if_owned(shared: &Shared, st: &State, conn: &Conn) {
+    match conn.role {
+        Role::Owner => queue_for_program(shared, &Msg::Attached),
+        Role::Program if st.owner.is_some() => {
+            conn.queue(&Msg::Attached);
+        }
         _ => {}
     }
-    run_conn(shared, id, &conn);
 }
 
 /// Compare tokens in time that doesn't depend on where they first differ.

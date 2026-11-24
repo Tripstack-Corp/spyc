@@ -37,22 +37,31 @@ impl Conn {
             }
             return;
         }
-        let frame = proto::encode(msg);
-        {
-            let mut out = self.outbox.lock().unwrap_or_else(PoisonError::into_inner);
-            if out.bytes > OUTBOX_CAP {
-                drop(out);
-                self.close();
-                return;
-            }
-            out.bytes += frame.len();
-            out.frames.push_back(frame);
+        if self.queue(msg) {
+            // The writer looks at its outbox under the state's lock, then
+            // waits on the jar's condition: taking that lock here means the
+            // wake can't fall between the two.
+            drop(shared.lock());
+            shared.cv.notify_all();
         }
-        // The writer looks at its outbox under the state's lock, then waits
-        // on the jar's condition: taking that lock here means the wake can't
-        // fall between the two.
-        drop(shared.lock());
-        shared.cv.notify_all();
+    }
+
+    /// Add `msg` to this connection's outbox without waking its writer, for
+    /// a caller that holds the state's lock and wakes the writers
+    /// (`cv.notify_all()`) once it lets go. Never a lookup's, which has no
+    /// writer. False when the outbox was full and the connection is closed.
+    pub(crate) fn queue(&self, msg: &Msg) -> bool {
+        debug_assert_ne!(self.role, Role::Lookup, "a lookup has no outbox");
+        let frame = proto::encode(msg);
+        let mut out = self.outbox.lock().unwrap_or_else(PoisonError::into_inner);
+        if out.bytes > OUTBOX_CAP {
+            drop(out);
+            self.close();
+            return false;
+        }
+        out.bytes += frame.len();
+        out.frames.push_back(frame);
+        true
     }
 
     /// Put back, ahead of everything, what a flush couldn't write: the rest
