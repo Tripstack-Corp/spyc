@@ -1,0 +1,55 @@
+[package]
+name = "spyc-jar"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+description = "The process that holds one spyc pane's program and its PTY, and outlives spyc"
+license = "BSD-3-Clause"
+repository = "https://github.com/Tripstack-Corp/spyc"
+# Published, and before spyc: spyc's package depends on it for its `spyc-jar`
+# binary, and `cargo publish` resolves a dependency from the registry
+# (docs/RELEASE_ENGINEERING.md).
+# The fuzz seeds live in this repository, not the package, so the test that
+# checks them stays here too.
+exclude = ["/tests/fuzz_seeds.rs"]
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# A jar built to differ, for CI's upgrade tests only and never released: wire
+# and handover-blob version 2, and a frame version 1 doesn't know
+# (`tests/jar_differ.rs`, `make test-jar-differ`).
+differ = []
+
+[dependencies]
+anyhow = "1"
+rustix = { version = "1.1.4", features = ["process", "fs", "termios", "pty", "event", "net", "stdio", "pipe"] }
+
+# A unix socket's peer (its user and pid): rustix reads it only on Linux.
+[target.'cfg(target_os = "macos")'.dependencies]
+nix = { version = "0.31", default-features = false, features = ["socket", "user"] }
+
+[lints.rust]
+# The jar holds a live PTY for a program spyc no longer owns; `#![forbid]` in
+# lib.rs says the same, and this keeps a new target from forgetting it.
+unsafe_code = "forbid"
+
+[lints.cargo]
+unused_dependencies = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Production code never unwraps (`clippy.toml` lets tests): `.expect("…")` names
+# the invariant.
+unwrap_used = "warn"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# A codec of fixed-width big-endian fields converts between widths everywhere,
+# and checks each length against what is left before it does.
+cast_possible_truncation = "allow"
+# Counted by `src/fn_size_guard.rs` instead, as for spyc.
+too_many_lines = "allow"

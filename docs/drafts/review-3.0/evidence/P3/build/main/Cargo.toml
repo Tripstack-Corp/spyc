@@ -1,0 +1,19 @@
+[package]
+name = "p3-jar-wrapper"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "spyc-jar"
+path = "main.rs"
+
+[features]
+differ = ["spyc-jar/differ"]
+
+[dependencies]
+anyhow = "1"
+spyc-jar = { path = "crates/spyc-jar" }
+
+[workspace]
+members = [".", "crates/spyc-jar"]

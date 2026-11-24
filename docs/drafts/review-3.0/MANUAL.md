@@ -4,25 +4,13 @@ Probes that need a real terminal emulator, a Linux login host, WSL, a laptop lid
 
 Pin: `444857a2`. Ordered by the severity of the finding each settles.
 
-## 1. A program run twice after a restore with jars off (C1 = G2, high)
+## 1. (Dropped) A program run twice after a restore with jars off (C1)
 
-1. In a scratch spyc, open a tab running `sh -c 'echo $$ >> /tmp/c1-pids; exec cat'`.
-2. `kill -9` that spyc from another terminal.
-3. Put `[pane]` / `jars = false` in the scratch `.spycrc.toml`.
-4. Run `spyc -r`.
+Shown by Unit C's red test and its refuter's run; not needed by hand.
 
-**Expected at the pin:** two pids in `/tmp/c1-pids`, both alive (`ps -p`), one under a `spyc-jar`. Afterwards, end both jars with `kill`.
+## 2. (Dropped) A stopped jar, and `^a R` on a `[detached]` tab (C2, C3)
 
-## 2. A stopped jar, and `^a R` on a `[detached]` tab (C2 high, C3 medium)
-
-1. In a scratch spyc, `^a c` and run `sh`.
-2. In another terminal, run `ps -o pid,ppid,command -A | grep 'spyc-jar sh'` and take the one whose parent is that spyc. `kill -STOP` it.
-3. Type now and then for two minutes. **Expected:** nothing on screen says anything (C3).
-4. Paste a few hundred kB of text. **Expected:** `[detached]` after about 40 s.
-5. `kill -CONT` the jar. **Expected:** the tab stays detached (C2's medium half).
-6. Press `^a R`. **Expected:** no question, and `ps` shows two `sh` programs in two jars (C2's high half).
-
-End both jars afterwards.
+Shown by Unit C's probes on both platforms; not needed by hand.
 
 ## 3. `^d` with a long session name, on your real `TMPDIR` layout (D1, D2)
 
@@ -50,17 +38,13 @@ Repeat with a 40-character name. **Expected (D2):** `^d` fails, spyc exits to th
 
 Alternatively, add the "Idle Wake Ups" column under Activity Monitor → Energy. `spyc` itself should sit near zero beside them.
 
-## 6. A failed upgrade on x86_64 Linux (A1, medium, frozen)
+## 6. (Moved) A failed upgrade on x86_64 Linux (A1)
 
-On an x86_64 glibc Linux machine, if you have one, run `python3 -I docs/drafts/review-3.0/evidence/A/probe_linux.py`, with `UA_S`, `UA_JAR` and `UA_DIFFER` set as in A1's command (a scratch directory, the pin's `spyc-jar`, and the jar built to differ). Copy the script out of the scratchpad first: it is pruned after a few days.
+Run under emulation: see [`ADDENDUM.md`](ADDENDUM.md), P3-6.
 
-**Expected:** "JAR DIED … status -13" within 40 tries. It reproduced on aarch64 musl; macOS survives.
+## 7. (Moved) A stopped and continued spyc on Linux (B12)
 
-## 7. A stopped and continued spyc on Linux (B12)
-
-On a Linux machine with jars on, open two jarred agent tabs. From another terminal, `kill -STOP <spyc pid>; sleep 1; kill -CONT <spyc pid>`.
-
-**Expected by B12:** both tabs go `[detached]`, and are taken back or stay that way. Repeat on macOS: **expected,** nothing visible.
+Run in the container: see [`ADDENDUM.md`](ADDENDUM.md), P1.
 
 ## 8. A detached session and the login (G10 = D9, H7)
 
@@ -74,12 +58,9 @@ On a Linux machine with jars on, open two jarred agent tabs. From another termin
 2. Close every Windows Terminal tab on the distribution, and wait two minutes. `wsl -l -v` in PowerShell shows whether it stopped.
 3. Open a new terminal and run `spyc attach`.
 
-## 9. `/tmp/spyc-<uid>` planted by another user (E2)
+## 9. (Moved) `/tmp/spyc-<uid>` planted by another user (E2)
 
-On a Linux host with two logins:
-1. As user B: `mkdir -m 777 /tmp/spyc-<uid of A>`.
-2. As A, with neither `XDG_RUNTIME_DIR` nor `TMPDIR` set, start spyc, open a tab and press `^d`. **Expected:** the detach is refused.
-3. As A, `env -u XDG_RUNTIME_DIR -u TMPDIR spyc attach`. **Expected at the pin:** it lists what B planted.
+Run in a container with two users: see [`ADDENDUM.md`](ADDENDUM.md), P3-9.
 
 ## 10. An agent ending spyc through its MCP socket (E1)
 
