@@ -559,7 +559,7 @@ _deb:
 	@if [ -f "$(dir $(SRC))$(JAR)" ]; then \
 		install -m 0755 "$(dir $(SRC))$(JAR)" "$(DIST_DIR)/deb-$(ARCH)/usr/bin/$(JAR)"; \
 	fi
-	@printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s\nSection: utils\nPriority: optional\nHomepage: https://github.com/Tripstack-Corp/spyc\nDescription: Keyboard-driven, MCP-native terminal file commander\n' \
+	@printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: %s\nSection: utils\nPriority: optional\nHomepage: https://github.com/Tripstack-Corp/spyc\nDescription: Terminal workspace for coding agents, built around a shared file commander\n' \
 		"$(BINARY)" "$(DEB_VERSION)" "$(ARCH)" "$(DEB_MAINTAINER)" \
 		> "$(DIST_DIR)/deb-$(ARCH)/DEBIAN/control"
 	dpkg-deb --build --root-owner-group "$(DIST_DIR)/deb-$(ARCH)" \

@@ -1,4 +1,4 @@
-//! spyc — a vi-keyboard-driven terminal file commander, in the lineage of keyboard-driven file managers like spy.
+//! spyc — a terminal workspace for coding agents, built around a vi-keyboard-driven file commander, in the lineage of keyboard-driven file managers like spy.
 //!
 //! This is the crate's **library** root: it owns all the modules and the
 //! [`run`] entry point. `src/main.rs` is a thin binary shim that calls
@@ -79,7 +79,7 @@ use crate::terminal::{
 #[cfg(test)]
 pub(crate) use crate::terminal::{mouse_test_lock, set_mouse_capture_for_test};
 
-/// spyc — vi-keyboard-driven file commander
+/// spyc — terminal workspace for coding agents, built around a shared file commander
 #[derive(Parser)]
 // `version = VERSION`, not clap's bare `version`: the bare form prints
 // `CARGO_PKG_VERSION` alone, which on the CURRENT stream is the SAME string for
@@ -89,7 +89,7 @@ pub(crate) use crate::terminal::{mouse_test_lock, set_mouse_capture_for_test};
 #[command(
     name = "spyc",
     version = VERSION,
-    about = "vi-keyboard-driven file commander"
+    about = "Terminal workspace for coding agents, built around a shared file commander"
 )]
 struct Cli {
     /// Open the saved-session restore picker on startup
