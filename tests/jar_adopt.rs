@@ -1869,7 +1869,7 @@ fn startup_tabs_each_get_a_jar_of_their_own() {
     let spyc = Spyc::start(&dirs, &[]);
     left.0.push(spyc.pid());
     let refused = || spyc.shows("not started") || spyc.shows("wrong token");
-    eventually("both tabs' programs run, or one is refused", || {
+    spyc.eventually("both tabs' programs run, or one is refused", || {
         noted(&dirs.pidfile).len() == 2 || refused()
     });
     left.0.extend(noted(&dirs.pidfile));
