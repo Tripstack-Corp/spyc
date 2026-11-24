@@ -5,7 +5,7 @@
 <h1 align="center">spyc</h1>
 
 <p align="center">
-  The file commander built for collaborating with your coding agents.
+  A terminal workspace for coding agents, built around a file commander you share.
 </p>
 
 <p align="center">
@@ -197,7 +197,9 @@ into a new tab, so you can try another approach without losing the first. An
 advisory **scope registry** (`register_scope` / `list_scopes` /
 `wait_for_scope_clear`) keeps parallel agents off each other's files. Sessions
 auto-save within seconds of any change, so a crash loses almost nothing and
-`spyc -r` resumes every tab and conversation. Design:
+`spyc -r` resumes every tab and conversation. A crash also leaves a report in
+spyc's state directory and prints a link that fills in a GitHub issue; spyc
+sends nothing itself. Design:
 [docs/AGENT_ORCHESTRATION.md](docs/AGENT_ORCHESTRATION.md).
 
 ## Keybindings

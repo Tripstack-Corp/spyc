@@ -251,7 +251,10 @@ fn tab_completes_paths_exactly_where_a_path_is_typed() {
                 ("Search", PromptKind::Search { saved_cursor: 0 }),
                 ("Limit", PromptKind::Limit),
                 ("SetEnv", PromptKind::SetEnv),
-                ("PaneNewTabCmd", PromptKind::PaneNewTabCmd),
+                (
+                    "PaneNewTabCmd",
+                    PromptKind::PaneNewTabCmd { ask_cwd: false },
+                ),
                 ("PaneRenameTab", PromptKind::PaneRenameTab),
                 ("WorktreeNewBranch", PromptKind::WorktreeNewBranch),
             ] {

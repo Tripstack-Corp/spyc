@@ -1,0 +1,15 @@
+{
+  "after": [
+    "/tmp/jsAkn3la"
+  ],
+  "/tmp/jsAkn3la": {
+    "pids": [
+      "3723",
+      "3777"
+    ],
+    "ps": " 3723  3722 cat\n 3777  3615 cat",
+    "parent": " 3722  3615 spyc-jar sh --wire 1"
+  },
+  "result": "thread 'app::harness_tests::jar_start::review_c_a_restored_tab_whose_jar_runs_is_not_started_again_with_jars_off' (189736519) panicked at src/app/harness_tests/jar_start.rs:773:9:\nassertion `left == right` failed: its program ran twice: 3723\n3777\n  left: 2\n right: 1\ntest result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4697 filtered out; finished in 3.10s",
+  "ms": 3229
+}

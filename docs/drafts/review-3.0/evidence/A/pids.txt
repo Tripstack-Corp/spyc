@@ -1,0 +1,10 @@
+72308 /tmp/uaA-boundary-560fgvca/j.sock
+74193 /tmp/uaA-failedexec-7a2q3_ms/j.sock
+3 /tmp/uaA-linux-o26v3j9v/j.sock
+58 /tmp/uaA-linuxfail-pp5rb8h7/j.sock
+96782 /tmp/uaA-lateproof-rgo901t3/j.sock
+11530 /tmp/uaA-h5-6r0urfzz/j.sock
+12681 /tmp/uaA-h5-a__4cpu0/j.sock
+35543 /tmp/uaA-nodesc-tx3d5_hj/j.sock
+35832 /tmp/uaA-fault-blob-sdtekw6_/j.sock
+36100 /tmp/uaA-fault-panic-ncfzt_ce/j.sock

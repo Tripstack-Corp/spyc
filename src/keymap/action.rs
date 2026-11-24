@@ -130,7 +130,7 @@ pub enum Action {
     ReloadConfig, // ^R — re-read ~/.spycrc.toml + project config
 
     // Split pane (M8).
-    TogglePane,         // Ctrl-\ / F10 / ^W \ / ^W c — open/close the pty pane
+    TogglePane,         // Ctrl-\ / F10 / ^a \ — open/close the pty pane
     ResumePane,         // F9 — open pane with `claude --resume`
     PaneFocusDown,      // ^W j — move focus down (to pane)
     PaneFocusUp,        // ^W k — move focus up (to list)
@@ -143,7 +143,8 @@ pub enum Action {
     TogglePaneZoom,     // ^W z — zoom (fullscreen) the pane / restore split
     PaneScrollEnter,    // ^W v — enter scroll mode (browse scrollback)
     PaneScrollSave,     // s (while in scroll mode) — save scrollback to file
-    PaneNewTab,         // ^W n — open a new pane tab (prompt for command + cwd)
+    PaneNewTab,         // ^a c — open a new pane tab (prompt for the command)
+    PaneNewTabAskCwd,   // ^a C — open a new pane tab (prompt for command + cwd)
     PaneCloseTab,       // ^W x — close the active pane tab
     PaneTabByIndex(u8), // ^W 1..9 — switch to tab N
     PaneNextTab,        // ^W ] — next tab
@@ -326,6 +327,7 @@ impl Action {
             | Self::PaneScrollEnter
             | Self::PaneScrollSave
             | Self::PaneNewTab
+            | Self::PaneNewTabAskCwd
             | Self::PaneCloseTab
             | Self::PaneTabByIndex(_)
             | Self::PaneNextTab
@@ -437,7 +439,7 @@ impl Action {
             Self::TogglePaneZoom => "zoom pane (toggle fullscreen)",
             Self::PaneScrollEnter => "scroll pane history",
             Self::PaneScrollSave => "save pane scrollback",
-            Self::PaneNewTab => "new pane tab",
+            Self::PaneNewTab | Self::PaneNewTabAskCwd => self.describe_new_tab(),
             Self::PaneCloseTab => "close pane tab",
             Self::PaneTabByIndex(_) => "switch pane tab",
             Self::PaneNextTab | Self::PanePrevTab | Self::PaneLastTab => self.describe_tab_step(),
@@ -603,7 +605,7 @@ impl Action {
             Self::TogglePaneZoom => "toggle_pane_zoom",
             Self::PaneScrollEnter => "pane_scroll_enter",
             Self::PaneScrollSave => "pane_scroll_save",
-            Self::PaneNewTab => "pane_new_tab",
+            Self::PaneNewTab | Self::PaneNewTabAskCwd => self.new_tab_name(),
             Self::PaneCloseTab => "pane_close_tab",
             Self::PaneTabByIndex(_) => "pane_tab_by_index",
             Self::PaneNextTab | Self::PanePrevTab | Self::PaneLastTab => self.tab_step_name(),
@@ -696,6 +698,14 @@ impl Action {
         }
     }
 
+    /// The new-tab arm of [`Self::describe`], which is at its length pin.
+    const fn describe_new_tab(&self) -> &'static str {
+        match self {
+            Self::PaneNewTabAskCwd => "new pane tab, asking for its directory",
+            _ => "new pane tab",
+        }
+    }
+
     /// The tab steps' arm of [`Self::describe`], which is at its length pin.
     const fn describe_tab_step(&self) -> &'static str {
         match self {
@@ -777,6 +787,14 @@ impl Action {
             Self::PaneSendEsc => "pane_send_esc",
             Self::PaneSendCtrlW => "pane_send_ctrl_w",
             _ => "pane_send_prefix",
+        }
+    }
+
+    /// The new-tab arm of [`Self::canonical_name`], which is at its length pin.
+    const fn new_tab_name(&self) -> &'static str {
+        match self {
+            Self::PaneNewTabAskCwd => "pane_new_tab_ask_cwd",
+            _ => "pane_new_tab",
         }
     }
 

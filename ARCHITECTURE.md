@@ -561,6 +561,16 @@ reopens the second commander there.
   via `resume_tui`. Critically, `suspend_tui` does **not**
   `LeaveAlternateScreen` — that would flash main-buffer content;
   the child's own `smcup` reuses our blanked alt buffer.
+- **A stop from outside hands the terminal to the shell.** After
+  `kill -STOP`, the shell puts the terminal in its own line mode and draws
+  over spyc's screen; its `fg` continues spyc. A thread counts each
+  `SIGCONT` (`App::watch_continues`), and the loop's top
+  (`settle_continued`) takes the terminal back once spyc's process group
+  holds its foreground: raw mode set again (crossterm's `enable_raw_mode`
+  does nothing while it believes raw mode is on, so it is turned off first),
+  the mode set as `resume_tui` sends it, and a full repaint
+  (`terminal::continued`). Continued in the background, spyc waits for the
+  `fg`, which continues it again.
 - Pane subprocesses run under their own slave PTY (allocated via
   `portable_pty`). The pane is a VT-emulated rectangle inside
   spyc's TUI; the child has a real tty, ours is unaffected.
@@ -705,6 +715,13 @@ the release builds of `cd413b07`:
 | macOS, arm64 and x86_64 | libSystem | libSystem | libSystem | libSystem | libSystem | `nm -m`: each is `(undefined) external ... (from libSystem)` |
 | `x86_64-unknown-linux-musl` | musl | `compiler_rt` | `compiler_rt` | musl | musl | each function's bytes in spyc compared with the objects the linker had |
 | `aarch64-unknown-linux-musl` | musl | `compiler_rt` | `compiler_rt` | musl | musl | the same |
+| `x86_64-unknown-linux-gnu` | glibc | glibc | glibc | glibc | glibc | `nm -D`: each is an import, `memset@GLIBC_2.2.5` |
+
+No release ships `x86_64-unknown-linux-gnu`; it is what `cargo install` builds
+on glibc Linux, and what CI tests. That binary also defines `ceilf`, `floorf`,
+`fma`, `fmaf`, `fmodf` and `roundf` as weak globals. They are Rust's own
+`compiler_builtins`, the same size as the copies in the toolchain's rlib, not the
+archive's.
 
 On the musl targets, "musl" and "`compiler_rt`" are Zig's: `release.yml` links
 them with `cargo zigbuild` and Zig 0.14.0, which adds its own musl `libc.a`
@@ -751,7 +768,10 @@ a recipe that skips the localization brings one back.
 `scripts/check-libsystem-binding.sh` checks a macOS binary against
 `vendor/LIBC_SYMBOLS`: `tests/libsystem_binding.rs` runs it on the test build,
 and the release workflow on both slices of the universal artifact before
-upload. `scripts/test_vendored_archives.py` checks the committed archives, and
+upload. `scripts/check-linux-libc-binding.sh` checks a glibc Linux binary the
+same way, allowing only `compiler_builtins`' own copies, and
+`tests/libc_binding.rs` runs it on CI's test build. Neither check can apply to a
+static musl binary, which defines every C library function itself. `scripts/test_vendored_archives.py` checks the committed archives, and
 the vendored-archives job the ones it rebuilds. The evidence, with the commands that reproduce it, is in
 [`spikes/zig-macho-weak-export/`](spikes/zig-macho-weak-export/README.md).
 
@@ -964,6 +984,18 @@ blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
 `a_stalled_reader_does_not_freeze_a_release` and
 `a_paste_the_program_never_reads_does_not_block_its_owner`.
 
+<!-- SPYC-TRAP: jar-program-hears-each-owner-once -->
+A program in its own jar (spyc in its session's) hears `attached` once for
+each owner and `detached` once as it goes, in the order the owners changed:
+on `attached` spyc probes the terminal and repaints, on `detached` it stops
+drawing. So who is told is settled under the jar's state lock, in the same
+hold that changes the owner, and the frames are queued there for the writers
+(`Conn::queue`, which takes no lock of the state's). Decided once the lock
+was let go, an owner and the program connecting together each told the program, so it
+heard `attached` twice, and an owner's going could be told after the next
+owner's coming. `a_program_hears_one_attached_per_owner_however_the_connections_race`
+in `tests/jar_process.rs` caught the first under load.
+
 <!-- SPYC-TRAP: jar-frame-whole -->
 A client's wait bounds only the start of a frame (`Client::recv`). Once a
 frame's first byte is in, the rest is read under an hour's timeout, since
@@ -1010,7 +1042,9 @@ pane, and take the pane jar's name for its session's.
 <!-- SPYC-TRAP: move-saved-before-release -->
 `:detach project` (`src/app/project_move.rs`) saves the project it moves as a
 session of its own, synced to disk, before it ends its connection to any of
-the project's jars. The jars run on either way, but only that file says where
+the project's jars; `:detach tab` does the same for its one tab, and
+`:attach` saves the session taking them before it removes the file that held
+them. The jars run on either way, but only that file says where
 they are and whose they are now: the spike let them go first, so a spyc that
 died between the two left every jar running for no spyc to find (finding 6). A
 save that fails stops the move with nothing let go.
@@ -1108,9 +1142,11 @@ that turns jars on.
   `src/pane/jar/store.rs`): `<state>/jar-bin/<version>-<hash>/spyc-jar`,
   `<hash>` the first 12 hex digits of its SHA-256, copied
   whole from the `spyc-jar` beside spyc on a worker at start and run once as
-  `spyc-jar build-info` to check it is this build's. Never the binary beside
-  spyc, which an install may replace while spyc runs, and which a jar would
-  otherwise run by name. A store that can't hold a copy that runs (a
+  `spyc-jar build-info` to check it is this build's, given a minute: macOS
+  scans a new executable's first run behind every other new one, which under
+  load takes seconds, and a slow answer is not a broken install. Never the
+  binary beside spyc, which an install may replace while spyc runs, and which
+  a jar would otherwise run by name. A store that can't hold a copy that runs (a
   `noexec` state directory) leaves jars to start beside spyc, when that one
   runs as this build; a `spyc-jar` missing, unable to run or of another
   build is no usable jar. Its

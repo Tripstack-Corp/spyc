@@ -1,7 +1,73 @@
-//! Pure bookkeeping for tabs a session restore could not open.
+//! Pure bookkeeping for a session restore: the tabs it could not open, and
+//! what a column showed in its directory (its cursor, picks and filter).
 
-use crate::state::sessions::SavedTab;
+use crate::app::View;
+use crate::state::sessions::{SavedColumn, SavedTab};
 use std::hash::{Hash, Hasher};
+
+use super::{AppState, Side};
+
+impl AppState {
+    /// What column `side` shows in its directory, as a save keeps it: the file
+    /// under its cursor, its picks, sorted, and its filter. `None` when there
+    /// is no such column, or nothing to keep. A name or pick that isn't UTF-8
+    /// is left out, since the session file can't hold it.
+    pub fn saved_column(&self, side: Side) -> Option<SavedColumn> {
+        let col = self.get_col(side)?;
+        let cursor = (col.view == View::Dir)
+            .then(|| col.rows.get(col.cursor.index))
+            .flatten()
+            .and_then(|row| row.path.file_name()?.to_str())
+            .map(str::to_owned);
+        let mut picks: Vec<_> = col
+            .picks
+            .iter()
+            .filter(|p| p.to_str().is_some())
+            .cloned()
+            .collect();
+        picks.sort();
+        let saved = SavedColumn {
+            cursor,
+            picks,
+            filter: col.temp_filter.clone(),
+        };
+        (saved != SavedColumn::default()).then_some(saved)
+    }
+
+    /// Put back what column `side` showed in its directory, once it is there
+    /// again: the picks still listed, the filter, and the cursor on its file
+    /// while that file is still listed.
+    pub fn restore_column(&mut self, side: Side, saved: &SavedColumn) {
+        let col = self.col_mut(side);
+        for pick in &saved.picks {
+            if col.listing.entries.iter().any(|e| e.path == *pick) {
+                col.picks.insert(pick);
+            }
+        }
+        col.temp_filter.clone_from(&saved.filter);
+        self.rebuild_rows_for(side);
+        let col = self.col_mut(side);
+        if let Some(index) = saved.cursor.as_deref().and_then(|name| {
+            col.rows
+                .iter()
+                .position(|row| row.path.file_name().is_some_and(|n| n == name))
+        }) {
+            col.cursor.index = index;
+        }
+    }
+
+    /// What of column `side` a save keeps that the autosave watches for: its
+    /// picks and filter. Not its cursor, which moves with every key.
+    pub fn hash_column(&self, side: Side, hasher: &mut impl Hasher) {
+        if let Some(col) = self.get_col(side) {
+            col.picks
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .hash(hasher);
+            col.temp_filter.hash(hasher);
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct DeferredTab {

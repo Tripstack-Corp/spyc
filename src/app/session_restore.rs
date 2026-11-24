@@ -306,6 +306,40 @@ impl App {
         })
     }
 
+    /// Bring `saved`'s tabs into the project in view, after its own, as a
+    /// restore opens them: a tab whose jar runs is taken back, and one that
+    /// can't open is kept saved, unopened. The labels of those that opened and
+    /// of those that didn't. Each that opens is appended and made active, as a
+    /// new tab is.
+    pub(super) fn restore_tabs_here(
+        &mut self,
+        saved: &SavedProject,
+        held: &Held,
+    ) -> (Vec<String>, Vec<String>) {
+        let plans = restore_plans(saved, false, held, self.own_claude_home().as_deref());
+        let first = self
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or(0, crate::pane::PaneTabs::len)
+            + self.state.active_project().deferred_tabs.len();
+        let mut restored = Vec::new();
+        for (i, (tab, plan)) in plans.tabs.iter().zip(plans.plans).enumerate() {
+            self.restore_tab(first + i, tab, plan, saved.anchor(), &mut restored);
+        }
+        let (opened, unopened): (Vec<_>, Vec<_>) = plans
+            .tabs
+            .iter()
+            .enumerate()
+            .partition(|(i, _)| restored.contains(&(first + i)));
+        let label = |(_, t): (usize, &SavedTab)| crate::pane::tabs::strip_exit_suffix(&t.label);
+        (
+            opened.into_iter().map(label).collect(),
+            unopened.into_iter().map(label).collect(),
+        )
+    }
+
     /// Land column `a` where the project left it: its own directory, else the
     /// project's anchor, which is all a version 1 file saved, else its start
     /// directory ([`landings`]). The first that is a directory, or a place
@@ -329,6 +363,13 @@ impl App {
                 match self.state.chdir_side(Side::Left, dir) {
                     Ok(()) => {
                         self.state.set_start_dir(&start_dir);
+                        if let Some(saved) = project
+                            .left_column
+                            .as_ref()
+                            .filter(|_| project.left_cwd.as_deref() == Some(dir))
+                        {
+                            self.state.restore_column(Side::Left, saved);
+                        }
                         return Some(Vec::new());
                     }
                     Err(e) => failure = Some(format!("session chdir: {e:#}")),
@@ -602,6 +643,13 @@ impl App {
                 v.width_pct = width_pct;
                 v.mode = mode;
                 v.focus = focus;
+            }
+            if let Some(saved) = sv.right_column.as_ref().filter(|_| {
+                self.state
+                    .get_col(Side::Right)
+                    .is_some_and(|c| c.listing.dir == *right_cwd)
+            }) {
+                self.state.restore_column(Side::Right, saved);
             }
             // `open_second_commander_at` forces `state.focus = FileList`;
             // re-apply the saved region focus (the pane block may have wanted

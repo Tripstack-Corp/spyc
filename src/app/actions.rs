@@ -33,6 +33,7 @@ impl App {
     /// per-worktree harpoon list after every action. Cheap: a no-op for a
     /// column whose [`AppState::harpoon_root`] matches its loaded list.
     pub fn apply(&mut self, action: &Action) -> Result<Vec<Effect>> {
+        crate::crash_report::note_action(action.canonical_name());
         let result = self.apply_inner(action);
         self.reconcile_harpoon();
         result
@@ -316,7 +317,8 @@ impl App {
             Action::PaneScrollEnter => self.open_pane_scroll_pager(),
             Action::PaneScrollSave => self.pane_scroll_save(),
 
-            Action::PaneNewTab => self.start_new_tab_prompt(),
+            Action::PaneNewTab => self.start_new_tab_prompt(false),
+            Action::PaneNewTabAskCwd => self.start_new_tab_prompt(true),
             Action::PaneCloseTab => self.close_active_tab(),
             Action::PaneTabByIndex(n) => {
                 self.go_to_tab(|tabs| tabs.switch_to((*n as usize).saturating_sub(1)));
@@ -508,6 +510,7 @@ impl App {
                 | Action::OpenThinkingHistory
                 | Action::PaneScrollSave
                 | Action::PaneNewTab
+                | Action::PaneNewTabAskCwd
                 | Action::PaneCloseTab
                 | Action::PaneTabByIndex(_)
                 | Action::PaneNextTab
@@ -532,7 +535,7 @@ impl App {
         ) && matches!(
             self.state.mode,
             Mode::Prompting(Prompt {
-                kind: PromptKind::PaneNewTabCmd
+                kind: PromptKind::PaneNewTabCmd { .. }
                     | PromptKind::PaneNewTabCwd
                     | PromptKind::PaneRenameTab,
                 ..

@@ -69,25 +69,59 @@ fn report(
     sl: &FilePart,
     sl_part: Part,
 ) -> Status {
+    let mut notes = Vec::new();
+    if sl_part.in_place()
+        && file::read(&sl.path)
+            .ok()
+            .flatten()
+            .as_deref()
+            .is_some_and(statusline::is_disabled)
+    {
+        notes.push(format!(
+            "{} sets `statusLine.enabled = false`; agy won't run spyc's statusLine until it is enabled",
+            crate::paths::display_tilde(&sl.path)
+        ));
+    }
     Status {
         hooks: hooks_part,
         hooks_file: hooks.path.clone(),
         mcp: mcp_part,
         mcp_file: mcp.path.clone(),
         statusline: Some((sl_part, sl.path.clone())),
-        notes: Vec::new(),
+        notes,
     }
+}
+
+/// Whether `sl` explicitly sets `statusLine.enabled = false` without spyc's
+/// wrapper already in place.
+fn sl_disabled_without_ours(sl: &FilePart) -> bool {
+    let Ok(Some(text)) = file::read(&sl.path) else {
+        return false;
+    };
+    let ours =
+        statusline::settings_without(&text).is_some_and(|r| r != crate::mcp::Removal::NothingOurs);
+    statusline::is_disabled(&text) && !ours
 }
 
 pub(super) fn status(env: &Env) -> Status {
     with_parts(env, |hooks, mcp, sl| {
-        report(hooks, hooks.status(), mcp, mcp.status(), sl, sl.status())
+        let sl_part = if sl_disabled_without_ours(sl) {
+            Part::Blocked("`statusLine.enabled` is false".to_string())
+        } else {
+            sl.status()
+        };
+        report(hooks, hooks.status(), mcp, mcp.status(), sl, sl_part)
     })
 }
 
 pub(super) fn install(env: &Env) -> Status {
     with_parts(env, |hooks, mcp, sl| {
-        report(hooks, hooks.install(), mcp, mcp.install(), sl, sl.install())
+        let sl_part = if sl_disabled_without_ours(sl) {
+            Part::Blocked("`statusLine.enabled` is false".to_string())
+        } else {
+            sl.install()
+        };
+        report(hooks, hooks.install(), mcp, mcp.install(), sl, sl_part)
     })
 }
 

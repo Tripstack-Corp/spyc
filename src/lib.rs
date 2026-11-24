@@ -1,4 +1,4 @@
-//! spyc — a vi-keyboard-driven terminal file commander, in the lineage of keyboard-driven file managers like spy.
+//! spyc — a terminal workspace for coding agents, built around a vi-keyboard-driven file commander, in the lineage of keyboard-driven file managers like spy.
 //!
 //! This is the crate's **library** root: it owns all the modules and the
 //! [`run`] entry point. `src/main.rs` is a thin binary shim that calls
@@ -23,6 +23,7 @@ pub mod archive;
 mod clipboard;
 mod config;
 mod context;
+mod crash_report;
 mod debug_log;
 mod envset;
 mod fs;
@@ -78,7 +79,7 @@ use crate::terminal::{
 #[cfg(test)]
 pub(crate) use crate::terminal::{mouse_test_lock, set_mouse_capture_for_test};
 
-/// spyc — vi-keyboard-driven file commander
+/// spyc — terminal workspace for coding agents, built around a shared file commander
 #[derive(Parser)]
 // `version = VERSION`, not clap's bare `version`: the bare form prints
 // `CARGO_PKG_VERSION` alone, which on the CURRENT stream is the SAME string for
@@ -88,7 +89,7 @@ pub(crate) use crate::terminal::{mouse_test_lock, set_mouse_capture_for_test};
 #[command(
     name = "spyc",
     version = VERSION,
-    about = "vi-keyboard-driven file commander"
+    about = "Terminal workspace for coding agents, built around a shared file commander"
 )]
 struct Cli {
     /// Open the saved-session restore picker on startup
@@ -382,11 +383,7 @@ fn install_panic_hook() {
             note_worker_panic(
                 std::thread::current().name(),
                 info.location().map(ToString::to_string),
-                info.payload()
-                    .downcast_ref::<&str>()
-                    .copied()
-                    .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
-                    .unwrap_or("a panic with no message"),
+                crash_report::panic_message(info),
             );
         }
 
@@ -401,6 +398,7 @@ fn install_panic_hook() {
         // printed now, it would draw over the TUI still running.
         if ends_the_tui {
             default_hook(info);
+            crash_report::report(info);
         }
     }));
 }

@@ -8,11 +8,11 @@ use crate::app::tasks::TaskStatus;
 // logic (decide_scroll_source, PaneTabs index math) is unit-tested in
 // src/pane.
 
-/// By default (`new_tab_cwd = worktree_root`) a bare pane tab spawns at the
-/// focused column's worktree root — `gw`'s target — not wherever the file
-/// list has been browsed to, and moves focus into the pane.
+/// `new_tab_cwd = worktree_root`: a bare pane tab spawns at the focused
+/// column's worktree root — `gw`'s target — not wherever the file list has
+/// been browsed to, and moves focus into the pane.
 #[test]
-fn open_pane_tab_defaults_to_worktree_root_and_focuses_pane() {
+fn open_pane_tab_worktree_root_anchors_there_and_focuses_pane() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let root = tmp.path().join("repo");
@@ -21,6 +21,8 @@ fn open_pane_tab_defaults_to_worktree_root_and_focuses_pane() {
         // Browsing has moved the list deep into the tree, but the pane must
         // anchor to the worktree root (wherever `gw` would jump).
         let mut app = App::test_app(browsed.clone());
+        app.state.active_project_mut().config.pane.new_tab_cwd =
+            crate::config::NewTabCwd::WorktreeRoot;
         app.state
             .active_project_mut()
             .left
@@ -44,10 +46,11 @@ fn open_pane_tab_defaults_to_worktree_root_and_focuses_pane() {
     });
 }
 
-/// `new_tab_cwd = project_home` anchors a bare pane tab at PROJECT_HOME — not
-/// the focused worktree root, and not wherever the list has been browsed to.
+/// By default (`new_tab_cwd = project_home`) a bare pane tab anchors at
+/// PROJECT_HOME — not the focused worktree root, and not wherever the list
+/// has been browsed to.
 #[test]
-fn open_pane_tab_project_home_anchors_at_project_root() {
+fn open_pane_tab_defaults_to_project_home() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let home = tmp.path().join("proj");
@@ -55,7 +58,7 @@ fn open_pane_tab_project_home_anchors_at_project_root() {
         std::fs::create_dir_all(&browsed).unwrap();
         let mut app = App::test_app(browsed.clone());
         app.state.active_project_mut().config.pane.new_tab_cwd =
-            crate::config::NewTabCwd::ProjectHome;
+            crate::config::PaneConfig::default().new_tab_cwd;
         app.state.active_project_mut().home = Some(home.clone());
         // A worktree root is set too — ProjectHome must win over it.
         app.state
@@ -99,16 +102,21 @@ fn open_pane_tab_browse_dir_uses_listing_dir() {
     });
 }
 
-/// With no worktree root resolved (no git repo), the worktree_root default
-/// falls back to the browsed dir rather than spawning at an empty path.
+/// A project with no home starts its tabs in its start dir, not wherever the
+/// list has been browsed to since.
 #[test]
-fn open_pane_tab_falls_back_to_listing_dir_without_project_home() {
+fn open_pane_tab_falls_back_to_the_start_dir_without_project_home() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let dir = tmp.path().join("work");
-        std::fs::create_dir(&dir).unwrap();
+        let browsed = dir.join("sub");
+        std::fs::create_dir_all(&browsed).unwrap();
         let mut app = App::test_app(dir.clone());
+        app.state.active_project_mut().config.pane.new_tab_cwd =
+            crate::config::PaneConfig::default().new_tab_cwd;
         assert!(app.state.active_project().home.is_none());
+        assert_eq!(app.state.active_project().start_dir, dir);
+        app.state.cur_mut().listing.dir = browsed;
         app.open_pane_tab("cat");
         let tabs = app
             .runtime
@@ -453,8 +461,8 @@ pub(super) fn scrollback_numbered(app: &App) -> Option<bool> {
 }
 
 /// **`[pager] scrollback_line_numbers` decides whether `^a v` opens with line
-/// numbers.** Default on; `false` opens the scrollback without the gutter. `l`
-/// still shows them in the open view, and the next `^a v` opens at the
+/// numbers.** Default off; `true` opens the scrollback with the gutter. `l`
+/// still hides them in the open view, and the next `^a v` opens at the
 /// config's default again.
 #[test]
 fn scrollback_line_numbers_follow_the_pager_config() {
@@ -467,31 +475,31 @@ fn scrollback_line_numbers_follow_the_pager_config() {
 
         app.open_pane_scroll_pager();
         app.mount_terminal_scrollback();
-        assert_eq!(scrollback_numbered(&app), Some(true), "on by default");
+        assert_eq!(scrollback_numbered(&app), Some(false), "off by default");
 
         app.view.project_mut().scroll_pager = None;
         app.state
             .active_project_mut()
             .config
             .pager
-            .scrollback_line_numbers = false;
+            .scrollback_line_numbers = true;
         app.open_pane_scroll_pager();
         app.mount_terminal_scrollback();
         assert_eq!(
             scrollback_numbered(&app),
-            Some(false),
-            "off when the config says so"
+            Some(true),
+            "on when the config says so"
         );
 
         app.handle_key(key('l')).unwrap();
-        assert_eq!(scrollback_numbered(&app), Some(true), "`l` shows them");
+        assert_eq!(scrollback_numbered(&app), Some(false), "`l` hides them");
 
         app.view.project_mut().scroll_pager = None;
         app.open_pane_scroll_pager();
         app.mount_terminal_scrollback();
         assert_eq!(
             scrollback_numbered(&app),
-            Some(false),
+            Some(true),
             "a fresh `^a v` opens at the config's default, not the last toggle"
         );
     });
@@ -510,7 +518,7 @@ fn a_streamed_transcript_scrollback_follows_the_pager_config() {
             .active_project_mut()
             .config
             .pager
-            .scrollback_line_numbers = false;
+            .scrollback_line_numbers = true;
         let wake = app.make_pane_wake();
         let pane =
             crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
@@ -527,7 +535,7 @@ fn a_streamed_transcript_scrollback_follows_the_pager_config() {
             .as_ref()
             .expect("an agent with no capture mounts its transcript");
         assert!(view.streaming, "the transcript is the streamed mount");
-        assert!(!view.show_line_numbers, "and it opens without line numbers");
+        assert!(view.show_line_numbers, "and it opens with line numbers");
     });
 }
 
@@ -2058,7 +2066,7 @@ fn a_new_tab_command_expands_percent_from_the_tabs_directory() {
                 app.handle_key(key).unwrap();
             }
         };
-        app.apply(&Action::PaneNewTab).unwrap();
+        app.apply(&Action::PaneNewTabAskCwd).unwrap();
         type_line(&mut app, "printf '%%s\\n' % > got.txt");
         type_line(&mut app, work.to_str().unwrap());
 

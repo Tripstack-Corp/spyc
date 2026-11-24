@@ -146,11 +146,11 @@ take the place of both) and persist across `spyc -r`.
   `:name <NEW>` renames the session (normalized to
   `[A-Z0-9_]`); the session segment's menu opens the `:` line holding
   `name` and the current name, to edit. `:whoami` flashes `user@host`.
-- **New pane tabs** default their cwd to the focused column's
-  worktree/repo root (`gw`'s target), falling back to the current
-  listing dir when there's no repo. Set `[pane] new_tab_cwd` in
-  `.spycrc.toml` to `"project_home"` (pin to `PROJECT_HOME`) or
-  `"browse_dir"` (open in the current listing dir, "open here").
+- **New pane tabs** open in `PROJECT_HOME`, or the start dir when the
+  project has no home (`^a C` asks where instead). Set
+  `[pane] new_tab_cwd` in `.spycrc.toml` to `"worktree_root"` (the
+  focused column's worktree/repo root, `gw`'s target) or `"browse_dir"`
+  (open in the current listing dir, "open here").
 - **Session names** are generated at session creation from ~30
   spices, joined pairwise: `CUMIN_SAFFRON`, `HARISSA_SUMAC`, etc.
   Shown as the primary column in the `-r` session picker so you can
@@ -172,7 +172,12 @@ spyc auto-saves your workspace on quit and can restore it on startup.
   the spice-themed session name, `PROJECT_HOME`, the start directory, and
   the vertical split (its shape plus the second commander's cwd, or the
   preview file) — restored on `-r`, reopening columns `a` and `b` where you
-  left them. A column `a` whose directory has gone opens at `PROJECT_HOME`.
+  left them. Each column also keeps the file under its cursor, its picks and
+  its `=` filter, which come back with it when it reopens in the same
+  directory: a pick of a file that has gone is dropped, and the cursor lands on
+  the first row when its file has gone. A cursor move alone doesn't make the
+  autosave write, so after a crash the cursor is where the last save found
+  it. A column `a` whose directory has gone opens at `PROJECT_HOME`.
   Sessions saved by an older spyc still restore. A quit with
   nothing to restore (no tabs, split or scope claims) saves nothing, so it
   doesn't take a picker slot; a restored session is still updated.
@@ -255,7 +260,8 @@ uses that login's agent, though the program started under another. Notifications
 route them: through it over SSH, and with none attached, to this machine's notifier.
 
 The first `^d` moves spyc into a jar of its own. Your tabs come with it, their programs
-untouched, but what `spyc -r` doesn't keep (cursors, picks, filters, open pagers) starts afresh.
+untouched, and each column's cursor, picks and filter come back, but what `spyc -r` doesn't keep
+(open pagers, a `/` search) starts afresh.
 After that, detaching and attaching don't change anything in spyc. Every tab must run in a jar
 to detach; spyc says which one doesn't.
 
@@ -278,6 +284,15 @@ attached to it. `:attach project NAME` brings that session's projects into this 
 yours, their tabs running on and their claims and waiting agents with them, and that session
 ends: a terminal attached to it is let go. It's refused while one of its projects is open here
 too, or while it has a tab outside a jar, a tab still starting or an editor open.
+
+`:detach tab` does the same for one tab: the active one, or `:detach tab N` for tab N, counted
+as `^a 1` counts. The tab's program keeps running in a new session of its own, with its
+agent's tools, its scope claims and whether it was waiting on you, and its project stays here.
+The session holds a copy of the project with that tab alone, so `spyc attach NAME` shows it
+where it was. `:attach tab NAME` brings that session's tabs into the project you're in, after
+your own, and the session ends. A tab outside a jar, still starting or already ended can't be
+detached, and `:attach tab` takes only a session with one project: `:attach project` brings
+the rest.
 
 `Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `spyc shutdown` does the same
 from outside the session, attached or not: it picks the session as `spyc attach` does, lists

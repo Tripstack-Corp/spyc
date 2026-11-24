@@ -8,7 +8,7 @@ use std::sync::{Arc, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::accept::tell_program;
+use super::accept::queue_for_program;
 use super::describe::describe;
 use super::life::deliver;
 use super::{By, Conn, Shared, TICK, Who, readable};
@@ -364,11 +364,11 @@ pub(super) fn release(shared: &Shared, id: u64) {
         if !st.info.iter().any(|(k, _)| k == OWNER_LEFT) {
             set_info(&mut st, OWNER_LEFT, OwnerLeft::Closed.word());
         }
+        queue_for_program(shared, &Msg::Detached);
     }
     drop(st);
     if was_owner {
         shared.drop_input(id);
-        tell_program(shared, &Msg::Detached);
     }
     shared.cv.notify_all();
     shared.park_cv.notify_all();

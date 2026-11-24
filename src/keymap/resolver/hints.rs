@@ -86,6 +86,7 @@ fn pane_rows(prefix: PanePrefix) -> Vec<ChordEntry> {
         Act("n ]", A::PaneNextTab),
         Act("p [", A::PanePrevTab),
         Act("c", A::PaneNewTab),
+        Act("C", A::PaneNewTabAskCwd),
         Range("1-9", A::PaneTabByIndex(1)),
         Act("x", A::PaneCloseTab),
         Act("r", A::PaneRenameTab),
@@ -104,7 +105,7 @@ fn pane_rows(prefix: PanePrefix) -> Vec<ChordEntry> {
         Act("u", A::QuickSelectOpen),
         Act(".", A::PaneContextMenu),
         Act("g", A::OpenImageGallery),
-        Act("\\ C", A::TogglePane),
+        Act("\\", A::TogglePane),
         Act("!", A::Project(ProjectAction::Attention)),
         Sub("Space", "global menu", PendingSeq::Leader),
     ]

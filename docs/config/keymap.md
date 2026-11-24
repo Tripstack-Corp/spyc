@@ -161,6 +161,7 @@ verbs above (`down`, `pick`,
 | `pane_scroll_enter` | scroll pane history |
 | `pane_scroll_save` | save pane scrollback |
 | `pane_new_tab` | new pane tab |
+| `pane_new_tab_ask_cwd` | new pane tab, asking for its directory |
 | `pane_close_tab` | close pane tab |
 | `pane_tab_by_index =N` | switch to pane tab `N` (1 to 9) |
 | `pane_next_tab` | next pane tab |

@@ -266,3 +266,130 @@ fn a_taken_session_opens_beside_this_one_and_its_file_goes() {
         assert!(!names.contains(&"GIVEN_AWAY".to_string()), "{names:?}");
     });
 }
+
+/// `:detach tab` refuses a tab outside a jar, and a number past the last
+/// tab; nothing is saved and the tab stays.
+#[test]
+fn a_tab_outside_a_jar_or_past_the_last_isnt_detached() {
+    with_two(|app, [x, _], homes, state| {
+        agent_tab_in(app, x, &homes[0], "claude");
+        app.detach_tab("");
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(flash.contains("outside a jar"), "{flash}");
+        app.detach_tab("2");
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(flash.contains("no tab 2"), "{flash}");
+        let tabs = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .map_or(0, crate::pane::PaneTabs::len);
+        assert_eq!(tabs, 1);
+        assert_eq!(saved_files(state), 0);
+    });
+}
+
+/// The moved tab's session: a copy of its project holding that tab alone,
+/// no running spyc's, with its last report and its claims, and none of
+/// another tab's.
+#[test]
+fn the_moved_tab_session_holds_that_tab_alone_with_its_claims_and_report() {
+    with_two(|app, [x, _], homes, _| {
+        agent_tab_in(app, x, &homes[0], "claude");
+        let moving = agent_tab_in(app, x, &homes[0], "claude");
+        report_at(app, x, 1, AgentActivity::Blocked, Instant::now());
+        let owners: Vec<String> = app
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .unwrap()
+            .tabs()
+            .iter()
+            .map(|e| e.info.claim_owner.clone())
+            .collect();
+        claim(app, 1, owners[0].clone(), "src/stays.rs");
+        claim(app, 2, owners[1].clone(), "src/moves.rs");
+        let manifest = app
+            .moved_tab_manifest(&moving, &owners[1], "TAB_NAME")
+            .expect("the tab is saved");
+        assert_eq!((manifest.name.as_str(), manifest.pid), ("TAB_NAME", None));
+        let [project] = manifest.projects.as_slice() else {
+            panic!("{:?}", manifest.projects);
+        };
+        assert_eq!(project.anchor(), homes[0].as_path());
+        let ids: Vec<&str> = project.tabs.iter().map(|t| t.pane_id.as_str()).collect();
+        assert_eq!(ids, [moving.as_str()]);
+        assert_eq!(project.active_tab, 0);
+        assert_eq!(
+            project.tabs[0].live.as_ref().map(|l| l.status.as_str()),
+            Some("blocked")
+        );
+        let claims: Vec<_> = manifest.scope_claims.iter().map(|c| c.id).collect();
+        assert_eq!(claims, [2]);
+    });
+}
+
+#[test]
+fn attaching_this_sessions_own_tabs_is_refused() {
+    with_two(|app, _, _, _| {
+        app.state.session_name = Some("OWN_NAME".into());
+        super::super::project_move::cmd_attach(app, "tab OWN_NAME");
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(
+            flash.contains("attach tab: OWN_NAME is this session"),
+            "{flash}"
+        );
+        super::super::project_move::cmd_attach(app, "nonsense");
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(flash.contains(":attach tab NAME"), "{flash}");
+    });
+}
+
+/// Taking a released session's tabs: they join the project in view after its
+/// own, the pane gets the keys on the last, its claims come too, no project
+/// opens, and its file goes once this session is saved.
+#[test]
+fn taken_tabs_join_the_project_in_view_and_their_file_goes() {
+    with_two(|app, [x, _], homes, _| {
+        agent_tab_in(app, x, &homes[0], "claude");
+        let tab: crate::state::sessions::SavedTab = serde_json::from_value(serde_json::json!({
+            "command": "cat", "label": "moved-cat", "cwd": homes[1]
+        }))
+        .unwrap();
+        let mut project = app.closed_snapshot(x).project;
+        project.tabs = vec![tab];
+        let mut given = app.session_of(project, &std::collections::HashSet::new(), "GIVEN_TABS");
+        given.scope_claims.push(ScopeClaim {
+            id: 3,
+            owner: String::new(),
+            owner_label: "claude".into(),
+            paths: vec!["src/t.rs".into()],
+            intent: ScopeIntent::Editing,
+            pr: None,
+            note: None,
+            claimed_at_secs: 0,
+        });
+        crate::state::sessions::save_session_durably(&given).unwrap();
+        app.take_tabs("GIVEN_TABS", &given);
+        let flash = app.flash_text().unwrap_or_default().to_string();
+        assert!(
+            flash.contains("attached GIVEN_TABS's tabs: moved-cat"),
+            "{flash}"
+        );
+        assert_eq!(app.state.open_projects().count(), 2, "a project opened");
+        assert_eq!(app.state.active, x);
+        let tabs = app.runtime.project().pane_tabs.as_ref().unwrap();
+        let labels: Vec<&str> = tabs.tabs().iter().map(|e| e.info.label.as_str()).collect();
+        assert_eq!(labels, ["claude", "moved-cat"]);
+        assert_eq!(tabs.active_index(), 1);
+        assert!(app.state.pane_focused());
+        assert!(app.state.scope_registry.iter().any(|c| c.id == 3));
+        let names: Vec<String> = crate::state::sessions::load_manifests()
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        assert!(!names.contains(&"GIVEN_TABS".to_string()), "{names:?}");
+    });
+}

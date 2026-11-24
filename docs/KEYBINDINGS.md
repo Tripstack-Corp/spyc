@@ -126,10 +126,11 @@ file view.
 
 | Key | Action |
 |-----|--------|
-| `^\` / `F10` / `^a \` / `^a C` | Toggle pane |
+| `^\` / `F10` / `^a \` | Toggle pane |
 | `F9` | Open pane with `claude --resume` |
 | `^a j` / `^a k` | Switch focus |
-| `^a c` | New tab |
+| `^a c` | New tab: asks for the command, opens in the project home |
+| `^a C` | New tab: asks for the command, then the directory |
 | `^a n` / `^a ]` | Next tab |
 | `^a p` / `^a [` | Prev tab |
 | `^a K` / `^a x` | Close tab (confirms first while its child is still running) |
@@ -194,9 +195,8 @@ in place:
 - **`D`** opens the cursor file in the **top pane** (bottom pane
   stays visible alongside).
 - **`^a v`** mounts a frozen snapshot of pane scrollback in the
-  **bottom pane** (line numbers on by default, so it reads as
-  scrolled-back rather than live; `[pager] scrollback_line_numbers`
-  turns that default off). On an agent tab it shows the
+  **bottom pane** (line numbers off by default;
+  `[pager] scrollback_line_numbers` turns them on). On an agent tab it shows the
   agent's transcript instead whenever the terminal has nothing to
   show; `T` swaps between the two when both exist, `t` toggles
   tool-call lines, `r` reloads. Scrolling down past the end exits back
@@ -334,6 +334,8 @@ appear on the top bar and persist across `spyc -r`.
 | `:attach` | List the other sessions running, with their projects |
 | `:attach project NAME` | Bring session NAME's projects into this spyc, their tabs running on; that session ends |
 | `:detach project [NAME]` | Move the project in view, or the open one named, into a session of its own, its tabs running on; `spyc attach` reaches it by the name spyc shows |
+| `:attach tab NAME` | Bring session NAME's tabs into the project in view, their programs running on; that session ends |
+| `:detach tab [N]` | Move the active tab, or tab N, into a session of its own, its program running on; its project stays here |
 | `q` | Doesn't quit: flashes a hint instead, keeping the key for macro recording |
 | `gV` / `:version` | Show the spyc version |
 
@@ -346,10 +348,10 @@ global/workspace menu: `Space w l\|n\|d` (worktree list/new/delete),
 `W d` is a list-focus alias for the same worktree list / new / delete.
 
 `PROJECT_HOME` is auto-set on startup if the launch directory contains
-`.git`. New pane tabs default their cwd to the focused column's
-worktree/repo root (`gw`'s target); set `[pane] new_tab_cwd =
-"project_home"` to pin them to `PROJECT_HOME` instead, or `"browse_dir"`
-to open them in the current listing dir.
+`.git`. New pane tabs open in `PROJECT_HOME`, or the project's start dir
+when it has none; set `[pane] new_tab_cwd = "worktree_root"` to open them
+at the focused column's worktree/repo root (`gw`'s target) instead, or
+`"browse_dir"` to open them in the current listing dir.
 
 ## Display & config
 

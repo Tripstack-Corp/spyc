@@ -1,0 +1,544 @@
+diff --git a/tests/review_b_probes.rs b/tests/review_b_probes.rs
+new file mode 100644
+index 00000000..2c776edb
+--- /dev/null
++++ b/tests/review_b_probes.rs
+@@ -0,0 +1,538 @@
++//! Unit B (pre-3.0 review) probes: uncommitted evidence, not part of the suite.
++//! Run one at a time: cargo test --test review_b_probes -- --ignored --nocapture NAME
++//! Every jar lives in a fresh 0700 directory under /tmp and is ended, with its
++//! program's group, when the probe ends.
++
++use std::io::Write;
++use std::path::{Path, PathBuf};
++use std::process::{Child, Command, Stdio};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
++use std::time::{Duration, Instant};
++
++use spyc_jar::client::Client;
++use spyc_jar::proto::{Msg, Role};
++
++const TOKEN: &[u8] = b"review-b-token-0123456789";
++
++struct J {
++    _dir: tempfile::TempDir,
++    socket: PathBuf,
++    child: Child,
++}
++
++fn sock_dir() -> tempfile::TempDir {
++    use std::os::unix::fs::PermissionsExt;
++    tempfile::Builder::new()
++        .prefix("revb")
++        .permissions(std::fs::Permissions::from_mode(0o700))
++        .tempdir_in("/tmp")
++        .expect("tempdir")
++}
++
++fn jar(extra: &[&str], argv: &[&str], exit_linger: Option<Duration>) -> J {
++    let dir = sock_dir();
++    let socket = dir.path().join("j.sock");
++    let mut child = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
++        .args(["--wire", "1"])
++        .args(extra)
++        .stdin(Stdio::piped())
++        .stdout(Stdio::null())
++        .stderr(Stdio::null())
++        .spawn()
++        .expect("spawn jar");
++    let start = spyc_jar::cli::Start {
++        token: TOKEN.to_vec(),
++        socket: socket.clone(),
++        cwd: None,
++        rows: 24,
++        cols: 80,
++        hold: None,
++        exit_linger,
++        argv: argv.iter().map(|a| (*a).to_string()).collect(),
++    };
++    child.stdin.take().unwrap().write_all(&start.encode()).unwrap();
++    let until = Instant::now() + Duration::from_secs(10);
++    while !socket.exists() {
++        assert!(Instant::now() < until, "no socket");
++        std::thread::sleep(Duration::from_millis(10));
++    }
++    J { _dir: dir, socket, child }
++}
++
++fn field(socket: &Path, key: &str) -> String {
++    spyc_jar::client::describe(socket)
++        .map(|f| f.into_iter().find(|(k, _)| k == key).map(|(_, v)| v).unwrap_or_default())
++        .unwrap_or_default()
++}
++
++impl Drop for J {
++    fn drop(&mut self) {
++        if let Ok(pid) = field(&self.socket, "program_pid").parse::<i32>()
++            && let Some(p) = rustix::process::Pid::from_raw(pid)
++        {
++            let _ = rustix::process::kill_process_group(p, rustix::process::Signal::KILL);
++        }
++        let _ = self.child.kill();
++        let _ = self.child.wait();
++    }
++}
++
++fn owner(j: &J) -> Client {
++    Client::connect(&j.socket, Role::Owner, Duration::from_secs(10), TOKEN).expect("owner").0
++}
++
++/// H1: the program ends while a process it started keeps the PTY open. The jar
++/// records the exit at once, and describes it, but never tells its owner.
++#[test]
++#[ignore = "review probe"]
++fn h1_exit_with_a_descendant_holding_the_pty_reaches_the_owner() {
++    for (name, script) in [
++        ("hup-ignoring child", "(trap '' HUP; exec sleep 20) & echo bg-started; exit 3"),
++        ("job-control shell", "set -m; sleep 20 & echo bg-started; exit 3"),
++    ] {
++        let j = jar(&[], &["/bin/sh", "-c", script], None);
++        let mut o = owner(&j);
++        o.send(&Msg::Replay { from: 0 }).unwrap();
++        let t0 = Instant::now();
++        let mut described_at = None;
++        let mut exited_at = None;
++        while t0.elapsed() < Duration::from_secs(8) {
++            if let Ok(Some(m)) = o.recv(Duration::from_millis(100)) {
++                match m {
++                    Msg::Output { offset, bytes } => {
++                        let _ = o.send(&Msg::Ack { offset: offset + bytes.len() as u64 });
++                    }
++                    Msg::Exited { .. } => {
++                        exited_at.get_or_insert(t0.elapsed());
++                    }
++                    _ => {}
++                }
++            }
++            if described_at.is_none() && field(&j.socket, "exit") == "3" {
++                described_at = Some(t0.elapsed());
++            }
++            if exited_at.is_some() && described_at.is_some() {
++                break;
++            }
++        }
++        o.send(&Msg::Signal { signal: 3 }).unwrap();
++        let mut kill_answer = None;
++        let t1 = Instant::now();
++        while t1.elapsed() < Duration::from_secs(2) && kill_answer.is_none() {
++            if let Ok(Some(m @ Msg::Refused { .. })) = o.recv(Duration::from_millis(100)) {
++                kill_answer = Some(m);
++            }
++        }
++        println!(
++            "H1 [{name}]: describe exit=3 at {described_at:?}; owner heard exited at {exited_at:?} (waited 8 s); Signal(kill) after: {kill_answer:?}; jar alive: {}",
++            j.socket.exists()
++        );
++        assert!(described_at.is_some(), "premise: the program exited");
++        assert!(exited_at.is_some(), "[{name}] the jar recorded the exit but its owner never heard it");
++    }
++}
++
++/// V8: ten idle jars, five with an owner pinging every 2 s, five ownerless.
++/// Writes "jar_pid owned|ownerless" lines to $PROBE_OUT and holds them for
++/// $PROBE_SECS (default 40) while wakeups are counted outside.
++#[test]
++#[ignore = "review probe"]
++fn v8_idle_jars() {
++    let secs: u64 = std::env::var("PROBE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
++    let out = std::env::var("PROBE_OUT").unwrap_or_else(|_| "/dev/stdout".into());
++    let mut jars = Vec::new();
++    let mut owners = Vec::new();
++    let mut lines = String::new();
++    for i in 0..10 {
++        let j = jar(&[], &["/bin/sleep", "100000"], None);
++        let o = owner(&j);
++        if i < 5 {
++            let (mut rx, tx) = o.split_queued(Duration::from_secs(2), Duration::from_secs(20)).unwrap();
++            tx.send(&Msg::Replay { from: 0 }).unwrap();
++            let stop = Arc::new(AtomicBool::new(false));
++            let s2 = Arc::clone(&stop);
++            let tx2 = tx.clone();
++            let h = std::thread::spawn(move || {
++                while !s2.load(Ordering::SeqCst) {
++                    if let Ok(Some(Msg::Output { offset, bytes })) = rx.recv(Duration::from_secs(2)) {
++                        let _ = tx2.send(&Msg::Ack { offset: offset + bytes.len() as u64 });
++                    }
++                }
++            });
++            owners.push((stop, h, tx));
++            lines += &format!("{} owned\n", j.child.id());
++        } else {
++            o.drop_connection();
++            lines += &format!("{} ownerless\n", j.child.id());
++        }
++        jars.push(j);
++    }
++    std::fs::write(&out, &lines).unwrap();
++    std::thread::sleep(Duration::from_secs(secs));
++    for (stop, h, tx) in owners {
++        stop.store(true, Ordering::SeqCst);
++        tx.close();
++        let _ = h.join();
++    }
++}
++
++/// H4: throughput of 'yes' to an owner that acknowledges as it reads, and
++/// the owner's ping round trip, with 0 and then 5 readers, and while a new
++/// reader replays the whole ring.
++#[test]
++#[ignore = "review probe"]
++fn h4_throughput_and_latency() {
++    for readers in [0usize, 5] {
++        let j = jar(&[], &["yes", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"], None);
++        let stop = Arc::new(AtomicBool::new(false));
++        let mut hs = Vec::new();
++        let rbytes = Arc::new(AtomicU64::new(0));
++        for _ in 0..readers {
++            let (mut r, _) = Client::connect(&j.socket, Role::Reader, Duration::from_secs(5), TOKEN).unwrap();
++            r.send(&Msg::Replay { from: 0 }).unwrap();
++            let (s, rb) = (Arc::clone(&stop), Arc::clone(&rbytes));
++            hs.push(std::thread::spawn(move || {
++                while !s.load(Ordering::SeqCst) {
++                    match r.recv(Duration::from_millis(100)) {
++                        Ok(Some(Msg::Output { bytes, .. })) => {
++                            rb.fetch_add(bytes.len() as u64, Ordering::Relaxed);
++                        }
++                        Err(_) => break,
++                        _ => {}
++                    }
++                }
++            }));
++        }
++        let mut o = owner(&j);
++        o.send(&Msg::Replay { from: 0 }).unwrap();
++        let (bytes, rtts) = drive(&mut o, Duration::from_secs(4), None);
++        println!(
++            "H4 readers={readers}: owner {:.1} MB/s, readers total {:.1} MB/s, ping rtt ms {}",
++            bytes as f64 / 4e6,
++            rbytes.load(Ordering::Relaxed) as f64 / 4e6,
++            summary(&rtts)
++        );
++        // A late reader replaying the ring while the owner reads on.
++        let (mut late, _) = Client::connect(&j.socket, Role::Reader, Duration::from_secs(5), TOKEN).unwrap();
++        late.send(&Msg::Replay { from: 0 }).unwrap();
++        let lb = Arc::new(AtomicU64::new(0));
++        let (s, lb2) = (Arc::clone(&stop), Arc::clone(&lb));
++        hs.push(std::thread::spawn(move || {
++            while !s.load(Ordering::SeqCst) {
++                match late.recv(Duration::from_millis(100)) {
++                    Ok(Some(Msg::Output { bytes, .. })) => {
++                        lb2.fetch_add(bytes.len() as u64, Ordering::Relaxed);
++                    }
++                    Err(_) => break,
++                    _ => {}
++                }
++            }
++        }));
++        let (bytes, rtts) = drive(&mut o, Duration::from_secs(4), None);
++        println!(
++            "H4 readers={readers} + replaying reader: owner {:.1} MB/s, late reader got {:.1} MB, ping rtt ms {}",
++            bytes as f64 / 4e6,
++            lb.load(Ordering::Relaxed) as f64 / 1e6,
++            summary(&rtts)
++        );
++        stop.store(true, Ordering::SeqCst);
++        drop(o);
++        drop(j);
++        for h in hs {
++            let _ = h.join();
++        }
++    }
++}
++
++/// Read and acknowledge for 'for_', pinging every 50 ms: bytes read and each
++/// ping's round trip.
++fn drive(o: &mut Client, for_: Duration, _unused: Option<()>) -> (u64, Vec<Duration>) {
++    let t0 = Instant::now();
++    let mut bytes = 0u64;
++    let mut rtts = Vec::new();
++    let mut n = 1u64;
++    let mut sent: Option<(u64, Instant)> = None;
++    while t0.elapsed() < for_ {
++        if sent.is_none() {
++            o.send(&Msg::Ping { n }).unwrap();
++            sent = Some((n, Instant::now()));
++            n += 1;
++        }
++        match o.recv(Duration::from_millis(50)) {
++            Ok(Some(Msg::Output { offset, bytes: b })) => {
++                bytes += b.len() as u64;
++                o.send(&Msg::Ack { offset: offset + b.len() as u64 }).unwrap();
++            }
++            Ok(Some(Msg::Pong { n: got })) => {
++                if let Some((want, at)) = sent
++                    && want == got
++                {
++                    rtts.push(at.elapsed());
++                    sent = None;
++                }
++            }
++            Ok(_) => {}
++            Err(e) => panic!("owner lost: {e:#}"),
++        }
++    }
++    (bytes, rtts)
++}
++
++fn summary(v: &[Duration]) -> String {
++    if v.is_empty() {
++        return "none".into();
++    }
++    let mut ms: Vec<f64> = v.iter().map(|d| d.as_secs_f64() * 1e3).collect();
++    ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
++    let p = |q: f64| ms[((ms.len() - 1) as f64 * q) as usize];
++    format!("n={} p50={:.1} p99={:.1} max={:.1}", ms.len(), p(0.5), p(0.99), ms[ms.len() - 1])
++}
++
++/// Resource hygiene: the ring's cap counts payload bytes only. A program that
++/// prints a byte at a time fills it with one event per byte.
++#[test]
++#[ignore = "review probe"]
++fn ring_memory_with_one_byte_events() {
++    let rss = |pid: u32| -> u64 {
++        let out = Command::new("ps").args(["-o", "rss=", "-p", &pid.to_string()]).output().unwrap();
++        String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
++    };
++    let held = |s: &Path| -> u64 {
++        field(s, "log").split(' ').next().and_then(|n| n.parse().ok()).unwrap_or(0)
++    };
++    let cap: u64 = 1 << 20;
++    for (name, argv) in [
++        ("large writes", vec!["/bin/sh", "-c", "yes | head -c 3000000; exec sleep 1000"]),
++        (
++            "one byte per write",
++            vec![
++                "/usr/bin/env",
++                "python3",
++                "-c",
++                "import os,time\nfor i in range(3000000):\n os.write(1,b'x')\n if i % 64 == 0: time.sleep(0.0002)\ntime.sleep(1000)",
++            ],
++        ),
++    ] {
++        let ring = cap.to_string();
++        let j = jar(&["--ring", &ring, "--window", "65536"], &argv, None);
++        let base = rss(j.child.id());
++        let t0 = Instant::now();
++        while held(&j.socket) < cap * 99 / 100 && t0.elapsed() < Duration::from_secs(240) {
++            std::thread::sleep(Duration::from_millis(500));
++        }
++        println!(
++            "RING [{name}]: ring {cap} B, held {} B after {:?}; jar RSS {} KiB at start, {} KiB now; log: {}",
++            held(&j.socket),
++            t0.elapsed(),
++            base,
++            rss(j.child.id()),
++            field(&j.socket, "log")
++        );
++    }
++}
++
++/// How long a new owner waits between its Replay and the first byte of a log
++/// that is already full: a wake lost between the writer's look at its cursor
++/// and its wait costs it the writer's 500 ms tick.
++#[test]
++#[ignore = "review probe"]
++fn replay_to_first_output_latency() {
++    let j = jar(&[], &["/bin/sh", "-c", "echo ready; exec sleep 1000"], None);
++    let mut lat = Vec::new();
++    for _ in 0..200 {
++        let mut o = owner(&j);
++        let t = Instant::now();
++        o.send(&Msg::Replay { from: 0 }).unwrap();
++        loop {
++            if let Ok(Some(Msg::Output { .. })) = o.recv(Duration::from_secs(2)) {
++                lat.push(t.elapsed());
++                break;
++            }
++            assert!(t.elapsed() < Duration::from_secs(3), "no output");
++        }
++        o.drop_connection();
++        let until = Instant::now() + Duration::from_secs(5);
++        while !field(&j.socket, "owner").starts_with("none") && Instant::now() < until {
++            std::thread::sleep(Duration::from_millis(5));
++        }
++    }
++    let slow = lat.iter().filter(|d| **d > Duration::from_millis(400)).count();
++    println!("REPLAY latency over {} owners: {} ; over 400 ms: {slow}", lat.len(), summary(&lat));
++}
++
++
++/// A recv blocked on an idle jar connection, while this process is stopped
++/// and continued from outside (as a shell's ^Z / fg would). On Linux a socket
++/// read with SO_RCVTIMEO fails with EINTR after SIGCONT even with no handler.
++#[test]
++#[ignore = "review probe"]
++fn eintr_after_stop_and_continue() {
++    let j = jar(&[], &["/bin/cat"], None);
++    let mut o = owner(&j);
++    let me = std::process::id();
++    let h = std::thread::spawn(move || {
++        let t = Instant::now();
++        let r = o.recv(Duration::from_secs(6));
++        (t.elapsed(), format!("{r:?}"))
++    });
++    let _ = Command::new("/bin/sh")
++        .args(["-c", &format!("sleep 1; kill -STOP {me}; sleep 0.5; kill -CONT {me}")])
++        .spawn()
++        .unwrap();
++    let (took, r) = h.join().unwrap();
++    println!("EINTR-STOP: recv returned after {took:?}: {r}");
++}
++
++extern "C" fn noop(_: libc::c_int) {}
++
++/// A recv blocked on an idle jar connection gets a handled signal (SIGWINCH,
++/// SA_RESTART, as spyc's terminal handling installs) on its own thread.
++#[test]
++#[ignore = "review probe"]
++fn eintr_on_a_handled_signal() {
++    use std::os::unix::thread::JoinHandleExt;
++    // SAFETY: a review probe; the handler does nothing and is async-signal-safe.
++    unsafe {
++        let mut sa: libc::sigaction = std::mem::zeroed();
++        sa.sa_sigaction = noop as *const () as usize;
++        sa.sa_flags = libc::SA_RESTART;
++        libc::sigaction(libc::SIGWINCH, &sa, std::ptr::null_mut());
++    }
++    let j = jar(&[], &["/bin/cat"], None);
++    let mut o = owner(&j);
++    let h = std::thread::spawn(move || {
++        let t = Instant::now();
++        let r = o.recv(Duration::from_secs(4));
++        (t.elapsed(), format!("{r:?}"))
++    });
++    std::thread::sleep(Duration::from_millis(500));
++    // SAFETY: the thread is alive (joined below).
++    unsafe {
++        libc::pthread_kill(h.as_pthread_t() as libc::pthread_t, libc::SIGWINCH);
++    }
++    let (took, r) = h.join().unwrap();
++    println!("EINTR-WINCH: recv returned after {took:?}: {r}");
++}
++
++/// The count across an upgrade, many times over, dumping the text around any
++/// break: is a line lost, or garbled?
++#[test]
++#[ignore = "review probe"]
++fn upgrade_count_diag() {
++    let rounds: usize = std::env::var("DIAG_ROUNDS").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
++    let par: usize = std::env::var("DIAG_PAR").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
++    let out = std::env::var("DIAG_OUT").unwrap_or_else(|_| "/dev/stdout".into());
++    let hs: Vec<_> = (0..par)
++        .map(|w| {
++            let out = out.clone();
++            std::thread::spawn(move || {
++                let mut breaks = 0;
++                for r in 0..rounds {
++                    if let Some(d) = one_upgrade_round() {
++                        breaks += 1;
++                        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(&out).unwrap();
++                        let _ = writeln!(f, "worker {w} round {r}: {d}");
++                    }
++                }
++                breaks
++            })
++        })
++        .collect();
++    let breaks: usize = hs.into_iter().map(|h| h.join().unwrap_or(1000)).sum();
++    println!("DIAG: {breaks} broken counts in {} rounds", rounds * par);
++}
++
++fn one_upgrade_round() -> Option<String> {
++    let counter = "(i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.005; done) & while read l; do echo got=$l; done";
++    let j = jar(&[], &["/bin/sh", "-c", counter], None);
++    let mut o = owner(&j);
++    let (mut rd, _) = Client::connect(&j.socket, Role::Reader, Duration::from_secs(10), TOKEN).expect("reader");
++    rd.send(&Msg::Replay { from: 0 }).unwrap();
++    let rstop = Arc::new(AtomicBool::new(false));
++    let rs = Arc::clone(&rstop);
++    let rh = std::thread::spawn(move || {
++        while !rs.load(Ordering::SeqCst) {
++            if rd.recv(Duration::from_millis(200)).is_err() {
++                break;
++            }
++        }
++    });
++    let _reader = scopeguard_stop(rstop, rh);
++    o.send(&Msg::Replay { from: 0 }).unwrap();
++    let next = j.socket.parent().unwrap().join("jar-next");
++    std::fs::copy(env!("CARGO_BIN_EXE_spyc-jar"), &next).unwrap();
++    let mut text: Vec<u8> = Vec::new();
++    let mut marks: Vec<(usize, String)> = Vec::new();
++    let mut next_off: Option<u64> = None;
++    let t0 = Instant::now();
++    let mut asked = false;
++    let mut upgraded = false;
++    let mut typed = false;
++    while t0.elapsed() < Duration::from_secs(60) {
++        let Ok(m) = o.recv(Duration::from_millis(200)) else {
++            return Some("connection lost".into());
++        };
++        let Some(m) = m else { continue };
++        match m {
++            Msg::Output { offset, bytes } => {
++                if let Some(n) = next_off
++                    && n != offset
++                {
++                    return Some(format!("offset jump {n} -> {offset}"));
++                }
++                next_off = Some(offset + bytes.len() as u64);
++                text.extend_from_slice(&bytes);
++                let _ = o.send(&Msg::Ack { offset: offset + bytes.len() as u64 });
++            }
++            other => marks.push((text.len(), format!("{other:?} at {:?}", t0.elapsed()))),
++        }
++        let s = String::from_utf8_lossy(&text);
++        let counts: Vec<u64> = s.lines().filter_map(|l| l.trim().strip_prefix("n=")?.parse().ok()).collect();
++        if !asked && counts.last().is_some_and(|n| *n >= 30) {
++            marks.push((text.len(), format!("asked upgrade at {:?}", t0.elapsed())));
++            o.send(&Msg::Upgrade { binary: next.display().to_string() }).unwrap();
++            asked = true;
++        }
++        if asked && !upgraded && marks.iter().any(|(_, k)| k.starts_with("Upgraded")) {
++            upgraded = true;
++        }
++        if upgraded && !typed {
++            marks.push((text.len(), format!("typed after at {:?}", t0.elapsed())));
++            o.send(&Msg::Input { bytes: b"after\n".to_vec() }).unwrap();
++            typed = true;
++        }
++        if typed && s.contains("got=after") && counts.last().is_some_and(|n| *n >= 120) {
++            for w in counts.windows(2) {
++                if w[1] != w[0] + 1 {
++                    let needle = format!("n={}", w[0]);
++                    let at = s.find(&needle).unwrap_or(0);
++                    let lo = at.saturating_sub(40);
++                    let hi = (at + 160).min(s.len());
++                    return Some(format!(
++                        "count {} then {}: text {:?}; marks {:?}",
++                        w[0],
++                        w[1],
++                        &s[lo..hi],
++                        marks.iter().map(|(p, k)| format!("@{p}:{k}")).collect::<Vec<_>>()
++                    ));
++                }
++            }
++            return None;
++        }
++    }
++    Some(format!("timed out; marks {marks:?}"))
++}
++
++struct StopOnDrop(Arc<AtomicBool>, Option<std::thread::JoinHandle<()>>);
++impl Drop for StopOnDrop {
++    fn drop(&mut self) {
++        self.0.store(true, Ordering::SeqCst);
++        if let Some(h) = self.1.take() {
++            let _ = h.join();
++        }
++    }
++}
++fn scopeguard_stop(a: Arc<AtomicBool>, h: std::thread::JoinHandle<()>) -> StopOnDrop {
++    StopOnDrop(a, Some(h))
++}

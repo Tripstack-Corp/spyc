@@ -325,6 +325,7 @@ impl App {
         let vsplit = self.saved_vsplit();
         let pane_focused = self.state.pane_focused();
         let left_cwd = self.state.col(Side::Left).listing.dir.clone();
+        let left_column = self.state.saved_column(Side::Left);
         let project = self.state.active_project();
         SavedProject {
             id: project.id,
@@ -333,6 +334,7 @@ impl App {
             start_dir: project.start_dir.clone(),
             left_cwd: Some(left_cwd),
             vsplit,
+            left_column,
             pane_height_pct: project.pane.pane_height_pct,
             pane_focused,
             tabs,
@@ -449,6 +451,7 @@ impl App {
                 .state
                 .get_col(Side::Right)
                 .map(|c| c.listing.dir.clone()),
+            right_column: self.state.saved_column(Side::Right),
         })
     }
 
@@ -572,9 +575,11 @@ impl App {
             matches!(v.focus, Side::Right).hash(h);
         }
         self.state.col(Side::Left).listing.dir.hash(h);
+        self.state.hash_column(Side::Left, h);
         if let Some(c) = self.state.get_col(Side::Right) {
             c.listing.dir.hash(h);
         }
+        self.state.hash_column(Side::Right, h);
         project.pane.agent_hud.choice.hash(h);
     }
 

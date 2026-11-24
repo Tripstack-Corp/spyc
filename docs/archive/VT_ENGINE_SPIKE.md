@@ -1385,3 +1385,46 @@ shortfall on 4 KiB pages is 52 rows (0.5% of the budget), and it's transient:
 fed, 9,820 at 30,000 and 9,900 at 60,000, identically at both pins and in three
 runs each. The gate's 15,000-row feed stops while the buffer is still filling.
 Deriving `BYTES_PER_ROW_HEAVY` per page size stays open in #1147.
+
+# Addendum — 2026-11-23: the scrollback floor tested the wrong thing (#1147)
+
+The heavy-content shortfall above isn't Linux's, and the byte limit didn't
+cause it.
+
+- **It follows the build target, not the machine.** ghostty rounds each page's
+  size up to `std.heap.page_size_min`, which Zig fixes when it compiles for a
+  target: 16 KiB for `aarch64-apple-darwin`, 4 KiB for `x86_64-apple-darwin`
+  and both Linux targets. The `x86_64-apple-darwin` build, run under Rosetta on
+  the same Mac, prints exactly the Linux figures: heavy 9,508, plain 9,820,
+  pathological 1,112. The Intel half of the macOS universal binary is one of
+  the 4 KiB targets.
+- **The byte limit never bound.** With no byte limit at all (`SIZE_MAX`), each
+  target keeps the same rows as at the shipped ceiling, at every point of a
+  60,000-row feed. What moves the count is the line limit: past the budget,
+  ghostty drops whole pages, so the count saws between the budget and up to
+  586 rows under it, more than the 440 rows (400 KiB at 929 B/row) the floor
+  allowed for a page.
+- **Every target dips under the 9,560 floor somewhere.** Sampled every 250 rows
+  up to 60,000, the lowest counts past the budget:
+
+| target | plain | heavy |
+|---|---|---|
+| `aarch64-apple-darwin` | 9,413 | 9,449 |
+| `x86_64-apple-darwin`, under Rosetta | 9,429 | 9,458 |
+| `aarch64-unknown-linux-musl`, podman, page size 4,096 | 9,429 | 9,458 |
+
+The gate's one sample, at 15,000 rows fed, landed high on arm64 macOS and low
+on the others.
+
+**`sbprobe`'s first assertion now checks the rule itself.** It feeds 60,000
+rows, 250 at a time. After every step, the rows kept at the shipped ceiling must
+equal the rows kept with no byte limit. All three targets pass, for plain and
+heavy content.
+It fails when the ceiling is too low: with `BYTES_PER_ROW_HEAVY` set to 600,
+the `x86_64-apple-darwin` build prints "heavy BOUND at 9500 rows fed: 8904
+kept, 9477 with no byte limit" and exits 1. At 700 it still passes, so the
+shipped 929 has room on 4 KiB targets too. `sbprobe` now exits 1 when either
+assertion fails.
+
+The Linux waiver above is withdrawn, because nothing was short.
+`BYTES_PER_ROW_HEAVY` needs no separate value per page size.

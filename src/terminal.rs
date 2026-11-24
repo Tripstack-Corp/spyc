@@ -476,6 +476,62 @@ fn push_keyboard_enhancement(probe: bool) {
     }
 }
 
+/// Whether spyc's process group holds the terminal's foreground, so it may
+/// set the terminal's modes and draw: not while a shell has it after an
+/// outside stop, which hands it back with `fg`.
+pub fn owns_foreground() -> bool {
+    let Ok(tty) = crossterm_tty() else {
+        return false;
+    };
+    rustix::termios::tcgetpgrp(&tty).is_ok_and(|pgrp| pgrp == rustix::process::getpgrp())
+}
+
+/// The terminal crossterm drives: standard input when it is one, else
+/// `/dev/tty`.
+fn crossterm_tty() -> io::Result<std::os::fd::OwnedFd> {
+    use std::os::fd::AsFd;
+    let stdin = rustix::stdio::stdin();
+    if rustix::termios::isatty(stdin) {
+        return stdin.as_fd().try_clone_to_owned();
+    }
+    Ok(std::fs::File::open("/dev/tty")?.into())
+}
+
+/// Take the terminal back after spyc was stopped from outside and continued
+/// (`kill -STOP`, then the shell's `fg`). While spyc was stopped the shell
+/// put the terminal in its own line mode, drew its own lines over spyc's
+/// screen, and may have turned bracketed paste or the kitty keyboard flags
+/// off: set them again, then repaint in full. crossterm's `enable_raw_mode`
+/// does nothing while it believes raw mode is on, so raw mode is turned off
+/// and on again. The kitty flag is popped before it is pushed, so the stack
+/// holds one of spyc's whatever the shell did to it. Mouse reporting and key
+/// event types come back through their reconciles.
+pub fn continued(terminal: &mut Tui) -> Result<()> {
+    disable_raw_mode()?;
+    enable_raw_mode()?;
+    MOUSE_CAPTURE_ON.store(false, Ordering::Relaxed);
+    KEY_EVENT_TYPES_ON.store(false, Ordering::Relaxed);
+    let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        Clear(ClearType::All),
+        MoveTo(0, 0),
+        EnableBracketedPaste,
+        DisableWheelReporting,
+        EnableAlternateScroll
+    )?;
+    if KEYBOARD_ENHANCEMENT_SUPPORTED.load(Ordering::Relaxed) {
+        let _ = execute!(
+            terminal.backend_mut(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
+    terminal.hide_cursor()?;
+    force_full_repaint(terminal)?;
+    Ok(())
+}
+
 /// A terminal attached to spyc's own jar (`pane::jar::session`). It may be
 /// another emulator than the last, at another size, with another keyboard and
 /// image protocol: set every mode again, probe it and repaint in full, as

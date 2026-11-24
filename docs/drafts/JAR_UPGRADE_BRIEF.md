@@ -5,6 +5,8 @@
 (`JAR_PROTOCOL.md`, decisions L and M). Read "Upgrading: where each check
 runs" there and "The upgrade step" in the plan first; this brief says what to
 build and in what order, not why.
+**Status:** built; version 1 froze again on 2026-11-24 (`JAR_PROTOCOL.md`,
+decision N).
 **Checked against:** `main` at `be018db6`. Line numbers are that commit's;
 the jar session's `jar/s2a-spawn` branch isn't on `main` and wasn't read
 except where it says so.

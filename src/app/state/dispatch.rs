@@ -328,16 +328,22 @@ impl AppState {
                 }
                 PromptResult::Handled
             }
-            PromptKind::PaneNewTabCmd => {
+            PromptKind::PaneNewTabCmd { ask_cwd } => {
                 let cmd = buffer.trim().to_string();
                 if cmd.is_empty() {
                     return PromptResult::Handled;
                 }
                 self.pending_new_tab_cmd = Some(cmd);
-                // Pre-fill the same cwd the bare-spawn path would use, so the
-                // prompted (`^a c`) and unprompted spawns agree — PROJECT_HOME
-                // by default, the browse dir under `[pane] new_tab_cwd`.
-                let cwd_default = self.default_pane_cwd().display().to_string();
+                // `^a c`: the App starts the tab in `[pane] new_tab_cwd`.
+                if !*ask_cwd {
+                    return PromptResult::NotHandled;
+                }
+                // `^a C` is for somewhere other than `^a c`'s directory, so it
+                // offers the focused column's worktree root (`gw`'s target).
+                let cwd_default = self
+                    .pane_cwd_for(crate::config::NewTabCwd::WorktreeRoot)
+                    .display()
+                    .to_string();
                 let mut p = Prompt::shell(PromptKind::PaneNewTabCwd, "pane cwd: ");
                 p.buffer.clone_from(&cwd_default);
                 if let Some(ed) = p.editor.as_mut() {
