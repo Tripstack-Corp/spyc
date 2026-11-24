@@ -461,8 +461,8 @@ pub(super) fn scrollback_numbered(app: &App) -> Option<bool> {
 }
 
 /// **`[pager] scrollback_line_numbers` decides whether `^a v` opens with line
-/// numbers.** Default on; `false` opens the scrollback without the gutter. `l`
-/// still shows them in the open view, and the next `^a v` opens at the
+/// numbers.** Default off; `true` opens the scrollback with the gutter. `l`
+/// still hides them in the open view, and the next `^a v` opens at the
 /// config's default again.
 #[test]
 fn scrollback_line_numbers_follow_the_pager_config() {
@@ -475,31 +475,31 @@ fn scrollback_line_numbers_follow_the_pager_config() {
 
         app.open_pane_scroll_pager();
         app.mount_terminal_scrollback();
-        assert_eq!(scrollback_numbered(&app), Some(true), "on by default");
+        assert_eq!(scrollback_numbered(&app), Some(false), "off by default");
 
         app.view.project_mut().scroll_pager = None;
         app.state
             .active_project_mut()
             .config
             .pager
-            .scrollback_line_numbers = false;
+            .scrollback_line_numbers = true;
         app.open_pane_scroll_pager();
         app.mount_terminal_scrollback();
         assert_eq!(
             scrollback_numbered(&app),
-            Some(false),
-            "off when the config says so"
+            Some(true),
+            "on when the config says so"
         );
 
         app.handle_key(key('l')).unwrap();
-        assert_eq!(scrollback_numbered(&app), Some(true), "`l` shows them");
+        assert_eq!(scrollback_numbered(&app), Some(false), "`l` hides them");
 
         app.view.project_mut().scroll_pager = None;
         app.open_pane_scroll_pager();
         app.mount_terminal_scrollback();
         assert_eq!(
             scrollback_numbered(&app),
-            Some(false),
+            Some(true),
             "a fresh `^a v` opens at the config's default, not the last toggle"
         );
     });
@@ -518,7 +518,7 @@ fn a_streamed_transcript_scrollback_follows_the_pager_config() {
             .active_project_mut()
             .config
             .pager
-            .scrollback_line_numbers = false;
+            .scrollback_line_numbers = true;
         let wake = app.make_pane_wake();
         let pane =
             crate::pane::Pane::spawn("cat", 24, 80, &dir, &app.view.project().context_path, wake)
@@ -535,7 +535,7 @@ fn a_streamed_transcript_scrollback_follows_the_pager_config() {
             .as_ref()
             .expect("an agent with no capture mounts its transcript");
         assert!(view.streaming, "the transcript is the streamed mount");
-        assert!(!view.show_line_numbers, "and it opens without line numbers");
+        assert!(view.show_line_numbers, "and it opens with line numbers");
     });
 }
 

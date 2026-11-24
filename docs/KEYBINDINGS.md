@@ -195,9 +195,8 @@ in place:
 - **`D`** opens the cursor file in the **top pane** (bottom pane
   stays visible alongside).
 - **`^a v`** mounts a frozen snapshot of pane scrollback in the
-  **bottom pane** (line numbers on by default, so it reads as
-  scrolled-back rather than live; `[pager] scrollback_line_numbers`
-  turns that default off). On an agent tab it shows the
+  **bottom pane** (line numbers off by default;
+  `[pager] scrollback_line_numbers` turns them on). On an agent tab it shows the
   agent's transcript instead whenever the terminal has nothing to
   show; `T` swaps between the two when both exist, `t` toggles
   tool-call lines, `r` reloads. Scrolling down past the end exits back

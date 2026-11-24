@@ -23,6 +23,7 @@ pub mod archive;
 mod clipboard;
 mod config;
 mod context;
+mod crash_report;
 mod debug_log;
 mod envset;
 mod fs;
@@ -382,11 +383,7 @@ fn install_panic_hook() {
             note_worker_panic(
                 std::thread::current().name(),
                 info.location().map(ToString::to_string),
-                info.payload()
-                    .downcast_ref::<&str>()
-                    .copied()
-                    .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str))
-                    .unwrap_or("a panic with no message"),
+                crash_report::panic_message(info),
             );
         }
 
@@ -401,6 +398,7 @@ fn install_panic_hook() {
         // printed now, it would draw over the TUI still running.
         if ends_the_tui {
             default_hook(info);
+            crash_report::report(info);
         }
     }));
 }

@@ -860,6 +860,101 @@ fn agy_wiring_wraps_the_users_statusline_and_gives_it_back() {
 }
 
 #[test]
+fn agy_wiring_replaces_agys_empty_statusline_placeholder() {
+    let s = Sandbox::new();
+    let settings = s.home(".gemini/antigravity-cli/settings.json");
+    let placeholder = serde_json::to_string_pretty(&serde_json::json!({
+        "statusLine": { "type": "", "command": "", "enabled": true }
+    }))
+    .unwrap()
+        + "\n";
+    s.put(&settings, &placeholder);
+    assert_eq!(
+        status(AgentKind::Agy, &s.env).unwrap().statusline,
+        Some((Part::Absent, settings.clone())),
+        "agy's default empty placeholder must read as Absent, not Current"
+    );
+    let installed = install(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(
+        installed.statusline,
+        Some((Part::Current, settings.clone()))
+    );
+    let v = json(&settings);
+    assert_eq!(v["statusLine"]["type"], "command");
+    assert_eq!(v["statusLine"]["enabled"], true);
+    assert_eq!(v["statusLine"]["stack_with_default"], true);
+    assert_eq!(
+        super::statusline::unwrap(v["statusLine"]["command"].as_str().unwrap()),
+        Some(super::statusline::Wrapped::Nothing)
+    );
+
+    // An explicit stack_with_default: false stays Current on later startup passes.
+    let mut opted_out = v;
+    opted_out["statusLine"]["stack_with_default"] = serde_json::json!(false);
+    s.put(
+        &settings,
+        &(serde_json::to_string_pretty(&opted_out).unwrap() + "\n"),
+    );
+    assert_eq!(
+        status(AgentKind::Agy, &s.env).unwrap().statusline,
+        Some((Part::Current, settings))
+    );
+}
+
+#[test]
+fn agy_wiring_respects_disabled_statusline() {
+    let s = Sandbox::new();
+    let settings = s.home(".gemini/antigravity-cli/settings.json");
+    let disabled = serde_json::to_string_pretty(&serde_json::json!({
+        "statusLine": { "type": "", "command": "", "enabled": false }
+    }))
+    .unwrap()
+        + "\n";
+    s.put(&settings, &disabled);
+    let st = status(AgentKind::Agy, &s.env).unwrap();
+    assert!(
+        matches!(st.statusline, Some((Part::Blocked(_), ref p)) if p == &settings),
+        "{st:?}"
+    );
+    let installed = install(AgentKind::Agy, &s.env).unwrap();
+    assert!(
+        matches!(installed.statusline, Some((Part::Blocked(_), ref p)) if p == &settings),
+        "{installed:?}"
+    );
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), disabled);
+    let removed = remove(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(removed.statusline, Some((Part::Absent, settings.clone())));
+    assert_eq!(std::fs::read_to_string(&settings).unwrap(), disabled);
+
+    // When spyc's wrapper is already installed and the user later flips
+    // enabled: false, status warns via a note and remove still unwraps it.
+    let mut active = json(&settings);
+    active["statusLine"]["enabled"] = serde_json::json!(true);
+    s.put(
+        &settings,
+        &(serde_json::to_string_pretty(&active).unwrap() + "\n"),
+    );
+    assert_eq!(
+        install(AgentKind::Agy, &s.env).unwrap().statusline,
+        Some((Part::Current, settings.clone()))
+    );
+    let mut later_disabled = json(&settings);
+    later_disabled["statusLine"]["enabled"] = serde_json::json!(false);
+    s.put(
+        &settings,
+        &(serde_json::to_string_pretty(&later_disabled).unwrap() + "\n"),
+    );
+    let st = status(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(st.statusline, Some((Part::Current, settings.clone())));
+    assert!(
+        st.notes.iter().any(|n| n.contains("statusLine.enabled")),
+        "{st:?}"
+    );
+    let after_remove = remove(AgentKind::Agy, &s.env).unwrap();
+    assert_eq!(after_remove.statusline, Some((Part::Absent, settings)));
+}
+
+#[test]
 fn agy_wiring_leaves_unparseable_settings_alone_as_refused() {
     let s = Sandbox::new();
     let settings = s.home(".gemini/antigravity-cli/settings.json");
