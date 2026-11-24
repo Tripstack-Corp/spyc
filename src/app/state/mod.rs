@@ -816,7 +816,7 @@ pub(super) fn format_age(epoch: u64) -> String {
         // to format Y-m-d in local TZ.
         match jiff::Timestamp::from_second(epoch as i64) {
             Ok(ts) => ts
-                .to_zoned(jiff::tz::TimeZone::system())
+                .to_zoned_datetime(jiff::tz::TimeZone::system())
                 .strftime("%Y-%m-%d")
                 .to_string(),
             Err(_) => "long ago".to_string(),

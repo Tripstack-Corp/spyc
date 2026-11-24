@@ -285,7 +285,7 @@ fn write_report(snapshot: &Snapshot) -> Option<PathBuf> {
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
     builder.create(&dir).ok()?;
     let stamp = jiff::Timestamp::now()
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .strftime("%Y%m%dT%H%M%SZ")
         .to_string();
     let name = format!("crash/{stamp}-{}.txt", std::process::id());

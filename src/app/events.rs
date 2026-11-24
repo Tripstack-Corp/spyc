@@ -75,7 +75,9 @@ impl App {
         if pending.is_empty() {
             return false;
         }
-        let at = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S").to_string();
+        let at = jiff::ZonedDateTime::now()
+            .strftime("%Y-%m-%d %H:%M:%S")
+            .to_string();
         let stamped: Vec<Event> = pending
             .into_iter()
             .map(|(kind, text)| Event {
