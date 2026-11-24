@@ -9,8 +9,9 @@
 //!
 //! On macOS std sets `SO_NOSIGPIPE` on every socket it makes but a
 //! socketpair, and an accepted connection inherits it from the listener; the
-//! jar sets it on each socketpair it writes. On Linux std's `write` carries
-//! `MSG_NOSIGNAL`, and `rustix`'s `sendmsg` carries what it is given.
+//! jar's socketpairs come from `jar::pair`, which sets it. On Linux std's
+//! `write` carries `MSG_NOSIGNAL`, and the jar's `sendmsg` calls carry it as
+//! `jar::NO_SIGNAL` (SPYC-TRAP `jar-no-sigpipe`).
 
 use super::*;
 
@@ -60,6 +61,44 @@ fn script(jar: &Jar, name: &str, arm: &str) -> PathBuf {
     path
 }
 
+/// Review finding F7: after a failed `exec`, a validator that goes without
+/// reading the blob leaves the jar's write of it answering `EPIPE`, and the
+/// jar refuses the upgrade (reason 6) and runs on. The blob carries the
+/// program's 2 MB of output, far more than a socket holds, so the write is
+/// still waiting when the validator goes. On macOS it is the socketpair's
+/// `SO_NOSIGPIPE` that keeps the jar alive (SPYC-TRAP `jar-no-sigpipe`).
+#[test]
+fn a_validator_gone_mid_blob_does_not_end_a_jar_whose_exec_failed() {
+    let mut jar = Jar::start(&[], &sh("head -c 2000000 /dev/zero | tr '\\0' a; cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    read_until(&mut owner, true, |s| s.text.len() >= 2_000_000);
+    fail_an_exec(&jar, &mut owner);
+    let gone = script(&jar, "jar-gone", "validate-handover) exit 1 ;;");
+    owner
+        .send(&Msg::Upgrade {
+            binary: gone.display().to_string(),
+        })
+        .expect("upgrade");
+    // The jar ending as it writes to the validator that has gone ends the
+    // owner's connection: `recv` fails.
+    let answer = upgrade_answer_pinging(&mut owner, |m| {
+        matches!(m, Msg::Refused { .. } | Msg::Upgraded { .. })
+    });
+    assert!(
+        matches!(
+            answer,
+            Msg::Refused {
+                reason: spyc_jar::proto::reason::UPGRADE_REJECTED,
+                ..
+            }
+        ),
+        "{answer:?}"
+    );
+    owner.send(&Msg::Ping { n: 4 }).expect("ping");
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 4 }));
+}
+
 /// The holder of an upgrade after a failed `exec` has gone before the jar's
 /// handshake with it: the handshake answers `EPIPE`, the upgrade fails
 /// (reason 7) and the jar runs on. It was killed by `SIGPIPE`, since the
@@ -70,7 +109,6 @@ fn script(jar: &Jar, name: &str, arm: &str) -> PathBuf {
 /// holder has gone.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "red until A1 is fixed (fix/jar-sigpipe)"]
 fn a_holder_gone_before_its_handshake_does_not_end_a_jar_whose_exec_failed() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);

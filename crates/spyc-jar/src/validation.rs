@@ -8,7 +8,6 @@
 
 use std::io::{BufRead, Read, Write};
 use std::os::fd::OwnedFd;
-use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -75,8 +74,7 @@ pub fn validate(
 ) -> Result<(), (u16, anyhow::Error)> {
     let busy = |e: anyhow::Error| (reason::UPGRADE_BUSY, e);
     let rejected = |e: anyhow::Error| (reason::UPGRADE_REJECTED, e);
-    let (ours, theirs) = UnixStream::pair().context("socketpair").map_err(busy)?;
-    crate::jar::no_sigpipe(&ours);
+    let (ours, theirs) = crate::jar::pair().context("socketpair").map_err(busy)?;
     let mut child = Command::new(binary)
         .arg("validate-handover")
         .process_group(0)

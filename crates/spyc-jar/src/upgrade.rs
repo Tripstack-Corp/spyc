@@ -52,7 +52,7 @@ use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow, bail};
-use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags};
+use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage};
 
 use crate::handover;
 use crate::jar::{Conn, Shared, Who};
@@ -268,7 +268,7 @@ fn try_run(
 
     // No descriptor for these is the machine's for now (review finding A2).
     let (blob_read, blob_write) = pipe().map_err(busy)?;
-    let (to_image, image_stdin) = UnixStream::pair().context("socketpair").map_err(busy)?;
+    let (to_image, image_stdin) = crate::jar::pair().context("socketpair").map_err(busy)?;
     // Held across the handover: the holder and the new image take this
     // listener, and no connection may be accepted in between.
     let listener = shared
@@ -295,7 +295,7 @@ fn try_run(
     }
     let pid = holder.id().to_be_bytes();
     let iov = [IoSlice::new(FDS_TAG), IoSlice::new(&pid)];
-    if let Err(e) = rustix::net::sendmsg(&to_image, &iov, &mut control, SendFlags::empty()) {
+    if let Err(e) = rustix::net::sendmsg(&to_image, &iov, &mut control, crate::jar::NO_SIGNAL) {
         end_group(&mut holder);
         return Err(failed(anyhow!("send the descriptors: {e}")));
     }
@@ -470,10 +470,9 @@ fn hold(
             e.context(format!("{} didn't hold the handover", binary.display())),
         )
     };
-    let (ours, theirs) = UnixStream::pair()
+    let (ours, theirs) = crate::jar::pair()
         .context("socketpair")
         .map_err(|e| (reason::UPGRADE_BUSY, e))?;
-    crate::jar::no_sigpipe(&ours);
     let mut child = Command::new(binary)
         .arg("hold-handover")
         .process_group(0)
@@ -507,7 +506,7 @@ fn hold(
             &ours,
             &[IoSlice::new(b"h")],
             &mut control,
-            SendFlags::empty(),
+            crate::jar::NO_SIGNAL,
         )?;
         Ok(())
     })();

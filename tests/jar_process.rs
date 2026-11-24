@@ -1907,7 +1907,6 @@ mod threads;
 #[path = "jar_process/answers.rs"]
 mod answers;
 
-#[cfg(target_os = "linux")]
 #[path = "jar_process/sigpipe.rs"]
 mod sigpipe;
 

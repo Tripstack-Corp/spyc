@@ -58,8 +58,8 @@ use anyhow::Context;
 use crate::proto::{Msg, Role};
 use crate::state::{Config, ConnState, Log, State};
 
-pub(crate) use accept::no_sigpipe;
 pub use accept::peer_is;
+pub(crate) use accept::{NO_SIGNAL, no_sigpipe, pair};
 pub use conn::MIN_TOKEN;
 pub(crate) use input::Inbox;
 pub(crate) use outbox::Outbox;
@@ -552,6 +552,8 @@ pub(crate) fn accept_loop(shared: &Arc<Shared>) -> ! {
             continue;
         };
         let _ = stream.set_nonblocking(false);
+        // Before the jar's first write to it, a refusal included.
+        no_sigpipe(&stream);
         let sock = Arc::new(stream);
         let ticket = accept::admit(shared, &sock);
         let started = {

@@ -2513,6 +2513,61 @@ fn every_thread_the_jar_starts_can_be_refused() {
     );
 }
 
+/// Review finding A1: a jar whose upgrade `exec` failed has `SIGPIPE` at its
+/// default, so no send of the jar's may raise it (SPYC-TRAP `jar-no-sigpipe`):
+/// every `sendmsg` carries `NO_SIGNAL`, every socketpair comes from
+/// `jar::pair`, and nothing writes a socket with `writev`, which std sends
+/// without `MSG_NOSIGNAL`.
+#[test]
+fn every_send_the_jar_makes_answers_a_gone_peer_with_epipe() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
+    let mut wrong = Vec::new();
+    let mut sends = 0;
+    let mut dirs = vec![src];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            if path.extension().is_none_or(|x| x != "rs") {
+                continue;
+            }
+            let text =
+                crate::guard_support::production_half(&std::fs::read_to_string(&path).unwrap());
+            let lines: Vec<&str> = text
+                .lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .collect();
+            let defines = path.ends_with("jar/accept.rs");
+            for (i, line) in lines.iter().enumerate() {
+                let at = || format!("{}: {}", path.display(), line.trim());
+                if line.contains("sendmsg(") {
+                    sends += 1;
+                    let call = lines[i..lines.len().min(i + 8)].join(" ");
+                    if !call.contains("NO_SIGNAL") {
+                        wrong.push(at());
+                    }
+                }
+                let flags = line.contains("SendFlags::") && !defines;
+                let pair = line.contains("UnixStream::pair(") && !defines;
+                if flags || pair || line.contains("write_vectored") {
+                    wrong.push(at());
+                }
+            }
+        }
+    }
+    assert!(
+        sends >= 2,
+        "premise: the scan finds the jar's sendmsg calls ({sends})"
+    );
+    assert!(
+        wrong.is_empty(),
+        "a send that may raise SIGPIPE ends a jar whose exec failed: {wrong:#?}"
+    );
+}
+
 /// Every time constant in the `spyc-jar` crate, by what running out costs: a
 /// new timer fails this until it is classified. A running jar keeps its
 /// compiled-in timers for its whole life, so each is sized for its kind
