@@ -1,8 +1,8 @@
 # spyc apt repository
 
 Signed Debian/Ubuntu packages for
-[spyc](https://github.com/Tripstack-Corp/spyc) — a keyboard-driven,
-MCP-native terminal file commander. Served via GitHub Pages at
+[spyc](https://github.com/Tripstack-Corp/spyc) — a terminal workspace for
+coding agents, built around a file commander you share. Served via GitHub Pages at
 <https://tripstack-corp.github.io/spyc>.
 
 ## Install
