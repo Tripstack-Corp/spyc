@@ -1,0 +1,4 @@
+[?1049h[2J[1;1H[?2004h[?1007h[>1p[?u[c[22;0t_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\[16t[c[?1007l[?1000h[?1002h[?1006h]2;🌶️: home · DUKKAH_SUMAC[?2026h[1;2H[39;48;5;166m  [1;5H[1m[38;5;224;48;5;95m home [22m[38;5;95;48;5;141m[1m[38;5;234;48;5;141m DUKKAH_SUMAC [22m[38;5;141;48;5;239m[38;5;153;48;5;239m ~ [38;5;239;48;5;236m[1m[38;5;60;48;5;236m . menu [22m[38;5;236;49m[2;1H[38;5;60;49m<Empty>[39m[49m[59m[0m[?25l[?2026l[?2026h[39m[49m[59m[0m[?25l[?2026l[<1u[?1049l[?2004l[?1007l[?1006l[?1003l[?1002l[?1000l[>0p[23;0t[?25hError: DUKKAH_SUMAC's tabs run on in their jars: `spyc -r` takes them back
+
+Caused by:
+    /tmp/spyc-1000 belongs to uid 1001, not this user's 1000; no jar is trusted there
