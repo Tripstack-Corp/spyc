@@ -279,7 +279,7 @@ general-purpose multiplexer, no cross-machine protocols (remote rides SSH),
 and no binary state-replication ambitions — that is Superlogical's fight and
 zellij's category, and neither is ours. The protocol is private to spyc and
 froze at version 1 on 2026-11-12
-([`docs/drafts/JAR_PROTOCOL.md`](docs/drafts/JAR_PROTOCOL.md), proved by
+([`docs/JAR_PROTOCOL.md`](docs/JAR_PROTOCOL.md), proved by
 [`docs/drafts/PANE_JAR_SPIKE.md`](docs/drafts/PANE_JAR_SPIKE.md),
 [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)).
 
@@ -777,7 +777,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
   jar upgrading itself). The jar is spyc's own crate and binary, shipped with
   it, with a private protocol and no standalone tool. Version 1 froze on this
   date after a six-stage spike measured it on macOS and Linux
-  (`docs/drafts/JAR_PROTOCOL.md`, `docs/drafts/PANE_JAR_SPIKE.md`). The
+  (`docs/JAR_PROTOCOL.md`, `docs/drafts/PANE_JAR_SPIKE.md`). The
   competitive review's "resilient autosave, not a daemon" is superseded with
   it: the objection was a daemon fighting the single-process MVU core, and a
   jar leaves that core whole.
@@ -808,7 +808,7 @@ so we don't re-litigate them. Full history in CHANGELOG.md.
 | `docs/archive/CLICKABLE_MENUS_PLAN.md` | Archived — the proposal to make the which-key popup clickable (#478). Absorbed into `UX_2_0_PLAN.md` as its slices 1–2, and archived in its slice 0 when that plan was approved (#881). |
 | `docs/archive/AUTO_APPROVAL_PLAN.md` | Archived, not built — [#57](https://github.com/Tripstack-Corp/spyc/issues/57) closed as not planned once Claude Code shipped its own auto mode. |
 | `docs/drafts/PATH_HANDOFF_PLAN.md` | Split — Option A shipped for 2.2 ([#9](https://github.com/Tripstack-Corp/spyc/issues/9)); the rest stays exploration ([#59](https://github.com/Tripstack-Corp/spyc/issues/59)). |
-| [`docs/drafts/JAR_PROTOCOL.md`](docs/drafts/JAR_PROTOCOL.md) | Draft — the `spyc-jar` requirements and its protocol, version 1, frozen 2026-11-12 ([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)): use cases, a verdict per requirement, the wire format with byte fixtures, sharing, fuzzing, and the owner's decisions. |
+| [`docs/JAR_PROTOCOL.md`](docs/JAR_PROTOCOL.md) | Draft — the `spyc-jar` requirements and its protocol, version 1, frozen 2026-11-12 ([#1099](https://github.com/Tripstack-Corp/spyc/issues/1099)): use cases, a verdict per requirement, the wire format with byte fixtures, sharing, fuzzing, and the owner's decisions. |
 | [`docs/drafts/PANE_JAR_SPIKE.md`](docs/drafts/PANE_JAR_SPIKE.md) | Draft — the staged spike that proved the jar, stages 0b to 6, and the freeze. |
 | `docs/archive/multi-question-bug-investigation.md` | Archived — the investigation record for an agent pane going deaf to input, an open bug tracked as [#1107](https://github.com/Tripstack-Corp/spyc/issues/1107). |
 | `docs/archive/LAUNCH_PLAN_2_0.md` | Archived — the 2.0 distribution/launch plan, every gate closed, plus what never shipped. |

@@ -6,12 +6,12 @@ built every v1 verdict below. It reopened on 2026-11-12 for three changes an
 external review found it needed (decision K), and froze again with them made
 and tested. It reopened on 2026-11-15 for the upgrade step (decision L), and
 froze again once the conditions in
-[`JAR_PRODUCTION_PLAN.md`](JAR_PRODUCTION_PLAN.md) → "Refreezing" held. No
+[`JAR_PRODUCTION_PLAN.md`](drafts/JAR_PRODUCTION_PLAN.md) → "Refreezing" held. No
 byte of any frame and nothing in the blob's layout changed in that last
 reopening; [Version 1 on the wire](#version-1-on-the-wire) is the format, byte
 for byte.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099).
-**Tested by:** [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md), which builds a minimal
+**Tested by:** [`PANE_JAR_SPIKE.md`](drafts/PANE_JAR_SPIKE.md), which builds a minimal
 jar, measures it, and reports which of these requirements survive.
 
 A `spyc-jar` runs one pane's program, owns its PTY, and outlives spyc. A jar

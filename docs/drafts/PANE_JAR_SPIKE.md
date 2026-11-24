@@ -5,7 +5,7 @@
 froze on 2026-11-12 ("The freeze", below), reopened the same day for an
 external review's findings, and froze again with them built ("The review").
 Its report is the "Findings" section, stage by stage.
-**Requirements:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md). This spike builds a
+**Requirements:** [`JAR_PROTOCOL.md`](../JAR_PROTOCOL.md). This spike builds a
 minimal jar and measures it; it reports when a measurement contradicts a
 verdict there, and never changes the verdict itself.
 **Gates:** `ROADMAP.md` → "The 3.0 horizon: Slow Cooker (durable sessions)".
@@ -34,7 +34,7 @@ parent, relays bytes to whichever spyc owns it, keeps a log of output and
 resizes, and stores an opaque snapshot of spyc's engine. A new spyc loads the
 snapshot and replays the log after it, and the jar never parsed a byte.
 
-[`JAR_PROTOCOL.md`](JAR_PROTOCOL.md) has the rest: the use cases, each
+[`JAR_PROTOCOL.md`](../JAR_PROTOCOL.md) has the rest: the use cases, each
 requirement with its verdict, the overflow modes, roles, the threat model, and
 the owner's open decisions.
 

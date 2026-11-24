@@ -7,7 +7,7 @@
 //! handover-blob version 2, and a frame version 1 doesn't know.
 //! `SPYC_JAR_DIFFER_BIN` names it; `make test-jar-differ` builds it and runs
 //! these, as `make test` and CI do. ("Meeting another version" in
-//! `docs/drafts/JAR_PROTOCOL.md`.)
+//! `docs/JAR_PROTOCOL.md`.)
 
 use std::io::Write;
 use std::os::unix::net::UnixStream;

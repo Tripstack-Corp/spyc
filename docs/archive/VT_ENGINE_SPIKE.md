@@ -4,7 +4,7 @@
 > adopted: libghostty-vt replaced vt100 for 2.2 (#465) and is pinned at 1.0.0
 > (#1067). It stays the evidence behind the libghostty-vt entries in the
 > decisions log and the snapshot figures the jar requirements
-> ([`JAR_PROTOCOL.md`](../drafts/JAR_PROTOCOL.md)) rely on, and is still appended to, never
+> ([`JAR_PROTOCOL.md`](../JAR_PROTOCOL.md)) rely on, and is still appended to, never
 > rewritten.
 
 **Status:** spike complete; recommendation below is a proposal, not a decision.

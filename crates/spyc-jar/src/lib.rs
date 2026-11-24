@@ -1,6 +1,6 @@
 //! `spyc-jar`: the process that holds one spyc pane's program and its PTY,
 //! relays its bytes to the spyc that owns it, and outlives that spyc. It never
-//! parses terminal output. The design is `docs/drafts/JAR_PROTOCOL.md`, whose
+//! parses terminal output. The design is `docs/JAR_PROTOCOL.md`, whose
 //! version 1 is frozen.
 //!
 //! - [`proto`]: the frames on the jar's socket, and the messages they carry.

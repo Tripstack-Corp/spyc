@@ -6,7 +6,7 @@ the upgrade step ("The upgrade step", below). The owner's decisions are at
 the end.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099), on
 the `3.0` milestone.
-**Builds:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md), whose version 1 froze on
+**Builds:** [`JAR_PROTOCOL.md`](../JAR_PROTOCOL.md), whose version 1 froze on
 2026-11-12, froze again the same day with the review's changes, reopened
 on 2026-11-15 for the upgrade step (its decision L), and froze again on
 2026-11-24 (its decision N), from what
