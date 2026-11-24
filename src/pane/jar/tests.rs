@@ -1367,6 +1367,34 @@ fn a_store_copy_that_cant_be_used_falls_back_to_the_binary_beside_spyc() {
     assert!(matches!(got, store::Binary::Beside(..)), "{got:?}");
 }
 
+/// macOS scans a new executable before its first run and scans one at a
+/// time, so a fresh store entry's first `build-info` waits behind every new
+/// executable started meanwhile: 72 copies of `spyc-jar` run together took up
+/// to 15.8 s here. A `spyc-jar` that answers that late is still this
+/// session's jar, never the "no usable spyc-jar" a broken install gets.
+#[test]
+#[ignore = "red until a slow first run of spyc-jar is waited out"]
+fn a_spyc_jar_slow_to_answer_its_first_run_is_still_this_sessions_jar() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = short_dir();
+    let build = store::Build {
+        commit: "c0ffee0",
+        built: "a slow first run",
+    };
+    let slow = dir.path().join("spyc-jar");
+    std::fs::write(
+        &slow,
+        format!(
+            "#!/bin/sh\nsleep 15\necho '{}'\necho '{}'\n",
+            build.commit, build.built
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&slow, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let got = store::install(&dir.path().join("jar-bin"), &slow, build);
+    assert!(matches!(got, store::Binary::Entry(_)), "{got:?}");
+}
+
 /// No usable jar: a `spyc-jar` missing from beside spyc, or one there that
 /// can't run, is no jar this session, never one every tab then fails to
 /// start.
