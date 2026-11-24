@@ -219,8 +219,8 @@ const SECTIONS: &[Section] = &[
             ("g P", "set PROJECT_HOME to current directory"),
             ("g S", "set start dir (target of `) to current directory"),
             (
-                ":project [.|<path>|clear|config]",
-                "manage PROJECT_HOME; config: its own config file",
+                ":project [.|<path>|clear|config|name [NEW]]",
+                "manage PROJECT_HOME; config: its own config file; name: its name",
             ),
             (":startdir [.|<path>]", "manage start directory"),
             (

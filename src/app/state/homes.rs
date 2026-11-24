@@ -27,7 +27,8 @@ impl AppState {
     }
 
     /// `:project <arg>`: `clear` the home, `config` open the project's own
-    /// config file (`Effect::EditProjectConfig`), anything else re-home onto
+    /// config file (`Effect::EditProjectConfig`), `name [NEW]` say or change
+    /// the project's name (`Effect::NameProject`), anything else re-home onto
     /// that directory, so `./config` reaches one named `config`.
     pub fn project_command(&mut self, arg: &str) -> CommandResult {
         match arg.trim() {
@@ -38,6 +39,13 @@ impl AppState {
                     anchor: project.anchor().to_path_buf(),
                     label: project.label(),
                     file: project.config.project.as_ref().map(|f| f.path.clone()),
+                }]);
+            }
+            "name" => self.flash_info(format!("project name: {}", self.active_project().label())),
+            arg if arg.starts_with("name ") => {
+                return CommandResult::Post(vec![Effect::NameProject {
+                    anchor: self.active_project().anchor().to_path_buf(),
+                    name: arg["name ".len()..].trim().to_owned(),
                 }]);
             }
             arg => match self.resolve_dir_arg(arg) {

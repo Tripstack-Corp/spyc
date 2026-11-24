@@ -163,10 +163,10 @@ pub fn create(dir: &Path, anchor: &Path, label: &str) -> anyhow::Result<PathBuf>
     use std::io::Write as _;
     let canonical = std::fs::canonicalize(anchor)
         .with_context(|| format!("the project's home {} has gone", anchor.display()))?;
-    let stem = if label.is_empty() || label.contains('/') || label.starts_with('.') {
-        "project"
-    } else {
+    let stem = if is_plain_name(label) {
         label
+    } else {
+        "project"
     };
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     for n in 1.. {
@@ -210,6 +210,73 @@ pub fn create(dir: &Path, anchor: &Path, label: &str) -> anyhow::Result<PathBuf>
         return Ok(path);
     }
     unreachable!("a free name is found: each taken one moves to the next")
+}
+
+/// Whether `name` can be a project's name, which is its file's: a file name
+/// in the directory, not hidden.
+pub fn is_plain_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\0']) && !name.starts_with('.')
+}
+
+/// Name the project anchored at `anchor` `name` (`:project name`): its file
+/// in `dir` renamed `<name>.toml`, or with none, one made under that name
+/// holding its `home`. Refused when a file of that name is already there,
+/// and when several files name the project, as then which of them applies
+/// would turn on the new name's place among theirs.
+pub fn rename(dir: &Path, anchor: &Path, name: &str) -> anyhow::Result<PathBuf> {
+    use anyhow::Context as _;
+    anyhow::ensure!(
+        is_plain_name(name),
+        "{name:?} can't name a file: no `/`, and no `.` first"
+    );
+    let canonical = std::fs::canonicalize(anchor)
+        .with_context(|| format!("the project's home {} has gone", anchor.display()))?;
+    let entries = scan_dir(dir);
+    let naming: Vec<&Entry> = entries
+        .iter()
+        .filter(|e| matches!(&e.named, Named::Home(h) if *h == canonical))
+        .collect();
+    let target = dir.join(format!("{name}.toml"));
+    let taken = || match named_in(&target) {
+        Named::Home(home) => anyhow::anyhow!(
+            "projects/{name}.toml already names {}",
+            crate::paths::display_tilde(&home)
+        ),
+        Named::Gone | Named::Bad(_) => anyhow::anyhow!("projects/{name}.toml is already there"),
+    };
+    match naming.as_slice() {
+        [] => {
+            if target.symlink_metadata().is_ok() {
+                return Err(taken());
+            }
+            create(dir, anchor, name)
+        }
+        [only] if only.path == target => Ok(target),
+        [only] => {
+            // On a case-insensitive disk `Work.toml` is `work.toml`: a
+            // change of case is a rename, not a clash.
+            if target.symlink_metadata().is_ok() && !same_file(&only.path, &target) {
+                return Err(taken());
+            }
+            std::fs::rename(&only.path, &target).with_context(|| {
+                format!("renaming {} to {}", only.path.display(), target.display())
+            })?;
+            Ok(target)
+        }
+        several => {
+            let names: Vec<String> = several.iter().map(|e| e.name()).collect();
+            anyhow::bail!("{} all name this project; keep one", names.join(", "))
+        }
+    }
+}
+
+/// Whether `a` and `b` are one file on disk.
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    match (a.symlink_metadata(), b.symlink_metadata()) {
+        (Ok(a), Ok(b)) => (a.dev(), a.ino()) == (b.dev(), b.ino()),
+        _ => false,
+    }
 }
 
 /// `path` as a `home` names it: `~` for the user's home, as [`find`] reads it
@@ -494,5 +561,139 @@ mod tests {
         let f = fixture();
         let (file, warnings) = find(&scan_dir(&f.dir.join("nope")), &f.home);
         assert_eq!((file, warnings.len()), (None, 0));
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// The project's file takes the new name, its text as it was.
+    #[test]
+    fn rename_moves_the_projects_file_and_keeps_its_text() {
+        let f = fixture();
+        let text = format!(
+            "home = {:?}\n[colors]\ndir = \"#123456\"\n",
+            f.home.display().to_string()
+        );
+        write(&f.dir, "app.toml", &text);
+        let path = rename(&f.dir, &f.home, "General Work").expect("renamed");
+        assert_eq!(path, f.dir.join("General Work.toml"));
+        assert_eq!(names(&f.dir), ["General Work.toml"]);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        let found = find(&scan_dir(&f.dir), &f.home).0.map(|p| p.label);
+        assert_eq!(found.as_deref(), Some("General Work"));
+    }
+
+    /// A project with no file gets one under the new name, naming its home.
+    #[test]
+    fn rename_makes_a_file_for_a_project_with_none() {
+        let f = fixture();
+        let path = rename(&f.dir, &f.home, "work").expect("made");
+        assert_eq!(names(&f.dir), ["work.toml"]);
+        assert!(matches!(named_in(&path), Named::Home(h) if h == f.home));
+    }
+
+    /// A name a file already has is refused, whatever that file names, and
+    /// neither file changes.
+    #[test]
+    fn rename_refuses_a_name_a_file_already_has() {
+        let f = fixture();
+        let other = f.home.parent().unwrap().join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let mine = format!("home = {:?}\n", f.home.display().to_string());
+        let theirs = format!("home = {:?}\n", other.display().to_string());
+        write(&f.dir, "app.toml", &mine);
+        write(&f.dir, "taken.toml", &theirs);
+        write(&f.dir, "junk.toml", "not toml at all [");
+        let err = rename(&f.dir, &f.home, "taken").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("taken.toml already names"),
+            "{err:#}"
+        );
+        let err = rename(&f.dir, &f.home, "junk").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("junk.toml is already there"),
+            "{err:#}"
+        );
+        assert_eq!(names(&f.dir), ["app.toml", "junk.toml", "taken.toml"]);
+        assert_eq!(
+            std::fs::read_to_string(f.dir.join("app.toml")).unwrap(),
+            mine
+        );
+        assert_eq!(
+            std::fs::read_to_string(f.dir.join("taken.toml")).unwrap(),
+            theirs
+        );
+    }
+
+    /// Without a file of its own, a project still can't take a name another
+    /// file has: none is made beside it.
+    #[test]
+    fn rename_with_no_file_refuses_a_name_a_file_has() {
+        let f = fixture();
+        write(&f.dir, "taken.toml", "home = \"/\"\n");
+        assert!(rename(&f.dir, &f.home, "taken").is_err());
+        assert_eq!(names(&f.dir), ["taken.toml"]);
+    }
+
+    /// With two files naming the project, renaming one could hand the
+    /// project to the other: refused, naming both.
+    #[test]
+    fn rename_refuses_while_several_files_name_the_project() {
+        let f = fixture();
+        let home = format!("home = {:?}\n", f.home.display().to_string());
+        write(&f.dir, "a.toml", &home);
+        write(&f.dir, "b.toml", &home);
+        let err = rename(&f.dir, &f.home, "z").unwrap_err();
+        assert!(
+            format!("{err:#}").contains("a.toml, projects/b.toml"),
+            "{err:#}"
+        );
+        assert_eq!(names(&f.dir), ["a.toml", "b.toml"]);
+    }
+
+    /// A change of case only renames the file, on a disk that folds case too.
+    #[test]
+    fn rename_changes_the_case_of_a_name() {
+        let f = fixture();
+        write(
+            &f.dir,
+            "work.toml",
+            &format!("home = {:?}\n", f.home.display().to_string()),
+        );
+        rename(&f.dir, &f.home, "Work").expect("renamed");
+        assert_eq!(names(&f.dir), ["Work.toml"]);
+    }
+
+    /// The same name is no change.
+    #[test]
+    fn rename_to_the_name_it_has_changes_nothing() {
+        let f = fixture();
+        write(
+            &f.dir,
+            "work.toml",
+            &format!("home = {:?}\n", f.home.display().to_string()),
+        );
+        assert_eq!(
+            rename(&f.dir, &f.home, "work").unwrap(),
+            f.dir.join("work.toml")
+        );
+        assert_eq!(names(&f.dir), ["work.toml"]);
+    }
+
+    /// A name that is no plain file name in the directory is refused, and
+    /// nothing is made.
+    #[test]
+    fn rename_refuses_a_name_that_is_no_file_name() {
+        let f = fixture();
+        for name in ["", "../up", "a/b", ".hidden", "nul\0"] {
+            assert!(rename(&f.dir, &f.home, name).is_err(), "{name:?}");
+        }
+        assert_eq!(names(&f.dir), Vec::<String>::new());
     }
 }
