@@ -45,6 +45,16 @@ has gets `-2`. A file is never written over: one of that name that names this
 project, or no usable home, is opened as it is. Saving it reloads it. (A
 directory called `config` is `:project ./config`.)
 
+## Naming a project
+
+**`:project name <name>`** renames the project in view: it renames its file
+to `<name>.toml`, settings and all, or with no file yet makes one under that
+name holding its `home`. The new name shows at once. Spaces are fine
+(`:project name General Work`); a name with a `/`, or starting with `.`,
+isn't. It is refused when another file already has the name, when two files
+name the project (keep one first), and while an editor is open in the
+project, which may hold the file. `:project name` alone says the name.
+
 ## How it layers
 
 A project's config is three files, each overriding the one before, per field:

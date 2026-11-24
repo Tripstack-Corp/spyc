@@ -93,11 +93,9 @@ impl App {
                 // `pending_capture` skips silently, matching the former inline
                 // `if let Some(capture)` write in the key/paste handlers.
                 Effect::SendToCapture { bytes } => self.send_to_capture(&bytes),
-                Effect::EditProjectConfig {
-                    anchor,
-                    label,
-                    file,
-                } => self.edit_project_config(&anchor, &label, file),
+                effect @ (Effect::EditProjectConfig { .. } | Effect::NameProject { .. }) => {
+                    self.run_project_file_effect(effect);
+                }
                 // A-class: the only side effect of a terminal-title update;
                 // compose + dedup already happened loop-side.
                 Effect::SetTerminalTitle { title } => {

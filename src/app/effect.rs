@@ -184,6 +184,10 @@ pub enum Effect {
         file: Option<PathBuf>,
     },
 
+    /// `:project name NEW`: name the project anchored at `anchor` `name`, by
+    /// renaming its own config file, or making one (`App::name_project`).
+    NameProject { anchor: PathBuf, name: String },
+
     /// A-class. Fire a desktop notification and/or ring the terminal bell that an
     /// agent pane changed to `Blocked` ("needs me") or `Done` — the P3-1 ping
     /// (`docs/archive/AGENT_AWARENESS_PLAN.md`). Emitted by `settle_agent_activity` on the
@@ -779,6 +783,7 @@ pub mod matchers {
             | Effect::SaveLearned(_)
             | Effect::SetTerminalTitle { .. }
             | Effect::EditProjectConfig { .. }
+            | Effect::NameProject { .. }
             | Effect::Notify { .. }
             | Effect::ReadPaneText { .. }
             | Effect::ChangeDir { .. }

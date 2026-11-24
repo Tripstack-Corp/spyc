@@ -753,3 +753,142 @@ fn a_reload_skips_a_repo_rc_that_cannot_load() {
         });
     });
 }
+
+// ── `:project name` ─────────────────────────────────────────────────────────
+
+/// What the loop does with `:project name …`'s effect: `App::name_project`.
+fn run_project_name(app: &mut App, command: &str) {
+    let state::CommandResult::Post(fx) = app.state.dispatch_command(command) else {
+        panic!("no effect: {:?}", app.flash_text());
+    };
+    for effect in fx {
+        if let Effect::NameProject { anchor, name } = effect {
+            app.name_project(&anchor, &name);
+        }
+    }
+}
+
+fn errored(app: &App) -> bool {
+    app.state
+        .flash
+        .as_ref()
+        .is_some_and(|f| matches!(f.kind, FlashKind::Error))
+}
+
+/// A project named for its directory takes a name of the user's: a file is
+/// made under it, naming its home, and the project goes by it at once.
+#[test]
+fn project_name_names_a_project_with_no_file() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            run_project_name(&mut t.app, "project name General Work");
+            assert!(!errored(&t.app), "{:?}", t.app.flash_text());
+            assert_eq!(t.app.state.active_project().label(), "General Work");
+            let file = config.join("projects").join("General Work.toml");
+            let text = std::fs::read_to_string(&file).expect("the file was made");
+            assert!(
+                text.contains(&format!("home = {:?}", t.x_home.display().to_string())),
+                "{text}"
+            );
+            assert_eq!(t.app.flash_text(), Some("project name: General Work"));
+        });
+    });
+}
+
+/// A project with a file is renamed by renaming the file: its settings
+/// stay in force, and no other file is left naming it.
+#[test]
+fn project_name_renames_the_projects_file() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let old = project_file(config, "work", &t.x_home, "[colors]\ndir = \"#123456\"\n");
+            let before = std::fs::read_to_string(&old).unwrap();
+            t.app.reload_config();
+            assert_eq!(t.app.state.active_project().label(), "work");
+            run_project_name(&mut t.app, "project name  play ");
+            assert!(!errored(&t.app), "{:?}", t.app.flash_text());
+            assert_eq!(t.app.state.active_project().label(), "play");
+            assert!(!old.exists(), "the old file is left");
+            let new = config.join("projects").join("play.toml");
+            assert_eq!(std::fs::read_to_string(&new).unwrap(), before);
+            let file = t.app.state.active_project().config.project.clone();
+            assert_eq!(file.map(|f| f.path), Some(new));
+        });
+    });
+}
+
+/// Another project's name is refused: both keep theirs and their files.
+#[test]
+fn project_name_refuses_another_projects_name() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let theirs = project_file(config, "taken", &t.y_home, "");
+            t.app.reload_config();
+            run_project_name(&mut t.app, "project name taken");
+            let flash = t.app.flash_text().unwrap_or_default().to_owned();
+            assert!(errored(&t.app), "{flash}");
+            assert!(
+                flash.starts_with("project name: projects/taken.toml"),
+                "{flash}"
+            );
+            assert_eq!(t.app.state.active_project().label(), "xproj");
+            assert_eq!(t.app.state.label_of(t.y).as_deref(), Some("taken"));
+            assert!(theirs.exists());
+            assert_eq!(
+                std::fs::read_dir(config.join("projects")).unwrap().count(),
+                1,
+                "a file was made"
+            );
+        });
+    });
+}
+
+/// `:project name` alone says the name, and changes nothing.
+#[test]
+fn bare_project_name_says_the_name() {
+    with_three(|t| {
+        let result = t.app.state.dispatch_command("project name");
+        assert!(
+            matches!(result, state::CommandResult::Handled),
+            "{result:?}"
+        );
+        assert_eq!(t.app.flash_text(), Some("project name: xproj"));
+        assert_eq!(
+            t.app.state.active_project().home.as_deref(),
+            Some(&*t.x_home)
+        );
+    });
+}
+
+/// The control: `./name` still reaches a directory named `name`.
+#[test]
+fn project_dot_slash_name_re_homes_onto_a_name_directory() {
+    with_three(|t| {
+        let dir = t.x_home.join("name");
+        std::fs::create_dir_all(&dir).unwrap();
+        t.app.state.dispatch_command("project ./name");
+        assert_eq!(t.app.state.active_project().home.as_deref(), Some(&*dir));
+    });
+}
+
+/// While an editor is open in a project with a file, which it may be
+/// editing, the file keeps its name.
+#[test]
+fn project_name_leaves_a_file_an_editor_may_hold() {
+    with_three(|t| {
+        with_config(t, |t, config| {
+            let file = project_file(config, "work", &t.x_home, "");
+            t.app.reload_config();
+            let wake = t.app.make_pane_wake();
+            let context = t.app.view.project().context_path.clone();
+            let editor = crate::pane::Pane::spawn("cat", 24, 80, &t.x_home, &context, wake)
+                .expect("spawn an editor");
+            t.app.runtime.project_mut().top_overlay = Some(editor);
+            run_project_name(&mut t.app, "project name play");
+            let flash = t.app.flash_text().unwrap_or_default().to_owned();
+            assert!(flash.contains("an editor is open here"), "{flash}");
+            assert!(file.exists());
+            assert_eq!(t.app.state.active_project().label(), "work");
+        });
+    });
+}

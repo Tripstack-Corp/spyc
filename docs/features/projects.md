@@ -142,7 +142,10 @@ take the place of both) and persist across `spyc -r`.
   `:project clear` manage the value. `:project config` opens the project's
   own config file in the editor, making it first if it has none
   ([per-project files](../config/projects.md)); `./config` reaches a
-  directory named `config`. `:startdir` manages start dir.
+  directory named `config`. `:project name <NEW>` renames the project in
+  view, in the status bar, `Space j`, the terminal title and the `-r`
+  picker; `:project name` alone says its name, and `./name` reaches a
+  directory named `name`. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to
   `[A-Z0-9_]`); the session segment's menu opens the `:` line holding
   `name` and the current name, to edit. `:whoami` flashes `user@host`.

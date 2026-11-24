@@ -397,12 +397,7 @@ impl App {
         label: &str,
         file: Option<PathBuf>,
     ) {
-        let project = self.runtime.project();
-        let editing = [&project.top_overlay, &project.top_overlay_right]
-            .into_iter()
-            .flatten()
-            .any(|pane| !pane.is_closed() && pane.exit_status().is_none());
-        if editing {
+        if self.editor_open_here() {
             self.state
                 .flash_info("project config: an editor is open here; close it first");
             return;
@@ -432,25 +427,78 @@ impl App {
         );
         match made {
             Ok(path) => {
-                self.view.config_watch_gen += 1;
-                self.reload_config();
-                let erred = self
-                    .state
-                    .flash
-                    .as_ref()
-                    .is_some_and(|f| matches!(f.kind, FlashKind::Error));
-                if !erred {
-                    self.state.flash_info(format!(
-                        "project config: {}",
-                        crate::paths::display_tilde(&path)
-                    ));
-                }
+                self.adopt_project_file(format!(
+                    "project config: {}",
+                    crate::paths::display_tilde(&path)
+                ));
                 Some(path)
             }
             Err(e) => {
                 self.state.flash_error(format!("project config: {e:#}"));
                 None
             }
+        }
+    }
+}
+
+impl App {
+    /// The effects on the user's own file for a project: `:project config`
+    /// and `:project name`.
+    pub(super) fn run_project_file_effect(&mut self, effect: super::Effect) {
+        match effect {
+            super::Effect::EditProjectConfig {
+                anchor,
+                label,
+                file,
+            } => self.edit_project_config(&anchor, &label, file),
+            super::Effect::NameProject { anchor, name } => self.name_project(&anchor, &name),
+            _ => {}
+        }
+    }
+
+    /// `:project name NEW`: call the project anchored at `anchor` `name`, by
+    /// renaming its own config file, or making one under that name
+    /// (`project_file::rename`), then read it so the project goes by it.
+    /// Refused while an editor is open in a project with a file, which may
+    /// hold that file and would write it back under its old name.
+    pub(super) fn name_project(&mut self, anchor: &Path, name: &str) {
+        if self.state.active_project().config.project.is_some() && self.editor_open_here() {
+            self.state
+                .flash_info("project name: an editor is open here; close it first");
+            return;
+        }
+        let Some(dir) = crate::config::project_file::dir() else {
+            self.state
+                .flash_error("project name: neither $XDG_CONFIG_HOME nor $HOME is set");
+            return;
+        };
+        match crate::config::project_file::rename(&dir, anchor, name) {
+            Ok(_) => self.adopt_project_file(format!("project name: {name}")),
+            Err(e) => self.state.flash_error(format!("project name: {e:#}")),
+        }
+    }
+
+    /// Whether an editor runs in the project's top overlay.
+    fn editor_open_here(&self) -> bool {
+        let project = self.runtime.project();
+        [&project.top_overlay, &project.top_overlay_right]
+            .into_iter()
+            .flatten()
+            .any(|pane| !pane.is_closed() && pane.exit_status().is_none())
+    }
+
+    /// Read again a project file just made or renamed, with its directory
+    /// watched, and say `done` unless reading it went wrong.
+    fn adopt_project_file(&mut self, done: String) {
+        self.view.config_watch_gen += 1;
+        self.reload_config();
+        let erred = self
+            .state
+            .flash
+            .as_ref()
+            .is_some_and(|f| matches!(f.kind, FlashKind::Error));
+        if !erred {
+            self.state.flash_info(done);
         }
     }
 }
