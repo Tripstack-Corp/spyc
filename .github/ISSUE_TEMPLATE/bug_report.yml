@@ -8,6 +8,9 @@ body:
         Thanks for the report. spyc is a terminal app, so the debug log and your
         terminal/OS/multiplexer matter a lot — please fill in the environment and
         attach a `--debug` log if you can.
+
+        If spyc crashed, it printed the path of a crash report and a link that
+        fills in this form. Read the report before you share it.
   - type: textarea
     id: what-happened
     attributes:
@@ -39,10 +42,11 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Debug log
+      label: Debug log or crash report
       description: >
-        Reproduce with `spyc --debug`, then paste the relevant lines from the
-        `spyc-debug-<timestamp>.log` whose path it prints at startup (in spyc's
-        state directory). For pane/agent issues, `--status-trace` adds the
-        status-hook payloads to `mcp.log`.
+        After a crash, the crash report whose path spyc printed (`crash/` in
+        spyc's state directory). Otherwise, reproduce with `spyc --debug`, then
+        paste the relevant lines from the `spyc-debug-<timestamp>.log` whose path
+        it prints at startup (in spyc's state directory). For pane/agent issues,
+        `--status-trace` adds the status-hook payloads to `mcp.log`.
       render: text

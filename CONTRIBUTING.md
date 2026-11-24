@@ -79,7 +79,9 @@ We use GitHub pull requests. The target branch is `main`.
 
    **Bug fix PRs** should include relevant debug log output.
    Run `spyc --debug` to reproduce the issue, then attach the
-   relevant lines from the `/tmp/spyc-debug-*.log` file.
+   relevant lines from the `spyc-debug-*.log` file in spyc's state directory
+   (the path is printed at startup). After a crash, attach the report from
+   `crash/` in that directory, whose path spyc printed.
 
 6. **Merge.** `main` is branch-protected: a PR is required and the CI
    checks (lint + tests) must pass, then **squash-merge** to keep the
