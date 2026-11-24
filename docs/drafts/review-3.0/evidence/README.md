@@ -16,6 +16,8 @@ What the unit reports and refuter files cite: probe scripts, their logs, the loa
 
 ## Left out
 
+- From `P3/build/{pin,main}/`: the copies of `crates/spyc-jar` and of `Cargo.lock` that `build.sh` takes from the commit it builds. They are the repo's own files at `444857a2` and `52ce15b7`; `build.sh` says how they were copied.
+
 - The fuzz corpus Unit A's runs grew (in the `review/3.0-a` worktree).
 - Both full gate logs (about 450 kB each); their summaries are here.
 - Unit F's `mac-tests.txt` and `linux-tests.txt` (about 400 kB each, the test-name lists) and `pkgx/` (the unpacked crate from `make package-check`).
