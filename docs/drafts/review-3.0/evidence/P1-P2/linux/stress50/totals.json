@@ -1,0 +1,25 @@
+{
+ "rounds": 50,
+ "tabs_at_risk": 200,
+ "readers_ended": 200,
+ "retaken": 56,
+ "detached": 5,
+ "rounds_with_loss": 4,
+ "sessions": 5,
+ "restartR_done": true,
+ "restartR": {
+  "asked": [
+   "restarted sh -c 'echo READY_$$; while IFS= read -r l; do echo got_$",
+   "restarted sh -c 'echo READY_$$; while IFS= read -r l; do echo got_$"
+  ],
+  "new_programs": [
+   4373
+  ],
+  "old_alive": [
+   4036,
+   4060,
+   4084,
+   4108
+  ]
+ }
+}
