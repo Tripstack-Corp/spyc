@@ -1,0 +1,6 @@
+Linux f409ec54b6d7 6.19.7-200.fc43.aarch64 #1 SMP PREEMPT_DYNAMIC Thu Mar 12 15:54:05 UTC 2026 aarch64 GNU/Linux
+7
+               total        used        free      shared  buff/cache   available
+Mem:            7907         739        1461           0        5904        7167
+Swap:              0           0           0
+15

@@ -1,0 +1,58 @@
+Summary of 'gate-macos-444857a2.log' (the full log, about 450 kB, was left out of the tree): every 'Running', 'test result' and verdict line.
+cargo fmt --all -- --check
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace --all-targets
+     Running unittests src/lib.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/d49c27abfe2722f2/out/spyc-d49c27abfe2722f2)
+test result: ok. 4689 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 67.74s
+     Running unittests src/main.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/ba53c0d826083bc8/out/spyc-ba53c0d826083bc8)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/bin/spyc-jar.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/61fa9da68601e3c0/out/spyc_jar-61fa9da68601e3c0)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/archive_roundtrip.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/7e037cc3085f0ed6/out/archive_roundtrip-7e037cc3085f0ed6)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/filesystem.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/87124caaba2f2253/out/filesystem-87124caaba2f2253)
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/jar_adopt.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/769f08001801deac/out/jar_adopt-769f08001801deac)
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 22.05s
+     Running tests/jar_attach.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/7e3a49734fda98ae/out/jar_attach-7e3a49734fda98ae)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.86s
+     Running tests/jar_compat.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/2a470c35eeecbd2e/out/jar_compat-2a470c35eeecbd2e)
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/jar_differ.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/72af6991ee09e15e/out/jar_differ-72af6991ee09e15e)
+test result: ok. 1 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.01s
+     Running tests/jar_process.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/d17db8b209b38b4e/out/jar_process-d17db8b209b38b4e)
+test result: ok. 91 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 42.81s
+     Running tests/keymap_roundtrip.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/6ea495e6f22e1d55/out/keymap_roundtrip-6ea495e6f22e1d55)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/libc_binding.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/8113b5dc96cbcf7b/out/libc_binding-8113b5dc96cbcf7b)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/libsystem_binding.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/516bc078ccd1eb6c/out/libsystem_binding-516bc078ccd1eb6c)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s
+     Running tests/mcp_proxy.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/4ec4582aa3aa7d3a/out/mcp_proxy-4ec4582aa3aa7d3a)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+     Running tests/pane_roundtrip.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/1996fe2d74f461f6/out/pane_roundtrip-1996fe2d74f461f6)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+     Running tests/session_jar.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/081a871265f49dec/out/session_jar-081a871265f49dec)
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.82s
+     Running tests/status_hook_reporter.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/69f8e3986828d876/out/status_hook_reporter-69f8e3986828d876)
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+     Running tests/statusline_wrapper.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/4746ce3f86e36067/out/statusline_wrapper-4746ce3f86e36067)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+     Running unittests examples/claude_metrics.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/46f263ad37e6cf3e/out/claude_metrics-46f263ad37e6cf3e)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests examples/codex_metrics.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/42ada9d0f3c2032d/out/codex_metrics-42ada9d0f3c2032d)
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc-jar/1200f0697b9637a7/out/spyc_jar-1200f0697b9637a7)
+test result: ok. 21 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.40s
+     Running tests/fuzz_seeds.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc-jar/87d12f7b89b8de97/out/fuzz_seeds-87d12f7b89b8de97)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests/wire_v1.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc-jar/f7573e85ed47a9b4/out/wire_v1-f7573e85ed47a9b4)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running unittests src/lib.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc-vt-sys/3e7affba7c10da70/out/spyc_vt_sys-3e7affba7c10da70)
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+cargo build --locked --bin spyc-jar --features spyc-jar/differ --target-dir ~/.cache/spyc/target/3.0-9f8124c5/differ
+     Running tests/jar_differ.rs (~/.cache/spyc/target/3.0-9f8124c5/debug/build/spyc/72af6991ee09e15e/out/jar_differ-72af6991ee09e15e)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.28s
+ignored tests: 11, 0 of them red until a fix
+=== GATE: PASS ===
+exit=0

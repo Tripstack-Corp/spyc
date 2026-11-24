@@ -1,0 +1,1146 @@
+[
+ {
+  "f": "src/app/harness_tests/jar_start.rs",
+  "n": 51,
+  "txt": "\": > '{began}'\\nwhile [ ! -e '{go}' ]; do sleep 0.05; done\\nexec '{jar}' \\\"$@\\\"\\n\",",
+  "loopish": true,
+  "before": "\n/// A `spyc-jar` that marks `began` and waits for `go` before it runs: its\n/// start is as slow as the test makes it.\npub(super) fn gated_jar(dir: &Path) -> PathBuf {\n    script(\n        dir,\n        \"gated-jar\",\n        &format!(",
+  "after": "            began = dir.join(\"began\").display(),\n            go = dir.join(\"go\").display(),\n            jar = built_jar().display(),"
+ },
+ {
+  "f": "src/app/harness_tests/jar_start.rs",
+  "n": 98,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "        .active()\n        .with_screen(crate::pane::engine::TerminalScreen::contents)\n}\n\npub(super) fn eventually(what: &str, mut done: impl FnMut() -> bool) {\n    let until = Instant::now() + WAIT;\n    while !done() {\n        assert!(Instant::now() < until, \"never: {what}\");",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "src/app/harness_tests/jar_start.rs",
+  "n": 114,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": false,
+  "before": "        if screen(app).contains(needle) {\n            return;\n        }\n        assert!(\n            Instant::now() < until,\n            \"never saw {needle:?}: {:?}\",\n            screen(app)\n        );",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "src/app/harness_tests/jar_start.rs",
+  "n": 240,
+  "txt": "\"if [ -e '{answers}' ]; then exec '{jar}' \\\"$@\\\"; fi\\nexec sleep 600\\n\",",
+  "loopish": false,
+  "before": "        // Silent until the test makes `answers`. A mark the first start wrote\n        // itself would race the hold, which kills a start slow to write it,\n        // and leave the restart silent too.\n        let answers = dir.path().join(\"answers\");\n        let silent_until = script(\n            dir.path(),\n            \"silent-until\",\n            &format!(",
+  "after": "                answers = answers.display(),\n                jar = built_jar().display(),\n            ),"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 55,
+  "txt": "match self.frames.recv_timeout(left) {",
+  "loopish": true,
+  "before": "}\n\nimpl FakeJar {\n    /// The next frame that isn't a ping.\n    fn next(&self) -> Msg {\n        let until = Instant::now() + WAIT;\n        loop {\n            let left = until.saturating_duration_since(Instant::now());",
+  "after": "                Ok(Msg::Ping { .. }) => {}\n                Ok(m) => return m,\n                Err(e) => panic!(\"the jar heard nothing more: {e}\"),"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 127,
+  "txt": "let to_owner = conn_rx.recv_timeout(WAIT).unwrap();",
+  "loopish": false,
+  "before": "    let fresh = Resume {\n        pid: child_pid,\n        replay: 0,\n        offsets: offsets::Offsets::new(0),\n        gate: ReplayGate::open(),\n    };\n    let jarred = connect(client, fresh, &socket, (24, 80), Duration::from_secs(2)).unwrap();\n    let host = PtyHost::around_jar(jarred, (24, 80)).unwrap();",
+  "after": "    let jar = FakeJar {\n        frames,\n        to_owner,"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 148,
+  "txt": "match rx.recv_timeout(WAIT) {",
+  "loopish": true,
+  "before": "    (jar, host)\n}\n\n/// The bytes the host hands its consumer, until `n` have arrived.\nfn read_bytes(host: &PtyHost, n: usize) -> Vec<u8> {\n    let rx = host.event_rx.as_ref().unwrap();\n    let mut got = Vec::new();\n    while got.len() < n {",
+  "after": "            Ok(PtyEvent::Bytes(b)) => got.extend(b),\n            Ok(PtyEvent::Closed) => break,\n            Err(e) => panic!(\"only {got:?} arrived: {e}\"),"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 162,
+  "txt": "match rx.recv_timeout(WAIT) {",
+  "loopish": true,
+  "before": "    got\n}\n\n/// What the host hands its consumer, until it holds `needle`.\nfn read_until(host: &PtyHost, needle: &str) -> String {\n    let rx = host.event_rx.as_ref().unwrap();\n    let mut got = Vec::new();\n    while !String::from_utf8_lossy(&got).contains(needle) {",
+  "after": "            Ok(PtyEvent::Bytes(b)) => got.extend(b),\n            Ok(PtyEvent::Closed) | Err(_) => {\n                panic!(\"{needle:?} never came: {:?}\", String::from_utf8_lossy(&got))"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 413,
+  "txt": "std::thread::sleep(Duration::from_millis(300));",
+  "loopish": false,
+  "before": "        );\n        assert!(\n            no_usable_jar(&e).is_some(),\n            \"{}: said as no usable jar, which offers jarless tabs: {e:#}\",\n            binary.display()\n        );\n        // A jar that ended is seen at once: never the wait for one to answer.\n        assert!(at.elapsed() < WAIT, \"waited {:?}\", at.elapsed());",
+  "after": "        assert!(!mark.exists(), \"{}: the program ran\", binary.display());\n        let left: Vec<_> = std::fs::read_dir(&place.tokens).unwrap().collect();\n        assert!(left.is_empty(), \"a token outlived its jar: {left:?}\");"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 427,
+  "txt": "std::fs::write(&silent, \"#!/bin/sh\\nexec sleep 60\\n\").unwrap();",
+  "loopish": false,
+  "before": "\n/// Until a tab can open before its jar answers, one whose jar doesn't\n/// answer in time fails, says so, and runs nothing.\n#[test]\nfn a_tab_whose_jar_doesnt_answer_fails_and_says_so() {\n    use std::os::unix::fs::PermissionsExt;\n    let dir = short_dir();\n    let silent = dir.path().join(\"silent-jar\");",
+  "after": "    std::fs::set_permissions(&silent, std::fs::Permissions::from_mode(0o755)).unwrap();\n    let place = place_in(dir.path(), silent);\n    let mark = dir.path().join(\"ran\");"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 541,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    tokens::save(&place, &dead, b\"t\").unwrap();\n    tokens::save(&place, &live, b\"t\").unwrap();\n    tokens::save(&place, &unknown, b\"t\").unwrap();\n    // A child another test forks meanwhile holds a copy of the listener until\n    // it `exec`s.\n    let until = Instant::now() + WAIT;\n    while socket_state(&dead) != SocketState::Stale {\n        assert!(Instant::now() < until, \"premise: nothing answers\");",
+  "after": "    }\n\n    assert_eq!("
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 659,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    read_until(&host, \"got:hi\");\n    assert_eq!(recorded_exit(&mut host).exit_code(), 3);\n    let until = Instant::now() + WAIT;\n    while socket.exists() {\n        assert!(\n            Instant::now() < until,\n            \"the jar outlived its acknowledged exit\"\n        );",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 745,
+  "txt": "std::thread::sleep(Duration::from_millis(1100));",
+  "loopish": false,
+  "before": "    let (jar, host) = host_in_fake_jar(std::process::id());\n    let engine = std::sync::Mutex::new(\n        <crate::pane::PaneEngine as crate::pane::engine::Engine>::new(24, 80, 100),\n    );\n    crate::pane::engine::Engine::process(&mut *engine.lock().unwrap(), b\"hello\");\n    let mut s = Snapshotter::new(host.snapshot_sink().unwrap());\n    s.parsed(5);\n    s.tick(&engine, true);",
+  "after": "    s.tick(&engine, false);\n    assert!(\n        std::iter::from_fn(|| jar.frames.try_recv().ok()).all(|m| matches!(m, Msg::Ping { .. })),"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 762,
+  "txt": "std::thread::sleep(Duration::from_millis(1100));",
+  "loopish": false,
+  "before": "        if let Msg::StoreSnapshot(snap) = jar.next() {\n            stored.push((snap.format, snap.offset));\n        }\n    }\n    assert_eq!(\n        stored,\n        [(proto::SNAPSHOT_BINARY, 5), (proto::SNAPSHOT_VT, 5)]\n    );",
+  "after": "    s.tick(&engine, true);\n    std::thread::sleep(Duration::from_millis(100));\n    assert!("
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 764,
+  "txt": "std::thread::sleep(Duration::from_millis(100));",
+  "loopish": false,
+  "before": "        }\n    }\n    assert_eq!(\n        stored,\n        [(proto::SNAPSHOT_BINARY, 5), (proto::SNAPSHOT_VT, 5)]\n    );\n    std::thread::sleep(Duration::from_millis(1100));\n    s.tick(&engine, true);",
+  "after": "    assert!(\n        std::iter::from_fn(|| jar.frames.try_recv().ok()).all(|m| matches!(m, Msg::Ping { .. })),\n        \"a second snapshot of nothing new\""
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 795,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "/// a quit waits for an exit, not how long one takes to arrive.\nfn recorded_exit(host: &mut PtyHost) -> portable_pty::ExitStatus {\n    let until = Instant::now() + Duration::from_secs(30);\n    loop {\n        if let Some(status) = host.child.try_wait().unwrap() {\n            return status;\n        }\n        assert!(Instant::now() < until, \"the connection recorded no exit\");",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 875,
+  "txt": "std::thread::sleep(Duration::from_millis(100));",
+  "loopish": false,
+  "before": "            break;\n        }\n        assert!(\n            Instant::now() < until,\n            \"snapshots {:?}, log {:?}\",\n            field(&fields, \"snapshots\"),\n            field(&fields, \"log\")\n        );",
+  "after": "    }\n    let mut pane = pane;\n    pane.shutdown_reporting(END, || {});"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 925,
+  "txt": "std::thread::sleep(Duration::from_millis(600));",
+  "loopish": true,
+  "before": "\n/// R15a: while a replayed tail is in the parser, its queries go unanswered;\n/// a grace after it's handed over, answers flow again.\n#[test]\nfn replies_wait_until_the_replayed_tail_is_parsed() {\n    let gate = link::ReplayGate::until(100);\n    assert!(!gate.is_open());\n    gate.handed_over(50);",
+  "after": "    assert!(!gate.is_open(), \"half the tail\");\n    gate.handed_over(100);\n    assert!(!gate.is_open(), \"the parser may still hold its queries\");"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 929,
+  "txt": "std::thread::sleep(Duration::from_millis(600));",
+  "loopish": true,
+  "before": "fn replies_wait_until_the_replayed_tail_is_parsed() {\n    let gate = link::ReplayGate::until(100);\n    assert!(!gate.is_open());\n    gate.handed_over(50);\n    std::thread::sleep(Duration::from_millis(600));\n    assert!(!gate.is_open(), \"half the tail\");\n    gate.handed_over(100);\n    assert!(!gate.is_open(), \"the parser may still hold its queries\");",
+  "after": "    assert!(gate.is_open());\n    assert!(link::ReplayGate::open().is_open(), \"nothing to replay\");\n}"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 974,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "fn shows(pane: &crate::pane::Pane, needle: &str) {\n    let until = Instant::now() + WAIT;\n    while !screen(pane).contains(needle) {\n        assert!(\n            Instant::now() < until,\n            \"{needle:?} never showed: {:?}\",\n            screen(pane)\n        );",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 999,
+  "txt": "std::thread::sleep(Duration::from_millis(100));",
+  "loopish": false,
+  "before": "            .next()\n            .and_then(|s| s.rsplit(' ').next())\n            .map(str::to_string)\n            .unwrap();\n        if get(\"snapshots\") == format!(\"1@{printed} 2@{printed}\") {\n            return;\n        }\n        assert!(Instant::now() < until, \"snapshots {:?}\", get(\"snapshots\"));",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1092,
+  "txt": "while [ ! -e {go} ]; do sleep 0.05; done\\n\\",
+  "loopish": true,
+  "before": "    let socket = place.socket(TAB);\n    let go = dir.path().join(\"go\");\n    let program = dir.path().join(\"program.sh\");\n    std::fs::write(\n        &program,\n        format!(\n            \"trap 'stty size' WINCH\\n\\\n             printf 'ready\\\\n'\\n\\",
+  "after": "             head -c 6000000 /dev/zero | tr '\\\\0' x\\n\\\n             printf '\\\\nflooded\\\\n'\\n\\\n             while :; do sleep 0.05; done\\n\","
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1095,
+  "txt": "while :; do sleep 0.05; done\\n\",",
+  "loopish": true,
+  "before": "    std::fs::write(\n        &program,\n        format!(\n            \"trap 'stty size' WINCH\\n\\\n             printf 'ready\\\\n'\\n\\\n             while [ ! -e {go} ]; do sleep 0.05; done\\n\\\n             head -c 6000000 /dev/zero | tr '\\\\0' x\\n\\\n             printf '\\\\nflooded\\\\n'\\n\\",
+  "after": "            go = go.display()\n        ),\n    )"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1114,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    // Taken back once the flood is printed: a shell runs its trap only\n    // between commands.\n    let until = Instant::now() + WAIT;\n    while log_printed_and_base(&socket).0 < 6_000_000 {\n        assert!(\n            Instant::now() < until,\n            \"premise: the program floods its jar\"\n        );",
+  "after": "    }\n    assert!(\n        log_printed_and_base(&socket).1 > 0,"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1161,
+  "txt": "std::thread::sleep(Duration::from_millis(300));",
+  "loopish": false,
+  "before": "    );\n\n    owner.host.sever_jar();\n    drop(owner);\n    std::fs::remove_file(token_of(&place, &socket)).unwrap();\n    let tokenless = pane_in(&place, &command, dir.path(), Some(socket.clone()));\n    assert!(tokenless.detached(), \"no token for it\");\n",
+  "after": "    assert!(!mark.exists(), \"the program was started twice\");\n    assert_eq!(socket_state(&socket), SocketState::Live, \"the jar runs on\");\n    let mut held = held;"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1169,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    std::thread::sleep(Duration::from_millis(300));\n    assert!(!mark.exists(), \"the program was started twice\");\n    assert_eq!(socket_state(&socket), SocketState::Live, \"the jar runs on\");\n    let mut held = held;\n    let until = Instant::now() + WAIT;\n    while !held.is_closed() {\n        held.drain_output();\n        assert!(Instant::now() < until, \"a detached tab never closed\");",
+  "after": "    }\n    let status = held.exit_status().map(portable_pty::ExitStatus::signal);\n    assert_eq!(status, Some(Some(Lost::Held.label())));"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1229,
+  "txt": "std::thread::sleep(Duration::from_millis(1500));",
+  "loopish": false,
+  "before": "        None,\n    );\n    shows(&first, \"?62\");\n    first.host.sever_jar();\n    drop(first);\n\n    let second = pane_in(&place, \"exec cat\", dir.path(), Some(socket));\n    assert!(second.adopted());",
+  "after": "    let mut second = second;\n    second.send_bytes(b\"done\\n\").unwrap();\n    shows(&second, \"cdone\");"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1387,
+  "txt": "\"#!/bin/sh\\nsleep 15\\necho '{}'\\necho '{}'\\n\",",
+  "loopish": false,
+  "before": "    let build = store::Build {\n        commit: \"c0ffee0\",\n        built: \"a slow first run\",\n    };\n    let slow = dir.path().join(\"spyc-jar\");\n    std::fs::write(\n        &slow,\n        format!(",
+  "after": "            build.commit, build.built\n        ),\n    )"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1571,
+  "txt": "rx.recv_timeout(WAIT).ok()",
+  "loopish": false,
+  "before": "fn judged(place: &Place, socket: &Path) -> Option<(SocketState, usize)> {\n    let (tx, rx) = mpsc::channel();\n    let place = place.clone();\n    let socket = socket.to_path_buf();\n    std::thread::spawn(move || {\n        let state = socket_state(&socket);\n        let _ = tx.send((state, place::sweep(&place, Duration::ZERO)));\n    });",
+  "after": "}\n\n/// R32b, finding 4: a socket counts as gone only when its jar's lock is"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1582,
+  "txt": "let mut host = spawn_in(&place, \"exec sleep 100\", dir.path()).unwrap();",
+  "loopish": false,
+  "before": "/// R32b, finding 4: a socket counts as gone only when its jar's lock is\n/// free. A real jar that isn't accepting (stopped, its backlog full, so\n/// macOS refuses a connection) holds its lock: live, and never swept.\n#[test]\nfn a_jar_holding_its_lock_is_never_judged_gone_however_busy() {\n    use rustix::process::{Pid, Signal, kill_process};\n    let dir = short_dir();\n    let place = place_in(dir.path(), built_jar());",
+  "after": "    let socket = place.socket(\"0123456789abcdef\");\n    let jar = describe_field(&socket, \"pid\");\n    let _ends = Ends(vec![jar]);"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1660,
+  "txt": "\"#!/bin/sh\\nsleep 6\\nexec '{}' \\\"$@\\\"\\n\",",
+  "loopish": false,
+  "before": "#[test]\nfn a_tab_whose_jar_is_slow_to_start_opens_with_its_program_run_once() {\n    use std::os::unix::fs::PermissionsExt;\n    let dir = short_dir();\n    let slow = dir.path().join(\"slow-jar\");\n    std::fs::write(\n        &slow,\n        format!(",
+  "after": "            built_jar().display()\n        ),\n    )"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1676,
+  "txt": "std::thread::sleep(Duration::from_secs(2));",
+  "loopish": true,
+  "before": "    let host = spawn_in(\n        &place,\n        &format!(\"echo once >> {}; exec cat\", ran.display()),\n        dir.path(),\n    );\n    let mut host = host.unwrap_or_else(|e| panic!(\"the tab didn't open: {e:#}\"));\n    host.write_all(b\"typed\\n\").unwrap();\n    read_until(&host, \"typed\");",
+  "after": "    assert_eq!(\n        std::fs::read_to_string(&ran).unwrap(),\n        \"once\\n\","
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1710,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    drop(first);\n    let until = Instant::now() + WAIT;\n    while !spyc_jar::client::describe(&socket)\n        .unwrap()\n        .iter()\n        .any(|(k, v)| k == \"owner\" && v.starts_with(\"none\"))\n    {\n        assert!(Instant::now() < until, \"premise: the jar saw its owner go\");",
+  "after": "    }\n\n    kill_process(Pid::from_raw(jar).unwrap(), Signal::STOP).unwrap();"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1715,
+  "txt": "std::thread::sleep(Duration::from_secs(6));",
+  "loopish": false,
+  "before": "        .any(|(k, v)| k == \"owner\" && v.starts_with(\"none\"))\n    {\n        assert!(Instant::now() < until, \"premise: the jar saw its owner go\");\n        std::thread::sleep(Duration::from_millis(20));\n    }\n\n    kill_process(Pid::from_raw(jar).unwrap(), Signal::STOP).unwrap();\n    let resume = std::thread::spawn(move || {",
+  "after": "        kill_process(Pid::from_raw(jar).unwrap(), Signal::CONT).unwrap();\n    });\n    let second = pane_in(&place, \"echo started-again\", dir.path(), Some(socket));"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1757,
+  "txt": "std::thread::sleep(PARKED_AT_MOST);",
+  "loopish": false,
+  "before": "            version: proto::VERSION,\n            child_pid: std::process::id(),\n            head: 0,\n            base: 0,\n            rows: 24,\n            cols: 80,\n        };\n        proto::write_msg(&mut conn, &welcome).unwrap();",
+  "after": "        let mut input = 0;\n        while let Ok(Some(m)) = proto::read_msg(&mut conn) {\n            if let Msg::Input { bytes } = m {"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 1789,
+  "txt": "match got.recv_timeout(until.saturating_duration_since(Instant::now())) {",
+  "loopish": true,
+  "before": "    let batches = 400;\n    for _ in 0..batches {\n        host.write_all(&[b'x'; 256]).unwrap();\n    }\n    let pasted = batches * 256;\n    let until = Instant::now() + PARKED_AT_MOST + WAIT;\n    let mut through = 0;\n    while through < pasted {",
+  "after": "            Ok(n) => through = n,\n            Err(e) => panic!(\n                \"spyc gave up on a parked jar with {through} of {pasted} typed bytes through: {e}\""
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 2199,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "        (\"project_home\", \"/home/work\"),\n    ]);\n    let until = Instant::now() + WAIT;\n    while !spyc_jar::client::describe(&socket).is_ok_and(|f| {\n        f.iter()\n            .any(|(k, v)| k == \"project_home\" && v == \"/home/work\")\n    }) {\n        assert!(Instant::now() < until, \"the jar was never told\");",
+  "after": "    }\n    host.sever_jar();\n    std::mem::forget(host);"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 2208,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    }\n    host.sever_jar();\n    std::mem::forget(host);\n    // The jar hears its owner went in its own time; until then it refuses one.\n    while !spyc_jar::client::describe(&socket)\n        .is_ok_and(|f| f.iter().any(|(k, v)| k == \"owner\" && v.starts_with(\"none\")))\n    {\n        assert!(Instant::now() < until, \"the jar never heard its owner go\");",
+  "after": "    }\n    (socket, program)\n}"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 2239,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    owned.shutdown(Duration::from_secs(2));\n    drop(owned);\n    let until = Instant::now() + WAIT;\n    while owned_socket.exists() {\n        assert!(\n            Instant::now() < until,\n            \"the owned jar ran on after its tab closed\"\n        );",
+  "after": "    }\n\n    let (socket, program) = left_by_a_crash(&place, dir.path());"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 2248,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    }\n\n    let (socket, program) = left_by_a_crash(&place, dir.path());\n    let mut found = Vec::new();\n    let until = Instant::now() + WAIT;\n    while found.is_empty() {\n        assert!(Instant::now() < until, \"the orphan was never found\");\n        found = orphans::find(Some(place.clone()));",
+  "after": "    }\n    assert_eq!(found.len(), 1, \"{found:?}\");\n    let orphan = &found[0];"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 2275,
+  "txt": "std::thread::sleep(Duration::from_secs(1));",
+  "loopish": false,
+  "before": "    assert!(\n        orphans::find(Some(place.clone())).is_empty(),\n        \"a jar whose token isn't here is another spyc's\"\n    );\n    std::fs::write(&token, kept).unwrap();\n    orphans::discard(Some(place), &socket).unwrap();\n    assert!(\n        !running(program) || {",
+  "after": "            !running(program)\n        }\n    );"
+ },
+ {
+  "f": "src/pane/jar/tests.rs",
+  "n": 2292,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "fn a_discarded_jar_ends_with_its_program() {\n    let dir = short_dir();\n    let place = place_in(dir.path(), built_jar());\n    let (socket, program) = left_by_a_crash(&place, dir.path());\n    orphans::discard(Some(place.clone()), &socket).unwrap();\n    let until = Instant::now() + WAIT;\n    while running(program) || socket.exists() {\n        assert!(Instant::now() < until, \"the jar or its program ran on\");",
+  "after": "    }\n    assert!(!token_of(&place, &socket).exists(), \"its token was kept\");\n}"
+ },
+ {
+  "f": "tests/jar_process/contain.rs",
+  "n": 100,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "\n/// What a held jar does: the holder goes at once, the program prints on past\n/// anything a PTY buffers, and every connection is answered, the requester's\n/// and new ones alike.\nfn assert_held(h: &mut Held, what: &str) {\n    assert_failed(h, what);\n    let until = Instant::now() + Duration::from_secs(3);\n    while running(h.holder) && Instant::now() < until {",
+  "after": "    }\n    assert!(\n        !running(h.holder),"
+ },
+ {
+  "f": "tests/jar_differ.rs",
+  "n": 165,
+  "txt": "s.set_read_timeout(Some(WAIT)).unwrap();",
+  "loopish": false,
+  "before": "        }\n    }\n}\n\n/// A raw `hello` naming `version`, as a lookup; the version the welcome\n/// answers.\nfn welcomed_at(socket: &Path, version: u16) -> u16 {\n    let mut s = UnixStream::connect(socket).unwrap();",
+  "after": "    let mut payload = version.to_be_bytes().to_vec();\n    payload.extend([Role::Lookup as u8, 0, 0]);\n    let mut frame = u32::try_from(payload.len() + 2)"
+ },
+ {
+  "f": "tests/jar_process/lock.rs",
+  "n": 57,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "fn lock_becomes(socket: &Path, want: Lock, what: &str) {\n    let until = Instant::now() + WAIT;\n    while lock_of(socket) != want {\n        assert!(\n            Instant::now() < until,\n            \"{what}: the lock stayed {:?}\",\n            lock_of(socket)\n        );",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "tests/jar_process/lock.rs",
+  "n": 64,
+  "txt": "sh(\"trap '' HUP; echo hangups-ignored; exec sleep 120\")",
+  "loopish": false,
+  "before": "        );\n        std::thread::sleep(Duration::from_millis(20));\n    }\n}\n\n/// A program that outlives its jar: it ignores the hangup the jar's end\n/// sends its terminal.\nfn outliving() -> Vec<&'static str> {",
+  "after": "}\n\n/// Held while the jar runs; free within a moment of the jar being killed,"
+ },
+ {
+  "f": "tests/jar_process/lock.rs",
+  "n": 109,
+  "txt": "&format!(\"validate-handover) {};;\", on_call(&calls, 2, \"sleep 2\")),",
+  "loopish": false,
+  "before": "                }\n            }\n        })\n    };\n    let calls = jar.dir.path().join(\"validations\");\n    let slow_parked = jar_script(\n        jar.dir.path(),\n        \"jar-slow-parked\",",
+  "after": "    );\n    let plain = jar_script(jar.dir.path(), \"jar-plain\", \"\");\n    for binary in [&plain, &slow_parked, &plain] {"
+ },
+ {
+  "f": "tests/jar_compat.rs",
+  "n": 70,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    let _reap = Reap(&mut jar);\n\n    // What a newer spyc may send in its hello: capabilities after the fields\n    // version 1 defines. The old jar reads the fields it knows and welcomes it.\n    let mut raw = loop {\n        if let Ok(s) = UnixStream::connect(&socket) {\n            break s;\n        }",
+  "after": "    };\n    raw.write_all(&frame(\n        1,"
+ },
+ {
+  "f": "tests/jar_compat.rs",
+  "n": 79,
+  "txt": "raw.set_read_timeout(Some(WAIT)).expect(\"timeout\");",
+  "loopish": false,
+  "before": "    };\n    raw.write_all(&frame(\n        1,\n        proto::CRITICAL,\n        &[0, 1, 2, b'c', b'a', b'p', b's'],\n    ))\n    .expect(\"hello\");\n    let mut head = [0u8; 6];",
+  "after": "    raw.read_exact(&mut head)\n        .expect(\"an answer to a longer hello\");\n    assert_eq!("
+ },
+ {
+  "f": "tests/jar_process/ownership.rs",
+  "n": 21,
+  "txt": "std::thread::sleep(Duration::from_secs(13));",
+  "loopish": true,
+  "before": "/// A jar holding its program for its first owner, with a finite linger,\n/// waits past the first-owner grace without spinning, and the owner that\n/// comes inside its start wait is still given the program.\n#[test]\nfn a_jar_holding_its_program_for_a_first_owner_waits_idle_past_the_grace() {\n    let mut jar = Jar::holding(30000, &[\"--linger-ownerless-ms\", \"0\"], &[\"/bin/cat\"]);\n    eventually(\"the jar's socket\", || jar.socket.exists());\n    // Past the jar's ten-second first-owner grace, inside its start wait.",
+  "after": "    let spent = cpu_seconds(jar.process.id());\n    assert!(\n        spent < 1.0,"
+ },
+ {
+  "f": "tests/jar_process/ownership.rs",
+  "n": 60,
+  "txt": "std::thread::sleep(deadline / 5);",
+  "loopish": true,
+  "before": "    // than the flow-control window and the socket hold.\n    let until = Instant::now() + deadline * 4;\n    let mut n = 0;\n    while Instant::now() < until {\n        n += 1;\n        tx.send(&Msg::Ping { n }).unwrap_or_else(|e| {\n            panic!(\"the jar ended a live owner's connection while it pinged: {e}\")\n        });",
+  "after": "    }\n    let mut seen = Seen::default();\n    let until = Instant::now() + WAIT;"
+ },
+ {
+  "f": "tests/jar_process/ownership.rs",
+  "n": 102,
+  "txt": "std::thread::sleep(Duration::from_secs(7));",
+  "loopish": false,
+  "before": "    let mut owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).expect(\"replay\");\n    let mut line = vec![b'a'; 512];\n    line.extend(b\" paused-mid-frame\\n\");\n    let frame = proto::encode(&Msg::Input { bytes: line });\n    let (first, rest) = frame.split_at(frame.len() / 2);\n    owner.send_raw(first).expect(\"the frame's first half\");\n    // Past the five-second frame deadline, inside the ten-second lease.",
+  "after": "    owner.send_raw(rest).expect(\"the rest of the frame\");\n    let seen = read_until(&mut owner, true, |s| s.contains(\"paused-mid-frame\"));\n    assert!(seen.contains(\"paused-mid-frame\"));"
+ },
+ {
+  "f": "tests/jar_process/ownership.rs",
+  "n": 137,
+  "txt": "std::thread::sleep(Duration::from_secs(12));",
+  "loopish": false,
+  "before": "        (\"lingering\", &lingering),\n        (\"holding an exit\", &exited),\n    ];\n    let before: Vec<f64> = jars\n        .iter()\n        .map(|(_, j)| cpu_seconds(j.process.id()))\n        .collect();\n    // The window ends past the waiting jar's ten-second first-owner grace.",
+  "after": "    for ((state, jar), at) in jars.iter().zip(before) {\n        assert!(\n            jar.process.id() > 0 && running(jar.process.id()),"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 98,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "        .parse()\n        .expect(\"a pid\")\n}\n\n/// Wait up to 2 s for `pid` to be gone; kill it if it isn't, and say so.\nfn gone_soon(pid: u32) -> bool {\n    let until = Instant::now() + Duration::from_secs(2);\n    while running(pid) && Instant::now() < until {",
+  "after": "    }\n    let gone = !running(pid);\n    if !gone"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 143,
+  "txt": "&format!(\"validate-handover) {};;\", on_call(&calls, 1, \"sleep 7\")),",
+  "loopish": false,
+  "before": "/// for it.\n#[test]\nfn a_first_run_slower_than_a_parked_validation_still_upgrades() {\n    let (mut jar, mut owner, mut seen) = counting();\n    let calls = jar.dir.path().join(\"validations\");\n    let slow_first = jar_script(\n        jar.dir.path(),\n        \"jar-slow-first\",",
+  "after": "    );\n    let (answer, quiet) =\n        upgrade_watching(&mut owner, &mut seen, &slow_first, Duration::from_secs(40));"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 171,
+  "txt": "&format!(\"validate-handover) {};;\", on_call(&calls, 2, \"sleep 12\")),",
+  "loopish": true,
+  "before": "/// and the next attempt goes through.\n#[test]\nfn a_parked_validation_past_its_limit_is_busy_and_a_retry_succeeds() {\n    let (mut jar, mut owner, mut seen) = counting();\n    let calls = jar.dir.path().join(\"validations\");\n    let slow_parked = jar_script(\n        jar.dir.path(),\n        \"jar-slow-parked\",",
+  "after": "    );\n    let (answer, quiet) =\n        upgrade_watching(&mut owner, &mut seen, &slow_parked, Duration::from_secs(60));"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 209,
+  "txt": "&format!(\"sleep 300 & echo $! > {}; sleep 300\", pidfile.display())",
+  "loopish": false,
+  "before": "    let hung = jar_script(\n        jar.dir.path(),\n        \"jar-hung\",\n        &format!(\n            \"validate-handover) {};;\",\n            on_call(\n                &calls,\n                2,",
+  "after": "            )\n        ),\n    );"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 300,
+  "txt": "std::thread::sleep(Duration::from_millis(300));",
+  "loopish": false,
+  "before": "    }\n    proto::write_msg(&mut sock, &Msg::Replay { from: 0 }).expect(\"replay\");\n    let mut requester = jar.connect(Role::Reader);\n    let mut seen = Seen::default();\n    let pings: Vec<u8> = (0..20_000u64)\n        .flat_map(|n| proto::encode(&Msg::Ping { n }))\n        .collect();\n    (&sock).write_all(&pings).expect(\"pings\");",
+  "after": "    let answered = Arc::new(AtomicBool::new(false));\n    let first = jar.dir.path().join(\"first-run-paid\");\n    let owner = {"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 312,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "        let answered = Arc::clone(&answered);\n        let (first, socket) = (first.clone(), jar.socket.clone());\n        std::thread::spawn(move || {\n            let until = Instant::now() + WAIT;\n            while !first.exists() || !parking(&socket) {\n                if Instant::now() > until {\n                    return Err(\"the jar never parked\".to_string());\n                }",
+  "after": "            }\n            let mut sock = sock;\n            loop {"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 323,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "            loop {\n                match proto::read_msg(&mut sock) {\n                    Ok(Some(Msg::Pong { .. })) => break,\n                    Ok(_) => {}\n                    Err(e) => return Err(format!(\"the owner's connection ended: {e:?}\")),\n                }\n            }\n            while !answered.load(Ordering::SeqCst) {",
+  "after": "            }\n            // Now it reads again: every answer still comes, and the\n            // connection lives."
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 327,
+  "txt": "let _ = sock.set_read_timeout(Some(WAIT));",
+  "loopish": true,
+  "before": "                    Err(e) => return Err(format!(\"the owner's connection ended: {e:?}\")),\n                }\n            }\n            while !answered.load(Ordering::SeqCst) {\n                std::thread::sleep(Duration::from_millis(50));\n            }\n            // Now it reads again: every answer still comes, and the\n            // connection lives.",
+  "after": "            loop {\n                match proto::read_msg(&mut sock) {\n                    Ok(Some(Msg::Pong { n: 19_999 })) => return Ok(()),"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 341,
+  "txt": "\"validate-handover) [ -e {first} ] || {{ sleep 1; touch {first}; }};;\",",
+  "loopish": false,
+  "before": "                }\n            }\n        })\n    };\n    let next = jar_script(\n        jar.dir.path(),\n        \"jar-next\",\n        &format!(",
+  "after": "            first = first.display()\n        ),\n    );"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 372,
+  "txt": "&format!(\"sleep 300 & echo $! > {}; wait\", pidfile.display())",
+  "loopish": false,
+  "before": "    let slow_holder = jar_script(\n        jar.dir.path(),\n        \"jar-slow-holder\",\n        &format!(\n            \"hold-handover) {};;\",\n            on_call(\n                &calls,\n                1,",
+  "after": "            )\n        ),\n    );"
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 418,
+  "txt": "\"hold-handover) sleep 300;;\",",
+  "loopish": true,
+  "before": "        ),\n    );\n    let mut owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).expect(\"replay\");\n    let mut seen = read_until(&mut owner, true, |s| s.text.len() >= 1_000_000);\n    let deaf = jar_script(\n        jar.dir.path(),\n        \"jar-deaf-holder\",",
+  "after": "    );\n    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &deaf, Duration::from_secs(60));\n    assert_eq!("
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 441,
+  "txt": "&format!(\"resume-handover) {};;\", on_call(&calls, 1, \"sleep 35\")),",
+  "loopish": false,
+  "before": "/// flight, and macOS flushes those.\n#[test]\nfn a_new_image_slower_than_the_holders_old_limit_keeps_every_connection() {\n    let (mut jar, mut owner, mut seen) = counting();\n    let calls = jar.dir.path().join(\"resumes\");\n    let slow_resume = jar_script(\n        jar.dir.path(),\n        \"jar-slow-resume\",",
+  "after": "    );\n    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow_resume, Duration::from_secs(60));\n    assert!("
+ },
+ {
+  "f": "tests/jar_process/timers.rs",
+  "n": 466,
+  "txt": "\"hold-handover) echo $$ > {holder};;\\nresume-handover) touch {resuming}; sleep 300;;\",",
+  "loopish": false,
+  "before": "fn a_holder_ends_when_the_jar_does() {\n    let (mut jar, mut owner, mut seen) = counting();\n    let holder_pid = jar.dir.path().join(\"holder.pid\");\n    let resuming = jar.dir.path().join(\"resuming\");\n    let stalled = jar_script(\n        jar.dir.path(),\n        \"jar-stalled-resume\",\n        &format!(",
+  "after": "            holder = holder_pid.display(),\n            resuming = resuming.display()\n        ),"
+ },
+ {
+  "f": "tests/session_jar.rs",
+  "n": 313,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    fn wait_for(&self, what: &str, needle: &str) {\n        let until = Instant::now() + WAIT;\n        while !self.text().contains(needle) {\n            assert!(\n                Instant::now() < until,\n                \"never: {what}; the terminal was sent:\\n{:?}\",\n                self.text()\n            );",
+  "after": "        }\n    }\n"
+ },
+ {
+  "f": "tests/session_jar.rs",
+  "n": 328,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "        self.tx.close();\n    }\n}\n\nfn eventually(what: &str, mut done: impl FnMut() -> bool) {\n    let until = Instant::now() + WAIT;\n    while !done() {\n        assert!(Instant::now() < until, \"never: {what}\");",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "tests/session_jar.rs",
+  "n": 350,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    let until = Instant::now() + WAIT;\n    let mut answered = false;\n    while !quit() {\n        if !answered && asked() {\n            type_keys(b\"y\");\n            answered = true;\n        }\n        assert!(Instant::now() < until, \"never: {what}\");",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "tests/session_jar.rs",
+  "n": 452,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    fn wait_for(&self, what: &str, needle: &str) {\n        let until = Instant::now() + WAIT;\n        while !self.text().contains(needle) {\n            assert!(\n                Instant::now() < until,\n                \"never: {what}; the terminal showed:\\n{:?}\",\n                self.text()\n            );",
+  "after": "        }\n    }\n"
+ },
+ {
+  "f": "tests/session_jar.rs",
+  "n": 473,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": false,
+  "before": "                .is_some_and(|at| text[at..].contains(name))\n            {\n                return;\n            }\n            assert!(\n                Instant::now() < until,\n                \"never drew {name}; the terminal showed:\\n{text:?}\"\n            );",
+  "after": "        }\n    }\n"
+ },
+ {
+  "f": "tests/session_jar.rs",
+  "n": 495,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": false,
+  "before": "            if let Some(status) = self.child.try_wait().unwrap() {\n                return status;\n            }\n            assert!(\n                Instant::now() < until,\n                \"never exited; the terminal showed:\\n{:?}\",\n                self.text()\n            );",
+  "after": "        }\n    }\n"
+ },
+ {
+  "f": "tests/session_jar.rs",
+  "n": 759,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": false,
+  "before": "            if let Some(line) = detaches().get(seen) {\n                return line.clone();\n            }\n            assert!(\n                Instant::now() < until,\n                \"no detach noted after {seen}: {:?}\",\n                std::fs::read_to_string(&log)\n            );",
+  "after": "        }\n    };\n"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 210,
+  "txt": "\"validate-handover) sleep 12 & exit 1;;\",",
+  "loopish": true,
+  "before": "    let mut owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).expect(\"replay\");\n    let mut seen = read_until(&mut owner, true, |s| {\n        counts(s).last().is_some_and(|n| *n >= 5)\n    });\n    let holding = jar_script(\n        jar.dir.path(),\n        \"jar-holding\",",
+  "after": "    );\n    let (answer, took) = upgrade_answer(&mut owner, &mut seen, &holding, Duration::from_secs(20));\n    assert!(matches!(answer, Some(Msg::Refused { .. })), \"{answer:?}\");"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 237,
+  "txt": "\"validate-handover) sleep 60 & echo $! > {}; sleep 60;;\",",
+  "loopish": true,
+  "before": "    let mut seen = read_until(&mut owner, true, |s| {\n        counts(s).last().is_some_and(|n| *n >= 5)\n    });\n    let pidfile = jar.dir.path().join(\"validator-child.pid\");\n    let slow = jar_script(\n        jar.dir.path(),\n        \"jar-slow\",\n        &format!(",
+  "after": "            pidfile.display()\n        ),\n    );"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 261,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "        .expect(\"the validator started a child\")\n        .trim()\n        .parse()\n        .expect(\"a pid\");\n    let pid = rustix::process::Pid::from_raw(child).expect(\"a pid\");\n    let gone = || rustix::process::test_kill_process(pid).is_err();\n    let until = Instant::now() + Duration::from_secs(2);\n    while !gone() && Instant::now() < until {",
+  "after": "    }\n    let alive = !gone();\n    if alive {"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 420,
+  "txt": "\"validate-handover) [ -e {first} ] || {{ sleep 2; touch {first}; }};;\",",
+  "loopish": true,
+  "before": "    let mut seen = read_until(&mut owner, true, |s| {\n        counts(s).last().is_some_and(|n| *n >= 5)\n    });\n    let first = jar.dir.path().join(\"first-run-paid\");\n    let slow_once = jar_script(\n        jar.dir.path(),\n        \"jar-slow-once\",\n        &format!(",
+  "after": "            first = first.display()\n        ),\n    );"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 509,
+  "txt": "std::thread::sleep(Duration::from_millis(300));",
+  "loopish": false,
+  "before": "        matches!(proto::read_msg(&mut sock), Ok(Some(Msg::Welcome { .. }))),\n        \"premise: the reader is welcomed\"\n    );\n    proto::write_msg(&mut sock, &Msg::Replay { from: 0 }).expect(\"replay\");\n    let pings: Vec<u8> = (0..20_000u64)\n        .flat_map(|n| proto::encode(&Msg::Ping { n }))\n        .collect();\n    (&sock).write_all(&pings).expect(\"pings\");",
+  "after": "    let stop = Arc::new(AtomicBool::new(false));\n    let first = jar.dir.path().join(\"first-run-paid\");\n    let trickle = {"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 526,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "            // unanswered): read the rest of the log's batch, which lets the\n            // writer park with its outbox full, until the first answer to a\n            // ping shows the flush has begun; then take 4 KiB every 0.9 s.\n            let until = Instant::now() + WAIT;\n            while !first.exists() || !parking(&socket) {\n                if Instant::now() > until {\n                    return false;\n                }",
+  "after": "            }\n            let mut sock = sock;\n            let mut flushing = false;"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 539,
+  "txt": "std::thread::sleep(Duration::from_millis(900));",
+  "loopish": true,
+  "before": "                match proto::read_msg(&mut sock) {\n                    Ok(Some(Msg::Pong { .. })) => flushing = true,\n                    Ok(_) => {}\n                    Err(_) => return false,\n                }\n            }\n            let mut some = [0u8; 4096];\n            while !stop.load(Ordering::SeqCst) {",
+  "after": "                let _ = (&sock).read(&mut some);\n            }\n            true"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 549,
+  "txt": "\"validate-handover) [ -e {first} ] || {{ sleep 1; touch {first}; }};;\",",
+  "loopish": false,
+  "before": "            }\n            true\n        })\n    };\n    let next = jar_script(\n        jar.dir.path(),\n        \"jar-next\",\n        &format!(",
+  "after": "            first = first.display()\n        ),\n    );"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 575,
+  "txt": "let _ = s.set_read_timeout(Some(Duration::from_millis(300)));",
+  "loopish": false,
+  "before": "}\n\n/// Whether the jar at `socket` has parked for a handover: a lookup's `hello`\n/// goes unanswered, its acceptor being parked with everything else.\npub fn parking(socket: &std::path::Path) -> bool {\n    let Ok(mut s) = UnixStream::connect(socket) else {\n        return false;\n    };",
+  "after": "    if s.write_all(&LOOKUP_HELLO).is_err() {\n        return false;\n    }"
+ },
+ {
+  "f": "tests/jar_process/upgrade.rs",
+  "n": 602,
+  "txt": "std::thread::sleep(Duration::from_millis(300));",
+  "loopish": true,
+  "before": "        10000,\n        &[],\n        &sh(&format!(\n            \"touch {}; printf first-words; exec cat\",\n            mark.display()\n        )),\n    );\n    eventually(\"the jar's socket\", || jar.socket.exists());",
+  "after": "    assert_eq!(\n        described(&jar, \"program_pid\"),\n        \"0\","
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 82,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "                    argv: [\"/bin/sh\", \"-c\", script].map(String::from).to_vec(),\n                }\n                .encode(),\n            )\n            .unwrap();\n        let until = Instant::now() + WAIT;\n        while spyc_jar::client::describe(&socket).is_err() {\n            assert!(Instant::now() < until, \"the jar never answered\");",
+  "after": "        }\n        Self {\n            dir,"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 150,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    let shown = || String::from_utf8_lossy(&seen.lock().unwrap()).into_owned();\n    let until = Instant::now() + WAIT;\n    while jar.described(\"owner_pid\") != client.process_id().map(|p| p.to_string()) {\n        assert!(\n            Instant::now() < until,\n            \"the client never attached: {}\",\n            shown()\n        );",
+  "after": "    }\n\n    // The jar names its owner as the client connects, a moment before the"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 164,
+  "txt": "std::thread::sleep(Duration::from_millis(250));",
+  "loopish": true,
+  "before": "    while !shown().contains(\"got=late\") {\n        assert!(\n            Instant::now() < until,\n            \"keys typed now never arrived: {}\",\n            shown()\n        );\n        keys.write_all(b\"late\\r\").unwrap();\n        keys.flush().unwrap();",
+  "after": "    }\n    assert!(\n        !shown().contains(\"got=early\"),"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 190,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    let jar = Jar::start_with(&[\"--deadline-ms\", \"1000\"]);\n    let owner_gone = |what: &str| {\n        let until = Instant::now() + WAIT;\n        loop {\n            if let Some(why) = jar.described(\"owner_left\") {\n                return why;\n            }\n            assert!(Instant::now() < until, \"{what}: the owner never left\");",
+  "after": "        }\n    };\n"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 247,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "        {\n            let (seen, paused) = (Arc::clone(&seen), Arc::clone(&paused));\n            let mut reader = pair.master.try_clone_reader().unwrap();\n            std::thread::spawn(move || {\n                let _master = pair.master;\n                let mut buf = [0u8; 16384];\n                loop {\n                    while paused.load(std::sync::atomic::Ordering::SeqCst) {",
+  "after": "                    }\n                    match reader.read(&mut buf) {\n                        Ok(0) | Err(_) => break,"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 302,
+  "txt": "std::thread::sleep(Duration::from_millis(250));",
+  "loopish": true,
+  "before": "        let until = Instant::now() + WAIT;\n        while !self.shown().contains(&answer) {\n            assert!(\n                Instant::now() < until,\n                \"never shown: {answer}; the terminal showed: {}\",\n                self.shown()\n            );\n            self.type_keys(format!(\"{line}\\r\").as_bytes());",
+  "after": "        }\n    }\n"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 315,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    fn wait_attached(&self, jar: &Jar) {\n        let until = Instant::now() + WAIT;\n        while jar.described(\"owner_pid\") != Some(self.pid().to_string()) {\n            assert!(\n                Instant::now() < until,\n                \"the client never attached: {}\",\n                self.shown()\n            );",
+  "after": "        }\n    }\n"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 328,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "        let until = Instant::now() + WAIT;\n        while !self.shown().contains(needle) {\n            let shown = self.shown();\n            assert!(\n                Instant::now() < until,\n                \"never shown: {needle}; the terminal showed: {}\",\n                &shown[shown.len().saturating_sub(2000)..]\n            );",
+  "after": "        }\n    }\n}"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 353,
+  "txt": "std::thread::sleep(Duration::from_secs(6));",
+  "loopish": true,
+  "before": "    let jar = Jar::start_running(\n        &[\"--deadline-ms\", \"4000\"],\n        \"while read l; do if [ \\\"$l\\\" = flood ]; then yes | head -c 2000000; fi; echo got=$l; done\",\n    );\n    let mut term = Attached::start(&jar);\n    term.pause(true);\n    term.type_keys(b\"flood\\r\");\n    // Past the jar's deadline, reading none of it.",
+  "after": "    assert_eq!(\n        jar.described(\"owner_left\"),\n        None,"
+ },
+ {
+  "f": "tests/jar_attach.rs",
+  "n": 383,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    let pid = Pid::from_raw(i32::try_from(term.pid()).unwrap()).unwrap();\n    kill_process(pid, Signal::STOP).unwrap();\n    let until = Instant::now() + WAIT;\n    while jar.described(\"owner_left\").as_deref() != Some(\"silent\") {\n        assert!(\n            Instant::now() < until,\n            \"the jar never dropped the stopped client\"\n        );",
+  "after": "    }\n    term.type_keys(b\"blind\\r\");\n    kill_process(pid, Signal::CONT).unwrap();"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 143,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": false,
+  "before": "                    .flatten()\n                    .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())\n                    .collect();\n                panic!(\n                    \"never: {what}; spyc's standard error:\\n{logs}\\nspyc last drew:\\n{}\",\n                    &seen[at..]\n                );\n            }",
+  "after": "        }\n    }\n"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 216,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    rustix::process::Pid::from_raw(pid)\n        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())\n}\n\nfn eventually(what: &str, mut done: impl FnMut() -> bool) {\n    let until = Instant::now() + WAIT;\n    while !done() {\n        assert!(Instant::now() < until, \"never: {what}\");",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 458,
+  "txt": "std::thread::sleep(Duration::from_secs(5));",
+  "loopish": false,
+  "before": "    let now: i32 = std::fs::read_to_string(&dirs.pidfile)\n        .unwrap()\n        .trim()\n        .parse()\n        .unwrap();\n    assert_eq!(now, agent, \"the program was started again\");\n    // A restore types `/resume` into a Claude tab it starts once its banner\n    // has settled (2 s); one it took back is still in its conversation.",
+  "after": "    assert!(\n        !second.shows(\"/resume\"),\n        \"a restore typed /resume into the running agent\""
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 514,
+  "txt": "let line = self.replies.recv_timeout(WAIT).ok()?;",
+  "loopish": false,
+  "before": "    fn send(&mut self, message: &str) {\n        self.stdin.write_all(message.as_bytes()).unwrap();\n        self.stdin.write_all(b\"\\n\").unwrap();\n        self.stdin.flush().unwrap();\n    }\n\n    /// The reply to a request, or `None` when the proxy ended without one.\n    fn reply(&self) -> Option<serde_json::Value> {",
+  "after": "        Some(serde_json::from_str(&line).unwrap())\n    }\n"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 1261,
+  "txt": "std::thread::sleep(Duration::from_millis(300));",
+  "loopish": true,
+  "before": "\n    let ssh = std::ffi::OsStr::new(\"192.0.2.1 50000 192.0.2.2 22\");\n    let back = Spyc::start_env(&dirs, &[\"attach\"], &[(\"SSH_CONNECTION\", ssh)]);\n    left.0.push(back.pid());\n    back.eventually(\"the session drawn\", || {\n        squeezed(&back.since_last_screen()).contains(\"copied-file.txt\")\n    });\n    back.type_keys(b\"\\x01k\");",
+  "after": "    back.type_keys(b\"yf\");\n    back.eventually(\"the path comes back as OSC 52\", || {\n        back.since_last_screen().contains(\"\\x1b]52;\")"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 1468,
+  "txt": "std::thread::sleep(Duration::from_secs(2));",
+  "loopish": true,
+  "before": "        !plain.shows(\"Upgrade it?\"),\n        \"asked with nothing new installed\"\n    );\n    plain.type_keys(b\"\\x04\");\n    eventually(\"the client leaves\", || plain.exited());\n\n    // An install the session's spyc hasn't taken. A start time is whole\n    // seconds, so the install has to come more than a second after it.",
+  "after": "    let next = bin.join(\"spyc.new\");\n    std::fs::copy(built, &next).unwrap();\n    std::fs::rename(&next, &spyc).unwrap();"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 1791,
+  "txt": "if let Ok(chunk) = more.recv_timeout(Duration::from_millis(100)) {",
+  "loopish": true,
+  "before": "    first.type_keys(b\":whoami\\r\");\n    let mut seen = String::new();\n    let until = Instant::now() + WAIT;\n    while !seen.contains('@') {\n        assert!(\n            Instant::now() < until,\n            \"`-f` never printed the new flash: {seen}\"\n        );",
+  "after": "            seen.push_str(&chunk);\n        }\n    }"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 1874,
+  "txt": "std::thread::sleep(Duration::from_millis(50));",
+  "loopish": true,
+  "before": "    };\n    let until = Instant::now() + WAIT;\n    let mut text = String::new();\n    while Instant::now() < until {\n        text = std::fs::read_to_string(&log).unwrap_or_default();\n        if in_order(&text) {\n            return;\n        }",
+  "after": "    }\n    panic!(\"the session's log, not in order: {text}\");\n}"
+ },
+ {
+  "f": "tests/jar_adopt.rs",
+  "n": 1891,
+  "txt": "\"printf ready-mark; while [ ! -e {} ]; do sleep 0.1; done; printf while-stopped-mark; exec cat\",",
+  "loopish": true,
+  "before": "\n/// S2b: a spyc stopped past its jars' deadline loses their leases; resumed, it\n/// takes its tabs back, the same program, and what it printed meanwhile shows,\n/// since it fit the jar's ring.\n#[test]\nfn a_spyc_stopped_past_the_deadline_takes_its_tabs_back() {\n    let go = std::env::temp_dir().join(format!(\"jar-go-{}\", std::process::id()));\n    let dirs = dirs_running(&format!(",
+  "after": "        go.display()\n    ));\n    let mut left = Leftovers(Vec::new());"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 179,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "    }\n\n    fn ended_within(&mut self, wait: Duration) -> bool {\n        let until = Instant::now() + wait;\n        while Instant::now() < until {\n            if self.process.try_wait().ok().flatten().is_some() {\n                return true;\n            }",
+  "after": "        }\n        false\n    }"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 214,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "        .tempdir_in(\"/tmp\")\n        .expect(\"tempdir\")\n}\n\nfn eventually(what: &str, mut done: impl FnMut() -> bool) {\n    let until = Instant::now() + WAIT;\n    while !done() {\n        assert!(Instant::now() < until, \"timed out waiting for {what}\");",
+  "after": "    }\n}\n"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 390,
+  "txt": "&sh(\"head -c 1000000 /dev/zero | tr '\\\\000' b; echo; echo END; sleep 5\"),",
+  "loopish": false,
+  "before": "}\n\n/// R12/R12a: with no owner, a full log drops its oldest bytes, and a later\n/// replay is told which.\n#[test]\nfn an_ownerless_jar_drops_the_oldest_bytes_and_says_which() {\n    let mut jar = Jar::start(\n        &[\"--ring\", \"65536\", \"--window\", \"32768\"],",
+  "after": "    );\n    // Until the program has printed it all, as the jar describes its log:\n    // the same twice running, past the first byte."
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 403,
+  "txt": "std::thread::sleep(Duration::from_millis(200));",
+  "loopish": true,
+  "before": "        field(\n            &spyc_jar::client::describe(&jar.socket).expect(\"describe\"),\n            \"log\",\n        )\n    };\n    let until = Instant::now() + WAIT;\n    let mut last = String::new();\n    loop {",
+  "after": "        let now = log();\n        if now == last && !now.ends_with(\"from 0\") {\n            break;"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 458,
+  "txt": "std::thread::sleep(Duration::from_millis(500));",
+  "loopish": true,
+  "before": "            \"log\",\n        );\n        let n = log.split(\", \").nth(1).and_then(|s| s.split(' ').next());\n        n.and_then(|n| n.parse::<u64>().ok()).unwrap_or(0)\n    };\n    let until = Instant::now() + WAIT;\n    let mut last = 0;\n    loop {",
+  "after": "        let now = printed();\n        if now == last && now > 32_768 {\n            break;"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 540,
+  "txt": "let mut jar = Jar::start(&[], &sh(\"read go; stty size; sleep 1\"));",
+  "loopish": false,
+  "before": "        jar.ended_within(Duration::from_secs(3)),\n        \"the jar ends once its exit is collected\"\n    );\n}\n\n/// R9a: a resize is logged at the offset it took effect.\n#[test]\nfn a_resize_is_logged_where_it_happened() {",
+  "after": "    let mut owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).unwrap();\n    owner"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 657,
+  "txt": "s.set_read_timeout(Some(WAIT)).unwrap();",
+  "loopish": false,
+  "before": "        p.extend(TOKEN);\n        p.extend(b\"\\x00\\x02caps from a later version\");\n        let mut f = u32::try_from(p.len() + 2).unwrap().to_be_bytes().to_vec();\n        f.extend([1, proto::CRITICAL]);\n        f.extend(p);\n        f\n    };\n    let mut s = std::os::unix::net::UnixStream::connect(&jar.socket).unwrap();",
+  "after": "    s.write_all(&hello(2)).unwrap();\n    let welcome = proto::read_msg(&mut s).unwrap();\n    assert!("
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 670,
+  "txt": "zero.set_read_timeout(Some(WAIT)).unwrap();",
+  "loopish": true,
+  "before": "        \"{welcome:?}\"\n    );\n    // It owns the jar: the owner's frames come back to it.\n    proto::write_msg(&mut s, &Msg::Ping { n: 9 }).unwrap();\n    while proto::read_msg(&mut s).unwrap() != Some(Msg::Pong { n: 9 }) {}\n    drop(s);\n\n    let mut zero = std::os::unix::net::UnixStream::connect(&jar.socket).unwrap();",
+  "after": "    zero.write_all(&hello(0)).unwrap();\n    assert!(matches!(\n        proto::read_msg(&mut zero).unwrap(),"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 697,
+  "txt": "bytes: b\"sleep 3\\n\".to_vec(),",
+  "loopish": false,
+  "before": "        s.frames.contains(&Msg::Foreground { pgid: child_pid })\n    });\n    assert!(\n        !shell.frames.is_empty(),\n        \"the shell's own group is reported\"\n    );\n    owner\n        .send(&Msg::Input {",
+  "after": "        })\n        .unwrap();\n    let job = read_until(&mut owner, true, |s| {"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 716,
+  "txt": "\"(i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.005; done) & while read l; do echo got=$l; done\",",
+  "loopish": true,
+  "before": "// Stage 3 (R33): the jar replaces its own binary under a running program.\n\n/// A program that counts forever and echoes back each line it's sent, so a\n/// lost or repeated byte shows as a broken count and input as `got=`.\nfn counter() -> Vec<&'static str> {\n    vec![\n        \"/bin/sh\",\n        \"-c\",",
+  "after": "    ]\n}\n"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1006,
+  "txt": "(\"sleep 1000\", \"a program that ends on a hangup\"),",
+  "loopish": true,
+  "before": "        .iter()\n        .find(|(k, _)| k == key)\n        .map_or_else(String::new, |(_, v)| v.clone())\n}\n\n#[test]\nfn a_finite_linger_ends_the_program_once_its_owner_has_gone() {\n    for (program, why) in [",
+  "after": "        (\n            \"trap '' HUP; while :; do sleep 1; done\",\n            \"a program that ignores it\","
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1008,
+  "txt": "\"trap '' HUP; while :; do sleep 1; done\",",
+  "loopish": true,
+  "before": "        .map_or_else(String::new, |(_, v)| v.clone())\n}\n\n#[test]\nfn a_finite_linger_ends_the_program_once_its_owner_has_gone() {\n    for (program, why) in [\n        (\"sleep 1000\", \"a program that ends on a hangup\"),\n        (",
+  "after": "            \"a program that ignores it\",\n        ),\n    ] {"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1014,
+  "txt": "std::thread::sleep(Duration::from_millis(500));",
+  "loopish": true,
+  "before": "        (\"sleep 1000\", \"a program that ends on a hangup\"),\n        (\n            \"trap '' HUP; while :; do sleep 1; done\",\n            \"a program that ignores it\",\n        ),\n    ] {\n        let mut jar = Jar::start(&[\"--linger-ownerless-ms\", \"300\"], &sh(program));\n        let owner = jar.connect(Role::Owner);",
+  "after": "        assert!(\n            jar.process.try_wait().expect(\"try_wait\").is_none(),\n            \"{why}: alive while owned\""
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1037,
+  "txt": "let mut jar = Jar::start(&[], &sh(\"sleep 1000\"));",
+  "loopish": false,
+  "before": "            pid.is_some_and(|p| rustix::process::test_kill_process(p).is_err()),\n            \"{why}: the program is gone too\"\n        );\n    }\n}\n\n#[test]\nfn without_a_linger_the_program_waits_for_an_owner() {",
+  "after": "    jar.connect(Role::Owner).drop_connection();\n    std::thread::sleep(Duration::from_secs(2));\n    assert!("
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1039,
+  "txt": "std::thread::sleep(Duration::from_secs(2));",
+  "loopish": false,
+  "before": "        );\n    }\n}\n\n#[test]\nfn without_a_linger_the_program_waits_for_an_owner() {\n    let mut jar = Jar::start(&[], &sh(\"sleep 1000\"));\n    jar.connect(Role::Owner).drop_connection();",
+  "after": "    assert!(\n        jar.process.try_wait().expect(\"try_wait\").is_none(),\n        \"the jar waits\""
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1053,
+  "txt": "let mut jar = Jar::start(&[\"--linger-ownerless-ms\", \"60000\"], &sh(\"sleep 1000\"));",
+  "loopish": false,
+  "before": "    assert!(\n        matches!(welcome, Msg::Welcome { .. }),\n        \"and a new owner gets it\"\n    );\n}\n\n#[test]\nfn a_jar_describes_itself_and_keeps_its_identity_across_an_upgrade() {",
+  "after": "    let _owner = jar.connect(Role::Owner);\n    let before = spyc_jar::client::describe(&jar.socket).expect(\"describe\");\n    assert_eq!("
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1095,
+  "txt": "let mut jar = Jar::start(&[], &sh(\"sleep 1000\"));",
+  "loopish": false,
+  "before": "    assert!(field(&after, \"build\").starts_with(\"jar-next\"));\n}\n\n// Stage 6: a jar handed on (R22), where its owner's MCP socket is (R18,\n// R30a), and the token every role but a lookup presents (R26).\n\n#[test]\nfn a_released_jar_opens_only_to_its_new_token() {",
+  "after": "    let mut first = jar.connect(Role::Owner);\n    let mut reader = jar.connect(Role::Reader);\n    first"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1158,
+  "txt": "let mut jar = Jar::start(&[], &sh(\"echo secret-on-screen; sleep 1000\"));",
+  "loopish": true,
+  "before": "    .expect(\"set info\");\n    eventually(\"the successor's MCP socket to be stored\", || {\n        described(&jar, \"owner_mcp\") == \"/tmp/spyc/b.sock\"\n    });\n}\n\n#[test]\nfn without_the_token_a_client_can_only_ask_what_the_jar_is() {",
+  "after": "    let _owner = jar.connect(Role::Owner);\n    for role in [Role::Owner, Role::Reader] {\n        for token in [&b\"\"[..], b\"test-token-0123456780\", b\"test-token-012345678\"] {"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1221,
+  "txt": "let mut jar = Jar::start(&[], &sh(\"sleep 1000\"));",
+  "loopish": false,
+  "before": "    panic!(\"no matching message within {WAIT:?}\");\n}\n\n// The $TMPDIR check: macOS's cleaner may delete a socket left untouched for\n// days. The jar puts its address back.\n\n#[test]\nfn a_jar_whose_socket_was_deleted_binds_it_again() {",
+  "after": "    let owner = jar.connect(Role::Owner);\n    std::fs::remove_file(&jar.socket).expect(\"delete the socket\");\n    std::fs::remove_file(spyc_jar::lock::path(&jar.socket)).expect(\"and its lock file\");"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1227,
+  "txt": "std::thread::sleep(Duration::from_millis(100));",
+  "loopish": false,
+  "before": "#[test]\nfn a_jar_whose_socket_was_deleted_binds_it_again() {\n    let mut jar = Jar::start(&[], &sh(\"sleep 1000\"));\n    let owner = jar.connect(Role::Owner);\n    std::fs::remove_file(&jar.socket).expect(\"delete the socket\");\n    std::fs::remove_file(spyc_jar::lock::path(&jar.socket)).expect(\"and its lock file\");\n    std::fs::remove_dir(jar.socket.parent().expect(\"its directory\")).expect(\"and its directory\");\n    let back = (0..50).any(|_| {",
+  "after": "        jar.socket.exists()\n    });\n    assert!(back, \"the socket is back within 5 s\");"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1254,
+  "txt": "let mut jar = Jar::start(&[], &sh(\"sleep 1000\"));",
+  "loopish": false,
+  "before": "    ));\n    owner\n        .send(&Msg::Ping { n: 1 })\n        .expect(\"the owner's connection is untouched\");\n}\n\n#[test]\nfn a_released_jars_new_token_crosses_an_upgrade() {",
+  "after": "    let first = jar.connect(Role::Owner);\n    first\n        .send(&Msg::Release {"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1380,
+  "txt": "std::thread::sleep(Duration::from_millis(200));",
+  "loopish": false,
+  "before": "        // A jar that refuses may have gone before its start arrives.\n        let _ = jar\n            .stdin\n            .take()\n            .unwrap()\n            .write_all(&start(&socket, None, &[\"/bin/sh\", \"-c\", &script]).encode());\n        let status = jar.wait().unwrap();\n        assert_eq!(status.code(), Some(75), \"--wire {wire:?}\");",
+  "after": "        assert!(\n            !socket.exists() && !mark.exists(),\n            \"--wire {wire:?} started something\""
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1545,
+  "txt": "std::thread::sleep(Duration::from_secs(2));",
+  "loopish": false,
+  "before": "    let mut jar = Jar::start(&[\"--window\", \"16\"], &program);\n    let mut owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).unwrap();\n    owner\n        .send(&Msg::Input {\n            bytes: b\"detach\\r\".to_vec(),\n        })\n        .unwrap();",
+  "after": "    let mut seen = Seen::default();\n    let until = Instant::now() + WAIT;\n    loop {"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1717,
+  "txt": "std::thread::sleep(Duration::from_millis(300));",
+  "loopish": false,
+  "before": "            m,\n            Msg::Refused {\n                reason: spyc_jar::proto::reason::UPGRADE_REJECTED,\n                ..\n            }\n        ),\n        \"{m:?}\"\n    );",
+  "after": "    assert!(jar.process.try_wait().unwrap().is_none(), \"the jar lives\");\n    owner.send(&Msg::Ping { n: 5 }).unwrap();\n    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 5 }));"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1808,
+  "txt": "s.set_read_timeout(Some(WAIT)).expect(\"timeout\");",
+  "loopish": true,
+  "before": "fn raw_lookup(socket: &std::path::Path) -> UnixStream {\n    let mut connected = None;\n    eventually(\"the jar's socket\", || {\n        connected = UnixStream::connect(socket).ok();\n        connected.is_some()\n    });\n    let mut s = connected.expect(\"connected\");\n    s.write_all(&LOOKUP_HELLO).expect(\"hello\");",
+  "after": "    let welcome = spyc_jar::proto::read_msg(&mut s);\n    assert!(\n        matches!(welcome, Ok(Some(Msg::Welcome { .. }))),"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1825,
+  "txt": "rx.recv_timeout(WAIT)",
+  "loopish": false,
+  "before": "/// A lookup's `describe`, or why there was none within `WAIT`, however the\n/// jar fails to answer.\nfn describe_within(socket: &std::path::Path) -> Result<Vec<(String, String)>, String> {\n    let socket = socket.to_path_buf();\n    let (tx, rx) = std::sync::mpsc::channel();\n    std::thread::spawn(move || {\n        let _ = tx.send(spyc_jar::client::describe(&socket).map_err(|e| format!(\"{e:#}\")));\n    });",
+  "after": "        .unwrap_or_else(|_| Err(format!(\"no answer within {WAIT:?}\")))\n}\n"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1933,
+  "txt": "std::thread::sleep(Duration::from_millis(200));",
+  "loopish": true,
+  "before": "    // The header of a 4,000-byte ping, then a byte at a time.\n    (&raw).write_all(&[0, 0, 0x0f, 0xa0, 9]).expect(\"header\");\n    let stop = Arc::new(AtomicBool::new(false));\n    let trickle = {\n        let stop = Arc::clone(&stop);\n        let raw = raw.try_clone().expect(\"clone\");\n        std::thread::spawn(move || {\n            while !stop.load(Ordering::SeqCst) && (&raw).write_all(&[0]).is_ok() {",
+  "after": "            }\n        })\n    };"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 1959,
+  "txt": "std::thread::sleep(Duration::from_millis(200));",
+  "loopish": true,
+  "before": "    let raw = raw_lookup(&jar.socket);\n    (&raw).write_all(&[0, 0, 0x0f, 0xa0, 9]).expect(\"header\");\n    let stop = Arc::new(AtomicBool::new(false));\n    let trickle = {\n        let stop = Arc::clone(&stop);\n        let raw = raw.try_clone().expect(\"clone\");\n        std::thread::spawn(move || {\n            while !stop.load(Ordering::SeqCst) && (&raw).write_all(&[0]).is_ok() {",
+  "after": "            }\n        })\n    };"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2025,
+  "txt": "std::thread::sleep(Duration::from_secs(3));",
+  "loopish": false,
+  "before": "    let reader = connect_within(&jar, Role::Reader, TOKEN, Duration::from_secs(2));\n    assert!(\n        reader.is_ok(),\n        \"a token holder is welcomed: {:?}\",\n        reader.err()\n    );\n    let pid = jar.process.id();\n    let before = cpu_seconds(pid);",
+  "after": "    let spent = cpu_seconds(pid) - before;\n    assert!(spent < 1.0, \"the jar spent {spent:.2} s of CPU in 3 s\");\n    let answer = upgrade(&jar, &mut owner);"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2042,
+  "txt": "let mut jar = Jar::start(&[], &sh(\"stty raw -echo; echo READY; exec sleep 1000\"));",
+  "loopish": false,
+  "before": "}\n\n/// Finding 4: a large paste into a program that reads nothing doesn't stop\n/// the jar hearing its owner. A ping is answered; once the owner has gone, its\n/// paste goes with it, so the next owner can upgrade the jar and end the\n/// program.\n#[test]\nfn a_paste_the_program_never_reads_does_not_block_its_owner() {",
+  "after": "    let mut owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).expect(\"replay\");\n    read_until(&mut owner, true, |s| s.contains(\"READY\"));"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2099,
+  "txt": "std::thread::sleep(Duration::from_millis(20));",
+  "loopish": true,
+  "before": "        .stdin\n        .take()\n        .expect(\"stdin\")\n        .write_all(&start(&dir.path().join(\"j.sock\"), None, &[\"/bin/cat\"]).encode());\n    let until = Instant::now() + WAIT;\n    let mut status = None;\n    while status.is_none() && Instant::now() < until {\n        status = refused.try_wait().expect(\"try_wait\");",
+  "after": "    }\n    // A jar that started after all is ended here, not left behind.\n    let _ = refused.kill();"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2129,
+  "txt": "std::thread::sleep(Duration::from_millis(5));",
+  "loopish": true,
+  "before": "        .expect(\"go\");\n    // A live owner, slow to read: every byte arrives, contiguous.\n    let mut seen = Seen::default();\n    let until = Instant::now() + WAIT;\n    while !seen.contains(\"END\") {\n        assert!(Instant::now() < until, \"saw {} bytes\", seen.text.len());\n        if let Some(m) = owner.recv(Duration::from_millis(200)).expect(\"recv\") {\n            seen.take(m);",
+  "after": "            if let Some(next) = seen.next_offset {\n                owner.send(&Msg::Ack { offset: next }).expect(\"ack\");\n            }"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2149,
+  "txt": "&sh(\"trap 'exit 9' HUP; echo READY; while :; do sleep 0.05; done\"),",
+  "loopish": true,
+  "before": "}\n\n/// Finding 17 (R22, R32a): a pane that doesn't linger survives being handed\n/// on. A release grants the successor the time a first owner gets.\n#[test]\nfn a_pane_that_does_not_linger_survives_a_handover() {\n    let mut jar = Jar::start(\n        &[\"--linger-ownerless-ms\", \"0\"],",
+  "after": "    );\n    let mut owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).expect(\"replay\");"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2161,
+  "txt": "std::thread::sleep(Duration::from_millis(500));",
+  "loopish": true,
+  "before": "    read_until(&mut owner, true, |s| s.contains(\"READY\"));\n    let pid = jar.program.expect(\"welcomed\");\n    owner\n        .send(&Msg::Release {\n            token: NEXT_TOKEN.to_vec(),\n        })\n        .expect(\"release\");\n    // The successor is another spyc, which takes a moment to arrive.",
+  "after": "    let next = connect_within(&jar, Role::Owner, NEXT_TOKEN, WAIT);\n    assert!(next.is_ok(), \"the successor is welcomed: {:?}\", next.err());\n    assert!(running(pid), \"the program runs on\");"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2173,
+  "txt": "&sh(\"sleep 3; echo RESULT=42; exit 7\"),",
+  "loopish": true,
+  "before": "}\n\n/// Finding 16 (R2): a program that ends while nobody is there keeps its exit\n/// for the hold, counted from the exit, not from when its owner left.\n#[test]\nfn an_exit_with_nobody_there_is_kept_from_the_exit() {\n    let mut jar = Jar::start(\n        &[\"--linger-ms\", \"2000\"],",
+  "after": "    );\n    let owner = jar.connect(Role::Owner);\n    owner.send(&Msg::Replay { from: 0 }).expect(\"replay\");"
+ },
+ {
+  "f": "tests/jar_process.rs",
+  "n": 2696,
+  "txt": "Err(_) => std::thread::sleep(Duration::from_millis(20)),",
+  "loopish": true,
+  "before": "    /// The owner, replaced: the old one goes, and a new one takes the lease\n    /// once the jar has seen it go.\n    fn reconnect_owner(jar: &Jar) -> Result<Client, String> {\n        let until = Instant::now() + WAIT;\n        loop {\n            match connect_within(jar, Role::Owner, TOKEN, Duration::from_millis(500)) {\n                Ok(c) => return Ok(c),\n                Err(e) if Instant::now() >= until => return Err(format!(\"{e:#}\")),",
+  "after": "            }\n        }\n    }"
+ },
+ {
+  "f": "crates/spyc-jar/src/client.rs",
+  "n": 68,
+  "txt": "Err(_) => std::thread::sleep(CONNECT_RETRY),",
+  "loopish": true,
+  "before": "    ) -> anyhow::Result<(Self, Msg)> {\n        let until = Instant::now() + wait;\n        let stream = loop {\n            match UnixStream::connect(socket) {\n                Ok(s) => break s,\n                Err(e) if Instant::now() >= until => {\n                    return Err(anyhow::anyhow!(\"connect {}: {e}\", socket.display()));\n                }",
+  "after": "            }\n        };\n        let mut client = Self {"
+ },
+ {
+  "f": "crates/spyc-jar/src/client.rs",
+  "n": 272,
+  "txt": "let (frame, counted) = match frames.recv_timeout(idle) {",
+  "loopish": true,
+  "before": "    sock: &UnixStream,\n    frames: &mpsc::Receiver<Queued>,\n    queued: &AtomicUsize,\n    idle: Duration,\n) {\n    use std::io::Write as _;\n    let mut pings = 0u64;\n    loop {",
+  "after": "            Ok(Queued::Frame(f)) => {\n                let n = f.len();\n                (f, n)"
+ },
+ {
+  "f": "crates/spyc-jar/src/client.rs",
+  "n": 459,
+  "txt": "std::thread::sleep(Duration::from_millis(200));",
+  "loopish": false,
+  "before": "        assert_eq!(client.recv(Duration::ZERO).unwrap(), None);\n        let msg = Msg::Output {\n            offset: 7,\n            bytes: b\"split across the wait\".to_vec(),\n        };\n        let frame = proto::encode(&msg);\n        jar.write_all(&frame[..3]).unwrap();\n        std::thread::spawn(move || {",
+  "after": "            jar.write_all(&frame[3..]).unwrap();\n            std::thread::sleep(Duration::from_secs(5));\n        });"
+ },
+ {
+  "f": "crates/spyc-jar/src/client.rs",
+  "n": 461,
+  "txt": "std::thread::sleep(Duration::from_secs(5));",
+  "loopish": false,
+  "before": "            offset: 7,\n            bytes: b\"split across the wait\".to_vec(),\n        };\n        let frame = proto::encode(&msg);\n        jar.write_all(&frame[..3]).unwrap();\n        std::thread::spawn(move || {\n            std::thread::sleep(Duration::from_millis(200));\n            jar.write_all(&frame[3..]).unwrap();",
+  "after": "        });\n        assert_eq!(\n            client.recv(Duration::from_millis(50)).unwrap(),"
+ },
+ {
+  "f": "crates/spyc-jar/src/client.rs",
+  "n": 515,
+  "txt": "std::thread::sleep(Duration::from_millis(5));",
+  "loopish": false,
+  "before": "                .send(&Msg::Input {\n                    bytes: vec![b'x'; 1 << 16],\n                })\n                .is_err()\n            {\n                ended = true;\n                break;\n            }",
+  "after": "        }\n        assert!(\n            ended,"
+ }
+]
