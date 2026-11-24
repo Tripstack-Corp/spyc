@@ -7,8 +7,9 @@ the end.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099), on
 the `3.0` milestone.
 **Builds:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md), whose version 1 froze on
-2026-11-12, froze again the same day with the review's changes, and reopened
-on 2026-11-15 for the upgrade step (its decision L), from what
+2026-11-12, froze again the same day with the review's changes, reopened
+on 2026-11-15 for the upgrade step (its decision L), and froze again on
+2026-11-24 (its decision N), from what
 [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md) proved.
 
 The spike built every v1 verdict on `spike/jar-stage-2`, a branch that never
@@ -380,6 +381,9 @@ Version 1 freezes again when all three hold:
    requester hears a refusal within the validator's deadline;
 3. the jar built to differ (S3) passes upgrades in both directions.
 
+All three held on 2026-11-24, and version 1 froze again (`JAR_PROTOCOL.md`,
+decision N).
+
 ## The review's findings, slice by slice
 
 The external review of 2026-11-12 (`PANE_JAR_SPIKE.md` → "The review") found
@@ -449,7 +453,8 @@ and is its own issue.
    doesn't take the reference with it. It is deleted once S5 merges.
 5. **The upgrade step reopens version 1** (decided 2026-11-15), sorted by
    where each part's code runs, with the store, and not refrozen until
-   "Refreezing" holds (`JAR_PROTOCOL.md`, decisions L and M).
+   "Refreezing" holds (`JAR_PROTOCOL.md`, decisions L and M). Refrozen on
+   2026-11-24 (decision N).
 6. **With jars on, a pane's program runs in a jar or doesn't run** (decided
    2026-11-15). spyc never launches it another way: a tab that looks like
    every other and dies with spyc is worse than one that says it failed, and
