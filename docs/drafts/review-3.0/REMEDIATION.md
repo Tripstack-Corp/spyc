@@ -41,7 +41,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | E3 = G5 (tasks and captures signal through the jar) | F | | | | open |
 | E4 (`SECURITY.md` describes 3.0) | F | | | | open |
 | E7 (a session's token is forgotten with its jar) | F | | | | open |
-| H1 (2.4.0 restores a 3.0 session and runs every program twice) | §4 | | | | waits on the owner: a fix needs his word |
+| H1 (2.4.0 restores a 3.0 session and runs every program twice) | B | | | | open; added to slice B at the owner's word, 2026-11-24 |
 | Handover fault hooks (Unit D's crash ordering, by test) | §4 | | | | open |
 
 ## Filed, not fixed (section 5)
