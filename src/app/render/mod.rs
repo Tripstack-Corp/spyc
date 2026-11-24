@@ -27,7 +27,7 @@ use crate::ui::list_view::Row;
 use super::{App, FrameLayout, state};
 
 mod activity_hud;
-mod agent_hud;
+pub(super) mod agent_hud;
 mod chrome;
 #[cfg(test)]
 mod dim_tests;

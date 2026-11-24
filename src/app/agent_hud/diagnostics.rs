@@ -527,6 +527,47 @@ fn agy_statusline_detail_lines(agy: &crate::agent::agy_statusline::AgyStatusline
     out
 }
 
+fn agy_orchestrator_lines(
+    app: &App,
+    tabs: &crate::pane::PaneTabs,
+    info: &crate::pane::tabs::TabInfo,
+) -> Vec<String> {
+    let snapshot = match app.active_agent_hud_update() {
+        Some(Update::Agy(u)) if u.availability == Availability::Available => Some(&u.snapshot),
+        _ => None,
+    };
+    let reported = crate::app::render::agent_hud::agy_reported(tabs, info);
+    let outer = reported
+        .statusline
+        .and_then(|s| s.agy.as_ref())
+        .and_then(|a| a.model.as_deref())
+        .or_else(|| {
+            snapshot
+                .and_then(|s| s.mode.as_ref())
+                .and_then(|m| m.value.model.as_deref())
+        });
+    let Some(outer) = outer.filter(|m| crate::agent::agy_orchestrator::is_orchestrator_wrapper(m))
+    else {
+        return Vec::new();
+    };
+    let line = match crate::ui::agent_hud::agy_active_model(snapshot, reported) {
+        Some(active) => match active.role {
+            Some(role) => format!(
+                "orchestrator ({outer}): active {} [{}]; role {}",
+                active.display,
+                active.raw,
+                role.label()
+            ),
+            None => format!(
+                "orchestrator ({outer}): active {} [{}]",
+                active.display, active.raw
+            ),
+        },
+        None => format!("orchestrator ({outer}): pending (no routed step observed yet)"),
+    };
+    vec![line]
+}
+
 fn agy_quota_lines(tabs: &crate::pane::PaneTabs, now: Timestamp) -> Vec<String> {
     let newest = tabs
         .tabs()
@@ -624,6 +665,7 @@ fn agent_info_lines(
             "Agy home (spyc's environment): {}",
             tilde(app.state.active_project().pane.agent_hud.agy_home.as_ref())
         ));
+        out.extend(agy_orchestrator_lines(app, tabs, info));
         out.extend(agy_statusline_lines(tabs, info, Timestamp::now()));
     } else {
         out.push(format!(
@@ -676,6 +718,13 @@ fn agy_lines(s: &agy_metrics::Snapshot, tail_only: bool, now: Timestamp) -> Vec<
             )
         },
     ));
+    if let Some(step) = s.active_model.as_ref() {
+        out.push(format!(
+            "active step model (planner response): {}; {}",
+            step.value,
+            sample_freshness(step, now)
+        ));
+    }
     out.push(s.compaction.as_ref().map_or_else(
         || format!("compactions (checkpoint records): {}", s.compactions),
         |c| {

@@ -19,10 +19,12 @@ pub struct ToolCall {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
-    /// A planner response with token usage, latest reasoning step and tool calls.
+    /// A planner response with token usage, concrete step model, latest
+    /// reasoning step and tool calls.
     PlannerResponse {
         at: Timestamp,
         step_index: Option<u64>,
+        model: Option<String>,
         usage: Option<Usage>,
         reasoning: Option<String>,
         calls: Vec<ToolCall>,
@@ -67,6 +69,7 @@ pub fn decode(value: &Value) -> Option<Event> {
 fn planner_response(value: &Value) -> Option<Event> {
     let at = timestamp(value)?;
     let step_index = value["step_index"].as_u64();
+    let model = value["model"].as_str().and_then(label);
     let usage = usage(value);
     let reasoning = value["thinking"].as_str().and_then(clean_reasoning);
     let calls = value["tool_calls"]
@@ -79,6 +82,7 @@ fn planner_response(value: &Value) -> Option<Event> {
     Some(Event::PlannerResponse {
         at,
         step_index,
+        model,
         usage,
         reasoning,
         calls,

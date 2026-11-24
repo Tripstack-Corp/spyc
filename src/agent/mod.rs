@@ -14,6 +14,7 @@
 
 pub mod agy_approval;
 pub mod agy_metrics;
+pub mod agy_orchestrator;
 pub mod agy_statusline;
 pub mod chrome;
 pub mod claude_credential;

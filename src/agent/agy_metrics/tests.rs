@@ -123,6 +123,108 @@ fn user_settings_change_extracts_model() {
 }
 
 #[test]
+fn reducer_tracks_planner_step_model_and_clears_it_on_model_switch() {
+    let mut reducer = Reducer::default();
+    let step1 = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 1,
+        "created_at": "2026-10-14T08:00:00Z",
+        "model": "gemini-4-carbon-high",
+        "input_tokens": 100,
+        "cache_read_tokens": 50,
+        "output_tokens": 20
+    });
+    reducer.fold(decode(&step1).unwrap());
+    let snap = reducer.snapshot();
+    assert_eq!(
+        snap.active_model.as_ref().map(|s| s.value.as_str()),
+        Some("gemini-4-carbon-high")
+    );
+
+    // Switching to Orchestrator clears any pre-switch step model.
+    let switch = json!({
+        "type": "USER_INPUT",
+        "step_index": 2,
+        "created_at": "2026-10-14T08:00:05Z",
+        "content": "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 4 Carbon (High) to Orchestrator (Carbon).\n</USER_SETTINGS_CHANGE>"
+    });
+    reducer.fold(decode(&switch).unwrap());
+    let after_switch = reducer.snapshot();
+    assert_eq!(
+        after_switch
+            .mode
+            .as_ref()
+            .and_then(|m| m.value.model.as_deref()),
+        Some("Orchestrator (Carbon)")
+    );
+    assert!(after_switch.active_model.is_none());
+
+    // A routed executor step after the switch is recorded.
+    let step3 = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 3,
+        "created_at": "2026-10-14T08:00:10Z",
+        "model": "gemini-4-hydrogen-high",
+        "input_tokens": 120,
+        "cache_read_tokens": 60,
+        "output_tokens": 30
+    });
+    reducer.fold(decode(&step3).unwrap());
+    let after_exec = reducer.snapshot();
+    assert_eq!(
+        after_exec.active_model.as_ref().map(|s| s.value.as_str()),
+        Some("gemini-4-hydrogen-high")
+    );
+}
+
+#[test]
+fn replayed_pre_switch_step_model_does_not_overwrite_model_switch() {
+    let mut reducer = Reducer::default();
+    let switch = json!({
+        "type": "USER_INPUT",
+        "step_index": 2,
+        "created_at": "2026-10-14T08:00:05Z",
+        "content": "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from Gemini 4 Carbon (High) to Orchestrator (Carbon).\n</USER_SETTINGS_CHANGE>"
+    });
+    reducer.fold(decode(&switch).unwrap());
+    assert!(reducer.snapshot().active_model.is_none());
+
+    // Replayed pre-switch step arrives late and must not bring back the old model.
+    let stale_step = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 1,
+        "created_at": "2026-10-14T08:00:00Z",
+        "model": "gemini-4-carbon-high",
+        "input_tokens": 100,
+        "cache_read_tokens": 50,
+        "output_tokens": 20
+    });
+    reducer.fold(decode(&stale_step).unwrap());
+    assert!(reducer.snapshot().active_model.is_none());
+
+    // A newer post-switch step still lands, and an older replayed switch does not wipe it.
+    let post_step = json!({
+        "type": "PLANNER_RESPONSE",
+        "step_index": 3,
+        "created_at": "2026-10-14T08:00:10Z",
+        "model": "gemini-4-hydrogen-high",
+        "input_tokens": 120,
+        "cache_read_tokens": 60,
+        "output_tokens": 30
+    });
+    reducer.fold(decode(&post_step).unwrap());
+    reducer.fold(decode(&switch).unwrap());
+    assert_eq!(
+        reducer
+            .snapshot()
+            .active_model
+            .as_ref()
+            .map(|s| s.value.as_str()),
+        Some("gemini-4-hydrogen-high")
+    );
+}
+
+#[test]
 fn reducer_accumulates_usage_and_deduplicates_repeated_planner_steps() {
     let mut reducer = Reducer::default();
 
