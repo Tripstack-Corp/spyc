@@ -974,6 +974,18 @@ blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
 `a_stalled_reader_does_not_freeze_a_release` and
 `a_paste_the_program_never_reads_does_not_block_its_owner`.
 
+<!-- SPYC-TRAP: jar-program-hears-each-owner-once -->
+A program in its own jar (spyc in its session's) hears `attached` once for
+each owner and `detached` once as it goes, in the order the owners changed:
+on `attached` spyc probes the terminal and repaints, on `detached` it stops
+drawing. So who is told is settled under the jar's state lock, in the same
+hold that changes the owner, and the frames are queued there for the writers
+(`Conn::queue`, which takes no lock of the state's). Decided once the lock
+was let go, an owner and the program connecting together each told the program, so it
+heard `attached` twice, and an owner's going could be told after the next
+owner's coming. `a_program_hears_one_attached_per_owner_however_the_connections_race`
+in `tests/jar_process.rs` caught the first under load.
+
 <!-- SPYC-TRAP: jar-frame-whole -->
 A client's wait bounds only the start of a frame (`Client::recv`). Once a
 frame's first byte is in, the rest is read under an hour's timeout, since
