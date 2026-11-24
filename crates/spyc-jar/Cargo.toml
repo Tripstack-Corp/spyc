@@ -28,7 +28,7 @@ rustix = { version = "1.1.4", features = ["process", "fs", "termios", "pty", "ev
 
 # A unix socket's peer (its user and pid): rustix reads it only on Linux.
 [target.'cfg(target_os = "macos")'.dependencies]
-nix = { version = "0.31", default-features = false, features = ["socket", "user"] }
+nix = { version = "0.32", default-features = false, features = ["socket", "user"] }
 
 [lints.rust]
 # The jar holds a live PTY for a program spyc no longer owns; `#![forbid]` in
