@@ -18,9 +18,9 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | An ending jar leaves its socket behind, so its tab's restart is refused for good (found through a flake in `a_tab_whose_jar_still_runs_never_starts_its_program_twice`) | B | `an_ending_jar_leaves_no_socket_for_its_tab_to_be_refused_on` (`test/jar-end-race-red`) | | | fixed on `fix/jar-end-race` (every end and every socket check take the jar's address), awaiting its refuter; added to slice B at the owner's word, 2026-11-25 |
 | B1 (unchecked `thread::spawn`, upgrade path first) | C | `tests/jar_process/threads.rs`: three Linux tests (`RLIMIT_NPROC` at 0), red at `origin/main` 1dfaac86 | `test/jar-thread-refusal-red`, `fix/jar-thread-refusal` | pending | fixed on the branch, awaiting the refuter |
 | A1 (`SIGPIPE` after a failed `exec`) | C | | | | open |
-| A2 (reason 6 where 5 is promised) | C | | | | open |
-| A3 (the copy step opens any path) | C | | | | open |
-| A9 (a validator's process group) | C | | | | open |
+| A2 (reason 6 where 5 is promised) | C | `tests/jar_process/answers.rs`: a late proof (both platforms), two Linux tests short of descriptors; red at `origin/main` 1dfaac86 | `test/jar-upgrade-answers-red`, `fix/jar-upgrade-answers` | pending | fixed on the branch, awaiting the refuter |
+| A3 (the copy step opens any path) | C | `an_upgrade_naming_a_fifo_is_refused_and_the_next_one_runs`, `a_refused_upgrade_leaves_no_copy_behind`; red at `origin/main` 1dfaac86 | `test/jar-upgrade-answers-red`, `fix/jar-upgrade-answers` | pending | fixed on the branch, awaiting the refuter |
+| A9 (a validator's process group) | C | `a_validators_children_end_with_the_validation`; red at `origin/main` 1dfaac86 | `test/jar-upgrade-answers-red`, `fix/jar-upgrade-answers` | pending | fixed on the branch, awaiting the refuter |
 | G9 (three jar-or-nothing sentences) | C | | | | open |
 | A13 (the specification's prose) | C | | | | open |
 | D7 (token rotation no code performs) | C | | | | open |

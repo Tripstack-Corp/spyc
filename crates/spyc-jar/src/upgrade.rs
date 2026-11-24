@@ -142,7 +142,15 @@ fn run_upgrade(shared: &Shared, reply: &Conn, binary: &str) {
             )
         } else {
             match one_file(shared, binary) {
-                Ok(image) => run(shared, &image),
+                Ok(image) => {
+                    let failed = run(shared, &image.path);
+                    // Review finding A3: a copy made for an upgrade that
+                    // didn't happen goes; a store entry stays.
+                    if image.copied {
+                        crate::store::remove_copy(&image.path);
+                    }
+                    failed
+                }
                 Err(e) => e,
             }
         };
@@ -177,7 +185,7 @@ pub(crate) fn copies_dir(shared: &Shared) -> PathBuf {
 }
 
 /// The one file an upgrade to `binary` runs (decision L, part 1).
-fn one_file(shared: &Shared, binary: &str) -> Result<PathBuf, (u16, anyhow::Error)> {
+fn one_file(shared: &Shared, binary: &str) -> Result<crate::store::OneFile, (u16, anyhow::Error)> {
     let named = Path::new(binary);
     if !named.is_absolute() {
         return Err((reason::INVALID, anyhow!("{binary} isn't an absolute path")));
@@ -185,8 +193,35 @@ fn one_file(shared: &Shared, binary: &str) -> Result<PathBuf, (u16, anyhow::Erro
     let store = crate::store::store_of(&own_image());
     // SPYC-TRAP(jar-upgrade-one-file): every step after this runs the file it
     // returns; looking `named` up again would run whatever is there by then.
-    crate::store::one_file(named, store.as_deref(), &copies_dir(shared))
-        .map_err(|e| (reason::UPGRADE_REJECTED, e))
+    crate::store::one_file(named, store.as_deref(), &copies_dir(shared)).map_err(|e| {
+        let machines = e
+            .chain()
+            .find_map(|c| c.downcast_ref::<std::io::Error>())
+            .is_some_and(|io| !the_binarys_fault(io));
+        let why = if machines {
+            reason::UPGRADE_BUSY
+        } else {
+            reason::UPGRADE_REJECTED
+        };
+        (why, e)
+    })
+}
+
+/// Whether `e`, from copying or starting the new binary, is the binary's
+/// own doing: it isn't there, can't be read or run, or isn't a file at all
+/// (reason 6). Anything else (no descriptor, no process, no room on the
+/// disk, no memory) is the machine's for now, and only defers the upgrade
+/// (reason 5): review finding A2. A refusal that is no `io::Error` (not a
+/// regular file, too big) is the binary's.
+fn the_binarys_fault(e: &std::io::Error) -> bool {
+    use rustix::io::Errno;
+    use std::io::ErrorKind::{
+        InvalidFilename, IsADirectory, NotADirectory, NotFound, PermissionDenied,
+    };
+    matches!(
+        e.kind(),
+        NotFound | PermissionDenied | NotADirectory | IsADirectory | InvalidFilename
+    ) || matches!(Errno::from_io_error(e), Some(Errno::NOEXEC | Errno::LOOP))
 }
 
 /// Park, validate, hand over and `exec`. Returns only on failure, with its
@@ -658,10 +693,13 @@ fn wait_parked(shared: &Shared) -> anyhow::Result<()> {
 /// validator that refuses without reading it leaves a write that answers
 /// `EPIPE`, never `SIGPIPE`.
 ///
-/// Only what the binary did rejects it (reason 6): it isn't there, it exits
-/// non-zero, or it exits 0 without the proof. One that runs out of time is
-/// ended with its whole process group and makes the upgrade busy (reason 5):
-/// a loaded machine defers an upgrade and never fails a good binary.
+/// Only what the binary did rejects it (reason 6): it isn't there or can't
+/// run, it exits non-zero, or it exits 0 without the proof. Running out of
+/// time, its proof included, and a validator the machine can't start now,
+/// make the upgrade busy (reason 5): a loaded machine defers an upgrade and
+/// never fails a good binary (review finding A2). Whatever the outcome, the
+/// validator's whole process group is ended (finding A9): a child it left
+/// would hold a copy of the blob for as long as it lives.
 fn validate(
     binary: &Path,
     blob: &[u8],
@@ -679,8 +717,7 @@ fn validate(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("run {} validate-handover", binary.display()))
-        .map_err(rejected)?;
+        .map_err(|e| unstarted(binary, e))?;
     let group = i32::try_from(child.id())
         .ok()
         .and_then(rustix::process::Pid::from_raw);
@@ -727,10 +764,15 @@ fn validate(
     }
     let until = Instant::now() + deadline;
     let left = || until.saturating_duration_since(Instant::now());
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) => {}
+    // Its exit is seen without reaping it: until it is reaped, its pid can't
+    // name another process group, so ending its group reaches no stranger.
+    let pid = rustix::process::Pid::from_child(&child);
+    let succeeded = loop {
+        use rustix::process::{WaitId, WaitIdOptions};
+        let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+        match rustix::process::waitid(WaitId::Pid(pid), options) {
+            Ok(Some(s)) => break s.exit_status() == Some(0),
+            Ok(None) | Err(rustix::io::Errno::INTR) => {}
             Err(e) => {
                 end_group();
                 let _ = child.wait();
@@ -747,27 +789,66 @@ fn validate(
         }
         std::thread::sleep(VALIDATOR_POLL);
     };
-    if !status.success() {
+    let answer = if succeeded {
+        proved(binary, &line_rx, left(), (instance, blob.len()), deadline)
+    } else {
         // Its reason, if it has gone with it: a child of the validator may
         // keep the stream open.
         let why = err_rx
             .recv_timeout(left().min(OUTPUT_GRACE))
             .unwrap_or_default();
-        return Err(rejected(anyhow!(
+        Err(rejected(anyhow!(
             "{} rejected the handover: {}",
             binary.display(),
             why.trim()
-        )));
+        )))
+    };
+    end_group();
+    let _ = child.wait();
+    answer
+}
+
+/// Why `binary`'s validator didn't start: its own fault (reason 6), or the
+/// machine's for now (reason 5).
+fn unstarted(binary: &Path, e: std::io::Error) -> (u16, anyhow::Error) {
+    let why = if the_binarys_fault(&e) {
+        reason::UPGRADE_REJECTED
+    } else {
+        reason::UPGRADE_BUSY
+    };
+    let e = anyhow::Error::new(e).context(format!("run {} validate-handover", binary.display()));
+    (why, e)
+}
+
+/// Whether a validator that exited 0 proved the blob of `(instance, len)`:
+/// its proof line, or the end of its output, read within `left`. A child
+/// of the validator may hold its output open, and a line not there yet is no
+/// line refused: running out of `deadline` is busy.
+fn proved(
+    binary: &Path,
+    line: &std::sync::mpsc::Receiver<String>,
+    left: Duration,
+    (instance, len): (u64, usize),
+    deadline: Duration,
+) -> Result<(), (u16, anyhow::Error)> {
+    match line.recv_timeout(left) {
+        Ok(line) if proves(&line, instance, len) => Ok(()),
+        Ok(line) => Err((
+            reason::UPGRADE_REJECTED,
+            anyhow!(
+                "{} exited without proving it took the handover (it printed {:?})",
+                binary.display(),
+                line.trim()
+            ),
+        )),
+        Err(_) => Err((
+            reason::UPGRADE_BUSY,
+            anyhow!(
+                "{} didn't prove it took the handover within {deadline:?}",
+                binary.display()
+            ),
+        )),
     }
-    let line = line_rx.recv_timeout(left()).unwrap_or_default();
-    if !proves(&line, instance, blob.len()) {
-        return Err(rejected(anyhow!(
-            "{} exited without proving it took the handover (it printed {:?})",
-            binary.display(),
-            line.trim()
-        )));
-    }
-    Ok(())
 }
 
 /// Whether `line` is the proof line for the blob of `instance` and `len`

@@ -12,9 +12,12 @@
 //! arbitrary directory for one. A jar with no store keeps its copies in
 //! [`COPIES`] beside its socket. Either way a copy is written whole, under a
 //! name of its own, and nothing is ever written to an entry twice. The jar
-//! hashes nothing.
+//! hashes nothing. Only a regular file of at most [`MAX_BINARY`] bytes is
+//! copied, opened without blocking (a FIFO would wait for a writer, a device
+//! never ends), and a copy for an upgrade that didn't happen is removed
+//! ([`remove_copy`]): review finding A3.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
@@ -25,6 +28,18 @@ pub const MARKER: &str = ".spyc-jar-store";
 pub const ENTRY_FILE: &str = "spyc-jar";
 /// Where a jar with no store keeps its copies, beside its socket.
 pub const COPIES: &str = "jar-bin";
+/// The largest file an upgrade copies. A jar's binary is a few megabytes;
+/// the bound keeps a path named by mistake from filling the disk.
+pub const MAX_BINARY: u64 = 256 << 20;
+
+/// The one file an upgrade runs, and whether the jar made it for this
+/// upgrade (a copy, [`remove_copy`]'s once the upgrade fails) or found it
+/// (a store entry, never removed).
+#[derive(Debug, PartialEq, Eq)]
+pub struct OneFile {
+    pub path: PathBuf,
+    pub copied: bool,
+}
 
 /// `dir` is a directory, not a link, owned by this user and closed to
 /// everyone else.
@@ -74,14 +89,17 @@ pub fn build_of(image: &Path, copies: &Path) -> String {
 /// The one file an upgrade to `named` runs: `named` itself when it's an
 /// entry of `store`, or a copy written whole into `store`, or into `copies`
 /// for a jar with none. `named` must be absolute.
-pub fn one_file(named: &Path, store: Option<&Path>, copies: &Path) -> anyhow::Result<PathBuf> {
+pub fn one_file(named: &Path, store: Option<&Path>, copies: &Path) -> anyhow::Result<OneFile> {
     if !named.is_absolute() {
         bail!("{} isn't an absolute path", named.display());
     }
     if let Some(store) = store
         && store_of(named).is_some_and(|s| same_dir(&s, store))
     {
-        return Ok(named.to_path_buf());
+        return Ok(OneFile {
+            path: named.to_path_buf(),
+            copied: false,
+        });
     }
     let dir = if let Some(s) = store {
         s.to_path_buf()
@@ -95,7 +113,44 @@ pub fn one_file(named: &Path, store: Option<&Path>, copies: &Path) -> anyhow::Re
         private_dir(copies)?;
         copies.to_path_buf()
     };
-    write_whole(named, &dir)
+    write_whole(named, &dir).map(|path| OneFile { path, copied: true })
+}
+
+/// Remove `copy`, a copy [`one_file`] made, with the entry it made for it.
+pub fn remove_copy(copy: &Path) {
+    let _ = std::fs::remove_file(copy);
+    if let Some(entry) = copy.parent() {
+        let _ = std::fs::remove_dir(entry);
+    }
+}
+
+/// `src`, open for reading if it is a regular file of at most
+/// [`MAX_BINARY`] bytes; opened without blocking, so a FIFO is refused
+/// rather than waited on.
+fn open_binary(src: &Path) -> anyhow::Result<(std::fs::File, u64)> {
+    use rustix::fs::{Mode, OFlags};
+    let fd = rustix::fs::open(
+        src,
+        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(std::io::Error::from)
+    .with_context(|| format!("open {}", src.display()))?;
+    let file = std::fs::File::from(fd);
+    let meta = file
+        .metadata()
+        .with_context(|| format!("look at {}", src.display()))?;
+    if !meta.file_type().is_file() {
+        bail!("{} isn't a regular file", src.display());
+    }
+    if meta.len() > MAX_BINARY {
+        bail!(
+            "{} is {} bytes, more than a jar's binary ({MAX_BINARY})",
+            src.display(),
+            meta.len()
+        );
+    }
+    Ok((file, meta.len()))
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -117,21 +172,28 @@ fn write_whole(src: &Path, dir: &Path) -> anyhow::Result<PathBuf> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
     let entry = dir.join(format!("{stem}.{:x}.{nanos:x}", std::process::id()));
+    let (from, _) = open_binary(src)?;
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&entry)
         .with_context(|| format!("create {}", entry.display()))?;
     let tmp = entry.join(".spyc-jar.partial");
     let copied = (|| -> anyhow::Result<()> {
-        let mut from =
-            std::fs::File::open(src).with_context(|| format!("open {}", src.display()))?;
         let mut to = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(&tmp)
             .with_context(|| format!("create {}", tmp.display()))?;
-        std::io::copy(&mut from, &mut to).with_context(|| format!("copy {}", src.display()))?;
+        // A file that grows while it is copied stops at the bound, refused.
+        let n = std::io::copy(&mut from.take(MAX_BINARY + 1), &mut to)
+            .with_context(|| format!("copy {}", src.display()))?;
+        if n > MAX_BINARY {
+            bail!(
+                "{} grew past {MAX_BINARY} bytes as it was copied",
+                src.display()
+            );
+        }
         to.flush()?;
         to.sync_all()?;
         std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o555))?;
@@ -225,11 +287,19 @@ mod tests {
         let entry = store.join("abc123").join(ENTRY_FILE);
         binary(&entry);
         let copies = tmp.path().join("copies");
-        assert_eq!(one_file(&entry, Some(&store), &copies).unwrap(), entry);
+        assert_eq!(
+            one_file(&entry, Some(&store), &copies).unwrap(),
+            OneFile {
+                path: entry.clone(),
+                copied: false
+            }
+        );
 
         let loose = tmp.path().join("jar-next");
         std::fs::write(&loose, b"the new binary").unwrap();
         let into_store = one_file(&loose, Some(&store), &copies).unwrap();
+        assert!(into_store.copied);
+        let into_store = into_store.path;
         assert_eq!(store_of(&into_store).as_deref(), Some(store.as_path()));
         assert_eq!(std::fs::read(&into_store).unwrap(), b"the new binary");
         let mode = std::fs::metadata(&into_store).unwrap().permissions().mode() & 0o777;
@@ -242,10 +312,10 @@ mod tests {
             "a copy, not a link"
         );
 
-        let without = one_file(&loose, None, &copies).unwrap();
+        let without = one_file(&loose, None, &copies).unwrap().path;
         assert_eq!(without.parent().unwrap().parent().unwrap(), copies);
         assert!(build_of(&without, &copies).starts_with("jar-next."));
-        let again = one_file(&loose, None, &copies).unwrap();
+        let again = one_file(&loose, None, &copies).unwrap().path;
         assert_ne!(again, without, "every copy under a name of its own");
 
         assert!(one_file(Path::new("relative/spyc-jar"), Some(&store), &copies).is_err());
@@ -256,5 +326,42 @@ mod tests {
             2,
             "a failed copy leaves nothing behind: {left:?}"
         );
+        remove_copy(&again);
+        let left: Vec<_> = std::fs::read_dir(&copies).unwrap().collect();
+        assert_eq!(left.len(), 1, "a removed copy takes its entry: {left:?}");
+    }
+
+    /// Review finding A3: only a regular file of at most `MAX_BINARY` bytes
+    /// is copied, and one that isn't is refused at once, leaving nothing: a
+    /// FIFO without blocking for a writer, a device without reading it.
+    #[test]
+    fn only_a_regular_file_of_a_binarys_size_is_copied() {
+        let tmp = Tmp::new("refused");
+        let copies = tmp.path().join("copies");
+        let fifo = tmp.path().join("fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let huge = tmp.path().join("huge");
+        std::fs::File::create(&huge)
+            .unwrap()
+            .set_len(MAX_BINARY + 1)
+            .unwrap();
+        let dir = tmp.path().join("a-directory");
+        std::fs::create_dir(&dir).unwrap();
+        for named in [fifo.as_path(), Path::new("/dev/null"), &huge, &dir] {
+            let refused = one_file(named, None, &copies);
+            assert!(
+                refused.is_err(),
+                "{} is refused: {refused:?}",
+                named.display()
+            );
+        }
+        let left: Vec<_> = std::fs::read_dir(&copies).unwrap().collect();
+        assert!(left.is_empty(), "a refused file leaves nothing: {left:?}");
     }
 }

@@ -662,7 +662,7 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   | 2 | the jar has an owner |
   | 3 | no version this jar speaks |
   | 4 | not for this connection's role |
-  | 5 | an upgrade can't start or finish now (one is under way, no safe point was reached, or the new binary didn't answer in time); worth asking again |
+  | 5 | an upgrade can't start or finish now (one is under way, no safe point was reached, the new binary didn't answer in time, or the machine couldn't copy or start it now); worth asking again |
   | 6 | the new binary is missing or rejected the handover; the jar runs on |
   | 7 | the upgrade failed after the new binary accepted: the jar runs on, or, when the new image took over and couldn't resume, holds its program and serves nothing else |
   | 8 | invalid: no `hello` first, a value out of range, or a kind a client doesn't send |
@@ -682,7 +682,11 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
 - **The upgrade's command lines,** since a version-1 jar runs a later
   binary's. `BINARY` is a file in the jar's store: the binary `upgrade` named
   when that is already a store entry, or the jar's own copy of it (decision
-  L), never a path the jar looks up again:
+  L), never a path the jar looks up again. A named file that isn't a regular
+  file of at most 256 MiB is refused (reason 6), opened without blocking and
+  never read; a copy that fails for want of a descriptor, room or memory, as a
+  validator the machine can't start now, makes the upgrade busy (reason 5);
+  and a copy made for an upgrade that doesn't happen is removed:
   - `BINARY validate-handover`: the blob on standard input, a socket, until
     its end. It accepts the blob by printing a **proof line** on standard
     output and exiting 0, within 30 seconds the first time (the program is
@@ -695,8 +699,10 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
     fields, each after a space; a version-1 jar matches the prefix and the
     first two fields and ignores the rest. Exiting 0 without the line, or with
     values that aren't the blob's, is a refusal (reason 6), as is a non-zero
-    exit. Running out of time is not: the upgrade is busy (reason 5), since
-    a loaded machine defers an upgrade and never fails a good binary.
+    exit. Running out of time is not, a proof line not there by the deadline
+    included: the upgrade is busy (reason 5), since a loaded machine defers
+    an upgrade and never fails a good binary. Whatever the answer, the
+    validator's process group is ended with it.
     **What the proof covers:** it refuses a binary that isn't a jar, and one
     that stops parsing partway. It doesn't refuse a jar that validates and
     then can't resume, nor stop a file replaced between validation and the

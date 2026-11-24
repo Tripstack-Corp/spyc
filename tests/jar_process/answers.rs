@@ -64,7 +64,6 @@ fn copies(jar: &Jar) -> Vec<String> {
 /// busy, and the next one runs. The old image called it rejected (6), and
 /// spyc then stopped upgrading every jar for the session.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn a_proof_that_comes_after_the_deadline_is_busy_and_the_next_upgrade_runs() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -93,7 +92,6 @@ fn a_proof_that_comes_after_the_deadline_is_busy_and_the_next_upgrade_runs() {
 /// `open` with the jar's upgrade claimed for as long as nothing writes to it;
 /// the next upgrade runs.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn an_upgrade_naming_a_fifo_is_refused_and_the_next_one_runs() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -113,7 +111,6 @@ fn an_upgrade_naming_a_fifo_is_refused_and_the_next_one_runs() {
 
 /// A3: a copy the jar made for an upgrade that didn't happen is removed.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn a_refused_upgrade_leaves_no_copy_behind() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -149,7 +146,6 @@ fn alive(pid: u32) -> bool {
 /// process group once the validation is over, however it ended: only a
 /// validator that ran out of time had its group ended.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn a_validators_children_end_with_the_validation() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -233,7 +229,6 @@ fn free_descriptors(jar: &Jar, n: usize) -> Vec<u64> {
 /// rejected; with descriptors again, the next one runs.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn an_upgrade_that_cant_copy_for_want_of_a_descriptor_is_busy() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -259,7 +254,6 @@ fn an_upgrade_that_cant_copy_for_want_of_a_descriptor_is_busy() {
 /// none.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn an_upgrade_whose_validator_cant_start_for_want_of_a_descriptor_is_busy() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
