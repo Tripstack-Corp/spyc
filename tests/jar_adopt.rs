@@ -986,6 +986,141 @@ fn detach_project_moves_a_project_and_its_agent_into_a_session_of_its_own() {
     );
 }
 
+/// S5: `:detach tab` moves one tab into a session of its own, its program
+/// running on, its claim and MCP going with it, while its project stays here.
+/// `:attach project` won't take a project that is open here too, and points
+/// to `:attach tab NAME`, which brings the tab back into the project in view,
+/// the session's spyc gone and its file with it.
+#[test]
+fn detach_tab_moves_one_tab_into_a_session_and_attach_tab_brings_it_back() {
+    let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+    let env_file = probe.path().to_path_buf();
+    let dirs = dirs_with_agent(&format!(
+        "env > {}; printf ready-mark; exec cat",
+        env_file.display()
+    ));
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    first.eventually("the agent-wiring question", || {
+        squeezed(&first.since_last_screen()).contains("[y]yes[n]no")
+    });
+    first.type_keys(b"n");
+    let agent = noted(&dirs.pidfile)[0];
+    left.0.push(agent);
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let agent_env: Vec<(String, String)> = std::fs::read_to_string(&env_file)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| matches!(*k, "SPYC_MCP_SOCK" | "SPYC_PANE_ID" | "SPYC_JAR_SOCKET"))
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let mut proxy = Proxy::start(&dirs, &agent_env);
+    proxy.send("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+    assert!(proxy.reply().is_some(), "the proxy initialized");
+    proxy.send("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+    proxy.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"register_scope\",\"arguments\":{\"paths\":[\"src/tab.rs\"],\"intent\":\"editing\"}}}",
+    );
+    let claimed = proxy.reply().unwrap();
+    assert!(claimed.get("error").is_none(), "{claimed}");
+
+    first.type_keys(b":detach tab 1\r");
+    let mut session = None;
+    first.eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let mut moved_spyc = None;
+    first.eventually("the session's spyc runs", || {
+        moved_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        moved_spyc.is_some()
+    });
+    let moved_spyc = moved_spyc.unwrap();
+    left.0.push(moved_spyc.parse().unwrap());
+    first.eventually("the session's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(moved_spyc.as_str())
+    });
+    first.eventually("the spyc it left says where it went", || {
+        squeezed(&first.since_last_screen()).contains(&format!("runsonassession{name}"))
+    });
+    assert!(alive(agent), "the tab's program ended with the move");
+    assert!(alive(first.pid()), "the spyc it left runs on");
+    assert_eq!(
+        proxy.answering_spyc(3),
+        Ok(moved_spyc.parse::<i64>().unwrap()),
+        "the agent's MCP followed its jar"
+    );
+    proxy.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"list_scopes\",\"arguments\":{}}}",
+    );
+    let scopes = proxy.reply().unwrap().to_string();
+    assert!(
+        scopes.contains("src/tab.rs"),
+        "the claim stayed behind: {scopes}"
+    );
+
+    // Its project is still open here, so only `:attach tab` takes it back.
+    first.type_keys(format!(":attach project {name}\r").as_bytes());
+    first.eventually("attach project is refused, pointing to attach tab", || {
+        squeezed(&first.since_last_screen()).contains(&format!(":attachtab{name}"))
+    });
+    first.type_keys(format!(":attach tab {name}\r").as_bytes());
+    let first_pid = first.pid().to_string();
+    first.eventually("this spyc owns the tab's jar again", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(first_pid.as_str())
+    });
+    let moved_pid: i32 = moved_spyc.parse().unwrap();
+    eventually("the session's spyc has gone", || !alive(moved_pid));
+    assert_eq!(
+        described(&tab_socket, "program_pid"),
+        Some(agent.to_string()),
+        "the tab's program was started again"
+    );
+    first.eventually("the tab's output shows again", || first.shows("ready-mark"));
+    assert_eq!(
+        proxy.answering_spyc(5),
+        Ok(i64::from(first.pid())),
+        "the agent's MCP followed its jar home"
+    );
+    proxy.send(
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"list_scopes\",\"arguments\":{}}}",
+    );
+    let scopes = proxy.reply().unwrap().to_string();
+    assert!(
+        scopes.contains("src/tab.rs"),
+        "the claim stayed behind: {scopes}"
+    );
+    let named = format!("\"name\": \"{name}\"");
+    let left_behind: Vec<_> = std::fs::read_dir(dirs.state.join("spyc/sessions"))
+        .unwrap()
+        .flatten()
+        .filter(|e| std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains(&named)))
+        .map(|e| e.path())
+        .collect();
+    assert!(
+        left_behind.is_empty(),
+        "{name}'s file stayed: {left_behind:?}"
+    );
+}
+
 /// #904: a tab reaches the SSH agent of the terminal its spyc has now. It is
 /// given a link of its own as its `SSH_AUTH_SOCK`, and after `^d` and a
 /// `spyc attach` from a login with another agent, the same link, in the same
