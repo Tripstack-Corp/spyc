@@ -401,6 +401,41 @@ mod tests {
         proto::read_msg(jar).unwrap_or_default()
     }
 
+    /// A refused connect to a jar whose lock is free gives up then: no jar
+    /// runs there, and retrying only waited out the deadline (20 s for a
+    /// tab taken back), so a tab whose jar died was marked `[jar lost]`
+    /// that much later, and under load past what a caller waits.
+    #[test]
+    #[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
+    fn a_connect_to_a_jar_that_has_gone_gives_up_at_once() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("jar-gone-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("g.sock");
+        // A jar that died: its socket's path and its lock file are left,
+        // nothing listens, and nothing holds the lock.
+        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+        std::fs::write(crate::lock::path(&socket), b"").unwrap();
+        assert_eq!(
+            crate::lock::state(&socket),
+            crate::lock::LockState::Free,
+            "premise"
+        );
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let tried = Client::connect(&socket, Role::Lookup, Duration::from_secs(3600), b"");
+            let _ = tx.send(tried.map(|_| ()).map_err(|e| format!("{e:#}")));
+        });
+        let tried = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the connect to a jar that has gone still waits");
+        assert!(tried.is_err(), "{tried:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// A jar that answered and closed before the client asked again (a
     /// lookup's, which ends with its one answer) still has its answer read:
     /// macOS refuses a new timeout on a socket its peer has closed, and that

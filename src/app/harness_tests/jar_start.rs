@@ -712,3 +712,79 @@ fn a_demoted_tab_keeps_its_jar_and_the_jar_hears_it_holds_a_task() {
         end(&mut app);
     });
 }
+
+/// Review 3.0, unit C (red): a restored tab whose jar still runs is never
+/// started a second time, whatever `[pane] jars` says now. With jars off
+/// (`[pane] jars = false`, the way back, or a build that doesn't honour the
+/// setting) `launch_tab_pane` starts the saved command on a PTY of spyc's
+/// while the jar's program runs on.
+#[test]
+#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
+fn review_c_a_restored_tab_whose_jar_runs_is_not_started_again_with_jars_off() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let pid = dir.path().join("pid");
+        let program = format!("sh -c 'echo $$ >> {}; exec cat'", pid.display());
+        assert!(app.open_pane_tab_in(&program, dir.path()));
+        land(&mut app);
+        eventually("its program noted its pid", || {
+            std::fs::read_to_string(&pid).is_ok_and(|p| p.ends_with('\n'))
+        });
+        let socket = tabs(&mut app).active().jar_socket().unwrap().to_path_buf();
+        let id = tabs(&mut app).active_info().id.clone();
+        // As a crash of spyc leaves it: the jar and its program run on.
+        let first = app.runtime.project_mut().pane_tabs.take().unwrap();
+        first.active().host.sever_jar();
+        drop(first);
+        assert_eq!(
+            crate::pane::jar::place::socket_state(&socket),
+            crate::pane::jar::place::SocketState::Live
+        );
+        // The restoring spyc runs with jars off.
+        app.state.active_project_mut().config.pane.jars = false;
+        let saved = crate::state::sessions::SavedTab {
+            command: program.clone(),
+            label: program.clone(),
+            cwd: dir.path().to_path_buf(),
+            agent_kind: crate::state::sessions::AgentKind::Other,
+            agent_session_id: None,
+            agent_session_name: None,
+            codex_home: None,
+            codex_home_unresolved: false,
+            claude_home: None,
+            claim_owner: String::new(),
+            pane_id: id,
+            agent_hint: None,
+            unopened: false,
+            jar_socket: Some(socket),
+            live: None,
+        };
+        app.spawn_pane_tab(
+            &program,
+            dir.path(),
+            super::super::pane_tabs::TabSlot::Append,
+            None,
+            Some(&saved),
+            None,
+        );
+        // Until the tab has started its program again, or been left to its jar.
+        eventually(
+            "the restored tab started its program or was left to its jar",
+            || {
+                app.drain_pane_output();
+                std::fs::read_to_string(&pid).is_ok_and(|p| p.lines().count() > 1)
+                    || tabs(&mut app).active().detached()
+            },
+        );
+        let started = std::fs::read_to_string(&pid).unwrap();
+        if let Some(tabs) = app.runtime.project_mut().pane_tabs.as_mut() {
+            tabs.active_mut().shutdown_reporting(END, || {});
+        }
+        assert_eq!(
+            started.lines().count(),
+            1,
+            "its program ran twice: {started}"
+        );
+    });
+}
