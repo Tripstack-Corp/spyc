@@ -25,6 +25,13 @@
 //! own session, and only then removes the other's file. A project it couldn't
 //! open stays in that file for `spyc -r`. An agent's MCP proxy follows its jar
 //! once the spyc it reached has gone.
+//!
+//! `:detach tab [N]` and `:attach tab NAME` do the same for one tab. The
+//! session a tab moves into holds a copy of its project, with that tab alone
+//! and its claims; the project stays here. `:attach tab NAME` brings every
+//! tab of a session with one project into the project in view, its jars
+//! taken back as a restore takes them, and that session ends as it does for
+//! `:attach project`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -39,13 +46,14 @@ use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
 use crate::state::scope_registry::ScopeClaim;
 use crate::state::sessions::{Held, MANIFEST_VERSION, Manifest, SavedLive};
 
-/// `:detach`, and `:detach project [name]`.
+/// `:detach`, `:detach project [name]` and `:detach tab [N]`.
 pub(super) fn cmd_detach(app: &mut App, args: &str) -> Vec<Effect> {
     match super::command_table::split_name_args(args.trim()) {
         ("", _) => app.detach(),
         ("project", name) => app.detach_project(name),
+        ("tab", n) => app.detach_tab(n),
         _ => app.state.flash_error(format!(
-            "detach {}: `:detach`, or `:detach project [name]`",
+            "detach {}: `:detach`, `:detach project [name]` or `:detach tab [N]`",
             args.trim()
         )),
     }
@@ -146,6 +154,17 @@ impl App {
                 .map(|e| e.info.claim_owner.clone())
                 .collect()
         });
+        self.session_of(project, &owners, name)
+    }
+
+    /// `project` as a session of its own named `name`, no running spyc's,
+    /// with the scope claims `owners` hold and its tabs' last reports.
+    pub(super) fn session_of(
+        &self,
+        project: crate::state::sessions::SavedProject,
+        owners: &HashSet<String>,
+        name: &str,
+    ) -> Manifest {
         let mut manifest = Manifest {
             version: MANIFEST_VERSION,
             id: u64::try_from(crate::sysinfo::epoch_nanos() / 1_000_000).unwrap_or(u64::MAX),
@@ -277,22 +296,174 @@ impl App {
     }
 }
 
-/// `:attach`, and `:attach project NAME`.
+impl App {
+    /// `:detach tab [N]`: tab N of the project in view, counted from 1 as
+    /// `^a 1` counts, or the active one.
+    pub(super) fn detach_tab(&mut self, n: &str) {
+        let Some(index) = self.tab_to_move(n) else {
+            return;
+        };
+        let (label, pane_id, owner) = {
+            let tabs = self.runtime.project().pane_tabs.as_ref();
+            let info = &tabs.expect("tab_to_move found the tab").tabs()[index].info;
+            (
+                info.label.clone(),
+                info.id.clone(),
+                info.claim_owner.clone(),
+            )
+        };
+        let name = unused_session_name();
+        let Some(manifest) = self.moved_tab_manifest(&pane_id, &owner, &name) else {
+            self.state.flash_error(format!(
+                "detach tab: {label} has no saved form, so it stays"
+            ));
+            return;
+        };
+        // SPYC-TRAP(move-saved-before-release): the session is on disk before
+        // any jar is let go; a spyc that dies in between strands nothing.
+        if let Err(e) = crate::state::sessions::save_session_durably(&manifest) {
+            self.state.flash_error(format!(
+                "detach tab {label}: it wasn't saved, so it stays: {e:#}"
+            ));
+            return;
+        }
+        let cwd = manifest
+            .projects
+            .first()
+            .map_or_default(|p| p.anchor().to_path_buf());
+        self.state
+            .note_event(&format!("detaching tab {label} into session {name}"));
+        self.let_tab_go(index, pane_id, owner, &name);
+        self.start_moved_session(label, name, cwd);
+    }
+
+    /// The index of tab `n` of the project in view, the active one for none;
+    /// flashed when there's none, or it can't move: still starting, ended, or
+    /// outside a jar.
+    fn tab_to_move(&mut self, n: &str) -> Option<usize> {
+        let Some(tabs) = self.runtime.project().pane_tabs.as_ref() else {
+            self.state.flash_error("detach tab: no tab is open");
+            return None;
+        };
+        let index = if n.is_empty() {
+            tabs.active_index()
+        } else {
+            match n.parse::<usize>() {
+                Ok(k) if (1..=tabs.len()).contains(&k) => k - 1,
+                _ => {
+                    let count = tabs.len();
+                    self.state.flash_error(format!(
+                        "detach tab: no tab {n}; this project's are 1 to {count}"
+                    ));
+                    return None;
+                }
+            }
+        };
+        let entry = &tabs.tabs()[index];
+        let why = if entry.pane.starting() {
+            "it's still starting"
+        } else if entry.pane.is_closed() {
+            "its program has ended"
+        } else if !entry.pane.host.jarred() {
+            "it runs outside a jar and would end"
+        } else {
+            return Some(index);
+        };
+        let label = entry.info.label.clone();
+        self.state
+            .flash_error(format!("can't detach tab {label}: {why}"));
+        None
+    }
+
+    /// The project in view as a session of its own named `name`, holding only
+    /// its tab `pane_id`, with that tab's claims (`owner`'s) and last report.
+    /// `None` when the save has no such tab.
+    pub(super) fn moved_tab_manifest(
+        &mut self,
+        pane_id: &str,
+        owner: &str,
+        name: &str,
+    ) -> Option<Manifest> {
+        let mut project = self.closed_snapshot(self.state.active).project;
+        project.tabs.retain(|t| t.pane_id == pane_id);
+        if project.tabs.is_empty() {
+            return None;
+        }
+        project.active_tab = 0;
+        project.pane_focused = true;
+        let owners: HashSet<String> = std::iter::once(owner.to_string())
+            .filter(|o| !o.is_empty())
+            .collect();
+        Some(self.session_of(project, &owners, name))
+    }
+
+    /// Let tab `index` of the project in view go, its program running on: end
+    /// the connection to its jar, close its agent's MCP connection as it next
+    /// speaks, and close the tab, its claims gone with it, the user left on
+    /// the tab they were on; then save this session without it.
+    fn let_tab_go(&mut self, index: usize, pane_id: String, owner: String, name: &str) {
+        let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut() else {
+            return;
+        };
+        let users = tabs.active_info().id.clone();
+        tabs.switch_to(index);
+        tabs.active().host.sever_jar();
+        // Severed first, so what closing the tab sends its jar goes nowhere.
+        self.close_active_tab_now();
+        if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
+            && let Some(back) = tabs.tabs().iter().position(|e| e.info.id == users)
+        {
+            tabs.switch_to(back);
+        }
+        crate::mcp::panes_moved(vec![pane_id]);
+        if !owner.is_empty() {
+            self.drop_claims_of(
+                &HashSet::from([owner]),
+                &format!("this agent's tab moved to session {name}"),
+            );
+        }
+        if self.autosave_session() {
+            self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+        }
+    }
+}
+
+/// `:attach`, `:attach project NAME` and `:attach tab NAME`.
 pub(super) fn cmd_attach(app: &mut App, args: &str) -> Vec<Effect> {
     match super::command_table::split_name_args(args.trim()) {
         ("", _) => app.list_sessions(),
         ("project", name) if !name.is_empty() => app.attach_project(name),
+        ("tab", name) if !name.is_empty() => app.attach_tab(name),
         _ => app.state.flash_error(format!(
-            "attach {}: `:attach`, or `:attach project NAME`",
+            "attach {}: `:attach`, `:attach project NAME` or `:attach tab NAME`",
             args.trim()
         )),
     }
     Vec::new()
 }
 
+/// What `:attach` takes from the session it names.
+#[derive(Clone, Copy)]
+enum Taking {
+    /// Its projects, opened beside this spyc's.
+    Projects,
+    /// Its tabs, into the project in view.
+    Tabs,
+}
+
+impl Taking {
+    const fn word(self) -> &'static str {
+        match self {
+            Self::Projects => "project",
+            Self::Tabs => "tab",
+        }
+    }
+}
+
 /// Another session's spyc, asked to let its session go: the file it saved.
 pub(super) struct Released {
     name: String,
+    taking: Taking,
     session: Result<u64, String>,
 }
 
@@ -330,49 +501,91 @@ impl App {
             .collect();
         lines.push(String::new());
         lines.push("`:attach project NAME` brings a session's projects into this spyc".into());
+        lines.push("`:attach tab NAME` brings its tabs into the project in view".into());
         self.view.project_mut().pager =
             Some(crate::ui::pager::PagerView::new_plain("sessions", lines));
     }
 
-    /// `:attach project NAME`: ask session `name`'s spyc, on a worker, to let
-    /// its session go for this one to take.
+    /// `:attach project NAME`: ask session `name`'s spyc to let its session
+    /// go, for its projects to open here.
     fn attach_project(&mut self, name: &str) {
-        if self.state.session_name.as_deref() == Some(name) {
-            self.state
-                .flash_error(format!("attach project: {name} is this session"));
-            return;
-        }
-        let Some(session) = crate::pane::jar::attach::running_here()
-            .into_iter()
-            .find(|r| r.name == name)
-        else {
-            self.state.flash_error(format!(
-                "attach project: no session named {name} runs; `:attach` lists them"
-            ));
+        let Some(socket) = self.session_to_take(name, Taking::Projects) else {
             return;
         };
         if let Some(open) = self.open_here_too(name) {
             self.state.flash_error(format!(
-                "attach project: {name}'s project {open} is open here too"
+                "attach project: {name}'s project {open} is open here too; \
+                 `:attach tab {name}` brings its tabs into the project in view"
             ));
             return;
         }
+        self.ask_release(name, socket, Taking::Projects);
+    }
+
+    /// `:attach tab NAME`: ask session `name`'s spyc to let its session go,
+    /// for its tabs to join the project in view. A session with more than one
+    /// project is refused: `:attach project` takes those.
+    fn attach_tab(&mut self, name: &str) {
+        let Some(socket) = self.session_to_take(name, Taking::Tabs) else {
+            return;
+        };
+        let projects = crate::state::sessions::load_manifests()
+            .into_iter()
+            .filter(|m| m.name == name)
+            .max_by_key(|m| m.epoch_secs)
+            .map(|m| m.projects.len());
+        match projects {
+            Some(1) => self.ask_release(name, socket, Taking::Tabs),
+            None => self.state.flash_error(format!(
+                "attach tab: {name} hasn't saved its session yet; try again in a moment"
+            )),
+            Some(n) => self.state.flash_error(format!(
+                "attach tab: {name} holds {n} projects; `:attach project {name}` brings them"
+            )),
+        }
+    }
+
+    /// The socket of session `name`'s jar, when it's another session that
+    /// runs; flashed when it isn't.
+    fn session_to_take(&mut self, name: &str, taking: Taking) -> Option<PathBuf> {
+        let word = taking.word();
+        if self.state.session_name.as_deref() == Some(name) {
+            self.state
+                .flash_error(format!("attach {word}: {name} is this session"));
+            return None;
+        }
+        let session = crate::pane::jar::attach::running_here()
+            .into_iter()
+            .find(|r| r.name == name);
+        if session.is_none() {
+            self.state.flash_error(format!(
+                "attach {word}: no session named {name} runs; `:attach` lists them"
+            ));
+        }
+        session.map(|s| s.socket)
+    }
+
+    /// Ask session `name`'s spyc, on a worker, to let its session go for this
+    /// one to take.
+    fn ask_release(&mut self, name: &str, socket: PathBuf, taking: Taking) {
+        let word = taking.word();
         self.state
-            .note_event(&format!("attaching {name}'s projects"));
+            .note_event(&format!("attaching {name}'s {word}s"));
         let results = self
             .runtime
             .attach_releases
             .sender_waking(self.loop_waker(Wake::PaneStart));
         let (for_work, named) = (name.to_string(), name.to_string());
-        let socket = session.socket;
         spawn_worker(
             results,
             move || Released {
                 name: for_work,
+                taking,
                 session: release(&socket),
             },
             move |why| Released {
                 name: named,
+                taking,
                 session: Err(why),
             },
         );
@@ -396,18 +609,24 @@ impl App {
     pub(crate) fn apply_attach_releases(&mut self) -> bool {
         let landed = self.runtime.attach_releases.drain();
         let drawn = !landed.is_empty();
-        for Released { name, session } in landed {
+        for Released {
+            name,
+            taking,
+            session,
+        } in landed
+        {
             let manifest = session.and_then(|id| {
                 crate::state::sessions::load_manifests()
                     .into_iter()
                     .find(|m| m.id == id)
                     .ok_or_else(|| format!("the session it saved ({id}) isn't there"))
             });
-            match manifest {
-                Ok(manifest) => self.take_session(&name, &manifest),
-                Err(why) => self
+            match (manifest, taking) {
+                (Ok(manifest), Taking::Projects) => self.take_session(&name, &manifest),
+                (Ok(manifest), Taking::Tabs) => self.take_tabs(&name, &manifest),
+                (Err(why), _) => self
                     .state
-                    .flash_error(format!("attach project {name}: {why}")),
+                    .flash_error(format!("attach {} {name}: {why}", taking.word())),
             }
         }
         drawn
@@ -462,6 +681,49 @@ impl App {
                 "attached {name}'s projects but {}, which stayed in its saved session: \
                  `spyc -r` takes them back",
                 stayed.join(", ")
+            ));
+        }
+    }
+
+    /// Bring `manifest`'s tabs into the project in view, their jars taken
+    /// back, with their claims and tasks; save this session, then remove that
+    /// one's file. A tab that can't open stays saved, unopened, in this
+    /// project, as a restore keeps one.
+    pub(super) fn take_tabs(&mut self, name: &str, manifest: &Manifest) {
+        let held = Held::by_running(&crate::state::sessions::load_manifests());
+        // A tab that moved away from this spyc and comes back is answered here.
+        let panes: Vec<String> = manifest
+            .projects
+            .iter()
+            .flat_map(|p| &p.tabs)
+            .map(|t| t.pane_id.clone())
+            .collect();
+        crate::mcp::panes_returned(&panes);
+        let (mut opened, mut unopened) = (Vec::new(), Vec::new());
+        for saved in &manifest.projects {
+            let (o, u) = self.restore_tabs_here(saved, &held);
+            opened.extend(o);
+            unopened.extend(u);
+        }
+        self.take_claims(&manifest.scope_claims);
+        self.restore_tasks(&manifest.tasks);
+        // SPYC-TRAP(move-saved-before-release): this session holds the tabs,
+        // or keeps them unopened, on disk before the file that held them goes.
+        let mut own = self.build_manifest();
+        self.carry_live(&mut own);
+        if crate::state::sessions::save_session_durably(&own).is_ok() {
+            self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+            if let Err(e) = crate::state::sessions::remove_session(manifest.id) {
+                crate::spyc_debug!("attach: {name}'s file stays: {e:#}");
+            }
+        }
+        if unopened.is_empty() {
+            self.state
+                .flash_info(format!("attached {name}'s tabs: {}", opened.join(", ")));
+        } else {
+            self.state.flash_error(format!(
+                "attached {name}'s tabs but {}, kept unopened in this project",
+                unopened.join(", ")
             ));
         }
     }
