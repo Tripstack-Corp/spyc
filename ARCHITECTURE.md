@@ -561,6 +561,16 @@ reopens the second commander there.
   via `resume_tui`. Critically, `suspend_tui` does **not**
   `LeaveAlternateScreen` — that would flash main-buffer content;
   the child's own `smcup` reuses our blanked alt buffer.
+- **A stop from outside hands the terminal to the shell.** After
+  `kill -STOP`, the shell puts the terminal in its own line mode and draws
+  over spyc's screen; its `fg` continues spyc. A thread counts each
+  `SIGCONT` (`App::watch_continues`), and the loop's top
+  (`settle_continued`) takes the terminal back once spyc's process group
+  holds its foreground: raw mode set again (crossterm's `enable_raw_mode`
+  does nothing while it believes raw mode is on, so it is turned off first),
+  the mode set as `resume_tui` sends it, and a full repaint
+  (`terminal::continued`). Continued in the background, spyc waits for the
+  `fg`, which continues it again.
 - Pane subprocesses run under their own slave PTY (allocated via
   `portable_pty`). The pane is a VT-emulated rectangle inside
   spyc's TUI; the child has a real tty, ours is unaffected.

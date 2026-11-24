@@ -4308,6 +4308,7 @@ dependencies = [
  "sha2 0.11.1",
  "shellexpand",
  "shlex 2.0.1",
+ "signal-hook",
  "spyc-jar",
  "spyc-vt-sys",
  "strip-ansi-escapes",
