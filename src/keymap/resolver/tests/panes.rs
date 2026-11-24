@@ -70,6 +70,23 @@ fn ctrl_a_c_new_tab() {
     );
 }
 
+/// `^a C` is the new tab that asks for its directory, no longer a pane
+/// toggle (#1122); `^a \\` still toggles.
+#[test]
+fn ctrl_a_shift_c_new_tab_asking_for_its_cwd() {
+    let mut r = Resolver::new();
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, key('C')),
+        ResolverOutcome::Action(Action::PaneNewTabAskCwd)
+    );
+    feed(&mut r, ctrl('a'));
+    assert_eq!(
+        feed(&mut r, key('\\')),
+        ResolverOutcome::Action(Action::TogglePane)
+    );
+}
+
 #[test]
 fn ctrl_w_x_close_tab() {
     let mut r = Resolver::new();

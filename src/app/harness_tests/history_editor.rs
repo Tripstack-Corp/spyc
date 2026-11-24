@@ -271,7 +271,7 @@ fn esc_space_opens_each_prompts_own_history_or_none() {
             ("!", K::ShellCmdCaptured, Some("history")),
             (";", K::ShellCmd, Some("history")),
             ("J", K::Jump, Some("jump history")),
-            ("pane command", K::PaneNewTabCmd, None),
+            ("pane command", K::PaneNewTabCmd { ask_cwd: false }, None),
             ("pane cwd", K::PaneNewTabCwd, None),
             ("tab name", K::PaneRenameTab, None),
             ("open project", K::ProjectOpen, None),

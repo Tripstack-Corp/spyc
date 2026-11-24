@@ -1408,7 +1408,7 @@ mod history_bucket_tests {
         // directories typed at "pane cwd:" leaked into the "pane
         // command:" Up/Down browse.
         assert_eq!(
-            history_bucket_for(Some(&PromptKind::PaneNewTabCmd)),
+            history_bucket_for(Some(&PromptKind::PaneNewTabCmd { ask_cwd: false })),
             HistoryBucket::PaneCmd
         );
         assert_eq!(

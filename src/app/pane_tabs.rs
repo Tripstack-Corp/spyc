@@ -635,7 +635,9 @@ impl App {
         }
     }
 
-    pub fn start_new_tab_prompt(&mut self) {
+    /// `^a c` (`ask_cwd` false): the command, then a tab in `[pane]
+    /// new_tab_cwd`. `^a C`: the command, then the directory.
+    pub fn start_new_tab_prompt(&mut self, ask_cwd: bool) {
         // Precedence: $SPYC_PANE_CMD > [pane] default_command in
         // .spycrc.toml > "claude" fallback. Env var wins so a user
         // can override on the fly per shell without editing config.
@@ -649,7 +651,7 @@ impl App {
                     .clone()
             })
             .unwrap_or_else(|| "claude".to_string());
-        let mut p = Prompt::shell(PromptKind::PaneNewTabCmd, "pane command: ");
+        let mut p = Prompt::shell(PromptKind::PaneNewTabCmd { ask_cwd }, "pane command: ");
         p.buffer.clone_from(&default_cmd);
         if let Some(ed) = p.editor.as_mut() {
             ed.set_content(&default_cmd);
@@ -657,11 +659,16 @@ impl App {
         self.state.mode = Mode::Prompting(p);
     }
 
-    /// `^a c`'s second step: start the command its first step took, in `cwd`,
-    /// with `%` expanded to the selection as named from there.
-    pub(super) fn open_prompted_pane_tab(&mut self, cwd: &str) {
+    /// A new tab's last step: start the command its first step took, in the
+    /// directory `^a C`'s `prompt` names, or `[pane] new_tab_cwd` after
+    /// `^a c`'s, with `%` expanded to the selection as named from there.
+    pub(super) fn open_prompted_pane_tab(&mut self, prompt: &Prompt) -> Vec<Effect> {
         let Some(cmd) = self.state.pending_new_tab_cmd.take() else {
-            return;
+            return Vec::new();
+        };
+        let cwd = match prompt.kind {
+            PromptKind::PaneNewTabCwd => prompt.buffer.trim(),
+            _ => "",
         };
         // Empty = the user cleared the pre-fill; fall back to the configured
         // default cwd (so clearing it agrees with what the prompt was
@@ -680,6 +687,7 @@ impl App {
             }
             Err(e) => self.state.flash_error(e.to_string()),
         }
+        Vec::new()
     }
 
     /// ^W x — close the active pane tab. If its child is still running (a live
