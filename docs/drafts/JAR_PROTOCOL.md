@@ -383,7 +383,7 @@ elsewhere and pick it back up.
 | `:detach project [name]` | Detach one project: the one in view, or the one named. Its jars keep running, ready to be attached elsewhere (U13). |
 | `:detach tab [n]` | Detach one tab: the active one, or tab `n`. |
 | `:attach` | List what is detached (whole spycs, projects and tabs) and pick one to attach. |
-| `:attach project [name]`, `:attach tab [id]` | Attach a detached project, or a detached tab into the project in view, so this spyc owns it. |
+| `:attach project NAME`, `:attach tab NAME` | Attach a detached session's projects, or its tabs into the project in view, so this spyc owns them. |
 | `spyc attach [name]`, from a shell | Reattach a terminal to a detached spyc. |
 | `^D`, `Q`, `ZZ`, `:q` | **Quit.** End this spyc's jars, and spyc with them. Asks first while an agent or task is running, as quitting does today. Jars owned by another spyc are untouched. |
 

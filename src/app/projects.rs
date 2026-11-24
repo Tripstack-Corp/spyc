@@ -577,6 +577,20 @@ impl App {
                 overlay.shutdown_detached(Duration::from_millis(250));
             }
         }
+        self.drop_claims_of(&owners, why);
+        if let Some(view) = self.view.remove_project(id) {
+            crate::context::remove_context_file(&view.context_path);
+        }
+        self.state.remove_project(id);
+        if self.state.last_project == Some(id) {
+            self.state.last_project = None;
+        }
+        self.record_open_roots();
+    }
+
+    /// Drop the scope claims `owners` hold, and answer with `why` a wait one
+    /// of them parked.
+    pub(super) fn drop_claims_of(&mut self, owners: &HashSet<String>, why: &str) {
         self.state
             .scope_registry
             .retain(|c| !owners.contains(&c.owner));
@@ -589,14 +603,6 @@ impl App {
                 message: why.into(),
             });
         }
-        if let Some(view) = self.view.remove_project(id) {
-            crate::context::remove_context_file(&view.context_path);
-        }
-        self.state.remove_project(id);
-        if self.state.last_project == Some(id) {
-            self.state.last_project = None;
-        }
-        self.record_open_roots();
     }
 
     /// Where the user lands as project `id`, the one in view, closes: the

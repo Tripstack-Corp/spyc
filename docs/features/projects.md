@@ -279,6 +279,15 @@ yours, their tabs running on and their claims and waiting agents with them, and 
 ends: a terminal attached to it is let go. It's refused while one of its projects is open here
 too, or while it has a tab outside a jar, a tab still starting or an editor open.
 
+`:detach tab` does the same for one tab: the active one, or `:detach tab N` for tab N, counted
+as `^a 1` counts. The tab's program keeps running in a new session of its own, with its
+agent's tools, its scope claims and whether it was waiting on you, and its project stays here.
+The session holds a copy of the project with that tab alone, so `spyc attach NAME` shows it
+where it was. `:attach tab NAME` brings that session's tabs into the project you're in, after
+your own, and the session ends. A tab outside a jar, still starting or already ended can't be
+detached, and `:attach tab` takes only a session with one project: `:attach project` brings
+the rest.
+
 `Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `spyc shutdown` does the same
 from outside the session, attached or not: it picks the session as `spyc attach` does, lists
 the tabs that end with it and asks first (`-y` doesn't ask). The session is saved, so `spyc -r`

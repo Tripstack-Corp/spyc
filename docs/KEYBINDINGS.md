@@ -334,6 +334,8 @@ appear on the top bar and persist across `spyc -r`.
 | `:attach` | List the other sessions running, with their projects |
 | `:attach project NAME` | Bring session NAME's projects into this spyc, their tabs running on; that session ends |
 | `:detach project [NAME]` | Move the project in view, or the open one named, into a session of its own, its tabs running on; `spyc attach` reaches it by the name spyc shows |
+| `:attach tab NAME` | Bring session NAME's tabs into the project in view, their programs running on; that session ends |
+| `:detach tab [N]` | Move the active tab, or tab N, into a session of its own, its program running on; its project stays here |
 | `q` | Doesn't quit: flashes a hint instead, keeping the key for macro recording |
 | `gV` / `:version` | Show the spyc version |
 
