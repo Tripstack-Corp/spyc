@@ -1373,7 +1373,6 @@ fn a_store_copy_that_cant_be_used_falls_back_to_the_binary_beside_spyc() {
 /// to 15.8 s here. A `spyc-jar` that answers that late is still this
 /// session's jar, never the "no usable spyc-jar" a broken install gets.
 #[test]
-#[ignore = "red until a slow first run of spyc-jar is waited out"]
 fn a_spyc_jar_slow_to_answer_its_first_run_is_still_this_sessions_jar() {
     use std::os::unix::fs::PermissionsExt;
     let dir = short_dir();

@@ -8,7 +8,8 @@
 //! hashing as it writes and writing the entry whole, then runs the copy once
 //! as `spyc-jar build-info`. That checks the copy is this build's, not one a
 //! package upgrade landed meanwhile, and pays a new file's first run (about
-//! 263 ms on macOS) away from any pane. The first jar waits for it. An entry
+//! 263 ms on macOS, and seconds behind other new executables) away from any
+//! pane. The first jar waits for it. An entry
 //! that exists already is hashed again, never rewritten. The directory holds
 //! `spyc_jar::store::MARKER`, which is how a jar knows it runs from a store.
 //!
@@ -62,8 +63,11 @@ pub const OURS: Build<'static> = Build {
 
 /// How long an entry may go untouched before a sweep may take it.
 pub const UNTOUCHED: Duration = Duration::from_hours(24);
-/// How long `build-info` has to answer.
-const BUILD_INFO_WAIT: Duration = Duration::from_secs(10);
+/// How long `build-info` has to answer. macOS scans a new executable before
+/// its first run, one at a time, so a fresh entry's first run waits behind
+/// every new executable started meanwhile: 72 at once took up to 15.8 s. A
+/// binary that can't run fails at once; only a hung one waits all of this.
+const BUILD_INFO_WAIT: Duration = Duration::from_secs(60);
 /// How often `build-info` is looked at, within [`BUILD_INFO_WAIT`].
 const BUILD_INFO_POLL: Duration = Duration::from_millis(5);
 
