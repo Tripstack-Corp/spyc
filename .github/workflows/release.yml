@@ -83,7 +83,7 @@ jobs:
       # Pinned: rustc 1.100 passes `--fix-cortex-a53-843419` when linking
       # aarch64-musl, and cargo-zigbuild before 0.23 hands it to `zig cc`,
       # which rejects it (#1154). 0.24.0 is what v2.4.0 shipped with.
-      - uses: taiki-e/install-action@v2.90.3
+      - uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-zigbuild@0.24.0
       - name: Toolchain (auto from rust-toolchain.toml)
@@ -158,7 +158,7 @@ jobs:
           cd dist
           cosign sign-blob --yes SHA256SUMS --bundle SHA256SUMS.cosign.bundle
       - name: Generate release notes (git-cliff, this tag's section)
-        uses: taiki-e/install-action@v2.90.3
+        uses: taiki-e/install-action@v2.90.5
         with:
           tool: git-cliff
       - name: Write this tag's notes

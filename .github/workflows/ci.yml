@@ -78,7 +78,7 @@ jobs:
       # image and fails PRs that touched nothing. Same reasoning that moved
       # cargo-deny off this path. Keep in step with the version the Makefile
       # names, so a local run and CI agree.
-      - uses: taiki-e/install-action@v2.90.3
+      - uses: taiki-e/install-action@v2.90.5
         with:
           tool: shellcheck@0.11.0
       - name: Lint workflows (actionlint + shellcheck)
@@ -179,7 +179,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ steps.pins.outputs.zig }}
-      - uses: taiki-e/install-action@v2.90.3
+      - uses: taiki-e/install-action@v2.90.5
         with:
           tool: cargo-zigbuild@${{ steps.pins.outputs.zigbuild }}
       - name: Build as the release does, and check the sizes
