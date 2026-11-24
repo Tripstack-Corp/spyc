@@ -166,6 +166,18 @@ impl Spyc {
             .map_or_else(String::new, |at| seen[at..].to_string())
     }
 
+    /// How much it has printed so far.
+    fn printed(&self) -> usize {
+        self.seen.lock().unwrap().len()
+    }
+
+    /// Whether what it printed after the first `from` bytes holds `needle`.
+    fn printed_since(&self, from: usize, needle: &[u8]) -> bool {
+        self.seen.lock().unwrap()[from..]
+            .windows(needle.len())
+            .any(|w| w == needle)
+    }
+
     /// How many times it has entered the alternate screen.
     fn screens(&self) -> usize {
         String::from_utf8_lossy(&self.seen.lock().unwrap())
@@ -1257,8 +1269,18 @@ fn a_session_attached_over_ssh_copies_through_the_terminal() {
     back.eventually("the session drawn", || {
         squeezed(&back.since_last_screen()).contains("copied-file.txt")
     });
-    back.type_keys(b"\x01k");
-    std::thread::sleep(Duration::from_millis(300));
+    // `yf` goes to the files once the chord has landed: `^a` shows itself
+    // pending, and the frame drawn after `k` ends it.
+    let from = back.printed();
+    back.type_keys(b"\x01");
+    back.eventually("the chord shown pending", || {
+        back.printed_since(from, b"^a-")
+    });
+    let from = back.printed();
+    back.type_keys(b"k");
+    back.eventually("a frame after the chord", || {
+        back.printed_since(from, b"\x1b[?2026l")
+    });
     back.type_keys(b"yf");
     back.eventually("the path comes back as OSC 52", || {
         back.since_last_screen().contains("\x1b]52;")

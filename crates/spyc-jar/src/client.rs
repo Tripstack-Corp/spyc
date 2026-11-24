@@ -426,18 +426,15 @@ mod tests {
         let (_rx, out) = client
             .split_queued(Duration::from_secs(60), Duration::from_secs(60))
             .unwrap();
-        let at = Instant::now();
+        // Every send returns with the jar reading nothing, and what the
+        // socket can't take waits in the queue: a send that waited on the
+        // socket would hold here until the stall ended the connection.
         for _ in 0..64 {
             out.send(&Msg::Input {
                 bytes: vec![b'x'; 1 << 20],
             })
             .unwrap();
         }
-        assert!(
-            at.elapsed() < Duration::from_secs(2),
-            "sends waited on the socket: {:?}",
-            at.elapsed()
-        );
         assert!(out.queued() > 32 << 20, "the frames wait in the queue");
     }
 

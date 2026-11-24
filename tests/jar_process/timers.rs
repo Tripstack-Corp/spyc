@@ -15,7 +15,9 @@ use std::time::{Duration, Instant};
 use spyc_jar::client::Client;
 use spyc_jar::proto::{self, Msg, Role, reason};
 
-use super::upgrade::{assert_program_survives, jar_script, parking, upgrade_answer};
+use super::upgrade::{
+    assert_program_survives, count_on, held_until, jar_script, parking, upgrade_answer,
+};
 use super::*;
 
 /// A shell step that runs `then` on the `n`th time it runs, counting in
@@ -32,47 +34,52 @@ pub fn counting() -> (Jar, Client, Seen) {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let seen = read_until(&mut owner, true, |s| {
+    let seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     (jar, owner, seen)
 }
 
-/// Ask `owner` for an upgrade to `binary`, acknowledging output meanwhile:
-/// the answer, and the longest the program's output went quiet before it.
-fn upgrade_watching(
+/// The answer to an upgrade `owner` has asked for, acknowledging output
+/// meanwhile, and how long it took; `None` when none comes within `wait`.
+fn answer_to_the_upgrade(
     owner: &mut Client,
     seen: &mut Seen,
-    binary: &Path,
     wait: Duration,
 ) -> (Option<Msg>, Duration) {
-    owner
-        .send(&Msg::Upgrade {
-            binary: binary.display().to_string(),
-        })
-        .expect("upgrade");
-    let until = Instant::now() + wait;
-    let mut last = Instant::now();
-    let mut longest = Duration::ZERO;
-    while Instant::now() < until {
-        match owner.recv(Duration::from_millis(50)) {
+    let at = Instant::now();
+    if let Some(m) = seen
+        .frames
+        .iter()
+        .find(|f| matches!(f, Msg::Upgraded { .. } | Msg::Refused { .. }))
+    {
+        return (Some(m.clone()), at.elapsed());
+    }
+    let mut n = 1 << 40;
+    let mut pinged = at;
+    while at.elapsed() < wait {
+        // Pinging once a second, as spyc's owner does while it waits: one
+        // silent past the jar's deadline loses its lease, and the answer.
+        if pinged.elapsed() >= Duration::from_secs(1) {
+            n += 1;
+            let _ = owner.send(&Msg::Ping { n });
+            pinged = Instant::now();
+        }
+        match owner.recv(Duration::from_millis(200)) {
             Ok(Some(m @ (Msg::Upgraded { .. } | Msg::Refused { .. }))) => {
-                return (Some(m), longest.max(last.elapsed()));
+                return (Some(m), at.elapsed());
             }
-            Ok(Some(m @ Msg::Output { .. })) => {
-                longest = longest.max(last.elapsed());
-                last = Instant::now();
+            Ok(Some(Msg::Pong { .. }) | None) => {}
+            Ok(Some(m)) => {
                 seen.take(m);
                 if let Some(next) = seen.next_offset {
                     let _ = owner.send(&Msg::Ack { offset: next });
                 }
             }
-            Ok(Some(m)) => seen.take(m),
-            Ok(None) => {}
-            Err(_) => return (None, longest),
+            Err(_) => return (None, at.elapsed()),
         }
     }
-    (None, longest)
+    (None, at.elapsed())
 }
 
 fn reason_of(answer: Option<&Msg>) -> Option<u16> {
@@ -131,26 +138,42 @@ fn open_fds(pid: u32) -> usize {
 
 /// (1) A new binary's first run that takes longer than a parked validation
 /// may (a cold file under load, a jar with no store) is paid with the
-/// program still served: the upgrade goes ahead, and the output never stops
-/// for it.
+/// program still served: the upgrade goes ahead, and the program counts on
+/// while that first run is past a parked validation's 5 s and still going.
 #[test]
 fn a_first_run_slower_than_a_parked_validation_still_upgrades() {
     let (mut jar, mut owner, mut seen) = counting();
     let calls = jar.dir.path().join("validations");
+    let slept = jar.dir.path().join("first-run-slept");
+    let go = jar.dir.path().join("go");
     let slow_first = jar_script(
         jar.dir.path(),
         "jar-slow-first",
-        &format!("validate-handover) {};;", on_call(&calls, 1, "sleep 7")),
+        &format!(
+            "validate-handover) {};;",
+            on_call(
+                &calls,
+                1,
+                &format!("sleep 6; touch {}; {}", slept.display(), held_until(&go))
+            )
+        ),
     );
-    let (answer, quiet) =
-        upgrade_watching(&mut owner, &mut seen, &slow_first, Duration::from_secs(40));
+    owner
+        .send(&Msg::Upgrade {
+            binary: slow_first.display().to_string(),
+        })
+        .expect("upgrade");
+    let until = Instant::now() + Duration::from_secs(40);
+    while !slept.exists() {
+        assert!(Instant::now() < until, "the first run never got past 6 s");
+        count_on(&mut owner, &mut seen, 1, "while the first run is paid");
+    }
+    count_on(&mut owner, &mut seen, 20, "with the first run past 6 s");
+    std::fs::write(&go, "").expect("let the first run end");
+    let (answer, _) = answer_to_the_upgrade(&mut owner, &mut seen, UPGRADE_AT_MOST);
     assert!(
         matches!(answer, Some(Msg::Upgraded { .. })),
         "a good binary, only slow to start, takes over: {answer:?}"
-    );
-    assert!(
-        quiet < Duration::from_secs(3),
-        "the program went quiet for {quiet:?} while the first run was paid"
     );
     assert_unbroken(&seen);
     assert_program_survives(&mut jar, owner, "a slow first run");
@@ -158,31 +181,32 @@ fn a_first_run_slower_than_a_parked_validation_still_upgrades() {
 
 /// (2) A parked validation that outlasts its limit refuses the upgrade as
 /// busy (worth asking again), not rejected: the binary is good, the jar
-/// only couldn't wait for it parked. The program's output resumes before
-/// the stalled validator would have answered, nothing is lost or doubled,
-/// and the next attempt goes through.
+/// only couldn't wait for it parked. The refusal comes while the stalled
+/// validator would still be running (it never ends by itself), the program
+/// counts on after it with nothing lost or doubled, and the next attempt
+/// goes through.
 #[test]
 fn a_parked_validation_past_its_limit_is_busy_and_a_retry_succeeds() {
     let (mut jar, mut owner, mut seen) = counting();
     let calls = jar.dir.path().join("validations");
+    let go = jar.dir.path().join("go");
     let slow_parked = jar_script(
         jar.dir.path(),
         "jar-slow-parked",
-        &format!("validate-handover) {};;", on_call(&calls, 2, "sleep 12")),
+        &format!(
+            "validate-handover) {};;",
+            on_call(&calls, 2, &held_until(&go))
+        ),
     );
-    let (answer, quiet) =
-        upgrade_watching(&mut owner, &mut seen, &slow_parked, Duration::from_secs(60));
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow_parked, Duration::from_secs(60));
     assert_eq!(
         reason_of(answer.as_ref()),
         Some(reason::UPGRADE_BUSY),
         "a stalled parked validation is busy: {answer:?}"
     );
-    assert!(
-        quiet < Duration::from_secs(10),
-        "the jar stayed parked for {quiet:?}, near the stalled validator's 12 s"
-    );
-    let (answer, _) =
-        upgrade_watching(&mut owner, &mut seen, &slow_parked, Duration::from_secs(60));
+    count_on(&mut owner, &mut seen, 20, "after the busy refusal");
+    std::fs::write(&go, "").expect("let a stalled validator go");
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &slow_parked, Duration::from_secs(60));
     assert!(
         matches!(answer, Some(Msg::Upgraded { .. })),
         "asked again, the upgrade goes through: {answer:?}"
@@ -239,7 +263,7 @@ fn a_binary_that_refuses_is_rejected_for_what_it_did() {
         ("jar-no-proof", "cat >/dev/null; exit 0"),
     ] {
         let binary = jar_script(&dir, name, &format!("validate-handover) {step};;"));
-        let (answer, _) = upgrade_answer(&mut owner, &mut seen, &binary, WAIT);
+        let (answer, _) = upgrade_answer(&mut owner, &mut seen, &binary, UPGRADE_AT_MOST);
         let Some(Msg::Refused { reason, why }) = &answer else {
             panic!("{name}: refused: {answer:?}");
         };
@@ -255,8 +279,27 @@ fn a_binary_that_refuses_is_rejected_for_what_it_did() {
 /// (5) An owner that can't take its last frames before the handover (a
 /// spyc starved by load) keeps its connection: the upgrade is refused as
 /// busy rather than going ahead without it, and every frame still comes.
+///
+/// The owner's thread guesses the park from a lookup's silence and must read
+/// within the jar's own 3 s park deadline; when it doesn't, the jar says so
+/// (busy: a thread didn't reach a safe point), the scenario never came
+/// about, and it is set up again, at most three times.
 #[test]
 fn an_owner_that_cant_take_its_last_frames_keeps_its_connection() {
+    let mut missed = Vec::new();
+    for _ in 0..3 {
+        match owner_cant_flush() {
+            None => return,
+            Some(why) => missed.push(why),
+        }
+    }
+    panic!("the owner never held its last frames through a park: {missed:?}");
+}
+
+/// One go at (5): `None` when the jar kept the owner and refused the
+/// upgrade for its last frames, the reason the jar gave when the park the
+/// scenario needs never came, and a panic for anything else.
+fn owner_cant_flush() -> Option<String> {
     let mut jar = Jar::start(
         &["--deadline-ms", "60000"],
         &sh("yes aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | head -c 2000000; exec cat"),
@@ -265,8 +308,14 @@ fn an_owner_that_cant_take_its_last_frames_keeps_its_connection() {
     // its pings behind it, then reads only the log's batch once the jar
     // parks, so its writer parks with the answers waiting, and reads nothing
     // more until the upgrade has been answered.
-    eventually("the jar's socket", || jar.socket.exists());
-    let mut sock = UnixStream::connect(&jar.socket).expect("connect");
+    // Its socket's file exists from its `bind`, a moment before it listens:
+    // wait for a connection it takes.
+    let mut sock = None;
+    eventually("the jar to take a connection", || {
+        sock = UnixStream::connect(&jar.socket).ok();
+        sock.is_some()
+    });
+    let mut sock = sock.expect("connected");
     proto::write_msg(
         &mut sock,
         &Msg::Hello {
@@ -297,14 +346,26 @@ fn an_owner_that_cant_take_its_last_frames_keeps_its_connection() {
         .flat_map(|n| proto::encode(&Msg::Ping { n }))
         .collect();
     (&sock).write_all(&pings).expect("pings");
-    std::thread::sleep(Duration::from_millis(300));
+    // The jar reads a connection's frames in order: once it has stored what
+    // the owner set after its pings, every ping's answer is queued.
+    proto::write_msg(
+        &mut sock,
+        &Msg::SetInfo {
+            key: "pings".into(),
+            value: "read".into(),
+        },
+    )
+    .expect("set info");
+    eventually("the jar to read every ping", || {
+        described(&jar, "pings") == "read"
+    });
     let answered = Arc::new(AtomicBool::new(false));
     let first = jar.dir.path().join("first-run-paid");
     let owner = {
         let answered = Arc::clone(&answered);
         let (first, socket) = (first.clone(), jar.socket.clone());
         std::thread::spawn(move || {
-            let until = Instant::now() + WAIT;
+            let until = Instant::now() + UPGRADE_AT_MOST;
             while !first.exists() || !parking(&socket) {
                 if Instant::now() > until {
                     return Err("the jar never parked".to_string());
@@ -342,15 +403,26 @@ fn an_owner_that_cant_take_its_last_frames_keeps_its_connection() {
             first = first.display()
         ),
     );
-    let (answer, _) = upgrade_answer(&mut requester, &mut seen, &next, Duration::from_secs(20));
+    let (answer, _) = upgrade_answer(&mut requester, &mut seen, &next, UPGRADE_AT_MOST);
     answered.store(true, Ordering::SeqCst);
     let kept = owner.join().expect("the owner");
+    if let Some(Msg::Refused { why, .. }) = &answer
+        && why.contains("safe point")
+    {
+        return Some(why.clone());
+    }
     assert_eq!(
         reason_of(answer.as_ref()),
         Some(reason::UPGRADE_BUSY),
-        "an owner that can't flush makes the upgrade busy: {answer:?}"
+        "an owner that can't flush makes the upgrade busy: {answer:?}; the owner: {kept:?}"
+    );
+    // Busy for the flush, as the jar says.
+    assert!(
+        matches!(&answer, Some(Msg::Refused { why, .. }) if why.contains("last frames")),
+        "busy because the owner didn't take its last frames: {answer:?}"
     );
     kept.unwrap_or_else(|e| panic!("{e}"));
+    None
 }
 
 /// (6) A holder slow to say it has the sockets: busy, the holder ended with
@@ -411,11 +483,14 @@ fn a_holder_that_never_takes_the_blob_cannot_hold_the_jar_parked() {
     );
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| s.text.len() >= 1_000_000);
+    let mut seen = read_while_it_comes(&mut owner, true, |s| s.text.len() >= 1_000_000);
     let deaf = jar_script(
         jar.dir.path(),
         "jar-deaf-holder",
-        "hold-handover) sleep 300;;",
+        &format!(
+            "hold-handover) {};;",
+            held_until(&jar.dir.path().join("go"))
+        ),
     );
     let (answer, _) = upgrade_answer(&mut owner, &mut seen, &deaf, Duration::from_secs(60));
     assert_eq!(
@@ -463,7 +538,7 @@ fn a_holder_ends_when_the_jar_does() {
         jar.dir.path(),
         "jar-stalled-resume",
         &format!(
-            "hold-handover) echo $$ > {holder};;\nresume-handover) touch {resuming}; sleep 300;;",
+            "hold-handover) echo $$ > {holder};;\nresume-handover) touch {resuming}; exec sleep 300;;",
             holder = holder_pid.display(),
             resuming = resuming.display()
         ),
