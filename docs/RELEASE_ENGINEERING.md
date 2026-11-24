@@ -549,10 +549,11 @@ mark).
 - Pin `spyc` once public.
 
 **Repo — `Tripstack-Corp/spyc`:**
-- **About:** description = BRAND.md's crate line ("A keyboard-driven, MCP-native
-  terminal file commander that gives your coding agent live eyes on your working
-  tree."); homepage; **topics:** `rust` `tui` `cli` `terminal` `file-manager`
-  `mcp` `ai-agents` `claude` `developer-tools`.
+- **About:** description = BRAND.md's crate line ("A terminal workspace for coding
+  agents, built around a file commander you share"); homepage; **topics:**
+  `ai-agent` `claude-code` `cli` `crossterm` `developer-tools`
+  `file-commander` `file-manager` `mcp` `ratatui` `rust`
+  `terminal` `tui` `vi` `vim` `agent-ide`.
 - **Social preview** (1280×640) — the spyc chili on Charcoal with the wordmark,
   palette from BRAND.md.
 - **README** — spyc logo at top, badges (CI, latest release, license, platform),
