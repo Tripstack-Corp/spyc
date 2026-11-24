@@ -22,7 +22,7 @@ MACOS_NAMES = {"11": "big_sur", "12": "monterey", "13": "ventura", "14": "sonoma
 
 FORMULA = """\
 class Spyc < Formula
-  desc "Keyboard-driven, MCP-native terminal file commander"
+  desc "Terminal workspace for coding agents, built around a shared file commander"
   version "2.4.0"
 
   head do
