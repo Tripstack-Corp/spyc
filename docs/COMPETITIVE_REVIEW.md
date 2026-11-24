@@ -12,6 +12,8 @@ thing — the **session layer** beneath both lanes (Superlogical, zmx), added
 2026-09-04 on a stated-facts basis rather than the mine-and-verify standard, and
 brought to that standard on 2026-11-03.
 §1g covers tuios, a Go multiplexer that grew an agent inbox, added 2026-11-03.
+§1h covers Orca, the Electron "agent IDE" that is now the largest tool in the
+category, added 2026-11-23.
 
 > **Method.** Two deep-research passes. The first (v1) drew only on vendor
 > primary sources (GitHub READMEs, changelogs, marketing pages) and produced a
@@ -40,6 +42,11 @@ brought to that standard on 2026-11-03.
 > **Fifth pass (2026-11-12)** recorded spyc's own change of answer: 3.0's
 > durable sessions are a jar per pane (ROADMAP's decisions log, 2026-11-12),
 > so "not a daemon" in §1a, §3 and §6 is corrected, with a dated update in §1a.
+>
+> **Sixth pass (2026-11-23)** added §1h (Orca) on the same standard, updated
+> Conductor's row in §1 (it is joining Meta), noted in §1 and §4 that the GUI lane
+> is no longer macOS-only, and added a section to §4 on whether spyc should call
+> itself an "agent IDE".
 
 ---
 
@@ -74,7 +81,9 @@ cross-platform, Rust" — herdr owns that ground too.
 ## 1. The landscape
 
 Two lanes. The **GUI/macOS lane** is busy and well-funded but structurally
-locked to one OS and paying for it in stability. The **terminal/cross-platform
+locked to one OS and paying for it in stability. (**2026-11-23:** no longer
+so: Orca, the largest tool in this table, ships on macOS, Windows and Linux. See
+§1h.) The **terminal/cross-platform
 lane** is where spyc lives — and it already has occupants.
 
 | Tool | Lane | What it is · signal |
@@ -82,9 +91,10 @@ lane** is where spyc lives — and it already has occupants.
 | **Claude Squad** | TUI · cross-plat | 7.9k★ · Go · tmux+worktrees, AGPL. The terminal incumbent; "works like you'd expect," but dinged for clunky UX and no uninstall script. |
 | **herdr** | TUI · cross-plat | ~47.8k★ (2026-11-03; ~7.4k in June) · **Rust** · Apache-2.0 (AGPL until July) · YC F26, $6M seed. The closest twin — live agent-status sidebar (blocked/working/done/idle), detach/reattach daemon + live binary handoff, a Unix-socket orchestration API with **wait/subscribe** verbs, 15+ agents. But **no MCP**, and its terminal UI has **no file manager or diff/review** (its desktop app, 2026-10-16, adds both) — and its two headline features (hook-free status detection, persistence) are exactly where its bug reports cluster. See §1a. |
 | **tuios** | TUI · cross-plat | 6.3k★ · **Go** · MIT, one maintainer behind ~90% of commits, ~1M lines in 14 months. A client/daemon window manager with an agent **Inbox** that answers approvals, review with notes sent back to the agent, fan-out and checkpoints, plus a browser client and phone pairing; it answers herdr's socket API. No file manager. See §1g. |
+| **Orca** | GUI · **cross-plat** + phones | **134k★** (2026-11-23) · Electron/TypeScript · MIT · Stably AI, YC. Calls itself "the agent IDE" and is the largest tool here by far: agents as a CLI or a chat, worktrees, review notes sent back to the agent, a coordinator that starts workers, SSH hosts and cloud VMs behind a local UI, a phone app, and bots asked from Slack. Users praise remote and mobile; the tracker shows the weight of an Electron app (multi-GB memory, freezes) and an `orca` CLI that lets any agent type into any terminal. No file manager, no vim mode. See §1h. |
 | **cmux** | GUI · macOS | Swift/libghostty. Vertical tabs + notifications are loved; plagued by an 80 GB OOM leak, session loss, crash windows, and an agent-wrapper trust crisis. |
 | **supacode** | GUI · macOS 26 | Worktree command-center; beta, single-maintainer (~1,574 commits by one person), "Other" license, macOS-26-only floor, ~1k Homebrew installs/qtr. |
-| **Conductor** | GUI · macOS | Cloud/GitHub-OAuth model triggered a trust backlash ("keys for the kingdom"); "silicon only." |
+| **Conductor** | GUI · macOS | Cloud/GitHub-OAuth model triggered a trust backlash ("keys for the kingdom"); "silicon only." Announced it is joining Meta (2026-11-04); its announcement now says it will still be developed. Users moving off it name Orca (§1h). |
 | **Superset** | GUI · macOS | "Run 10 parallel agents"; surfaced the review-bottleneck and DB-isolation debates. |
 | **agent-deck** | TUI · cross-plat | 338★ · Go · MIT. Feature-maximalist: MCP socket pooling (claims 85–90% memory reduction), status-transition notifications, cost dashboard, "conductor" agents. |
 | **psmux** | TUI · **Windows** | Rust · "the native Windows tmux" (ConPTY, reads `.tmux.conf`, 83 tmux commands). A **multiplexer**, not a manager — its one agent feature renders Claude Code teammate agents into panes. No file manager, MCP, git, or context-sharing. Different lane (Windows) + different layer. See §1b. |
@@ -1055,6 +1065,205 @@ herdr's tenfold growth since June deserves a fresh pass of §1a.
 
 ---
 
+## 1h. Orca — the agent IDE, at a scale nothing else here has (2026-11-23)
+
+[Orca](https://github.com/stablyai/orca) — *"Ship 100x with the agent IDE"*
+([orca.dev](https://orca.dev)). Stably AI, "Backed by Y Combinator." Electron,
+TypeScript and React, **MIT**. It began as an internal tool, open-sourced on
+2026-03-17 and posted as "Show HN: Open Source 'Conductor + Ghostty'" (21
+points, [47549197](https://news.ycombinator.com/item?id=47549197)). On 2026-11-23 it stands at **134,334★ and 8,586
+forks**, 781 contributors, v1.4.272, with a stable release most days and
+Android builds alongside. About 6,100 commits landed in October and 5,900 in the
+first 23 days of November. Its README badge counts 205m downloads across
+releases; GitHub's language API counts 138 MB of TypeScript in a tree of 34,028
+files. The tracker holds 5,352 open issues against 7,375 closed and 903 open pull
+requests, and 3,747 issues carry the `bug` label. CodeRabbit named it the
+open-source repository it reviewed most in September 2026 (5.6k review runs;
+smb06, [50007033](https://news.ycombinator.com/item?id=50007033)).
+
+It is the largest tool in this document by a wide margin: 2.8 times herdr's
+47.8k (§1a, 2026-11-03), and in eight months.
+
+> **Provenance.** Counts from the GitHub API on 2026-11-23 (`repos/stablyai/orca`,
+> the contributors `Link: rel="last"` page count, `search/issues` and
+> `search/commits` totals, `/releases`). The README read whole; the docs read
+> at HEAD as `.mdx` (terminal, session restore, notifications, telemetry, the CLI
+> reference); `package.json` for the stack. The orca.dev lines quoted below were
+> checked against the page's HTML. Issue text from `gh issue view`, HN items from
+> the Firebase item API for author and timestamp, and the three blog posts
+> fetched whole.
+
+### What it is
+
+A desktop app for macOS, Windows and Linux, with iOS and Android companions. A
+repository holds worktrees; each worktree is a workspace whose tabs and splits
+hold agents, terminals, a browser, diffs and a Monaco editor.
+
+- **Agents, as a CLI or a chat.** The home page counts "27 supported agents",
+  plus any CLI agent. Each runs as its own CLI in an xterm.js terminal ("the same
+  xterm.js-based terminal VS Code uses", its docs say), or in a chat view, and a
+  conversation moves between the two. The repo's `ghostty` topic refers to a
+  Ghostty config and theme import, not the terminal engine.
+- **Attention.** Agent tabs show working, waiting for input, completed, and
+  completed-but-unread; a bell holds unread notifications across worktrees, with
+  a Dock badge, sounds and mobile push. Its Show HN led with a manual "mark as
+  unread" for worktrees.
+- **Review that goes back to the agent.** Notes on changed lines are sent to the
+  agent; commit messages and pull requests are drafted from the diff; failing
+  checks and PR review comments go back to an agent to fix. GitHub and Linear
+  issues start workspaces.
+- **Orchestration.** A coordinator agent splits a task and starts workers in
+  their own worktrees. The `orca` CLI lets agents create worktrees, list, read
+  and type into terminals (`orca terminal send`), wait for `tui-idle`, drive the
+  built-in browser, run computer use, and schedule automations.
+- **Persistence.** "A background daemon owns the PTYs": agents survive quitting
+  the app, an app crash and the auto-updater. A reboot ends them; the layout and
+  the last scrollback come back. That is the shape of spyc's jar (§1a's update of
+  2026-11-12).
+- **Run anywhere.** An SSH host runs the agents and worktrees while "the editor,
+  diff, and UI stay on your laptop"; a paired Remote Orca Server (`orca serve`,
+  over Tailscale) owns projects for several clients; per-workspace cloud VMs run
+  on the user's own provider account. The phone app pairs with any of them.
+- **Bots**, the newest headline: ask a bot in Slack, Linear or GitHub and "come
+  back to a tested pull request". A bot runs on the user's own Claude Code or
+  Codex subscription on one of their machines. Requests pass through Orca Cloud,
+  which keeps recent thread text, undelivered requests and webhook bodies for up
+  to seven days; "Orca's default chat permission is Full access."
+- **Also:** a browser whose design mode copies an element to the agent, mobile
+  emulators, dictation, usage tracking across subscriptions, a plugin catalogue,
+  and PostHog telemetry on by default (no content, its docs say; off with
+  `DO_NOT_TRACK=1` or `ORCA_TELEMETRY_DISABLED=1`).
+
+No pricing page exists; the site says "Free and open source." Bots need an Orca
+account, through Orca Cloud.
+
+### What users actually say (verified)
+
+Unlike herdr in June or tuios, Orca has a real voice outside its tracker, and
+most of it is praise from people who came from Conductor or tmux:
+
+> "I went down this path over 6 months ago and had a variety of custom setups
+> using tmux, cmux, and more. But since using Orca IDE it feels like a leap in
+> usability and robustness." — Reebz, [50150507](https://news.ycombinator.com/item?id=50150507)
+
+> "I switched from conductor to orca because conductor didn’t support mobile app
+> working with local instances and didn’t have a good cli/mcp at the time. Very
+> happy I switched. I’m extremely productive on mobile." — mchusma,
+> [50372452](https://news.ycombinator.com/item?id=50372452)
+
+> "I'm liking Orca largely because of the built in browser with ability to
+> select an object(s), write a comment and send it back to the agent." —
+> vulture916, [49235682](https://news.ycombinator.com/item?id=49235682)
+
+> "The Orca feature I love most is relay, which lets me run sessions from my
+> phone." — James Carr,
+> [blog](https://james-carr.org/posts/2026-09-30-current-agentic-development-setup-orca-oh-my-pi/),
+> 2026-09-30
+
+Its maintainer's own framing is the one spyc answers from the other side:
+
+> "we beleive in the TUI world but just want a GUI wrapper to help bridge the
+> chaos" — nwparker (Stably's CTO), [47771238](https://news.ycombinator.com/item?id=47771238)
+
+The criticism sorts four ways:
+
+- **Breadth over finish.** "I’ve been using Orca as my agent orchestrator du
+  jour - but its editor experience is just pathetic. … Orca is a total slopshow
+  with way too many features" — bikelang, [50236557](https://news.ycombinator.com/item?id=50236557). "In Orca, it took me
+  about half an hour to even find the diff view (hidden behind a panel,
+  activated on the top right)" — epistasis, [49234708](https://news.ycombinator.com/item?id=49234708). Because the editor is
+  Monaco, the most-wanted requests are an editor's: language servers
+  ([#961](https://github.com/stablyai/orca/issues/961), [#3035](https://github.com/stablyai/orca/issues/3035), [#14872](https://github.com/stablyai/orca/issues/14872)), an embedded VS Code ([#7754](https://github.com/stablyai/orca/issues/7754)) and a vim
+  mode: "Since the editor isn't modal (no Vim mode), it breaks muscle memory"
+  ([#9699](https://github.com/stablyai/orca/issues/9699), open).
+- **Weight.** "type 4 letters and wait 2-5 seconds for them to even start
+  appearing" ([#6795](https://github.com/stablyai/orca/issues/6795)); freezes with "as much as 13 or 14GB in Orca"
+  ([#16038](https://github.com/stablyai/orca/issues/16038)); "Completely unusable" on 1.4.204 ([#21041](https://github.com/stablyai/orca/issues/21041)); 4.33 GB of
+  leftover staging folders on Windows ([#7725](https://github.com/stablyai/orca/issues/7725), open). Updates left old
+  daemons running: "The UI showed only 8 open sessions, but `ps` showed ~46 live
+  Claude Code processes" ([#9138](https://github.com/stablyai/orca/issues/9138), open). On 2026-11-16 the CTO opened
+  "Performance 100x'd 🚀" ([#43246](https://github.com/stablyai/orca/issues/43246)), "especially as users scale out with
+  thousands of worktrees".
+- **An agent can drive the whole app.** The `orca` CLI, run from inside an
+  agent's terminal, lists, reads and types into every terminal Orca has open,
+  local or on other hosts. A user who ran agents in sandboxed SSH hosts reported
+  it as a bug ([#23835](https://github.com/stablyai/orca/issues/23835)); the CTO replied: "It's a valid concern. I think it's
+  a give and take as always." The same user wrote it up: "So I uninstalled Orca"
+  ([Martin Tapia](https://martintapia.com/blog/2026/i-tried-orca-and-vscode-agents-window-i-went-back-to-tmux-shortly-after),
+  2026-09-30, who went back to tmux and neovim over SSH).
+- **Sameness.** "T3 Code, Paseo, Conductor, Orca, Jetbrains Air, Jetbrains
+  Thinkrail, etc. There's 30 million of these and they all look basically
+  identical." — madeofpalk, [50303067](https://news.ycombinator.com/item?id=50303067). A Conductor user who moved to Orca
+  for remote control: "these tools are a dime-a-dozen now. I'm not sure that if
+  I was hunting for a new tool today that I'd pick up Orca. Maybe Herdr?" —
+  phildenhoff, [50369888](https://news.ycombinator.com/item?id=50369888)
+
+### Feature standing (where they differ)
+
+| Area | Orca | spyc |
+|---|---|---|
+| Host | Electron desktop app, plus phone apps | a terminal program; runs inside an SSH session as it is |
+| Files | an explorer tree that drags into a prompt, and a Monaco editor | a vi file commander (marks, harpoon, picks, inventory, git gutter, archives); files open in `$EDITOR` |
+| Terminal engine | xterm.js with WebGL | libghostty-vt |
+| Agents | 27 named, any CLI; a chat view or the CLI | claude, codex, agy and zot by profile; any program in a tab |
+| Attention | per-tab state, unread, bell, Dock badge, phone push | per-tab dots from hooks and MCP self-report, a held `waiting`, `Space !` |
+| Review | line notes sent to the agent, drafted commits and PRs, CI failures sent to an agent | in-process gix diff, show and blame in the pager; nothing sent back to the agent |
+| Agent control surface | the `orca` CLI: any terminal (read and type), browser, computer use | MCP: the user's working set (cursor, picks, inventory), worktrees, scopes; no tool types into a pane |
+| Persistence | a daemon owns the PTYs; survives quit, crash and update, not a reboot | a jar per pane survives spyc quitting; `spyc -r` restores after a reboot |
+| Remote | SSH hosts with a local UI, a paired server, cloud VMs, the phone | spyc on the host over SSH; `spyc attach` |
+| Accounts, telemetry | an account for bots; PostHog on by default | "No telemetry. No accounts." |
+
+### Strategic read
+
+**What Orca changes in this document:**
+
+- **It names the category.** "Agent IDE" and "ADE" are Orca's words (its repo
+  topic `agent-ide`; its home page: "IDEs were built for you. An ADE is built
+  for you and your agents: worktrees, terminals, browser, and CLI in one app").
+  Warp, JetBrains Air, Spotify's Xirp, Emdash, OpenChamber and a dozen Show HNs
+  use the same words. §4 takes up what that means for spyc's label.
+- **The GUI lane is no longer macOS-only.** §1 calls the GUI lane "structurally
+  locked to one OS", and §4's first structural advantage is the cross-platform
+  moat against it. Orca ships on macOS, Windows and Linux, and on phones. What
+  remains spyc's is running in the terminal itself: inside the SSH session a user
+  already has, on a server with no display, with nothing to install on the
+  machine in front of them.
+- **Persistence is level.** Orca's daemon and spyc's jar both keep agents
+  through a quit and lose them to a reboot.
+- **Conductor's users have somewhere to go.** Conductor announced on 2026-11-04
+  that it is joining Meta ([50369503](https://news.ycombinator.com/item?id=50369503); its announcement now adds "Plans have
+  changed! We'll still be developing Conductor."). Orca imports Conductor
+  workspaces, and the users quoted above made that move.
+
+**Where Orca beats spyc (be honest):** the phone app and push; remote hosts and
+cloud VMs behind a local UI; bots asked from Slack, Linear and GitHub; review
+notes and CI failures sent back to the agent; coordinator and worker
+orchestration; a browser that hands elements to the agent; issue trackers;
+Windows; and momentum: 781 contributors, a release most days, 134k stars.
+
+**Where spyc wins:** the file manager; keyboard-first and modal throughout,
+where Orca has no vim mode even in its editor; any terminal, including over SSH;
+weight: one native binary with nothing awake at idle, against an Electron app
+whose tracker reports multi-gigabyte memory, freezes and leaked daemons; git
+in-process; an agent surface that carries the user's working set and cannot type
+into another pane; no account, cloud relay or telemetry; and the guards and
+size ratchets, set against 3,747 bug-labelled issues in eight months.
+
+**Take, don't chase.** Worth taking, and small: review notes sent back to the
+agent (already on §1g's list), a failing check or PR comment handed to an agent,
+and a completed-but-unread state on a tab. Not worth chasing: the phone app, the
+chat view, bots, a browser, an editor, cloud VMs and computer use. Each is a
+product of its own, and Orca's tracker shows what carrying all of them costs.
+Orca's SSH model (agents and worktrees on the host, the interface local) is the
+remote shape its users praise; spyc's stated direction, remote that rides SSH
+(ROADMAP), gets there by running spyc on the host.
+
+**Watch conditions.** Orca's performance work ([#43246](https://github.com/stablyai/orca/issues/43246)) landing would weaken
+the weight argument; a keyboard-modal mode or a terminal client would move it
+onto spyc's ground; a fix for [#23835](https://github.com/stablyai/orca/issues/23835) would close the security gap above.
+
+---
+
 ## 2. What users love — validated
 
 These features are actively praised and are now table stakes; spyc should match
@@ -1249,6 +1458,11 @@ vi-navigation: **keep pane indices stable.**
 > **2026-11-03:** herdr's desktop app now has a changes view and a file browser,
 > and tuios ships review (§1a, §1g). Still spyc's alone: a file manager and
 > review *in the terminal*, and the MCP bridge.
+>
+> **2026-11-23:** Orca (§1h) is a cross-platform GUI with review that talks back
+> to the agent, so "vs the GUIs: cross-platform" no longer holds for the largest
+> of them. Against Orca the case is the terminal itself (SSH, no display, no app
+> on the client), the file manager, the keyboard, and weight.
 
 Structural advantages back it — but note which competitor each one beats:
 
@@ -1284,6 +1498,51 @@ Structural advantages back it — but note which competitor each one beats:
   `gd`/`gD`/`gu`) and an **MCP bridge** that grounds the agent in your view —
   three things herdr's README confirms it has none of. The multiplexer is a
   feature of spyc; for herdr it is the whole product.
+
+### The label: should spyc call itself an "agent IDE"? (2026-11-23)
+
+The owner asked whether spyc should rebrand as an "Agent IDE". What this pass
+found:
+
+- **The name is Orca's, and crowded.** Orca's home page leads with "Ship 100x
+  with the agent IDE" and tags its repository `agent-ide` (§1h). "Agentic
+  Development Environment" is the self-description of Warp 2.0
+  ([44366972](https://news.ycombinator.com/item?id=44366972)), JetBrains Air ([46139905](https://news.ycombinator.com/item?id=46139905)), Emdash ([47140322](https://news.ycombinator.com/item?id=47140322)),
+  OpenChamber ([49233448](https://news.ycombinator.com/item?id=49233448)), Spotify's Xirp ([49245118](https://news.ycombinator.com/item?id=49245118)) and at least
+  eight smaller Show HNs; even the terminal form is taken ("Show HN: Tmux-IDE,
+  OSS agent-first terminal IDE", [47428868](https://news.ycombinator.com/item?id=47428868)). Users already treat the label
+  as a sign of sameness: "all these 'ADE's are mostly the exact same" (vulture916,
+  [49235682](https://news.ycombinator.com/item?id=49235682)).
+- **§1's takeaway applies.** "Mindshare is now a moat. spyc needs a sharp
+  one-line wedge or it disappears into this list." Under "agent IDE", spyc is
+  the twentieth entry, beside a 134k-star tool that owns the term.
+- **"IDE" promises an editor.** Orca's most-wanted requests are an editor's
+  (language servers, VS Code, a vim mode) and its sharpest criticism is its
+  editor ("just pathetic", §1h). spyc hands files to `$EDITOR` by design, and the
+  objection below already records the warning: "You will end up reinventing an
+  IDE."
+- **What the instinct gets right.** "File commander" no longer covers what spyc
+  is. Most of 2026's work went into the agent half: jars, the HUD, attention,
+  MCP, worktrees, several projects. Someone looking for an agent tool would not
+  find spyc under its current descriptor.
+
+**Recommendation: keep the noun, widen the descriptor.** The north star ("The
+file commander is the noun the agent operates on") is the one claim nobody in
+the list can make, so it stays. The descriptor in `BRAND.md`, the README and the
+crate description ("terminal file commander") should name both halves, for
+example:
+
+- "A terminal workspace for coding agents, built around a file commander they
+  can see."
+- "Run your coding agents in the terminal, beside a vi file commander they can
+  see."
+
+Use "ADE" and "agent IDE" as search terms rather than as the name: in crate
+keywords, repository topics, and a "spyc and Orca" comparison page, so someone
+searching the category finds spyc and sees how it differs. If spyc does take a
+category word, "terminal ADE" is more distinct than "agent IDE", though
+Tmux-IDE sits close to it. This pass changes no brand copy; the label is the
+owner's decision.
 
 ### Objections to pre-empt at launch
 
@@ -1403,6 +1662,10 @@ the reliable (MCP/hook) way**, not herdr's fragile scrape.
 > report themselves, so moves 1 and 2 are no longer uncontested. They still lead, on
 > execution (in-process git, the file manager, nothing awake at idle) rather than
 > on being the only ones.
+>
+> **2026-11-23:** Orca (§1h) sends review notes and failing checks back to the
+> agent, and marks a finished turn unread until it is seen. Move 6 now also owes
+> the descriptor decision in §4 ("The label").
 
 1. **Make per-worktree diff review a headline workflow** *(now THE wedge; mostly
    built).* No other TUI-lane tool has an in-process review loop — herdr concedes
@@ -1527,6 +1790,26 @@ Primary sources, all fetched and verified:
   (OSC 72 drag-and-drop, merged 2026-05-28). Snapshot last refreshed 2026-07-01,
   spyc-side; Yazi still v26.5.6. Full standalone history archived at
   `docs/archive/YAZI_COMPETITIVE_REVIEW.md`.
+
+- **Orca (§1h, added 2026-11-23):** [repo](https://github.com/stablyai/orca) ·
+  [orca.dev](https://orca.dev) home page and the bots, bot security and
+  ways-to-run pages · README and the docs at HEAD (`model/session-restore.mdx`,
+  `terminal.mdx`, `notifications.mdx`, `telemetry.mdx`, `cli/reference.mdx`)
+  and `package.json` · counts via the GitHub API (`repos/stablyai/orca`,
+  contributors page count, `search/issues`, `search/commits`, `/releases`,
+  `/languages`) · issues [#961](https://github.com/stablyai/orca/issues/961), [#3035](https://github.com/stablyai/orca/issues/3035), [#6795](https://github.com/stablyai/orca/issues/6795), [#7725](https://github.com/stablyai/orca/issues/7725),
+  [#7754](https://github.com/stablyai/orca/issues/7754), [#9138](https://github.com/stablyai/orca/issues/9138), [#9699](https://github.com/stablyai/orca/issues/9699), [#14872](https://github.com/stablyai/orca/issues/14872), [#16038](https://github.com/stablyai/orca/issues/16038), [#21041](https://github.com/stablyai/orca/issues/21041),
+  [#23835](https://github.com/stablyai/orca/issues/23835) (with the CTO's reply) and [#43246](https://github.com/stablyai/orca/issues/43246) via `gh issue view` — **MIT;
+  ideas only, no code reused.** HN via the Firebase item API:
+  [47549197](https://news.ycombinator.com/item?id=47549197) (its Show HN), [47771238](https://news.ycombinator.com/item?id=47771238) (nwparker), [50150507](https://news.ycombinator.com/item?id=50150507)
+  (Reebz), [50372452](https://news.ycombinator.com/item?id=50372452) (mchusma), [49235682](https://news.ycombinator.com/item?id=49235682) (vulture916),
+  [50236557](https://news.ycombinator.com/item?id=50236557) (bikelang), [49234708](https://news.ycombinator.com/item?id=49234708) (epistasis), [50303067](https://news.ycombinator.com/item?id=50303067)
+  (madeofpalk), [50369888](https://news.ycombinator.com/item?id=50369888) (phildenhoff), [50007033](https://news.ycombinator.com/item?id=50007033) (smb06), and
+  [50369503](https://news.ycombinator.com/item?id=50369503) with [Conductor's announcement](https://www.conductor.build/announcement).
+  Blog posts: [Martin Tapia](https://martintapia.com/blog/2026/i-tried-orca-and-vscode-agents-window-i-went-back-to-tmux-shortly-after),
+  [James Carr](https://james-carr.org/posts/2026-09-30-current-agentic-development-setup-orca-oh-my-pi/).
+  The "agent IDE" / "ADE" label count from HN Algolia story searches for both
+  phrases.
 
 **Verification caveats.** Six mined quotes were discarded because the text was
 real but credited to the wrong author (e.g. a comment by the cmux dev attributed
