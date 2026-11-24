@@ -631,6 +631,7 @@ impl App {
         );
         self.wire_at_startup();
         self.start_own_jar(terminal, &foreground_exec);
+        self.watch_continues();
 
         // (Pre-v1.50.84 the loop carried `last_pane_render` and
         // `last_active_drain` timestamps to throttle pane renders /
@@ -659,7 +660,7 @@ impl App {
             if reader_done.load(std::sync::atomic::Ordering::Acquire) {
                 break take_reader_result(read_err);
             }
-            if self.settle_own_jar(terminal, &foreground_exec) {
+            if self.settle_terminal(terminal, &foreground_exec) {
                 ctx.draw.mark(3);
             }
             // One-shot full repaint after a pane or overlay closes (or any

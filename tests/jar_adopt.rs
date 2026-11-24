@@ -1949,6 +1949,38 @@ fn a_spyc_stopped_past_the_deadline_takes_its_tabs_back() {
     assert_eq!(now, agent, "the program was started again");
 }
 
+/// #1309: a tab whose jar dies is marked `[jar lost]` with no key typed: the
+/// loss wakes the loop. The jar spike's Linux runs drew it only on the next
+/// key.
+#[test]
+fn a_tab_whose_jar_dies_is_marked_jar_lost_with_no_key_typed() {
+    let dirs = dirs_running("printf ready-mark; exec cat");
+    let mut left = Leftovers(Vec::new());
+    let spyc = Spyc::start(&dirs, &[]);
+    left.0.push(spyc.pid());
+    spyc.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    left.0.extend(noted(&dirs.pidfile));
+    spyc.eventually("the tab's output shows", || spyc.shows("ready-mark"));
+    let mut socket = None;
+    eventually("the session records the tab's jar", || {
+        socket = saved_jar_socket(&dirs.state);
+        socket.is_some()
+    });
+    let socket = socket.unwrap();
+    let jar: i32 = described(&socket, "pid")
+        .and_then(|p| p.parse().ok())
+        .unwrap();
+    left.0.push(jar);
+    eventually("spyc owns the jar", || {
+        described(&socket, "owner_pid") == Some(spyc.pid().to_string())
+    });
+    assert!(!spyc.shows("jar lost"), "premise: the jar runs");
+    kill(jar);
+    spyc.eventually("the tab is marked [jar lost]", || spyc.shows("jar lost"));
+}
+
 /// How many bytes the jar at `socket` says its program printed.
 fn printed(socket: &Path) -> usize {
     described(socket, "log")

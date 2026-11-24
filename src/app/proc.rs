@@ -421,11 +421,7 @@ impl super::App {
     /// and probe it with the input reader parked, then repaint in full. A
     /// terminal that attached and left again before this pass is set up on
     /// the next attach.
-    pub(super) fn settle_own_jar(
-        &mut self,
-        terminal: &mut Tui,
-        foreground_exec: &ForegroundExec,
-    ) -> bool {
+    fn settle_own_jar(&mut self, terminal: &mut Tui, foreground_exec: &ForegroundExec) -> bool {
         let settled = self.settle_detach(terminal);
         let Some(jar) = &self.runtime.own_jar else {
             return settled;
@@ -466,6 +462,73 @@ impl super::App {
             .as_ref()
             .and_then(crate::pane::jar::session::OwnJar::terminal_over_ssh);
         self.view.is_ssh = over_ssh(true, told, self.view.ssh_at_start);
+        self.view.last_term_title = None;
+        self.view.needs_full_repaint = true;
+        true
+    }
+
+    /// Count each `SIGCONT` spyc gets, on a thread of its own, and wake the
+    /// loop for it. Without its thread spyc still runs; it just doesn't take
+    /// the terminal back after an outside stop.
+    pub(super) fn watch_continues(&self) {
+        let Some(tx) = self.runtime.pane_wake_tx.clone() else {
+            return;
+        };
+        let count = std::sync::Arc::clone(&self.runtime.continues);
+        let signals = match signal_hook::iterator::Signals::new([signal_hook::consts::SIGCONT]) {
+            Ok(signals) => signals,
+            Err(e) => {
+                crate::spyc_debug!("SIGCONT isn't watched: {e:#}");
+                return;
+            }
+        };
+        let spawned = std::thread::Builder::new()
+            .name("sigcont".into())
+            .spawn(move || {
+                let mut signals = signals;
+                for _ in signals.forever() {
+                    count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let _ = tx.send(Message::Wake(Wake::Continued));
+                }
+            });
+        if let Err(e) = spawned {
+            crate::spyc_debug!("SIGCONT isn't watched: {e:#}");
+        }
+    }
+
+    /// The terminal changed under spyc since the last pass: one attached to
+    /// its own jar, or spyc continued after a stop from outside. Whether
+    /// there is anything to draw.
+    pub(super) fn settle_terminal(
+        &mut self,
+        terminal: &mut Tui,
+        foreground_exec: &ForegroundExec,
+    ) -> bool {
+        let attached = self.settle_own_jar(terminal, foreground_exec);
+        self.settle_continued(terminal) || attached
+    }
+
+    /// spyc was continued since the last pass, after a stop from outside it:
+    /// take the terminal back and repaint in full, once spyc holds its
+    /// foreground. Continued in the background, it waits: the shell's `fg`
+    /// that hands the terminal back continues it again.
+    fn settle_continued(&mut self, terminal: &mut Tui) -> bool {
+        let continues = self
+            .runtime
+            .continues
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if continues == self.runtime.continues_seen
+            || !self.has_terminal()
+            || !crate::terminal::owns_foreground()
+        {
+            return false;
+        }
+        self.runtime.continues_seen = continues;
+        self.state.note_event("continued: the terminal taken back");
+        if let Err(e) = crate::terminal::continued(terminal) {
+            self.state
+                .flash_error(format!("taking the terminal back: {e:#}"));
+        }
         self.view.last_term_title = None;
         self.view.needs_full_repaint = true;
         true

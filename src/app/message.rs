@@ -209,6 +209,10 @@ pub enum Wake {
     /// A terminal attached to spyc's own jar, or left it (S4). Payloadless:
     /// `settle_own_jar` reads which at the loop's top.
     OwnJar,
+    /// spyc was continued after a stop from outside it (`kill -STOP`, then
+    /// `fg`). Payloadless: `settle_continued` reads the count at the loop's
+    /// top.
+    Continued,
     /// `W l`'s worktrees were read and dated (`worktree_list`) and landed on
     /// `runtime.worktree_rows_results`. Payloadless, same shape as
     /// `ClosedRows`; `apply_worktree_rows` drains it in the pre-recv scan.
