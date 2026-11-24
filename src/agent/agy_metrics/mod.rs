@@ -80,6 +80,9 @@ pub struct Snapshot {
     pub totals: Usage,
     pub messages: u64,
     pub mode: Option<Sample<Mode>>,
+    /// Latest concrete model observed on a `PLANNER_RESPONSE` step. Cleared
+    /// when a `<USER_SETTINGS_CHANGE>` changes the selected model.
+    pub active_model: Option<Sample<String>>,
     /// The current turn's latest reasoning line, from a planner response's
     /// `thinking`. A new prompt or a compaction clears it.
     pub reasoning: Option<Sample<String>>,

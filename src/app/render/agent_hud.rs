@@ -227,7 +227,7 @@ fn reported<'a>(
 /// What the tabs' statuslines reported for Antigravity: this tab's own report
 /// (model, context share, mode, sandbox, live subagents) and the newest quota
 /// snapshot any Antigravity tab saw.
-fn agy_reported<'a>(
+pub(in crate::app) fn agy_reported<'a>(
     tabs: &'a crate::pane::PaneTabs,
     info: &'a crate::pane::tabs::TabInfo,
 ) -> AgyReported<'a> {

@@ -9,6 +9,7 @@ use jiff::Timestamp;
 
 use super::records::{Event, ToolCall};
 use super::{Compaction, Mode, Sample, Snapshot, Tool, ToolStatus, Usage};
+use crate::agent::agy_orchestrator::is_concrete_step_model;
 use crate::agent::metrics::{MAX_TOOLS, count_tool, replace};
 
 /// How many planner responses are remembered to deduplicate their records.
@@ -44,6 +45,9 @@ pub struct Reducer {
     tools_incomplete: bool,
     mode: Mode,
     mode_at: Option<Timestamp>,
+    model_change_at: Option<Timestamp>,
+    model_change_step: Option<u64>,
+    active_model_step: Option<u64>,
     clock: Option<Timestamp>,
     compacted_at: Option<Timestamp>,
     compacted_step: Option<u64>,
@@ -77,6 +81,7 @@ impl Reducer {
             Event::PlannerResponse {
                 at,
                 step_index,
+                model,
                 usage,
                 reasoning,
                 calls,
@@ -88,6 +93,13 @@ impl Reducer {
                 };
                 self.close_older_pending_tools(step, at);
                 self.finish_planner_tps(Some(step), at);
+                if let Some(model) = model
+                    && is_concrete_step_model(&model)
+                    && self.should_record_active_model(at, step)
+                {
+                    replace(&mut self.snapshot.active_model, at, model);
+                    self.active_model_step = Some(step);
+                }
                 if let Some(reasoning) = reasoning
                     && self.should_record_reasoning(at, step)
                 {
@@ -134,13 +146,50 @@ impl Reducer {
                 model,
             } => {
                 self.fold_turn_boundary(at, step_index);
-                if let Some(at) = at {
-                    self.mode_at = Some(at);
-                } else {
-                    self.mode_at = self.clock;
-                }
-                self.mode.model = Some(model);
+                self.fold_model_change(at, step_index, model);
             }
+        }
+    }
+
+    /// A `<USER_SETTINGS_CHANGE>` switches the selected model: clear any step
+    /// model from before the switch while leaving newer steps intact when
+    /// out-of-order records arrive.
+    fn fold_model_change(&mut self, at: Option<Timestamp>, step_index: Option<u64>, model: String) {
+        if let Some(at) = at {
+            self.mode_at = Some(at);
+            self.model_change_at = Some(self.model_change_at.map_or(at, |prev| prev.max(at)));
+        } else {
+            self.mode_at = self.clock;
+        }
+        if let Some(step) = step_index {
+            self.model_change_step =
+                Some(self.model_change_step.map_or(step, |prev| prev.max(step)));
+        }
+        let clear = match (step_index, self.active_model_step) {
+            (Some(m_step), Some(a_step)) if m_step != a_step => m_step > a_step,
+            _ => match (at, self.snapshot.active_model.as_ref()) {
+                (Some(m_at), Some(sample)) => m_at >= sample.at,
+                _ => true,
+            },
+        };
+        if clear {
+            self.snapshot.active_model = None;
+            self.active_model_step = None;
+        }
+        self.mode.model = Some(model);
+    }
+
+    fn should_record_active_model(&self, at: Timestamp, step: u64) -> bool {
+        if !Self::is_after_turn(self.model_change_at, self.model_change_step, at, step) {
+            return false;
+        }
+        match self.active_model_step {
+            Some(prev_step) => step >= prev_step,
+            None => self
+                .snapshot
+                .active_model
+                .as_ref()
+                .is_none_or(|sample| at >= sample.at),
         }
     }
 

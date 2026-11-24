@@ -2059,3 +2059,77 @@ fn agy_statusline_reports_reach_the_strip_and_the_dump() {
         assert_eq!(app.agent_hud_reset_windows().len(), 1);
     });
 }
+
+#[test]
+fn agy_orchestrator_transcript_step_and_dump_surface_active_model() {
+    use crate::agent::agy_statusline::AgyStatusline;
+    use crate::agent::claude_statusline::Statusline;
+
+    let tmp = tempfile::tempdir().unwrap();
+    crate::state::with_state_root(tmp.path(), || {
+        let mut app = App::test_app(std::env::current_dir().unwrap());
+        app.view.term_size = (200, 32);
+        app.state.active_project_mut().config.mouse.capture = false;
+        app.state.active_project_mut().pane.pane_height_pct = 50;
+        app.state.active_project_mut().pane.agent_hud.agy_home = Some(tmp.path().to_path_buf());
+        let tab = agy_entry(&mut app, tmp.path(), Some(AGY_SESSION));
+        let pane_id = tab.info.id.clone();
+        app.runtime.project_mut().pane_tabs = Some(PaneTabs::new(tab));
+        app.cmd_agent_hud("full");
+
+        let path = agy_transcript(tmp.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+
+        app.land_statusline(
+            &pane_id,
+            Statusline {
+                agy: Some(AgyStatusline {
+                    model: Some("Orchestrator (Carbon)".into()),
+                    ..AgyStatusline::default()
+                }),
+                ..Statusline::default()
+            },
+        );
+        let mut ctx = RunCtx::for_test();
+        let pending = wait_hud_line(&mut app, &mut ctx, 0, "Orchestrator (Carbon)");
+        assert!(pending[0].contains("Orchestrator (Carbon)"), "{pending:?}");
+
+        let step = serde_json::json!({
+            "type": "PLANNER_RESPONSE",
+            "step_index": 1,
+            "created_at": "2026-10-14T08:00:01Z",
+            "model": "gemini-4-hydrogen-high",
+            "input_tokens": 100,
+            "cache_read_tokens": 50,
+            "output_tokens": 25
+        });
+        std::fs::write(&path, format!("{step}\n")).unwrap();
+        let routed = wait_hud_line(&mut app, &mut ctx, 0, "Orch → exec Hydrogen (High)");
+        assert!(
+            routed[0].contains("Orch → exec Hydrogen (High)"),
+            "{routed:?}"
+        );
+
+        app.cmd_agent_hud("dump");
+        let dump = app
+            .view
+            .project()
+            .pager
+            .as_ref()
+            .unwrap()
+            .lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            dump.contains("orchestrator (Orchestrator (Carbon)): active Gemini 4 Hydrogen (High) [gemini-4-hydrogen-high]; role executor"),
+            "{dump}"
+        );
+        assert!(
+            dump.contains("active step model (planner response): gemini-4-hydrogen-high"),
+            "{dump}"
+        );
+    });
+}

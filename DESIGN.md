@@ -204,7 +204,9 @@ when wired with `spyc --statusline`, the usage row likewise adds its context
 share, active-model `5h`/`7d` (and `argon`) quota windows (with pace run-out
 estimates in `countdown` mode) and step throughput (`t/s`), and the mode row
 adds `background`, `queued`, approval mode, `sandbox`, `plan` tier and a live
-running-subagent trailer. The full list is the dump's, which
+running-subagent trailer; under an Orchestrator model, the activity row's model
+cell shows the active underlying step model (`Orch → plan <model>`,
+`Orch → exec <model>`, or `Orch → <model>`). The full list is the dump's, which
 `:agent hud dump` (or `info`) opens, and so does a double-click anywhere on the
 strip. The strip is spyc's text, never the child's input: a press there selects,
 a drag copies, and the wheel does nothing.
