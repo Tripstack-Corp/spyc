@@ -519,6 +519,7 @@ mod clicks;
 mod codex_home;
 mod codex_images;
 mod codex_questions;
+mod column_state;
 mod ctrl_w;
 mod cwd_file;
 mod esc_guard;

@@ -178,6 +178,24 @@ pub struct SavedVsplit {
     /// `None` for a preview split; `Some` for a full second commander.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub right_cwd: Option<PathBuf>,
+    /// Column `b`'s cursor, picks and filter, for a second commander.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_column: Option<SavedColumn>,
+}
+
+/// What a column showed in its directory: the file under its cursor, its
+/// picks and its `=` filter (#1308), so a restore, and a handover with it,
+/// puts them back. A build before them ignores the field.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SavedColumn {
+    /// The name of the file under the cursor: an index would land on another
+    /// file once the directory changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub picks: Vec<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
 }
 
 thread_local! {

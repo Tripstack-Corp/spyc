@@ -237,6 +237,7 @@ fn a_refused_tab_does_not_prevent_layout_or_scope_restore() {
             focus_right: true,
             preview_path: None,
             right_cwd: Some(right.clone()),
+            right_column: None,
         });
         saved
             .scope_claims
