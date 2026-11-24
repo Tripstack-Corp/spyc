@@ -1,0 +1,4 @@
+Error: spyc-jar: can't start its own session (started as a process group leader?); refusing to run
+
+Caused by:
+    Operation not permitted (os error 1)

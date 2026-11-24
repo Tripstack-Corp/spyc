@@ -1,0 +1,496 @@
+[
+ {
+  "id": "baseline-jar",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 4,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 66,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.23s",
+     "test result: ok. 91 passed; 0 failed; 0 ignored in 42.79s"
+    ],
+    "failed": [],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "baseline-spyc",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib pane::jar",
+    "secs": 80,
+    "results": [
+     "test result: ok. 64 passed; 0 failed; 0 ignored in 32.06s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib app::harness_tests::jar_start",
+    "secs": 15,
+    "results": [
+     "test result: ok. 14 passed; 0 failed; 0 ignored in 2.40s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_adopt",
+    "secs": 34,
+    "results": [
+     "test result: ok. 19 passed; 0 failed; 0 ignored in 27.28s"
+    ],
+    "failed": [],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M1",
+  "what": "a reader's Input, Resize, Signal and other owner-only messages act as the owner's",
+  "file": "crates/spyc-jar/src/jar/conn.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 8,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 74,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.94s",
+     "test result: FAILED. 88 passed; 3 failed; 0 ignored in 47.05s"
+    ],
+    "failed": [
+     "sequences::no_sequence_lets_a_reader_type",
+     "a_refusal_says_why",
+     "one_owner_at_a_time_and_a_reader_cannot_type"
+    ],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M2",
+  "what": "the hello's token is never checked",
+  "file": "crates/spyc-jar/src/jar/accept.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 7,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 63,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.35s",
+     "test result: FAILED. 86 passed; 5 failed; 0 ignored in 42.88s"
+    ],
+    "failed": [
+     "a_refusal_says_why",
+     "a_released_jar_opens_only_to_its_new_token",
+     "a_released_jars_new_token_crosses_an_upgrade",
+     "sequences::no_sequence_takes_the_lease_without_the_token",
+     "without_the_token_a_client_can_only_ask_what_the_jar_is"
+    ],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M3",
+  "what": "serve skips the peer-user check",
+  "file": "crates/spyc-jar/src/jar/accept.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 7,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 60,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.33s",
+     "test result: ok. 91 passed; 0 failed; 0 ignored in 43.08s"
+    ],
+    "failed": [],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M4",
+  "what": "any line from the validator counts as the proof",
+  "file": "crates/spyc-jar/src/upgrade.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 5,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 61,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.32s",
+     "test result: FAILED. 87 passed; 4 failed; 0 ignored in 42.80s"
+    ],
+    "failed": [
+     "timers::a_binary_that_refuses_is_rejected_for_what_it_did",
+     "upgrade::a_proof_for_another_blob_is_refused",
+     "upgrade::a_validator_that_prints_no_proof_is_refused",
+     "upgrade::an_upgrade_to_a_binary_that_cant_resume_leaves_the_program_running"
+    ],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M5",
+  "what": "release keeps the old token",
+  "file": "crates/spyc-jar/src/jar/conn.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 4,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.40s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 60,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.54s",
+     "test result: FAILED. 87 passed; 4 failed; 0 ignored in 42.66s"
+    ],
+    "failed": [
+     "a_pane_that_does_not_linger_survives_a_handover",
+     "a_released_jar_opens_only_to_its_new_token",
+     "a_stalled_reader_does_not_freeze_a_release",
+     "a_released_jars_new_token_crosses_an_upgrade"
+    ],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M6",
+  "what": "a replay from before the ring's base gets no gap",
+  "file": "crates/spyc-jar/src/jar/conn.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 3,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 61,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 8.23s",
+     "test result: FAILED. 88 passed; 3 failed; 0 ignored in 43.73s"
+    ],
+    "failed": [
+     "an_ownerless_jar_drops_the_oldest_bytes_and_says_which",
+     "upgrade::a_validators_child_holding_its_stderr_cannot_hold_the_jar",
+     "upgrade::a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked"
+    ],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M10",
+  "what": "the jar ends at its program's exit, collected or not",
+  "file": "crates/spyc-jar/src/jar/life.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 3,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.40s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 67,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 8.57s",
+     "test result: FAILED. 84 passed; 7 failed; 0 ignored in 42.60s"
+    ],
+    "failed": [
+     "a_paste_the_program_never_reads_does_not_block_its_owner",
+     "a_signal_after_the_exit_is_refused",
+     "a_signalled_exit_reports_its_signal",
+     "an_exit_with_nobody_there_is_kept_from_the_exit",
+     "ownership::a_jar_sits_idle_in_every_idle_state",
+     "a_captures_exit_is_kept_until_an_owner_collects_it",
+     "upgrade::a_captures_jar_still_loses_no_output_after_an_upgrade"
+    ],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M11",
+  "what": "a signal after the exit is sent to the program's old pid",
+  "file": "crates/spyc-jar/src/jar/conn.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 3,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 57,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 8.30s",
+     "test result: FAILED. 90 passed; 1 failed; 0 ignored in 42.30s"
+    ],
+    "failed": [
+     "a_signal_after_the_exit_is_refused"
+    ],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M7",
+  "what": "an adopted tab answers terminal queries in the replay",
+  "file": "src/pane/jar/mod.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib pane::jar",
+    "secs": 41,
+    "results": [
+     "test result: FAILED. 63 passed; 1 failed; 0 ignored in 31.35s"
+    ],
+    "failed": [
+     "pane::jar::tests::a_replayed_query_is_not_answered_again"
+    ],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib app::harness_tests::jar_start",
+    "secs": 10,
+    "results": [
+     "test result: ok. 14 passed; 0 failed; 0 ignored in 2.17s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_adopt",
+    "secs": 26,
+    "results": [
+     "test result: ok. 19 passed; 0 failed; 0 ignored in 21.50s"
+    ],
+    "failed": [],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M8",
+  "what": "a snapshot is stored at the parser's count, not the jar's offset",
+  "file": "src/pane/jar/snapshots.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib pane::jar",
+    "secs": 40,
+    "results": [
+     "test result: FAILED. 63 passed; 1 failed; 0 ignored in 31.53s"
+    ],
+    "failed": [
+     "pane::jar::tests::a_snapshot_after_a_gap_is_stored_at_the_jars_offset"
+    ],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib app::harness_tests::jar_start",
+    "secs": 10,
+    "results": [
+     "test result: ok. 14 passed; 0 failed; 0 ignored in 2.21s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_adopt",
+    "secs": 27,
+    "results": [
+     "test result: ok. 19 passed; 0 failed; 0 ignored in 22.08s"
+    ],
+    "failed": [],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M9",
+  "what": "the reply gate opens once any of the replay is handed over",
+  "file": "src/pane/jar/link.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib pane::jar",
+    "secs": 43,
+    "results": [
+     "test result: FAILED. 63 passed; 1 failed; 0 ignored in 31.49s"
+    ],
+    "failed": [
+     "pane::jar::tests::replies_wait_until_the_replayed_tail_is_parsed"
+    ],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --lib app::harness_tests::jar_start",
+    "secs": 10,
+    "results": [
+     "test result: ok. 14 passed; 0 failed; 0 ignored in 2.24s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_adopt",
+    "secs": 29,
+    "results": [
+     "test result: ok. 19 passed; 0 failed; 0 ignored in 23.25s"
+    ],
+    "failed": [],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M12",
+  "what": "macOS: a connection's socket keeps SIGPIPE (SO_NOSIGPIPE never set)",
+  "file": "crates/spyc-jar/src/jar/accept.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 2,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.41s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 54,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.14s",
+     "test result: ok. 91 passed; 0 failed; 0 ignored in 42.38s"
+    ],
+    "failed": [],
+    "compileErr": false
+   }
+  ]
+ },
+ {
+  "id": "M13",
+  "what": "any local process of the user may connect as the program role",
+  "file": "crates/spyc-jar/src/jar/accept.rs",
+  "res": [
+   {
+    "cmd": "cargo test --locked --no-fail-fast -p spyc-jar",
+    "secs": 2,
+    "results": [
+     "test result: ok. 21 passed; 0 failed; 2 ignored in 0.40s",
+     "test result: ok. 2 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 3 passed; 0 failed; 0 ignored in 0.00s",
+     "test result: ok. 0 passed; 0 failed; 0 ignored in 0.00s"
+    ],
+    "failed": [],
+    "compileErr": false
+   },
+   {
+    "cmd": "cargo test --locked --no-fail-fast --test jar_process --test jar_attach",
+    "secs": 54,
+    "results": [
+     "test result: ok. 4 passed; 0 failed; 0 ignored in 7.09s",
+     "test result: FAILED. 89 passed; 2 failed; 0 ignored in 42.16s"
+    ],
+    "failed": [
+     "a_refusal_says_why",
+     "sequences::no_sequence_takes_the_lease_without_the_token"
+    ],
+    "compileErr": false
+   }
+  ]
+ }
+]

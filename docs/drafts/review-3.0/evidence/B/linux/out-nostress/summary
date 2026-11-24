@@ -1,0 +1,6 @@
+stress32 iter 1 threads 32 jar_process=0 unit=0 secs=36 load=0.77 1.20 1.06
+stress32 iter 2 threads 32 jar_process=0 unit=0 secs=36 load=0.49 1.08 1.03
+stress32 iter 3 threads 32 jar_process=0 unit=0 secs=36 load=0.41 0.99 1.00
+stress32 iter 4 threads 32 jar_process=0 unit=0 secs=36 load=0.76 1.04 1.02
+stress32 iter 5 threads 32 jar_process=0 unit=0 secs=36 load=1.61 1.28 1.10
+stress32 iter 6 threads 32 jar_process=0 unit=0 secs=37 load=1.89 1.36 1.13
