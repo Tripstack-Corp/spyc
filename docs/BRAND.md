@@ -8,8 +8,9 @@ product itself: people who live in the terminal. Write for them.
 
 ## What spyc is
 
-A keyboard-driven, MCP-native terminal file commander. Two panes — a
-vi-flavoured file commander on top, your coding agent below (Claude Code by
+A terminal workspace for coding agents, built around a file commander you
+share. Keyboard-driven and MCP-native. Two panes — a vi-flavoured file
+commander on top, your coding agent below (Claude Code by
 default, any program in practice) — sharing a local MCP socket so the agent
 sees exactly what you're looking at: cursor, picks, inventory, branch. No
 copy-paste, no path description. macOS and Linux. Rust.
@@ -161,9 +162,10 @@ into anchors in `ARCHITECTURE.md`; the MCP context tool `get_spyc_context`.
 > The file commander is the noun the agent operates on.
 
 **Tagline (recommended):**
-> A file commander your agent can see.
+> A terminal workspace for coding agents, built around a file commander you share.
 
 Alternates, if the line above needs to flex:
+- A file commander your agent can see.
 - Heat for the agentic terminal.
 - Keyboard-first file commanding, wired to your agent.
 - The terminal file commander, rebuilt for agents.
@@ -178,10 +180,14 @@ selection. When it names a path in its reply, press `gf` to jump there. Context
 flows both ways.
 
 **Crate / package description** (`Cargo.toml` `description`, ~one line):
-> A keyboard-driven, MCP-native terminal file commander that gives your coding agent live eyes on your working tree.
+> A terminal workspace for coding agents, built around a file commander you share.
 
 Shorter, if a registry truncates:
-> Keyboard-driven, MCP-native terminal file commander for working alongside coding agents.
+> Terminal workspace for coding agents, built around a shared file commander.
+
+**Category words.** "Agent IDE" and "ADE" are other tools' names for the
+category (Orca, Warp, JetBrains Air). spyc uses them as search keywords, such
+as the crate's `agent-ide` keyword, and never as its name or descriptor.
 
 ## Lineage & courtesy
 

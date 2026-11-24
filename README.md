@@ -5,7 +5,7 @@
 <h1 align="center">spyc</h1>
 
 <p align="center">
-  The file commander built for collaborating with your coding agents.
+  A terminal workspace for coding agents, built around a file commander you share.
 </p>
 
 <p align="center">
