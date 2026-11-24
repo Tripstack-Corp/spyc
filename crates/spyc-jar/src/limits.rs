@@ -13,9 +13,12 @@ use crate::upgrade::{
 
 /// The longest a jar reads nothing from its clients and answers none of them.
 ///
-/// Parked for an upgrade: from reaching the park through the flush, the
-/// parked validation of the new binary and its output, to the holder's
-/// answer. A client's frames queue meanwhile and are read after.
+/// Parked for an upgrade: from reaching the park through the flush and the
+/// parked validation of the new binary, its output included (the sum adds
+/// `OUTPUT_GRACE` again, a margin the jar doesn't take), to the holder's
+/// answer. A client's frames queue meanwhile and are read after. The `exec`
+/// and the new image's resume come after the holder's answer and aren't in
+/// it.
 pub const PARKED_AT_MOST: Duration = PARK_DEADLINE
     .saturating_add(FLUSH_DEADLINE)
     .saturating_add(PARKED_VALIDATION)

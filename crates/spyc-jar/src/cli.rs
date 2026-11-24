@@ -15,8 +15,8 @@
 //! `--wire N` names the protocol version its starter speaks. A jar that
 //! doesn't speak it exits with [`WIRE_NOT_SERVED`] before it reads anything
 //! else or starts the program, whatever else the command line says, so a spyc
-//! that finds a newer or older `spyc-jar` beside it can tell, and run the
-//! program another way.
+//! that finds a newer or older `spyc-jar` beside it can tell, and fail the
+//! tab rather than start the program another way unasked.
 //!
 //! `PATH`'s directory must be the user's own, `0700` and not a link, or the
 //! jar refuses to run: anyone else who could write there could put a socket

@@ -6,10 +6,16 @@
 runs" there and "The upgrade step" in the plan first; this brief says what to
 build and in what order, not why.
 **Status:** built; version 1 froze again on 2026-11-24 (`JAR_PROTOCOL.md`,
-decision N).
-**Checked against:** `main` at `be018db6`. Line numbers are that commit's;
-the jar session's `jar/s2a-spawn` branch isn't on `main` and wasn't read
-except where it says so.
+decision N). Three items of §5 were still open at the pre-3.0 review: the `=`
+pin of `spyc-jar` (`Cargo.toml` keeps a caret requirement), a real upgrade
+among the property sequences (they still name `/nonexistent/spyc-jar`), and
+released jars as CI fixtures (`tests/jar_compat.rs` can't start this crate's
+jar, review finding A8).
+**Checked against:** `main` at `be018db6`. Line numbers and names are that
+commit's and have moved since: `HOLD_LIMIT` (30 s) is `HOLD_BACKSTOP`
+(600 s), which a holder reaches only when the new image hangs. The jar
+session's `jar/s2a-spawn` branch isn't on `main` and wasn't read except
+where it says so.
 
 Sort every change by where its code runs: the **old image** (fixed in the
 first release, so all of it lands before that release), the **new image**
