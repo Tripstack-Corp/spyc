@@ -1132,9 +1132,11 @@ that turns jars on.
   `src/pane/jar/store.rs`): `<state>/jar-bin/<version>-<hash>/spyc-jar`,
   `<hash>` the first 12 hex digits of its SHA-256, copied
   whole from the `spyc-jar` beside spyc on a worker at start and run once as
-  `spyc-jar build-info` to check it is this build's. Never the binary beside
-  spyc, which an install may replace while spyc runs, and which a jar would
-  otherwise run by name. A store that can't hold a copy that runs (a
+  `spyc-jar build-info` to check it is this build's, given a minute: macOS
+  scans a new executable's first run behind every other new one, which under
+  load takes seconds, and a slow answer is not a broken install. Never the
+  binary beside spyc, which an install may replace while spyc runs, and which
+  a jar would otherwise run by name. A store that can't hold a copy that runs (a
   `noexec` state directory) leaves jars to start beside spyc, when that one
   runs as this build; a `spyc-jar` missing, unable to run or of another
   build is no usable jar. Its
