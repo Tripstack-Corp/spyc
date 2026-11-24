@@ -1,0 +1,6 @@
+suite 0 exit 0
+suite 1 exit 0
+suite 2 exit 0
+suite 3 exit 0
+suite 4 exit 0
+suite 5 exit 0

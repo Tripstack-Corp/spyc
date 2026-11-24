@@ -1,0 +1,26 @@
+stress48 iter 1 threads 48 jar_process=0 unit=0 secs=36 load=9.17 3.61 1.92 stressng=14 sleep300=1
+stress48 iter 2 threads 48 jar_process=0 unit=0 secs=36 load=11.16 4.77 2.38 stressng=14 sleep300=2
+stress48 iter 3 threads 48 jar_process=0 unit=0 secs=36 load=12.25 5.91 2.87 stressng=14 sleep300=3
+stress48 iter 4 threads 48 jar_process=0 unit=0 secs=36 load=12.11 6.58 3.20 stressng=14 sleep300=4
+stress48 iter 5 threads 48 jar_process=0 unit=0 secs=36 load=12.90 7.44 3.62 stressng=14 sleep300=5
+stress48 iter 6 threads 48 jar_process=0 unit=0 secs=36 load=13.47 8.22 4.03 stressng=14 sleep300=6
+stress48 iter 7 threads 48 jar_process=0 unit=0 secs=36 load=14.78 9.35 4.59 stressng=14 sleep300=7
+stress48 iter 8 threads 48 jar_process=0 unit=0 secs=37 load=13.55 9.67 4.88 stressng=14 sleep300=8
+stress48 iter 9 threads 48 jar_process=0 unit=0 secs=36 load=12.92 9.96 5.15 stressng=14 sleep300=8
+stress48 iter 10 threads 48 jar_process=0 unit=0 secs=38 load=13.46 10.51 5.55 stressng=14 sleep300=8
+stress48 iter 11 threads 48 jar_process=0 unit=0 secs=39 load=18.26 12.34 6.36 stressng=14 sleep300=7
+stress48 iter 12 threads 48 jar_process=0 unit=0 secs=37 load=15.52 12.37 6.63 stressng=14 sleep300=6
+stress48 iter 13 threads 48 jar_process=0 unit=0 secs=36 load=14.51 12.52 6.89 stressng=14 sleep300=6
+stress48 iter 14 threads 48 jar_process=0 unit=0 secs=36 load=14.54 12.82 7.21 stressng=14 sleep300=6
+stress48 iter 15 threads 48 jar_process=0 unit=0 secs=37 load=16.13 13.54 7.69 stressng=14 sleep300=6
+stress48 iter 16 threads 48 jar_process=0 unit=0 secs=36 load=14.66 13.46 7.89 stressng=14 sleep300=6
+stress48 iter 17 threads 48 jar_process=0 unit=0 secs=36 load=13.52 13.33 8.05 stressng=14 sleep300=6
+stress48 iter 18 threads 48 jar_process=0 unit=0 secs=36 load=13.68 13.43 8.29 stressng=14 sleep300=6
+stress48 iter 19 threads 48 jar_process=0 unit=0 secs=36 load=14.28 13.68 8.57 stressng=14 sleep300=7
+stress48 iter 20 threads 48 jar_process=0 unit=0 secs=41 load=14.42 14.07 8.96 stressng=14 sleep300=8
+stress48 iter 21 threads 48 jar_process=101 unit=101 secs=50 load=14.71 14.27 9.30 stressng=14 sleep300=7
+stress48 iter 22 threads 48 jar_process=101 unit=0 secs=41 load=14.79 14.52 9.61 stressng=14 sleep300=7
+stress48 iter 23 threads 48 jar_process=101 unit=0 secs=39 load=18.77 15.96 10.32 stressng=14 sleep300=7
+stress48 iter 24 threads 48 jar_process=101 unit=0 secs=39 load=20.91 17.17 10.99 stressng=14 sleep300=7
+stress48 iter 25 threads 48 jar_process=0 unit=0 secs=36 load=17.26 16.69 11.06 stressng=14 sleep300=7
+done

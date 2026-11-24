@@ -1,0 +1,7 @@
+load14 iter 1 burners 14 threads 32 jar_process=101 unit=0 secs=44
+load14 iter 2 burners 14 threads 32 jar_process=0 unit=0 secs=43
+load14 iter 3 burners 14 threads 32 jar_process=0 unit=0 secs=42
+load14t64 iter 1 burners 14 threads 64 jar_process=101 unit=0 secs=43
+load14t64 iter 2 burners 14 threads 64 jar_process=101 unit=0 secs=41
+load14t64 iter 3 burners 14 threads 64 jar_process=101 unit=0 secs=40
+load14t64 iter 4 burners 14 threads 64 jar_process=101 unit=0 secs=42

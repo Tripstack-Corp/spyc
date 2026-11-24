@@ -1,0 +1,150 @@
+diff --git a/src/app/harness_tests/jar_start.rs b/src/app/harness_tests/jar_start.rs
+index 90890d93..5cd4b85f 100644
+--- a/src/app/harness_tests/jar_start.rs
++++ b/src/app/harness_tests/jar_start.rs
+@@ -709,3 +709,67 @@ fn a_demoted_tab_keeps_its_jar_and_the_jar_hears_it_holds_a_task() {
+         end(&mut app);
+     });
+ }
++
++
++/// Review 3.0, unit C (red): a restored tab whose jar still runs is never
++/// started a second time, whatever `[pane] jars` says now. With jars off
++/// (`[pane] jars = false`, the way back, or a build that doesn't honour the
++/// setting) `launch_tab_pane` starts the saved command on a PTY of spyc's
++/// while the jar's program runs on.
++#[test]
++fn review_c_a_restored_tab_whose_jar_runs_is_not_started_again_with_jars_off() {
++    let dir = short_dir();
++    crate::state::with_state_root(dir.path(), || {
++        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
++        let pid = dir.path().join("pid");
++        let program = format!("sh -c 'echo $$ >> {}; exec cat'", pid.display());
++        assert!(app.open_pane_tab_in(&program, dir.path()));
++        land(&mut app);
++        eventually("its program noted its pid", || {
++            std::fs::read_to_string(&pid).is_ok_and(|p| p.ends_with('\n'))
++        });
++        let socket = tabs(&mut app).active().jar_socket().unwrap().to_path_buf();
++        let id = tabs(&mut app).active_info().id.clone();
++        // As a crash of spyc leaves it: the jar and its program run on.
++        let first = app.runtime.project_mut().pane_tabs.take().unwrap();
++        first.active().host.sever_jar();
++        drop(first);
++        assert_eq!(
++            crate::pane::jar::place::socket_state(&socket),
++            crate::pane::jar::place::SocketState::Live
++        );
++        // The restoring spyc runs with jars off.
++        app.state.active_project_mut().config.pane.jars = false;
++        let saved = crate::state::sessions::SavedTab {
++            command: program.clone(),
++            label: program.clone(),
++            cwd: dir.path().to_path_buf(),
++            agent_kind: crate::state::sessions::AgentKind::Other,
++            agent_session_id: None,
++            agent_session_name: None,
++            codex_home: None,
++            codex_home_unresolved: false,
++            claude_home: None,
++            claim_owner: String::new(),
++            pane_id: id,
++            agent_hint: None,
++            unopened: false,
++            jar_socket: Some(socket),
++            live: None,
++        };
++        app.spawn_pane_tab(
++            &program,
++            dir.path(),
++            super::super::pane_tabs::TabSlot::Append,
++            None,
++            Some(&saved),
++            None,
++        );
++        std::thread::sleep(Duration::from_secs(3));
++        let started = std::fs::read_to_string(&pid).unwrap();
++        if let Some(tabs) = app.runtime.project_mut().pane_tabs.as_mut() {
++            tabs.active_mut().shutdown_reporting(END, || {});
++        }
++        assert_eq!(started.lines().count(), 1, "its program ran twice: {started}");
++    });
++}
+diff --git a/src/pane/jar/tests.rs b/src/pane/jar/tests.rs
+index 8b5a75f8..3651f02b 100644
+--- a/src/pane/jar/tests.rs
++++ b/src/pane/jar/tests.rs
+@@ -2293,3 +2293,73 @@ fn a_discarded_jar_ends_with_its_program() {
+     }
+     assert!(!token_of(&place, &socket).exists(), "its token was kept");
+ }
++
++
++/// Review 3.0, unit C (red): a confirmed file pipe over the jar's frame limit
++/// (16 MiB) into a jarred tab must leave the tab's input working, as it does
++/// without a jar. At the pin the frame is refused by the outbox, the tab's
++/// input writer thread ends on the error, and nothing typed afterwards
++/// reaches the program.
++#[test]
++fn review_c_a_pipe_over_the_frame_limit_leaves_the_tabs_input_working() {
++    let dir = short_dir();
++    let place = place_in(dir.path(), built_jar());
++    let mut host = spawn_in(
++        &place,
++        "stty -echo; printf ready; exec grep --line-buffered -x end",
++        dir.path(),
++    )
++    .unwrap();
++    read_until(&host, "ready");
++    let line = [vec![b'a'; 99], vec![b'\n']].concat();
++    let payload = line.repeat(170_000);
++    assert!(payload.len() > proto::MAX_FRAME, "premise: over the frame limit");
++    let piped = host.write_confirmed_pipe(payload);
++    eprintln!("the pipe: {piped:?}");
++    let accepted = after_the_pipe(&mut host);
++    accepted.expect("input after a large pipe is still accepted");
++    read_until(&host, "end");
++    host.shutdown(END);
++}
++
++/// The control: the same pipe and the same key, with no jar.
++#[test]
++fn review_c_control_a_pipe_over_the_frame_limit_without_a_jar() {
++    let dir = short_dir();
++    let mut host = PtyHost::spawn(crate::pane::pty_host::PtySpec {
++        project_env: &[],
++        command: "stty -echo; printf ready; exec grep --line-buffered -x end",
++        rows: 24,
++        cols: 80,
++        cwd: dir.path(),
++        env: &[],
++        term: "dumb",
++        nudge_winch: false,
++        debug_dump: false,
++        exec_replace: false,
++        capture_launch_env: false,
++        jar: None,
++    })
++    .unwrap();
++    read_until(&host, "ready");
++    let line = [vec![b'a'; 99], vec![b'\n']].concat();
++    let payload = line.repeat(170_000);
++    host.write_confirmed_pipe(payload).unwrap();
++    after_the_pipe(&mut host).unwrap();
++    read_until(&host, "end");
++    host.shutdown(END);
++}
++
++/// Type `end` once the pipe has left the input queue, which takes nothing
++/// else while it's there: the answer to the first try it isn't full for.
++fn after_the_pipe(host: &mut PtyHost) -> anyhow::Result<()> {
++    let until = Instant::now() + Duration::from_secs(30);
++    loop {
++        match host.write_all(b"end\n") {
++            Err(e) if e.to_string().contains("queue full") && Instant::now() < until => {
++                std::thread::sleep(Duration::from_millis(20));
++            }
++            other => return other,
++        }
++    }
++}
