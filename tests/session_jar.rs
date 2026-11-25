@@ -1107,3 +1107,173 @@ fn spyc_jars_refuses_a_directory_open_to_others() {
     assert!(said.contains("open to others"), "{said}");
     assert!(!said.contains("0123456789abcdef"), "a jar listed: {said}");
 }
+
+/// Send the spyc of `pid` `method` with `params` on its MCP socket, as
+/// another process of this user's can: its reply, for a request.
+fn ask_spyc(
+    dirs: &Dirs,
+    pid: u32,
+    method: &str,
+    params: serde_json::Value,
+    request: bool,
+) -> Option<serde_json::Value> {
+    use std::io::{BufRead, Read};
+    let sock = dirs.state.join(format!("spyc/mcp-{pid}.sock"));
+    // The socket file is there before spyc listens on it: connect until it
+    // accepts.
+    let mut stream = None;
+    eventually("spyc's MCP socket accepts", || {
+        stream = std::os::unix::net::UnixStream::connect(&sock).ok();
+        stream.is_some()
+    });
+    let mut stream = stream.expect("connected");
+    stream.set_read_timeout(Some(WAIT)).unwrap();
+    let mut msg = serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params });
+    if request {
+        msg["id"] = serde_json::json!(1);
+    }
+    let body = msg.to_string();
+    write!(stream, "Content-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+    if !request {
+        return None;
+    }
+    let mut reader = std::io::BufReader::new(stream);
+    let mut len = 0;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        let line = line.trim();
+        if line.is_empty() {
+            break;
+        }
+        if let Some(n) = line.strip_prefix("Content-Length:") {
+            len = n.trim().parse().unwrap();
+        }
+    }
+    let mut reply = vec![0; len];
+    reader.read_exact(&mut reply).unwrap();
+    Some(serde_json::from_slice(&reply).unwrap())
+}
+
+/// The pid of the spyc a session's jar runs.
+fn spyc_of(jar: &Jar) -> u32 {
+    jar.described("program_pid")
+        .and_then(|p| p.parse().ok())
+        .expect("the session's spyc")
+}
+
+/// The session's token, as `spyc attach` and `spyc shutdown` read it.
+fn token_text() -> String {
+    String::from_utf8(TOKEN.to_vec()).unwrap()
+}
+
+/// `spyc/shutdown` ends a session only with the session's token (the 3.0
+/// review, E1): any process of this user's reaches spyc's MCP socket, and
+/// one request would otherwise end spyc and every tab.
+#[test]
+#[ignore = "red until E1: fix/control-token"]
+fn a_shutdown_without_the_sessions_token_is_refused() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let spyc = spyc_of(&jar);
+    for params in [
+        serde_json::json!({}),
+        serde_json::json!({ "token": "not-the-token" }),
+    ] {
+        let reply = ask_spyc(&dirs, spyc, "spyc/shutdown", params.clone(), true).unwrap();
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("token")),
+            "{params}: {reply}"
+        );
+    }
+    assert_eq!(jar.described("exit"), None, "the session ended");
+    let reply = ask_spyc(
+        &dirs,
+        spyc,
+        "spyc/shutdown",
+        serde_json::json!({ "token": token_text() }),
+        true,
+    )
+    .unwrap();
+    assert_eq!(reply["result"], serde_json::json!({}), "{reply}");
+    eventually("the session ends", || jar.described("exit").is_some());
+}
+
+/// `spyc/release` lets a session go only with the session's token (E1).
+#[test]
+#[ignore = "red until E1: fix/control-token"]
+fn a_release_without_the_sessions_token_is_refused() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let reply = ask_spyc(
+        &dirs,
+        spyc_of(&jar),
+        "spyc/release",
+        serde_json::json!({}),
+        true,
+    )
+    .unwrap();
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("token")),
+        "{reply}"
+    );
+    assert_eq!(jar.described("exit"), None, "the session ended");
+}
+
+/// `spyc/upgrade` is acted on only with the session's token (E1). It is a
+/// notification, so its sender hears nothing either way; the session's own
+/// screen says it was refused.
+#[test]
+#[ignore = "red until E1: fix/control-token"]
+fn an_upgrade_without_the_sessions_token_is_refused() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let terminal = Terminal::attach(&jar, (30, 100), PLAIN);
+    terminal.wait_for("the session drawn", NAME);
+    ask_spyc(
+        &dirs,
+        spyc_of(&jar),
+        "spyc/upgrade",
+        serde_json::json!({}),
+        false,
+    );
+    let until = Instant::now() + WAIT;
+    while !terminal.text().contains("refused spyc/upgrade") {
+        assert!(
+            !terminal.text().contains("no newer spyc"),
+            "an upgrade looked for without the token"
+        );
+        assert!(Instant::now() < until, "never said: {:?}", terminal.text());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// A spyc that runs in no session jar of its own takes no control request,
+/// whatever it carries (E1).
+#[test]
+#[ignore = "red until E1: fix/control-token"]
+fn a_spyc_outside_a_session_jar_takes_no_control_request() {
+    let dirs = Dirs::new();
+    let mut plain = Attached::start(&dirs, &[]);
+    plain.wait_drawn(&dirs.mark());
+    let pid = plain.child.process_id().expect("spyc's pid");
+    let reply = ask_spyc(
+        &dirs,
+        pid,
+        "spyc/shutdown",
+        serde_json::json!({ "token": token_text() }),
+        true,
+    )
+    .unwrap();
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("no session jar")),
+        "{reply}"
+    );
+    plain.quit_spyc();
+}
