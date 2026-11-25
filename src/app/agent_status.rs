@@ -14,11 +14,15 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use super::state::Origin;
 use super::{
     AGENT_STATUS_TTL, AgentKind, AgentStatusCache, App, Deadline, Effect, RunCtx, VisualBell, Wake,
 };
-use crate::config::{DesktopVia, NotifyConfig};
+use crate::config::NotifyConfig;
 use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
+
+mod notify;
+use notify::{Subject, notification_for_transition, notification_text};
 
 /// How long after a tab's last pane output it still counts as `Working`. Long
 /// enough to bridge the sub-second gaps between streamed token chunks; short
@@ -73,154 +77,6 @@ const VISUAL_BELL_DURATION: Duration = Duration::from_millis(480);
 /// live, so an idle pane never wakes for it.
 const VISUAL_BELL_FRAME: Duration = Duration::from_millis(60);
 
-/// What a status transition should trigger, after `[notify]` gating +
-/// focused-tab suppression. The pure output of [`notification_for_transition`]:
-/// `system` is `Some((summary, body))` when the OS notifier fires; `osc9` is
-/// `Some(message)` when the terminal-escape channel fires; `bell`/`visual` when
-/// those fire. All-off = nothing to do.
-#[derive(Debug, Default, PartialEq, Eq)]
-struct NotifyPlan {
-    system: Option<(String, String)>,
-    osc9: Option<String>,
-    bell: bool,
-    visual: bool,
-}
-
-impl NotifyPlan {
-    /// No channel fired — the caller emits nothing.
-    const fn is_silent(&self) -> bool {
-        self.system.is_none() && self.osc9.is_none() && !self.bell && !self.visual
-    }
-}
-
-/// Which desktop-notification mechanisms fire for `via`, given whether spyc is
-/// running over SSH. Returns `(system, osc9)`. `Auto` routes to OSC-9 over SSH
-/// (so the ping reaches the *client* terminal, not the remote box) and the OS
-/// notifier locally — the "just works over SSH" default. Pure.
-const fn desktop_delivery(via: DesktopVia, is_ssh: bool) -> (bool, bool) {
-    match via {
-        DesktopVia::Auto => {
-            if is_ssh {
-                (false, true)
-            } else {
-                (true, false)
-            }
-        }
-        DesktopVia::System => (true, false),
-        DesktopVia::Osc9 => (false, true),
-        DesktopVia::Both => (true, true),
-    }
-}
-
-/// Decide what a tab's `old → new` activity transition should trigger, given the
-/// `[notify]` config, whether this tab is the one the user is actively watching
-/// (its pane owns the keyboard), and whether spyc is over SSH. Pure + testable.
-///
-/// Only a *fresh* transition INTO `Blocked` ("needs me") or `Done` (a finished
-/// turn) fires anything; a repeat or any other target is silent, as is a focused
-/// tab when `suppress_focused_tab`. Beyond that, each channel decides *which*
-/// edge it fires on: `Blocked` fires every enabled channel, but the routine
-/// `Done` edge (once per turn) fires a channel only if it opts in via its
-/// `*_done` flag — `desktop_done` for the ping, `bell_done` for the bell,
-/// `visual_done` for the flash. The default splits by intrusiveness: the quiet
-/// desktop ping notifies on `Done`, the interrupting bell + on-screen flash stay
-/// `Blocked`-only so they don't fire per turn. The desktop mechanism(s) come from
-/// [`desktop_delivery`]. Returns a silent plan when no channel fires.
-fn notification_for_transition(
-    old: AgentActivity,
-    new: AgentActivity,
-    cfg: &NotifyConfig,
-    tab_focused: bool,
-    is_ssh: bool,
-    who: &Subject,
-) -> NotifyPlan {
-    // A fresh edge into a notify-worthy state; `is_done` distinguishes the
-    // routine finished-turn edge (per-channel opt-in) from `Blocked` (fires all).
-    let is_done = match new {
-        AgentActivity::Blocked if old != AgentActivity::Blocked => false,
-        // A reported error needs the user as a block does: every channel.
-        AgentActivity::Error if old != AgentActivity::Error => false,
-        AgentActivity::Done if old != AgentActivity::Done => true,
-        _ => return NotifyPlan::default(),
-    };
-    if cfg.suppress_focused_tab && tab_focused {
-        return NotifyPlan::default();
-    }
-    // On a `Done` edge each channel needs its own `*_done` opt-in; `Blocked`
-    // (`!is_done`) fires every enabled channel.
-    let want_desktop = cfg.desktop && (!is_done || cfg.desktop_done);
-    let want_bell = cfg.bell && (!is_done || cfg.bell_done);
-    let want_visual = cfg.visual && (!is_done || cfg.visual_done);
-
-    let (want_system, want_osc9) = if want_desktop {
-        desktop_delivery(cfg.desktop_via, is_ssh)
-    } else {
-        (false, false)
-    };
-    let (system, osc9) = if want_system || want_osc9 {
-        let (summary, body) = notification_text(who, new);
-        // OSC-9 takes one line; fold the two parts into it.
-        let osc9 = want_osc9.then(|| format!("{summary} — {body}"));
-        let system = want_system.then_some((summary, body));
-        (system, osc9)
-    } else {
-        (None, None)
-    };
-    NotifyPlan {
-        system,
-        osc9,
-        bell: want_bell,
-        visual: want_visual,
-    }
-}
-
-/// Who a notification is about: the tab's label and its number in its
-/// project, the project, named only while several are open, and what a
-/// blocked one waits on ([`TabInfo::waiting_for`]).
-struct Subject<'a> {
-    label: &'a str,
-    tab_number: usize,
-    project: Option<&'a str>,
-    blocked_on: Option<std::borrow::Cow<'a, str>>,
-}
-
-/// Compose the `(summary, body)` for a transition notification: a glanceable
-/// "which agent + what" summary plus the tab locator in the body, each naming
-/// the project when [`Subject::project`] does, and a `Blocked` summary what
-/// it waits on ("claude needs you: Bash"). Only `Blocked` / `Done` reach here
-/// (see [`notification_for_transition`]); the fallback arm is a sane
-/// non-panicking default.
-fn notification_text(who: &Subject, new: AgentActivity) -> (String, String) {
-    let (label, tab) = (who.label, who.tab_number);
-    let (agent, place) = who.project.map_or_else(
-        || (label.to_owned(), format!("tab {tab}")),
-        |project| {
-            (
-                format!("{label} in {project}"),
-                format!("{project}: tab {tab}"),
-            )
-        },
-    );
-    match new {
-        AgentActivity::Blocked => {
-            let on = who
-                .blocked_on
-                .as_ref()
-                .map_or_else(String::new, |on| format!(": {on}"));
-            (
-                format!("{agent} needs you{on}"),
-                format!("{place} is blocked"),
-            )
-        }
-        AgentActivity::Done => (format!("{agent} finished"), format!("{place} — done")),
-        AgentActivity::Error => (
-            format!("{agent} failed"),
-            format!("{place} reported an error"),
-        ),
-        _ => (agent, place),
-    }
-}
-
 /// One project's part of the activity walk: its `[notify]`, how its
 /// notifications name it, and what the user sees of it.
 struct ProjectNotify {
@@ -229,6 +85,8 @@ struct ProjectNotify {
     /// Its label, while several projects are open: a tab number alone doesn't
     /// say which project's tab.
     named: Option<String>,
+    /// Its label, which the event log always names.
+    label: String,
     /// Its place in switcher order, which orders the bell's flash.
     order: usize,
     /// It is the project in view.
@@ -237,12 +95,27 @@ struct ProjectNotify {
     tab_in_view: Option<usize>,
 }
 
+impl ProjectNotify {
+    /// Where its tab `index`, `pane_id`, is, for the event log.
+    fn origin_of(&self, index: usize, pane_id: &str) -> Origin {
+        Origin {
+            project: Some(self.label.clone()),
+            project_id: Some(self.id.to_string()),
+            tab: Some(index + 1),
+            pane_id: Some(pane_id.to_string()),
+            conn: None,
+        }
+    }
+}
+
 /// A bell rung from a project out of view, and the flash that says where.
 struct BellNote {
     blocked: bool,
     order: usize,
     tab_number: usize,
+    /// What the event log noted, which the flash leads with `origin`'s place.
     text: String,
+    origin: Origin,
 }
 
 impl BellNote {
@@ -292,7 +165,7 @@ struct ActivityScan<'a> {
     bell_note: Option<BellNote>,
     /// What the session's event log notes: an agent that turned blocked,
     /// done or errored.
-    notes: Vec<(super::state::EventKind, String)>,
+    notes: Vec<(super::state::EventKind, String, Origin)>,
 }
 
 impl ActivityScan<'_> {
@@ -408,8 +281,18 @@ impl ActivityScan<'_> {
                 project: project.named.as_deref(),
                 blocked_on: entry.info.waiting_for(),
             };
+            let origin = project.origin_of(index, &entry.info.id);
+            let said = notification_text(
+                &Subject {
+                    project: None,
+                    blocked_on: who.blocked_on.clone(),
+                    ..who
+                },
+                new,
+            )
+            .0;
             if let Some(kind) = super::events::noted_turn(new) {
-                self.notes.push((kind, notification_text(&who, new).0));
+                self.notes.push((kind, said.clone(), origin.clone()));
             }
             let plan = notification_for_transition(
                 entry.info.notified,
@@ -425,7 +308,8 @@ impl ActivityScan<'_> {
                         blocked: new == AgentActivity::Blocked,
                         order: project.order,
                         tab_number: who.tab_number,
-                        text: notification_text(&who, new).1,
+                        text: said,
+                        origin,
                     });
                 }
                 if plan.system.is_some() || plan.osc9.is_some() || plan.bell {
@@ -855,8 +739,8 @@ impl App {
             notes,
             ..
         } = scan;
-        for (kind, text) in notes {
-            self.state.events.note(kind, &text);
+        for (kind, text, origin) in notes {
+            self.state.events.note(kind, &text, &origin);
         }
 
         // Fire `agent_status` for tabs whose SEMANTIC status transitioned (the
@@ -910,7 +794,9 @@ impl App {
                 .as_ref()
                 .is_some_and(|flash| matches!(flash.kind, super::FlashKind::Error));
             if let Some(note) = bell_note.filter(|_| !error_showing) {
-                self.state.flash_info(note.text);
+                // The walk noted it already: a flash that noted it again
+                // would log the turn twice.
+                self.state.flash_hint(note.origin.flashed(note.text));
             }
         }
         (changed, effects)
@@ -928,6 +814,7 @@ impl App {
                 id: project.id,
                 cfg: project.config.notify.clone(),
                 named: several.then(|| project.label()),
+                label: project.label(),
                 order,
                 in_view: project.id == in_view,
                 tab_in_view: tab_in_view.filter(|_| project.id == in_view),
@@ -1621,6 +1508,7 @@ mod tests {
             order,
             tab_number,
             text: String::new(),
+            origin: super::Origin::default(),
         };
         assert!(
             note(true, 3, 5).outranks(&note(false, 0, 1)),
@@ -1667,7 +1555,7 @@ mod tests {
     // so the ping reaches the client terminal — and the explicit modes obey.
     #[test]
     fn notify_desktop_delivery_routes_osc9_over_ssh() {
-        use super::desktop_delivery;
+        use super::notify::desktop_delivery;
         use crate::config::DesktopVia::{Auto, Both, Osc9, System};
         // (system, osc9)
         assert_eq!(

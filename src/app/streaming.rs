@@ -469,8 +469,11 @@ impl App {
             }
             exited.extend(marked);
         }
-        for label in exited {
-            self.state.note_event(&format!("tab ended: {label}"));
+        for (pane_id, label) in exited {
+            let origin = Some(self.tab_origin(&pane_id));
+            self.noting_from(origin, |app| {
+                app.state.note_event(&format!("tab ended: {label}"));
+            });
         }
         (needs_draw, draw_reason)
     }

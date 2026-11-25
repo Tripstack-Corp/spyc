@@ -172,7 +172,8 @@ impl App {
         let mut drawn = false;
         for (id, label, looked) in landed {
             self.runtime.jar_upgrades.in_flight = None;
-            drawn |= self.land_jar_upgrade(id, &label, looked);
+            let origin = (!id.is_empty()).then(|| self.tab_origin(&id));
+            drawn |= self.noting_from(origin, |app| app.land_jar_upgrade(id, &label, looked));
         }
         drawn
     }

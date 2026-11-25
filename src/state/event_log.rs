@@ -218,17 +218,35 @@ fn appended(path: &Path, offset: &mut u64) -> Vec<String> {
         .collect()
 }
 
+/// The columns an event's place is padded to, so what happened lines up.
+const PLACE_WIDTH: usize = 20;
+
 /// A line of the file as `:events` shows it: its time from the month on,
-/// then what happened, an error in red when `colour`.
-fn shown(line: &str, colour: bool) -> String {
+/// where it happened, what happened, an error in red when `colour`, and the
+/// ids that trace it, dim when `colour`.
+pub fn shown(line: &str, colour: bool) -> String {
     let mut parts = line.splitn(3, "  ");
-    let (Some(at), Some(kind), Some(text)) = (parts.next(), parts.next(), parts.next()) else {
+    let (Some(at), Some(kind), Some(rest)) = (parts.next(), parts.next(), parts.next()) else {
         return line.to_string();
     };
     let when = at.get(5..).unwrap_or(at);
-    match (kind, colour) {
-        ("E", true) => format!("{when}  \x1b[31m{text}\x1b[0m"),
-        _ => format!("{when}  {text}"),
+    let mut fields = rest.splitn(3, '\t');
+    let text = fields.next().unwrap_or_default();
+    let place = fields.next().unwrap_or_default();
+    let ids = fields.next().unwrap_or_default();
+    let mut out = format!("{when}  ");
+    if !place.is_empty() {
+        let pad = PLACE_WIDTH.saturating_sub(crate::ui::display_width(place));
+        out = format!("{out}{place}{}  ", " ".repeat(pad));
+    }
+    out = match (kind, colour) {
+        ("E", true) => format!("{out}\x1b[31m{text}\x1b[0m"),
+        _ => format!("{out}{text}"),
+    };
+    match (ids.is_empty(), colour) {
+        (true, _) => out,
+        (false, true) => format!("{out}  \x1b[2m{ids}\x1b[0m"),
+        (false, false) => format!("{out}  {ids}"),
     }
 }
 
@@ -345,6 +363,26 @@ mod tests {
             "11-20 06:30:31  two  spaces"
         );
         assert_eq!(shown("not a line of ours", true), "not a line of ours");
+    }
+
+    /// A tab's event shows where it happened, in a column, and the ids that
+    /// trace it after what happened.
+    #[test]
+    fn a_line_shows_its_place_and_ids() {
+        let line =
+            "2026-11-25 05:54:18  I  claude needs you: Bash\tweb tab 2\tpane=t-9 project=p-1";
+        assert_eq!(
+            shown(line, false),
+            "11-25 05:54:18  web tab 2             claude needs you: Bash  pane=t-9 project=p-1"
+        );
+        assert_eq!(
+            shown(line, true),
+            "11-25 05:54:18  web tab 2             claude needs you: Bash  \x1b[2mpane=t-9 project=p-1\x1b[0m"
+        );
+        assert_eq!(
+            shown("2026-11-25 05:54:18  I  saved\tweb\t", false),
+            "11-25 05:54:18  web                   saved"
+        );
     }
 
     #[test]

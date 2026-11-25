@@ -799,6 +799,8 @@ fn the_event_log_says_why_a_terminal_left() {
         std::fs::read_to_string(&log)
             .unwrap_or_default()
             .lines()
+            // What happened, before the tab that leads its place and ids.
+            .map(|l| l.split('\t').next().unwrap_or(l))
             .filter(|l| l.contains("terminal detached"))
             .map(|l| l.split_once("terminal detached").unwrap().1.to_string())
             .collect::<Vec<_>>()

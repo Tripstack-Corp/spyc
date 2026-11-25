@@ -963,7 +963,70 @@ fn the_bell_for_another_project_names_it() {
         app.make_active(t.y);
         app.settle_agent_activity(now, &mut RunCtx::for_test());
         assert!(app.view.visual_bell.is_some(), "the bell rang");
-        assert_eq!(app.flash_text(), Some("xproj: tab 1 is blocked"));
+        assert_eq!(app.flash_text(), Some("xproj tab 1: claude needs you"));
+    });
+}
+
+/// An agent's turn is noted with where it happened, though one project is in
+/// view: its project and tab, and the ids that trace the tab.
+#[test]
+fn an_agents_turn_is_noted_with_its_project_tab_and_pane() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        let pane = first_tab(app, x, |tab| tab.info.id.clone());
+        let now = Instant::now();
+        edit_first_tab(app, x, |info| {
+            info.reported = Some(report(AgentActivity::Done, now));
+        });
+        app.make_active(t.y);
+        app.settle_agent_activity(now, &mut RunCtx::for_test());
+        app.settle_events();
+        let event = app
+            .state
+            .events
+            .iter()
+            .find(|e| e.text == "claude finished")
+            .unwrap_or_else(|| panic!("{:?}", app.state.events.iter().collect::<Vec<_>>()));
+        assert_eq!(event.place, "xproj tab 1");
+        assert!(event.ids.contains(&format!("pane={pane}")), "{}", event.ids);
+        assert!(event.ids.contains(&format!("project={x}")), "{}", event.ids);
+    });
+}
+
+/// What an agent's MCP call flashes leads with the tab that made it, and the
+/// event log keeps the tab, its pane and the connection.
+#[test]
+fn an_mcp_calls_flash_names_the_tab_that_made_it() {
+    with_two(|t| {
+        let (app, x, x_home) = (&mut t.app, t.x, t.x_home.clone());
+        agent_tab_in(app, x, &x_home, "claude");
+        let pane = first_tab(app, x, |tab| tab.info.id.clone());
+        app.make_active(x);
+        let (reply, _rx) = std::sync::mpsc::channel();
+        app.route_mcp_request(crate::mcp_cmd::McpRequest {
+            command: crate::mcp_cmd::McpCommand::SetFilter {
+                pattern: Some("*.rs".into()),
+            },
+            reply,
+            project: Some(x),
+            pane_id: Some(pane.clone()),
+            conn: Some(3),
+        });
+        assert_eq!(app.flash_text(), Some("xproj tab 1: [mcp] filter: *.rs"));
+        app.settle_events();
+        let event = app.state.events.iter().last().expect("noted");
+        assert_eq!(
+            (event.place.as_str(), event.text.as_str()),
+            ("xproj tab 1", "[mcp] filter: *.rs")
+        );
+        assert_eq!(event.ids, format!("pane={pane} project={x} conn=3"));
+        app.state.flash_info("saved: notes.md");
+        assert_eq!(
+            app.flash_text(),
+            Some("saved: notes.md"),
+            "once the call is served, a flash is the user's again"
+        );
     });
 }
 

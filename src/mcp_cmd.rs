@@ -59,6 +59,10 @@ pub struct McpRequest {
     /// `None` from a connection bound to none. It says who is asking, not what
     /// to do, so it rides here rather than on each command.
     pub project: Option<crate::project_id::ProjectId>,
+    /// The tab of the agent that sent it, and its connection's number: who
+    /// the event log says asked.
+    pub pane_id: Option<String>,
+    pub conn: Option<u64>,
 }
 
 /// Commands that Claude can send to mutate the TUI workspace.

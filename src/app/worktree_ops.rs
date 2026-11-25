@@ -101,6 +101,8 @@ pub struct WorktreeOutcome {
     /// The project the job was started for: opening `b` or entering the new
     /// tree lands only there.
     pub project: super::state::ProjectId,
+    /// The tab whose MCP call started it, which its flash is noted as.
+    pub origin: Option<super::state::Origin>,
 }
 
 const fn err_result(message: String) -> WorktreeJobResult {
@@ -338,6 +340,7 @@ impl App {
         // asked, and an MCP command is served inside its caller's project
         // (`in_project`), so the active project is the one that asked.
         let project = self.state.active;
+        let origin = self.state.events.source.clone();
         let cooking = self.start_cooking();
         std::thread::spawn(move || {
             let _cooking = cooking;
@@ -346,6 +349,7 @@ impl App {
                 result,
                 completion,
                 project,
+                origin,
             });
         });
     }
@@ -363,6 +367,7 @@ impl App {
             result,
             completion,
             project,
+            origin,
         } in outcomes
         {
             let WorktreeJobResult {
@@ -376,7 +381,9 @@ impl App {
             match completion {
                 WorktreeCompletion::Mcp(reply) => {
                     if mutated {
-                        self.land_worktree_mutation(project, flash, open_path);
+                        self.noting_from(origin, |app| {
+                            app.land_worktree_mutation(project, flash, open_path);
+                        });
                     }
                     // The client may have timed out (5 s) and dropped its
                     // receiver — a failed send is fine; the refresh/context

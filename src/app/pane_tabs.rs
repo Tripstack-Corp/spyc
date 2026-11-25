@@ -368,13 +368,16 @@ impl App {
                 self.state.active_project_mut().focus = state::Focus::Pane;
                 self.state
                     .flash_hint(format!("pane: {cmd} (^W k for list)"));
-                self.state.note_tab_started(cmd, restoring.is_some());
                 let entry = TabEntry::new(p, info);
                 match (self.runtime.project_mut().pane_tabs.as_mut(), slot) {
                     (Some(tabs), TabSlot::Replace(idx)) => tabs.replace_at(idx, entry),
                     (Some(tabs), TabSlot::Append) => tabs.push(entry),
                     (None, _) => self.runtime.project_mut().pane_tabs = Some(PaneTabs::new(entry)),
                 }
+                let origin = Some(self.tab_origin(&pane_id));
+                self.noting_from(origin, |app| {
+                    app.state.note_tab_started(cmd, restoring.is_some());
+                });
                 // The first launch of an agent asks whether to wire it. After
                 // the tab exists, so the prompt doesn't cover a missing pane.
                 self.offer_wiring(kind);
@@ -838,7 +841,17 @@ impl App {
         self.state.scope_registry.retain(|c| c.owner != owner);
         // Reclaim the replaced tab's parked scrollback stream, if it had one.
         self.prune_orphaned_pager_streams();
-        self.state.flash_info(format!("pane: restarted {cmd}"));
+        let origin = self
+            .runtime
+            .project()
+            .pane_tabs
+            .as_ref()
+            .and_then(|tabs| tabs.tabs().get(idx))
+            .map(|entry| entry.info.id.clone())
+            .map(|id| self.tab_origin(&id));
+        self.noting_from(origin, |app| {
+            app.state.flash_info(format!("pane: restarted {cmd}"));
+        });
     }
 
     /// ^W j / ^W k — set keyboard focus directionally (no wrap).
