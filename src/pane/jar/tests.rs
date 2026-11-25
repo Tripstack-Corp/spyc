@@ -1253,15 +1253,10 @@ fn a_replayed_query_is_not_answered_again() {
 
     let second = pane_in(&place, "exec cat", dir.path(), Some(socket));
     assert!(second.adopted());
-    // Typed once the pane's reply gate has opened: the replayed tail is
-    // handed over and past its grace, so any answer to the replayed query
-    // has been let through or dropped by then.
-    let link = std::sync::Arc::clone(&second.host.snapshot_sink().expect("a jarred pane").0);
-    let until = Instant::now() + WAIT;
-    while !link.gate.is_open() {
-        assert!(Instant::now() < until, "the reply gate never opened");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    // Typed once the replay shows the first answer's echo, which the log
+    // holds after the query: the engine has parsed the query by then, so an
+    // answer to it is already queued for the program, ahead of what's typed.
+    shows(&second, "?62");
     let mut second = second;
     second.send_bytes(b"done\n").unwrap();
     shows(&second, "cdone");
