@@ -191,6 +191,19 @@ tag RELEASEs directly off `main` until a second major needs `stable/`.
 5. **Patch:** same two steps with `VERSION=N.M.(P+1)`. (Stage 2: cherry-pick
    onto `releng/N.M` first.)
 
+**Jars at a release.** Each tab's program runs in a `spyc-jar` that outlives
+the spyc that started it, so a jar a release ships keeps running under later
+installs. Four things follow, each written into the steps above or §5a:
+
+- An rc runs what its release will: no code reads the version's prerelease
+  part (step 2).
+- `spyc-jar` carries spyc's version and publishes with every tag, its first
+  publish by hand at `v3.0.0-rc.1` (§5a).
+- Every stable release's `spyc-jar` from 3.0.0 on is a fixture CI drives with
+  each later build (step 4).
+- CI runs the jar tests on Linux only; before a tag, `make check-ci` on the
+  Apple silicon Mac at the tagged commit is the macOS run.
+
 **Stage 2 (parallel majors):** add a freeze on a `releng/N.M` branch forked
 from `stable/N`, run `-beta.X` → `-rc.X` → `vN.M.0` on that branch, and keep
 `main` open for the next major. The Release Manager owns the freeze window.
@@ -303,12 +316,13 @@ registry, which is exactly what `cargo publish` will do at the tag. A file the
 build needs but the package leaves out (#426) fails there, and so does a
 dependency the registry can't resolve.
 
-The two package separately, which is what makes the vendored archives
-affordable: `spyc-vt-sys` measures **3.91 MiB** as a `.crate` (five archives)
-and spyc's own stays around 1.6 MiB, so each is independently well inside
-crates.io's 10 MiB cap instead of sharing one budget. Both figures are from an
-actual `cargo package`, not arithmetic — re-measure on a pin bump, since the
-archives are most of the first number.
+The three package separately, which is what makes the vendored archives
+affordable: `spyc-vt-sys` measures **4.4 MiB** as a `.crate` (five archives,
+13.1 MiB unpacked), spyc's own 2.8 MiB and `spyc-jar`'s 73 KiB, so each is
+independently well inside crates.io's 10 MiB cap instead of sharing one
+budget. The figures are from an actual `cargo package` (`make package-check`,
+2026-11-25), not arithmetic — re-measure on a pin bump, since the archives are
+most of the first number.
 
 `spyc-vt-sys` is versioned independently of spyc and only moves when the pin or
 the bindings move. A spyc release that changes neither republishes nothing.
@@ -415,7 +429,8 @@ are the source of truth — Actions *call them* so local and CI never drift.
   its whole cycle. A prerelease tag isn't a git-cliff boundary (§3), so its
   notes are `git cliff --unreleased --tag <tag>`, every commit since the last
   stable release.
-- **Publish:** create the GitHub Release, attach `spyc-vN.M.P-<target>.tar.gz` ×4,
+- **Publish:** create the GitHub Release, attach the three
+  `spyc-vN.M.P-<target>.tar.gz` (each holding `spyc` and `spyc-jar`),
   `SHA256SUMS`, signatures. Then **dispatch** `homebrew.yml` + `apt.yml`: a
   GITHUB_TOKEN-created release does NOT fire their `on: release` triggers (GitHub
   blocks token events from cascading), so release.yml runs them via
@@ -550,6 +565,10 @@ in `ci.yml`); the `apt-publish` environment holds `APT_GPG_PRIVATE_KEY` +
 | Linux aarch64 | `aarch64-unknown-linux-musl` | static | `spyc-vN.M.P-linux-aarch64.tar.gz` |
 | Windows | — | via WSL (use the Linux build) | documented, not a native target |
 
+Each tarball holds `spyc` and `spyc-jar`, which spyc runs each pane tab's
+program in and looks for beside itself; the `.deb`s and the Homebrew formula
+install the two side by side.
+
 **Checksums:** `SHA256SUMS` (`make dist-checksums`).
 
 **Signing — recommend layering:**
@@ -568,8 +587,8 @@ in `ci.yml`); the `apt-publish` environment holds `APT_GPG_PRIVATE_KEY` +
   GitHub-Pages repo (`apt.yml`; amd64 + arm64).
 - **`cargo-binstall`** — add the `[package.metadata.binstall]` hints to
   `Cargo.toml` so `cargo binstall spyc` pulls the GitHub artifact (no compile).
-- **crates.io** — optional `cargo install spyc` (§13.5); reserve the name
-  regardless.
+- **crates.io** — `cargo install spyc` builds both binaries from the three
+  crates the release publishes (§5a).
 
 ## 10. GitHub org & repo presentation (Tripstack-Corp)
 
@@ -652,7 +671,7 @@ existing repo, not seeding a clean slate. Ordered to stand the whole thing up:
 9. Enable Security: private vuln reporting, secret scanning, (optional)
    Dependabot for Actions.
 10. **Dry run:** push a throwaway `v0.0.0-rc.1` tag → confirm `release.yml`
-    builds all four artifacts, signs, and publishes a pre-release; verify with
+    builds all three tarballs, signs, and publishes a pre-release; verify with
     `gh attestation verify` + checksum.
 11. Add `[package.metadata.binstall]` to `Cargo.toml`; publish the first Homebrew
     formula; (optional) reserve/publish crates.io.
