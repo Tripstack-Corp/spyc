@@ -82,7 +82,7 @@ pub fn safe_remove_worktree(
         )));
     } else {
         status::repo_status_result(path)
-            .map_err(|e| std::io::Error::other(format!("reading worktree status: {e}")))?
+            .map_err(|e| std::io::Error::other(format!("reading worktree status: {e:#}")))?
     };
 
     // Honour a lease BEFORE archiving — don't archive then refuse. A claim is

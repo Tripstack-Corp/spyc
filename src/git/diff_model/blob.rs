@@ -81,7 +81,7 @@ pub fn set_blob(
     } else {
         gix::diff::blob::ResourceKind::OldOrSource
     };
-    let _ = rc.set_resource(id, kind, rela_path, resource_kind, &repo.objects);
+    let _ = rc.set_resource(Some(id), kind, rela_path, resource_kind, &repo.objects);
 }
 
 /// Read the [`DiffKind`] (binary marker, text hunks, or an error) from a
@@ -105,8 +105,10 @@ pub fn diff_kind_from_cache(rc: &mut gix::diff::blob::Platform) -> DiffKind {
         Operation::SourceOrDestinationIsBinary | Operation::ExternalCommand { .. } => {
             DiffKind::Binary
         }
-        Operation::InternalDiff { algorithm } => {
-            let input = prep.interned_input();
+        // Both sides were set but neither exists: there are no lines to diff.
+        Operation::NeitherExists => DiffKind::Text(Vec::new()),
+        Operation::InternalDiff { algorithm, change } => {
+            let input = change.patch_input();
             let diff = gix::diff::blob::diff_with_slider_heuristics(algorithm, &input);
             DiffKind::Text(lines_to_hunks(&diff, &input))
         }

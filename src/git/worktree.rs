@@ -162,7 +162,8 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     // `gix::discover` (not `gix::open`) so adding from a repo subdirectory
     // resolves the enclosing repo and anchors the new worktree on its root,
     // matching `git worktree add` from anywhere in the tree.
-    let repo = gix::discover(dir).map_err(|e| std::io::Error::other(format!("open repo: {e}")))?;
+    let repo =
+        gix::discover(dir).map_err(|e| std::io::Error::other(format!("open repo: {e:#}")))?;
 
     // Canonicalize up front: gix returns paths relative to the CWD it captured
     // at open, and a relative `gitdir:` in the persisted worktree gitfile makes
@@ -225,9 +226,9 @@ pub fn add(dir: &Path, branch: &str, base: Option<&str>) -> std::io::Result<Path
     // The tree to materialize is the branch commit's tree.
     let tree_id = repo
         .find_commit(commit_id)
-        .map_err(|e| std::io::Error::other(format!("find commit: {e}")))?
+        .map_err(|e| std::io::Error::other(format!("find commit: {e:#}")))?
         .tree_id()
-        .map_err(|e| std::io::Error::other(format!("commit tree: {e}")))?
+        .map_err(|e| std::io::Error::other(format!("commit tree: {e:#}")))?
         .detach();
 
     // Pick the admin dir name (dedupe like git: name, name1, name2, …).
@@ -303,16 +304,16 @@ fn checkout_and_write(
 ) -> std::io::Result<()> {
     let mut index = repo
         .index_from_tree(&tree_id)
-        .map_err(|e| std::io::Error::other(format!("index from tree: {e}")))?;
+        .map_err(|e| std::io::Error::other(format!("index from tree: {e:#}")))?;
     index.set_path(admin_dir.join("index"));
 
     let checkout_opts = repo
         .checkout_options(gix::worktree::stack::state::attributes::Source::IdMapping)
-        .map_err(|e| std::io::Error::other(format!("checkout options: {e}")))?;
+        .map_err(|e| std::io::Error::other(format!("checkout options: {e:#}")))?;
     let objects = repo
         .objects
         .into_arc()
-        .map_err(|e| std::io::Error::other(format!("object store: {e}")))?;
+        .map_err(|e| std::io::Error::other(format!("object store: {e:#}")))?;
     let should_interrupt = AtomicBool::new(false);
     gix::worktree::state::checkout(
         &mut index,
@@ -323,7 +324,7 @@ fn checkout_and_write(
         &should_interrupt,
         checkout_opts,
     )
-    .map_err(|e| std::io::Error::other(format!("checkout: {e}")))?;
+    .map_err(|e| std::io::Error::other(format!("checkout: {e:#}")))?;
     write_index_with_lock_retry(&mut index)?;
 
     write_admin_files(admin_dir, target, branch)
@@ -334,7 +335,7 @@ fn checkout_and_write(
 /// gix acquires `<admin>/index.lock` with `Fail::Immediately` — no internal
 /// wait — so a contender that holds the lock for even a moment (a concurrent
 /// gix operation in production, or the heavily-parallel test runner) makes a
-/// `write` fail instantly with `AcquireLock` rather than blocking. A bounded
+/// `write` fail instantly rather than blocking. A bounded
 /// exponential backoff (10 attempts, capped at 300ms/step, ~1.8s total) rides
 /// out that transient contention on a loaded CI filesystem, while a genuinely
 /// stuck lock still fails in bounded time instead of hanging (it is NOT
@@ -343,16 +344,22 @@ fn checkout_and_write(
 /// re-acquires from scratch, so no partial state carries across attempts.
 ///
 /// Only genuine contention is retried — see [`lock_contention_is_transient`].
-/// Failures are reported with their whole source chain: `AcquireLock`'s own
-/// Display is just "Could not acquire lock for index file", which names neither
-/// the cause nor the path, and that opacity is why three earlier rounds of
-/// widening this retry could not tell contention from an IO failure.
+/// Failures are reported with their whole source chain: the outer message is
+/// just "Could not acquire lock for index file", which names neither the cause
+/// nor the path, and that opacity is why three earlier rounds of widening this
+/// retry could not tell contention from an IO failure.
+#[expect(
+    clippy::default_trait_access,
+    reason = "gix::fs, the one path to SharedPermissions, is behind gix's unstable feature"
+)]
 fn write_index_with_lock_retry(index: &mut gix::index::File) -> std::io::Result<()> {
     const ATTEMPTS: u32 = 10;
     const MAX_BACKOFF: std::time::Duration = std::time::Duration::from_millis(300);
     let mut backoff = std::time::Duration::from_millis(20);
     for attempt in 1..=ATTEMPTS {
-        match index.write(gix::index::write::Options::default()) {
+        // Default permissions follow the umask, as gix does for a repository
+        // without `core.sharedRepository`; `gix::fs` is unstable to name.
+        match index.write(gix::index::write::Options::default(), Default::default()) {
             Ok(()) => return Ok(()),
             Err(e) if attempt < ATTEMPTS && lock_contention_is_transient(&e) => {
                 std::thread::sleep(backoff);
@@ -421,25 +428,24 @@ fn describe_index_parent(index_path: &Path) -> String {
 
 /// Whether a failed index write is worth another attempt.
 ///
-/// `AcquireLock` collapses two unrelated causes: `PermanentlyLocked` (someone
-/// holds `index.lock` — transient, retry) and `Io` (the lock file could not be
-/// created at all). Retrying a deterministic `Io` — a missing parent directory,
-/// EPERM, ENOSPC — just burns the whole backoff budget and then reports it as
-/// lock contention, hiding the real fault. Only the IO kinds that describe
-/// *momentary* unavailability are retried; every other kind fails fast.
-fn lock_contention_is_transient(e: &gix::index::file::write::Error) -> bool {
-    let gix::index::file::write::Error::AcquireLock(acquire) = e else {
-        return false;
-    };
-    match acquire {
-        gix::lock::acquire::Error::PermanentlyLocked { .. } => true,
-        gix::lock::acquire::Error::Io(io) => matches!(
-            io.kind(),
-            std::io::ErrorKind::AlreadyExists
-                | std::io::ErrorKind::WouldBlock
-                | std::io::ErrorKind::Interrupted
-        ),
-    }
+/// A failure to take the lock has two unrelated causes: someone holds
+/// `index.lock` (transient, retry), or the lock file could not be created at
+/// all. Retrying the second — a missing parent directory, EPERM, ENOSPC — just
+/// burns the whole backoff budget and then reports it as lock contention,
+/// hiding the real fault. gix reports a held lock as an `AlreadyExists` IO
+/// error in the chain, so only the IO kinds that describe *momentary*
+/// unavailability are retried; every other failure fails fast.
+fn lock_contention_is_transient(e: &gix::Error) -> bool {
+    e.iter_errors()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|io| {
+            matches!(
+                io.kind(),
+                std::io::ErrorKind::AlreadyExists
+                    | std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::Interrupted
+            )
+        })
 }
 
 /// Resolve `full_ref` (`refs/heads/<branch>`) to its commit id. If the branch
@@ -460,12 +466,12 @@ fn resolve_or_create_branch(
         return existing
             .peel_to_id()
             .map(gix::Id::detach)
-            .map_err(|e| std::io::Error::other(format!("peel branch '{branch}': {e}")));
+            .map_err(|e| std::io::Error::other(format!("peel branch '{branch}': {e:#}")));
     }
     // Validate the ref name via gix (rejects path-traversal / invalid names)
     // before writing the loose ref by hand.
     gix::refs::FullName::try_from(full_ref)
-        .map_err(|e| std::io::Error::other(format!("invalid branch name '{branch}': {e}")))?;
+        .map_err(|e| std::io::Error::other(format!("invalid branch name '{branch}': {e:#}")))?;
     // Start the new branch at `base` (the repo's default branch) when given and
     // resolvable, else the current HEAD — the pre-POLA behaviour, and the
     // fallback when there's no resolvable default (origin-less / unborn repo).
@@ -476,7 +482,7 @@ fn resolve_or_create_branch(
         Some(id) => id.detach(),
         None => repo
             .head_id()
-            .map_err(|e| std::io::Error::other(format!("resolve HEAD: {e}")))?
+            .map_err(|e| std::io::Error::other(format!("resolve HEAD: {e:#}")))?
             .detach(),
     };
     // Write the loose ref directly (`<common_dir>/refs/heads/<branch>` = the
@@ -1597,20 +1603,40 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::default_trait_access,
+        reason = "gix::fs, the one path to SharedPermissions, is behind gix's unstable feature"
+    )]
     fn only_genuine_contention_is_retried() {
-        use gix::index::file::write::Error as WriteErr;
-        use gix::lock::acquire::Error as AcquireErr;
+        use gix::error::{ErrorExt, ResultExt, message};
         use std::io::{Error as IoErr, ErrorKind};
 
+        // What `index.write` returns when it can't take the lock at `index`.
+        let acquire = |index: &Path| {
+            gix::lock::File::acquire(
+                index,
+                gix::lock::acquire::Fail::Immediately,
+                None,
+                Default::default(),
+                None,
+            )
+            .or_raise(|| message("Could not acquire lock for index file"))
+            .map(drop)
+            .expect_err("the lock can't be taken")
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+
         // Someone holds index.lock — the case the backoff exists for.
-        let held = WriteErr::AcquireLock(AcquireErr::PermanentlyLocked {
-            resource_path: std::path::PathBuf::from("/somewhere/index"),
-            mode: gix::lock::acquire::Fail::Immediately,
-            attempts: 1,
-        });
+        std::fs::write(dir.path().join("index.lock"), b"").expect("plant the lock");
         assert!(
-            super::lock_contention_is_transient(&held),
+            super::lock_contention_is_transient(&acquire(&dir.path().join("index"))),
             "a held lock is the retryable case"
+        );
+
+        // Nobody holds the lock: its parent is missing, and waiting won't create it.
+        assert!(
+            !super::lock_contention_is_transient(&acquire(&dir.path().join("gone/index"))),
+            "a missing parent directory must fail fast"
         );
 
         // Momentary unavailability — a contender created the lock file just now.
@@ -1619,7 +1645,8 @@ mod tests {
             ErrorKind::WouldBlock,
             ErrorKind::Interrupted,
         ] {
-            let e = WriteErr::AcquireLock(AcquireErr::Io(IoErr::new(kind, "momentary")));
+            let e = IoErr::new(kind, "momentary")
+                .and_raise(message("Could not acquire lock for index file"));
             assert!(
                 super::lock_contention_is_transient(&e),
                 "{kind:?} describes momentary unavailability and should retry"
@@ -1634,7 +1661,8 @@ mod tests {
             ErrorKind::NotFound,
             ErrorKind::Other,
         ] {
-            let e = WriteErr::AcquireLock(AcquireErr::Io(IoErr::new(kind, "deterministic")));
+            let e = IoErr::new(kind, "deterministic")
+                .and_raise(message("Could not acquire lock for index file"));
             assert!(
                 !super::lock_contention_is_transient(&e),
                 "{kind:?} cannot be fixed by waiting and must fail fast"
@@ -1642,7 +1670,8 @@ mod tests {
         }
 
         // A failure that isn't about the lock at all is never contention.
-        let serialize = WriteErr::Io(IoErr::new(ErrorKind::BrokenPipe, "write out").into());
+        let serialize = IoErr::new(ErrorKind::BrokenPipe, "write out")
+            .and_raise(message("Could not write index"));
         assert!(
             !super::lock_contention_is_transient(&serialize),
             "a serialization failure is not lock contention"
@@ -1651,12 +1680,12 @@ mod tests {
 
     #[test]
     fn error_chain_names_the_cause_an_opaque_wrapper_hides() {
-        // `AcquireLock`'s own Display names neither the cause nor the path, so
-        // reporting it alone (what this code used to do) says only "could not
-        // acquire lock" no matter why. The chain has to carry the real cause.
-        let e = gix::index::file::write::Error::AcquireLock(gix::lock::acquire::Error::Io(
-            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied by fs"),
-        ));
+        use gix::error::{ErrorExt, message};
+        // The outer message names neither the cause nor the path, so reporting
+        // it alone says only "could not acquire lock" no matter why. The chain
+        // has to carry the real cause.
+        let e = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied by fs")
+            .and_raise(message("Could not acquire lock for index file"));
         let rendered = crate::git::error_chain(&e);
         assert!(
             rendered.contains("Could not acquire lock"),
