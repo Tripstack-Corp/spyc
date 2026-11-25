@@ -1,7 +1,8 @@
-//! Draws the status bar's powerline segments (pepper, `PROJECT_HOME`, session,
+//! Draws the status bar's powerline segments (pepper, session, `PROJECT_HOME`,
 //! path, git, agent and the column's state), cutting the path in the middle
 //! when the row is too short. While several projects are open, their chips
-//! (`ui::project_chips`) take the place of `PROJECT_HOME` and the session.
+//! (`ui::project_chips`) take the place of `PROJECT_HOME`. The session leads,
+//! as it holds the rest, and gives way first when the path would be squeezed.
 //! The pass that draws the bar marks where each segment lands
 //! (`ui::status_segments`), for a click to find.
 
@@ -18,10 +19,12 @@ use crate::ui::theme::Theme;
 pub struct StatusBar<'a> {
     /// Basename of `PROJECT_HOME` if set (e.g. `spyc`). Hidden when `None`.
     pub project_home: Option<&'a str>,
-    /// Session display name (e.g. `SAFFRON_CUMIN`). Hidden when `None`.
+    /// Session display name (e.g. `SAFFRON_CUMIN`), first after the logo.
+    /// Hidden when `None`, or when it would leave the path fewer than
+    /// [`PATH_FLOOR`] columns.
     pub session_name: Option<&'a str>,
     /// Every open project's chip while several are open, drawn in a third of
-    /// the bar in place of `project_home` and `session_name`. `None` with one.
+    /// the bar in place of `project_home`. `None` with one.
     pub projects: Option<&'a ProjectChips>,
     pub path: &'a str,
     /// Optional trailing state, e.g. `[picks:2 hidden:3]`.
@@ -150,6 +153,10 @@ const PL_SEP: &str = "\u{e0b0}";
 
 const ELLIPSIS: &str = "...";
 
+/// The columns the path keeps (or all it needs, when less) before the session
+/// segment gives way to it.
+const PATH_FLOOR: usize = 16;
+
 /// The status bar's mark for `unread` stderr lines, `⚠3` or `⚠99+`; `None`
 /// when there are none.
 pub fn stderr_notice(unread: u64) -> Option<String> {
@@ -218,18 +225,45 @@ fn push_spans(
     next_bg: Color,
 ) {
     let from = bar.width;
-    let bg = if segment == StatusSegment::Projects {
-        project_chips::SEGMENT_BG
-    } else {
-        bg
-    };
+    let bg = segment_bg(segment, bg);
     let end = spans.last().and_then(|s| s.style.bg).unwrap_or(bg);
     bar.push_chips(spans, Style::default().fg(fg).bg(bg));
     bar.push(Span::styled(PL_SEP, Style::default().fg(end).bg(next_bg)));
     bar.mark(segment, from);
 }
 
+/// The background of a segment of spans: the projects segment's own deeper
+/// brown, else `bg`.
+fn segment_bg(segment: StatusSegment, bg: Color) -> Color {
+    if segment == StatusSegment::Projects {
+        project_chips::SEGMENT_BG
+    } else {
+        bg
+    }
+}
+
+/// The background a segment of `spans` starts on, for the separator into it:
+/// its first span's own (the tab in view's, when it comes first), else the
+/// segment's.
+fn start_bg(segment: StatusSegment, spans: &ChipSpans, bg: Color) -> Color {
+    spans
+        .first()
+        .and_then(|s| s.style.bg)
+        .unwrap_or_else(|| segment_bg(segment, bg))
+}
+
 impl StatusBar<'_> {
+    /// The session's segment text, ` NAME `, unless with it the path would
+    /// get fewer than [`PATH_FLOOR`] columns of the `room` the other segments
+    /// leave, with the shortest suffix: where you are keeps the room first.
+    fn session_text(&self, room: usize) -> Option<String> {
+        let text = format!(" {} ", self.session_name?);
+        let suffix = self.suffix_short.unwrap_or(self.suffix);
+        let suffix_w = if suffix.is_empty() { 0 } else { dw(suffix) + 3 };
+        let path_need = (dw(self.path) + 2).min(PATH_FLOOR);
+        (room.saturating_sub(dw(&text) + 1 + suffix_w) >= path_need).then_some(text)
+    }
+
     /// The suffix to draw in `room` columns, given what a suffix costs there
     /// and what the uncut path needs: the full one, unless it would cut the path
     /// and a short form exists. Whether it is the short one, too.
@@ -355,10 +389,6 @@ impl StatusBar<'_> {
         let emoji_w = self.logo_width(); // space + 🌶️ (2 cols) + space, then the notice
 
         let project_spans = self.project_spans(avail);
-        let session_text = self
-            .session_name
-            .filter(|_| self.projects.is_none())
-            .map(|n| format!(" {n} "));
         let git_text = self.git_info.map(|g| format!(" \u{e0a0} {g} "));
         let agent_text = self.agent_info.map(|a| format!(" \u{f120} {a} ")); // 󰰠 terminal-shell-like glyph
 
@@ -366,9 +396,11 @@ impl StatusBar<'_> {
         let project_w = project_spans
             .as_ref()
             .map_or(0, |(_, s)| project_chips::width(s) + 1);
-        let session_w = width_of(&session_text);
         let git_w = width_of(&git_text);
         let agent_w = width_of(&agent_text);
+        let session_text =
+            self.session_text(avail.saturating_sub(emoji_w + project_w + git_w + agent_w + 1));
+        let session_w = width_of(&session_text);
         // A suffix segment is ` text ` plus its separator; the path's is ` path `.
         let (suffix, short) = self.fitting_suffix(
             avail.saturating_sub(emoji_w + project_w + session_w + git_w + agent_w + 1),
@@ -397,13 +429,15 @@ impl StatusBar<'_> {
         let mut bar = Bar::default();
         self.push_logo(&mut bar, term_bg);
 
-        if let Some((segment, project)) = project_spans {
-            let next_bg = session_text.as_ref().map_or(path_bg, |_| sess_bg);
-            push_spans(&mut bar, segment, project, proj_fg, proj_bg, next_bg);
-        }
         if let Some(ref text) = session_text {
+            let next_bg = project_spans.as_ref().map_or(path_bg, |(segment, spans)| {
+                start_bg(*segment, spans, proj_bg)
+            });
             let session = StatusSegment::Session;
-            push_segment(&mut bar, session, text, sess_fg, sess_bg, path_bg);
+            push_segment(&mut bar, session, text, sess_fg, sess_bg, next_bg);
+        }
+        if let Some((segment, project)) = project_spans {
+            push_spans(&mut bar, segment, project, proj_fg, proj_bg, path_bg);
         }
 
         // Path (always present).
@@ -484,8 +518,14 @@ impl StatusBar<'_> {
             bar.push(Span::raw(" "));
         }
         if let Some(chips) = self.projects {
+            if let Some(session) = self.session_name {
+                let from = bar.width;
+                bar.push(Span::styled(session.to_string(), bold));
+                bar.mark(StatusSegment::Session, from);
+                bar.push(Span::styled(" ", bold));
+            }
             let from = bar.width;
-            let most = avail.saturating_sub(2);
+            let most = avail.saturating_sub(2 + bar.width);
             bar.push_chips(
                 chips.spans(chip_room(avail), most, self.theme),
                 Style::default(),
@@ -525,12 +565,12 @@ impl StatusBar<'_> {
         bar.finish()
     }
 
-    /// Mono's `spyc SAFFRON_CUMIN: `: the project and the session, each a
+    /// Mono's `SAFFRON_CUMIN spyc: `: the session and the project, each a
     /// segment of its own, and nothing when neither is set.
     fn push_plain_prefix(&self, bar: &mut Bar, bold: Style) {
         let parts = [
-            (self.project_home, StatusSegment::Project),
             (self.session_name, StatusSegment::Session),
+            (self.project_home, StatusSegment::Project),
         ];
         let mut any = false;
         for (text, segment) in parts {
@@ -904,10 +944,10 @@ mod tests {
         insta::assert_snapshot!(out);
     }
 
-    /// The chips take the project and session segments' place, on the
-    /// project segment's background, each glyph keeping its own colour.
+    /// The chips take the project segment's place, after the session's, on
+    /// the project segment's background, each glyph keeping its own colour.
     #[test]
-    fn the_chips_take_the_project_and_session_place() {
+    fn the_chips_take_the_project_place_after_the_session() {
         use crate::ui::project_chips::{BLOCKED_RED, ProjectAttention, ProjectChip};
         let theme = Theme::default();
         let chips = ProjectChips {
@@ -943,7 +983,8 @@ mod tests {
         let line = bar.build_line(Rect::new(0, 0, 120, 1));
         let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.contains(" web ■ \u{e0b0} spyc "), "{text}");
-        assert!(!text.contains("SAFFRON_CUMIN"), "{text}");
+        let session = text.find(" SAFFRON_CUMIN ").expect("the session is drawn");
+        assert!(session < text.find(" web ").unwrap_or(0), "{text}");
         let glyph = line
             .spans
             .iter()
@@ -979,6 +1020,136 @@ mod tests {
             (PL_SEP, tab),
             "and the segment ends from the tab's colour"
         );
+    }
+
+    /// A bar of `width` with the session, `chips` or one project `spyc`,
+    /// and `path`, as text, and its spans.
+    fn session_bar(chips: Option<&ProjectChips>, path: &str, width: u16) -> Line<'static> {
+        let theme = Theme::default();
+        StatusBar {
+            project_home: Some("spyc"),
+            session_name: Some("SAFFRON_CUMIN"),
+            projects: chips,
+            path,
+            suffix: "[picks:1]",
+            suffix_short: Some("[p:1]"),
+            git_info: Some("main*"),
+            agent_info: Some("claude:76422c62"),
+            theme: &theme,
+            plain_logo: true,
+            stderr_notice: None,
+            cooking: None,
+            teach_menu: false,
+        }
+        .build_line(Rect::new(0, 0, width, 1))
+    }
+
+    fn two_chips(active_first: bool) -> ProjectChips {
+        use crate::ui::project_chips::ProjectChip;
+        ProjectChips {
+            chips: vec![
+                ProjectChip {
+                    label: "web".into(),
+                    attention: None,
+                    active: active_first,
+                },
+                ProjectChip {
+                    label: "spyc".into(),
+                    attention: None,
+                    active: !active_first,
+                },
+            ],
+            pulse: Color::Red,
+        }
+    }
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// The session leads the bar, before the project, with one project open
+    /// or several.
+    #[test]
+    fn the_session_leads_the_projects() {
+        let chips = two_chips(false);
+        for (chips, project) in [(None, " spyc "), (Some(&chips), " web ")] {
+            let text = line_text(&session_bar(chips, PATH, 160));
+            let session = text.find("SAFFRON_CUMIN").expect("the session is drawn");
+            let project = text.find(project).expect("the project is drawn");
+            assert!(session < project, "{text}");
+            assert!(text[..session].trim().chars().count() <= 2, "{text}");
+        }
+    }
+
+    /// The separator out of the session runs into the colour the projects
+    /// start on: the tab's, when the project in view comes first.
+    #[test]
+    fn the_session_runs_into_the_first_chips_colour() {
+        let theme = Theme::default();
+        for (active_first, start) in [(true, theme.cursor_bg), (false, project_chips::SEGMENT_BG)] {
+            let chips = two_chips(active_first);
+            let line = session_bar(Some(&chips), PATH, 160);
+            let at = line
+                .spans
+                .iter()
+                .position(|s| s.content.contains("SAFFRON_CUMIN"))
+                .expect("the session");
+            let sep = &line.spans[at + 1];
+            assert_eq!(
+                (sep.content.as_ref(), sep.style.fg, sep.style.bg),
+                (PL_SEP, Some(theme.status_user), Some(start)),
+                "active_first={active_first}"
+            );
+        }
+    }
+
+    /// In a narrow bar the session gives way before the path is squeezed
+    /// under [`PATH_FLOOR`] columns; in a wide one both are whole.
+    #[test]
+    fn the_session_gives_way_to_the_path() {
+        let path = "/home/someone/src/a/long/path/to/somewhere";
+        let (mut shown, mut hidden) = (false, false);
+        for width in 40u16..=160 {
+            let text = line_text(&session_bar(None, path, width));
+            if !text.contains("SAFFRON_CUMIN") {
+                hidden = true;
+                continue;
+            }
+            shown = true;
+            let drawn = text
+                .split('\u{e0b0}')
+                .find(|s| s.trim().starts_with('/'))
+                .map_or(0, |s| dw(s.trim()));
+            assert!(drawn >= PATH_FLOOR - 2, "width={width}: {text}");
+        }
+        assert!(shown && hidden, "shown={shown} hidden={hidden}");
+    }
+
+    /// Mono draws the session first too: `SAFFRON_CUMIN web | spyc: path`.
+    #[test]
+    fn mono_draws_the_session_before_the_chips() {
+        let theme = Theme {
+            mono: true,
+            ..Theme::default()
+        };
+        let chips = two_chips(false);
+        let bar = StatusBar {
+            project_home: Some("spyc"),
+            session_name: Some("SAFFRON_CUMIN"),
+            projects: Some(&chips),
+            path: PATH,
+            suffix: "",
+            suffix_short: None,
+            git_info: None,
+            agent_info: None,
+            theme: &theme,
+            plain_logo: true,
+            stderr_notice: None,
+            cooking: None,
+            teach_menu: false,
+        };
+        let text = line_text(&bar.build_line(Rect::new(0, 0, 120, 1)));
+        assert!(text.starts_with("SAFFRON_CUMIN web"), "{text}");
     }
 
     /// However narrow the bar, the narrowest step's `■` and the segment's end

@@ -192,18 +192,22 @@ fn several_projects_show_in_the_bar_each_with_its_glyph() {
     });
 }
 
-/// The session name leaves the bar while several projects are open, giving
-/// the chips its room; the title still names it.
+/// While several projects are open the session name leads the bar, before
+/// the chips of the projects it holds; the title names it too.
 #[test]
-fn the_session_name_leaves_the_bar_while_several_are_open() {
+fn the_session_name_leads_the_chips_while_several_are_open() {
     with_four(|t| {
         for mono in [false, true] {
             t.app.view.theme.mono = mono;
             let text = bar(&mut t.app, 160);
-            assert!(!text.contains(SESSION), "mono={mono}: {text}");
             let parting = if mono { "|" } else { "\u{e0b0}" };
             let chips = format!("xproj   {parting} yproj");
-            assert!(text.contains(&chips), "mono={mono}: {text}");
+            let session = text.find(SESSION);
+            let at = text.find(&chips);
+            assert!(
+                session.zip(at).is_some_and(|(s, c)| s < c),
+                "mono={mono}: {text}"
+            );
         }
         assert!(title(&mut t.app).ends_with(SESSION));
     });

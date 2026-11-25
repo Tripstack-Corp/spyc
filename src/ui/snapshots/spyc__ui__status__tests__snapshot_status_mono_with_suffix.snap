@@ -2,4 +2,4 @@
 source: src/ui/status.rs
 expression: out
 ---
-spyc SAFFRON_CUMIN: /home/user/src  [picks:2 m1:on]
+SAFFRON_CUMIN spyc: /home/user/src  [picks:2 m1:on]
