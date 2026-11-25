@@ -1,11 +1,12 @@
 //! `^d` and `:detach` (S4): the terminal goes, and spyc stays. spyc in its
 //! own jar (`pane::jar::session`) writes its terminal's reset and has the jar
 //! end the client (`settle_detach`). A plain spyc hands itself over first: it
-//! leaves the loop, saves the session as no running spyc's, starts the
-//! session's own jar holding a spyc for the first terminal to attach, ends each
-//! jar's connection as a crash would, and becomes `spyc attach` for that jar
-//! (`hand_over`, from `lib.rs`). The spyc the jar starts restores the session
-//! by its name and takes the jars back (`restore_own_session`).
+//! leaves the loop, saves the session as no running spyc's, ends each jar's
+//! connection as a crash would, starts the session's own jar with a spyc
+//! running there before any terminal attaches, and ends, naming the session
+//! `spyc attach` takes (`hand_over`, from `lib.rs`). The spyc the jar starts
+//! restores the session by its name and takes the jars back
+//! (`restore_own_session`).
 //!
 //! `:upgrade` is the same handover to a newly installed spyc. In a plain spyc
 //! it is `^d`'s, whose jar runs the binary now installed. In spyc's own jar
@@ -176,10 +177,10 @@ impl App {
     }
 
     /// Hand the session over, once the loop has ended and the terminal is
-    /// restored: save it, start its jar, leave every jar running, and become
-    /// `spyc attach` for it. Returns only when that fails, saying what runs on.
+    /// restored: save it, leave every jar running, start the session's own jar
+    /// with its spyc running there with no terminal, and end, the terminal
+    /// freed as any detach frees it. Says what runs on when that fails.
     pub fn hand_over(&mut self, handover: &Handover) -> anyhow::Result<()> {
-        use std::os::unix::process::CommandExt;
         self.close_event_log();
         let name = &handover.name;
         if handover.in_place {
@@ -189,23 +190,14 @@ impl App {
         let exe = crate::paths::installed_spyc()?;
         let cwd = std::env::current_dir().context("spyc's directory")?;
         let size = crossterm::terminal::size().map_or((24, 80), |(cols, rows)| (rows, cols));
-        let started = crate::pane::jar::session::start(
-            name,
-            vec![exe.display().to_string()],
-            &cwd,
-            size,
-            crate::pane::jar::session::Begin::OnAttach,
-        );
+        // Released first: the spyc the jar starts takes the jars back at once.
         self.release_jars();
-        started.with_context(|| {
-            format!("{name}'s tabs run on in their jars: `spyc -r` takes them back")
-        })?;
-        let err = std::process::Command::new(&exe)
-            // `--force`: this terminal shows this spyc already, so nothing nests,
-            // though a spyc started in another's pane has that pane's env.
-            .args(["attach", "--force", name])
-            .exec();
-        Err(err).with_context(|| format!("become `spyc attach {name}`, which you can run"))
+        crate::pane::jar::session::start(name, vec![exe.display().to_string()], &cwd, size)
+            .with_context(|| {
+                format!("{name}'s tabs run on in their jars: `spyc -r` takes them back")
+            })?;
+        println!("[detached from {name}: `spyc attach {name}` brings it back]");
+        Ok(())
     }
 
     /// An upgrade in spyc's own jar: save, leave the jars running, and `exec`

@@ -41,7 +41,6 @@ use super::landing::spawn_worker;
 use super::message::Wake;
 use super::state::ProjectId;
 use super::{App, Effect};
-use crate::pane::jar::session::Begin;
 use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
 use crate::state::scope_registry::ScopeClaim;
 use crate::state::sessions::{Held, MANIFEST_VERSION, Manifest, SavedLive};
@@ -253,10 +252,9 @@ impl App {
             results,
             move || {
                 let argv = vec![exe.display().to_string()];
-                let started =
-                    crate::pane::jar::session::start(&named, argv, &cwd, size, Begin::Now)
-                        .map(drop)
-                        .map_err(|e| format!("{e:#}"));
+                let started = crate::pane::jar::session::start(&named, argv, &cwd, size)
+                    .map(drop)
+                    .map_err(|e| format!("{e:#}"));
                 MovedStart {
                     label: for_work,
                     name: named,

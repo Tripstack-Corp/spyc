@@ -265,7 +265,8 @@ uses that login's agent, though the program started under another. Notifications
 (`yf`, `yd`, `yp`) go to the terminal attached now, as `[notify] desktop_via` and `[clipboard] via`
 route them: through it over SSH, and with none attached, to this machine's notifier.
 
-The first `^d` moves spyc into a jar of its own. Your tabs come with it, their programs
+The first `^d` moves spyc into a jar of its own and frees your terminal like any other,
+printing the name `spyc attach` takes. Your tabs come with it, their programs
 untouched, and each column's cursor, picks and filter come back, but what `spyc -r` doesn't keep
 (open pagers, a `/` search) starts afresh.
 After that, detaching and attaching don't change anything in spyc. Every tab must run in a jar

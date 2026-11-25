@@ -687,10 +687,40 @@ fn session_jar(dirs: &Dirs) -> Option<(String, PathBuf)> {
         .map(|p| (p.file_stem().unwrap().to_string_lossy().into_owned(), p))
 }
 
-/// S4: `^d` in a plain spyc hands it over to a spyc in its session's own jar,
-/// and the terminal shows the same session: the same tab, its program never
-/// restarted. A second `^d` leaves that spyc running with no terminal, and
-/// `spyc attach` from another brings it back. `:q` quits it, ending its tabs.
+/// `^d` in a plain spyc: the terminal goes, told how to come back, and the
+/// session's spyc runs on in its own jar. The session's name and socket, and
+/// that spyc's pid.
+fn detach_plain(first: &mut Spyc, dirs: &Dirs, left: &mut Leftovers) -> (String, PathBuf, String) {
+    first.type_keys(b"\x04");
+    eventually("the terminal's spyc ends", || first.exited());
+    let mut session = None;
+    eventually("a session jar", || {
+        session = session_jar(dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let shown = String::from_utf8_lossy(&first.seen.lock().unwrap()).into_owned();
+    assert!(
+        shown.contains(&format!("spyc attach {name}")),
+        "the terminal wasn't told how to come back: {shown:?}"
+    );
+    let mut jar_spyc = None;
+    eventually("the session's spyc runs", || {
+        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        jar_spyc.is_some()
+    });
+    let jar_spyc = jar_spyc.unwrap();
+    left.0.push(jar_spyc.parse().unwrap());
+    (name, socket, jar_spyc)
+}
+
+/// S4: `^d` in a plain spyc hands it over to a spyc in its session's own jar
+/// and frees the terminal, as any `^d` does: the jar's spyc runs on with no
+/// terminal, holding the same tab, its program never restarted, and `spyc
+/// attach` from another terminal brings it back. `:q` quits it, ending its tabs.
 #[test]
 fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
     let dirs = dirs();
@@ -717,48 +747,25 @@ fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
         left.0.push(jar);
     }
 
-    // The handover: the same terminal, now a client of the session's jar.
-    let screens = first.screens();
-    first.type_keys(b"\x04");
-    let mut session = None;
-    first.eventually("a session jar", || {
-        session = session_jar(&dirs);
-        session.is_some()
-    });
-    let (name, socket) = session.unwrap();
-    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
-        left.0.push(jar);
-    }
-    first.eventually("the session drawn again, from its jar", || {
-        first.screens() > screens && first.since_last_screen().contains(&name)
-    });
-    let jar_spyc = described(&socket, "program_pid").unwrap();
-    left.0.push(jar_spyc.parse().unwrap());
-    first.eventually("the jar's spyc owns the tab's jar", || {
+    // The handover: the terminal goes, reset, and spyc runs on in the
+    // session's own jar with no terminal, holding the tab's jar.
+    let (name, socket, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
+    let shown = String::from_utf8_lossy(&first.seen.lock().unwrap()).into_owned();
+    let last = shown.rfind("\x1b[?1049h").unwrap();
+    assert!(
+        shown[last..].contains("\x1b[?1049l"),
+        "spyc didn't reset the terminal it left: {:?}",
+        &shown[last..]
+    );
+    eventually("the session's spyc owns the tab's jar", || {
         described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
     });
-    first.eventually("the tab's output shows again", || {
-        first.since_last_screen().contains("ready-mark")
-    });
-    assert!(!first.exited(), "the terminal's spyc became `spyc attach`");
     let now: i32 = std::fs::read_to_string(&dirs.pidfile)
         .unwrap()
         .trim()
         .parse()
         .unwrap();
     assert_eq!(now, agent, "the tab's program was started again");
-
-    // A second `^d`: the terminal goes, reset, and spyc runs on.
-    first.type_keys(b"\x04");
-    eventually("the client leaves", || first.exited());
-    let shown = String::from_utf8_lossy(&first.seen.lock().unwrap()).into_owned();
-    let last = shown.rfind("\x1b[?1049h").unwrap();
-    // The title's restore is spyc's own reset; the client's fixed one has none.
-    assert!(
-        shown[last..].contains("\x1b[23;0t") && shown[last..].contains("\x1b[?1049l"),
-        "spyc didn't reset the terminal it left: {:?}",
-        &shown[last..]
-    );
     assert_eq!(
         described(&socket, "program_pid").as_deref(),
         Some(jar_spyc.as_str())
@@ -1176,33 +1183,11 @@ fn a_tabs_ssh_agent_follows_the_terminal_that_attaches() {
     });
     let tab_socket = tab_socket.unwrap();
 
-    // `^d` into the session's own jar, then `^d` again: the terminal goes.
-    let screens = first.screens();
-    first.type_keys(b"\x04");
-    let mut session = None;
-    first.eventually("a session jar", || {
-        session = session_jar(&dirs);
-        session.is_some()
-    });
-    let (name, socket) = session.unwrap();
-    // A new screen, drawn from the jar: the one before `^d` showed both too.
-    first.eventually("the session drawn again, from its jar", || {
-        let shown = first.since_last_screen();
-        first.screens() > screens && shown.contains(&name) && shown.contains("ready-mark")
-    });
-    // The jar reports 0 while it holds its program for the first owner.
-    let mut jar_spyc = None;
-    first.eventually("the session's spyc runs", || {
-        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
-        jar_spyc.is_some()
-    });
-    let jar_spyc = jar_spyc.unwrap();
-    left.0.push(jar_spyc.parse().unwrap());
-    first.eventually("the session's spyc owns the tab's jar", || {
+    // `^d`: the terminal goes, and the session runs on in its own jar.
+    let (_, _, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
+    eventually("the session's spyc owns the tab's jar", || {
         described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
     });
-    first.type_keys(b"\x04");
-    eventually("the terminal leaves", || first.exited());
 
     // From another login, with another agent.
     let back = Spyc::start_env(&dirs, &["attach"], &[("SSH_AUTH_SOCK", b.as_os_str())]);
@@ -1239,29 +1224,8 @@ fn a_session_attached_over_ssh_copies_through_the_terminal() {
     left.0.push(noted(&dirs.pidfile)[0]);
     first.eventually("the tab's output shows", || first.shows("ready-mark"));
 
-    // `^d` into the session's own jar, then `^d` again: the terminal goes.
-    let screens = first.screens();
-    first.type_keys(b"\x04");
-    let mut session = None;
-    first.eventually("a session jar", || {
-        session = session_jar(&dirs);
-        session.is_some()
-    });
-    let (name, socket) = session.unwrap();
-    // A new screen, drawn from the jar: the one before `^d` showed both too.
-    first.eventually("the session drawn again, from its jar", || {
-        let shown = first.since_last_screen();
-        first.screens() > screens && shown.contains(&name) && shown.contains("ready-mark")
-    });
-    // The jar reports 0 while it holds its program for the first owner.
-    let mut jar_spyc = None;
-    first.eventually("the session's spyc runs", || {
-        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
-        jar_spyc.is_some()
-    });
-    left.0.push(jar_spyc.unwrap().parse().unwrap());
-    first.type_keys(b"\x04");
-    eventually("the terminal leaves", || first.exited());
+    // `^d`: the terminal goes, and the session runs on in its own jar.
+    detach_plain(&mut first, &dirs, &mut left);
 
     let ssh = std::ffi::OsStr::new("192.0.2.1 50000 192.0.2.2 22");
     let back = Spyc::start_env(&dirs, &["attach"], &[("SSH_CONNECTION", ssh)]);
@@ -1355,25 +1319,17 @@ fn upgrade_in_a_session_jar_runs_the_new_spyc_with_the_same_tabs() {
         left.0.push(jar);
     }
 
-    // Into the session's jar.
-    let screens = first.screens();
-    first.type_keys(b"\x04");
-    let mut session = None;
-    first.eventually("a session jar", || {
-        session = session_jar(&dirs);
-        session.is_some()
-    });
-    let (name, socket) = session.unwrap();
-    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
-        left.0.push(jar);
-    }
-    first.eventually("the session drawn again, from its jar", || {
-        first.screens() > screens && first.since_last_screen().contains(&name)
-    });
-    let jar_spyc = described(&socket, "program_pid").unwrap();
-    left.0.push(jar_spyc.parse().unwrap());
-    first.eventually("the jar's spyc owns the tab's jar", || {
+    // Into the session's jar, and attached again.
+    let mut first = first;
+    let (name, socket, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
+    eventually("the session's spyc owns the tab's jar", || {
         described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    let first = Spyc::start_from(&spyc, &dirs, &["attach", &name]);
+    left.0.push(first.pid());
+    first.eventually("the session drawn", || {
+        first.since_last_screen().contains(&name)
+            && first.since_last_screen().contains("ready-mark")
     });
 
     // Nothing new installed: nothing happens.
@@ -1453,25 +1409,8 @@ fn spyc_attach_from_a_newer_install_offers_the_upgrade() {
     left.0.push(agent);
     first.eventually("the tab's output shows", || first.shows("ready-mark"));
 
-    // Into the session's jar, then detached.
-    let screens = first.screens();
-    first.type_keys(b"\x04");
-    let mut session = None;
-    first.eventually("a session jar", || {
-        session = session_jar(&dirs);
-        session.is_some()
-    });
-    let (name, socket) = session.unwrap();
-    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
-        left.0.push(jar);
-    }
-    first.eventually("the session drawn again, from its jar", || {
-        first.screens() > screens && first.since_last_screen().contains(&name)
-    });
-    let jar_spyc = described(&socket, "program_pid").unwrap();
-    left.0.push(jar_spyc.parse().unwrap());
-    first.type_keys(b"\x04");
-    eventually("the client leaves", || first.exited());
+    // Detached into the session's own jar.
+    let (name, socket, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
 
     // Nothing new installed: it attaches without asking.
     let mut plain = Spyc::start_from(&spyc, &dirs, &["attach"]);
@@ -1559,27 +1498,11 @@ fn spyc_shutdown_ends_a_detached_session_and_its_tabs() {
         .unwrap();
     left.0.push(agent);
     first.eventually("the tab's output shows", || first.shows("ready-mark"));
-    let screens = first.screens();
-    first.type_keys(b"\x04");
-    let mut session = None;
-    first.eventually("a session jar", || {
-        session = session_jar(&dirs);
-        session.is_some()
-    });
-    let (name, socket) = session.unwrap();
-    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
-        left.0.push(jar);
-    }
-    first.eventually("the session drawn again, from its jar", || {
-        first.screens() > screens && first.since_last_screen().contains(&name)
-    });
-    let jar_spyc: i32 = described(&socket, "program_pid").unwrap().parse().unwrap();
-    left.0.push(jar_spyc);
-    first.eventually("the jar's spyc owns the tab's jar", || {
+    let (name, socket, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
+    let jar_spyc: i32 = jar_spyc.parse().unwrap();
+    eventually("the jar's spyc owns the tab's jar", || {
         described(&tab_jar(&dirs), "owner_pid") == Some(jar_spyc.to_string())
     });
-    first.type_keys(b"\x04");
-    eventually("the client leaves", || first.exited());
 
     let shutdown = |args: &[&str], answer: &str| {
         let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
@@ -1845,23 +1768,12 @@ fn the_event_log_follows_a_session_through_a_handover_and_a_quit() {
     });
     left.0.extend(noted(&dirs.pidfile));
     first.eventually("the tab's output shows", || first.shows("ready-mark"));
-    let screens = first.screens();
-    first.type_keys(b"\x04");
-    let mut session = None;
-    first.eventually("a session jar", || {
-        session = session_jar(&dirs);
-        session.is_some()
+    let (name, _, _) = detach_plain(&mut first, &dirs, &mut left);
+    let mut first = Spyc::start(&dirs, &["attach", &name]);
+    left.0.push(first.pid());
+    first.eventually("the session drawn", || {
+        first.since_last_screen().contains(&name)
     });
-    let (name, socket) = session.unwrap();
-    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
-        left.0.push(jar);
-    }
-    first.eventually("the session drawn again, from its jar", || {
-        first.screens() > screens && first.since_last_screen().contains(&name)
-    });
-    if let Some(spyc) = described(&socket, "program_pid").and_then(|p| p.parse().ok()) {
-        left.0.push(spyc);
-    }
     first.type_keys(b":q\r");
     first.eventually("spyc asks whether to quit", || {
         squeezed(&first.since_last_screen()).contains("quitanyway?[y/N]")
