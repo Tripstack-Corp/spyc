@@ -206,10 +206,7 @@ pub fn diff_cached(repo_root: &Path, paths: &[String]) -> Option<DiffModel> {
         &index,
         None,
         gix::status::tree_index::TrackRenames::Given(gix::diff::Rewrites::default()),
-        |change,
-         _tree_index,
-         _worktree_index|
-         -> Result<gix::diff::index::Action, std::convert::Infallible> {
+        |change, _tree_index, _worktree_index| -> gix::error::Result<gix::diff::index::Action> {
             if let Some(oc) = own_index_change(&change) {
                 owned.push(oc);
             }

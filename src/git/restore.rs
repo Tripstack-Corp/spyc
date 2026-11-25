@@ -19,7 +19,7 @@ use std::path::Path;
 /// fully-staged deletion). Refuses if the file already exists. Returns the
 /// number of bytes written on success, or a human-facing error string.
 pub fn restore_to_worktree(repo_root: &Path, rela_path: &str) -> Result<usize, String> {
-    let repo = gix::open(repo_root).map_err(|e| format!("open repo: {e}"))?;
+    let repo = gix::open(repo_root).map_err(|e| format!("open repo: {e:#}"))?;
 
     let dest = repo_root.join(rela_path);
     if dest.exists() {
@@ -33,7 +33,7 @@ pub fn restore_to_worktree(repo_root: &Path, rela_path: &str) -> Result<usize, S
 
     let data = repo
         .find_object(oid)
-        .map_err(|e| format!("read blob: {e}"))?
+        .map_err(|e| format!("read blob: {e:#}"))?
         .detach()
         .data;
 

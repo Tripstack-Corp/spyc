@@ -141,7 +141,15 @@ pub fn tracked_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
         Some(index) => index
             .entries()
             .iter()
-            .map(|e| root.join(gix::path::from_bstr(e.path(&index))))
+            .map(|e| {
+                let path = e.path(&index);
+                root.join(gix::path::from_bstr(path).unwrap_or_else(|err| {
+                    panic!(
+                        "{}: index path {path} isn't a path here: {err:#}",
+                        root.display()
+                    )
+                }))
+            })
             .filter(|p| p.is_file())
             .collect(),
         None => walk(),

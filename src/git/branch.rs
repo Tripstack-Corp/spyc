@@ -146,8 +146,8 @@ pub fn fork_point(repo: &gix::Repository, base: Option<&str>) -> anyhow::Result<
     let mut forks = Vec::new();
     for tip in base_tips(repo, &base)? {
         match repo.merge_base(head, tip) {
-            Ok(fork) => forks.push(fork.detach()),
-            Err(gix::repository::merge_base::Error::NotFound { .. }) => {}
+            Ok(Some(fork)) => forks.push(fork.detach()),
+            Ok(None) => {}
             Err(e) => {
                 return Err(anyhow!(
                     "finding where HEAD left `{base}`: {}",
@@ -188,9 +188,12 @@ fn base_tips(repo: &gix::Repository, base: &str) -> anyhow::Result<Vec<gix::Obje
 /// The later of two commits: the one the other is an ancestor of, else the
 /// more recently committed.
 fn later(repo: &gix::Repository, a: gix::ObjectId, b: gix::ObjectId) -> gix::ObjectId {
-    match repo.merge_base(a, b).map(gix::Id::detach) {
-        Ok(shared) if shared == a => b,
-        Ok(shared) if shared == b => a,
+    match repo
+        .merge_base(a, b)
+        .map(|shared| shared.map(gix::Id::detach))
+    {
+        Ok(Some(shared)) if shared == a => b,
+        Ok(Some(shared)) if shared == b => a,
         _ => {
             let time = |id| {
                 repo.find_commit(id)
