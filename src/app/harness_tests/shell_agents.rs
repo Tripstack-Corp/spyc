@@ -104,10 +104,12 @@ pub(super) fn fake_agents(dir: &std::path::Path) -> std::path::PathBuf {
 /// draws: a tab looks at its foreground only after output, so a fake that
 /// never drew was seen only when the look its line's echo scheduled came
 /// after it started. Bash runs the loop itself rather than replacing itself
-/// with `sleep`, which would rename the process.
+/// with `sleep`, which would rename the process. It traps `^C`: untrapped,
+/// bash takes a `sleep` that ended normally as the `^C` came to have
+/// handled it and runs on, which a loaded machine makes likely.
 pub(super) fn run_fake_agent(path: &std::path::Path) -> String {
     format!(
-        "{} -c 'for ((i = 0; i < 60; i++)); do printf .; sleep 1; done'\r",
+        "{} -c 'trap \"exit 130\" INT; for ((i = 0; i < 60; i++)); do printf .; sleep 1; done'\r",
         path.display()
     )
 }
@@ -130,7 +132,23 @@ fn type_until(app: &mut App, text: &str, what: &str, done: impl Fn(&crate::pane:
         if done(&app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0].info) {
             return;
         }
-        assert!(std::time::Instant::now() < deadline, "never saw: {what}");
+        if std::time::Instant::now() >= deadline {
+            let now = std::time::Instant::now();
+            let entry = &app.runtime.project().pane_tabs.as_ref().unwrap().tabs()[0];
+            let info = &entry.info;
+            panic!(
+                "never saw: {what}\nrunning={:?} alive={:?}\nshell={:?} fg={:?} members={:?}\ndue_in={:?} checked_ago={:?} output_ago={:?}\nscreen:\n{}",
+                info.running,
+                info.running.map(|r| crate::proc_group::alive(r.pid)),
+                entry.pane.process_id(),
+                entry.pane.foreground_pgrp(),
+                entry.pane.foreground_pgrp().map(crate::proc_group::members),
+                info.fg_check_due.map(|d| d.saturating_duration_since(now)),
+                info.fg_checked_at.map(|d| now.duration_since(d)),
+                info.last_output_at.map(|d| now.duration_since(d)),
+                entry.pane.visible_lines().join("\n"),
+            );
+        }
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
 }
