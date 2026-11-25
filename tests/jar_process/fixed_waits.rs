@@ -4,15 +4,17 @@
 //! against a number of seconds: a loaded machine slows everything, and a
 //! fast one hides a jar that waits too long. Three shapes are caught:
 //!
-//! - **sleep, then assert**: a `sleep` (`thread::sleep(` or a bare
-//!   `sleep(Duration`) followed by an assertion (`assert!`, `assert_eq!`,
-//!   `assert_ne!`, their `debug_` forms, or `panic!`) anywhere later in the
-//!   same block, before the block closes or another sleep starts. An
-//!   assertion that is itself a wait's bound (`Instant::now() < deadline`)
-//!   doesn't count;
+//! - **sleep, then assert**: a `sleep` (`thread::sleep(`, `park_timeout(` or
+//!   a bare `sleep(Duration`) followed by an assertion (`assert!`,
+//!   `assert_eq!`, `assert_ne!`, their `debug_` forms, or `panic!`) anywhere
+//!   later in the same block, or after a bare `{ }` block it sits in, before
+//!   a loop's, an `if`'s or a closure's block closes or another sleep
+//!   starts. An assertion that is itself a wait's bound
+//!   (`Instant::now() < deadline`) doesn't count;
 //! - **a clock verdict**: an assertion, or an `if` whose block panics, that
 //!   compares an `elapsed()` time or a `Duration`, directly or through a
-//!   variable the same function bound to one (`let took = t.elapsed();`);
+//!   variable the same function bound to one (`let took = t.elapsed();`,
+//!   `Instant::now() - t`, `duration_since(`);
 //! - **a fixed window**: a loop `while Instant::now() < w` where `w` was set
 //!   to `Instant::now()` plus a literal duration, and nothing in the loop
 //!   leaves it early: a stretch of time whose end decides what was seen.
@@ -22,7 +24,11 @@
 //! `let` broken across lines, a condition in a helper); a fixed window
 //! that leaves early yet concludes from what it didn't see; `recv(d)`
 //! or `recv_timeout(d)` read as "nothing came"; a duration held in a struct
-//! field. Those need reading.
+//! field; a sleep followed by an assertion after a loop or an `if` block
+//! that holds the sleep (a polling loop looks the same); a clock passed
+//! through a second variable (`let a = t.elapsed(); let b = a;`); a wait
+//! made some other way (`Condvar::wait_timeout`, `recv_timeout` as a
+//! sleep, a busy loop on `Instant`). Those need reading.
 //!
 //! A site that can't be put on a state stays only by name, below, with why,
 //! one entry per site; an entry that no longer matches fails too.
@@ -354,7 +360,10 @@ fn function_at(lines: &[&str], at: usize) -> (usize, String) {
 }
 
 fn is_sleep(t: &str) -> bool {
-    t.contains("thread::sleep(") || t.starts_with("sleep(Duration") || t.contains(" sleep(Duration")
+    t.contains("thread::sleep(")
+        || t.contains("park_timeout(")
+        || t.starts_with("sleep(Duration")
+        || t.contains(" sleep(Duration")
 }
 
 fn is_assertion(t: &str) -> bool {
@@ -430,12 +439,27 @@ fn sites(src: &Source) -> (Vec<(String, Shape, String, usize)>, usize) {
         let (start, function) = function_at(&lines, i);
         if is_sleep(t) {
             sleeps += 1;
-            let depth = indent(line);
+            let mut depth = indent(line);
             for (j, next) in lines.iter().enumerate().skip(i + 1) {
                 if !code(next) {
                     continue;
                 }
-                if indent(next) < depth || is_sleep(next.trim()) {
+                if indent(next) < depth {
+                    // Out of a bare `{ }` block, the scan goes on in the
+                    // block around it; out of a loop, an `if` or a closure,
+                    // it stops.
+                    let closing = indent(next);
+                    let opener = lines[start..i]
+                        .iter()
+                        .rev()
+                        .find(|l| code(l) && indent(l) == closing && l.trim_end().ends_with('{'));
+                    if next.trim() == "}" && opener.is_some_and(|o| o.trim() == "{") {
+                        depth = closing;
+                        continue;
+                    }
+                    break;
+                }
+                if is_sleep(next.trim()) {
                     break;
                 }
                 if is_assertion(next.trim()) {
@@ -468,7 +492,10 @@ fn sites(src: &Source) -> (Vec<(String, Shape, String, usize)>, usize) {
                     let rest = l.strip_prefix("let ")?;
                     let rest = rest.strip_prefix("mut ").unwrap_or(rest);
                     let (name, value) = rest.split_once(" = ")?;
-                    let clock = (value.contains(".elapsed()") || value.contains("Duration::"))
+                    let clock = (value.contains(".elapsed()")
+                        || value.contains("Duration::")
+                        || value.contains("Instant::now() -")
+                        || value.contains("duration_since("))
                         && !value.contains("Instant::now() +");
                     clock.then(|| {
                         name.trim_end_matches(|c: char| c == ':' || c.is_whitespace())
