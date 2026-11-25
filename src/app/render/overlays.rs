@@ -48,7 +48,7 @@ const fn consent_frame(kind: &PromptKind) -> Option<(&'static str, u16, &'static
             " spyc — end their programs? ",
             90,
             &[
-                ("[y] ", "end them     ", KeyCode::Char('y')),
+                ("[Y] ", "shift-y ends them     ", KeyCode::Char('Y')),
                 ("[n] ", "no", KeyCode::Char('n')),
             ],
         ),

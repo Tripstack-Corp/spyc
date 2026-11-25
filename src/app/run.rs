@@ -475,12 +475,6 @@ impl App {
             // round-trip hangs/errs over SSH and races the input reader.
             crate::force_full_repaint(terminal)?;
         }
-        // Read before the frame is built: input the reader sent by then was
-        // typed before anything this frame shows was on the screen.
-        let inputs_before = self
-            .runtime
-            .inputs_read
-            .load(std::sync::atomic::Ordering::Acquire);
         let draw_start = std::time::Instant::now();
         let frame_area = terminal
             .draw(|frame| {
@@ -512,7 +506,13 @@ impl App {
         if sync_update {
             let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
         }
-        self.note_frame_drawn(inputs_before);
+        // Read once the frame is written: input the reader sent by then was
+        // typed before anything this frame shows was on the screen.
+        let inputs_seen = self
+            .runtime
+            .inputs_read
+            .load(std::sync::atomic::Ordering::Acquire);
+        self.note_frame_drawn(inputs_seen);
         if self.view.show_activity && !activity_only {
             self.view.activity.live.draws += 1;
             self.view.activity.live.bytes +=

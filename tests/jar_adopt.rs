@@ -2675,7 +2675,7 @@ fn spyc_r_after_a_kill_takes_a_running_capture_back() {
 }
 
 /// The orphan offer of the 3.0 review: discarding jars no spyc owns ends
-/// their programs, so `d` asks first, and only `y` ends them.
+/// their programs, so `d` asks first, and only `Y` (shift-y) ends them.
 #[test]
 fn discarding_a_jar_no_spyc_owns_asks_first() {
     let dirs = dirs();
@@ -2709,7 +2709,7 @@ fn discarding_a_jar_no_spyc_owns_asks_first() {
         squeezed(&second.since_last_screen()).contains("endtheirprograms?")
     });
     assert!(alive(program), "`d` alone ended the program");
-    second.type_keys(b"y");
+    second.type_keys(b"Y");
     eventually("the program ends", || !alive(program));
 }
 

@@ -4,15 +4,17 @@
 //! keeps (`jar::orphans`): what a crash left that no `spyc -r` took back.
 //! spyc names them in a pop-up (`PromptKind::OrphanJars`) and offers to
 //! restore them, each pane as a tab in the project it was in and each task or
-//! capture as a background task, or to discard them, ending their programs,
-//! which it asks about again (`PromptKind::OrphanJarsDiscard`): only `y` there
-//! ends them. Not now leaves them running, for `spyc --jars` to list.
+//! capture as a background task, or to discard them (`d`), ending their
+//! programs, which it asks about again (`PromptKind::OrphanJarsDiscard`): only
+//! `Y`, shift-y, there ends them. Not now leaves them running, for `spyc
+//! --jars` to list.
 //!
-//! Neither pop-up takes a key typed before it appeared: one is answered only
-//! by input the reader sent after the loop began the frame that first drew
-//! it (`note_frame_drawn`, against the counts `run` and `proc` keep). A
-//! user typing into what they took for their session would otherwise answer
-//! it.
+//! The pop-ups come up while the user may be typing into what they take for
+//! their session (D1 of the 3.0 review), so typing must not answer them. A
+//! pop-up takes only input the reader sent after the frame that first drew it
+//! was written (`note_frame_drawn`, against the counts `run` and `proc`
+//! keep), and ending programs takes a lowercase `d` followed by a capital
+//! `Y`, which no word typed at either case gives.
 
 use std::path::{Path, PathBuf};
 
@@ -158,17 +160,17 @@ impl App {
         self.state.mode = Mode::Prompting(Prompt::simple(kind, text));
     }
 
-    /// A frame reached the terminal, built once the reader had sent
-    /// `inputs_before`: a pop-up about jars no spyc owns drawn in it for the
+    /// A frame was written to the terminal, after which the reader had sent
+    /// `inputs_seen`: a pop-up about jars no spyc owns drawn in it for the
     /// first time is answered only by input the reader sent after that.
-    pub(super) const fn note_frame_drawn(&mut self, inputs_before: u64) {
+    pub(super) const fn note_frame_drawn(&mut self, inputs_seen: u64) {
         let up = matches!(
             &self.state.mode,
             Mode::Prompting(p)
                 if matches!(p.kind, PromptKind::OrphanJars | PromptKind::OrphanJarsDiscard)
         );
         if up && self.runtime.orphan_jars.shown_after.is_none() {
-            self.runtime.orphan_jars.shown_after = Some(inputs_before);
+            self.runtime.orphan_jars.shown_after = Some(inputs_seen);
         }
     }
 
@@ -181,8 +183,8 @@ impl App {
             .is_some_and(|sent| self.runtime.inputs_handled > sent)
     }
 
-    /// The answer: `r` restores them, `d` asks whether to end their
-    /// programs, `Esc` leaves them running, and any other key asks again. A
+    /// The answer: `r` restores them, `d` (lowercase: caps lock gives `D`)
+    /// asks whether to end their programs, `Esc` leaves them running, and any other key asks again. A
     /// key typed before the pop-up appeared answers nothing.
     pub(in crate::app) fn handle_orphan_jars_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         if !self.typed_after_the_ask() {
@@ -197,12 +199,12 @@ impl App {
                 self.state
                     .flash_info(format!("jars: taking back {n} no spyc owned"));
             }
-            KeyCode::Char('d' | 'D') => {
+            KeyCode::Char('d') => {
                 let found = &self.runtime.orphan_jars.found;
                 let names: Vec<String> = found.iter().map(described).collect();
                 let text = format!(
                     "End {} program(s) no spyc owns: {}? Their jars end with them, and what \
-                     they were doing is lost.",
+                     they were doing is lost. Y (shift-y) ends them; any other key doesn't.",
                     found.len(),
                     names.join(", ")
                 );
@@ -219,14 +221,14 @@ impl App {
         Vec::new()
     }
 
-    /// The answer to whether to end them: `y` ends their programs, and any
-    /// other key goes back to the offer. A key typed before it appeared
+    /// The answer to whether to end them: `Y`, shift-y, ends their programs,
+    /// and any other key goes back to the offer. A key typed before it appeared
     /// answers nothing.
     pub(in crate::app) fn handle_orphan_jars_discard_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         if !self.typed_after_the_ask() {
             return Vec::new();
         }
-        if !matches!(key.code, KeyCode::Char('y' | 'Y')) {
+        if key.code != KeyCode::Char('Y') {
             self.state.mode = Mode::Normal;
             self.offer_orphan_jars();
             return Vec::new();
