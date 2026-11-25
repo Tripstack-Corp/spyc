@@ -14,7 +14,8 @@ use crate::pane::pty_host::PtyHost;
 use crate::pane::{Pane, PaneTabs, TabEntry, TabInfo};
 use crate::ui::pager::PagerView;
 
-use super::{App, Effect, PendingCapture, SigOk, buffer_to_lines, eof_marker_line, kill_pg, state};
+use super::{App, Effect, PendingCapture, SigOk, buffer_to_lines, eof_marker_line, state};
+use spyc_jar::proto::JarSignal;
 
 /// Lifecycle state of a backgrounded shell capture.
 #[derive(Debug)]
@@ -282,17 +283,17 @@ impl App {
             self.state.flash_info(format!("task #{id} already paused"));
             return Vec::new();
         }
-        let Some(pid) = task.host.process_id() else {
+        if task.host.process_id().is_none() {
             self.state.flash_error(format!("task #{id}: no process id"));
             return Vec::new();
-        };
-        // SIGSTOP to the process group (negative pid → group; uncatchable,
-        // so the child can't refuse; the reader thread keeps blocking on
-        // read until SIGCONT). The signal, the `paused` toggle, and the
-        // flash all run in `run_effects` (the sole side-effect executor).
+        }
+        // SIGSTOP to the process group (uncatchable, so the child can't
+        // refuse; the reader thread keeps blocking on read until SIGCONT),
+        // through its jar when it runs in one. The signal, the `paused`
+        // toggle, and the flash all run in `run_effects` (the sole
+        // side-effect executor).
         vec![Effect::SignalGroup {
-            pid,
-            sig: rustix::process::Signal::STOP,
+            sig: JarSignal::Stop,
             on_ok: SigOk::Pause(id),
             on_err: format!("task #{id}: SIGSTOP failed"),
         }]
@@ -318,15 +319,15 @@ impl App {
         if !matches!(task.status, TaskStatus::Running) {
             return Err("process already stopped".to_string());
         }
-        let pid = task
-            .host
-            .process_id()
-            .ok_or_else(|| format!("task #{id}: no process id"))?;
-        // Negative pid → process group, same convention as
+        if task.host.process_id().is_none() {
+            return Err(format!("task #{id}: no process id"));
+        }
+        // The process group, through its jar when it runs in one, as
         // pause_task / resume_task. SIGINT lets the child clean up
         // (matches a real ^C); use ^\ in the live capture path for a
         // hard kill.
-        kill_pg(pid, rustix::process::Signal::INT)
+        task.host
+            .signal(JarSignal::Interrupt)
             .map(|()| format!("task #{id}: sent SIGINT"))
             .map_err(|_| format!("task #{id}: SIGINT failed"))
     }
@@ -351,15 +352,14 @@ impl App {
             self.state.flash_info(format!("task #{id} is not paused"));
             return Vec::new();
         }
-        let Some(pid) = task.host.process_id() else {
+        if task.host.process_id().is_none() {
             self.state.flash_error(format!("task #{id}: no process id"));
             return Vec::new();
-        };
+        }
         // SIGCONT to the process group; the signal, the `paused` toggle,
         // and the flash all run in `run_effects`.
         vec![Effect::SignalGroup {
-            pid,
-            sig: rustix::process::Signal::CONT,
+            sig: JarSignal::Continue,
             on_ok: SigOk::Resume(id),
             on_err: format!("task #{id}: SIGCONT failed"),
         }]
@@ -426,11 +426,9 @@ impl App {
 
         // Wake a paused task — it's user-facing now, no point
         // leaving SIGSTOP'd.
-        if task.paused
-            && let Some(pid) = task.host.process_id()
-        {
+        if task.paused {
             #[cfg(unix)]
-            let _ = kill_pg(pid, rustix::process::Signal::CONT);
+            let _ = task.host.signal(JarSignal::Continue);
         }
 
         // If the task viewer was open on this task, close it —
@@ -615,10 +613,8 @@ impl App {
         // user explicitly asked for it to be active again. Without
         // this, `:fg` on a paused task would re-attach the streaming
         // capture but the child would stay frozen.
-        if task.paused
-            && let Some(pid) = task.host.process_id()
-        {
-            let _ = kill_pg(pid, rustix::process::Signal::CONT);
+        if task.paused {
+            let _ = task.host.signal(JarSignal::Continue);
         }
 
         match task.status {

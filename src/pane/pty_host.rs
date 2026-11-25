@@ -593,22 +593,51 @@ impl PtyHost {
     /// program's.
     #[cfg(unix)]
     fn signal_group(&self, pid: u32, signal: JarSignal) {
-        use rustix::process::Signal;
         // SPYC-TRAP(jar-signals-through-the-jar): never `pid` for a jarred
         // program; after its exit the pid may be anyone's.
         if let Some(jar) = &self.jar {
             let _ = jar.send(signal);
             return;
         }
-        let sig = match signal {
-            JarSignal::Interrupt => Signal::INT,
-            JarSignal::Terminate => Signal::TERM,
-            JarSignal::Kill => Signal::KILL,
-            JarSignal::Stop => Signal::STOP,
-            JarSignal::Continue => Signal::CONT,
-            JarSignal::Hangup => Signal::HUP,
-        };
-        kill_group(pid, sig);
+        kill_group(pid, local_signal(signal));
+    }
+
+    /// Signal the program's process group, as `:pause`, `:resume` and a
+    /// task's `^C` do: through its jar when it runs in one.
+    #[cfg(unix)]
+    pub fn signal(&self, signal: JarSignal) -> anyhow::Result<()> {
+        if let Some(jar) = &self.jar {
+            return Ok(jar.send(signal)?);
+        }
+        let pid = self
+            .process_id()
+            .ok_or_else(|| anyhow::anyhow!("no process to signal"))?;
+        kill_group_checked(pid, local_signal(signal))
+    }
+
+    /// Signal the job in the PTY's foreground, as a capture's `^C` and `^\\`
+    /// do: locally that group (`tcgetpgrp`), else the program's. A jarred
+    /// program's jar is asked, and signals its program's group; when the jar
+    /// reports another job in the foreground, an interrupt also goes as the
+    /// key's byte, which the PTY turns into the signal for that job as a
+    /// real `^C` does. No number the jar reported is signalled.
+    #[cfg(unix)]
+    pub fn signal_foreground(&mut self, signal: JarSignal) -> anyhow::Result<()> {
+        if let Some(jar) = &self.jar {
+            jar.send(signal)?;
+            let other_job = self
+                .foreground_pgrp()
+                .is_some_and(|fg| Some(fg) != self.process_id());
+            if signal == JarSignal::Interrupt && other_job {
+                self.write_all(&[0x03])?;
+            }
+            return Ok(());
+        }
+        let pgrp = self
+            .foreground_pgrp()
+            .or_else(|| self.process_id())
+            .ok_or_else(|| anyhow::anyhow!("no process group to signal"))?;
+        kill_group_checked(pgrp, local_signal(signal))
     }
 
     /// `^z`: stop the program's job with `SIGSTOP`, or continue it. Locally
@@ -747,6 +776,32 @@ impl Drop for PtyHost {
 fn kill_group(pid: u32, sig: rustix::process::Signal) {
     if let Some(rpid) = rustix::process::Pid::from_raw(pid as i32) {
         let _ = rustix::process::kill_process_group(rpid, sig);
+    }
+}
+
+/// [`kill_group`], its failure returned: a user's `:pause` or `^C` says
+/// when the signal didn't go.
+#[cfg(unix)]
+fn kill_group_checked(pid: u32, sig: rustix::process::Signal) -> anyhow::Result<()> {
+    let rpid = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+        .ok_or_else(|| anyhow::anyhow!("no process group {pid}"))?;
+    rustix::process::kill_process_group(rpid, sig)
+        .map_err(|e| anyhow::anyhow!("signal process group {pid}: {e}"))
+}
+
+/// The OS signal a jar delivers for `signal`, for a program spyc runs itself.
+#[cfg(unix)]
+const fn local_signal(signal: JarSignal) -> rustix::process::Signal {
+    use rustix::process::Signal;
+    match signal {
+        JarSignal::Interrupt => Signal::INT,
+        JarSignal::Terminate => Signal::TERM,
+        JarSignal::Kill => Signal::KILL,
+        JarSignal::Stop => Signal::STOP,
+        JarSignal::Continue => Signal::CONT,
+        JarSignal::Hangup => Signal::HUP,
     }
 }
 

@@ -774,7 +774,7 @@ fn capture_ctrl_c_signals_the_group_not_the_byte() {
         let fx = app.handle_key(ctrl_c).unwrap();
         assert_eq!(
             fx.capture_signals(),
-            [rustix::process::Signal::INT],
+            [spyc_jar::proto::JarSignal::Interrupt],
             "^C must send the capture one SIGINT, got {fx:?}"
         );
         assert!(

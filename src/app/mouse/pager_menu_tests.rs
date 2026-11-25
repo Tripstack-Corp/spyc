@@ -215,7 +215,7 @@ fn a_click_on_interrupt_signals_the_capture() {
         assert!(
             fx.iter().any(|e| matches!(
                 e,
-                Effect::SignalCapture { sig, .. } if *sig == rustix::process::Signal::INT
+                Effect::SignalCapture { sig } if *sig == spyc_jar::proto::JarSignal::Interrupt
             )),
             "a SIGINT, as `^C` sends: {fx:?}"
         );
@@ -353,7 +353,7 @@ fn a_click_on_pause_pauses_the_task_and_its_menu_then_offers_continue() {
             fx.iter().any(|e| matches!(
                 e,
                 Effect::SignalGroup { sig, on_ok: SigOk::Pause(1), .. }
-                    if *sig == rustix::process::Signal::STOP
+                    if *sig == spyc_jar::proto::JarSignal::Stop
             )),
             "a SIGSTOP to task #1, as `S` sends: {fx:?}"
         );
@@ -370,7 +370,7 @@ fn a_click_on_pause_pauses_the_task_and_its_menu_then_offers_continue() {
             fx.iter().any(|e| matches!(
                 e,
                 Effect::SignalGroup { sig, on_ok: SigOk::Resume(1), .. }
-                    if *sig == rustix::process::Signal::CONT
+                    if *sig == spyc_jar::proto::JarSignal::Continue
             )),
             "a SIGCONT to task #1, as `C` sends: {fx:?}"
         );
@@ -644,7 +644,7 @@ fn pauses_task_one(fx: &[Effect]) -> bool {
         matches!(
             e,
             Effect::SignalGroup { sig, on_ok: SigOk::Pause(1), .. }
-                if *sig == rustix::process::Signal::STOP
+                if *sig == spyc_jar::proto::JarSignal::Stop
         )
     })
 }

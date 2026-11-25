@@ -242,8 +242,6 @@ use proc::{ForegroundExec, spawn_input_reader};
 pub use prompt::{Prompt, PromptKind};
 use scheduler::{Deadline, Scheduler, arm_resume_deadlines};
 use tasks::{BackgroundTasks, TASK_BUFFER_CAP, TaskStatus};
-#[cfg(unix)]
-use util::kill_pg;
 use util::{
     buffer_to_lines, eof_marker_line, format_elapsed_hms, format_uptime, path_basename_display,
     user_host_string,

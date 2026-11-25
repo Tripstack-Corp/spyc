@@ -39,7 +39,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | D3 (`take_over` re-reads before it signals) | E | `a_takeover_after_the_question_ends_the_client_attached_then` (`tests/session_jar.rs`); after the refuter's low `a_takeover_of_a_session_that_ended_meanwhile_says_it_ended` (`src/pane/jar/attach.rs`) | | refuter: holds, one new low; recheck pending | fixed on the branches `fix/attach-rereads-before-signal` and `fix/attach-session-gone` |
 | E1 (the control methods need the session's token) | F | | | | open |
 | E2, high since P3-9 (one ownership check on every path) | F | | | | open |
-| E3 = G5 (tasks and captures signal through the jar) | F | | | | open |
+| E3 = G5 (tasks and captures signal through the jar) | F | `app::harness_tests::jar_signals` (seven cases and the guard `no_number_is_signalled_outside_the_listed_sites`), on `test/task-signals-red` | | refuter pending | fixed on the branch `fix/task-signals` |
 | E4 (`SECURITY.md` describes 3.0) | F | | | | open |
 | E7 (a session's token is forgotten with its jar) | F | | | | open |
 | H1 (2.4.0 restores a 3.0 session and runs every program twice) | B | `a_saved_session_is_one_2_4_0_skips` (`test/manifest-v3-red`), `every_manifest_written_is_this_version` | | | fixed on `fix/manifest-v3` (manifest version 3; 2 and 3 read); refuter round 2 answered, awaiting its re-check; added to slice B at the owner's word, 2026-11-24 |

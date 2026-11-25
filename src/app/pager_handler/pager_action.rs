@@ -273,25 +273,24 @@ impl App {
         }
     }
 
-    /// `^C` in a live capture: SIGINT to its foreground process group, as a
-    /// real `^C` in its tty would send, rather than the 0x03 byte a raw-mode
-    /// reader ignores.
+    /// `^C` in a live capture: SIGINT to its foreground job, as a real `^C`
+    /// in its tty would send, rather than the 0x03 byte a raw-mode reader
+    /// ignores; through its jar when it runs in one.
     fn interrupt_capture(&self) -> Vec<Effect> {
         let Some(capture) = self.runtime.pending_capture.as_ref() else {
             return Vec::new();
         };
         #[cfg(unix)]
         {
-            capture
-                .host
-                .foreground_pgrp()
-                .or_else(|| capture.host.process_id())
-                .map_or_default(|pgrp| {
-                    vec![Effect::SignalCapture {
-                        pgrp,
-                        sig: rustix::process::Signal::INT,
-                    }]
-                })
+            let running =
+                capture.host.foreground_pgrp().is_some() || capture.host.process_id().is_some();
+            if running {
+                vec![Effect::SignalCapture {
+                    sig: spyc_jar::proto::JarSignal::Interrupt,
+                }]
+            } else {
+                Vec::new()
+            }
         }
         // No signal path off-unix: the 0x03 byte, as `^C` encodes.
         #[cfg(not(unix))]
@@ -307,14 +306,15 @@ impl App {
         let Some(capture) = self.runtime.pending_capture.as_mut() else {
             return Vec::new();
         };
-        // Also kill the command's own foreground group: job control
-        // under `zsh -i -c` runs it apart from the wrapper shell that
-        // Drop/`child.kill()` target, which would otherwise orphan it.
+        // The command's own foreground job first: job control under
+        // `zsh -i -c` runs it apart from the wrapper shell that
+        // Drop/`child.kill()` target, which would otherwise orphan it. In a
+        // jar, the jar kills its program's group, whose shell's end hangs
+        // up the job in its terminal's foreground.
         #[cfg(unix)]
-        let fg_pgrp = capture
+        let _ = capture
             .host
-            .foreground_pgrp()
-            .filter(|&fg| Some(fg) != capture.host.process_id());
+            .signal_foreground(spyc_jar::proto::JarSignal::Kill);
         let _ = capture.host.child.kill();
         let _ = capture.host.child.wait();
         // ✗ — same non-clean-termination glyph the status bar uses.
@@ -328,13 +328,6 @@ impl App {
         // close-wake fires through a None slot.
         capture.host.clear_wake_slot();
         self.runtime.pending_capture = None;
-        #[cfg(unix)]
-        if let Some(pgrp) = fg_pgrp {
-            return vec![Effect::SignalCapture {
-                pgrp,
-                sig: rustix::process::Signal::KILL,
-            }];
-        }
         Vec::new()
     }
 
