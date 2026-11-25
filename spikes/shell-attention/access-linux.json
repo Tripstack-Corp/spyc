@@ -1,0 +1,626 @@
+{
+ "meta": {
+  "clk_tck": 100,
+  "date": "2026-11-25T00:05:02Z",
+  "scope": "0",
+  "uid": 1000,
+  "uname": "Linux 6.19.7-200.fc43.aarch64 aarch64",
+  "versions": {
+   "bash": "GNU bash, version 5.2.15(1)-release (aarch64-unknown-linux-gnu)",
+   "cc": "cc (Debian 12.2.0-14+deb12u1) 12.2.0",
+   "fzf": "0.38.0 (debian)",
+   "git": "git version 2.39.5",
+   "gum": "",
+   "less": "less 590 (GNU regular expressions)",
+   "node": "v18.20.4",
+   "python3": "Python 3.11.2",
+   "ssh": "OpenSSH_9.2p1 Debian-2+deb12u10, OpenSSL 3.0.22 25 Aug 2026",
+   "sudo": "Sudo version 1.9.13p3",
+   "vim": "VIM - Vi IMproved 9.0 (2022 Jun 28, compiled Feb 16 2025 05:23:41)",
+   "zsh": "zsh 5.9 (aarch64-unknown-linux-gnu)"
+  },
+  "yama_ptrace_scope": "0"
+ },
+ "rows": [
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "0",
+   "target": "same-user",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 753,
+    "ppid": 752,
+    "prober": 751,
+    "shell": 752,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "0",
+   "target": "same-user",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 753,
+    "ppid": 752,
+    "prober": 751,
+    "shell": 752,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "EACCES",
+    "fd_list": "EACCES",
+    "fdinfo0": "EACCES",
+    "io": "EACCES",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EACCES",
+    "task_syscall": "EACCES",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "0",
+   "target": "root-owned",
+   "target_info": {
+    "comm": "sudo",
+    "pid": 757,
+    "ppid": 756,
+    "prober": 751,
+    "shell": 756,
+    "uid": "0"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "EACCES",
+    "fd_list": "EACCES",
+    "fdinfo0": "EACCES",
+    "io": "EACCES",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EACCES",
+    "task_syscall": "EACCES",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "0",
+   "target": "root-owned",
+   "target_info": {
+    "comm": "sudo",
+    "pid": 757,
+    "ppid": 756,
+    "prober": 751,
+    "shell": 756,
+    "uid": "0"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "0",
+   "target": "reparented",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 761,
+    "ppid": 1,
+    "prober": 751,
+    "shell": 759,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "0",
+   "target": "reparented",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 761,
+    "ppid": 1,
+    "prober": 751,
+    "shell": 759,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "0",
+   "target": "reparented-to-subreaper",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 765,
+    "ppid": 751,
+    "prober": 751,
+    "shell": 763,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "0",
+   "target": "reparented-to-subreaper",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 765,
+    "ppid": 751,
+    "prober": 751,
+    "shell": 763,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "1",
+   "target": "same-user",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1170,
+    "ppid": 1169,
+    "prober": 1168,
+    "shell": 1169,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "1",
+   "target": "same-user",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1170,
+    "ppid": 1169,
+    "prober": 1168,
+    "shell": 1169,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "EACCES",
+    "fd_list": "EACCES",
+    "fdinfo0": "EACCES",
+    "io": "EACCES",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EACCES",
+    "task_syscall": "EACCES",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "1",
+   "target": "root-owned",
+   "target_info": {
+    "comm": "sudo",
+    "pid": 1174,
+    "ppid": 1173,
+    "prober": 1168,
+    "shell": 1173,
+    "uid": "0"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "EACCES",
+    "fd_list": "EACCES",
+    "fdinfo0": "EACCES",
+    "io": "EACCES",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EACCES",
+    "task_syscall": "EACCES",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "1",
+   "target": "root-owned",
+   "target_info": {
+    "comm": "sudo",
+    "pid": 1174,
+    "ppid": 1173,
+    "prober": 1168,
+    "shell": 1173,
+    "uid": "0"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "1",
+   "target": "reparented",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1178,
+    "ppid": 1,
+    "prober": 1168,
+    "shell": 1176,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "1",
+   "target": "reparented",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1178,
+    "ppid": 1,
+    "prober": 1168,
+    "shell": 1176,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "ok",
+    "task_syscall": "ok",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "1",
+   "target": "reparented-to-subreaper",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1182,
+    "ppid": 1168,
+    "prober": 1168,
+    "shell": 1180,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "1",
+   "target": "reparented-to-subreaper",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1182,
+    "ppid": 1168,
+    "prober": 1168,
+    "shell": 1180,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "2",
+   "target": "same-user",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1586,
+    "ppid": 1585,
+    "prober": 1584,
+    "shell": 1585,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "2",
+   "target": "same-user",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1586,
+    "ppid": 1585,
+    "prober": 1584,
+    "shell": 1585,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "EACCES",
+    "fd_list": "EACCES",
+    "fdinfo0": "EACCES",
+    "io": "EACCES",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EACCES",
+    "task_syscall": "EACCES",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "2",
+   "target": "root-owned",
+   "target_info": {
+    "comm": "sudo",
+    "pid": 1590,
+    "ppid": 1589,
+    "prober": 1584,
+    "shell": 1589,
+    "uid": "0"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "EACCES",
+    "fd_list": "EACCES",
+    "fdinfo0": "EACCES",
+    "io": "EACCES",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EACCES",
+    "task_syscall": "EACCES",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "2",
+   "target": "root-owned",
+   "target_info": {
+    "comm": "sudo",
+    "pid": 1590,
+    "ppid": 1589,
+    "prober": 1584,
+    "shell": 1589,
+    "uid": "0"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "2",
+   "target": "reparented",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1594,
+    "ppid": 1,
+    "prober": 1584,
+    "shell": 1592,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "2",
+   "target": "reparented",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1594,
+    "ppid": 1,
+    "prober": 1584,
+    "shell": 1592,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "ancestor",
+   "scope": "2",
+   "target": "reparented-to-subreaper",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1598,
+    "ppid": 1584,
+    "prober": 1584,
+    "shell": 1596,
+    "uid": "1000"
+   }
+  },
+  {
+   "cells": {
+    "fd0_link": "ok",
+    "fd_list": "ok",
+    "fdinfo0": "ok",
+    "io": "ok",
+    "schedstat": "ok",
+    "stat": "ok",
+    "status": "ok",
+    "syscall": "EPERM",
+    "task_syscall": "EPERM",
+    "wchan": "ok"
+   },
+   "position": "unrelated",
+   "scope": "2",
+   "target": "reparented-to-subreaper",
+   "target_info": {
+    "comm": "sleep",
+    "pid": 1598,
+    "ppid": 1584,
+    "prober": 1584,
+    "shell": 1596,
+    "uid": "1000"
+   }
+  }
+ ]
+}

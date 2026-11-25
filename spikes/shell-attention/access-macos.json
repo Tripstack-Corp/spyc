@@ -1,0 +1,146 @@
+{
+  "meta": {
+    "clk_tck": 100,
+    "date": "2026-11-25T00:27:58Z",
+    "scope": "n/a",
+    "uid": 501,
+    "uname": "Darwin 25.6.0 arm64",
+    "versions": {
+      "bash": "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)",
+      "cc": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+      "fzf": "",
+      "git": "git version 2.54.0 (Apple Git-157)",
+      "gum": "gum version 2.0.2",
+      "less": "less 668 (POSIX regular expressions)",
+      "node": "v26.13.1",
+      "python3": "Python 3.15.2",
+      "ssh": "OpenSSH_10.5p1, LibreSSL 3.3.6",
+      "sudo": "Sudo version 1.9.17p2",
+      "vim": "VIM - Vi IMproved 9.2 (2026 Feb 14, compiled Nov 23 2026 20:33:30)",
+      "zsh": "zsh 5.9 (arm64-apple-darwin25.0)"
+    },
+    "yama_ptrace_scope": "n/a"
+  },
+  "rows": [
+    {
+      "cells": {
+        "bsdinfo": "ok",
+        "listfds": "ok",
+        "listthreads": "ok",
+        "rusage": "ok",
+        "taskallinfo": "ok"
+      },
+      "position": "ancestor",
+      "scope": "n/a",
+      "target": "same-user",
+      "target_info": {
+        "comm": "sleep",
+        "pid": 60306,
+        "ppid": 60300,
+        "prober": 60298,
+        "shell": 60300,
+        "uid": 501
+      }
+    },
+    {
+      "cells": {
+        "bsdinfo": "ok",
+        "listfds": "ok",
+        "listthreads": "ok",
+        "rusage": "ok",
+        "taskallinfo": "ok"
+      },
+      "position": "unrelated",
+      "scope": "n/a",
+      "target": "same-user",
+      "target_info": {
+        "comm": "sleep",
+        "pid": 60306,
+        "ppid": 60300,
+        "prober": 60298,
+        "shell": 60300,
+        "uid": 501
+      }
+    },
+    {
+      "cells": {
+        "bsdinfo": "EPERM",
+        "listfds": "EPERM",
+        "listthreads": "EPERM",
+        "rusage": "EPERM",
+        "taskallinfo": "EPERM"
+      },
+      "position": "ancestor",
+      "scope": "n/a",
+      "target": "root-owned",
+      "target_info": {
+        "comm": null,
+        "pid": 60344,
+        "ppid": null,
+        "prober": 60298,
+        "shell": 60342,
+        "uid": null
+      }
+    },
+    {
+      "cells": {
+        "bsdinfo": "EPERM",
+        "listfds": "EPERM",
+        "listthreads": "EPERM",
+        "rusage": "EPERM",
+        "taskallinfo": "EPERM"
+      },
+      "position": "unrelated",
+      "scope": "n/a",
+      "target": "root-owned",
+      "target_info": {
+        "comm": null,
+        "pid": 60344,
+        "ppid": null,
+        "prober": 60298,
+        "shell": 60342,
+        "uid": null
+      }
+    },
+    {
+      "cells": {
+        "bsdinfo": "ok",
+        "listfds": "ok",
+        "listthreads": "ok",
+        "rusage": "ok",
+        "taskallinfo": "ok"
+      },
+      "position": "ancestor",
+      "scope": "n/a",
+      "target": "reparented",
+      "target_info": {
+        "comm": "sleep",
+        "pid": 60370,
+        "ppid": 1,
+        "prober": 60298,
+        "shell": 60359,
+        "uid": 501
+      }
+    },
+    {
+      "cells": {
+        "bsdinfo": "ok",
+        "listfds": "ok",
+        "listthreads": "ok",
+        "rusage": "ok",
+        "taskallinfo": "ok"
+      },
+      "position": "unrelated",
+      "scope": "n/a",
+      "target": "reparented",
+      "target_info": {
+        "comm": "sleep",
+        "pid": 60370,
+        "ppid": 1,
+        "prober": 60298,
+        "shell": 60359,
+        "uid": 501
+      }
+    }
+  ]
+}

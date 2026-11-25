@@ -1,0 +1,13 @@
+# The Linux side of the probe: Debian bookworm with Rust, and the corpus's
+# programs. `gum` isn't packaged for Debian; `fzf` stands in as the raw-mode
+# prompt. The probe runs as `probe`, an ordinary user whose password is random
+# and never typed: `sudo` asks for it and is killed at the prompt.
+FROM docker.io/library/rust:1.100.0-bookworm
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      sudo openssh-server openssh-client python3 nodejs golang-go fzf netcat-openbsd \
+      curl make vim less procps git zsh strace gcc \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -m -u 1000 -s /bin/bash probe \
+    && echo "probe:$(head -c 24 /dev/urandom | base64)" | chpasswd \
+    && echo 'probe ALL=(ALL) ALL' > /etc/sudoers.d/probe && chmod 0440 /etc/sudoers.d/probe \
+    && mkdir -p /run/sshd

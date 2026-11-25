@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "clk_tck": 100,
+    "date": "2026-11-25T00:28:01Z",
+    "scope": "n/a",
+    "uid": 501,
+    "uname": "Darwin 25.6.0 arm64",
+    "versions": {
+      "bash": "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)",
+      "cc": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+      "fzf": "",
+      "git": "git version 2.54.0 (Apple Git-157)",
+      "gum": "gum version 2.0.2",
+      "less": "less 668 (POSIX regular expressions)",
+      "node": "v26.13.1",
+      "python3": "Python 3.15.2",
+      "ssh": "OpenSSH_10.5p1, LibreSSL 3.3.6",
+      "sudo": "Sudo version 1.9.17p2",
+      "vim": "VIM - Vi IMproved 9.2 (2026 Feb 14, compiled Nov 23 2026 20:33:30)",
+      "zsh": "zsh 5.9 (arm64-apple-darwin25.0)"
+    },
+    "yama_ptrace_scope": "n/a"
+  },
+  "rows": [
+    {
+      "full_calls": 11,
+      "full_us_median": 17,
+      "full_us_p90": 54,
+      "members": 1,
+      "members_only_calls": 8,
+      "members_only_us_median": 5,
+      "members_only_us_p90": 16,
+      "n": 1,
+      "proc_entries_scanned": 1,
+      "strace_calls_unrelated_first_read": null
+    },
+    {
+      "full_calls": 83,
+      "full_us_median": 140,
+      "full_us_p90": 162,
+      "members": 10,
+      "members_only_calls": 80,
+      "members_only_us_median": 112,
+      "members_only_us_p90": 131,
+      "n": 10,
+      "proc_entries_scanned": 10,
+      "strace_calls_unrelated_first_read": null
+    },
+    {
+      "full_calls": 803,
+      "full_us_median": 728,
+      "full_us_p90": 1023,
+      "members": 100,
+      "members_only_calls": 800,
+      "members_only_us_median": 693,
+      "members_only_us_p90": 973,
+      "n": 100,
+      "proc_entries_scanned": 100,
+      "strace_calls_unrelated_first_read": null
+    }
+  ]
+}
