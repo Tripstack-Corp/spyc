@@ -419,6 +419,16 @@ impl super::App {
     /// upon with the feature switched off: middle-click pasted the clipboard and
     /// right-click opened the leader menu.
     pub(super) fn handle_mouse(&mut self, ev: MouseEvent) -> Vec<Effect> {
+        self.handle_mouse_at(ev, std::time::Instant::now())
+    }
+
+    /// [`Self::handle_mouse`] for an event made at `now`: whether two presses
+    /// are a double-click depends on when they were made, so a test gives it.
+    pub(super) fn handle_mouse_at(
+        &mut self,
+        ev: MouseEvent,
+        now: std::time::Instant,
+    ) -> Vec<Effect> {
         if !crate::mouse_capture_is_on() {
             return Vec::new();
         }
@@ -490,7 +500,7 @@ impl super::App {
             }
             MouseSink::FocusAndSelectRows(side) => {
                 self.focus_region(region);
-                self.begin_row_selection(ev, side)
+                self.begin_row_selection(ev, side, now)
             }
             MouseSink::FocusAndSelectPane => {
                 self.focus_region(region);
@@ -505,7 +515,7 @@ impl super::App {
                     self.forward_to_child(ev, &layout)
                 }
             }
-            MouseSink::SelectChrome => self.begin_chrome_selection(ev),
+            MouseSink::SelectChrome => self.begin_chrome_selection(ev, now),
             MouseSink::StderrLog => self.open_stderr_log(),
             MouseSink::TaskViewer => self.click_tasks(),
             MouseSink::Answer(code) => self.answer_by_click(code),

@@ -209,11 +209,14 @@ impl super::super::App {
     /// whole row instead of anchoring a drag. Status lines are one atomic string —
     /// an error with its `source()` chain, a path, a git summary — and picking the
     /// whole thing up is the common case that a drag makes fiddly.
-    pub(super) fn begin_chrome_selection(&mut self, ev: MouseEvent) -> Vec<Effect> {
+    pub(super) fn begin_chrome_selection(
+        &mut self,
+        ev: MouseEvent,
+        now: std::time::Instant,
+    ) -> Vec<Effect> {
         let Some((y, col)) = self.chrome_col_at(ev) else {
             return Vec::new();
         };
-        let now = std::time::Instant::now();
         let whole_row = super::is_double_click(self.view.last_chrome_click, y, now);
         self.view.last_chrome_click = Some((y, now));
         if whole_row && self.on_agent_hud(y) {
@@ -577,6 +580,7 @@ impl super::super::App {
         &mut self,
         ev: MouseEvent,
         side: crate::app::state::Side,
+        now: std::time::Instant,
     ) -> Vec<Effect> {
         let Some(idx) = self.list_row_at(side, ev) else {
             return Vec::new();
@@ -585,7 +589,7 @@ impl super::super::App {
             .modifiers
             .contains(crossterm::event::KeyModifiers::CONTROL);
         self.state.col_mut(side).cursor.index = idx;
-        if self.is_list_double_click(side, idx) {
+        if self.is_list_double_click(side, idx, now) {
             return self.open_double_clicked_row();
         }
         self.view.list_selection = Some(ListSelection {
@@ -600,11 +604,15 @@ impl super::super::App {
 
     /// Is this press on row `idx` of `side` the second of a double-click? Records
     /// it as the last press when it is not.
-    fn is_list_double_click(&mut self, side: crate::app::state::Side, idx: usize) -> bool {
+    fn is_list_double_click(
+        &mut self,
+        side: crate::app::state::Side,
+        idx: usize,
+        now: std::time::Instant,
+    ) -> bool {
         let Some(path) = self.state.col(side).rows.get(idx).map(|r| r.path.clone()) else {
             return false;
         };
-        let now = std::time::Instant::now();
         let prev = self
             .view
             .last_list_click
@@ -934,6 +942,7 @@ mod tests {
                 app.begin_row_selection(
                     at(MouseEventKind::Down(MouseButton::Left), 1, mods),
                     Side::Left,
+                    std::time::Instant::now(),
                 );
                 app.extend_row_selection(
                     at(MouseEventKind::Drag(MouseButton::Left), 3, mods),
@@ -988,7 +997,11 @@ mod tests {
             };
             // Screen row 1 is the list's first row — row 0 is the status bar, which
             // `row_at` correctly refuses.
-            app.begin_row_selection(at(MouseEventKind::Down(MouseButton::Left), 1), Side::Left);
+            app.begin_row_selection(
+                at(MouseEventKind::Down(MouseButton::Left), 1),
+                Side::Left,
+                std::time::Instant::now(),
+            );
             app.extend_row_selection(at(MouseEventKind::Drag(MouseButton::Left), 3), Side::Left);
             let _ = app.finish_row_selection(at(MouseEventKind::Up(MouseButton::Left), 3));
 
@@ -1099,7 +1112,10 @@ mod tests {
             };
             // Drag columns 5..9 — "main*", crossing no segment seam of its own but
             // starting past two.
-            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 5));
+            app.begin_chrome_selection(
+                at(MouseEventKind::Down(MouseButton::Left), 5),
+                std::time::Instant::now(),
+            );
             app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 9));
             let effects = app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 9));
 
@@ -1158,7 +1174,10 @@ mod tests {
                 modifiers: KeyModifiers::NONE,
             };
             // The reported drag: from "found" (col 14) to just past "project".
-            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 14));
+            app.begin_chrome_selection(
+                at(MouseEventKind::Down(MouseButton::Left), 14),
+                std::time::Instant::now(),
+            );
             app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 41));
             let effects =
                 app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 41));
@@ -1225,7 +1244,10 @@ mod tests {
                     row: flash_y,
                     modifiers: KeyModifiers::NONE,
                 };
-                app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 0));
+                app.begin_chrome_selection(
+                    at(MouseEventKind::Down(MouseButton::Left), 0),
+                    std::time::Instant::now(),
+                );
                 app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 18));
                 let effects =
                     app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 18));
@@ -1270,6 +1292,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir").keep();
         crate::state::with_state_root(&tmp, || {
             let mut app = App::test_app(tmp.clone());
+            // One time for every press: a double-click is two presses close in time.
+            let t0 = std::time::Instant::now();
             app.view
                 .chrome_rows
                 .borrow_mut()
@@ -1291,7 +1315,7 @@ mod tests {
             };
             // First click: a plain press-and-release on one column. It selects
             // nothing (a click, not a drag) and copies nothing.
-            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6));
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6), t0);
             assert!(
                 app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 6))
                     .is_empty(),
@@ -1302,7 +1326,7 @@ mod tests {
             // press and release, which is what a real double-click looks like.
             // That leaves anchor == focus, the shape the release otherwise
             // discards as an empty click.
-            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6));
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6), t0);
             assert!(
                 app.view.chrome_selection.is_some_and(|s| s.whole_row),
                 "the second press claims the row"
@@ -1321,7 +1345,7 @@ mod tests {
 
             // A cell of pointer drift between the second press and its release is
             // normal and must not narrow the row back down to those columns.
-            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6));
+            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 6), t0);
             app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 7));
             let effects = app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 7));
             let [Effect::CopyToClipboard { text, .. }] = effects.as_slice() else {
@@ -1400,7 +1424,10 @@ mod tests {
                 row: status_y,
                 modifiers: KeyModifiers::NONE,
             };
-            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left), 0));
+            app.begin_chrome_selection(
+                at(MouseEventKind::Down(MouseButton::Left), 0),
+                std::time::Instant::now(),
+            );
             app.extend_chrome_selection(at(MouseEventKind::Drag(MouseButton::Left), 40));
             let effects =
                 app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left), 40));
@@ -1442,7 +1469,10 @@ mod tests {
                 row: 0,
                 modifiers: KeyModifiers::NONE,
             };
-            app.begin_chrome_selection(at(MouseEventKind::Down(MouseButton::Left)));
+            app.begin_chrome_selection(
+                at(MouseEventKind::Down(MouseButton::Left)),
+                std::time::Instant::now(),
+            );
             let effects = app.finish_chrome_selection(at(MouseEventKind::Up(MouseButton::Left)));
             assert!(effects.is_empty(), "a click must not copy: {effects:?}");
             assert!(
