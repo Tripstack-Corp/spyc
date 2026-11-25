@@ -378,3 +378,44 @@ fn a_binary_for_another_machine_is_rejected() {
         "a binary for another machine is rejected: {answer:?}"
     );
 }
+
+/// A2, the owner's choice: a holder that goes before it answers for a
+/// reason of its own (its binary's failure, here an exit of 3) still fails
+/// the upgrade (7). Only the holder that says the machine refused it (its
+/// exit status `HOLDER_BUSY`) makes it busy.
+#[test]
+fn a_holder_that_fails_on_its_own_fails_the_upgrade() {
+    let mut jar = Jar::start(&[], &sh("cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let failing = script(&jar, "jar-failing-holder", "hold-handover) exit 3 ;;");
+    let answer = upgrade_to(&mut owner, &failing);
+    assert_eq!(
+        reason_of(&answer),
+        Ok(reason::UPGRADE_FAILED),
+        "a holder that fails on its own fails the upgrade: {answer:?}"
+    );
+    owner.send(&Msg::Ping { n: 6 }).expect("ping");
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 6 }));
+}
+
+/// A2: a holder from a binary that doesn't know `hold-handover` (a later
+/// one that drops it) exits as any unknown subcommand does,
+/// `WIRE_NOT_SERVED`, and the upgrade fails (7). Were that status the
+/// holder's busy one, every jar of this build would read such a binary as
+/// busy and retry it for the session.
+#[test]
+fn a_holder_that_doesnt_know_its_subcommand_fails_the_upgrade() {
+    let mut jar = Jar::start(&[], &sh("cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let later = script(
+        &jar,
+        "jar-without-hold",
+        "hold-handover) exec \"$REAL\" no-such-subcommand ;;",
+    );
+    let answer = upgrade_to(&mut owner, &later);
+    assert_eq!(reason_of(&answer), Ok(reason::UPGRADE_FAILED), "{answer:?}");
+    owner.send(&Msg::Ping { n: 8 }).expect("ping");
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 8 }));
+}

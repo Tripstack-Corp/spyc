@@ -718,7 +718,10 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
     the `exec`) has gone, or for 10 minutes. The jar gives it 5 seconds to
     take the blob and answer, as one deadline, and a holder that runs out
     of it is ended with its process group and makes the upgrade busy
-    (reason 5).
+    (reason 5). A holder that goes before it answers fails the upgrade
+    (reason 7), unless it exits 71: the machine couldn't give it what it
+    needs now (a thread), and the upgrade is busy (reason 5). No other exit
+    of `spyc-jar` gives 71; an unknown subcommand exits 75, which fails it.
   - `BINARY resume-handover PREVIOUS`, by `exec`: `PREVIOUS` is the absolute
     path of the image that `exec`ed it, a store entry (decision L), which the
     new image may `exec` back to if it can't resume. On standard input, one

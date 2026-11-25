@@ -218,7 +218,6 @@ fn an_upgrade_whose_threads_are_refused_is_busy_and_the_next_one_runs() {
 /// as the binary's failure (7), which stops upgrades for the session. The old
 /// jar runs on.
 #[test]
-#[ignore = "red until A2 is fixed for a holder refused a thread (fix/jar-upgrade-answers)"]
 fn a_holder_whose_thread_is_refused_is_busy_and_the_jar_runs_on() {
     let mut jar = refusing("jar-blob-out", &sh("cat"));
     let mut owner = jar.connect(Role::Owner);

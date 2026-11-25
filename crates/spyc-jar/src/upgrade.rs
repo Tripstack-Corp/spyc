@@ -77,6 +77,16 @@ const HOLD_BACKSTOP: Duration = Duration::from_secs(600);
 const PARENT_CHECK: Duration = Duration::from_millis(100);
 /// How long a holder has to say it holds the sockets, with the jar parked.
 pub(crate) const HOLDER_ANSWER: Duration = Duration::from_secs(5);
+/// How often a jar whose holder went unanswered looks for its exit status.
+const HOLDER_POLL: Duration = Duration::from_millis(5);
+/// A holder's exit status when the machine can't give it what it needs now.
+///
+/// It goes before it answers (no thread, review finding A2), and the upgrade
+/// is busy (reason 5) rather than failed; any other exit before the answer
+/// is the binary's failure (reason 7). No other exit of the binary gives
+/// it, `cli::WIRE_NOT_SERVED` (an unknown subcommand) above all: a jar reads
+/// this status for its whole life, so it is `EX_OSERR`, the binary's alone.
+pub const HOLDER_BUSY: i32 = 71;
 /// How long the connections have to take their last frames before the
 /// handover, all of them together.
 pub(crate) const FLUSH_DEADLINE: Duration = Duration::from_secs(1);
@@ -516,23 +526,54 @@ fn hold(
         });
     match answered {
         Ok(()) => Ok(child),
-        Err(e) => {
-            end_group(&mut child);
+        Err(e)
             if matches!(
                 e.kind(),
                 std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-            ) {
+            ) =>
+        {
+            end_group(&mut child);
+            Err((
+                reason::UPGRADE_BUSY,
+                anyhow!(
+                    "{} didn't say it held the handover within {HOLDER_ANSWER:?}",
+                    binary.display()
+                ),
+            ))
+        }
+        Err(e) => {
+            // Its exit status says why, read before it is reaped, so its
+            // group can't be a stranger's yet when it is ended.
+            let busy = exited_busy(&child, until);
+            end_group(&mut child);
+            if busy {
                 Err((
                     reason::UPGRADE_BUSY,
-                    anyhow!(
-                        "{} didn't say it held the handover within {HOLDER_ANSWER:?}",
-                        binary.display()
-                    ),
+                    anyhow!("{} couldn't hold the handover now", binary.display()),
                 ))
             } else {
                 Err(failed(anyhow!("no word from the holder: {e}")))
             }
         }
+    }
+}
+
+/// Whether `holder`, gone before it answered, exited [`HOLDER_BUSY`]: its
+/// status read without reaping it, waited for until `until` at most.
+fn exited_busy(holder: &std::process::Child, until: Instant) -> bool {
+    use rustix::process::{WaitId, WaitIdOptions};
+    let pid = rustix::process::Pid::from_child(holder);
+    let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+    loop {
+        match rustix::process::waitid(WaitId::Pid(pid), options) {
+            Ok(Some(s)) => return s.exit_status() == Some(HOLDER_BUSY),
+            Ok(None) | Err(rustix::io::Errno::INTR) => {}
+            Err(_) => return false,
+        }
+        if Instant::now() >= until {
+            return false;
+        }
+        std::thread::sleep(HOLDER_POLL);
     }
 }
 
@@ -612,14 +653,17 @@ pub fn hold_stdin() -> anyhow::Result<()> {
     let pipe = std::fs::File::from(held.remove(0));
     let blob = read_blob(&mut &sock)?;
     // The new image reads the blob as the holder writes it; a pipe holds far
-    // less than a blob. The writer starts before the answer, so a holder
-    // with no thread for it (review finding B1) fails the upgrade unanswered.
-    crate::threads::start("jar-blob-out", move || {
+    // less than a blob. The writer starts before the answer, so a holder the
+    // OS gives no thread for it (review finding B1) goes unanswered, and
+    // says why by its exit status: the upgrade is busy, not failed (A2).
+    let started = crate::threads::start("jar-blob-out", move || {
         let mut pipe = pipe;
         let _ = pipe.write_all(&(blob.len() as u64).to_be_bytes());
         let _ = pipe.write_all(&blob);
-    })
-    .context("a thread to hand the blob on")?;
+    });
+    if started.is_err() {
+        std::process::exit(HOLDER_BUSY);
+    }
     (&sock).write_all(b"k").context("answer")?;
     let parent = rustix::process::getppid();
     let until = Instant::now() + HOLD_BACKSTOP;
