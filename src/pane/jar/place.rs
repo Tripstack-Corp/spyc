@@ -249,9 +249,15 @@ pub fn socket_state(socket: &Path) -> SocketState {
 pub(super) const SWEEP_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Remove the sockets in `place` at least `age` old whose jars are gone, and
-/// their tokens and lock files (R32); how many.
+/// their tokens and lock files (R32): the pane jars' and the sessions' (the
+/// 3.0 review, E7). How many.
 pub(super) fn sweep(place: &Place, age: std::time::Duration) -> usize {
-    let Ok(entries) = std::fs::read_dir(place.sockets()) else {
+    sweep_dir(place, place.sockets(), age) + sweep_dir(place, &sessions_dir(&place.dirs), age)
+}
+
+/// [`sweep`], in `dir`.
+fn sweep_dir(place: &Place, dir: &Path, age: std::time::Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
     };
     let old_enough = |p: &Path| {

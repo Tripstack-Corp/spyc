@@ -846,11 +846,20 @@ lock across three upgrades, a parked validation included.
 <!-- SPYC-TRAP: jar-gone-on-evidence -->
 spyc reads the lock before it connects (`place::socket_state`), and only a
 free lock makes a socket gone: the sweep removes it with its token and lock
-file, and a tab's new jar may take its place. A held lock is a live jar,
-however busy. With no lock file to read, a jar that accepts a non-blocking
+file, and a tab's new jar may take its place. The sessions directory is swept
+the same way. A held lock is a live jar, however busy. With no lock file to read, a jar that accepts a non-blocking
 connection at once is live, and anything else is unknown, which is never
 removed, since a token deleted by mistake can't be undone. The connect never
 blocks: on Linux a blocking connect to a full backlog waits for ever.
+
+A session's token is forgotten by whichever spyc sees its jar end (the 3.0
+review, E7): the session's own spyc as it quits for good or lets its session
+go, `spyc shutdown` once the session has ended, `spyc attach` when the jar it
+was attached to holds only the exit, and the sweep above. A token kept for a
+gone session is what a socket planted under its name would collect. One case
+keeps it: a session whose spyc died with no terminal attached, whose jar then
+ended and took its socket and lock with it, leaves nothing for a sweep to read,
+and its token stays until a session of that name starts again.
 
 ## spyc outwaits a busy jar
 

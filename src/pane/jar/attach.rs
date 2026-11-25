@@ -97,7 +97,36 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
         upgrade_first(&chosen.name, program)?;
     }
     crate::terminal::restore_on_signal();
-    spyc_jar::attach::run(&chosen.socket, &token)
+    let attached = spyc_jar::attach::run(&chosen.socket, &token);
+    // The session's spyc may have ended without a quit of its own (killed,
+    // crashed): its jar, holding only the exit, ends too.
+    if session_ended(&chosen.socket) {
+        super::session::forget_token(&chosen.socket);
+    }
+    attached
+}
+
+/// How long `spyc attach`, once it has returned, waits on a session's jar
+/// that doesn't answer: one whose program's exit it just acknowledged ends
+/// within a moment.
+const END_WAIT: Duration = Duration::from_secs(5);
+
+/// Whether the session at `socket` has ended, its jar gone or holding only
+/// its spyc's exit, as `spyc attach` finds it once it has returned. A jar
+/// that doesn't answer is waited on, within [`END_WAIT`], for its socket to
+/// go; one still there after counts as running, and keeps its token.
+fn session_ended(socket: &Path) -> bool {
+    let until = Instant::now() + END_WAIT;
+    loop {
+        if socket_state(socket) != SocketState::Live {
+            return true;
+        }
+        match spyc_jar::client::describe(socket) {
+            Ok(fields) => return fields.iter().any(|(k, _)| k == "exit"),
+            Err(_) if Instant::now() >= until => return false,
+            Err(_) => std::thread::sleep(TAKEOVER_POLL),
+        }
+    }
 }
 
 /// Why this shell runs inside spyc, where attaching would nest a session in

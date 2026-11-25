@@ -64,7 +64,12 @@ pub(super) fn load_in(dir: &Path, socket: &Path) -> Option<Vec<u8>> {
 }
 
 pub(super) fn forget(place: &Place, socket: &Path) {
-    if let Some(p) = path(place, socket) {
+    forget_in(&place.tokens, socket);
+}
+
+/// [`forget`], from the tokens directory `dir`.
+pub(super) fn forget_in(dir: &Path, socket: &Path) {
+    if let Some(p) = path_in(dir, socket) {
         let _ = std::fs::remove_file(p);
     }
 }

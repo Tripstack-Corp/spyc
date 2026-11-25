@@ -60,6 +60,7 @@ pub fn run(name: Option<&str>, yes: bool) -> anyhow::Result<()> {
         );
         std::thread::sleep(SHUTDOWN_POLL);
     }
+    super::session::forget_token(&chosen.socket);
     eprintln!("spyc: {} has shut down", chosen.name);
     Ok(())
 }

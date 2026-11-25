@@ -2066,7 +2066,12 @@ fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
         "TAKEOVER_WAIT",
         "WRITE_STALL",
     ];
-    const SHORTER: [(&str, &str); 26] = [
+    const SHORTER: [(&str, &str); 27] = [
+        (
+            "END_WAIT",
+            "`spyc attach`, done, waiting on a jar that stopped answering to drop its socket: \
+             running out keeps the session's token, and nothing is lost",
+        ),
         (
             "LET_GO_POLL",
             "how often a retake asks a jar whether it let a connection go, not a wait",
