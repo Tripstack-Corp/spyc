@@ -791,7 +791,6 @@ fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
 /// spyc it starts must link to it there, take the session back and own the
 /// tab's jar, rather than starting as another session that owns nothing.
 #[test]
-#[ignore = "red until D1 is fixed (fix/session-own-socket)"]
 fn ctrl_d_hands_over_when_the_runtime_directory_is_a_link_to_a_long_path() {
     use std::os::unix::fs::PermissionsExt;
     let dirs = dirs();

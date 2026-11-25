@@ -784,7 +784,6 @@ fn each_terminal_that_attaches_to_spycs_own_jar_is_set_up_probed_and_drawn_on() 
 /// refuses a name whose socket couldn't be bound, though this jar keeps its
 /// own socket, since the name is the next jar's address after `spyc -r`.
 #[test]
-#[ignore = "red until D1 is fixed (fix/session-own-socket)"]
 fn a_name_too_long_for_a_socket_is_refused_in_the_sessions_own_jar() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);

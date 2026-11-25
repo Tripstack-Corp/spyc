@@ -78,7 +78,14 @@ impl App {
                 .flash_error(format!("can't detach {label}: {what}"));
             return;
         }
-        let name = unused_session_name();
+        let name = match unused_session_name() {
+            Ok(name) => name,
+            Err(e) => {
+                self.state
+                    .flash_error(format!("can't detach {label}: {e:#}"));
+                return;
+            }
+        };
         let manifest = self.moved_manifest(id, &name);
         // SPYC-TRAP(move-saved-before-release): the session is on disk before
         // any jar is let go; a spyc that dies in between strands nothing.
@@ -310,7 +317,14 @@ impl App {
                 info.claim_owner.clone(),
             )
         };
-        let name = unused_session_name();
+        let name = match unused_session_name() {
+            Ok(name) => name,
+            Err(e) => {
+                self.state
+                    .flash_error(format!("can't detach tab {label}: {e:#}"));
+                return;
+            }
+        };
         let Some(manifest) = self.moved_tab_manifest(&pane_id, &owner, &name) else {
             self.state.flash_error(format!(
                 "detach tab: {label} has no saved form, so it stays"
@@ -807,8 +821,17 @@ fn release(socket: &std::path::Path) -> Result<u64, String> {
     crate::mcp::ask_release(pid).map_err(|e| format!("{e:#}"))
 }
 
+/// A session name no running session and no saved one has, whose jar's
+/// socket can be bound; an error when none can.
+fn unused_session_name() -> anyhow::Result<String> {
+    let sessions = crate::pane::jar::place::this_users_sessions();
+    let name = unused_name();
+    crate::pane::jar::session::socket_in(&sessions, &name)?;
+    Ok(name)
+}
+
 /// A session name no running session and no saved one has.
-fn unused_session_name() -> String {
+fn unused_name() -> String {
     let saved: HashSet<String> = crate::state::sessions::load_manifests()
         .into_iter()
         .map(|m| m.name)

@@ -169,12 +169,15 @@ pub fn link_own() -> Option<OwnJar> {
     // its own.
     let resolved = |p: &Path| std::fs::canonicalize(p).ok();
     let given = Path::new(&env);
-    let socket = resolved(given.parent()?)?.join(given.file_name()?);
-    let socket = own_jar_socket(&socket, &resolved(&this_users_sessions())?)?;
-    match link(&socket) {
+    let canonical = resolved(given.parent()?)?.join(given.file_name()?);
+    own_jar_socket(&canonical, &resolved(&this_users_sessions())?)?;
+    // SPYC-TRAP(own-jar-at-given-path): resolved only to compare. The jar is
+    // reached where it was bound, at the path it was given: the resolved one
+    // can be too long for a socket (`/tmp` is `/private/tmp` on macOS).
+    match link(given) {
         Ok(jar) => Some(jar),
         Err(e) => {
-            crate::spyc_debug!("own jar: {} won't take this spyc: {e:#}", socket.display());
+            crate::spyc_debug!("own jar: {} won't take this spyc: {e:#}", given.display());
             None
         }
     }
@@ -213,6 +216,22 @@ fn link(socket: &Path) -> anyhow::Result<OwnJar> {
         attached: Arc::new(AtomicBool::new(attached)),
         attaches: Arc::new(AtomicU64::new(0)),
     })
+}
+
+/// The socket of session `name`'s own jar in `sessions`, when one can be
+/// bound there: `sun_path` holds at most 103 bytes of a path on macOS and 107
+/// on Linux, and a session whose socket is longer can't start its jar.
+pub fn socket_in(sessions: &Path, name: &str) -> anyhow::Result<PathBuf> {
+    let socket = sessions.join(format!("{name}.sock"));
+    if std::os::unix::net::SocketAddr::from_pathname(&socket).is_err() {
+        anyhow::bail!(
+            "{name} is too long a session name here: its jar's socket, {}, would be {} bytes, \
+             longer than a socket's path can be",
+            socket.display(),
+            socket.as_os_str().len()
+        );
+    }
+    Ok(socket)
 }
 
 /// The file beside a session's socket holding the name it goes by, once
@@ -276,7 +295,7 @@ pub(super) fn start_in(
 ) -> anyhow::Result<PathBuf> {
     use super::place::{SocketState, socket_state};
     use std::os::unix::process::CommandExt;
-    let socket = place.prepare_sessions()?.join(format!("{name}.sock"));
+    let socket = socket_in(&place.prepare_sessions()?, name)?;
     match socket_state(&socket) {
         SocketState::Live => anyhow::bail!("{name} already runs in a jar of its own"),
         SocketState::Unknown => anyhow::bail!(
@@ -365,6 +384,22 @@ mod tests {
             Some("CORIANDER_CLOVE"),
             "an empty name file names nothing"
         );
+    }
+
+    #[test]
+    fn a_session_name_fits_only_when_its_socket_can_be_bound() {
+        let sessions = Path::new("/run/u/spyc/sessions");
+        assert_eq!(
+            socket_in(sessions, "CORIANDER_CLOVE").unwrap(),
+            sessions.join("CORIANDER_CLOVE.sock")
+        );
+        let long = "A".repeat(120);
+        let err = socket_in(sessions, &long).unwrap_err().to_string();
+        assert!(err.contains("too long"), "{err}");
+        // The limit is the path's, not the name's: a name that fits one
+        // directory doesn't fit a deeper one.
+        let deep = PathBuf::from("/").join("d".repeat(90));
+        assert!(socket_in(&deep, "CORIANDER_CLOVE").is_err());
     }
 
     #[test]
