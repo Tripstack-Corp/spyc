@@ -126,10 +126,10 @@ impl Caller {
     }
 }
 
-/// Send the loop a command whose reply nobody reads.
-/// The notification `spyc attach` sends a spyc older than the one installed,
-/// once the user says yes, to have it `:upgrade`. Its `params.token` is the
-/// session's (`control`).
+/// The request `spyc attach` sends a spyc older than the one installed, once
+/// the user says yes, to have it `:upgrade`: answered `{"upgrading": true}`
+/// before it starts, or an error naming why it won't (H7). Its
+/// `params.token` is the session's (`control`).
 pub(super) const UPGRADE_METHOD: &str = "spyc/upgrade";
 
 /// The request `spyc shutdown` sends a session's spyc, once the user says yes,
@@ -465,11 +465,6 @@ pub(super) fn dispatch_for(
             let new_pid = parsed["params"]["new_pid"].as_u64().unwrap_or(0) as u32;
             tell(tx, McpCommand::Disconnected { new_pid });
         }
-        if method == UPGRADE_METHOD
-            && let Some(tx) = cmd_tx
-        {
-            control::notice(&parsed["params"], tx);
-        }
         return Ok(());
     }
 
@@ -519,7 +514,7 @@ pub(super) fn dispatch_for(
             Some(answer) => send_result(w, &id, answer),
             None => send_error(w, id, -32000, "spyc didn't answer"),
         },
-        RELEASE_METHOD | SHUTDOWN_METHOD => {
+        RELEASE_METHOD | SHUTDOWN_METHOD | UPGRADE_METHOD => {
             control::request(w, &id, method, &parsed["params"], cmd_tx)
         }
         _ => send_error(w, id, -32601, &format!("Method not found: {method}")),

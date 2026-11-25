@@ -188,8 +188,10 @@ pub enum McpCommand {
     /// entry, rewrote this directory's entry and said so (`spyc/disconnected`).
     /// Nothing this version sends; the TUI tells the user who owns the entry.
     Disconnected { new_pid: u32 },
-    /// `spyc attach` from a newer install asked this spyc to `:upgrade`
-    /// (`spyc/upgrade`). Fire-and-forget.
+    /// `spyc attach` from a newer install asks this spyc to `:upgrade`
+    /// (`spyc/upgrade`): answered `{"upgrading": true}` once what an upgrade
+    /// needs is there and it is under way, else an error naming what's
+    /// missing.
     Upgrade,
     /// `spyc shutdown` asked this spyc to save its session and quit, ending
     /// its tabs (`spyc/shutdown`). Fire-and-forget.
@@ -280,7 +282,6 @@ impl McpCommand {
             self,
             Self::Statusline { .. }
                 | Self::Disconnected { .. }
-                | Self::Upgrade
                 | Self::Shutdown
                 | Self::ConnectionInitialized { .. }
                 | Self::ConnectionBound { .. }

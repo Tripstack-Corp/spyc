@@ -280,7 +280,9 @@ or a package update), and says so when there's none. In a session that runs in i
 spyc restarts in place: your terminal stays attached, your tabs come back with their programs
 untouched, and what `spyc -r` doesn't keep starts afresh. In a plain spyc, `:upgrade` is a
 `^d` whose jar runs the new spyc. `spyc attach` notices a session whose spyc is older than
-the one installed where it runs from, and asks whether to upgrade it before you attach.
+the one installed where it runs from, and asks whether to upgrade it before you attach. When
+that spyc can't upgrade (no newer spyc where it runs from, or a tab outside a jar), `spyc attach`
+says why and attaches to it as it is.
 
 `:detach project` takes one project out of spyc and leaves it running as a session of its
 own, under a new name that spyc shows: the project in view, or `:detach project NAME` for

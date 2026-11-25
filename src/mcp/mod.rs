@@ -116,10 +116,34 @@ pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
 
 /// Socket path for the current process. `None` when [`state_dir`] is.
 /// Ask the spyc with `pid` to `:upgrade`: `spyc attach` from a newer
-/// install, once the user said yes, with the session's `token`.
+/// install, once the user said yes, with the session's `token`. `Ok` once
+/// it has said it is upgrading; an error says why it won't, or that it
+/// predates the question (H7).
 pub fn ask_upgrade(pid: u32, token: &[u8]) -> anyhow::Result<()> {
-    notify(pid, protocol::UPGRADE_METHOD, &control_params(token))
+    use anyhow::Context as _;
+    let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
+    let reply = request_within(
+        &sock,
+        protocol::UPGRADE_METHOD,
+        &control_params(token),
+        UPGRADE_ANSWER_WAIT,
+    )?;
+    if reply["error"]["code"] == -32601 {
+        anyhow::bail!("its spyc predates answering an upgrade: attach, then `:upgrade` in it");
+    }
+    if let Some(why) = reply["error"]["message"].as_str() {
+        anyhow::bail!("{why}");
+    }
+    anyhow::ensure!(
+        reply["result"]["upgrading"] == true,
+        "its spyc's answer names no upgrade: {reply}"
+    );
+    Ok(())
 }
+
+/// How long `spyc attach` waits for a spyc's answer to an upgrade: past the
+/// socket thread's own waits for its loop, on the token and on the upgrade.
+const UPGRADE_ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// A control request's parameters: the session's `token`, which its spyc
 /// requires (the 3.0 review, E1).
@@ -223,19 +247,6 @@ fn request_shutdown(sock: &Path, token: &[u8]) -> anyhow::Result<()> {
         "spyc refused the shutdown: {}",
         reply["error"]
     );
-    Ok(())
-}
-
-/// Send the spyc of `pid` the notification `method` with `params` on its MCP
-/// socket.
-fn notify(pid: u32, method: &str, params: &serde_json::Value) -> anyhow::Result<()> {
-    use anyhow::Context as _;
-    let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
-    let mut stream = std::os::unix::net::UnixStream::connect(&sock)
-        .with_context(|| format!("reach the spyc at {}", sock.display()))?;
-    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params });
-    framing::send_message(&mut stream, &msg.to_string())
-        .with_context(|| format!("send spyc {method}"))?;
     Ok(())
 }
 

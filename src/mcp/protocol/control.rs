@@ -3,8 +3,10 @@
 //! user reaches that socket, a hosted agent's shell included, so each request
 //! must carry the token of the session jar spyc runs in, which the loop checks
 //! (`McpCommand::Authorize`) before the request is acted on; a spyc in no
-//! session jar of its own takes none. `spyc/upgrade` is a notification: a
-//! refusal reaches its sender as nothing, and the session's own screen says it.
+//! session jar of its own takes none. Each is a request, answered: a refusal
+//! with why, so the asking `spyc attach`, `spyc shutdown` or `:attach
+//! project` says it (`spyc/upgrade` was once a notification, whose refusal
+//! reached its sender as nothing: H7).
 
 use std::io::{self, Write};
 use std::sync::mpsc::Sender;
@@ -19,6 +21,10 @@ use crate::mcp_cmd::{McpCommand, McpRequest};
 /// How long the socket thread waits for the loop's word on a token.
 const AUTHORIZE_WAIT: Duration = Duration::from_secs(5);
 
+/// How long it waits for the loop to say whether it will upgrade: a look at
+/// what spyc runs from and at its tabs, nothing started.
+const UPGRADE_ANSWER_WAIT: Duration = Duration::from_secs(5);
+
 /// Whether the loop lets `method` be acted on, carrying `params`' token;
 /// why not, when it doesn't.
 fn authorized(tx: &Sender<McpRequest>, method: &str, params: &Value) -> Result<(), String> {
@@ -30,8 +36,10 @@ fn authorized(tx: &Sender<McpRequest>, method: &str, params: &Value) -> Result<(
     ask_within(tx, ask, AUTHORIZE_WAIT).map(|_| ())
 }
 
-/// `spyc/shutdown` or `spyc/release`, answered on `w`: refused, with why,
-/// unless authorized.
+/// `spyc/shutdown`, `spyc/release` or `spyc/upgrade`, answered on `w`:
+/// refused, with why, unless authorized; an upgrade is answered
+/// `{"upgrading": true}` once the loop has checked what it needs, else why
+/// not.
 pub(super) fn request(
     w: &mut impl Write,
     id: &Value,
@@ -45,19 +53,17 @@ pub(super) fn request(
     if let Err(why) = authorized(tx, method, params) {
         return send_error(w, id.clone(), -32000, &why);
     }
-    if method == RELEASE_METHOD {
-        return match ask_within(tx, McpCommand::Release, RELEASE_WAIT) {
+    let asked = match method {
+        RELEASE_METHOD => Some((McpCommand::Release, RELEASE_WAIT)),
+        UPGRADE_METHOD => Some((McpCommand::Upgrade, UPGRADE_ANSWER_WAIT)),
+        _ => None,
+    };
+    if let Some((command, wait)) = asked {
+        return match ask_within(tx, command, wait) {
             Ok(answer) => send_result(w, id, answer),
             Err(why) => send_error(w, id.clone(), -32000, &why),
         };
     }
     tell(tx, McpCommand::Shutdown);
     send_result(w, id, json!({}))
-}
-
-/// `spyc/upgrade`, a notification: the loop is told only when authorized.
-pub(super) fn notice(params: &Value, tx: &Sender<McpRequest>) {
-    if authorized(tx, UPGRADE_METHOD, params).is_ok() {
-        tell(tx, McpCommand::Upgrade);
-    }
 }

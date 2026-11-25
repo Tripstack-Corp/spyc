@@ -8,7 +8,6 @@ use crate::mcp_cmd::{McpCommand, McpResponse};
 /// With no newer spyc installed, the request is refused, saying so, and no
 /// upgrade is left pending.
 #[test]
-#[ignore = "red until H7: fix/upgrade-answers"]
 fn an_upgrade_asked_with_no_newer_install_is_refused_before_it_starts() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {

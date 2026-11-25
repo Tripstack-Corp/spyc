@@ -312,6 +312,7 @@ impl App {
             }
             McpCommand::ClearPicks => self.mcp_clear_picks(),
             c @ (McpCommand::Behind | McpCommand::Authorize { .. }) => self.answer_attach(c),
+            McpCommand::Upgrade => self.accept_upgrade(),
             McpCommand::Release => self.release_session(),
             McpCommand::CreateWorktree { .. }
             | McpCommand::RemoveWorktree { .. }
@@ -434,7 +435,6 @@ impl App {
             // Notices, which `execute_notice` took before this match.
             McpCommand::Statusline { .. }
             | McpCommand::Disconnected { .. }
-            | McpCommand::Upgrade
             | McpCommand::Shutdown
             | McpCommand::ConnectionInitialized { .. }
             | McpCommand::ConnectionBound { .. }
@@ -492,15 +492,6 @@ impl App {
                     message: "acknowledged".into(),
                 }
             }
-            // Keep serving: agents this spyc launches still reach it through
-            // their pane's env, and the next one it launches rewrites the entry
-            // to pin nothing again.
-            McpCommand::Upgrade => {
-                self.runtime.upgrade_pending = true;
-                McpResponse::Ok {
-                    message: "upgrading".into(),
-                }
-            }
             McpCommand::Shutdown => {
                 self.state
                     .note_event("`spyc shutdown` asked: saving the session and quitting");
@@ -509,6 +500,9 @@ impl App {
                     message: "shutting down".into(),
                 }
             }
+            // Keep serving: agents this spyc launches still reach it through
+            // their pane's env, and the next one it launches rewrites the entry
+            // to pin nothing again.
             McpCommand::Disconnected { new_pid } => {
                 self.state.flash_info(format!(
                     "MCP: an older spyc (PID {new_pid}) pinned this dir's agent config to \
