@@ -271,3 +271,6 @@ pub(super) fn sweep(place: &Place, age: std::time::Duration) -> usize {
         })
         .count()
 }
+
+#[cfg(test)]
+mod tests;
