@@ -362,3 +362,61 @@ fn a_socket_not_made_yet_in_a_trusted_directory_is_waited_for() {
     assert!(reached.is_ok(), "refused before the jar bound: {reached:?}");
     jar.join().unwrap();
 }
+
+/// Save, as a session's spyc would, a manifest named `name` whose spyc is
+/// `pid`, started at `started`.
+fn saved_session(name: &str, pid: u32, started: u64) {
+    let manifest = crate::state::sessions::parse_manifest(serde_json::json!({
+        "version": 2, "id": u64::from(pid) * 1000 + 7, "epoch_secs": 1, "name": name,
+        "pid": pid, "process_started": started, "projects": []
+    }))
+    .expect("a session");
+    crate::state::sessions::save_session(&manifest).unwrap();
+}
+
+/// A session token is forgotten at the next sweep once its session is gone
+/// on evidence, though nothing is left of its jar to judge (the refuter on
+/// E7): a crash with nobody attached, or a logout or reboot that emptied the
+/// runtime directory. The evidence is the session's saved spyc, gone by its
+/// start time. One whose spyc runs, or with no saved session, keeps its token.
+#[test]
+#[ignore = "red until E7: fix/session-token-evidence"]
+fn a_gone_sessions_token_is_forgotten_though_its_jar_left_nothing() {
+    let dir = super::super::test_dir::TestDir::new("pg");
+    let state = dir.path().join("state");
+    std::fs::create_dir(&state).unwrap();
+    crate::state::with_state_root(&state, || {
+        let place = place_in(dir.path());
+        let sessions = place.prepare_sessions().unwrap();
+        let token = super::super::tokens::new().unwrap();
+        let mut live = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let started = crate::proc_group::started_epoch_secs(live.id()).expect("its start time");
+        let mut ended = std::process::Command::new("true").spawn().unwrap();
+        ended.wait().unwrap();
+        // A start time far from now and from 0, which sysinfo gives for a
+        // process it can't read (launchd, on macOS).
+        saved_session("GONE_TEST", ended.id(), 1_000_000_000);
+        saved_session("RUNNING_TEST", live.id(), started);
+        for name in ["GONE_TEST", "RUNNING_TEST", "UNSAVED_TEST"] {
+            super::super::tokens::save(&place, &sessions.join(format!("{name}.sock")), &token)
+                .unwrap();
+        }
+        sweep(&place, Duration::ZERO);
+        let kept = |name: &str| {
+            super::super::tokens::load(&place, &sessions.join(format!("{name}.sock"))).is_some()
+        };
+        let (gone, running, unsaved) = (
+            kept("GONE_TEST"),
+            kept("RUNNING_TEST"),
+            kept("UNSAVED_TEST"),
+        );
+        let _ = live.kill();
+        let _ = live.wait();
+        assert!(!gone, "a gone session's token is kept");
+        assert!(running, "a running session's token was forgotten");
+        assert!(unsaved, "a token with no evidence either way was forgotten");
+    });
+}
