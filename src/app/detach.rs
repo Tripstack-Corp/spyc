@@ -434,4 +434,30 @@ mod tests {
             );
         });
     }
+
+    /// D1: a name the session's socket couldn't be bound at is refused when
+    /// it's given, as `:name` and a click on the session's name give it, and
+    /// the session keeps the name it had: `^d` would otherwise start its jar
+    /// at a path no socket can have.
+    #[test]
+    #[ignore = "red until D1 is fixed (fix/session-own-socket)"]
+    fn a_name_whose_session_socket_would_not_fit_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(&tmp.path().join("state"), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.runtime.sessions_dir = Some(tmp.path().join("sessions"));
+            app.state.session_name = Some("ANISE".into());
+            // Longer than any `sun_path` holds, wherever the sessions are.
+            app.name_session("A".repeat(120));
+            assert_eq!(
+                app.state.session_name.as_deref(),
+                Some("ANISE"),
+                "renamed to a name no socket can be bound at"
+            );
+            let flash = app.flash_text().unwrap_or_default();
+            assert!(flash.contains("too long"), "{flash}");
+            app.name_session("GENERAL_WORK".into());
+            assert_eq!(app.state.session_name.as_deref(), Some("GENERAL_WORK"));
+        });
+    }
 }

@@ -785,6 +785,64 @@ fn ctrl_d_hands_spyc_to_its_jar_and_spyc_attach_brings_it_back() {
     eventually("quitting ends the tab's program", || !alive(agent));
 }
 
+/// D1: a session's own jar is found by the path it was given, not that path
+/// resolved. The runtime directory here is a link to a directory whose own
+/// path is too long for a socket: the jar binds at the short path, and the
+/// spyc it starts must link to it there, take the session back and own the
+/// tab's jar, rather than starting as another session that owns nothing.
+#[test]
+#[ignore = "red until D1 is fixed (fix/session-own-socket)"]
+fn ctrl_d_hands_over_when_the_runtime_directory_is_a_link_to_a_long_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs = dirs();
+    // The resolved sessions directory's path alone passes the longest a
+    // socket's path may be on either platform (103 bytes on macOS, 107 on
+    // Linux); the given one, through the link, stays well inside it.
+    let real = dirs.root.path().join("L".repeat(100));
+    std::fs::create_dir(&real).unwrap();
+    std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o700)).unwrap();
+    std::fs::remove_dir(&dirs.runtime).unwrap();
+    std::os::unix::fs::symlink(&real, &dirs.runtime).unwrap();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    let agent = noted(&dirs.pidfile)[0];
+    left.0.push(agent);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+
+    let (name, socket, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
+    assert!(
+        socket.starts_with(&dirs.runtime),
+        "the jar binds at the path it was given: {}",
+        socket.display()
+    );
+    eventually("the jar's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    let back = Spyc::start(&dirs, &["attach", &name]);
+    left.0.push(back.pid());
+    back.eventually("the session drawn, its tab with it", || {
+        back.shows(&name) && back.shows("ready-mark")
+    });
+    assert!(
+        !back.shows("no spyc owns"),
+        "the session's spyc offered its own tabs as no spyc's"
+    );
+    assert!(alive(agent), "the tab's program ended");
+}
+
 /// [`dirs_running`], its one tab saying it hosts Claude (`[[pane.tab]] agent`),
 /// so its status reports count.
 fn dirs_with_agent(rest: &str) -> Dirs {

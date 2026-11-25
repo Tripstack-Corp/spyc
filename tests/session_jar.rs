@@ -780,6 +780,32 @@ fn each_terminal_that_attaches_to_spycs_own_jar_is_set_up_probed_and_drawn_on() 
     );
 }
 
+/// D1 of the 3.0 review, in the session's own jar (#1328's rename): `:name`
+/// refuses a name whose socket couldn't be bound, though this jar keeps its
+/// own socket, since the name is the next jar's address after `spyc -r`.
+#[test]
+#[ignore = "red until D1 is fixed (fix/session-own-socket)"]
+fn a_name_too_long_for_a_socket_is_refused_in_the_sessions_own_jar() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let term = Terminal::attach(&jar, (30, 100), KITTY);
+    term.wait_for("the session's name drawn", NAME);
+    let log = dirs.state.join(format!("spyc/events/{NAME}.log"));
+    let logged = |needle: &str| std::fs::read_to_string(&log).is_ok_and(|l| l.contains(needle));
+    term.type_keys(format!(":name {}\r", "A".repeat(120)).as_bytes());
+    eventually("spyc refuses the name", || logged("too long"));
+    assert!(
+        !session_socket(&dirs, NAME).with_extension("name").exists(),
+        "the name was written beside the socket"
+    );
+    quit_with_q(
+        "spyc quits when told to",
+        |typed| term.type_keys(typed),
+        || term.text().contains(QUIT_ASKS),
+        || *term.exited.lock().unwrap(),
+    );
+}
+
 /// The session's event log says why each terminal left spyc's own jar: one
 /// whose connection closed, one that went silent past the jar's deadline, and
 /// one spyc detached, which says nothing more.
