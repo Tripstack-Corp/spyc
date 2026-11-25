@@ -165,8 +165,10 @@ pub fn next_change(resets_at: i64, now: Timestamp, style: AgentHudResets) -> Opt
 
 /// Today's reset is a time; this week's adds the weekday; later, the date.
 fn clock(resets_at: i64, now: Timestamp, tz: &TimeZone) -> Option<String> {
-    let at = Timestamp::from_second(resets_at).ok()?.to_zoned(tz.clone());
-    let today = now.to_zoned(tz.clone()).date();
+    let at = Timestamp::from_second(resets_at)
+        .ok()?
+        .to_zoned_datetime(tz.clone());
+    let today = now.to_zoned_datetime(tz.clone()).date();
     let days = today.until(at.date()).ok()?.get_days();
     let time = time_of_day(at.hour(), at.minute());
     Some(match days {
@@ -252,7 +254,7 @@ mod tests {
 
     #[test]
     fn the_fixture_is_a_thursday_at_utc_midnight() {
-        let zoned = at(utc(0, 0)).to_zoned(TimeZone::UTC);
+        let zoned = at(utc(0, 0)).to_zoned_datetime(TimeZone::UTC);
         assert_eq!(zoned.to_string(), "2026-10-15T00:00:00+00:00[UTC]");
         assert_eq!(zoned.weekday(), jiff::civil::Weekday::Thursday);
     }

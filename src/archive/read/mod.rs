@@ -760,7 +760,7 @@ fn zip_mtime(dt: zip::DateTime) -> Option<SystemTime> {
         0,
     );
     let secs = civil
-        .to_zoned(jiff::tz::TimeZone::UTC)
+        .to_zoned_datetime(jiff::tz::TimeZone::UTC)
         .ok()?
         .timestamp()
         .as_second();

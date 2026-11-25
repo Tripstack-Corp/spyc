@@ -723,7 +723,7 @@ pub fn parse_iso8601_to_epoch_secs(s: &str) -> Option<u64> {
     // Fallback: zoneless `YYYY-MM-DDTHH:MM:SS` — assume UTC.
     // Defensive against upstream drift.
     let civil: jiff::civil::DateTime = s.parse().ok()?;
-    let zoned = civil.to_zoned(jiff::tz::TimeZone::UTC).ok()?;
+    let zoned = civil.to_zoned_datetime(jiff::tz::TimeZone::UTC).ok()?;
     let secs = zoned.timestamp().as_second();
     if secs < 0 {
         return None;

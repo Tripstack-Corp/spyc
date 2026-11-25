@@ -59,7 +59,7 @@ pub fn format_git_time(time: gix::date::Time) -> String {
     let Ok(ts) = jiff::Timestamp::from_second(secs) else {
         return secs.to_string();
     };
-    let zoned = ts.to_zoned(jiff::tz::TimeZone::fixed(offset));
+    let zoned = ts.to_zoned_datetime(jiff::tz::TimeZone::fixed(offset));
     jiff::fmt::strtime::format("%Y-%m-%d %H:%M:%S %:z", &zoned).unwrap_or_else(|_| secs.to_string())
 }
 

@@ -184,7 +184,7 @@ grep-regex = "0.1"
 open = "5"
 regex = "1"
 grep-matcher = "0.1"
-jiff = "0.2"
+jiff = "1"
 uuid = { version = "1", features = ["v7"] }
 uzers = "0.12"
 strip-ansi-escapes = "0.2"

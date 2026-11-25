@@ -302,7 +302,7 @@ fn format_local_time_from_unix(secs: i64, _nsec: i64) -> String {
     let Ok(ts) = jiff::Timestamp::from_second(secs) else {
         return "—".to_string();
     };
-    ts.to_zoned(jiff::tz::TimeZone::system())
+    ts.to_zoned_datetime(jiff::tz::TimeZone::system())
         .strftime("%Y-%m-%d %H:%M:%S")
         .to_string()
 }

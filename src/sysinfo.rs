@@ -2,7 +2,7 @@
 
 /// Current UTC date/time as `YYYY-MM-DD HH:MM:SS UTC`.
 pub fn format_now() -> String {
-    let dt = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC);
+    let dt = jiff::Timestamp::now().to_zoned_datetime(jiff::tz::TimeZone::UTC);
     dt.strftime("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
 

@@ -83,7 +83,7 @@ fn updated_label(at: Option<SystemTime>, now: SystemTime, tz: &jiff::tz::TimeZon
     let local = jiff::Timestamp::try_from(at).map_or_else(
         |_| String::new(),
         |ts| {
-            ts.to_zoned(tz.clone())
+            ts.to_zoned_datetime(tz.clone())
                 .strftime("%Y-%m-%d %H:%M")
                 .to_string()
         },
