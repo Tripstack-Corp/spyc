@@ -16,7 +16,8 @@
 //! [`describe`] and [`attach`], the only places spyc connects to a jar.
 //! Spawn, adopt, retake, a session's start, `spyc attach`, `spyc shutdown`,
 //! `spyc --jars`, the orphan finder, the store's sweep and the MCP proxy that
-//! follows `SPYC_JAR_SOCKET` all pass through them.
+//! follows `SPYC_JAR_SOCKET` all pass through them, and so does the SSH-agent
+//! links' directory beside them (`pane::ssh_agent::prepare`).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -187,7 +188,7 @@ pub(super) fn sessions_dir(dirs: &[PathBuf]) -> PathBuf {
 
 /// `dir` is a directory, not a link, owned by this user and closed to
 /// everyone else.
-pub(super) fn private_dir(dir: &Path) -> anyhow::Result<()> {
+pub fn private_dir(dir: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let meta = dir
         .symlink_metadata()
