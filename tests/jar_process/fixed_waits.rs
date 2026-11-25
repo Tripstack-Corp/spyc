@@ -111,6 +111,10 @@ fn sources() -> Vec<Source> {
             include_str!("../jar_interrupted.rs"),
         ),
         whole("tests/continued.rs", include_str!("../continued.rs")),
+        whole(
+            "src/app/harness_tests/jar_signals.rs",
+            include_str!("../../src/app/harness_tests/jar_signals.rs"),
+        ),
         tests_of(
             "crates/spyc-jar/src/client.rs",
             include_str!("../../crates/spyc-jar/src/client.rs"),
