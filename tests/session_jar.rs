@@ -1365,3 +1365,52 @@ fn an_empty_or_partial_token_is_refused() {
     }
     assert_eq!(jar.described("exit"), None, "the session ended");
 }
+
+/// `spyc shutdown` from inside spyc, a pane or a shell a spyc started,
+/// refuses as `spyc attach` does (the owner's word on the refuter's E1
+/// finding): it says why, and that a terminal outside spyc can run it. The
+/// session runs on.
+#[test]
+#[ignore = "red until spyc shutdown inside spyc: fix/shutdown-inside-spyc"]
+fn spyc_shutdown_from_inside_spyc_is_refused() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let out = Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["shutdown", NAME, "-y"])
+        .env_clear()
+        .envs(dirs.env())
+        .env("SPYC_PANE_ID", "a-pane")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(
+        said.contains("runs in a spyc pane") && said.contains("outside spyc"),
+        "{said}"
+    );
+    assert_eq!(jar.described("exit"), None, "the session ended");
+}
+
+/// `spyc shutdown` refuses in a shell a spyc tab started, known by
+/// `SPYC_JAR_SOCKET` naming a live jar though `SPYC_PANE_ID` is unset: the
+/// check is `spyc attach`'s own, not a copy reading one variable (the
+/// refuter on the owner's decision).
+#[test]
+#[ignore = "red until spyc shutdown inside spyc: fix/shutdown-inside-spyc"]
+fn spyc_shutdown_refuses_with_only_a_live_jar_socket_in_its_env() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let out = Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["shutdown", NAME, "-y"])
+        .env_clear()
+        .envs(dirs.env())
+        .env("SPYC_JAR_SOCKET", jar.socket.as_os_str())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(said.contains("outside spyc"), "{said}");
+    assert_eq!(jar.described("exit"), None, "the session ended");
+}
