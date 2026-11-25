@@ -626,8 +626,9 @@ pub(in crate::app) fn place_clear_of_line(
 }
 
 /// Greedy word-wrap a popup label to `width` display columns. Returns one
-/// segment per line. A single word longer than `width` lands on its own line
-/// (popup labels never contain such words, so this stays simple).
+/// segment per line. A word wider than `width` (a Makefile's
+/// `TARGET=a|b|c…` help line) fills the line it starts on and breaks between
+/// characters, so no line is drawn past the box's edge.
 pub(in crate::app) fn wrap_label(label: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     if crate::ui::display_width(label) <= width {
@@ -638,17 +639,30 @@ pub(in crate::app) fn wrap_label(label: &str, width: usize) -> Vec<String> {
     let mut cur_w = 0usize;
     for word in label.split(' ') {
         let ww = crate::ui::display_width(word);
-        if cur_w == 0 {
-            cur.push_str(word);
-            cur_w = ww;
-        } else if cur_w + 1 + ww <= width {
+        if cur_w > 0 && cur_w + 1 + ww <= width {
             cur.push(' ');
             cur.push_str(word);
             cur_w += 1 + ww;
-        } else {
+            continue;
+        }
+        // A word that fits a line of its own starts one; a wider one starts
+        // here when at least a column is left after the space.
+        if cur_w > 0 && (ww <= width || cur_w + 2 > width) {
             lines.push(std::mem::take(&mut cur));
-            cur.push_str(word);
-            cur_w = ww;
+            cur_w = 0;
+        }
+        if cur_w > 0 {
+            cur.push(' ');
+            cur_w += 1;
+        }
+        for ch in word.chars() {
+            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if cur_w > 0 && cur_w + cw > width {
+                lines.push(std::mem::take(&mut cur).trim_end().to_string());
+                cur_w = 0;
+            }
+            cur.push(ch);
+            cur_w += cw;
         }
     }
     if !cur.is_empty() {
@@ -659,7 +673,26 @@ pub(in crate::app) fn wrap_label(label: &str, width: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::place_clear_of_line;
+    use super::{place_clear_of_line, wrap_label};
+
+    #[test]
+    fn a_word_longer_than_the_width_breaks_at_the_edge() {
+        let label = "run with T=archive_name|dsl_parse|render_markdown|highlight to pick";
+        let lines = wrap_label(label, 20);
+        assert!(
+            lines.iter().all(|l| crate::ui::display_width(l) <= 20),
+            "every line fits: {lines:?}"
+        );
+        let rejoined: String = lines.concat().split_whitespace().collect();
+        let original: String = label.split_whitespace().collect();
+        assert_eq!(rejoined, original, "no character is lost");
+    }
+
+    #[test]
+    fn a_long_word_of_wide_characters_breaks_between_characters() {
+        let lines = wrap_label(&"漢".repeat(9), 4);
+        assert_eq!(lines, ["漢漢", "漢漢", "漢漢", "漢漢", "漢"]);
+    }
 
     #[test]
     fn no_line_or_no_collision_keeps_centered() {
