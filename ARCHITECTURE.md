@@ -1379,10 +1379,13 @@ a task's and a `!` capture's (`:pause`, `:resume`, `^C`, `^\`, and the
 `CONT` that `:fg` and `:task-to-pane` give a paused task), as a frame to its
 jar, and never to the pid (finding 10, the 3.0 review's E3). Nothing in
 `src/app` signals a number: it asks the host (`PtyHost::signal`,
-`PtyHost::signal_foreground`). A capture's `^C` with another job in the jar's
-foreground also types the key's byte, which the PTY turns into the signal for
-that job as a real `^C` does, since a version-1 jar signals only its program's
-group. The pid stays for reading what the process is doing. A signal sent to
+`PtyHost::signal_foreground`). The jar delivers an interrupt to its PTY's
+foreground group, as a terminal's `^C` would, and a kill to that group and its
+program's: a capture's `zsh -i -c` runs its command as a job of its own, which
+a byte would not interrupt in raw mode and its shell's hangup need not end.
+The jar reads the group from the PTY it holds, so it is always one of the
+program's session. A host whose jar has gone signals nothing. The pid stays
+for reading what the process is doing. A signal sent to
 it directly passes every test where the pid is still the program's, and kills
 a bystander the day it isn't: `pane::jar::tests::every_signal_goes_through_the_jar`
 gives the jar a bystander's pid to report, and

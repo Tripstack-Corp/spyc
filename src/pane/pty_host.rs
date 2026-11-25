@@ -617,21 +617,14 @@ impl PtyHost {
 
     /// Signal the job in the PTY's foreground, as a capture's `^C` and `^\\`
     /// do: locally that group (`tcgetpgrp`), else the program's. A jarred
-    /// program's jar is asked, and signals its program's group; when the jar
-    /// reports another job in the foreground, an interrupt also goes as the
-    /// key's byte, which the PTY turns into the signal for that job as a
-    /// real `^C` does. No number the jar reported is signalled.
+    /// program's jar is asked, and it reads the foreground group from the PTY
+    /// it holds: an interrupt goes to that group, a kill to it and to the
+    /// program's (`spyc_jar`'s `life::deliver`). No number the jar reported is
+    /// signalled.
     #[cfg(unix)]
-    pub fn signal_foreground(&mut self, signal: JarSignal) -> anyhow::Result<()> {
+    pub fn signal_foreground(&self, signal: JarSignal) -> anyhow::Result<()> {
         if let Some(jar) = &self.jar {
-            jar.send(signal)?;
-            let other_job = self
-                .foreground_pgrp()
-                .is_some_and(|fg| Some(fg) != self.process_id());
-            if signal == JarSignal::Interrupt && other_job {
-                self.write_all(&[0x03])?;
-            }
-            return Ok(());
+            return Ok(jar.send(signal)?);
         }
         let pgrp = self
             .foreground_pgrp()

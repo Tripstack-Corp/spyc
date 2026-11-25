@@ -309,8 +309,9 @@ impl App {
         // The command's own foreground job first: job control under
         // `zsh -i -c` runs it apart from the wrapper shell that
         // Drop/`child.kill()` target, which would otherwise orphan it. In a
-        // jar, the jar kills its program's group, whose shell's end hangs
-        // up the job in its terminal's foreground.
+        // jar, the jar kills its program's group and its PTY's foreground
+        // group. The `child.kill()` after it reaches the shell too, so the
+        // tests can't tell a jar whose Kill missed the program's group.
         #[cfg(unix)]
         let _ = capture
             .host

@@ -472,8 +472,14 @@ const SECTIONS: &[Section] = &[
                 "cursor file (or all picks if any), shell-quoted, relative to the column's dir",
             ),
             ("%%", "literal percent sign"),
-            ("^C", "interrupt the running capture (SIGINT to child)"),
-            ("^\\", "hard-kill the running capture"),
+            (
+                "^C",
+                "interrupt the running capture (SIGINT to the command in front)",
+            ),
+            (
+                "^\\",
+                "hard-kill the running capture (SIGKILL to the command and its shell)",
+            ),
             ("^Z", "send to background; resume later with :fg"),
         ],
     },

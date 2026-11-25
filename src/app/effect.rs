@@ -130,10 +130,11 @@ pub enum Effect {
 
     /// A-class. Send `sig` to the live `!` capture's foreground job: `^C`'s
     /// interrupt. A real signal, not the old `0x03` byte, so it interrupts a
-    /// raw-mode reader (e.g. `gh secret set`) that ignores the byte: locally
-    /// to the PTY's foreground group, the command under the `zsh -i -c`
-    /// wrapper; in a jar, through the jar (`PtyHost::signal_foreground`).
-    /// `#[cfg(unix)]`, like `SignalPane`.
+    /// raw-mode reader (e.g. `gh secret set`) that ignores the byte. It
+    /// reaches the PTY's foreground group, the command a `zsh -i -c` or
+    /// `bash -i -c` wrapper runs as a job of its own: locally by its number,
+    /// in a jar by the jar, which reads that group from the PTY it holds
+    /// (`PtyHost::signal_foreground`). `#[cfg(unix)]`, like `SignalPane`.
     #[cfg(unix)]
     SignalCapture { sig: spyc_jar::proto::JarSignal },
 

@@ -258,8 +258,8 @@ While a `!` capture is running in the pager:
 
 | Key | Action |
 |-----|--------|
-| `^C` | Interrupt the running capture (`SIGINT` to the child) |
-| `^\` | Hard-kill the running capture |
+| `^C` | Interrupt the running capture: `SIGINT` to the command in its terminal's foreground, as a terminal's `^C` would, a raw-mode reader included |
+| `^\` | Hard-kill the running capture: `SIGKILL` to the command and its shell, a job that ignores the hangup included |
 | `^Z` | Send to background; resume later with `:fg` |
 
 ## Background tasks & buffer history

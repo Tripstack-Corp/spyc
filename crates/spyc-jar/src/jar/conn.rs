@@ -328,7 +328,7 @@ fn act_as_owner(shared: &Shared, id: u64, conn: &Conn, msg: Msg) {
                 why: "the program has ended".into(),
             });
         }
-        Msg::Signal { signal } => deliver(shared.child_pid(), signal),
+        Msg::Signal { signal } => deliver(shared, signal),
         // Handed back, a snapshot takes one byte more than it was stored in:
         // one that would come back over the limit is refused now, rather
         // than end the connection that fetches it.
