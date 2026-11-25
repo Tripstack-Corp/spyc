@@ -306,21 +306,18 @@ pub fn sweep(root: &Path, sockets: &Path, ours: &Path, untouched: Duration) -> V
 /// answers a connection won't describe itself.
 fn reported_builds(sockets: &Path) -> Option<std::collections::HashSet<String>> {
     let mut builds = std::collections::HashSet::new();
-    let Ok(entries) = std::fs::read_dir(sockets) else {
-        return Some(builds);
-    };
-    for sock in entries.filter_map(Result::ok).map(|e| e.path()) {
+    // A directory this user can't trust may hold any jar's socket: none of
+    // its builds can be named.
+    let socks = super::place::sockets_in(sockets).ok()?;
+    for sock in socks {
         use super::place::SocketState;
-        if sock.extension().is_none_or(|x| x != "sock") {
-            continue;
-        }
         match super::place::socket_state(&sock) {
             SocketState::Live => {}
             // A jar that may run from an entry this can't name.
             SocketState::Unknown => return None,
             SocketState::Stale | SocketState::Missing => continue,
         }
-        let fields = spyc_jar::client::describe(&sock).ok()?;
+        let fields = super::place::describe(&sock).ok()?;
         if let Some((_, b)) = fields.into_iter().find(|(k, _)| k == "build") {
             builds.insert(b);
         }

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 
-use super::attach::{Running, ask, choose, ended, running};
+use super::attach::{Running, ask, choose, ended, running_in};
 use super::place::{SocketState, socket_dirs, socket_state, this_users_sessions};
 
 /// How long `spyc shutdown` waits for the session's spyc to end: its quit,
@@ -25,7 +25,7 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// `spyc shutdown [NAME] [-y]`.
 pub fn run(name: Option<&str>, yes: bool) -> anyhow::Result<()> {
-    let running = running(&this_users_sessions());
+    let running = running_in(&this_users_sessions())?;
     let chosen = match choose(&running, name).map_err(anyhow::Error::msg)? {
         Some(one) => one.clone(),
         None => ask(
@@ -100,7 +100,7 @@ fn what_ends(session: &Running, tabs: &[String]) -> String {
 
 /// The pid of the spyc a session's jar runs.
 pub fn program_pid(socket: &Path) -> Option<i32> {
-    field(&spyc_jar::client::describe(socket).ok()?, "program_pid")?
+    field(&super::place::describe(socket).ok()?, "program_pid")?
         .parse()
         .ok()
 }
@@ -116,10 +116,11 @@ fn tabs_of(pid: i32) -> Vec<String> {
     .pop()
     .unwrap_or_default();
     let owner = pid.to_string();
-    super::listing::sockets_in(&dir)
+    super::place::sockets_in(&dir)
+        .unwrap_or_default()
         .iter()
         .filter(|socket| socket_state(socket) == SocketState::Live)
-        .filter_map(|socket| spyc_jar::client::describe(socket).ok())
+        .filter_map(|socket| super::place::describe(socket).ok())
         .filter(|fields| field(fields, "owner_pid") == Some(owner.as_str()))
         .map(|fields| tab_line(&fields))
         .collect()

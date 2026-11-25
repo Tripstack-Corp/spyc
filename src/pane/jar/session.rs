@@ -73,7 +73,7 @@ impl OwnJar {
     /// client told the jar (`spyc_jar::attach::TERMINAL_KEY`); `None` when it
     /// didn't say (an older client) or the jar can't be asked.
     pub fn terminal_over_ssh(&self) -> Option<bool> {
-        let fields = spyc_jar::client::describe(&self.socket).ok()?;
+        let fields = super::place::describe(&self.socket).ok()?;
         let (_, kind) = fields
             .iter()
             .find(|(k, _)| k == spyc_jar::attach::TERMINAL_KEY)?;
@@ -84,7 +84,7 @@ impl OwnJar {
     /// when the jar can't be asked or doesn't say: one built before it did,
     /// or one still ending a terminal spyc detached.
     pub fn why_left(&self) -> Option<OwnerLeft> {
-        let fields = spyc_jar::client::describe(&self.socket).ok()?;
+        let fields = super::place::describe(&self.socket).ok()?;
         let (_, word) = fields.iter().find(|(k, _)| k == OWNER_LEFT)?;
         OwnerLeft::from_word(word)
     }
@@ -193,7 +193,7 @@ pub fn link_own() -> Option<OwnJar> {
 /// is attached: the jar says `attached` at once to a program that connects
 /// while it has an owner, and its description, asked after, follows that.
 fn link(socket: &Path) -> anyhow::Result<OwnJar> {
-    let (mut client, _) = Client::connect(socket, Role::Program, LINK_WAIT, b"")?;
+    let (mut client, _) = super::place::connect(socket, Role::Program, LINK_WAIT, b"")?;
     client.send(&Msg::Describe)?;
     let until = Instant::now() + LINK_WAIT;
     let mut attached = false;

@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use spyc_jar::client::Client;
 use spyc_jar::proto::{JarSignal, Msg, Role};
 
 use super::Place;
@@ -37,15 +36,13 @@ pub fn find(place: Option<Place>) -> Vec<Orphan> {
     let Some(place) = place.or_else(|| Place::for_this_user().ok()) else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(place.sockets()) else {
-        return Vec::new();
+    let sockets = match super::place::sockets_in(place.sockets()) {
+        Ok(sockets) => sockets,
+        Err(e) => {
+            crate::spyc_debug!("orphans: none looked for: {e:#}");
+            return Vec::new();
+        }
     };
-    let mut sockets: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "sock"))
-        .collect();
-    sockets.sort();
     sockets
         .into_iter()
         .filter_map(|socket| orphan(&place, socket))
@@ -58,7 +55,7 @@ fn orphan(place: &Place, socket: PathBuf) -> Option<Orphan> {
         return None;
     }
     super::tokens::load(place, &socket)?;
-    let fields = spyc_jar::client::describe(&socket).ok()?;
+    let fields = super::place::describe(&socket).ok()?;
     let get = |key: &str| {
         fields
             .iter()
@@ -99,7 +96,7 @@ pub fn discard(place: Option<Place>, socket: &Path) -> anyhow::Result<()> {
     };
     let token = super::tokens::load(&place, socket)
         .with_context(|| format!("no token here for the jar at {}", socket.display()))?;
-    let (mut jar, welcome) = Client::connect(socket, Role::Owner, DISCARD_WAIT, &token)?;
+    let (mut jar, welcome) = super::place::connect(socket, Role::Owner, DISCARD_WAIT, &token)?;
     // The program's exit comes in the stream an owner asks for; nothing it
     // printed before is wanted.
     let head = match welcome {

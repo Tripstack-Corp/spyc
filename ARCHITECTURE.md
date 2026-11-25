@@ -1216,7 +1216,15 @@ setting alike: nothing decides what a build does by its version
 - **A socket's directory is this user's** (finding 14): under
   `$XDG_RUNTIME_DIR`, else `$TMPDIR`, else `/tmp/spyc-<uid>`, and both spyc and
   the jar check it is a directory, not a link, owned by this user and closed to
-  others before trusting a socket there. A program finds its jar by
+  others before trusting a socket there. spyc checks it on every path, not
+  only when it starts a jar (the 3.0 review, E2, where another user's
+  `/tmp/spyc-<uid>` got the token and the keys `spyc attach` sent): one check
+  in `jar::place` (`trusted_dir`, `trusted`), and the only connect, lookup
+  and attach to a jar's socket wrap it, which
+  `every_jar_socket_is_reached_through_the_ownership_check` keeps true. spyc
+  checks the runtime directory's `spyc` too, and that the socket itself is a
+  socket of this user's. A jar rebinds a deleted socket only in a directory
+  that passes its own start's check. A program finds its jar by
   `SPYC_JAR_SOCKET`, never by working the path out again.
 - **A tab's program never runs twice** (finding 7). A jar's socket is named
   after its tab, and a saved session records it. A restore that finds the

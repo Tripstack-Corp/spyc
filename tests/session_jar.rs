@@ -1030,7 +1030,6 @@ fn open_to_others(dir: &Path) {
 /// whose pid its jar names, as a planted socket names a pid of its choosing:
 /// that client must not be ended.
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn spyc_attach_refuses_a_sessions_directory_open_to_others() {
     let dirs = Dirs::new();
     let _jar = session(&dirs, NAME);
@@ -1068,7 +1067,6 @@ fn spyc_attach_refuses_a_sessions_directory_open_to_others() {
 /// `spyc shutdown` asks no spyc named by a socket in a sessions directory
 /// open to others (the 3.0 review, E2).
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn spyc_shutdown_refuses_a_sessions_directory_open_to_others() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
@@ -1089,7 +1087,6 @@ fn spyc_shutdown_refuses_a_sessions_directory_open_to_others() {
 /// `spyc --jars` lists no jar from a directory open to others, and says
 /// why (the 3.0 review, E2).
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn spyc_jars_refuses_a_directory_open_to_others() {
     let dirs = Dirs::new();
     let jar = Jar::start(&dirs, dirs.runtime.join("spyc/jars/0123456789abcdef.sock"));

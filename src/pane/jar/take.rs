@@ -6,8 +6,9 @@
 //! welcome's wait; one whose lease a connection of this spyc's still holds
 //! (the tab's own, closed a moment before) is asked again once the jar says
 //! that connection has gone. Only a jar another spyc owns, one this spyc has
-//! no token for, or one that refuses it leaves the tab detached, its screen
-//! saying which.
+//! no token for, one that refuses it, or one the ownership check doesn't
+//! trust (the 3.0 review, E2) leaves the tab detached, its screen saying
+//! which.
 //!
 //! A spyc a `^d` started in the session's own jar is told which spyc it took
 //! the session from (`took_over_from`). That spyc lets its jars go only once
@@ -92,7 +93,7 @@ enum Holder {
 
 /// Who owns the jar at `socket`; `None` when it doesn't answer.
 fn holder(socket: &Path) -> Option<Holder> {
-    let fields = spyc_jar::client::describe(socket).ok()?;
+    let fields = super::place::describe(socket).ok()?;
     let field = |key: &str| {
         fields
             .iter()
@@ -182,16 +183,24 @@ enum Try {
     Owned,
     Refused(String),
     NoToken,
+    /// The ownership check refused the jar's socket (the 3.0 review, E2):
+    /// evidence about the socket, so it isn't asked again.
+    Untrusted(String),
     /// No welcome in time, or the connection lost after one: the jar is
     /// asked again for as long as it runs.
     Silent(String),
 }
 
 fn try_once(place: &Place, socket: &Path, size: (u16, u16)) -> Try {
+    // A socket file gone a moment (its jar binds it again) is a silence; a
+    // directory or a socket the ownership check refuses is evidence.
+    if let Err(e) = super::place::trusted_now(socket) {
+        return Try::Untrusted(format!("{e:#}"));
+    }
     let Some(token) = tokens::load(place, socket) else {
         return Try::NoToken;
     };
-    let (client, welcome) = match Client::connect(socket, Role::Owner, ADOPT_WAIT, &token) {
+    let (client, welcome) = match super::place::connect(socket, Role::Owner, ADOPT_WAIT, &token) {
         Ok(answered) => answered,
         Err(e) => {
             return match e.downcast_ref::<Refusal>() {
@@ -239,6 +248,14 @@ pub(super) fn back(spec: &Spec, socket: &Path, size: (u16, u16)) -> anyhow::Resu
         match try_once(&spec.place, socket, size) {
             Try::Taken(jarred) => return Ok(Some(jarred)),
             Try::NoToken => return Ok(Some(link::detached(socket, &no_token(socket), size))),
+            Try::Untrusted(why) => {
+                let why = format!(
+                    "This tab's jar at {} isn't trusted ({why}). Nothing was taken back or \
+                     started here.\n^a x closes this tab.",
+                    socket.display()
+                );
+                return Ok(Some(link::detached(socket, &why, size)));
+            }
             Try::Refused(why) => {
                 let why = format!(
                     "This tab's jar at {} refused this spyc ({why}). Its program runs on, and \
@@ -466,7 +483,7 @@ pub fn end_held(place: &Place, socket: &Path, watch: Option<&Watch>) -> anyhow::
             "its program still runs in its jar at {}, so nothing was started",
             socket.display()
         );
-        match Client::connect(socket, Role::Owner, left, &token) {
+        match super::place::connect(socket, Role::Owner, left, &token) {
             Ok((client, _)) => return end_through(client, socket, until),
             Err(e) => match e.downcast_ref::<Refusal>() {
                 Some(r) if r.reason == reason::OWNER_PRESENT => match holder(socket) {

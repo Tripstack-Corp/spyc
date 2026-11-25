@@ -873,8 +873,12 @@ fn a_click_on_the_session_segment_opens_the_name_line() {
 fn a_name_another_running_session_goes_by_is_refused() {
     with_mouse(|base| {
         let mut app = session_app(base);
-        let sessions = base.join("sessions");
-        std::fs::create_dir_all(&sessions).unwrap();
+        // Private, and the directory above it too, as spyc requires of a
+        // sessions directory it reads.
+        let sessions = base.join("spyc").join("sessions");
+        std::os::unix::fs::DirBuilderExt::mode(std::fs::DirBuilder::new().recursive(true), 0o700)
+            .create(&sessions)
+            .unwrap();
         let _other = std::os::unix::net::UnixListener::bind(sessions.join("ANISE.sock")).unwrap();
         crate::pane::jar::session::write_name(&sessions.join("ANISE.sock"), "GINGER").unwrap();
         app.runtime.sessions_dir = Some(sessions);

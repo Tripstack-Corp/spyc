@@ -325,11 +325,10 @@ const OWNER_MCP: &str = "owner_mcp";
 
 /// R30a: the MCP socket of the spyc that owns the jar at `socket`, as the jar
 /// says; `None` while no spyc owns it, or when it doesn't answer. Asked as a
-/// lookup, which needs no token, from a directory that must be this user's
-/// alone (finding 14).
+/// lookup, which needs no token, of a socket of this user's in a directory
+/// that is this user's alone (finding 14, the 3.0 review's E2).
 pub fn owner_mcp(socket: &Path) -> Option<std::path::PathBuf> {
-    place::private_dir(socket.parent()?).ok()?;
-    spyc_jar::client::describe(socket)
+    place::describe(socket)
         .ok()?
         .into_iter()
         .find(|(k, v)| k == OWNER_MCP && !v.is_empty())
@@ -676,7 +675,7 @@ fn answer(
 ) -> anyhow::Result<(Client, Msg)> {
     let until = Instant::now() + wait;
     loop {
-        match Client::connect(socket, Role::Owner, ANSWER_TRY, token) {
+        match place::connect(socket, Role::Owner, ANSWER_TRY, token) {
             Ok(answered) => return Ok(answered),
             Err(e) => {
                 if let Some(status) = jar.try_wait().context("wait for spyc-jar")? {

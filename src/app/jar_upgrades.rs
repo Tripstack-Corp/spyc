@@ -231,7 +231,7 @@ fn look(
     build: &str,
 ) -> Looked {
     let runs = |socket: &std::path::Path| {
-        spyc_jar::client::describe(socket)
+        crate::pane::jar::place::describe(socket)
             .ok()
             .and_then(|fields| fields.into_iter().find(|(k, _)| k == "build"))
             .map(|(_, v)| v)

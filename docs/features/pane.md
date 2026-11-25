@@ -377,6 +377,12 @@ why, and the rest stay on the build they run.
 agent and project, its program's pid, its jar's pid, the build its jar runs, and whether a spyc
 owns it, with that spyc's pid.
 
+spyc trusts a jar only in a directory that is yours alone, closed to everyone else. Where
+another user made the directory first or can write in it, as can happen on Linux with neither
+`XDG_RUNTIME_DIR` nor `TMPDIR` set (`/tmp/spyc-<uid>`), `spyc attach`, `spyc shutdown`,
+`spyc --jars` and a new tab refuse it and say why, and no tab starts in a jar until the
+directory is yours again.
+
 A spyc can also run in a jar of its own, so it outlives the terminal it was started in.
 `spyc attach NAME` attaches your terminal to such a session by its name (the one spyc shows,
 such as `CORIANDER_CLOVE`). With no name it attaches to the one session running, or lists them
