@@ -104,6 +104,12 @@ jobs:
         run: make test
       - name: Build-directory script tests
         run: make test-scripts
+      # Every released spyc-jar (3.0.0 on), fetched from its release, driven by
+      # this build's client: a released jar runs on under every later spyc.
+      - name: Released jars (jar_compat)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: make test-jar-compat
 
   package:
     name: Package (cargo package --workspace)

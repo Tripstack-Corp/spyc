@@ -135,6 +135,14 @@ test-jar-differ: ## Upgrade tests against a jar built to differ (part of make te
 	cargo build --locked --bin spyc-jar --features spyc-jar/differ --target-dir $(TARGET_DIR)/differ
 	SPYC_JAR_DIFFER_BIN=$(TARGET_DIR)/differ/debug/spyc-jar cargo test --locked --test jar_differ -- --include-ignored
 
+# A8: every stable release's spyc-jar from 3.0.0 on, driven by this build
+# (tests/jar_compat.rs, with SPYC_JAR_OLD_BIN naming it). scripts/jar_fixtures.py
+# fetches each from its release's tarball into the build directory once; one
+# it can't have fails the run. Needs `gh` and the network. CI's test job runs it.
+.PHONY: test-jar-compat
+test-jar-compat: target-cap ## Drive each released spyc-jar (3.0.0 on) with this build (needs gh)
+	python3 scripts/jar_fixtures.py --cache $(TARGET_DIR)/jar-fixtures
+
 .PHONY: lint
 lint: target-cap ## Clippy with pedantic + nursery
 	cargo clippy --locked --workspace --all-targets -- -D warnings
