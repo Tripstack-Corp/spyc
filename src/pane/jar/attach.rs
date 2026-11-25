@@ -306,10 +306,20 @@ fn address_of(socket: &Path) -> Option<String> {
 /// The client attached to `session` now, read from its jar after any
 /// question, and when it started: `None` with none attached. A pid is the
 /// jar's client only while the jar names it, so the jar is asked on each
-/// side of reading the start time.
+/// side of reading the start time. A session whose jar has gone, or holds
+/// only its spyc's exit, ended while `spyc attach` asked.
 fn attached_now(session: &Running) -> anyhow::Result<Option<(i32, u64)>> {
     let until = Instant::now() + TAKEOVER_WAIT;
     loop {
+        let gone = matches!(
+            socket_state(&session.socket),
+            SocketState::Stale | SocketState::Missing
+        );
+        anyhow::ensure!(
+            !gone && !ended(&session.socket),
+            "{} ended while `spyc attach` asked; nothing to attach to",
+            session.name
+        );
         if let Ok(first) = client_of(&session.socket) {
             let Some(pid) = first else {
                 return Ok(None);
@@ -470,7 +480,6 @@ mod tests {
     /// `spyc attach` asked which to take says so, rather than that it can't
     /// tell which terminal is attached.
     #[test]
-    #[ignore = "red until spyc attach says a session that ended did (fix/attach-session-gone)"]
     fn a_takeover_of_a_session_that_ended_meanwhile_says_it_ended() {
         let dir = tempfile::tempdir().unwrap();
         let gone = Running {
