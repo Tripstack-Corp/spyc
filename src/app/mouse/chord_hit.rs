@@ -208,6 +208,21 @@ mod tests {
     }
 
     #[test]
+    fn a_label_with_a_word_past_the_cap_stays_inside_its_column() {
+        let label =
+            "T=archive_container|archive_name|dsl_parse|render_markdown|highlight|jar_frame";
+        let layout = chord_hint_layout(&[("x", label)], AREA, None, None).expect("a box");
+        let lines: Vec<&HintLine> = layout.columns.iter().flatten().collect();
+        assert!(lines.len() > 1, "the word wraps");
+        assert!(
+            lines
+                .iter()
+                .all(|l| crate::ui::display_width(&l.label) <= layout.label_w),
+            "no line runs past the label column: {lines:?}"
+        );
+    }
+
+    #[test]
     fn the_box_steps_off_a_divider_its_edge_would_land_on() {
         let centred = chord_hint_layout(&ROWS, AREA, None, None)
             .expect("a box")

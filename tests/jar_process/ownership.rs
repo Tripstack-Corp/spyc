@@ -60,14 +60,17 @@ fn an_owner_that_pings_keeps_its_lease_while_it_stops_reading() {
         std::thread::sleep(deadline / 5);
     }
     let mut seen = Seen::default();
-    let until = Instant::now() + WAIT;
+    let mut heard = Instant::now();
     while counts(&seen).last().is_none_or(|n| *n < 50_000) {
         assert!(
-            Instant::now() < until,
-            "timed out; saw {} bytes",
+            Instant::now() < heard + WAIT,
+            "nothing for {WAIT:?}; saw {} bytes",
             seen.text.len()
         );
         let msg = rx.recv(Duration::from_millis(200));
+        if matches!(msg, Ok(Some(_))) {
+            heard = Instant::now();
+        }
         let msg = msg.unwrap_or_else(|e| {
             panic!(
                 "the jar ended a live owner's connection after {} bytes: {e:#}",
@@ -166,7 +169,7 @@ fn an_owner_paused_mid_frame_makes_an_upgrade_busy() {
                 binary: next.display().to_string(),
             })
             .expect("upgrade");
-        recv_matching(reader, |m| {
+        recv_matching_within(reader, UPGRADE_AT_MOST, |m| {
             matches!(m, Msg::Refused { .. } | Msg::Upgraded { .. })
         })
     };
