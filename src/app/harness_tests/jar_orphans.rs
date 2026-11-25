@@ -94,6 +94,31 @@ fn a_discarded_jar_no_spyc_owns_ends_with_its_program() {
     });
 }
 
+/// A key that reached spyc before the offer was ever drawn answers nothing:
+/// typed for whatever the screen showed then, a `d` would end every program
+/// the offer names.
+#[test]
+#[ignore = "red until the orphan prompt is fixed (fix/orphan-discard-confirm)"]
+fn a_key_before_the_offer_is_drawn_doesnt_answer_it() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let (program, socket) = left_by_a_crash(dir.path());
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        look(&mut app);
+        assert!(offering(&app), "spyc offers the jar back");
+        app.handle_key(key('d')).unwrap();
+        let answered = !offering(&app);
+        let ran = running(program);
+        // The jar no spyc owns, ended by the test once it has looked.
+        let _ = crate::pane::jar::orphans::discard(app.runtime.jar_place.clone(), &socket);
+        assert!(
+            !answered,
+            "a key typed before the offer appeared answered it"
+        );
+        assert!(ran, "its program was ended");
+    });
+}
+
 /// A jar this spyc holds is never offered.
 #[test]
 fn a_jar_this_spyc_holds_is_not_offered() {
