@@ -204,13 +204,16 @@ pub enum McpCommand {
     /// go (`spyc/release`): saved as no running spyc's, its jars let go, and
     /// spyc gone. The answer names the session's file.
     Release,
-    /// Whether a control request (`spyc/shutdown`, `spyc/release`,
-    /// `spyc/upgrade`) may be acted on: `token`, the one it carried, is the
-    /// token of the session jar this spyc runs in (the 3.0 review, E1). A spyc
-    /// in no session jar of its own takes none. Asked before each.
+    /// A control request (`spyc/shutdown`, `spyc/release`, `spyc/upgrade`)
+    /// asks to be acted on (the 3.0 review, E1). The loop answers the socket
+    /// of the session jar this spyc runs in, whose own check of `token` the
+    /// socket thread then asks for, or refuses: a spyc in no session jar of its
+    /// own takes none, and a request with no token is refused. `refused`
+    /// tells the loop the jar refused the token, for it to say so.
     Authorize {
         method: String,
         token: Option<String>,
+        refused: Option<String>,
     },
     /// What Claude Code's statusline told `spyc --statusline` in a pane: the
     /// plan's rate-limit windows, the context window and the vim mode.

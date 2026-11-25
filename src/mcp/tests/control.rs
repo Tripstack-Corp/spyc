@@ -140,9 +140,15 @@ fn an_upgrade_request_with_a_refused_token_is_answered_why() {
 /// the loop's reason.
 #[test]
 fn an_upgrade_request_the_loop_refuses_is_answered_with_its_reason() {
+    let (_dir, socket) = jar_with_token(b"tok");
+    let named = json!({ "socket": socket }).to_string();
     let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"tok"}});
-    let reply = answer_to(&msg, |said| {
-        if said == "Upgrade" {
+    let reply = answer_to(&msg, move |said| {
+        if said.starts_with("Authorize") {
+            McpResponse::Ok {
+                message: named.clone(),
+            }
+        } else if said == "Upgrade" {
             McpResponse::Error {
                 message: "no newer spyc is installed".into(),
             }
@@ -159,13 +165,88 @@ fn an_upgrade_request_the_loop_refuses_is_answered_with_its_reason() {
 /// One the loop accepts is answered `{"upgrading": true}`.
 #[test]
 fn an_upgrade_request_the_loop_accepts_is_answered_upgrading() {
+    let (_dir, socket) = jar_with_token(b"tok");
+    let named = json!({ "socket": socket }).to_string();
     let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"tok"}});
-    let reply = answer_to(&msg, |said| McpResponse::Ok {
-        message: if said == "Upgrade" {
+    let reply = answer_to(&msg, move |said| McpResponse::Ok {
+        message: if said.starts_with("Authorize") {
+            named.clone()
+        } else if said == "Upgrade" {
             r#"{"upgrading": true}"#.into()
         } else {
             "{}".into()
         },
     });
     assert_eq!(reply["result"]["upgrading"], json!(true), "{reply}");
+}
+
+/// A session jar of the test's own, at `<tmp>/spyc/sessions/T.sock` as spyc
+/// lays them out, that welcomes a connection whose token is `token` and
+/// refuses any other, as a jar does.
+fn jar_with_token(
+    token: &'static [u8],
+) -> (crate::pane::jar::test_dir::TestDir, std::path::PathBuf) {
+    use spyc_jar::proto::{self, Msg};
+    use std::os::unix::fs::DirBuilderExt;
+    let dir = crate::pane::jar::test_dir::TestDir::new("ct");
+    let sessions = dir.path().join("spyc").join("sessions");
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&sessions)
+        .unwrap();
+    let socket = sessions.join("T.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(mut conn) = conn else { return };
+            let Ok(Some(Msg::Hello { token: got, .. })) = proto::read_msg(&mut conn) else {
+                continue;
+            };
+            let answer = if got == token {
+                Msg::Welcome {
+                    version: proto::VERSION,
+                    child_pid: std::process::id(),
+                    head: 0,
+                    base: 0,
+                    rows: 24,
+                    cols: 80,
+                }
+            } else {
+                Msg::Refused {
+                    reason: 3,
+                    why: "bad token".into(),
+                }
+            };
+            let _ = proto::write_msg(&mut conn, &answer);
+        }
+    });
+    (dir, socket)
+}
+
+/// The jar, not the loop, decides a token (the refuter on E1): one the jar
+/// refuses is refused, though the loop named the jar, and the loop is told.
+#[test]
+fn a_token_the_jar_refuses_is_refused_and_the_loop_told() {
+    let (_dir, socket) = jar_with_token(b"the-jars-own-token");
+    let named = json!({ "socket": socket }).to_string();
+    let (told_tx, told) = mpsc::channel::<String>();
+    let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/shutdown", "params":{"token":"written-in-the-file"}});
+    let reply = answer_to(&msg, move |said| {
+        let _ = told_tx.send(said.to_string());
+        McpResponse::Ok {
+            message: if said.starts_with("Authorize") {
+                named.clone()
+            } else {
+                "{}".into()
+            },
+        }
+    });
+    assert!(reply.get("error").is_some(), "{reply}");
+    let heard: Vec<String> = told.try_iter().collect();
+    assert!(!heard.iter().any(|c| c == "Shutdown"), "{heard:?}");
+    assert!(
+        heard.iter().any(|c| c.contains("refused: Some")),
+        "the loop wasn't told: {heard:?}"
+    );
 }
