@@ -223,9 +223,9 @@ impl Client {
         let (queue, frames) = mpsc::channel();
         let queued = Arc::new(AtomicUsize::new(0));
         let writer = (Arc::clone(&sock), Arc::clone(&queued));
-        std::thread::Builder::new()
-            .name("jar-outbox".into())
-            .spawn(move || write_queued(&writer.0, &frames, &writer.1, idle))?;
+        crate::threads::start("jar-outbox", move || {
+            write_queued(&writer.0, &frames, &writer.1, idle);
+        })?;
         Ok((
             Receiver(self),
             Outbox {

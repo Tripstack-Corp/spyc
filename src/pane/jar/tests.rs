@@ -2216,16 +2216,262 @@ fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     }
 }
 
-/// Review finding B1: no thread in the `spyc-jar` crate starts with a bare
-/// `std::thread::spawn`, which panics when the OS refuses a thread (ending
-/// the jar on its main thread, or leaving a lease or an upgrade claimed on
-/// another). Every one goes through `threads::start`, which hands the
-/// refusal back for the site to fail what wanted the thread.
+/// Review finding B1: no thread in the `spyc-jar` crate is started so that
+/// the OS's refusal panics (ending the jar on its main thread, or leaving a
+/// lease or an upgrade claimed on another). Every one goes through
+/// `threads::start`, which hands the refusal back for the site to fail what
+/// wanted the thread.
+///
+/// Read from each file's syntax (`syn`), production code only. It refuses,
+/// anywhere but `threads.rs`:
+/// - std's `thread::spawn`, `thread::Builder` and `thread::scope`, called or
+///   imported, `std::thread` renamed included (`use std::thread as t;
+///   t::spawn(..)`), and a glob of `std::thread`;
+/// - the same names inside a macro's tokens (`vec![std::thread::spawn(..)]`),
+///   which `syn` leaves unparsed;
+/// - `.expect(..)` or `.unwrap()` taken on a `threads::start(..)` (or a
+///   `use` of it under another name) or on any `.spawn(..)`: directly, at
+///   the end of a chain of method calls from one (`.ok().unwrap()`,
+///   `.map(..).expect(..)`), or on a `let` binding such a start or chain
+///   was put in. A `?` ends the chain: the refusal has been handed back;
+/// - the same in the function-call form, `Result::unwrap(threads::start(..))`,
+///   `Option::expect(..)` and the like, on a start, a chain or a binding.
+///
+/// It can't see: a refusal panicked on some other way (a `match` whose `Err`
+/// arm panics, `unwrap_or_else(|e| panic!(..))`); a start's handle unwrapped
+/// after it is passed on (to a function, a field, a tuple, an array or an
+/// iterator: `[threads::start(..)].into_iter().next().map(Result::unwrap)`);
+/// `unwrap` passed as a function (`.map(Result::unwrap)`); `.expect` taken on
+/// a start inside a macro's tokens; and a thread a dependency starts.
 #[test]
 fn every_thread_the_jar_starts_can_be_refused() {
+    use std::collections::HashSet;
+    use syn::visit::Visit;
+
+    const STARTERS: [&str; 3] = ["spawn", "Builder", "scope"];
+
+    /// What a file's `use` items call std's `thread` module and
+    /// `threads::start`.
+    #[derive(Default)]
+    struct Names {
+        thread: HashSet<String>,
+        start: HashSet<String>,
+    }
+
+    impl Names {
+        fn uses(&mut self, prefix: &mut Vec<String>, tree: &syn::UseTree) {
+            match tree {
+                syn::UseTree::Path(p) => {
+                    prefix.push(p.ident.to_string());
+                    self.uses(prefix, &p.tree);
+                    prefix.pop();
+                }
+                syn::UseTree::Name(n) => self.name(prefix, &n.ident, &n.ident),
+                syn::UseTree::Rename(r) => self.name(prefix, &r.ident, &r.rename),
+                syn::UseTree::Group(g) => {
+                    for t in &g.items {
+                        self.uses(prefix, t);
+                    }
+                }
+                syn::UseTree::Glob(_) => {}
+            }
+        }
+
+        fn name(&mut self, prefix: &[String], ident: &syn::Ident, called: &syn::Ident) {
+            let last = prefix.last().map(String::as_str);
+            if ident == "thread" || (ident == "self" && last == Some("thread")) {
+                self.thread.insert(called.to_string());
+            }
+            if ident == "start" && last == Some("threads") {
+                self.start.insert(called.to_string());
+            }
+        }
+    }
+
+    impl<'ast> Visit<'ast> for Names {
+        fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+            self.uses(&mut Vec::new(), &item.tree);
+        }
+    }
+
+    struct Scan {
+        file: String,
+        in_helper: bool,
+        names: Names,
+        bound: HashSet<String>,
+        unhandled: Vec<String>,
+        started: usize,
+    }
+
+    impl Scan {
+        /// Whether `names` holds std's thread starters, under any name the
+        /// file gives `thread`.
+        fn std_starter(&self, names: &[String]) -> bool {
+            names.windows(2).any(|w| {
+                (w[0] == "thread" || self.names.thread.contains(&w[0]))
+                    && STARTERS.contains(&w[1].as_str())
+            })
+        }
+
+        /// Whether `path` names `threads::start`, under any name.
+        fn is_start(&self, path: &syn::Path) -> bool {
+            let names: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+            names
+                .windows(2)
+                .any(|w| w[0] == "threads" && w[1] == "start")
+                || (names.len() == 1 && self.names.start.contains(&names[0]))
+        }
+
+        /// Whether `expr` starts a thread (or a process) and gives back its
+        /// refusal.
+        fn starts(&self, expr: &syn::Expr) -> bool {
+            match expr {
+                syn::Expr::Call(call) => {
+                    matches!(&*call.func, syn::Expr::Path(p) if self.is_start(&p.path))
+                }
+                syn::Expr::MethodCall(m) => m.method == "spawn",
+                syn::Expr::Path(p) => p
+                    .path
+                    .get_ident()
+                    .is_some_and(|i| self.bound.contains(&i.to_string())),
+                _ => false,
+            }
+        }
+
+        /// Whether `expr` is a start, or a chain of method calls from one
+        /// that still carries its refusal.
+        fn chained_from_start(&self, expr: &syn::Expr) -> bool {
+            match expr {
+                syn::Expr::MethodCall(m) if !self.starts(expr) => {
+                    self.chained_from_start(&m.receiver)
+                }
+                syn::Expr::Paren(p) => self.chained_from_start(&p.expr),
+                _ => self.starts(expr),
+            }
+        }
+
+        fn refuse(&mut self, what: String) {
+            if !self.in_helper {
+                self.unhandled.push(format!("{}: {what}", self.file));
+            }
+        }
+
+        fn uses(&mut self, prefix: &mut Vec<String>, tree: &syn::UseTree) {
+            match tree {
+                syn::UseTree::Path(p) => {
+                    prefix.push(p.ident.to_string());
+                    self.uses(prefix, &p.tree);
+                    prefix.pop();
+                }
+                syn::UseTree::Name(n) => self.used(prefix, &n.ident),
+                syn::UseTree::Rename(r) => self.used(prefix, &r.ident),
+                syn::UseTree::Group(g) => {
+                    for t in &g.items {
+                        self.uses(prefix, t);
+                    }
+                }
+                syn::UseTree::Glob(_) => {
+                    if prefix.last().is_some_and(|l| l == "thread") {
+                        self.refuse(format!("use {}::*", prefix.join("::")));
+                    }
+                }
+            }
+        }
+
+        fn used(&mut self, prefix: &[String], ident: &syn::Ident) {
+            let mut names = prefix.to_vec();
+            names.push(ident.to_string());
+            if self.std_starter(&names) {
+                self.refuse(format!("use {}", names.join("::")));
+            }
+        }
+    }
+
+    impl<'ast> Visit<'ast> for Scan {
+        fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+            self.uses(&mut Vec::new(), &item.tree);
+        }
+
+        fn visit_path(&mut self, path: &'ast syn::Path) {
+            let names: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+            if self.std_starter(&names) {
+                self.refuse(names.join("::"));
+            }
+            if self.is_start(path) {
+                self.started += 1;
+            }
+            syn::visit::visit_path(self, path);
+        }
+
+        fn visit_local(&mut self, local: &'ast syn::Local) {
+            if let (syn::Pat::Ident(p), Some(init)) = (&local.pat, &local.init)
+                && self.chained_from_start(&init.expr)
+            {
+                self.bound.insert(p.ident.to_string());
+            }
+            syn::visit::visit_local(self, local);
+        }
+
+        fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+            if (call.method == "expect" || call.method == "unwrap")
+                && self.chained_from_start(&call.receiver)
+            {
+                self.refuse(format!(
+                    ".{}() on a start or a chain from one, which panics when the OS refuses it",
+                    call.method
+                ));
+            }
+            syn::visit::visit_expr_method_call(self, call);
+        }
+
+        fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {
+            if let syn::Expr::Path(p) = &*call.func
+                && let Some(last) = p.path.segments.last()
+                && (last.ident == "expect" || last.ident == "unwrap")
+                && p.path.segments.len() >= 2
+                && call
+                    .args
+                    .first()
+                    .is_some_and(|a| self.chained_from_start(a))
+            {
+                self.refuse(format!(
+                    "{}(..) on a start or a chain from one, which panics when the OS refuses it",
+                    p.path
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect::<Vec<_>>()
+                        .join("::")
+                ));
+            }
+            syn::visit::visit_expr_call(self, call);
+        }
+
+        fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+            let tokens: String = mac
+                .tokens
+                .to_string()
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            let thread: Vec<String> = std::iter::once("thread".to_string())
+                .chain(self.names.thread.iter().cloned())
+                .collect();
+            for name in thread {
+                for starter in STARTERS {
+                    if tokens.contains(&format!("{name}::{starter}")) {
+                        self.refuse(format!("{name}::{starter} in a macro's tokens"));
+                    }
+                }
+            }
+            syn::visit::visit_macro(self, mac);
+        }
+    }
+
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
-    let mut bare = Vec::new();
+    let mut unhandled = Vec::new();
     let mut started = 0;
+    let mut files = 0;
     let mut dirs = vec![src];
     while let Some(dir) = dirs.pop() {
         for entry in std::fs::read_dir(&dir).unwrap() {
@@ -2239,22 +2485,31 @@ fn every_thread_the_jar_starts_can_be_refused() {
             }
             let text =
                 crate::guard_support::production_half(&std::fs::read_to_string(&path).unwrap());
-            for line in text
-                .lines()
-                .filter(|l| !l.trim_start().starts_with("//") && l.contains("thread::spawn"))
-            {
-                bare.push(format!("{}: {}", path.display(), line.trim()));
-            }
-            started += text.matches("threads::start(").count();
+            let file = syn::parse_file(&text)
+                .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()));
+            let mut names = Names::default();
+            names.visit_file(&file);
+            let mut scan = Scan {
+                file: path.display().to_string(),
+                in_helper: path.ends_with("threads.rs"),
+                names,
+                bound: HashSet::new(),
+                unhandled: Vec::new(),
+                started: 0,
+            };
+            scan.visit_file(&file);
+            unhandled.extend(scan.unhandled);
+            started += scan.started;
+            files += 1;
         }
     }
     assert!(
-        started >= 15,
-        "premise: the scan finds the jar's threads, {started} of them"
+        files > 10 && started >= 15,
+        "premise: the scan reads the jar's {files} files and finds its threads, {started} of them"
     );
     assert!(
-        bare.is_empty(),
-        "a bare thread::spawn panics when the OS refuses a thread; use threads::start: {bare:#?}"
+        unhandled.is_empty(),
+        "a thread whose refusal panics; start it with threads::start and fail what wanted it: {unhandled:#?}"
     );
 }
 
