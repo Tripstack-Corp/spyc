@@ -364,6 +364,7 @@ impl AppState {
             | PromptKind::LuaRunaway
             | PromptKind::JarlessFallback
             | PromptKind::OrphanJars
+            | PromptKind::OrphanJarsDiscard
             | PromptKind::ArchiveMountConfirm { .. }
             | PromptKind::ArchiveWriteConfirm { .. }
             | PromptKind::GraveyardPurgeAllConfirm => PromptResult::Handled,

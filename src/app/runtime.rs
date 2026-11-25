@@ -112,6 +112,12 @@ pub(super) struct Runtime {
     pub(super) terminal_noted: bool,
     /// A `^d` in spyc's own jar, for the loop to carry out with the terminal.
     pub(super) detach_pending: bool,
+    /// How many input events the input reader has sent the loop
+    /// (`proc::spawn_input_reader`), and how many the loop has taken: a
+    /// prompt drawn after the reader had sent N takes only input N+1 on
+    /// (`orphan_jars`).
+    pub(super) inputs_read: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    pub(super) inputs_handled: u64,
     /// `^d` in a plain spyc, for the loop to save the session and start its
     /// jar before it hands over (`App::prepare_handover`).
     pub(super) handover_asked: bool,
@@ -427,6 +433,8 @@ impl Runtime {
             },
             terminal_noted: false,
             detach_pending: false,
+            inputs_read: std::sync::Arc::default(),
+            inputs_handled: 0,
             handover_asked: false,
             handover: None,
             upgrade_pending: false,

@@ -286,6 +286,9 @@ impl App {
         read_err: &std::sync::mpsc::Receiver<std::io::Error>,
         ctx: &mut RunCtx,
     ) -> Result<DispatchFlow> {
+        if matches!(effective, Ok(Message::Input(_))) {
+            self.runtime.inputs_handled += 1;
+        }
         match effective {
             // A release is no keypress and redraws nothing: it only reaches a
             // program that asked for releases.
@@ -462,6 +465,12 @@ impl App {
             // round-trip hangs/errs over SSH and races the input reader.
             crate::force_full_repaint(terminal)?;
         }
+        // Read before the frame is built: input the reader sent by then was
+        // typed before anything this frame shows was on the screen.
+        let inputs_before = self
+            .runtime
+            .inputs_read
+            .load(std::sync::atomic::Ordering::Acquire);
         let draw_start = std::time::Instant::now();
         let frame_area = terminal
             .draw(|frame| {
@@ -493,6 +502,7 @@ impl App {
         if sync_update {
             let _ = crossterm::execute!(terminal.backend_mut(), EndSynchronizedUpdate);
         }
+        self.note_frame_drawn(inputs_before);
         if self.view.show_activity && !activity_only {
             self.view.activity.live.draws += 1;
             self.view.activity.live.bytes +=
@@ -590,7 +600,7 @@ impl App {
         // tears the thread down when run() returns. Phase 3a/3b: the watcher,
         // git forwarder, and pane workers (via `pane_wake_tx`) also feed the
         // channel; tasks / MCP stay polled until 3c/3d.
-        let reader_handle = spawn_input_reader(msg_tx);
+        let reader_handle = spawn_input_reader(msg_tx, self.runtime.inputs_read.clone());
         let read_err = &reader_handle.read_err;
         // Phase 3a: extra senders (watcher/forwarder) keep the channel
         // Connected after the reader thread dies, so the `Err(Disconnected)`

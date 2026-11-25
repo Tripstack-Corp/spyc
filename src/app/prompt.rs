@@ -189,9 +189,12 @@ pub enum PromptKind {
     /// `[not started]`; any other key re-raises it.
     JarlessFallback,
     /// Jars no spyc owns were found at the start (`app::orphan_jars`): `r`
-    /// restores them, `d` discards them, `Esc` leaves them running; any
-    /// other key re-raises it.
+    /// restores them, `d` asks [`Self::OrphanJarsDiscard`], `Esc` leaves
+    /// them running; any other key re-raises it.
     OrphanJars,
+    /// `d` at [`Self::OrphanJars`]: end their programs? Only `y`/`Y` does;
+    /// any other key goes back to the offer.
+    OrphanJarsDiscard,
 }
 
 impl PromptKind {
@@ -205,6 +208,7 @@ impl PromptKind {
                 | Self::ProjectTabsConsent { .. }
                 | Self::JarlessFallback
                 | Self::OrphanJars
+                | Self::OrphanJarsDiscard
         )
     }
 

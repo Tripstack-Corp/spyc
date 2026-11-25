@@ -4,8 +4,15 @@
 //! keeps (`jar::orphans`): what a crash left that no `spyc -r` took back.
 //! spyc names them in a pop-up (`PromptKind::OrphanJars`) and offers to
 //! restore them, each pane as a tab in the project it was in and each task or
-//! capture as a background task, or to discard them, ending their programs.
-//! Not now leaves them running, for `spyc --jars` to list.
+//! capture as a background task, or to discard them, ending their programs,
+//! which it asks about again (`PromptKind::OrphanJarsDiscard`): only `y` there
+//! ends them. Not now leaves them running, for `spyc --jars` to list.
+//!
+//! Neither pop-up takes a key typed before it appeared: one is answered only
+//! by input the reader sent after the loop began the frame that first drew
+//! it (`note_frame_drawn`, against the counts `run` and `proc` keep). A
+//! user typing into what they took for their session would otherwise answer
+//! it.
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +31,9 @@ pub(super) struct OrphanJars {
     looked: bool,
     /// What it found that this spyc doesn't hold, waiting on the answer.
     found: Vec<Orphan>,
+    /// How many inputs the reader had sent when the pop-up up now was first
+    /// drawn; `None` until it has been.
+    shown_after: Option<u64>,
 }
 
 impl App {
@@ -132,24 +142,55 @@ impl App {
             return false;
         }
         let names: Vec<String> = found.iter().map(described).collect();
-        self.state.mode = Mode::Prompting(Prompt::simple(
-            PromptKind::OrphanJars,
-            format!(
-                "{} jar(s) no spyc owns, their programs still running: {}. Restore them \
-                 here, or discard them, ending their programs?",
-                found.len(),
-                names.join(", ")
-            ),
-        ));
+        let text = format!(
+            "{} jar(s) no spyc owns, their programs still running: {}. Restore them \
+             here, or discard them, ending their programs?",
+            found.len(),
+            names.join(", ")
+        );
+        self.ask_about_orphans(PromptKind::OrphanJars, text);
         true
     }
 
-    /// The answer: `r` restores them, `d` discards them, `Esc` leaves them
-    /// running, and any other key asks again.
+    /// Put up one of the two pop-ups, to be answered once it has been drawn.
+    fn ask_about_orphans(&mut self, kind: PromptKind, text: String) {
+        self.runtime.orphan_jars.shown_after = None;
+        self.state.mode = Mode::Prompting(Prompt::simple(kind, text));
+    }
+
+    /// A frame reached the terminal, built once the reader had sent
+    /// `inputs_before`: a pop-up about jars no spyc owns drawn in it for the
+    /// first time is answered only by input the reader sent after that.
+    pub(super) const fn note_frame_drawn(&mut self, inputs_before: u64) {
+        let up = matches!(
+            &self.state.mode,
+            Mode::Prompting(p)
+                if matches!(p.kind, PromptKind::OrphanJars | PromptKind::OrphanJarsDiscard)
+        );
+        if up && self.runtime.orphan_jars.shown_after.is_none() {
+            self.runtime.orphan_jars.shown_after = Some(inputs_before);
+        }
+    }
+
+    /// Whether the input the loop is taking was sent after the pop-up up
+    /// now was first drawn.
+    fn typed_after_the_ask(&self) -> bool {
+        self.runtime
+            .orphan_jars
+            .shown_after
+            .is_some_and(|sent| self.runtime.inputs_handled > sent)
+    }
+
+    /// The answer: `r` restores them, `d` asks whether to end their
+    /// programs, `Esc` leaves them running, and any other key asks again. A
+    /// key typed before the pop-up appeared answers nothing.
     pub(in crate::app) fn handle_orphan_jars_key(&mut self, key: KeyEvent) -> Vec<Effect> {
-        let prompt = std::mem::replace(&mut self.state.mode, Mode::Normal);
+        if !self.typed_after_the_ask() {
+            return Vec::new();
+        }
         match key.code {
             KeyCode::Char('r' | 'R') => {
+                self.state.mode = Mode::Normal;
                 let found = std::mem::take(&mut self.runtime.orphan_jars.found);
                 let n = found.len();
                 self.restore_orphans(found);
@@ -157,24 +198,50 @@ impl App {
                     .flash_info(format!("jars: taking back {n} no spyc owned"));
             }
             KeyCode::Char('d' | 'D') => {
-                let found = std::mem::take(&mut self.runtime.orphan_jars.found);
-                let n = found.len();
-                let place = self.runtime.jar_place.clone();
-                std::thread::spawn(move || {
-                    for orphan in found {
-                        let _ = crate::pane::jar::orphans::discard(place.clone(), &orphan.socket);
-                    }
-                });
-                self.state
-                    .flash_info(format!("jars: ending {n} no spyc owned"));
+                let found = &self.runtime.orphan_jars.found;
+                let names: Vec<String> = found.iter().map(described).collect();
+                let text = format!(
+                    "End {} program(s) no spyc owns: {}? Their jars end with them, and what \
+                     they were doing is lost.",
+                    found.len(),
+                    names.join(", ")
+                );
+                self.ask_about_orphans(PromptKind::OrphanJarsDiscard, text);
             }
             KeyCode::Esc => {
+                self.state.mode = Mode::Normal;
                 self.runtime.orphan_jars.found.clear();
                 self.state
                     .flash_info("jars: left running (spyc --jars lists them)");
             }
-            _ => self.state.mode = prompt,
+            _ => {}
         }
+        Vec::new()
+    }
+
+    /// The answer to whether to end them: `y` ends their programs, and any
+    /// other key goes back to the offer. A key typed before it appeared
+    /// answers nothing.
+    pub(in crate::app) fn handle_orphan_jars_discard_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        if !self.typed_after_the_ask() {
+            return Vec::new();
+        }
+        if !matches!(key.code, KeyCode::Char('y' | 'Y')) {
+            self.state.mode = Mode::Normal;
+            self.offer_orphan_jars();
+            return Vec::new();
+        }
+        self.state.mode = Mode::Normal;
+        let found = std::mem::take(&mut self.runtime.orphan_jars.found);
+        let n = found.len();
+        let place = self.runtime.jar_place.clone();
+        std::thread::spawn(move || {
+            for orphan in found {
+                let _ = crate::pane::jar::orphans::discard(place.clone(), &orphan.socket);
+            }
+        });
+        self.state
+            .flash_info(format!("jars: ending {n} no spyc owned"));
         Vec::new()
     }
 

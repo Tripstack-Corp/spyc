@@ -46,6 +46,33 @@ fn offering(app: &App) -> bool {
     matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::OrphanJars))
 }
 
+fn asking_to_end(app: &App) -> bool {
+    matches!(&app.state.mode, Mode::Prompting(p) if matches!(p.kind, PromptKind::OrphanJarsDiscard))
+}
+
+/// What is up now drawn, as the loop draws a frame.
+fn drawn(app: &mut App) {
+    let sent = app
+        .runtime
+        .inputs_read
+        .load(std::sync::atomic::Ordering::SeqCst);
+    app.note_frame_drawn(sent);
+}
+
+/// `c` typed now: read by the input reader, then taken by the loop.
+fn typed(app: &mut App, c: char) {
+    app.runtime
+        .inputs_read
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    taken(app, c);
+}
+
+/// `c`, read by the input reader earlier, taken by the loop now.
+fn taken(app: &mut App, c: char) {
+    app.runtime.inputs_handled += 1;
+    app.handle_key(key(c)).unwrap();
+}
+
 fn running(pid: i32) -> bool {
     rustix::process::Pid::from_raw(pid)
         .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
@@ -61,9 +88,10 @@ fn a_jar_no_spyc_owns_is_offered_and_restored_as_its_tab() {
         let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
         look(&mut app);
         assert!(offering(&app), "spyc offers the jar back");
-        app.handle_key(key('x')).unwrap();
+        drawn(&mut app);
+        typed(&mut app, 'x');
         assert!(offering(&app), "a stray key doesn't answer");
-        app.handle_key(key('r')).unwrap();
+        typed(&mut app, 'r');
         assert!(!offering(&app));
         land(&mut app);
         assert!(tabs(&mut app).active().adopted(), "its jar was taken back");
@@ -78,7 +106,8 @@ fn a_jar_no_spyc_owns_is_offered_and_restored_as_its_tab() {
     });
 }
 
-/// Discarded, a jar no spyc owns ends, and its program with it.
+/// Discarded, a jar no spyc owns ends, and its program with it: `d` asks
+/// first, and `y` there ends them.
 #[test]
 fn a_discarded_jar_no_spyc_owns_ends_with_its_program() {
     let dir = short_dir();
@@ -87,10 +116,53 @@ fn a_discarded_jar_no_spyc_owns_ends_with_its_program() {
         let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
         look(&mut app);
         assert!(offering(&app));
-        app.handle_key(key('d')).unwrap();
+        drawn(&mut app);
+        typed(&mut app, 'd');
+        assert!(asking_to_end(&app), "`d` asks before it ends anything");
+        assert!(running(program), "`d` alone ended the program");
+        drawn(&mut app);
+        typed(&mut app, 'y');
         eventually("the jar and its program ended", || {
             !running(program) && !socket.exists()
         });
+    });
+}
+
+/// Keys the reader read before a pop-up about jars no spyc owns was drawn
+/// answer nothing, the offer's or the question whether to end them; any key
+/// but `y` at that question goes back to the offer.
+#[test]
+fn keys_read_before_a_pop_up_was_drawn_answer_nothing() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let (program, socket) = left_by_a_crash(dir.path());
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        look(&mut app);
+        // `d`, `d`, `y` read while the offer was being put up.
+        app.runtime
+            .inputs_read
+            .fetch_add(3, std::sync::atomic::Ordering::SeqCst);
+        drawn(&mut app);
+        for c in ['d', 'd', 'y'] {
+            taken(&mut app, c);
+        }
+        assert!(offering(&app), "keys typed before the offer answered it");
+        typed(&mut app, 'd');
+        assert!(asking_to_end(&app));
+        // `y` read before the question was drawn.
+        app.runtime
+            .inputs_read
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        drawn(&mut app);
+        taken(&mut app, 'y');
+        assert!(
+            asking_to_end(&app),
+            "a key typed before the question answered it"
+        );
+        typed(&mut app, 'u');
+        assert!(offering(&app), "anything but `y` goes back to the offer");
+        assert!(running(program), "the program was ended");
+        let _ = crate::pane::jar::orphans::discard(app.runtime.jar_place.clone(), &socket);
     });
 }
 
@@ -98,7 +170,6 @@ fn a_discarded_jar_no_spyc_owns_ends_with_its_program() {
 /// typed for whatever the screen showed then, a `d` would end every program
 /// the offer names.
 #[test]
-#[ignore = "red until the orphan prompt is fixed (fix/orphan-discard-confirm)"]
 fn a_key_before_the_offer_is_drawn_doesnt_answer_it() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
