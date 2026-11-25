@@ -508,6 +508,8 @@ mod tests {
             command: crate::mcp_cmd::McpCommand::ClearPicks,
             reply,
             project: None,
+            pane_id: None,
+            conn: None,
         })))
         .unwrap();
 

@@ -266,10 +266,13 @@ impl App {
             return false;
         }
         for start in landed {
+            let origin = Some(self.tab_origin(&start.tab));
             if start.project == self.state.active {
-                self.land_pane_start(start);
+                self.noting_from(origin, |app| app.land_pane_start(start));
             } else if self.state.has_project(start.project) {
-                self.land_in(start.project, |app| app.land_pane_start(start));
+                self.noting_from(origin, |app| {
+                    app.land_in(start.project, |app| app.land_pane_start(start));
+                });
             } else if let Ok(pane) = start.pane {
                 pane.shutdown_detached(END_WAIT);
             }

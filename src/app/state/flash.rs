@@ -1,7 +1,7 @@
 //! The flash: the one-line message the status row shows until something
 //! replaces it.
 
-use super::{AppState, EventKind, ProjectId};
+use super::{AppState, EventKind, Origin, ProjectId};
 use crate::app::{FlashKind, FlashMessage};
 
 impl FlashMessage {
@@ -14,30 +14,48 @@ impl FlashMessage {
 }
 
 impl AppState {
+    /// Where what's noted now comes from: the tab [`EventLog::source`] names,
+    /// else the active project.
+    ///
+    /// [`EventLog::source`]: super::EventLog::source
+    pub fn origin(&self) -> Origin {
+        self.events.source.clone().unwrap_or_else(|| {
+            let project = self.active_project();
+            Origin {
+                project: Some(project.label()),
+                project_id: Some(project.id.to_string()),
+                ..Origin::default()
+            }
+        })
+    }
+
     /// Flash `text`, and note it in the session's event log (`:events`),
-    /// where it stays after the flash is gone.
+    /// where it stays after the flash is gone. A tab's flash says which.
     pub fn flash_info<S: Into<String>>(&mut self, text: S) {
-        let text = text.into();
-        self.events.note(EventKind::Info, &text);
-        self.flash = Some(FlashMessage {
-            text,
-            kind: FlashKind::Info,
-        });
+        self.flash_noted(EventKind::Info, text.into());
     }
 
     /// Flash `text` as an error, and note it in the session's event log.
     pub fn flash_error<S: Into<String>>(&mut self, text: S) {
-        let text = text.into();
-        self.events.note(EventKind::Error, &text);
+        self.flash_noted(EventKind::Error, text.into());
+    }
+
+    fn flash_noted(&mut self, kind: EventKind, text: String) {
+        let origin = self.origin();
+        self.events.note(kind, &text, &origin);
         self.flash = Some(FlashMessage {
-            text,
-            kind: FlashKind::Error,
+            text: origin.flashed(text),
+            kind: match kind {
+                EventKind::Info => FlashKind::Info,
+                EventKind::Error => FlashKind::Error,
+            },
         });
     }
 
     /// Note an event of the session's life in its log without flashing it.
     pub fn note_event(&mut self, text: &str) {
-        self.events.note(EventKind::Info, text);
+        let origin = self.origin();
+        self.events.note(EventKind::Info, text, &origin);
     }
 
     /// Note a tab started fresh in the session's log; one restored is noted
@@ -51,7 +69,8 @@ impl AppState {
     /// Note something that went wrong in the session's log without flashing
     /// it.
     pub fn note_error(&mut self, text: &str) {
-        self.events.note(EventKind::Error, text);
+        let origin = self.origin();
+        self.events.note(EventKind::Error, text, &origin);
     }
 
     /// Flash a hint about what the user just did (where focus went), which

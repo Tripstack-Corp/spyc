@@ -709,6 +709,8 @@ fn serve_connection(
                     },
                     reply: reply_tx,
                     project: None,
+                    pane_id: None,
+                    conn: None,
                 });
                 break;
             }
