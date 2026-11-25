@@ -561,16 +561,20 @@ apt-prune-check: ## Dry-run the apt prerelease pruning (set APT_REPO=<gh-pages c
 	@./scripts/prune-apt-repo.sh --dry-run "$(APT_REPO)"
 
 # Internal: build one .deb from $(SRC) for $(ARCH). Fails clearly if the binary
-# is missing — build it with the matching release-linux-* target first.
+# is missing, or spyc-jar beside it for a version that ships one — build them
+# with the matching release-linux-* target first.
 .PHONY: _deb
 _deb:
-	@command -v dpkg-deb >/dev/null 2>&1 || { echo "dpkg-deb not found (Linux, or 'brew install dpkg')"; exit 1; }
 	@test -f "$(SRC)" || { echo "missing $(SRC) — run the matching 'make release-linux-*' first"; exit 1; }
+	@# spyc-jar, built beside spyc. Every release from 3.0.0 on ships it, and a
+	@# spyc without one starts no tab, so its deb fails here rather than ship.
+	@# A release from before it shipped has none, and apt.yml rebuilds that
+	@# release's deb without it.
+	@case "$(VERSION)" in 0.*|1.*|2.*) ;; *) test -f "$(dir $(SRC))$(JAR)" || { echo "missing $(dir $(SRC))$(JAR): spyc $(VERSION) ships spyc-jar beside spyc"; exit 1; } ;; esac
+	@command -v dpkg-deb >/dev/null 2>&1 || { echo "dpkg-deb not found (Linux, or 'brew install dpkg')"; exit 1; }
 	@rm -rf "$(DIST_DIR)/deb-$(ARCH)"
 	@mkdir -p "$(DIST_DIR)/deb-$(ARCH)/DEBIAN" "$(DIST_DIR)/deb-$(ARCH)/usr/bin"
 	@install -m 0755 "$(SRC)" "$(DIST_DIR)/deb-$(ARCH)/usr/bin/$(BINARY)"
-	@# spyc-jar, built beside spyc. A release from before it shipped has none,
-	@# and apt.yml rebuilds that release's deb without it.
 	@if [ -f "$(dir $(SRC))$(JAR)" ]; then \
 		install -m 0755 "$(dir $(SRC))$(JAR)" "$(DIST_DIR)/deb-$(ARCH)/usr/bin/$(JAR)"; \
 	fi

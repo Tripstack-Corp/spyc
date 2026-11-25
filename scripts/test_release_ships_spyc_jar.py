@@ -67,7 +67,6 @@ class ReleaseShipsSpycJar(unittest.TestCase):
             self.assertIn("./usr/bin/spyc\n", listing)
             self.assertIn("./usr/bin/spyc-jar\n", listing)
 
-    @unittest.skip("red until F8 (fix/deb-needs-jar) requires spyc-jar in a 3.x deb")
     def test_a_deb_of_a_release_that_ships_spyc_jar_needs_it(self):
         """From 3.0.0 every release ships spyc-jar, and spyc without it runs
         no tab: a deb built without it fails rather than ship (the 3.0

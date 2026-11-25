@@ -470,7 +470,9 @@ are the source of truth — Actions *call them* so local and CI never drift.
 ### `apt.yml` — signed apt repo publish (on release published) — **LIVE**
 - On any publish (prereleases included — apt tracks the rc stream): download the
   release's Linux tarballs, build
-  `.deb`s (`make deb`), regenerate the apt index (`apt-ftparchive`), sign the
+  `.deb`s (`make deb`, which fails on a tarball of a release from 3.0.0 on
+  that has no `spyc-jar`, so the publish fails rather than ship a spyc that
+  starts no tab), regenerate the apt index (`apt-ftparchive`), sign the
   `Release` file with the signing key, and deploy the archive to GitHub Pages as
   a **workflow artifact** — served at `https://tripstack-corp.github.io/spyc`,
   so users `apt install spyc` / `apt upgrade`. The job fails when the signing
