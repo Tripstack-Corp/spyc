@@ -1910,6 +1910,9 @@ mod answers;
 #[path = "jar_process/sigpipe.rs"]
 mod sigpipe;
 
+#[path = "jar_process/socket_dir.rs"]
+mod socket_dir;
+
 // The review's probes, as requirements. A jar can't be wedged by a client
 // that stops reading or a program that stops reading (finding 4), nor held by
 // connections without its token (finding 5), and it keeps what an owner yet

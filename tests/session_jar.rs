@@ -1015,3 +1015,98 @@ fn a_session_whose_spyc_died_forgets_its_token_through_its_terminal() {
         "the ended session's token is still kept"
     );
 }
+
+/// Make `dir` open to everyone, as a directory another user made first
+/// under `/tmp/spyc-<uid>` would be.
+fn open_to_others(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+}
+
+/// `spyc attach` trusts no sessions directory another user could have made
+/// or can write in (the 3.0 review, E2, and its addendum's P3-9): it says
+/// why and attaches to nothing, so no token and no key leaves this user, and
+/// it signals no pid it read there. The session here has a client attached,
+/// whose pid its jar names, as a planted socket names a pid of its choosing:
+/// that client must not be ended.
+#[test]
+#[ignore = "red until E2: fix/socket-trust"]
+fn spyc_attach_refuses_a_sessions_directory_open_to_others() {
+    let dirs = Dirs::new();
+    let _jar = session(&dirs, NAME);
+    let mut first = Attached::start(&dirs, &["attach", NAME]);
+    first.wait_drawn(NAME);
+    open_to_others(&dirs.runtime.join("spyc/sessions"));
+    let mut term = Attached::start(&dirs, &["attach", NAME]);
+    let until = Instant::now() + WAIT;
+    let status = loop {
+        if let Some(ended) = first.child.try_wait().unwrap() {
+            panic!(
+                "the client named by a socket in a directory open to others was ended: {ended:?}; \
+                 the second attach showed {:?}",
+                term.text()
+            );
+        }
+        if let Some(status) = term.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < until,
+            "the second attach never ended: {:?}",
+            term.text()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(!status.success(), "{:?}", term.text());
+    assert!(term.text().contains("open to others"), "{:?}", term.text());
+    assert!(
+        first.child.try_wait().unwrap().is_none(),
+        "the client attached before was ended"
+    );
+}
+
+/// `spyc shutdown` asks no spyc named by a socket in a sessions directory
+/// open to others (the 3.0 review, E2).
+#[test]
+#[ignore = "red until E2: fix/socket-trust"]
+fn spyc_shutdown_refuses_a_sessions_directory_open_to_others() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    open_to_others(&dirs.runtime.join("spyc/sessions"));
+    let out = Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["shutdown", NAME, "-y"])
+        .env_clear()
+        .envs(dirs.env())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{out:?}");
+    assert!(said.contains("open to others"), "{said}");
+    assert_eq!(jar.described("exit"), None, "the session ended");
+}
+
+/// `spyc --jars` lists no jar from a directory open to others, and says
+/// why (the 3.0 review, E2).
+#[test]
+#[ignore = "red until E2: fix/socket-trust"]
+fn spyc_jars_refuses_a_directory_open_to_others() {
+    let dirs = Dirs::new();
+    let jar = Jar::start(&dirs, dirs.runtime.join("spyc/jars/0123456789abcdef.sock"));
+    jar.wait_for_spyc();
+    open_to_others(&dirs.runtime.join("spyc/jars"));
+    let out = Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .arg("--jars")
+        .env_clear()
+        .envs(dirs.env())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(said.contains("open to others"), "{said}");
+    assert!(!said.contains("0123456789abcdef"), "a jar listed: {said}");
+}
