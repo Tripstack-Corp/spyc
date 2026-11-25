@@ -1083,6 +1083,17 @@ a session name whose socket couldn't be bound is refused when it is given
 (`session::socket_in`), and why `session::start` checks it before it starts
 anything.
 
+<!-- SPYC-TRAP: takeover-signals-the-client-now -->
+`spyc attach` takes a session over from the terminal attached to it by
+sending that terminal's client SIGTERM (`src/pane/jar/attach.rs`). The pid is
+the one the session's jar names as its owner, and it is read after any
+question `spyc attach` asks, not when it lists the sessions: a question can
+wait for minutes, the client it listed can leave meanwhile, and its pid can
+then be any process of the user's (D3 of the 3.0 review). A pid names the
+jar's client only while the jar names it, so the jar is asked on each side of
+reading the pid's start time, and the start time is read again just before
+the signal; a process gone by then is not signalled.
+
 <!-- SPYC-TRAP: move-saved-before-release -->
 `:detach project` (`src/app/project_move.rs`) saves the project it moves as a
 session of its own, synced to disk, before it ends its connection to any of

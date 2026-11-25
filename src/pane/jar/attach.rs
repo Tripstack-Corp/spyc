@@ -4,7 +4,11 @@
 //! takes the one session running, or asks which of several. A session attached elsewhere is taken over: its client, the
 //! `owner_pid` its jar describes, is sent SIGTERM, and a `spyc attach`
 //! restores its terminal on the way out, as spyc does when killed. A jar
-//! accepts only its user's processes, so that pid is the user's own.
+//! accepts only its user's processes, so that pid is the user's own. The jar
+//! is asked again once any question is answered, and the pid is signalled
+//! only while the jar still names it and it is the same process, by its start
+//! time (`take_over`): a pid read before a question may be another
+//! process's by its answer.
 //!
 //! A session whose spyc runs from the path this one does, and finds a newer
 //! spyc installed there, as `:upgrade` would, runs an install it hasn't
@@ -78,9 +82,7 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
     let token = super::tokens::load_in(&tokens_dir()?, &chosen.socket)
         .with_context(|| format!("no token kept for {}", chosen.name))?;
     follow_this_agent(&chosen.address);
-    if let Some(pid) = chosen.client {
-        take_over(&chosen, pid)?;
-    }
+    take_over(&chosen)?;
     if let Some((program, at)) = behind(&chosen.socket)
         && agrees(
             &format!(
@@ -301,6 +303,39 @@ fn address_of(socket: &Path) -> Option<String> {
     socket.file_stem()?.to_str().map(String::from)
 }
 
+/// The client attached to `session` now, read from its jar after any
+/// question, and when it started: `None` with none attached. A pid is the
+/// jar's client only while the jar names it, so the jar is asked on each
+/// side of reading the start time.
+fn attached_now(session: &Running) -> anyhow::Result<Option<(i32, u64)>> {
+    let until = Instant::now() + TAKEOVER_WAIT;
+    loop {
+        if let Ok(first) = client_of(&session.socket) {
+            let Some(pid) = first else {
+                return Ok(None);
+            };
+            if let Some(started) = started_secs(pid)
+                && client_of(&session.socket).ok().flatten() == Some(pid)
+            {
+                return Ok(Some((pid, started)));
+            }
+        }
+        anyhow::ensure!(
+            Instant::now() < until,
+            "can't tell which terminal is attached to {}; run `spyc attach` again",
+            session.name
+        );
+        std::thread::sleep(TAKEOVER_POLL);
+    }
+}
+
+/// When process `pid` started, in epoch seconds.
+fn started_secs(pid: i32) -> Option<u64> {
+    u32::try_from(pid)
+        .ok()
+        .and_then(crate::proc_group::started_epoch_secs)
+}
+
 /// The pid of the client attached to the jar at `socket`, as it describes it.
 fn client_of(socket: &Path) -> anyhow::Result<Option<i32>> {
     let fields = spyc_jar::client::describe(socket)?;
@@ -380,15 +415,26 @@ pub fn ask<'a>(
         .with_context(|| format!("{answer:?} is none of them"))
 }
 
-/// End the client attached to `session`, and wait until its jar has let it go.
-fn take_over(session: &Running, pid: i32) -> anyhow::Result<()> {
+/// End the client attached to `session` now, if one is, and wait until its
+/// jar has let it go.
+fn take_over(session: &Running) -> anyhow::Result<()> {
+    let Some((pid, started)) = attached_now(session)? else {
+        return Ok(());
+    };
     let target = rustix::process::Pid::from_raw(pid)
         .with_context(|| format!("{} names no client pid", session.name))?;
     eprintln!(
         "spyc: {} is attached elsewhere (pid {pid}); taking it over",
         session.name
     );
-    match rustix::process::kill_process(target, rustix::process::Signal::TERM) {
+    // SPYC-TRAP(takeover-signals-the-client-now): the process the jar named,
+    // by its start time, just before the signal; one gone since needs none.
+    let signalled = if started_secs(pid) == Some(started) {
+        rustix::process::kill_process(target, rustix::process::Signal::TERM)
+    } else {
+        Ok(())
+    };
+    match signalled {
         Ok(()) | Err(rustix::io::Errno::SRCH) => {}
         Err(e) => {
             return Err(e).with_context(|| {
@@ -400,7 +446,11 @@ fn take_over(session: &Running, pid: i32) -> anyhow::Result<()> {
     loop {
         match client_of(&session.socket) {
             Ok(Some(still)) if still == pid => {}
-            Ok(_) => return Ok(()),
+            Ok(Some(other)) => anyhow::bail!(
+                "another terminal attached to {} meanwhile (pid {other}); `spyc attach` takes it over",
+                session.name
+            ),
+            Ok(None) => return Ok(()),
             Err(_) => {}
         }
         anyhow::ensure!(
