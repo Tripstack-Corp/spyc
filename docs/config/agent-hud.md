@@ -135,7 +135,14 @@ transcript not found yet is looked up again on the tab's next status report.
 
 For an Antigravity (`agy`) tab, `context` is the input plus prompt-cache-read
 tokens from the latest request, or `--` after a compaction until the next
-request. When `agy` is wired (the first-launch `[Y/n]`, or `:hooks on agy`),
+request. When `agy` is wired (or after an in-session model switch) and running
+under an Orchestrator model (`Orchestrator (Carbon)`, `Orchestrator (Argon)`,
+or bare `Orchestrator`), the activity row's model cell shows the active
+underlying step model as `Orch → plan <model>` or `Orch → exec <model>` (or
+`Orch → <model>` when the outer name names no planner), falling back to the
+outer name until the first step runs; `:agent hud dump` names the outer
+wrapper, the full active model and its role. When `agy` is wired (the
+first-launch `[Y/n]`, or `:hooks on agy`),
 spyc wraps `statusLine` in `~/.gemini/antigravity-cli/settings.json` with
 `spyc --statusline` — preserving any existing command such as `agy-powerline`
 or `faiz-dash`, setting `stack_with_default` when adding a bare wrapper so

@@ -10,6 +10,7 @@
 use ratatui::text::Span;
 
 use crate::agent::agy_metrics::{Snapshot, ToolStatus};
+use crate::agent::agy_orchestrator::{ResolvedActiveModel, resolve_active_model};
 use crate::agent::agy_statusline::{AgyStatusline, QuotaBucket};
 use crate::config::AgentHudResets;
 
@@ -137,6 +138,27 @@ fn cache_hit_cell(s: &Snapshot, p: Palette) -> Field {
         .checked_div(sent)
         .map_or_else(|| p.label("--"), |pct| p.value(&format!("{pct}%")));
     p.pair("hit", hit)
+}
+
+/// Resolve Orchestrator's active underlying model from the transcript's latest
+/// concrete `PLANNER_RESPONSE.model`. `None` for single-model sessions or while
+/// pending.
+#[must_use]
+pub fn active_model(
+    snapshot: Option<&Snapshot>,
+    reported: AgyReported<'_>,
+) -> Option<ResolvedActiveModel> {
+    let outer = agy_report(reported)
+        .and_then(|a| a.model.as_deref())
+        .or_else(|| {
+            snapshot
+                .and_then(|s| s.mode.as_ref())
+                .and_then(|m| m.value.model.as_deref())
+        });
+    let transcript = snapshot
+        .and_then(|s| s.active_model.as_ref())
+        .map(|s| s.value.as_str());
+    resolve_active_model(outer, transcript)
 }
 
 fn plan_cells(
@@ -542,5 +564,129 @@ mod tests {
         let clock_usage = lines(&v, AgentHudMode::Full, 240, &theme)[1].to_string();
         assert!(clock_usage.contains("5h 75%"), "{clock_usage}");
         assert!(!clock_usage.contains("~40m"), "{clock_usage}");
+    }
+
+    #[test]
+    fn orchestrator_renders_pending_then_planner_and_executor_on_row_one() {
+        let theme = Theme::default();
+        let mut snapshot = session();
+        snapshot.reasoning = Some(Sample {
+            at: at(9),
+            value: "Inspecting orchestrator routing".into(),
+        });
+        let agy_sl = AgyStatusline {
+            model: Some("Orchestrator (Carbon)".into()),
+            quotas: vec![
+                QuotaBucket {
+                    key: "gemini-5h".into(),
+                    used_percent_x100: 2500,
+                    resets_at: Some(at(10 + 3600).as_second()),
+                    disabled: false,
+                },
+                QuotaBucket {
+                    key: "3p-weekly".into(),
+                    used_percent_x100: 6000,
+                    resets_at: Some(at(10 + 86_400).as_second()),
+                    disabled: false,
+                },
+            ],
+            ..AgyStatusline::default()
+        };
+        let sl = Statusline {
+            agy: Some(agy_sl.clone()),
+            ..Statusline::default()
+        };
+
+        // Pending before any concrete step model arrives: keeps outer wrapper.
+        {
+            let mut v = view(Some(&snapshot), false);
+            v.metrics = Metrics::Agy {
+                snapshot: Some(&snapshot),
+                tail_only: false,
+                reported: AgyReported {
+                    statusline: Some(&sl),
+                    plan: Some(&agy_sl),
+                },
+            };
+            let pending = rows(&v, 200);
+            assert!(pending[0].contains("Orchestrator (Carbon)"), "{pending:?}");
+        }
+
+        // Planner step from transcript renders `Orch → plan Carbon (High)` even
+        // while `thinking` occupies row 4 and in compact mode.
+        snapshot.active_model = Some(Sample {
+            at: at(9),
+            value: "gemini-4-carbon-high".into(),
+        });
+        {
+            let mut v = view(Some(&snapshot), false);
+            v.metrics = Metrics::Agy {
+                snapshot: Some(&snapshot),
+                tail_only: false,
+                reported: AgyReported {
+                    statusline: Some(&sl),
+                    plan: Some(&agy_sl),
+                },
+            };
+            let planning = rows(&v, 200);
+            assert!(
+                planning[0].contains("Orch → plan Carbon (High)"),
+                "{planning:?}"
+            );
+            assert!(planning[3].contains("thinking"), "{planning:?}");
+            let compact = lines(&v, AgentHudMode::Compact, 200, &theme)[0].to_string();
+            assert!(compact.contains("Orch → plan Carbon (High)"), "{compact}");
+        }
+
+        // Executor step (including Claude Sonnet) renders `Orch → exec ...`,
+        // while quota cells stay on the outer Orchestrator buckets.
+        snapshot.active_model = Some(Sample {
+            at: at(10),
+            value: "claude-sonnet-5-5".into(),
+        });
+        {
+            let mut v = view(Some(&snapshot), false);
+            v.metrics = Metrics::Agy {
+                snapshot: Some(&snapshot),
+                tail_only: false,
+                reported: AgyReported {
+                    statusline: Some(&sl),
+                    plan: Some(&agy_sl),
+                },
+            };
+            let executing = rows(&v, 200);
+            assert!(
+                executing[0].contains("Orch → exec Sonnet 5.5"),
+                "{executing:?}"
+            );
+            assert!(executing[1].contains("5h 25%"), "{executing:?}");
+            assert!(!executing[1].contains("7d 60%"), "{executing:?}");
+        }
+
+        // Bare `Orchestrator` omits the role label rather than guessing.
+        let bare_agy = AgyStatusline {
+            model: Some("Orchestrator".into()),
+            ..AgyStatusline::default()
+        };
+        let bare_sl = Statusline {
+            agy: Some(bare_agy),
+            ..Statusline::default()
+        };
+        snapshot.active_model = Some(Sample {
+            at: at(11),
+            value: "gemini-4-hydrogen-high".into(),
+        });
+        let mut v = view(Some(&snapshot), false);
+        v.metrics = Metrics::Agy {
+            snapshot: Some(&snapshot),
+            tail_only: false,
+            reported: AgyReported {
+                statusline: Some(&bare_sl),
+                plan: None,
+            },
+        };
+        let bare = rows(&v, 200);
+        assert!(bare[0].contains("Orch → Hydrogen (High)"), "{bare:?}");
+        assert!(!bare[0].contains("Orch → exec"), "{bare:?}");
     }
 }

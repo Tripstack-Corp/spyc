@@ -22,7 +22,7 @@ mod claude;
 mod codex;
 pub mod resets;
 
-pub use agy::ARGON_SURFACE_USED_PCT;
+pub use agy::{ARGON_SURFACE_USED_PCT, active_model as agy_active_model};
 
 /// Spaces between columns.
 const GAP: usize = 3;
@@ -679,6 +679,17 @@ fn thinking_row(view: &HudView<'_>, p: Palette) -> Option<Row> {
 
 /// The model and effort, from either agent's latest mode report.
 fn model(view: &HudView<'_>, p: Palette) -> Field {
+    if let Metrics::Agy {
+        snapshot, reported, ..
+    } = view.metrics
+        && let Some(active) = agy::active_model(snapshot, reported)
+    {
+        let prefix = match active.role {
+            Some(role) => format!("Orch \u{2192} {} ", role.short()),
+            None => "Orch \u{2192} ".to_owned(),
+        };
+        return Field(vec![p.label(&prefix), p.strong(&active.compact)]);
+    }
     let reported: Option<(Option<&str>, Option<&str>, bool)> = match view.metrics {
         Metrics::Codex(snapshot) => snapshot.and_then(|s| s.mode.as_ref()).map(|m| {
             (
