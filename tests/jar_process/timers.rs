@@ -16,7 +16,8 @@ use spyc_jar::client::Client;
 use spyc_jar::proto::{self, Msg, Role, reason};
 
 use super::upgrade::{
-    assert_program_survives, count_on, held_until, jar_script, parking, upgrade_answer,
+    assert_program_survives, count_on, first_validation_ended, held_until, jar_script,
+    upgrade_answer,
 };
 use super::*;
 
@@ -363,10 +364,10 @@ fn owner_cant_flush() -> Option<String> {
     let first = jar.dir.path().join("first-run-paid");
     let owner = {
         let answered = Arc::clone(&answered);
-        let (first, socket) = (first.clone(), jar.socket.clone());
+        let first = first.clone();
         std::thread::spawn(move || {
             let until = Instant::now() + UPGRADE_AT_MOST;
-            while !first.exists() || !parking(&socket) {
+            while !first_validation_ended(&first) {
                 if Instant::now() > until {
                     return Err("the jar never parked".to_string());
                 }
@@ -399,7 +400,7 @@ fn owner_cant_flush() -> Option<String> {
         jar.dir.path(),
         "jar-next",
         &format!(
-            "validate-handover) [ -e {first} ] || {{ sleep 1; touch {first}; }};;",
+            "validate-handover) [ -e {first} ] || {{ sleep 1; echo $$ > {first}; }};;",
             first = first.display()
         ),
     );

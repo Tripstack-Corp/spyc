@@ -369,30 +369,26 @@ fn a_live_owner_paces_the_program_and_loses_nothing() {
         })
         .unwrap();
 
-    let mut stalled = Seen::default();
-    let until = Instant::now() + Duration::from_millis(800);
-    while Instant::now() < until {
-        if let Some(m) = owner.recv(Duration::from_millis(50)).unwrap() {
-            stalled.take(m);
-        }
-    }
-    // What the program printed before the owner connected is sent whatever
-    // the window; the window stops the program, so with no acks delivery
-    // stops growing.
-    let mut more = Seen::default();
-    let until = Instant::now() + Duration::from_millis(800);
-    while Instant::now() < until {
-        if let Some(m) = owner.recv(Duration::from_millis(50)).unwrap() {
-            more.take(m);
-        }
-    }
+    // With no acks the jar stops reading the program once a window is
+    // unacknowledged: it reads while one is, so it stops within one read
+    // (`PTY_READ`, 8 KiB) past the window, as its log says.
+    let printed = || {
+        printed_in(&field(
+            &spyc_jar::client::describe(&jar.socket).expect("describe"),
+            "log",
+        ))
+    };
+    while_it_grows("the jar to stop at the window", &printed, |n| n >= window);
+    let paused = printed();
     assert!(
-        more.text.is_empty(),
-        "with no acks the program kept printing: {} more bytes",
-        more.text.len()
+        paused <= window + 8_192,
+        "with no acks the program printed on: {paused} bytes against a window of {window}"
     );
+    // The owner takes all of it; the log stays where it paused.
+    let stalled = read_while_it_comes(&mut owner, false, |s| s.text.len() as u64 >= paused);
+    assert_eq!(printed(), paused, "with no acks the program printed on");
     let got = stalled.text.len() as u64;
-    assert!(got < 2_000_000, "the program was paused before it finished");
+    assert_eq!(got, paused, "the owner was sent what the jar holds");
 
     owner.send(&Msg::Ack { offset: got }).unwrap();
     let mut rest = read_while_it_comes(&mut owner, true, |s| s.contains("END"));
@@ -1669,20 +1665,16 @@ fn a_program_hears_one_attached_per_owner_however_the_connections_race() {
         let mut jar = Jar::start(&[], &program);
         let mut owner = jar.connect(Role::Owner);
         owner.send(&Msg::Replay { from: 0 }).unwrap();
-        let mut seen = read_until(&mut owner, true, |s| s.contains("program: attached"));
-        // A second one would follow at once: give it time to show.
-        let until = Instant::now() + Duration::from_millis(300);
-        while Instant::now() < until {
-            if let Ok(Some(m)) = owner.recv(Duration::from_millis(50)) {
-                seen.take(m);
-                if let Some(next) = seen.next_offset {
-                    let _ = owner.send(&Msg::Ack { offset: next });
-                }
-            }
-        }
-        let heard = String::from_utf8_lossy(&seen.text)
-            .matches("program: attached")
-            .count();
+        read_until(&mut owner, true, |s| s.contains("program: attached"));
+        // The owner leaves: the program hears `detached` after anything the
+        // jar told it before, a second `attached` included.
+        owner.drop_connection();
+        let mut reader = jar.connect(Role::Reader);
+        reader.send(&Msg::Replay { from: 0 }).unwrap();
+        let seen = read_until(&mut reader, false, |s| s.contains("program: detached"));
+        let text = String::from_utf8_lossy(&seen.text);
+        let before = &text[..text.find("program: detached").unwrap_or(text.len())];
+        let heard = before.matches("program: attached").count();
         assert_eq!(
             heard, 1,
             "round {round}: the program heard {heard} for one owner"
@@ -2023,11 +2015,8 @@ fn cpu_seconds(pid: u32) -> f64 {
 /// lease at its deadline, though the jar's writes to it are stuck.
 #[test]
 fn a_silent_owner_loses_the_lease_while_its_program_prints() {
-    // The deadline binds the new owner too, which pings while it waits for
-    // its upgrade: 2 s, so a loaded machine's pause between its pings isn't
-    // taken for silence.
     let mut jar = Jar::start(
-        &["--deadline-ms", "2000"],
+        &["--deadline-ms", "500"],
         &["yes", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
     );
     let silent = jar.connect(Role::Owner);
@@ -2038,11 +2027,16 @@ fn a_silent_owner_loses_the_lease_while_its_program_prints() {
         next = connect_within(&jar, Role::Owner, TOKEN, Duration::from_millis(500)).ok();
         next.is_some()
     });
-    let mut next = next.expect("welcomed");
-    let answer = upgrade(&jar, &mut next);
+    // The lease has passed, and the silent owner's stuck writes don't wedge
+    // the jar: it can still be upgraded. Asked by a reader, which no 500 ms
+    // deadline binds, so a loaded machine's pause between pings can't end
+    // the asker's connection.
+    next.expect("welcomed").drop_connection();
+    let mut asker = jar.connect(Role::Reader);
+    let answer = upgrade(&jar, &mut asker);
     assert!(
         answer.as_ref().is_ok_and(|b| b.starts_with("jar-next")),
-        "the new owner can upgrade the jar: {answer:?}"
+        "the jar can still be upgraded: {answer:?}"
     );
     drop(silent);
 }
@@ -2405,44 +2399,66 @@ fn a_signalled_exit_reports_its_signal() {
 /// as a replay from before the ring would be, never handed a jump.
 #[test]
 fn a_reader_that_falls_behind_is_told_what_it_missed() {
-    // The reader reads nothing while the owner takes all 3 MB, however long
-    // a loaded machine makes that: a deadline past it, so the jar doesn't
-    // close a reader that is only behind for one that has stopped.
+    use spyc_jar::proto::{self, VERSION};
     let mut jar = Jar::start(
-        &[
-            "--ring",
-            "65536",
-            "--window",
-            "32768",
-            "--deadline-ms",
-            "60000",
-        ],
+        &["--ring", "65536", "--window", "32768"],
         &sh(
             "read go; yes line-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | head -c 3000000; echo; echo END",
         ),
     );
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut late = jar.connect(Role::Reader);
-    late.send(&Msg::Replay { from: 0 }).expect("replay");
+    // The late reader takes 4 KiB every half second while the owner takes
+    // everything: far behind, and never so still that the jar takes it for a
+    // reader that has stopped (one that takes nothing for the jar's deadline
+    // is closed).
+    let mut late = UnixStream::connect(&jar.socket).expect("connect");
+    proto::write_msg(
+        &mut late,
+        &Msg::Hello {
+            version: VERSION,
+            role: Role::Reader,
+            token: TOKEN.to_vec(),
+        },
+    )
+    .expect("hello");
+    assert!(
+        matches!(proto::read_msg(&mut late), Ok(Some(Msg::Welcome { .. }))),
+        "premise: the reader is welcomed"
+    );
+    proto::write_msg(&mut late, &Msg::Replay { from: 0 }).expect("replay");
+    let owner_done = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let owner_done = Arc::clone(&owner_done);
+        std::thread::spawn(move || {
+            let mut taken = Vec::new();
+            let mut some = [0u8; 4096];
+            while !owner_done.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(500));
+                if let Ok(n) = (&late).read(&mut some) {
+                    taken.extend_from_slice(&some[..n]);
+                }
+            }
+            (late, taken)
+        })
+    };
     owner
         .send(&Msg::Input {
             bytes: b"go\n".to_vec(),
         })
         .expect("go");
-    // The owner keeps up; the reader reads nothing until the program is done.
     read_while_it_comes(&mut owner, true, |s| s.contains("END"));
+    owner_done.store(true, Ordering::SeqCst);
+    let (late, taken) = trickle.join().expect("the late reader");
+    // Now it reads everything left, as frames from what it took so far.
+    late.set_read_timeout(Some(WAIT)).expect("timeout");
+    let mut frames = std::io::Cursor::new(taken).chain(&late);
     let (mut next, mut gaps, mut tail) = (None::<u64>, 0, Vec::new());
-    let mut heard = Instant::now();
     while !String::from_utf8_lossy(&tail).contains("END") {
-        assert!(
-            Instant::now() < heard + WAIT,
-            "the reader stopped short of the end, at {next:?}"
-        );
-        let got = late.recv(Duration::from_millis(200)).expect("recv");
-        if got.is_some() {
-            heard = Instant::now();
-        }
+        let got = match proto::read_msg(&mut frames) {
+            Ok(Some(m)) => Some(m),
+            other => panic!("the reader stopped short of the end, at {next:?}: {other:?}"),
+        };
         match got {
             Some(Msg::Gap { from, to }) => {
                 if let Some(n) = next {

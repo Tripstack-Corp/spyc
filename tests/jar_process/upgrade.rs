@@ -585,7 +585,7 @@ fn trickling_reader() -> Option<String> {
         jar.dir.path(),
         "jar-next",
         &format!(
-            "validate-handover) [ -e {first} ] || touch {first};;",
+            "validate-handover) [ -e {first} ] || echo $$ > {first};;",
             first = first.display()
         ),
     );
@@ -599,7 +599,6 @@ fn trickling_reader() -> Option<String> {
     let stop = Arc::new(AtomicBool::new(false));
     let trickle = {
         let stop = Arc::clone(&stop);
-        let socket = jar.socket.clone();
         std::thread::spawn(move || -> Trickled {
             // Once the jar has validated the new binary the first time and
             // begun to park (its acceptor parks too, so a lookup goes
@@ -612,7 +611,7 @@ fn trickling_reader() -> Option<String> {
             let mut some = [0u8; 4096];
             let until = Instant::now() + UPGRADE_AT_MOST;
             let mut parked = true;
-            while !first.exists() || !parking(&socket) {
+            while !first_validation_ended(&first) {
                 if Instant::now() > until {
                     parked = false;
                     break;
@@ -715,20 +714,18 @@ fn trickling_reader() -> Option<String> {
     None
 }
 
-/// Whether the jar at `socket` has parked for a handover: a lookup's `hello`
-/// goes unanswered for 300 ms, its acceptor being parked with everything
-/// else. A guess, which a test that acts on it must check afterwards by what
-/// the jar did: the jar reports no park, and a reader must begin within the
-/// jar's own 3 s park deadline.
-pub fn parking(socket: &std::path::Path) -> bool {
-    let Ok(mut s) = UnixStream::connect(socket) else {
-        return false;
-    };
-    let _ = s.set_read_timeout(Some(Duration::from_millis(300)));
-    if s.write_all(&LOOKUP_HELLO).is_err() {
-        return false;
-    }
-    spyc_jar::proto::read_msg(&mut s).is_err()
+/// Whether the first validation of an upgrade has ended, its validator
+/// having written its pid to `first` as it began. The jar parks the moment
+/// that validation returns, with nothing in between that takes time: no
+/// frame or description says a jar has parked, and a parked jar answers
+/// nothing, so the validator's end is the last state a test can see before
+/// the park. A reader that begins in the moment between leaves its writer
+/// mid-batch, and the jar says no thread reached a safe point.
+pub fn first_validation_ended(first: &std::path::Path) -> bool {
+    std::fs::read_to_string(first)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .is_some_and(|pid| !running(pid))
 }
 
 // Decision M: a pane's jar starts its program when its first owner's `hello`
