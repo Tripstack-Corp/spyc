@@ -278,3 +278,86 @@ fn an_upgrade_whose_validator_cant_start_for_want_of_a_descriptor_is_busy() {
     let again = upgrade(&jar, &mut owner);
     assert!(again.is_ok(), "the next upgrade runs: {again:?}");
 }
+
+/// The validator of a parked upgrade's second validation, as `script`
+/// writes one: it proves the blob, then runs `python3` on `limit` with the
+/// jar's pid (its parent) as `p`, and exits 0. The jar's next steps then
+/// meet whatever `limit` took from it.
+#[cfg(target_os = "linux")]
+fn starving(jar: &Jar, name: &str, limit: &str) -> PathBuf {
+    script(
+        jar,
+        name,
+        &format!(
+            "validate-handover)\n  n=$(cat \"$DIR/count\" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > \"$DIR/count\"\n  if [ $n = 2 ]; then proof=$(\"$REAL\" validate-handover) || exit 1; python3 -c 'import resource,sys; p=int(sys.argv[1]); {limit}' \"$PPID\" || exit 1; echo \"$proof\"; exit 0; fi\n  exec \"$REAL\" \"$@\" ;;"
+        ),
+    )
+}
+
+/// Put the jar's `resource` limit back to this process's.
+#[cfg(target_os = "linux")]
+fn give_back(jar: &Jar, resource: rustix::process::Resource) {
+    use rustix::process::Pid;
+    let pid =
+        Pid::from_raw(i32::try_from(jar.process.id()).expect("a pid")).expect("the jar's pid");
+    let ours = rustix::process::getrlimit(resource);
+    let _ = rustix::process::prlimit(Some(pid), resource, ours);
+}
+
+/// A2, after the parked validation: a handover short of a descriptor for its
+/// pipe is the machine's for now, so busy (5), as one short at the copy or
+/// the validator's start is; with descriptors again, the next upgrade runs.
+/// The parked validator proves, then lowers the jar's soft `RLIMIT_NOFILE`
+/// to 3 before it exits, so the jar's next descriptor is refused by
+/// construction (the refuter's test of slice C).
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "red until A2 is fixed for a handover or holder the machine can't start (fix/jar-upgrade-answers)"]
+fn a_handover_short_of_a_descriptor_is_busy() {
+    let mut jar = Jar::start(&[], &sh("cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let starved = starving(
+        &jar,
+        "jar-starved",
+        "h=resource.prlimit(p, resource.RLIMIT_NOFILE)[1]; resource.prlimit(p, resource.RLIMIT_NOFILE, (3, h))",
+    );
+    let answer = upgrade_to(&mut owner, &starved);
+    give_back(&jar, rustix::process::Resource::Nofile);
+    assert_eq!(
+        reason_of(&answer),
+        Ok(reason::UPGRADE_BUSY),
+        "a handover short of a descriptor is busy: {answer:?}"
+    );
+    let again = upgrade(&jar, &mut owner);
+    assert!(again.is_ok(), "the next upgrade runs: {again:?}");
+}
+
+/// A2, after the parked validation: a holder the OS won't start (`EAGAIN`
+/// at the process limit) is the machine's for now, so busy (5); with
+/// processes again, the next upgrade runs. The parked validator proves, then
+/// sets the jar's soft `RLIMIT_NPROC` to 0 before it exits, so the next
+/// process the jar starts, its holder, is refused by construction: nothing
+/// between the parked validation and the holder starts a thread.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "red until A2 is fixed for a handover or holder the machine can't start (fix/jar-upgrade-answers)"]
+fn a_holder_the_os_wont_start_is_busy() {
+    let mut jar = Jar::start(&[], &sh("cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let starved = starving(
+        &jar,
+        "jar-no-holder",
+        "h=resource.prlimit(p, resource.RLIMIT_NPROC)[1]; resource.prlimit(p, resource.RLIMIT_NPROC, (0, h))",
+    );
+    let answer = upgrade_to(&mut owner, &starved);
+    give_back(&jar, rustix::process::Resource::Nproc);
+    assert_eq!(
+        reason_of(&answer),
+        Ok(reason::UPGRADE_BUSY),
+        "a holder the OS won't start is busy: {answer:?}"
+    );
+    let again = upgrade(&jar, &mut owner);
+    assert!(again.is_ok(), "the next upgrade runs: {again:?}");
+}
