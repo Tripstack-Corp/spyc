@@ -63,7 +63,7 @@ fn enter(app: &mut App, dir: &Path) {
 }
 
 /// Run `effects` through the loop's executor.
-fn run(app: &mut App, effects: Vec<Effect>) {
+pub(super) fn run(app: &mut App, effects: Vec<Effect>) {
     use ratatui::{Terminal, TerminalOptions, Viewport, backend::CrosstermBackend, layout::Rect};
     let mut terminal = Terminal::with_options(
         CrosstermBackend::new(std::io::stdout()),

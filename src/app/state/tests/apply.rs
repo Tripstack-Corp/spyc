@@ -286,6 +286,96 @@ fn apply_long_list_emits_off_thread_file_op() {
     );
 }
 
+/// `L` on one directory opens the tree of sizes beneath it; on a file, a link
+/// to a directory or several entries, the long-listing table.
+#[test]
+fn long_list_on_one_directory_opens_its_tree() {
+    use crate::app::Effect;
+    use crate::app::file_ops::FileOp;
+    let mut s = state_with_rows(&["src", "link", "a.txt"]);
+    s.active_project_mut().left.rows[0].kind = EntryKind::Dir;
+    s.active_project_mut().left.rows[1].kind = EntryKind::Symlink;
+    let effect = |s: &mut AppState| {
+        let ApplyResult::Post(fx) = s.apply(&Action::LongList) else {
+            panic!("L posts its work");
+        };
+        fx
+    };
+    let fx = effect(&mut s);
+    assert!(
+        matches!(fx.as_slice(), [Effect::OpenDiskTree { root }] if root == Path::new("/tmp/test/src")),
+        "{fx:?}"
+    );
+    for at in [1, 2] {
+        s.active_project_mut().left.cursor.index = at;
+        let fx = effect(&mut s);
+        assert!(
+            matches!(fx.as_slice(), [Effect::FileOp(FileOp::LongList { .. })]),
+            "row {at}: {fx:?}"
+        );
+    }
+    s.active_project_mut().left.cursor.index = 0;
+    s.active_project_mut()
+        .left
+        .picks
+        .insert(Path::new("/tmp/test/src"));
+    s.active_project_mut()
+        .left
+        .picks
+        .insert(Path::new("/tmp/test/a.txt"));
+    let fx = effect(&mut s);
+    assert!(
+        matches!(fx.as_slice(), [Effect::FileOp(FileOp::LongList { paths, .. })] if paths.len() == 2),
+        "{fx:?}"
+    );
+}
+
+/// Inside an archive mount a directory is a member, with nothing on disk to
+/// walk: `L` keeps the long-listing table, which extracts first.
+#[test]
+fn long_list_inside_an_archive_mount_keeps_the_table() {
+    use crate::app::Effect;
+    use crate::app::file_ops::FileOp;
+    use crate::archive::ArchiveFormat;
+    use crate::archive::index::{Draft, IndexBuilder, Locator};
+    use crate::archive::journal::StagedStats;
+    use crate::archive::mount::ArchiveMount;
+    use crate::archive::scan::Capability;
+
+    let mut b = IndexBuilder::new(100);
+    b.push("d/a.txt", Draft::file(1, Locator::Zip { index: 0 }));
+    let (index, _) = b.finish(PathBuf::from("/tmp/pkg.zip"), ArchiveFormat::Zip, 10);
+    let mut s = test_state();
+    s.mounts.insert(
+        ArchiveMount {
+            index,
+            journal: crate::archive::Journal::default(),
+            staged: StagedStats::new(),
+            capability: Capability::ReadWrite,
+            warnings: Vec::new(),
+            staging_root: PathBuf::from("/tmp/staging"),
+            last_used: 0,
+            depth: 0,
+            editing: Vec::new(),
+        },
+        &[],
+    );
+    s.active_project_mut().left.listing.dir = PathBuf::from("/tmp/pkg.zip");
+    s.active_project_mut().left.rows = vec![RowData {
+        path: PathBuf::from("/tmp/pkg.zip/d"),
+        display: "d".to_string(),
+        kind: EntryKind::Dir,
+        deleted: false,
+    }];
+    let ApplyResult::Post(fx) = s.apply(&Action::LongList) else {
+        panic!("L posts its work");
+    };
+    assert!(
+        matches!(fx.as_slice(), [Effect::FileOp(FileOp::LongList { .. })]),
+        "{fx:?}"
+    );
+}
+
 #[test]
 fn apply_file_type_emits_off_thread_file_op() {
     use crate::app::Effect;

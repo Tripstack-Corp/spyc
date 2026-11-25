@@ -44,7 +44,7 @@ bound too, and on by default — see [Mouse](#mouse).
 | `M` | Move / rename selection (prompt) |
 | `+` | Make a new directory (prompt) |
 | `O` | Create a new file in `$EDITOR` (prompt) |
-| `L` | Long listing — wide aligned table (name, mode, size, mtime, …) |
+| `L` | Long listing — wide aligned table (name, mode, size, mtime, …); on a single directory, the tree of sizes beneath it |
 | `S` | Cycle sort: name → size → mtime → ext |
 | `:chmod <mode>` | Change mode on the selection |
 | `:filetype` | Show the cursor file's detected type |
@@ -222,6 +222,16 @@ A collapsed heading is marked `▸ N lines`, and folding a section takes its
 nested subsections with it — `##` swallows the `###`s under it and stops at the
 next `##`. These are inert on any other pager, and while `m` is showing the
 Markdown *source*, which the outline doesn't index.
+
+### Directory tree
+
+`L` on a single directory shows the tree of sizes beneath it, which opens two levels deep:
+
+| Key | Action |
+| --- | --- |
+| `zr` / `zm` | Open one more level / close the deepest open one |
+| `zR` / `zM` | Open every level / only the first |
+| `za` | Open or close the directory at the top of the view |
 
 Inside the pager: `/` search with `n`/`N`, `:N` jump-to-line,
 `V` arms visual line mode — first `V` places a line cursor you

@@ -1,6 +1,7 @@
 //! Filesystem model and operations.
 
 pub mod atomic;
+pub mod disk_tree;
 pub mod entry;
 pub mod finder;
 pub mod grep;

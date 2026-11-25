@@ -11,6 +11,7 @@ pub mod agent_hud;
 pub mod blame_render;
 pub mod color_depth;
 pub mod diff_render;
+pub mod disk_tree;
 pub mod emoji_diff;
 pub mod help;
 pub mod hex;

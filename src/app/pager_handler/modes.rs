@@ -278,13 +278,21 @@ impl App {
         // z-prefixed fold chord: `za` toggle, `zR` unfold all, `zM` fold all —
         // vim's own fold keys, so the muscle memory transfers.
         if std::mem::take(&mut self.view.pager_pending_z) {
-            let Some(view) = active_pager_mut!(self) else {
-                return Some(Vec::new());
-            };
-            if !view.has_outline() {
-                view.flash = Some("no outline (rendered Markdown only)".into());
-                return Some(Vec::new());
-            }
+            self.pager_fold_chord(key, viewport);
+            return Some(Vec::new());
+        }
+
+        None
+    }
+
+    /// The `z` chord's second key: `za`, `zR` and `zM` on a rendered Markdown
+    /// outline, and those with `zr` and `zm` on a directory's tree.
+    fn pager_fold_chord(&mut self, key: KeyEvent, viewport: u16) {
+        use crate::app::pager_stream::PagerStreamCmd as Cmd;
+        let Some(view) = active_pager_mut!(self) else {
+            return;
+        };
+        if view.has_outline() {
             match key.code {
                 KeyCode::Char('a') => {
                     view.toggle_fold(viewport);
@@ -299,10 +307,22 @@ impl App {
                 }
                 _ => {}
             }
-            return Some(Vec::new());
+            return;
         }
-
-        None
+        let cmd = match key.code {
+            KeyCode::Char('a') => Some(Cmd::ToggleFold),
+            KeyCode::Char('r') => Some(Cmd::Deeper),
+            KeyCode::Char('m') => Some(Cmd::Shallower),
+            KeyCode::Char('R') => Some(Cmd::OpenAll),
+            KeyCode::Char('M') => Some(Cmd::CloseAll),
+            _ => None,
+        };
+        if cmd.is_some_and(|cmd| self.dispatch_pager_command(cmd)) {
+            return;
+        }
+        if let Some(view) = active_pager_mut!(self) {
+            view.flash = Some("nothing to fold (rendered Markdown, or `L`'s tree)".into());
+        }
     }
 
     /// Placement mode: pre-visual-block cursor positioning via vi motions.

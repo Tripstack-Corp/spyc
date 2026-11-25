@@ -124,6 +124,7 @@ mod config;
 mod cooking;
 mod cwd_file;
 pub mod detach;
+mod disk_tree;
 mod effect;
 mod esc_guard;
 mod events;

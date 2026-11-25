@@ -188,7 +188,7 @@ const SECTIONS: &[Section] = &[
             ("Ndd", "remove cursor + N-1 entries below (e.g. 4dd)"),
             ("+", "make a new directory (prompt)"),
             ("O", "create new file in $EDITOR (prompt)"),
-            ("L", "long listing (wide aligned table)"),
+            ("L", "long listing; a directory's tree of sizes"),
             (":filetype", "file(1) on selection"),
             (":chmod", "chmod +x on selection"),
         ],
