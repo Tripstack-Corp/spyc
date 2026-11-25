@@ -854,12 +854,16 @@ blocks: on Linux a blocking connect to a full backlog waits for ever.
 
 A session's token is forgotten by whichever spyc sees its jar end (the 3.0
 review, E7): the session's own spyc as it quits for good or lets its session
-go, `spyc shutdown` once the session has ended, `spyc attach` when the jar it
-was attached to holds only the exit, and the sweep above. A token kept for a
-gone session is what a socket planted under its name would collect. One case
-keeps it: a session whose spyc died with no terminal attached, whose jar then
-ended and took its socket and lock with it, leaves nothing for a sweep to read,
-and its token stays until a session of that name starts again.
+go, `spyc shutdown` once the session has ended, `spyc attach` when the session
+has ended on evidence, and the sweep above. A token kept for a gone session is
+what a socket planted under its name would collect. "Ended" is decided on
+evidence only, as the trap above says (`session::gone_on_evidence`): the jar's
+lock free, or the jar holding only its spyc's exit, or, with nothing left of
+the jar (a jar ends by removing its socket and lock, and a logout or reboot may
+empty the runtime directory), the spyc the session's newest saved file names,
+gone by its start time; `spyc attach` also checks the spyc it attached to, by
+its pid and start time. A socket file a cleaner removed, its lock held, is a
+running session. A session no file speaks for keeps its token.
 
 ## A control request carries the session's token
 

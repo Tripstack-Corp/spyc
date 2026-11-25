@@ -369,7 +369,30 @@ pub(super) const SWEEP_AFTER: std::time::Duration = std::time::Duration::from_se
 /// their tokens and lock files (R32): the pane jars' and the sessions' (the
 /// 3.0 review, E7). How many.
 pub(super) fn sweep(place: &Place, age: std::time::Duration) -> usize {
-    sweep_dir(place, place.sockets(), age) + sweep_dir(place, &sessions_dir(&place.dirs), age)
+    let swept =
+        sweep_dir(place, place.sockets(), age) + sweep_dir(place, &sessions_dir(&place.dirs), age);
+    swept + sweep_session_tokens(place)
+}
+
+/// Forget each session's token whose session is gone on evidence, though
+/// nothing may be left of its jar (`session::gone_on_evidence`): a crash
+/// with nobody attached, or a logout or reboot that emptied the runtime
+/// directory. A pane jar's token, named by its socket's 16 hex digits, is
+/// the sockets' sweep's. How many.
+fn sweep_session_tokens(place: &Place) -> usize {
+    let Ok(entries) = std::fs::read_dir(&place.tokens) else {
+        return 0;
+    };
+    let sessions = sessions_dir(&place.dirs);
+    let pane_jars = |name: &str| name.len() == 16 && name.bytes().all(|b| b.is_ascii_hexdigit());
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|e| e.file_name().to_str().map(String::from))
+        .filter(|name| !name.starts_with('.') && !pane_jars(name))
+        .map(|name| sessions.join(format!("{name}.sock")))
+        .filter(|socket| super::session::gone_on_evidence(socket))
+        .inspect(|socket| super::tokens::forget(place, socket))
+        .count()
 }
 
 /// [`sweep`], in `dir`.

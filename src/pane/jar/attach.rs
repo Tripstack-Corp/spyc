@@ -103,36 +103,43 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
         }
     }
     crate::terminal::restore_on_signal();
+    let spyc = session_spyc(&chosen.socket);
     let attached = super::place::attach(&chosen.socket, &token);
     // The session's spyc may have ended without a quit of its own (killed,
-    // crashed): its jar, holding only the exit, ends too.
-    if session_ended(&chosen.socket) {
+    // crashed): its jar, holding only the exit, ends too. Judged on evidence:
+    // the jar's lock, or the spyc it ran gone by its start time.
+    if session_ended(&chosen.socket) || spyc.is_some_and(gone) {
         super::session::forget_token(&chosen.socket);
     }
     attached
 }
 
-/// How long `spyc attach`, once it has returned, waits on a session's jar
-/// that doesn't answer: one whose program's exit it just acknowledged ends
-/// within a moment.
-const END_WAIT: Duration = Duration::from_secs(5);
-
-/// Whether the session at `socket` has ended, its jar gone or holding only
-/// its spyc's exit, as `spyc attach` finds it once it has returned. A jar
-/// that doesn't answer is waited on, within [`END_WAIT`], for its socket to
-/// go; one still there after counts as running, and keeps its token.
+/// Whether the session at `socket` has ended, on evidence only
+/// (`session::gone_on_evidence`, SPYC-TRAP jar-gone-on-evidence): a socket
+/// file a cleaner removed, its jar holding its lock, is a session running.
 fn session_ended(socket: &Path) -> bool {
-    let until = Instant::now() + END_WAIT;
-    loop {
-        if socket_state(socket) != SocketState::Live {
-            return true;
-        }
-        match super::place::describe(socket) {
-            Ok(fields) => return fields.iter().any(|(k, _)| k == "exit"),
-            Err(_) if Instant::now() >= until => return false,
-            Err(_) => std::thread::sleep(TAKEOVER_POLL),
-        }
-    }
+    super::session::gone_on_evidence(socket)
+}
+
+/// The session's spyc, by its pid and start time, as its jar names it: what
+/// `spyc attach` checks once it has returned, since the jar of a spyc that
+/// died removes its socket and lock once its exit is read, and leaves
+/// nothing else to judge.
+fn session_spyc(socket: &Path) -> Option<(u32, u64)> {
+    let fields = super::place::describe(socket).ok()?;
+    let pid: u32 = fields
+        .iter()
+        .find(|(k, _)| k == "program_pid")?
+        .1
+        .parse()
+        .ok()?;
+    Some((pid, crate::proc_group::started_epoch_secs(pid)?))
+}
+
+/// Whether the process `spyc` names has gone: no process at its pid, or
+/// another, started at another time. An upgrade in place keeps both.
+fn gone((pid, started): (u32, u64)) -> bool {
+    crate::proc_group::started_epoch_secs(pid) != Some(started)
 }
 
 /// Why this shell runs inside spyc, read from its environment: what

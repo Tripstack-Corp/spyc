@@ -245,6 +245,34 @@ pub fn socket_in(sessions: &Path, name: &str) -> anyhow::Result<PathBuf> {
     Ok(socket)
 }
 
+/// Whether the session whose jar is at `socket` is gone, on evidence alone
+/// (SPYC-TRAP jar-gone-on-evidence): its jar's lock free, or its jar holding
+/// only its spyc's exit, or, with nothing left of the jar to judge (a jar
+/// ends by removing its socket and lock; a logout or reboot may empty the
+/// runtime directory), the spyc its newest saved session names gone by its
+/// start time. A held lock is a running jar however its socket file fares,
+/// and a session no file speaks for keeps its token.
+pub fn gone_on_evidence(socket: &Path) -> bool {
+    use spyc_jar::lock::LockState;
+    match spyc_jar::lock::state(socket) {
+        LockState::Free => true,
+        LockState::Held => super::place::describe(socket)
+            .is_ok_and(|fields| fields.iter().any(|(k, _)| k == "exit")),
+        LockState::Unknown => {
+            if super::place::socket_state(socket) == super::place::SocketState::Live {
+                return false;
+            }
+            let address = socket.file_stem().map(|s| s.to_string_lossy().into_owned());
+            let names: Vec<String> = address.into_iter().chain(shown_name(socket)).collect();
+            crate::state::sessions::load_manifests()
+                .into_iter()
+                .filter(|m| names.contains(&m.name))
+                .max_by_key(|m| m.epoch_secs)
+                .is_some_and(|m| m.pid.is_some() && !m.running())
+        }
+    }
+}
+
 /// Whether `token` opens the session jar at `socket`, as the jar itself
 /// answers (the 3.0 review, E1): a control request on spyc's MCP socket must
 /// carry it. The jar compares it with the only copy that counts, its own, in
