@@ -1,6 +1,7 @@
-//! Draws a [`crate::fs::disk_tree`] layout: one header line, then a line per
-//! row with its sizes, its share of its parent, its file count, and its name on
-//! the tree's branches.
+//! Draws a [`crate::fs::disk_tree`] layout under the directory's own
+//! long-listing lines: one header line, then a line per row with its sizes,
+//! its share of its parent, its file count, and its name on the tree's
+//! branches.
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -14,8 +15,9 @@ const HEADER: &str = "   SIZE  ON DISK  SHARE              FILES  ";
 /// Cells in a share bar.
 const BAR: usize = 8;
 
-/// The header line and one line per row.
-pub fn render(rows: &[Row], theme: &Theme) -> Vec<Line<'static>> {
+/// `listing`, its first line the header, then a blank line, the tree's
+/// header line and one line per row.
+pub fn render(listing: &[String], rows: &[Row], theme: &Theme) -> Vec<Line<'static>> {
     let style = |colour| {
         if theme.mono {
             Style::default()
@@ -23,7 +25,22 @@ pub fn render(rows: &[Row], theme: &Theme) -> Vec<Line<'static>> {
             Style::default().fg(colour)
         }
     };
-    let mut out = Vec::with_capacity(rows.len() + 1);
+    let mut out = Vec::with_capacity(listing.len() + rows.len() + 2);
+    for (i, line) in listing.iter().enumerate() {
+        let colour = if i == 0 {
+            theme.diff_meta_fg
+        } else {
+            theme.file
+        };
+        let mut style = style(colour);
+        if i == 0 {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        out.push(Line::from(Span::styled(line.clone(), style)));
+    }
+    if !listing.is_empty() {
+        out.push(Line::default());
+    }
     out.push(Line::from(vec![
         Span::styled(
             HEADER,
@@ -186,10 +203,14 @@ mod tests {
             usage,
             share: 500,
         };
-        let lines = render(&[row], &Theme::default());
-        assert!(text(&lines[0]).ends_with("NAME"));
+        let listing = ["NAME  MODE".to_string(), "src/  drwxr-xr-x".to_string()];
+        let lines = render(&listing, &[row], &Theme::default());
+        assert_eq!(text(&lines[0]), "NAME  MODE");
+        assert_eq!(text(&lines[1]), "src/  drwxr-xr-x");
+        assert_eq!(text(&lines[2]), "");
+        assert!(text(&lines[3]).ends_with("NAME"));
         assert_eq!(
-            text(&lines[1]),
+            text(&lines[4]),
             "   3.0K     4.0K    50% ████         1,500  │  └─ target/ ▸"
         );
     }

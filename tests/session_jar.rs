@@ -568,6 +568,64 @@ fn a_detach_in_spyc_ends_spyc_attach() {
     );
 }
 
+/// Every session jar under `Dirs`, shut down when the test ends however it
+/// ended: one a test made by detaching has no handle of its own.
+struct EndSessions<'a>(&'a Dirs);
+
+impl Drop for EndSessions<'_> {
+    fn drop(&mut self) {
+        let Ok(entries) = std::fs::read_dir(self.0.runtime.join("spyc/sessions")) else {
+            return;
+        };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.extension().is_some_and(|x| x == "sock") {
+                let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+                let _ = Command::new(env!("CARGO_BIN_EXE_spyc"))
+                    .args(["shutdown", "-y", &name])
+                    .env_clear()
+                    .envs(self.0.env())
+                    .stdin(Stdio::null())
+                    .output();
+            }
+        }
+    }
+}
+
+/// The first `^d` in a plain spyc frees the terminal as any other does: the
+/// spyc it hands the session to runs on in its own jar with no terminal, and
+/// `spyc attach` brings it back.
+#[test]
+fn the_first_detach_in_a_plain_spyc_frees_the_terminal() {
+    let dirs = Dirs::new();
+    let _sessions = EndSessions(&dirs);
+    let mut plain = Attached::start(&dirs, &[]);
+    plain.wait_drawn(&dirs.mark());
+    plain.type_keys(b"\x04");
+    let status = plain.exit();
+    assert!(status.success(), "{:?}", plain.text());
+    let sessions: Vec<PathBuf> = std::fs::read_dir(dirs.runtime.join("spyc/sessions"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "sock"))
+        .collect();
+    assert_eq!(sessions.len(), 1, "one session jar: {sessions:?}");
+    let name = sessions[0]
+        .file_stem()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        plain.text().contains(&format!("spyc attach {name}")),
+        "the terminal wasn't told how to come back: {:?}",
+        plain.text()
+    );
+
+    let mut back = Attached::start(&dirs, &["attach", &name]);
+    back.wait_drawn(&dirs.mark());
+    back.quit_spyc();
+}
+
 #[test]
 fn a_bare_spyc_attach_asks_which_of_several_sessions() {
     let dirs = Dirs::new();
