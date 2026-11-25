@@ -42,13 +42,15 @@ These are the names. Use them in code and when writing.
 
 - **Status bar** — single row, powerline segments. Top by default,
   bottom via `[layout] status_position = "bottom"`. Segments, in
-  order: pepper logo `🌶️` · `PROJECT_HOME` (basename) · session name
-  (`SAFFRON_CUMIN` style) · path · git branch + dirty flag · agent ·
-  suffix (`[picks:3 hidden:14]`). When the terminal is narrow, the
-  suffix switches to its short forms (`[p:3 h:14]`) before the path
-  is cut, and then the path is shortened in the middle. While several
-  projects are open, the **projects** segment takes the place of
-  `PROJECT_HOME` and the session name: a chip per project, its label
+  order: pepper logo `🌶️` · session name (`SAFFRON_CUMIN` style) ·
+  `PROJECT_HOME` (basename) · path · git branch + dirty flag · agent ·
+  suffix (`[picks:3 hidden:14]`), widest scope first: the session holds
+  the projects. When the terminal is narrow, the suffix switches to its
+  short forms (`[p:3 h:14]`) before the path is cut, the session name
+  gives way before the path drops under 16 columns, and then the path is
+  shortened in the middle. While several projects are open, the
+  **projects** segment takes the place of `PROJECT_HOME`, after the
+  session name: a chip per project, its label
   (the one in view a tab in the list cursor's colours, bold, entered and
   left by powerline's solid arrow, reversed in mono; the others dim, on a
   deeper brown than one project's segment) and the tab dots' glyph for

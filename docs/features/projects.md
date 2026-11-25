@@ -95,9 +95,10 @@ the list cursor's colours (reversed in mono) and the others dim, each with the g
 it: a red `■` when one is blocked on you or failed, a teal `■` for a done you haven't
 seen, `●` while one works and `○` while one waits on its own background work,
 and a blank while they're idle, parted by powerline's thin chevron (`U+E0B1`;
-a `|` in mono: `spyc ■ | web ● | api`). The chips take the session name's
-place, which stays in the terminal title and `Space s`, and get a third of
-the bar. The segment keeps its width whatever the agents are doing, so the
+a `|` in mono: `spyc ■ | web ● | api`). The session name comes first,
+before the chips, as the session holds them; in a narrow terminal it gives
+way to the path, and stays in the terminal title and `Space s`. The chips
+get a third of the bar. The segment keeps its width whatever the agents are doing, so the
 rest of the bar never shifts as they work and finish: each glyph has its
 place, blank while there's nothing to show. In a narrow terminal the longer
 labels are cut to one length, in the middle, so every project keeps its chip
@@ -126,8 +127,9 @@ close and stepping ([Mouse](mouse.md)).
 
 Each project has a **`PROJECT_HOME`** (a sticky project root), and each
 spyc run a **session name** (a spice-themed label like `SAFFRON_CUMIN`).
-Both are shown on the top bar (while several projects are open, their chips
-take the place of both) and persist across `spyc -r`.
+Both are shown on the top bar, the session name first (while several
+projects are open, their chips take the project's place) and persist across
+`spyc -r`.
 
 - **Auto-detect** — `PROJECT_HOME` is set to the launch directory
   automatically when that directory contains a `.git` entry. No

@@ -1,6 +1,5 @@
 ---
 source: src/ui/status.rs
-assertion_line: 382
 expression: out
 ---
- 🌶️   spyc  SAFFRON_CUMIN  /home/src   main*  [picks:1] 
+ 🌶️   SAFFRON_CUMIN  spyc  /home/src   main*  [picks:1] 

@@ -1,6 +1,5 @@
 ---
 source: src/ui/status.rs
-assertion_line: 403
 expression: out
 ---
- 🌶️   spyc  SAFFRON_CUMIN  /home/src   main*   claude:76422c62  [picks:1] 
+ 🌶️   SAFFRON_CUMIN  spyc  /home/src   main*   claude:76422c62  [picks:1] 
