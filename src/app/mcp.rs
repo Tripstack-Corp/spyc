@@ -538,7 +538,10 @@ impl App {
             }
             McpCommand::ConnectionInitialized { conn, pane_id } => {
                 let who = self.tab_label_of(pane_id.as_deref());
-                self.state.note_event(&format!("MCP: {who} connected"));
+                let origin = self.asker_origin(pane_id.as_deref(), Some(conn));
+                self.noting_from(origin, |app| {
+                    app.state.note_event(&format!("MCP: {who} connected"));
+                });
                 self.view.activity.mcp_connections.insert(
                     conn,
                     super::activity::McpConnection {
@@ -563,7 +566,10 @@ impl App {
             McpCommand::ConnectionClosed { conn } => {
                 if let Some(gone) = self.view.activity.mcp_connections.remove(&conn) {
                     let who = self.tab_label_of(gone.pane_id.as_deref());
-                    self.state.note_event(&format!("MCP: {who} disconnected"));
+                    let origin = self.asker_origin(gone.pane_id.as_deref(), Some(conn));
+                    self.noting_from(origin, |app| {
+                        app.state.note_event(&format!("MCP: {who} disconnected"));
+                    });
                 }
                 McpResponse::Ok {
                     message: "ok".into(),

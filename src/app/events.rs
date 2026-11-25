@@ -10,7 +10,7 @@
 use std::fmt::Write as _;
 use std::sync::mpsc::Sender;
 
-use super::state::{Event, EventKind, EventLog};
+use super::state::{Event, EventKind, EventLog, Origin};
 use super::{App, Effect, Wake};
 use crate::state::event_log::Write;
 use crate::ui::pager::PagerView;
@@ -30,7 +30,7 @@ impl App {
         if let Some(flash) = self.state.flash.clone()
             && matches!(flash.kind, super::FlashKind::Error)
         {
-            self.state.events.note(EventKind::Error, &flash.text);
+            self.state.note_error(&flash.text);
         }
         let Some(root) = crate::state::state_root() else {
             return;
@@ -78,10 +78,9 @@ impl App {
         let at = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S").to_string();
         let stamped: Vec<Event> = pending
             .into_iter()
-            .map(|(kind, text)| Event {
+            .map(|event| Event {
                 at: at.clone(),
-                kind,
-                text,
+                ..event
             })
             .collect();
         if let Some(writer) = &self.runtime.event_writer
@@ -141,6 +140,50 @@ impl App {
         true
     }
 
+    /// Where the tab `pane_id` is: its project and number, and its ids. A tab
+    /// that's gone keeps its pane id.
+    pub(super) fn tab_origin(&self, pane_id: &str) -> Origin {
+        let project = self
+            .runtime
+            .project_of_pane(pane_id)
+            .and_then(|id| self.state.project(id));
+        Origin {
+            project: project.map(super::state::Project::label),
+            project_id: project.map(|p| p.id.to_string()),
+            tab: self.runtime.tab_of_pane(pane_id).map(|(number, _)| number),
+            pane_id: Some(pane_id.to_string()),
+            conn: None,
+        }
+    }
+
+    /// Who an MCP request came from: the tab `pane_id`, else the active
+    /// project, with the connection `conn`; `None` when it names neither.
+    pub(super) fn asker_origin(&self, pane_id: Option<&str>, conn: Option<u64>) -> Option<Origin> {
+        if pane_id.is_none() && conn.is_none() {
+            return None;
+        }
+        let mut origin = pane_id.map_or_else(|| self.state.origin(), |id| self.tab_origin(id));
+        origin.conn = conn;
+        Some(origin)
+    }
+
+    /// Run `f` with what it notes and flashes coming from `origin`, when
+    /// there is one: a tab's doing, which the event log and the status row
+    /// then say is that tab's.
+    pub(super) fn noting_from<R>(
+        &mut self,
+        origin: Option<Origin>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let Some(origin) = origin else {
+            return f(self);
+        };
+        let outer = self.state.events.source.replace(origin);
+        let out = f(self);
+        self.state.events.source = outer;
+        out
+    }
+
     /// What the session's event log calls the tab `pane_id` names: its label,
     /// or what it is when it names none.
     pub(super) fn tab_label_of(&self, pane_id: Option<&str>) -> String {
@@ -191,8 +234,8 @@ pub(super) fn cmd_events(app: &mut App, _args: &str) -> Vec<Effect> {
     app.open_events()
 }
 
-/// The pager for `log`: one line an event, its time then what happened, an
-/// error in red.
+/// The pager for `log`: one line an event, as `spyc events` prints it
+/// (`crate::state::event_log::shown`).
 fn events_view(log: &EventLog, session: &str) -> PagerView {
     let mut title = format!("events \u{2014} {session}");
     let _ = match log.len() {
@@ -201,11 +244,11 @@ fn events_view(log: &EventLog, session: &str) -> PagerView {
     };
     let mut text = String::new();
     for event in log.iter() {
-        let when = event.at.get(5..).unwrap_or(&event.at);
-        let _ = match event.kind {
-            EventKind::Info => writeln!(text, "{when}  {}", event.text),
-            EventKind::Error => writeln!(text, "{when}  \x1b[31m{}\x1b[0m", event.text),
-        };
+        let _ = writeln!(
+            text,
+            "{}",
+            crate::state::event_log::shown(&event.to_line(), true)
+        );
     }
     if log.is_empty() {
         text.push_str("no events yet this session\n");

@@ -337,8 +337,17 @@ each event of the session's life:
 Hints about what you just did, such as where focus went, show on the status
 line but aren't kept.
 
-- **`:events`** (or **`:log`**) opens the log in the pager, newest last, an
-  error in red. New events appear in it while it's open, and `/` searches it.
+Each event says where it happened: its project, and the tab when a tab did
+it, numbered as the pane's tab bar numbers it (`web tab 2`). What a tab does
+shows that way on the status line too, so `web tab 2: claude finished` or
+`web tab 2: [mcp] created worktree …` says which agent it was.
+
+- **`:events`** (or **`:log`**) opens the log in the pager, newest last: the
+  time, where it happened, what happened (an error in red), then, dimmed, the
+  ids to trace it by: the tab's `pane=` id (its `SPYC_PANE_ID`), the
+  `project=` id, and for an agent's MCP call its `conn=` number, as
+  `:activity dump` lists it. New events appear in it while it's open, and `/`
+  searches it, ids included.
 - **`spyc events [NAME]`** prints a session's log from a shell, as `:events`
   shows it, without attaching. With no name it takes the one session running,
   or lists every session with a log, newest first, and asks which. `-n N`

@@ -142,13 +142,19 @@ fn show_tab(app: &mut App, ctx: &mut RunCtx, index: usize) {
 }
 
 /// The flash once the recap lands, or the latest one after a few seconds.
+/// The recap names the tab it's about, Claude's, tab 1: the rest is the
+/// recap's line.
 fn recap(app: &mut App, ctx: &mut RunCtx) -> Option<String> {
     let end = Instant::now() + Duration::from_secs(5);
+    let place = format!("{} tab 1: ", app.state.active_project().label());
     loop {
         tick(app, ctx);
         let flash = app.flash_text().map(String::from);
         if flash.as_deref().is_some_and(|f| f.contains(" turn")) || Instant::now() > end {
-            return flash;
+            return flash.map(|f| match f.strip_prefix(&place) {
+                Some(line) => line.to_string(),
+                None => panic!("the recap names its tab, {place:?}: {f}"),
+            });
         }
         std::thread::sleep(Duration::from_millis(10));
     }

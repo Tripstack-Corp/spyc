@@ -111,7 +111,8 @@ impl App {
                 tabs.tabs().get(index).map(|entry| entry.info.id.clone())
             });
             if in_view.as_deref() == Some(recap.pane_id.as_str()) {
-                self.state.flash_info(recap.line);
+                let origin = Some(self.tab_origin(&recap.pane_id));
+                self.noting_from(origin, |app| app.state.flash_info(recap.line));
                 shown = true;
             }
         }

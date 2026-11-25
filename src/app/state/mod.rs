@@ -33,7 +33,7 @@ mod commander;
 pub use commander::Commander;
 mod dispatch;
 pub mod events;
-pub use events::{Event, EventKind, EventLog};
+pub use events::{Event, EventKind, EventLog, Origin};
 mod flash;
 mod git;
 mod git_cache;

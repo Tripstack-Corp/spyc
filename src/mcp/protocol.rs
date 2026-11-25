@@ -93,6 +93,22 @@ impl Caller {
         self.pane_id.as_deref().is_some_and(super::moved::is_moved)
     }
 
+    /// `command` as a request from this connection: its project, tab and
+    /// number ride along.
+    fn request(
+        &self,
+        command: McpCommand,
+        reply: std::sync::mpsc::Sender<McpResponse>,
+    ) -> McpRequest {
+        McpRequest {
+            command,
+            reply,
+            project: self.project,
+            pane_id: self.pane_id.clone(),
+            conn: self.conn,
+        }
+    }
+
     pub(super) fn connection(conn: u64) -> Self {
         Self {
             conn: Some(conn),
@@ -142,6 +158,8 @@ fn ask_within(
         command,
         reply: reply_tx,
         project: None,
+        pane_id: None,
+        conn: None,
     })
     .map_err(|_| "spyc's loop has gone".to_string())?;
     match reply_rx.recv_timeout(wait) {
@@ -159,6 +177,8 @@ fn tell(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) {
         command,
         reply: reply_tx,
         project: None,
+        pane_id: None,
+        conn: None,
     });
 }
 
@@ -170,6 +190,8 @@ fn ask(tx: &std::sync::mpsc::Sender<McpRequest>, command: McpCommand) -> Option<
         command,
         reply: reply_tx,
         project: None,
+        pane_id: None,
+        conn: None,
     })
     .ok()?;
     match reply_rx
@@ -630,6 +652,8 @@ fn handle_tools_call(
             },
             reply: reply_tx,
             project: None,
+            pane_id: None,
+            conn: None,
         });
     }
 
@@ -921,14 +945,7 @@ fn handle_tools_call(
 
             // Send command and block for reply with timeout.
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-            if tx
-                .send(McpRequest {
-                    command,
-                    reply: reply_tx,
-                    project: caller.project,
-                })
-                .is_err()
-            {
+            if tx.send(caller.request(command, reply_tx)).is_err() {
                 return send_tool_error(w, id, "spyc is not running");
             }
             let reply_timeout = reply_budget(name, args);

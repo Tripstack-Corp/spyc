@@ -847,6 +847,7 @@ fn created_worktree_outcome(
         },
         completion,
         project,
+        origin: None,
     }
 }
 
