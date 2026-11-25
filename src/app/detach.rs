@@ -569,6 +569,51 @@ impl App {
         self.state.session_name = Some(name);
         self.run_effects(effects, terminal, foreground_exec);
     }
+
+    /// What another spyc asks of this session's on its MCP socket:
+    /// `spyc/behind`, and whether a control request may be acted on.
+    pub(super) fn answer_attach(
+        &mut self,
+        cmd: crate::mcp_cmd::McpCommand,
+    ) -> crate::mcp_cmd::McpResponse {
+        use crate::mcp_cmd::{McpCommand, McpResponse};
+        match cmd {
+            McpCommand::Authorize { method, token } => {
+                self.authorize_control(&method, token.as_deref())
+            }
+            _ => McpResponse::Ok {
+                message: serde_json::json!({ "behind": self.newer_install().0 }).to_string(),
+            },
+        }
+    }
+
+    /// A control request (`method`, carrying `token`) is acted on only in a
+    /// spyc that runs in a session jar of its own, and only with that
+    /// session's token (the 3.0 review, E1): any process of the user reaches
+    /// the socket, and one request would otherwise end spyc and every tab.
+    /// No prompt: a detached spyc has no one to ask. A refusal is flashed and
+    /// logged, so the session shows who was turned away.
+    fn authorize_control(
+        &mut self,
+        method: &str,
+        token: Option<&str>,
+    ) -> crate::mcp_cmd::McpResponse {
+        use crate::mcp_cmd::McpResponse;
+        let why = match &self.runtime.own_jar {
+            None => "this spyc runs in no session jar of its own",
+            Some(jar) if token.is_some_and(|t| jar.admits(t.as_bytes())) => {
+                return McpResponse::Ok {
+                    message: "{}".into(),
+                };
+            }
+            Some(_) if token.is_none() => "it carries no token",
+            Some(_) => "its token isn't this session's",
+        };
+        let said = format!("refused {method} on spyc's MCP socket: {why}");
+        self.state.note_event(&said);
+        self.state.flash_error(said.clone());
+        McpResponse::Error { message: said }
+    }
 }
 
 /// The flag that tells the spyc a `^d` starts in the session's own jar which

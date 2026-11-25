@@ -89,6 +89,13 @@ impl OwnJar {
         OwnerLeft::from_word(word)
     }
 
+    /// Whether `token` is this session's, as its jar would compare it (the
+    /// 3.0 review, E1): what a control request on spyc's MCP socket must
+    /// carry. `false` when no token is kept for it.
+    pub fn admits(&self, token: &[u8]) -> bool {
+        token_of(&self.socket).is_some_and(|want| super::tokens::same(&want, token))
+    }
+
     /// Forget this session's token: spyc ends it for good, and its jar with
     /// it ([`forget_token`]).
     pub fn forget_token(&self) {
@@ -238,6 +245,13 @@ pub fn socket_in(sessions: &Path, name: &str) -> anyhow::Result<PathBuf> {
         );
     }
     Ok(socket)
+}
+
+/// The token kept for the session whose jar is at `socket`: what `spyc
+/// attach`, `spyc shutdown` and `:attach project` present to it and its
+/// spyc.
+pub fn token_of(socket: &Path) -> Option<Vec<u8>> {
+    super::tokens::load_in(&super::place::tokens_dir().ok()?, socket)
 }
 
 /// Forget the token of the session whose jar is at `socket`, once its jar

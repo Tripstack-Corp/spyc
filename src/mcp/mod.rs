@@ -116,18 +116,24 @@ pub fn root_marker_path_in(state_dir: &Path, pid: u32) -> PathBuf {
 
 /// Socket path for the current process. `None` when [`state_dir`] is.
 /// Ask the spyc with `pid` to `:upgrade`: `spyc attach` from a newer
-/// install, once the user said yes.
-pub fn ask_upgrade(pid: u32) -> anyhow::Result<()> {
-    notify(pid, protocol::UPGRADE_METHOD)
+/// install, once the user said yes, with the session's `token`.
+pub fn ask_upgrade(pid: u32, token: &[u8]) -> anyhow::Result<()> {
+    notify(pid, protocol::UPGRADE_METHOD, &control_params(token))
+}
+
+/// A control request's parameters: the session's `token`, which its spyc
+/// requires (the 3.0 review, E1).
+fn control_params(token: &[u8]) -> serde_json::Value {
+    serde_json::json!({ "token": String::from_utf8_lossy(token) })
 }
 
 /// Have the spyc of `pid` save its session and quit, ending its tabs, as
-/// `:q` would (`spyc shutdown`).
-pub fn ask_shutdown(pid: i32) -> anyhow::Result<()> {
+/// `:q` would (`spyc shutdown`), with the session's `token`.
+pub fn ask_shutdown(pid: i32, token: &[u8]) -> anyhow::Result<()> {
     use anyhow::Context as _;
     let pid = u32::try_from(pid).context("a spyc's pid is positive")?;
     let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
-    request_shutdown(&sock)
+    request_shutdown(&sock, token)
 }
 
 /// How long `spyc shutdown` and `spyc attach` wait for a spyc's answer: the
@@ -140,7 +146,8 @@ const SHUTDOWN_ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs
 /// question, or none that answers.
 pub fn ask_behind(pid: u32) -> Option<bool> {
     let sock = socket_path_for(pid)?;
-    request(&sock, protocol::BEHIND_METHOD).ok()?["result"]["behind"].as_bool()
+    request(&sock, protocol::BEHIND_METHOD, &serde_json::Value::Null).ok()?["result"]["behind"]
+        .as_bool()
 }
 
 /// How long `:attach project` waits for the other spyc to let its session go:
@@ -148,11 +155,17 @@ pub fn ask_behind(pid: u32) -> Option<bool> {
 const RELEASE_ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Have the spyc of `pid` let its session go (`:attach project`): saved as
-/// no running spyc's, its jars let go, and spyc gone. The saved file's id.
-pub fn ask_release(pid: u32) -> anyhow::Result<u64> {
+/// no running spyc's, its jars let go, and spyc gone, asked with the
+/// session's `token`. The saved file's id.
+pub fn ask_release(pid: u32, token: &[u8]) -> anyhow::Result<u64> {
     use anyhow::Context as _;
     let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
-    let reply = request_within(&sock, protocol::RELEASE_METHOD, RELEASE_ANSWER_WAIT)?;
+    let reply = request_within(
+        &sock,
+        protocol::RELEASE_METHOD,
+        &control_params(token),
+        RELEASE_ANSWER_WAIT,
+    )?;
     if reply["error"]["code"] == -32601 {
         anyhow::bail!("its spyc predates `:attach project`: have it `:upgrade` first");
     }
@@ -164,23 +177,31 @@ pub fn ask_release(pid: u32) -> anyhow::Result<u64> {
         .with_context(|| format!("its spyc's answer names no session: {reply}"))
 }
 
-/// Send the spyc at `sock` the request `method` and read its reply, within
-/// [`SHUTDOWN_ANSWER_WAIT`].
-fn request(sock: &Path, method: &str) -> anyhow::Result<serde_json::Value> {
-    request_within(sock, method, SHUTDOWN_ANSWER_WAIT)
+/// Send the spyc at `sock` the request `method` with `params` (none when
+/// null) and read its reply, within [`SHUTDOWN_ANSWER_WAIT`].
+fn request(
+    sock: &Path,
+    method: &str,
+    params: &serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    request_within(sock, method, params, SHUTDOWN_ANSWER_WAIT)
 }
 
 /// [`request`], within `wait`.
 fn request_within(
     sock: &Path,
     method: &str,
+    params: &serde_json::Value,
     wait: std::time::Duration,
 ) -> anyhow::Result<serde_json::Value> {
     use anyhow::Context as _;
     let mut stream = std::os::unix::net::UnixStream::connect(sock)
         .with_context(|| format!("reach the spyc at {}", sock.display()))?;
     stream.set_read_timeout(Some(wait))?;
-    let msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method });
+    let mut msg = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": method });
+    if !params.is_null() {
+        msg["params"] = params.clone();
+    }
     framing::send_message(&mut stream, &msg.to_string())
         .with_context(|| format!("send spyc {method}"))?;
     let answer = framing::read_lsp_message(&mut std::io::BufReader::new(stream))
@@ -188,9 +209,10 @@ fn request_within(
     serde_json::from_str(&answer).with_context(|| format!("spyc's answer to {method}"))
 }
 
-/// Ask the spyc at `sock` to shut down, and read its answer.
-fn request_shutdown(sock: &Path) -> anyhow::Result<()> {
-    let reply = request(sock, protocol::SHUTDOWN_METHOD)?;
+/// Ask the spyc at `sock` to shut down, with the session's `token`, and read
+/// its answer.
+fn request_shutdown(sock: &Path, token: &[u8]) -> anyhow::Result<()> {
+    let reply = request(sock, protocol::SHUTDOWN_METHOD, &control_params(token))?;
     if reply["error"]["code"] == -32601 {
         anyhow::bail!(
             "its spyc predates `spyc shutdown`: attach to it and `:q`, or have it `:upgrade` first"
@@ -204,13 +226,14 @@ fn request_shutdown(sock: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Send the spyc of `pid` the notification `method` on its MCP socket.
-fn notify(pid: u32, method: &str) -> anyhow::Result<()> {
+/// Send the spyc of `pid` the notification `method` with `params` on its MCP
+/// socket.
+fn notify(pid: u32, method: &str, params: &serde_json::Value) -> anyhow::Result<()> {
     use anyhow::Context as _;
     let sock = socket_path_for(pid).context("no state directory for spyc's socket")?;
     let mut stream = std::os::unix::net::UnixStream::connect(&sock)
         .with_context(|| format!("reach the spyc at {}", sock.display()))?;
-    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": method });
+    let msg = serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params });
     framing::send_message(&mut stream, &msg.to_string())
         .with_context(|| format!("send spyc {method}"))?;
     Ok(())

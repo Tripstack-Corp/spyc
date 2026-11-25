@@ -311,7 +311,7 @@ impl App {
                 }
             }
             McpCommand::ClearPicks => self.mcp_clear_picks(),
-            McpCommand::Behind => self.answer_behind(),
+            c @ (McpCommand::Behind | McpCommand::Authorize { .. }) => self.answer_attach(c),
             McpCommand::Release => self.release_session(),
             McpCommand::CreateWorktree { .. }
             | McpCommand::RemoveWorktree { .. }
@@ -443,13 +443,6 @@ impl App {
                 message: "ok".into(),
             },
             McpCommand::MalformedSocketMessage { detail } => self.note_malformed(&detail),
-        }
-    }
-
-    /// `spyc/behind`: whether `:upgrade` would find a newer spyc installed.
-    fn answer_behind(&self) -> crate::mcp_cmd::McpResponse {
-        crate::mcp_cmd::McpResponse::Ok {
-            message: serde_json::json!({ "behind": self.newer_install().0 }).to_string(),
         }
     }
 

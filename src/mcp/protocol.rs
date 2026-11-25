@@ -7,6 +7,8 @@ use serde_json::{Value, json};
 
 use crate::mcp_cmd::{McpCommand, McpRequest, McpResponse};
 
+mod control;
+
 use super::deadline::{READ_TOOL_TIMEOUT, reply_budget, scope_wait_ms};
 use super::framing::{send_error, send_result, send_tool_error, send_tool_result};
 use super::readers::{
@@ -126,12 +128,14 @@ impl Caller {
 
 /// Send the loop a command whose reply nobody reads.
 /// The notification `spyc attach` sends a spyc older than the one installed,
-/// once the user says yes, to have it `:upgrade`.
+/// once the user says yes, to have it `:upgrade`. Its `params.token` is the
+/// session's (`control`).
 pub(super) const UPGRADE_METHOD: &str = "spyc/upgrade";
 
 /// The request `spyc shutdown` sends a session's spyc, once the user says yes,
 /// to have it save the session and quit. A request, not a notification: a spyc
-/// that predates it answers "Method not found" rather than nothing.
+/// that predates it answers "Method not found" rather than nothing. Its
+/// `params.token` is the session's (`control`).
 pub(super) const SHUTDOWN_METHOD: &str = "spyc/shutdown";
 
 /// The request `spyc attach` sends a session's spyc to learn whether a newer
@@ -140,7 +144,7 @@ pub(super) const BEHIND_METHOD: &str = "spyc/behind";
 
 /// The request `:attach project` sends another session's spyc to have it let
 /// its session go for the asking spyc to take: `{"session": <id>}`, the file
-/// it saved.
+/// it saved. Its `params.token` is the session's (`control`).
 pub(super) const RELEASE_METHOD: &str = "spyc/release";
 
 /// How long the socket thread waits for the loop to release its session: a
@@ -464,7 +468,7 @@ pub(super) fn dispatch_for(
         if method == UPGRADE_METHOD
             && let Some(tx) = cmd_tx
         {
-            tell(tx, McpCommand::Upgrade);
+            control::notice(&parsed["params"], tx);
         }
         return Ok(());
     }
@@ -515,18 +519,8 @@ pub(super) fn dispatch_for(
             Some(answer) => send_result(w, &id, answer),
             None => send_error(w, id, -32000, "spyc didn't answer"),
         },
-        RELEASE_METHOD => {
-            match cmd_tx.map(|tx| ask_within(tx, McpCommand::Release, RELEASE_WAIT)) {
-                Some(Ok(answer)) => send_result(w, &id, answer),
-                Some(Err(why)) => send_error(w, id, -32000, &why),
-                None => send_error(w, id, -32000, "spyc didn't answer"),
-            }
-        }
-        SHUTDOWN_METHOD => {
-            if let Some(tx) = cmd_tx {
-                tell(tx, McpCommand::Shutdown);
-            }
-            send_result(w, &id, json!({}))
+        RELEASE_METHOD | SHUTDOWN_METHOD => {
+            control::request(w, &id, method, &parsed["params"], cmd_tx)
         }
         _ => send_error(w, id, -32601, &format!("Method not found: {method}")),
     }

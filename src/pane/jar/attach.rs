@@ -94,7 +94,7 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
             &mut std::io::stderr(),
         )?
     {
-        upgrade_first(&chosen.name, program)?;
+        upgrade_first(&chosen.name, program, &token)?;
     }
     crate::terminal::restore_on_signal();
     let attached = super::place::attach(&chosen.socket, &token);
@@ -219,7 +219,7 @@ const fn replaced_since(started: u64, installed: u64) -> bool {
 /// spyc removes its MCP socket before its `exec` and the new one makes it
 /// again: a socket newer than the one there now, taking a connection, is the
 /// new spyc. One that doesn't come is attached to anyway, with a note.
-fn upgrade_first(name: &str, pid: u32) -> anyhow::Result<()> {
+fn upgrade_first(name: &str, pid: u32, token: &[u8]) -> anyhow::Result<()> {
     let socket =
         crate::mcp::socket_path_for(pid).context("no state directory for spyc's socket")?;
     let made = |path: &Path| {
@@ -229,7 +229,7 @@ fn upgrade_first(name: &str, pid: u32) -> anyhow::Result<()> {
             .map(|m| (m.ino(), m.ctime(), m.ctime_nsec()))
     };
     let before = made(&socket);
-    crate::mcp::ask_upgrade(pid)?;
+    crate::mcp::ask_upgrade(pid, token)?;
     let until = Instant::now() + UPGRADE_WAIT;
     loop {
         let now = made(&socket);
