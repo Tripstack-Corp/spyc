@@ -381,7 +381,7 @@ mod checks {
     #[test]
     fn no_reader_waits_for_the_end_of_a_pipe_another_spawn_can_hold() {
         /// Where a pipe stays, and why.
-        const EXCEPTIONS: [(&str, usize, &str); 6] = [
+        const EXCEPTIONS: [(&str, usize, &str); 7] = [
             (
                 "src/clipboard.rs",
                 3,
@@ -409,10 +409,16 @@ mod checks {
             ),
             (
                 "crates/spyc-jar/src/upgrade.rs",
-                7,
-                "the jar's upgrade path, slice C's: the validator's two pipes, the blob's \
-                 pipe (made, then marked close-on-exec: the same race, filed as #1334) \
-                 and three socketpairs",
+                4,
+                "the jar's handover, slice C's: the blob's pipe, its helper and its one \
+                 call (made, then marked close-on-exec: the same race, filed as #1334), \
+                 and the socketpairs to the new image and to the holder",
+            ),
+            (
+                "crates/spyc-jar/src/validation.rs",
+                3,
+                "the jar's validation of a new binary, slice C's: the validator's \
+                 socketpair for the blob and its two pipes, stdout and stderr",
             ),
             (
                 "crates/spyc-jar/src/pty.rs",

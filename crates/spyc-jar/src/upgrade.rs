@@ -41,7 +41,7 @@
 //! waits until there is none.
 
 use std::collections::HashMap;
-use std::io::{BufRead, IoSlice, Read, Write};
+use std::io::{IoSlice, Read, Write};
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -61,8 +61,6 @@ use crate::state::ConnState;
 
 /// How often an upgrade looks for every thread to have reached its park.
 const PARK_POLL: Duration = Duration::from_millis(20);
-/// How often an upgrade looks for the new binary's validation to end.
-const VALIDATOR_POLL: Duration = Duration::from_millis(5);
 
 /// The message that travels with the descriptors.
 pub(crate) const FDS_TAG: &[u8; 8] = b"SPYCJARF";
@@ -197,7 +195,7 @@ fn one_file(shared: &Shared, binary: &str) -> Result<crate::store::OneFile, (u16
         let machines = e
             .chain()
             .find_map(|c| c.downcast_ref::<std::io::Error>())
-            .is_some_and(|io| !the_binarys_fault(io));
+            .is_some_and(|io| !crate::validation::the_binarys_fault(io));
         let why = if machines {
             reason::UPGRADE_BUSY
         } else {
@@ -205,23 +203,6 @@ fn one_file(shared: &Shared, binary: &str) -> Result<crate::store::OneFile, (u16
         };
         (why, e)
     })
-}
-
-/// Whether `e`, from copying or starting the new binary, is the binary's
-/// own doing: it isn't there, can't be read or run, or isn't a file at all
-/// (reason 6). Anything else (no descriptor, no process, no room on the
-/// disk, no memory) is the machine's for now, and only defers the upgrade
-/// (reason 5): review finding A2. A refusal that is no `io::Error` (not a
-/// regular file, too big) is the binary's.
-fn the_binarys_fault(e: &std::io::Error) -> bool {
-    use rustix::io::Errno;
-    use std::io::ErrorKind::{
-        InvalidFilename, IsADirectory, NotADirectory, NotFound, PermissionDenied,
-    };
-    matches!(
-        e.kind(),
-        NotFound | PermissionDenied | NotADirectory | IsADirectory | InvalidFilename
-    ) || matches!(Errno::from_io_error(e), Some(Errno::NOEXEC | Errno::LOOP))
 }
 
 /// Park, validate, hand over and `exec`. Returns only on failure, with its
@@ -246,7 +227,7 @@ fn try_run(
     // A new binary's first run is slow (about 263 ms on macOS for a new
     // file), and one that isn't a jar is refused here: both while the program
     // is still served. The parked validation below is the one that counts.
-    validate(
+    crate::validation::validate(
         binary,
         &blob_now(shared),
         shared.cfg.instance,
@@ -273,10 +254,11 @@ fn try_run(
         )));
     }
     let blob = handover::encode_parts(&shared.cfg, shared.child_pid(), &st, &states);
-    validate(binary, &blob, shared.cfg.instance, PARKED_VALIDATION)?;
+    crate::validation::validate(binary, &blob, shared.cfg.instance, PARKED_VALIDATION)?;
 
-    let (blob_read, blob_write) = pipe().map_err(failed)?;
-    let (to_image, image_stdin) = UnixStream::pair().context("socketpair").map_err(failed)?;
+    // No descriptor for these is the machine's for now (review finding A2).
+    let (blob_read, blob_write) = pipe().map_err(busy)?;
+    let (to_image, image_stdin) = UnixStream::pair().context("socketpair").map_err(busy)?;
     // Held across the handover: the holder and the new image take this
     // listener, and no connection may be accepted in between.
     let listener = shared
@@ -489,8 +471,21 @@ fn hold(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .with_context(|| format!("run {} hold-handover", binary.display()))
-        .map_err(failed)?;
+        .map_err(|e| {
+            // The OS that won't start the holder now (no process, descriptor
+            // or memory) only defers the upgrade (review finding A2).
+            let why = if crate::validation::the_binarys_fault(&e) {
+                reason::UPGRADE_FAILED
+            } else {
+                reason::UPGRADE_BUSY
+            };
+            let e =
+                anyhow::Error::new(e).context(format!("run {} hold-handover", binary.display()));
+            (
+                why,
+                e.context(format!("{} didn't hold the handover", binary.display())),
+            )
+        })?;
     let given = (|| -> anyhow::Result<()> {
         let mut space =
             vec![std::mem::MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(held.len()))];
@@ -685,179 +680,6 @@ fn wait_parked(shared: &Shared) -> anyhow::Result<()> {
             .unwrap_or_else(PoisonError::into_inner)
             .0;
     }
-}
-
-/// Have `binary` check the blob before anything is handed to it: it must
-/// print the proof line for this blob within `deadline`, which covers its
-/// exit and its output. The blob goes over a socketpair, not a pipe: a
-/// validator that refuses without reading it leaves a write that answers
-/// `EPIPE`, never `SIGPIPE`.
-///
-/// Only what the binary did rejects it (reason 6): it isn't there or can't
-/// run, it exits non-zero, or it exits 0 without the proof. Running out of
-/// time, its proof included, and a validator the machine can't start now,
-/// make the upgrade busy (reason 5): a loaded machine defers an upgrade and
-/// never fails a good binary (review finding A2). Whatever the outcome, the
-/// validator's whole process group is ended (finding A9): a child it left
-/// would hold a copy of the blob for as long as it lives.
-fn validate(
-    binary: &Path,
-    blob: &[u8],
-    instance: u64,
-    deadline: Duration,
-) -> Result<(), (u16, anyhow::Error)> {
-    let busy = |e: anyhow::Error| (reason::UPGRADE_BUSY, e);
-    let rejected = |e: anyhow::Error| (reason::UPGRADE_REJECTED, e);
-    let (ours, theirs) = UnixStream::pair().context("socketpair").map_err(busy)?;
-    crate::jar::no_sigpipe(&ours);
-    let mut child = Command::new(binary)
-        .arg("validate-handover")
-        .process_group(0)
-        .stdin(Stdio::from(OwnedFd::from(theirs)))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| unstarted(binary, e))?;
-    let group = i32::try_from(child.id())
-        .ok()
-        .and_then(rustix::process::Pid::from_raw);
-    let end_group = || {
-        if let Some(g) = group {
-            let _ = rustix::process::kill_process_group(g, rustix::process::Signal::KILL);
-        }
-    };
-    // A thread the OS refuses (review finding B1) makes the upgrade busy,
-    // the validator ended with its group.
-    let no_thread = |child: &mut std::process::Child, e: std::io::Error| {
-        end_group();
-        let _ = child.wait();
-        busy(anyhow!("no thread to validate {}: {e}", binary.display()))
-    };
-    let blob_owned = blob.to_vec();
-    if let Err(e) = crate::threads::start("jar-blob-in", move || {
-        let _ = (&ours).write_all(&blob_owned);
-        let _ = ours.shutdown(std::net::Shutdown::Write);
-    }) {
-        return Err(no_thread(&mut child, e));
-    }
-    // Read on threads of their own: a child of the validator may hold either
-    // stream open long after the validator has gone.
-    let (line_tx, line_rx) = std::sync::mpsc::channel();
-    if let Some(out) = child.stdout.take()
-        && let Err(e) = crate::threads::start("jar-proof", move || {
-            let mut first = String::new();
-            let _ = std::io::BufReader::new(out.take(4096)).read_line(&mut first);
-            let _ = line_tx.send(first);
-        })
-    {
-        return Err(no_thread(&mut child, e));
-    }
-    let (err_tx, err_rx) = std::sync::mpsc::channel();
-    if let Some(err) = child.stderr.take()
-        && let Err(e) = crate::threads::start("jar-why", move || {
-            let mut why = String::new();
-            let _ = err.take(4096).read_to_string(&mut why);
-            let _ = err_tx.send(why);
-        })
-    {
-        return Err(no_thread(&mut child, e));
-    }
-    let until = Instant::now() + deadline;
-    let left = || until.saturating_duration_since(Instant::now());
-    // Its exit is seen without reaping it: until it is reaped, its pid can't
-    // name another process group, so ending its group reaches no stranger.
-    let pid = rustix::process::Pid::from_child(&child);
-    let succeeded = loop {
-        use rustix::process::{WaitId, WaitIdOptions};
-        let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
-        match rustix::process::waitid(WaitId::Pid(pid), options) {
-            Ok(Some(s)) => break s.exit_status() == Some(0),
-            Ok(None) | Err(rustix::io::Errno::INTR) => {}
-            Err(e) => {
-                end_group();
-                let _ = child.wait();
-                return Err(busy(anyhow!("wait for {}: {e}", binary.display())));
-            }
-        }
-        if left().is_zero() {
-            end_group();
-            let _ = child.wait();
-            return Err(busy(anyhow!(
-                "{} didn't answer within {deadline:?}",
-                binary.display()
-            )));
-        }
-        std::thread::sleep(VALIDATOR_POLL);
-    };
-    let answer = if succeeded {
-        proved(binary, &line_rx, left(), (instance, blob.len()), deadline)
-    } else {
-        // Its reason, if it has gone with it: a child of the validator may
-        // keep the stream open.
-        let why = err_rx
-            .recv_timeout(left().min(OUTPUT_GRACE))
-            .unwrap_or_default();
-        Err(rejected(anyhow!(
-            "{} rejected the handover: {}",
-            binary.display(),
-            why.trim()
-        )))
-    };
-    end_group();
-    let _ = child.wait();
-    answer
-}
-
-/// Why `binary`'s validator didn't start: its own fault (reason 6), or the
-/// machine's for now (reason 5).
-fn unstarted(binary: &Path, e: std::io::Error) -> (u16, anyhow::Error) {
-    let why = if the_binarys_fault(&e) {
-        reason::UPGRADE_REJECTED
-    } else {
-        reason::UPGRADE_BUSY
-    };
-    let e = anyhow::Error::new(e).context(format!("run {} validate-handover", binary.display()));
-    (why, e)
-}
-
-/// Whether a validator that exited 0 proved the blob of `(instance, len)`:
-/// its proof line, or the end of its output, read within `left`. A child
-/// of the validator may hold its output open, and a line not there yet is no
-/// line refused: running out of `deadline` is busy.
-fn proved(
-    binary: &Path,
-    line: &std::sync::mpsc::Receiver<String>,
-    left: Duration,
-    (instance, len): (u64, usize),
-    deadline: Duration,
-) -> Result<(), (u16, anyhow::Error)> {
-    match line.recv_timeout(left) {
-        Ok(line) if proves(&line, instance, len) => Ok(()),
-        Ok(line) => Err((
-            reason::UPGRADE_REJECTED,
-            anyhow!(
-                "{} exited without proving it took the handover (it printed {:?})",
-                binary.display(),
-                line.trim()
-            ),
-        )),
-        Err(_) => Err((
-            reason::UPGRADE_BUSY,
-            anyhow!(
-                "{} didn't prove it took the handover within {deadline:?}",
-                binary.display()
-            ),
-        )),
-    }
-}
-
-/// Whether `line` is the proof line for the blob of `instance` and `len`
-/// bytes. A later validator may add fields after these three.
-fn proves(line: &str, instance: u64, len: usize) -> bool {
-    let mut f = line.split_whitespace();
-    f.next() == Some(PROOF)
-        && f.next() == Some(format!("{instance:016x}").as_str())
-        && f.next() == Some(len.to_string().as_str())
 }
 
 /// `spyc-jar validate-handover`: the blob on standard input; exit 0 and print

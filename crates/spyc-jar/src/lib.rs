@@ -9,8 +9,9 @@
 //! - [`pty`]: the program's PTY, opened and spawned without `unsafe`.
 //! - [`handover`] and [`upgrade`]: the jar replacing its own binary across
 //!   `exec` (R33), and the blob that carries it; [`store`]: the one file an
-//!   upgrade runs; `held`: a new image that couldn't resume, holding the
-//!   program it was handed.
+//!   upgrade runs; `validation`: what the new binary's check answers;
+//!   `held`: a new image that couldn't resume, holding the program it was
+//!   handed.
 //! - [`lock`]: the lock a jar holds beside its socket for its life, which
 //!   tells a busy jar from a gone one; [`limits`]: the time limits a client
 //!   relies on.
@@ -41,3 +42,4 @@ pub mod state;
 pub mod store;
 mod threads;
 pub mod upgrade;
+mod validation;

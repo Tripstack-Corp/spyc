@@ -685,7 +685,8 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
   L), never a path the jar looks up again. A named file that isn't a regular
   file of at most 256 MiB is refused (reason 6), opened without blocking and
   never read; a copy that fails for want of a descriptor, room or memory, as a
-  validator the machine can't start now, makes the upgrade busy (reason 5);
+  validator, a holder or the handover's pipe and socketpair the machine can't
+  give it now, makes the upgrade busy (reason 5);
   and a copy made for an upgrade that doesn't happen is removed:
   - `BINARY validate-handover`: the blob on standard input, a socket, until
     its end. It accepts the blob by printing a **proof line** on standard

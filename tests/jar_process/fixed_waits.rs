@@ -131,6 +131,10 @@ fn sources() -> Vec<Source> {
             include_str!("../../crates/spyc-jar/src/store.rs"),
         ),
         tests_of(
+            "crates/spyc-jar/src/validation.rs",
+            include_str!("../../crates/spyc-jar/src/validation.rs"),
+        ),
+        tests_of(
             "src/pane/jar/attach.rs",
             include_str!("../../src/pane/jar/attach.rs"),
         ),
