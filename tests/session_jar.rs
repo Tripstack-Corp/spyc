@@ -550,6 +550,44 @@ fn spyc_attach_shows_the_session_and_a_second_attach_takes_it_over() {
     second.quit_spyc();
 }
 
+/// D3 of the 3.0 review: `spyc attach` looks at the session again after its
+/// question and takes it over from the terminal attached then, not the one
+/// attached when it asked, which may have gone and its pid with it.
+#[test]
+#[ignore = "red until D3 is fixed (fix/attach-rereads-before-signal)"]
+fn a_takeover_after_the_question_ends_the_client_attached_then() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let _other = session(&dirs, OTHER);
+    let mut desk = Attached::start(&dirs, &["attach", NAME]);
+    desk.wait_drawn(NAME);
+    let mut asking = Attached::start(&dirs, &["attach"]);
+    asking.wait_for("the choice", "Attach to which?");
+    let listed = asking.text();
+    assert!(
+        listed.contains(&format!("  1  {NAME}  (attached elsewhere)")),
+        "{listed:?}"
+    );
+
+    // While it asks, another terminal takes the session from the desk.
+    let mut elsewhere = Attached::start(&dirs, &["attach", NAME]);
+    let _ = desk.exit();
+    let pid = elsewhere.child.process_id().unwrap().to_string();
+    eventually("the session's client is the one from elsewhere", || {
+        jar.described("owner_pid").as_deref() == Some(pid.as_str())
+    });
+
+    asking.type_keys(b"1\r");
+    asking.wait_drawn(NAME);
+    let ended = elsewhere.exit();
+    assert_eq!(
+        ended.exit_code(),
+        128 + 15,
+        "the client attached then wasn't ended by SIGTERM"
+    );
+    asking.quit_spyc();
+}
+
 /// `^d` in a session reached by `spyc attach` ends the client: it attaches
 /// again only to a jar that dropped it for silence, never one spyc detached.
 #[test]
