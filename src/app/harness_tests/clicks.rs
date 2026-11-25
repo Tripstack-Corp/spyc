@@ -5,6 +5,7 @@
 use super::*;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 /// `root/work`, canonical, holding `docs/` (with `docs/inner/` inside) and
 /// `notes.txt`.
@@ -58,26 +59,51 @@ pub(super) fn drawn_at(app: &mut App, text: &str) -> (u16, u16) {
     panic!("{text:?} is not drawn");
 }
 
-pub(super) fn mouse(app: &mut App, kind: MouseEventKind, (column, row): (u16, u16)) -> Vec<Effect> {
-    app.handle_mouse(MouseEvent {
-        kind,
-        column,
-        row,
-        modifiers: KeyModifiers::NONE,
-    })
+pub(super) fn mouse(app: &mut App, kind: MouseEventKind, at: (u16, u16)) -> Vec<Effect> {
+    mouse_at(app, kind, at, Instant::now())
+}
+
+/// A mouse event at `(column, row)`, made at `now`.
+fn mouse_at(
+    app: &mut App,
+    kind: MouseEventKind,
+    (column, row): (u16, u16),
+    now: Instant,
+) -> Vec<Effect> {
+    app.handle_mouse_at(
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        now,
+    )
 }
 
 /// A left press and release at `at`, and what they started.
 pub(super) fn click(app: &mut App, at: (u16, u16)) -> Vec<Effect> {
-    let mut effects = mouse(app, MouseEventKind::Down(MouseButton::Left), at);
-    effects.extend(mouse(app, MouseEventKind::Up(MouseButton::Left), at));
+    click_at(app, at, Instant::now())
+}
+
+/// A left press and release at `at`, made at `now`: clicks given one `now`
+/// are as quick as a double-click, however slowly the test runs.
+pub(super) fn click_at(app: &mut App, at: (u16, u16), now: Instant) -> Vec<Effect> {
+    let mut effects = mouse_at(app, MouseEventKind::Down(MouseButton::Left), at, now);
+    effects.extend(mouse_at(
+        app,
+        MouseEventKind::Up(MouseButton::Left),
+        at,
+        now,
+    ));
     effects
 }
 
 /// Two clicks at `at`, as quick as a double-click is.
 pub(super) fn double_click(app: &mut App, at: (u16, u16)) -> Vec<Effect> {
-    let mut effects = click(app, at);
-    effects.extend(click(app, at));
+    let now = Instant::now();
+    let mut effects = click_at(app, at, now);
+    effects.extend(click_at(app, at, now));
     effects
 }
 
