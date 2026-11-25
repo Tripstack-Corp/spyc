@@ -392,24 +392,37 @@ fn a_jar_that_wont_run_fails_the_tab_and_runs_nothing() {
         (refusing, "doesn't speak wire version"),
         (dir.path().join("missing"), "didn't start"),
     ] {
-        let place = place_in(dir.path(), binary.clone());
+        // A jar that ended is seen at once: with an hour's hold, a tab that
+        // waited for it to answer would still be waiting.
+        let mut place = place_in(dir.path(), binary.clone());
+        place.hold = Duration::from_secs(3600);
         let mark = dir.path().join("ran");
-        let at = Instant::now();
-        let e = spawn_marking(&place, &mark)
-            .err()
+        let (done, failed) = mpsc::channel();
+        {
+            let (place, mark) = (place.clone(), mark.clone());
+            std::thread::spawn(move || {
+                let _ = done.send(
+                    spawn_marking(&place, &mark)
+                        .err()
+                        .map(|e| (format!("{e:#}"), no_usable_jar(&e).is_some())),
+                );
+            });
+        }
+        let (e, unusable) = failed
+            .recv_timeout(WAIT)
+            .unwrap_or_else(|_| {
+                panic!(
+                    "{}: the tab waited on a jar that had ended",
+                    binary.display()
+                )
+            })
             .unwrap_or_else(|| panic!("{}: the tab opened without a jar", binary.display()));
+        assert!(e.contains(why), "{}: {e}", binary.display());
         assert!(
-            format!("{e:#}").contains(why),
-            "{}: {e:#}",
+            unusable,
+            "{}: said as no usable jar, which offers jarless tabs: {e}",
             binary.display()
         );
-        assert!(
-            no_usable_jar(&e).is_some(),
-            "{}: said as no usable jar, which offers jarless tabs: {e:#}",
-            binary.display()
-        );
-        // A jar that ended is seen at once: never the wait for one to answer.
-        assert!(at.elapsed() < WAIT, "waited {:?}", at.elapsed());
         std::thread::sleep(Duration::from_millis(300));
         assert!(!mark.exists(), "{}: the program ran", binary.display());
         let left: Vec<_> = std::fs::read_dir(&place.tokens).unwrap().collect();
@@ -761,10 +774,14 @@ fn a_snapshot_follows_a_second_of_quiet_and_never_a_held_frame() {
     );
     std::thread::sleep(Duration::from_millis(1100));
     s.tick(&engine, true);
-    std::thread::sleep(Duration::from_millis(100));
+    // A snapshot goes out on the connection's one queue as the tick takes
+    // it: what's typed after the tick comes after any snapshot it took.
+    let mut host = host;
+    host.write_all(b"after the tick").unwrap();
+    let next = jar.next();
     assert!(
-        std::iter::from_fn(|| jar.frames.try_recv().ok()).all(|m| matches!(m, Msg::Ping { .. })),
-        "a second snapshot of nothing new"
+        matches!(next, Msg::Input { .. }),
+        "a second snapshot of nothing new: {next:?}"
     );
 }
 
@@ -772,12 +789,14 @@ fn a_snapshot_follows_a_second_of_quiet_and_never_a_held_frame() {
 #[test]
 fn a_jar_that_never_reports_an_exit_cannot_hold_a_shutdown() {
     let (jar, mut host) = host_in_fake_jar(std::process::id());
-    let at = Instant::now();
-    host.shutdown(Duration::from_millis(100));
+    let (done, shut) = mpsc::channel();
+    std::thread::spawn(move || {
+        host.shutdown(Duration::from_millis(100));
+        let _ = done.send(());
+    });
     assert!(
-        at.elapsed() < Duration::from_secs(4),
-        "the shutdown waited {:?}",
-        at.elapsed()
+        shut.recv_timeout(WAIT).is_ok(),
+        "the shutdown waited on an exit the jar never reports"
     );
     drop(jar);
 }
@@ -1105,13 +1124,21 @@ fn a_tab_taken_back_across_a_gap_has_its_program_repaint() {
     std::fs::write(&go, "").unwrap();
     // Taken back once the flood is printed: a shell runs its trap only
     // between commands.
-    let until = Instant::now() + WAIT;
-    while log_printed_and_base(&socket).0 < 6_000_000 {
+    // The wait bounds each stretch with no growth, never the whole flood: a
+    // loaded machine slows it, and only a program that stops short fails.
+    let mut printed = log_printed_and_base(&socket).0;
+    let mut grew = Instant::now();
+    while printed < 6_000_000 {
         assert!(
-            Instant::now() < until,
-            "premise: the program floods its jar"
+            Instant::now() < grew + WAIT,
+            "premise: the program floods its jar (stopped at {printed})"
         );
         std::thread::sleep(Duration::from_millis(50));
+        let now = log_printed_and_base(&socket).0;
+        if now != printed {
+            grew = Instant::now();
+            printed = now;
+        }
     }
     assert!(
         log_printed_and_base(&socket).1 > 0,
@@ -1226,7 +1253,10 @@ fn a_replayed_query_is_not_answered_again() {
 
     let second = pane_in(&place, "exec cat", dir.path(), Some(socket));
     assert!(second.adopted());
-    std::thread::sleep(Duration::from_millis(1500));
+    // Typed once the replay shows the first answer's echo, which the log
+    // holds after the query: the engine has parsed the query by then, so an
+    // answer to it is already queued for the program, ahead of what's typed.
+    shows(&second, "?62");
     let mut second = second;
     second.send_bytes(b"done\n").unwrap();
     shows(&second, "cdone");
@@ -1463,6 +1493,13 @@ fn the_store_sweep_removes_only_old_entries_nothing_runs() {
     for d in [running.parent().unwrap(), &ours, &stale] {
         age(d);
     }
+    let aged = running
+        .parent()
+        .unwrap()
+        .symlink_metadata()
+        .unwrap()
+        .modified()
+        .unwrap();
 
     // A jar that answers a connection but never describes itself.
     let mute = std::os::unix::net::UnixListener::bind(place.sockets().join("mute.sock")).unwrap();
@@ -1495,10 +1532,7 @@ fn the_store_sweep_removes_only_old_entries_nothing_runs() {
         .unwrap()
         .modified()
         .unwrap();
-    assert!(
-        touched.elapsed().unwrap() < Duration::from_secs(60),
-        "a reported entry is touched"
-    );
+    assert!(touched > aged, "a reported entry is touched");
     host.shutdown(END);
 }
 
@@ -1985,12 +2019,15 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         /// How long a jar keeps something for an owner that isn't there:
         /// running out drops it.
         Keep,
+        /// A debug build's stretch of a deadline, for a test that tells "at
+        /// once" from "at the deadline"; a release build has none.
+        DebugStretch,
     }
     use Kind::{
-        AfterExec, Command, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served, Start,
-        Unbounded,
+        AfterExec, Command, DebugStretch, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served,
+        Start, Unbounded,
     };
-    const TIMERS: [(&str, Kind); 44] = [
+    const TIMERS: [(&str, Kind); 45] = [
         ("ATTACH_WAIT", Command),
         ("ATTACH_PING", Poll),
         ("SIZE_POLL", Poll),
@@ -2035,6 +2072,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         ("SOCKET_CHECK", Poll),
         ("PARKED_AT_MOST", Limit),
         ("UPGRADE_AT_MOST", Limit),
+        ("STRETCHED", DebugStretch),
     ];
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
     let mut found = std::collections::BTreeSet::new();
@@ -2270,12 +2308,11 @@ fn jars_no_spyc_owns_are_found_by_what_they_hold() {
     );
     std::fs::write(&token, kept).unwrap();
     orphans::discard(Some(place), &socket).unwrap();
-    assert!(
-        !running(program) || {
-            std::thread::sleep(Duration::from_secs(1));
-            !running(program)
-        }
-    );
+    let until = Instant::now() + WAIT;
+    while running(program) {
+        assert!(Instant::now() < until, "the discarded jar's program ran on");
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// S2c: a discarded jar ends, its program with it, its socket and token

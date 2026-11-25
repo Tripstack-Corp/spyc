@@ -109,6 +109,7 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
         })
     });
     let send = |msg: &Msg| conn.send(shared, msg);
+    let lookup_deadline = crate::limits::stretched(crate::limits::Stretch::Lookup, LOOKUP_DEADLINE);
     let mut last_heard = Instant::now();
     loop {
         if shared.upgrading() {
@@ -122,7 +123,7 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
                 break;
             }
             // A lookup asks one thing, at once.
-            if lookup && last_heard.elapsed() >= LOOKUP_DEADLINE {
+            if lookup && last_heard.elapsed() >= lookup_deadline {
                 break;
             }
             continue;

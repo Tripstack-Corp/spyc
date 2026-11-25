@@ -41,3 +41,35 @@ pub const SHORTEST_WAIT: Duration = Duration::from_millis(1);
 /// Unless its start says otherwise (`--deadline-ms`): an owner with nothing
 /// to send pings more often.
 pub const OWNER_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How long a stretched deadline is: past any answer a test could wait for.
+#[cfg(debug_assertions)]
+const STRETCHED: Duration = Duration::from_secs(3600);
+
+/// A deadline a debug build may be told to stretch.
+#[derive(Clone, Copy)]
+pub(crate) enum Stretch {
+    /// How long a lookup may wait to ask its one question.
+    Lookup,
+    /// The first validation of a new binary, while the program is served.
+    Validation,
+}
+
+/// `deadline`, or an hour when a debug build's `SPYC_JAR_STRETCH` names
+/// `which` (`lookup`, `validation`, comma-separated): with the deadline far
+/// past any answer, a test can tell a jar that acts at once from one that
+/// waits for the deadline. A release build reads no environment for it.
+#[cfg(debug_assertions)]
+pub(crate) fn stretched(which: Stretch, deadline: Duration) -> Duration {
+    let name = match which {
+        Stretch::Lookup => "lookup",
+        Stretch::Validation => "validation",
+    };
+    let asked = std::env::var("SPYC_JAR_STRETCH").is_ok_and(|v| v.split(',').any(|w| w == name));
+    if asked { STRETCHED } else { deadline }
+}
+
+#[cfg(not(debug_assertions))]
+pub(crate) const fn stretched(_: Stretch, deadline: Duration) -> Duration {
+    deadline
+}
