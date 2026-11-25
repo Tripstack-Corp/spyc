@@ -335,9 +335,6 @@ pub struct AppState {
     pub status_flags_override: Option<crate::ui::status_flags::FlagsMode>,
     pub mode: Mode,
     pub session_name: Option<String>,
-    /// The session runs in its own jar, whose socket its name is: `:name`
-    /// can't change it there.
-    pub session_name_fixed: bool,
     /// Stable per-process session file id (millis timestamp), assigned once at
     /// startup and carried through restore, so every save (quit + P3-2 autosave)
     /// overwrites the same `<id>.json` instead of spawning a new file per save.
@@ -942,7 +939,6 @@ impl AppState {
             status_flags_override: None,
             mode: Mode::Normal,
             session_name: None,
-            session_name_fixed: false,
             session_id: None,
             last_search: None,
             last_captured_cmd: None,

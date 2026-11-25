@@ -229,7 +229,7 @@ const SECTIONS: &[Section] = &[
             ),
             (
                 ":name <NEW>",
-                "rename the active session (SPICE_SPICE style)",
+                "rename the session (SPICE_SPICE style); or click its name",
             ),
             (":whoami", "show user@host"),
         ],

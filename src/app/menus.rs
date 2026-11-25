@@ -142,21 +142,26 @@ impl App {
     }
 
     /// The session segment's menu: the session's rows, then `:name`, which
-    /// opens the `:` line holding `name` and the session's name, for editing.
-    /// With no name, the line holds `name ` alone.
+    /// opens the `:` line holding [`Self::session_name_line`].
     fn open_session_menu(&mut self) -> Option<Effect> {
         let mut rows = self.menu_rows(Target::Session);
-        let name = self.state.session_name.as_deref();
         rows.push((
             ":name".to_string(),
             "rename this session".to_string(),
-            HintEntry::Command(Some(CommandRow::Edit(format!(
-                "name {}",
-                name.unwrap_or_default()
-            )))),
+            HintEntry::Command(Some(CommandRow::Edit(self.session_name_line()))),
         ));
-        let title = name.unwrap_or("session");
+        let title = self.state.session_name.as_deref().unwrap_or("session");
         self.show_menu(format!("{title} · ? all keys"), rows)
+    }
+
+    /// What the `:` line holds to rename the session, as its menu's `:name`
+    /// row and a click on its segment open it: `name` and the session's
+    /// name, or `name ` alone with none.
+    pub(super) fn session_name_line(&self) -> String {
+        format!(
+            "name {}",
+            self.state.session_name.as_deref().unwrap_or_default()
+        )
     }
 
     /// Show a menu of `rows`, each `(keys, label, entry)`, titled `title`.

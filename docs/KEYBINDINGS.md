@@ -323,7 +323,7 @@ appear on the top bar and persist across `spyc -r`.
 | `:project [.\|<path>\|clear\|config]` | Manage `PROJECT_HOME`; `config` opens the project's own config file |
 | `:startdir [.\|<path>]` | Manage start dir |
 | `:order [N]` | Move the project in view to place N of the open projects; bare, show their order |
-| `:name <NEW>` | Rename the active session |
+| `:name <NEW>` | Rename the active session, refused while another running session goes by that name |
 | `:whoami` | Show `user@host` in the status line |
 | `Space s` / `I` | Session info (pid, rss, counts) |
 | `?` / `F1` / `Space ?` | This help overlay |
@@ -392,6 +392,7 @@ focus.
 | Left click on a project's label (status bar) | Go to that project, as `Space N` does; on the collapsed count (`2/4`), list the projects, as `Space j` does |
 | Drag a project's label along the status bar | Move that project to where you let go, as `:order` does |
 | Left click on the status bar's agent | Focus the pane |
+| Left click on the status bar's session | Open the `:` line holding `name` and the session's name, to rename it |
 | Left click on the background tasks' tags (divider), or `bg:` (status bar) | Open the task viewer, as `gB` does |
 | Left click on a prompt's `y` or `n` (`[y/N]`), or a consent's `[y]` or `[n]` | Answer it, as the key does |
 | Left drag | Select text: pager content, an agent tab's or a non-mouse pane's held grid, any chrome row, or file-list rows. Release copies |

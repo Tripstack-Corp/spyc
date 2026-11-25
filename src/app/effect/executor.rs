@@ -96,6 +96,7 @@ impl App {
                 effect @ (Effect::EditProjectConfig { .. } | Effect::NameProject { .. }) => {
                     self.run_project_file_effect(effect);
                 }
+                Effect::NameSession { name } => self.name_session(name),
                 // A-class: the only side effect of a terminal-title update;
                 // compose + dedup already happened loop-side.
                 Effect::SetTerminalTitle { title } => {

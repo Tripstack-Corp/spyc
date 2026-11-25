@@ -1034,8 +1034,12 @@ like a pane's, and `SPYC_JAR_SOCKET` names it, but every pane's program has a
 `SPYC_JAR_SOCKET` too, naming its own jar. A pane tab whose command is `spyc`
 makes that spyc the pane jar's program, so the jar's pid check alone would
 accept it. spyc therefore counts a jar as its own only when the socket is in
-the sessions directory, `<runtime>/spyc/sessions/<SESSION_NAME>.sock`, and the
-jar accepts it as its program. Getting this wrong fails silently: a spyc in a
+the sessions directory, `<runtime>/spyc/sessions/<ADDRESS>.sock`, and the
+jar accepts it as its program. The address is the name the session started
+as and never changes, since the jar holds its socket's path for its life;
+`:name` writes the name the session goes by beside it, `<ADDRESS>.name`,
+which `spyc attach` matches as well as the address and a spyc restarted in
+the jar reads back. Getting this wrong fails silently: a spyc in a
 pane would set the pane's terminal up again whenever its spyc attached to that
 pane, and take the pane jar's name for its session's.
 

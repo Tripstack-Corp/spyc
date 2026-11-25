@@ -185,7 +185,8 @@ takes, or keeps the hints for good, or turns them off
   `Space N` does, anywhere between the chevrons either side of its label, or the collapsed count (`2/4`) to list the projects, as
   `Space j` does; the prompt row names that key, as a menu row's click does,
   until you have learned it. A click on the agent segment gives the pane the
-  keyboard.
+  keyboard, and one on the session's name opens the `:` line holding `name`
+  and that name, to rename the session.
   The rest of the bar is text to select.
 - **Drag a project's label along the status bar to move it**, as `:order`
   does. The press goes to that project, and the labels make room as you

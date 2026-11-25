@@ -21,12 +21,11 @@ impl App {
         self.runtime.picker = picker;
     }
 
-    /// spyc runs in its own jar (S4): the session takes the jar's name, which
-    /// is where `spyc attach` finds it.
+    /// spyc runs in its own jar (S4): the session takes the name the jar's
+    /// session goes by, which `spyc attach` finds it by.
     pub fn set_own_jar(&mut self, jar: Option<crate::pane::jar::session::OwnJar>) {
         if let Some(jar) = &jar {
             self.state.session_name = Some(jar.name().to_string());
-            self.state.session_name_fixed = true;
         }
         self.runtime.own_jar = jar;
         // The agent of the terminal that attached, which `spyc attach` named.
@@ -188,7 +187,6 @@ impl App {
             status_flags_override: None,
             mode: Mode::Normal,
             session_name,
-            session_name_fixed: false,
             session_id,
             frecency: crate::state::Frecency::load(),
             learned: crate::state::Learned::load(),
@@ -354,6 +352,7 @@ impl App {
         // list > the user's list > single-tab-on-demand.
         app.start_startup_tabs(resume || restores_own);
         app.runtime.started_from = super::detach::BinaryStamp::installed();
+        app.runtime.sessions_dir = Some(crate::pane::jar::place::this_users_sessions());
 
         if resume {
             app.show_session_picker();

@@ -522,6 +522,7 @@ impl super::App {
                 self.set_pane_focus(true);
                 Vec::new()
             }
+            MouseSink::NameSession => self.open_command_line_holding(self.session_name_line()),
             MouseSink::PaneTab(index) => self.switch_to_clicked_tab(index),
             MouseSink::Paste => vec![Effect::PasteFromClipboard],
             MouseSink::ChordRow(index) => self.fire_chord_row(index),
@@ -839,20 +840,24 @@ impl super::App {
                     .to_string();
                 (self.dispatch_command(&line), name, "command")
             }
-            CommandRow::Edit(line) => {
-                let fx = self
-                    .apply(&crate::keymap::Action::CommandPrompt)
-                    .unwrap_or_else(|e| {
-                        self.state.flash_error(format!("{e:#}"));
-                        Vec::new()
-                    });
-                self.set_prompt_text(line);
-                return fx;
-            }
+            CommandRow::Edit(line) => return self.open_command_line_holding(line),
         };
         let label = if label.is_empty() { unlabelled } else { label };
         self.name_the_key(key, label, &name, None);
         self.relocate_flash_into_pager();
+        fx
+    }
+
+    /// Open the `:` line as `:` opens it, holding `line` with the cursor
+    /// after it, unrun.
+    fn open_command_line_holding(&mut self, line: String) -> Vec<Effect> {
+        let fx = self
+            .apply(&crate::keymap::Action::CommandPrompt)
+            .unwrap_or_else(|e| {
+                self.state.flash_error(format!("{e:#}"));
+                Vec::new()
+            });
+        self.set_prompt_text(line);
         fx
     }
 

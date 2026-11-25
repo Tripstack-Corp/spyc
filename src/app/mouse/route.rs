@@ -143,6 +143,10 @@ pub enum MouseSink {
     /// Give the pane the keyboard: the pointer was on the status bar's agent
     /// segment, which names the pane's active tab.
     FocusPane,
+    /// Open the `:` line holding `name` and the session's name, to rename
+    /// it, as its menu's `:name` row does: the pointer was on the status
+    /// bar's session segment.
+    NameSession,
     /// Give the keyboard to the pane AND anchor a spyc-side text selection over its
     /// visible grid — for a child that ignores mouse reports, so nothing else can
     /// do the selecting (codex's `^T` transcript, a plain shell).
@@ -425,14 +429,16 @@ pub fn project_click_hint(action: ProjectAction) -> Option<(String, String)> {
     }
 }
 
-/// What a left click on a status-bar `segment` does beyond selecting its
+/// What a left click on a status-bar `segment` does instead of selecting its
 /// text: a project's label goes to that project and the collapsed count lists
-/// them, as their keys do, and the agent segment gives the pane the keyboard.
+/// them, as their keys do, the agent segment gives the pane the keyboard, and
+/// the session segment opens the `:` line to rename the session.
 const fn status_click(segment: Option<StatusSegment>) -> Option<MouseSink> {
     match segment {
         Some(StatusSegment::ProjectLabel(index)) => Some(MouseSink::Project(project_key(index))),
         Some(StatusSegment::ProjectCount) => Some(MouseSink::Project(ProjectAction::List)),
         Some(StatusSegment::Agent) => Some(MouseSink::FocusPane),
+        Some(StatusSegment::Session) => Some(MouseSink::NameSession),
         Some(StatusSegment::PathUp(levels)) => Some(MouseSink::ClimbTo(levels)),
         _ => None,
     }

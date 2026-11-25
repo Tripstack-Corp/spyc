@@ -12,6 +12,12 @@
 //! it is made in place: the session saved and its jars left running, spyc
 //! `exec`s the new binary, which keeps the pid the jar knows its program by,
 //! and the terminal stays attached while the new spyc restores the session.
+//!
+//! `:name NEW` renames the session (`name_session`). In its own jar the
+//! socket, its address, stays; the name is written beside it
+//! (`pane::jar::session::write_name`), where `spyc attach` and a spyc
+//! restarted in that jar read it. A name another running session goes by, or
+//! has for its address, is refused, so `spyc attach NAME` means one.
 
 use anyhow::Context;
 
@@ -298,7 +304,8 @@ impl App {
         let (Some(jar), Some(dir)) = (&self.runtime.own_jar, ssh_agent::links_dir()) else {
             return;
         };
-        let Some(agent) = ssh_agent::pointed_at(&ssh_agent::session_link(&dir, jar.name())) else {
+        let Some(agent) = ssh_agent::pointed_at(&ssh_agent::session_link(&dir, jar.address()))
+        else {
             return;
         };
         if self.runtime.ssh_agent.as_ref() == Some(&agent) {
@@ -327,6 +334,31 @@ impl App {
         self.runtime.ssh_agent = Some(agent);
     }
 
+    /// Have the session go by `name`, already normalized.
+    pub(super) fn name_session(&mut self, name: String) {
+        let own = self
+            .runtime
+            .own_jar
+            .as_ref()
+            .map(|j| j.address().to_string());
+        if let Some(sessions) = &self.runtime.sessions_dir
+            && crate::pane::jar::attach::named_elsewhere(sessions, &name, own.as_deref())
+        {
+            self.state.flash_error(format!(
+                "name: another session goes by {name}; `spyc attach {name}` reaches it"
+            ));
+            return;
+        }
+        if let Some(jar) = self.runtime.own_jar.as_mut()
+            && let Err(e) = jar.rename(&name)
+        {
+            self.state.flash_error(format!("name: {e:#}"));
+            return;
+        }
+        self.state.flash_info(format!("session name: {name}"));
+        self.state.session_name = Some(name);
+    }
+
     /// spyc in its own jar, at the loop's start: hear the jar, and restore the
     /// session of its name.
     pub(super) fn start_own_jar(&mut self, terminal: &mut Tui, foreground_exec: &ForegroundExec) {
@@ -334,21 +366,29 @@ impl App {
         self.restore_own_session(terminal, foreground_exec);
     }
 
-    /// spyc in its own jar, at its start: the session of the jar's name comes
-    /// back, saved by the spyc that handed it over, its tabs taken back from
+    /// spyc in its own jar, at its start: the session the jar holds comes
+    /// back, saved by the spyc that handed it over under the name it goes by
+    /// or, renamed since that save, its address; its tabs taken back from
     /// their jars. A session whose spyc still runs isn't taken.
     fn restore_own_session(&mut self, terminal: &mut Tui, foreground_exec: &ForegroundExec) {
-        let Some(name) = self.runtime.own_jar.as_ref().map(|j| j.name().to_string()) else {
+        let Some((name, address)) = self
+            .runtime
+            .own_jar
+            .as_ref()
+            .map(|j| (j.name().to_string(), j.address().to_string()))
+        else {
             return;
         };
         let Some(manifest) = crate::state::sessions::load_manifests()
             .into_iter()
-            .filter(|m| m.name == name && !m.running())
+            .filter(|m| (m.name == name || m.name == address) && !m.running())
             .max_by_key(|m| m.epoch_secs)
         else {
             return;
         };
         let effects = self.restore_session(&manifest);
+        // Saved before a rename, the session came back under its address.
+        self.state.session_name = Some(name);
         self.run_effects(effects, terminal, foreground_exec);
     }
 }
