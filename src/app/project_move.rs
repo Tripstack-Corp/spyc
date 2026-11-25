@@ -470,10 +470,9 @@ pub(super) struct Released {
 impl App {
     /// `:attach`: the other sessions running, each with its projects.
     fn list_sessions(&mut self) {
-        let own = self.state.session_name.clone().unwrap_or_default();
         let others: Vec<_> = crate::pane::jar::attach::running_here()
             .into_iter()
-            .filter(|r| r.name != own)
+            .filter(|r| !self.is_this_session(r))
             .collect();
         if others.is_empty() {
             self.state.flash_info("attach: no other session runs");
@@ -485,7 +484,7 @@ impl App {
             .map(|r| {
                 let projects = saved
                     .iter()
-                    .filter(|m| m.name == r.name)
+                    .filter(|m| [&r.name, &r.address].contains(&&m.name))
                     .max_by_key(|m| m.epoch_secs)
                     .map_or_else(
                         || "(not saved yet)".to_string(),
@@ -509,9 +508,10 @@ impl App {
     /// `:attach project NAME`: ask session `name`'s spyc to let its session
     /// go, for its projects to open here.
     fn attach_project(&mut self, name: &str) {
-        let Some(socket) = self.session_to_take(name, Taking::Projects) else {
+        let Some((name, socket)) = self.session_to_take(name, Taking::Projects) else {
             return;
         };
+        let name = name.as_str();
         if let Some(open) = self.open_here_too(name) {
             self.state.flash_error(format!(
                 "attach project: {name}'s project {open} is open here too; \
@@ -526,9 +526,10 @@ impl App {
     /// for its tabs to join the project in view. A session with more than one
     /// project is refused: `:attach project` takes those.
     fn attach_tab(&mut self, name: &str) {
-        let Some(socket) = self.session_to_take(name, Taking::Tabs) else {
+        let Some((name, socket)) = self.session_to_take(name, Taking::Tabs) else {
             return;
         };
+        let name = name.as_str();
         let projects = crate::state::sessions::load_manifests()
             .into_iter()
             .filter(|m| m.name == name)
@@ -545,24 +546,36 @@ impl App {
         }
     }
 
-    /// The socket of session `name`'s jar, when it's another session that
-    /// runs; flashed when it isn't.
-    fn session_to_take(&mut self, name: &str, taking: Taking) -> Option<PathBuf> {
+    /// The name session `name` goes by and its jar's socket, when it's
+    /// another session that runs, found by that name or its address; flashed
+    /// when it isn't.
+    fn session_to_take(&mut self, name: &str, taking: Taking) -> Option<(String, PathBuf)> {
         let word = taking.word();
-        if self.state.session_name.as_deref() == Some(name) {
+        let session = crate::pane::jar::attach::running_here()
+            .into_iter()
+            .find(|r| r.name == name || r.address == name);
+        let own = self.state.session_name.as_deref() == Some(name)
+            || session.as_ref().is_some_and(|r| self.is_this_session(r));
+        if own {
             self.state
                 .flash_error(format!("attach {word}: {name} is this session"));
             return None;
         }
-        let session = crate::pane::jar::attach::running_here()
-            .into_iter()
-            .find(|r| r.name == name);
         if session.is_none() {
             self.state.flash_error(format!(
                 "attach {word}: no session named {name} runs; `:attach` lists them"
             ));
         }
-        session.map(|s| s.socket)
+        session.map(|s| (s.name, s.socket))
+    }
+
+    /// Whether `running` is this spyc's session: its own jar's, else one going
+    /// by its name.
+    fn is_this_session(&self, running: &crate::pane::jar::attach::Running) -> bool {
+        match &self.runtime.own_jar {
+            Some(jar) => running.address == jar.address(),
+            None => self.state.session_name.as_deref() == Some(running.name.as_str()),
+        }
     }
 
     /// Ask session `name`'s spyc, on a worker, to let its session go for this
@@ -804,7 +817,7 @@ fn unused_session_name() -> String {
         .collect();
     let running: HashSet<String> = crate::pane::jar::attach::running_here()
         .into_iter()
-        .map(|r| r.name)
+        .flat_map(|r| [r.name, r.address])
         .collect();
     (0..64)
         .map(|_| crate::state::session_names::generate())

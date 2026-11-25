@@ -423,30 +423,24 @@ impl AppState {
 }
 
 impl AppState {
-    /// `:name [NEW]`: rename the session, or show its name when bare. A
-    /// session in its own jar keeps the name its jar's socket has.
+    /// `:name [NEW]`: rename the session (`Effect::NameSession`), or show its
+    /// name when bare.
     fn cmd_name(&mut self, input: &str) -> Option<CommandResult> {
-        // :name [NEW] — rename session, or print current name when bare.
         if input == "name" {
             self.flash_info(format!("session name: {}", self.session_display()));
             return Some(CommandResult::Handled);
         }
-        if input.starts_with("name ") && self.session_name_fixed {
-            self.flash_error(
-                "name: this session runs in a jar of its own, named after it; quit to rename it",
-            );
-            return Some(CommandResult::Handled);
-        }
-        if let Some(arg) = input.strip_prefix("name ") {
-            match crate::state::session_names::normalize(arg) {
-                Some(norm) => {
-                    self.flash_info(format!("session name: {norm}"));
-                    self.session_name = Some(norm);
-                }
-                None => self.flash_error("name: empty after normalization"),
+        let arg = input.strip_prefix("name ")?;
+        match crate::state::session_names::normalize(arg) {
+            Some(name) if self.session_name.as_deref() == Some(name.as_str()) => {
+                self.flash_info(format!("session name: {name}"));
+                Some(CommandResult::Handled)
             }
-            return Some(CommandResult::Handled);
+            Some(name) => Some(CommandResult::Post(vec![Effect::NameSession { name }])),
+            None => {
+                self.flash_error("name: empty after normalization");
+                Some(CommandResult::Handled)
+            }
         }
-        None
     }
 }

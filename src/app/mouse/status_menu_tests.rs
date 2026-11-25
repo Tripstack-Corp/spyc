@@ -691,8 +691,19 @@ fn click_the_name_row(app: &mut App) {
 }
 
 fn key(app: &mut App, code: KeyCode) {
-    app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+    let fx = app
+        .handle_key(KeyEvent::new(code, KeyModifiers::NONE))
         .unwrap();
+    run_renames(app, fx);
+}
+
+/// Run the session renames among `fx`, as the loop's executor would.
+fn run_renames(app: &mut App, fx: Vec<crate::app::Effect>) {
+    for effect in fx {
+        if let crate::app::Effect::NameSession { name } = effect {
+            app.name_session(name);
+        }
+    }
 }
 
 fn type_text(app: &mut App, text: &str) {
@@ -829,6 +840,55 @@ fn esc_on_the_prefilled_line_closes_it_and_keeps_the_name() {
         assert_eq!(command_line(&app), None, "the line closed");
         assert!(matches!(app.state.mode, crate::app::Mode::Normal));
         assert_eq!(app.state.session_name.as_deref(), Some(SESSION));
+    });
+}
+
+/// A left click on the session segment opens the line its menu's `:name` row
+/// does, and `Enter` after an edit renames the session.
+#[test]
+fn a_click_on_the_session_segment_opens_the_name_line() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+        let segment = on_bar(&mut app, SESSION);
+
+        click(&mut app, segment);
+
+        assert_eq!(
+            command_line(&app),
+            Some(as_typed(&format!("name {SESSION}")))
+        );
+        assert_eq!(app.state.session_name.as_deref(), Some(SESSION), "not run");
+        for _ in SESSION.chars() {
+            key(&mut app, KeyCode::Backspace);
+        }
+        type_text(&mut app, "general work");
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(app.state.session_name.as_deref(), Some("GENERAL_WORK"));
+    });
+}
+
+/// A name another session that runs goes by is refused, and the session keeps
+/// its own; a name none has is taken.
+#[test]
+fn a_name_another_running_session_goes_by_is_refused() {
+    with_mouse(|base| {
+        let mut app = session_app(base);
+        let sessions = base.join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let _other = std::os::unix::net::UnixListener::bind(sessions.join("ANISE.sock")).unwrap();
+        crate::pane::jar::session::write_name(&sessions.join("ANISE.sock"), "GINGER").unwrap();
+        app.runtime.sessions_dir = Some(sessions);
+
+        for taken in ["ginger", "anise"] {
+            let fx = app.dispatch_command(&format!("name {taken}"));
+            run_renames(&mut app, fx);
+            assert_eq!(app.state.session_name.as_deref(), Some(SESSION), "{taken}");
+            let flash = app.flash_text().unwrap_or_default();
+            assert!(flash.contains("another session goes by"), "{flash}");
+        }
+        let fx = app.dispatch_command("name clove");
+        run_renames(&mut app, fx);
+        assert_eq!(app.state.session_name.as_deref(), Some("CLOVE"));
     });
 }
 

@@ -96,6 +96,9 @@ pub(super) struct Runtime {
     pub(super) pane_wake_tx: Option<std::sync::mpsc::Sender<Message>>,
     /// spyc's link to its own jar, when it runs in one (S4).
     pub(super) own_jar: Option<crate::pane::jar::session::OwnJar>,
+    /// Where sessions' own jars are, for `:name` to refuse a name another
+    /// session goes by. `None` in the test harness.
+    pub(super) sessions_dir: Option<std::path::PathBuf>,
     /// The own jar's attaches the loop has set the terminal up for.
     pub(super) attaches_seen: u64,
     /// How many times spyc has been continued (`SIGCONT`), counted by its
@@ -408,6 +411,7 @@ impl Runtime {
             mcp_cmd_rx,
             pane_wake_tx: None,
             own_jar: None,
+            sessions_dir: None,
             attaches_seen: 0,
             continues: std::sync::Arc::default(),
             continues_seen: 0,

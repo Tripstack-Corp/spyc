@@ -1,7 +1,7 @@
 //! `spyc attach [NAME]` (S4): attach this terminal to a session's own jar
-//! (`super::session`), found by the session's name in the sessions
-//! directory. With no name it takes the one session running, or asks which of
-//! several. A session attached elsewhere is taken over: its client, the
+//! (`super::session`), found in the sessions directory by the name the
+//! session goes by or by its address, the name it started as. With no name it
+//! takes the one session running, or asks which of several. A session attached elsewhere is taken over: its client, the
 //! `owner_pid` its jar describes, is sent SIGTERM, and a `spyc attach`
 //! restores its terminal on the way out, as spyc does when killed. A jar
 //! accepts only its user's processes, so that pid is the user's own.
@@ -45,7 +45,10 @@ const TAKEOVER_POLL: Duration = Duration::from_millis(50);
 /// A session whose own jar runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
+    /// The name it goes by.
     pub name: String,
+    /// Its socket's name, the one it started as.
+    pub address: String,
     pub socket: PathBuf,
     /// The pid of the client attached to it, when one is.
     pub client: Option<i32>,
@@ -74,7 +77,7 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
     };
     let token = super::tokens::load_in(&tokens_dir()?, &chosen.socket)
         .with_context(|| format!("no token kept for {}", chosen.name))?;
-    follow_this_agent(&chosen.name);
+    follow_this_agent(&chosen.address);
     if let Some(pid) = chosen.client {
         take_over(&chosen, pid)?;
     }
@@ -114,16 +117,17 @@ fn inside_spyc(pane: Option<&std::ffi::OsStr>, jar: Option<&Path>) -> Option<Str
     }
 }
 
-/// Point session `name`'s agent link at this terminal's SSH agent, which its
-/// spyc points its tabs at once this terminal attaches (`pane::ssh_agent`).
-/// With no agent here, the tabs keep theirs.
-fn follow_this_agent(name: &str) {
+/// Point the agent link of the session at `address` at this terminal's SSH
+/// agent, which its spyc points its tabs at once this terminal attaches
+/// (`pane::ssh_agent`). With no agent here, the tabs keep theirs.
+fn follow_this_agent(address: &str) {
     use crate::pane::ssh_agent;
     let (Some(dir), Some(agent)) = (ssh_agent::links_dir(), ssh_agent::from_env()) else {
         return;
     };
-    if let Err(e) = agent.and_then(|a| ssh_agent::point(&ssh_agent::session_link(&dir, name), &a)) {
-        eprintln!("spyc: {name}'s tabs keep the SSH agent they have: {e:#}");
+    let link = ssh_agent::session_link(&dir, address);
+    if let Err(e) = agent.and_then(|a| ssh_agent::point(&link, &a)) {
+        eprintln!("spyc: the session's tabs keep the SSH agent they have: {e:#}");
     }
 }
 
@@ -228,13 +232,14 @@ pub fn running(sessions: &Path) -> Vec<Running> {
         .flatten()
         .filter_map(|entry| {
             let socket = entry.path();
-            let name = session_name(&socket)?;
+            let address = address_of(&socket)?;
             if socket_state(&socket) != SocketState::Live || ended(&socket) {
                 return None;
             }
             Some(Running {
                 client: client_of(&socket).ok().flatten(),
-                name,
+                name: super::session::shown_name(&socket).unwrap_or_else(|| address.clone()),
+                address,
                 socket,
             })
         })
@@ -249,8 +254,36 @@ pub(super) fn ended(socket: &Path) -> bool {
     spyc_jar::client::describe(socket).is_ok_and(|fields| fields.iter().any(|(k, _)| k == "exit"))
 }
 
-/// The session a socket in the sessions directory holds.
-fn session_name(socket: &Path) -> Option<String> {
+/// Whether a session other than the one at `own` (an address) runs in
+/// `sessions` going by `name` or at that address. Reads no jar, so a jar
+/// that holds only its spyc's exit still counts.
+pub fn named_elsewhere(sessions: &Path, name: &str, own: Option<&str>) -> bool {
+    std::fs::read_dir(sessions)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter_map(|socket| Some((address_of(&socket)?, socket)))
+        .filter(|(address, _)| Some(address.as_str()) != own)
+        .filter(|(_, socket)| socket_state(socket) == SocketState::Live)
+        .any(|(address, socket)| {
+            address == name || super::session::shown_name(&socket).as_deref() == Some(name)
+        })
+}
+
+/// Whether `running` is the session `name` means: the name it goes by or its
+/// address, as typed or as `:name` would spell it.
+fn answers_to(running: &Running, name: &str) -> bool {
+    let spelled = crate::state::session_names::normalize(name);
+    [Some(name), spelled.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(|n| running.name == n || running.address == n)
+}
+
+/// The address of the session a socket in the sessions directory holds: its
+/// file's name.
+fn address_of(socket: &Path) -> Option<String> {
     if socket.extension()? != "sock" {
         return None;
     }
@@ -285,7 +318,7 @@ pub fn choose<'a>(
             .join(", ")
     };
     match (name, running) {
-        (Some(name), _) => match running.iter().find(|r| r.name == name) {
+        (Some(name), _) => match running.iter().find(|r| answers_to(r, name)) {
             Some(one) => Ok(Some(one)),
             None if running.is_empty() => {
                 Err(format!("no session named {name} runs in a jar of its own"))
@@ -315,7 +348,12 @@ pub fn ask<'a>(
         } else {
             ""
         };
-        writeln!(output, "{:>3}  {}{attached}", i + 1, r.name)?;
+        let was = if r.name == r.address {
+            String::new()
+        } else {
+            format!(" ({})", r.address)
+        };
+        writeln!(output, "{:>3}  {}{was}{attached}", i + 1, r.name)?;
     }
     write!(output, "{question}")?;
     output.flush()?;
@@ -327,7 +365,7 @@ pub fn ask<'a>(
         .ok()
         .and_then(|n| n.checked_sub(1))
         .and_then(|i| running.get(i))
-        .or_else(|| running.iter().find(|r| r.name == answer))
+        .or_else(|| running.iter().find(|r| answers_to(r, answer)))
         .with_context(|| format!("{answer:?} is none of them"))
 }
 
@@ -382,9 +420,59 @@ mod tests {
     fn session(name: &str, client: Option<i32>) -> Running {
         Running {
             name: name.into(),
+            address: name.into(),
             socket: PathBuf::from(format!("/run/spyc/sessions/{name}.sock")),
             client,
         }
+    }
+
+    /// Session `address`, renamed `name`.
+    fn renamed(address: &str, name: &str) -> Running {
+        Running {
+            name: name.into(),
+            ..session(address, None)
+        }
+    }
+
+    #[test]
+    fn a_renamed_session_answers_to_its_name_and_its_address() {
+        let running = [session("ANISE", None), renamed("CLOVE", "GENERAL_WORK")];
+        assert_eq!(
+            choose(&running, Some("GENERAL_WORK")),
+            Ok(Some(&running[1]))
+        );
+        assert_eq!(
+            choose(&running, Some("general work")),
+            Ok(Some(&running[1]))
+        );
+        assert_eq!(choose(&running, Some("CLOVE")), Ok(Some(&running[1])));
+        let err = choose(&running, Some("SAGE")).unwrap_err();
+        assert!(err.contains("ANISE, GENERAL_WORK"), "{err}");
+        let mut shown = Vec::new();
+        let picked = ask(&running, "?", &mut &b"general_work\n"[..], &mut shown).unwrap();
+        assert_eq!(picked.address, "CLOVE");
+        let shown = String::from_utf8(shown).unwrap();
+        assert!(shown.contains("  2  GENERAL_WORK (CLOVE)\n"), "{shown}");
+    }
+
+    #[test]
+    fn a_name_is_taken_by_another_live_session_by_its_name_or_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = |address: &str| {
+            std::os::unix::net::UnixListener::bind(dir.path().join(format!("{address}.sock")))
+                .unwrap()
+        };
+        let (_anise, _clove) = (live("ANISE"), live("CLOVE"));
+        super::super::session::write_name(&dir.path().join("CLOVE.sock"), "GENERAL_WORK").unwrap();
+        std::fs::write(dir.path().join("GONE.sock"), "").unwrap();
+        let taken = |name: &str, own: Option<&str>| named_elsewhere(dir.path(), name, own);
+        assert!(taken("GENERAL_WORK", Some("ANISE")));
+        assert!(taken("ANISE", Some("CLOVE")));
+        assert!(taken("CLOVE", Some("ANISE")), "a renamed session's address");
+        assert!(!taken("GENERAL_WORK", Some("CLOVE")), "its own name");
+        assert!(!taken("CLOVE", Some("CLOVE")), "its own address");
+        assert!(!taken("GINGER", None));
+        assert!(!taken("GONE", None), "a socket no jar answers at");
     }
 
     #[test]
@@ -458,11 +546,9 @@ mod tests {
 
     #[test]
     fn only_a_socket_names_a_session() {
-        assert_eq!(
-            session_name(Path::new("/s/ANISE.sock")),
-            Some("ANISE".into())
-        );
-        assert_eq!(session_name(Path::new("/s/ANISE.lock")), None);
-        assert_eq!(session_name(Path::new("/s/ANISE")), None);
+        assert_eq!(address_of(Path::new("/s/ANISE.sock")), Some("ANISE".into()));
+        assert_eq!(address_of(Path::new("/s/ANISE.lock")), None);
+        assert_eq!(address_of(Path::new("/s/ANISE.name")), None);
+        assert_eq!(address_of(Path::new("/s/ANISE")), None);
     }
 }

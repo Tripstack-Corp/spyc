@@ -149,8 +149,9 @@ projects are open, their chips take the project's place) and persist across
   picker; `:project name` alone says its name, and `./name` reaches a
   directory named `name`. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to
-  `[A-Z0-9_]`); the session segment's menu opens the `:` line holding
-  `name` and the current name, to edit. `:whoami` flashes `user@host`.
+  `[A-Z0-9_]`), unless another running session goes by that name; a click
+  on the session's name on the status bar, or its menu's `:name`, opens the
+  `:` line holding `name` and the current name, to edit. `:whoami` flashes `user@host`.
 - **New pane tabs** open in `PROJECT_HOME`, or the start dir when the
   project has no home (`^a C` asks where instead). Set
   `[pane] new_tab_cwd` in `.spycrc.toml` to `"worktree_root"` (the
@@ -303,8 +304,8 @@ the rest.
 from outside the session, attached or not: it picks the session as `spyc attach` does, lists
 the tabs that end with it and asks first (`-y` doesn't ask). The session is saved, so `spyc -r`
 can bring it back, its programs started afresh. `^D` detaches too: most
-terminals send it as `^d`. While a session runs in its own jar, its name is that jar's
-address, so `:name` can't change it.
+terminals send it as `^d`. A session renamed with `:name` while it runs in its own jar
+keeps the name it started as too: `spyc attach` finds it by either.
 
 ### Attaching over SSH
 

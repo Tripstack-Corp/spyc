@@ -52,18 +52,30 @@ fn cmd_detach_defers_to_app() {
     assert!(!s.should_quit);
 }
 
+/// `:name NEW` asks for the session to go by NEW, normalized, which the App
+/// does or refuses; the name it has already is said, not asked for.
 #[test]
-fn a_session_in_its_own_jar_keeps_its_name() {
+fn name_asks_for_the_session_to_go_by_the_normalized_name() {
     let mut s = test_state();
     s.session_name = Some("ANISE".into());
-    s.session_name_fixed = true;
-    s.dispatch_command("name clove");
-    assert_eq!(s.session_name.as_deref(), Some("ANISE"));
-    let flash = format!("{:?}", s.flash);
-    assert!(flash.contains("jar of its own"), "{flash}");
-    s.session_name_fixed = false;
-    s.dispatch_command("name clove");
-    assert_ne!(s.session_name.as_deref(), Some("ANISE"));
+    let asked = |r: CommandResult| match r {
+        CommandResult::Post(fx) => fx,
+        other => panic!("{other:?}"),
+    };
+    let fx = asked(s.dispatch_command("name general work"));
+    assert!(
+        matches!(fx.as_slice(), [crate::app::Effect::NameSession { name }] if name == "GENERAL_WORK"),
+        "{fx:?}"
+    );
+    assert_eq!(s.session_name.as_deref(), Some("ANISE"), "the App renames");
+    assert!(matches!(
+        s.dispatch_command("name anise"),
+        CommandResult::Handled
+    ));
+    assert!(matches!(
+        s.dispatch_command("name !!"),
+        CommandResult::Handled
+    ));
 }
 
 #[test]

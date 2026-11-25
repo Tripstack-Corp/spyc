@@ -1,8 +1,10 @@
 //! A session's own jar (S4, decision D): the jar spyc itself runs in, so a
 //! spyc outlives the terminal it was started from. It is a jar like a pane's,
 //! kept apart by where it lives: `<runtime>/spyc/sessions/<SESSION_NAME>.sock`,
-//! beside the pane jars' directory, named by the session it holds. Its name is
-//! its address, so a spyc in its own jar takes its session's name from it.
+//! beside the pane jars' directory, named by the session it started as. That
+//! name is its address and never changes; `:name` gives the session another
+//! to go by, kept beside the socket in `<ADDRESS>.name` ([`shown_name`]), and
+//! `spyc attach` finds the session by either.
 //!
 //! spyc is in its own jar when `SPYC_JAR_SOCKET` names a socket in that
 //! directory and the jar takes spyc as its program, which the jar knows by
@@ -35,7 +37,10 @@ pub(super) const LINK_WAIT: Duration = Duration::from_secs(20);
 
 /// spyc's link to its own jar, as its program.
 pub struct OwnJar {
+    /// The name the session goes by.
     name: String,
+    /// Its socket's name, which never changes.
+    address: String,
     socket: PathBuf,
     /// Until [`Self::watch`] takes it.
     client: Option<Client>,
@@ -46,9 +51,22 @@ pub struct OwnJar {
 }
 
 impl OwnJar {
-    /// The session's name: its jar's socket's.
+    /// The name the session goes by: its name file's, else its address.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// The jar's socket's name: where `spyc attach` reaches it, whatever the
+    /// session is called.
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+
+    /// Have the session go by `name`, its socket kept.
+    pub fn rename(&mut self, name: &str) -> anyhow::Result<()> {
+        write_name(&self.socket, name)?;
+        self.name = name.to_string();
+        Ok(())
     }
 
     /// Whether the terminal attached now reaches this machine over SSH, as its
@@ -183,17 +201,44 @@ fn link(socket: &Path) -> anyhow::Result<OwnJar> {
             _ => {}
         }
     }
-    let name = socket
+    let address = socket
         .file_stem()
         .map_or_default(|s| s.to_string_lossy().into_owned());
     Ok(OwnJar {
-        name,
+        name: shown_name(socket).unwrap_or_else(|| address.clone()),
+        address,
         socket: socket.to_path_buf(),
         client: Some(client),
         tx: None,
         attached: Arc::new(AtomicBool::new(attached)),
         attaches: Arc::new(AtomicU64::new(0)),
     })
+}
+
+/// The file beside a session's socket holding the name it goes by, once
+/// `:name` has given it one: `<ADDRESS>.name`.
+pub fn name_file(socket: &Path) -> PathBuf {
+    socket.with_extension("name")
+}
+
+/// The name the session at `socket` goes by: its name file's, else its
+/// address. `None` for a path with no file name.
+pub fn shown_name(socket: &Path) -> Option<String> {
+    let address = socket.file_stem()?.to_str()?.to_string();
+    let named = std::fs::read_to_string(name_file(socket))
+        .ok()
+        .and_then(|s| crate::state::session_names::normalize(s.trim()));
+    Some(named.unwrap_or(address))
+}
+
+/// Record `name` as the one the session at `socket` goes by, renamed into
+/// place so no reader sees half of it.
+pub fn write_name(socket: &Path, name: &str) -> anyhow::Result<()> {
+    let file = name_file(socket);
+    let part = socket.with_extension("name.part");
+    std::fs::write(&part, format!("{name}\n"))
+        .with_context(|| format!("write {}", part.display()))?;
+    std::fs::rename(&part, &file).with_context(|| format!("write {}", file.display()))
 }
 
 /// The own jar's watcher's wait between frames: it wakes on one, and the jar
@@ -240,6 +285,14 @@ pub fn start(
                 .with_context(|| format!("remove {}", socket.display()))?;
         }
         SocketState::Missing => {}
+    }
+    // A name the last session at this address went by isn't this one's.
+    match std::fs::remove_file(name_file(&socket)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(e).with_context(|| format!("remove {}", name_file(&socket).display()));
+        }
     }
     let token = super::tokens::new()?;
     super::tokens::save(&place, &socket, &token)?;
@@ -290,6 +343,28 @@ mod tests {
         let sessions = Path::new("/run/u/spyc/sessions");
         let own = sessions.join("CORIANDER_CLOVE.sock");
         assert_eq!(own_jar_socket(&own, sessions), Some(own.clone()));
+    }
+
+    #[test]
+    fn a_session_goes_by_its_name_file_else_its_address() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("CORIANDER_CLOVE.sock");
+        assert_eq!(shown_name(&socket).as_deref(), Some("CORIANDER_CLOVE"));
+        write_name(&socket, "GENERAL_WORK").unwrap();
+        assert_eq!(shown_name(&socket).as_deref(), Some("GENERAL_WORK"));
+        assert!(socket.with_extension("name").exists());
+        assert!(
+            !socket.with_extension("name.part").exists(),
+            "renamed into place"
+        );
+        write_name(&socket, "GINGER").unwrap();
+        assert_eq!(shown_name(&socket).as_deref(), Some("GINGER"));
+        std::fs::write(name_file(&socket), " \n").unwrap();
+        assert_eq!(
+            shown_name(&socket).as_deref(),
+            Some("CORIANDER_CLOVE"),
+            "an empty name file names nothing"
+        );
     }
 
     #[test]

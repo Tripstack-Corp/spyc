@@ -188,6 +188,10 @@ pub enum Effect {
     /// renaming its own config file, or making one (`App::name_project`).
     NameProject { anchor: PathBuf, name: String },
 
+    /// `:name NEW`: have the session go by `name`, already normalized,
+    /// unless another session that runs goes by it (`App::name_session`).
+    NameSession { name: String },
+
     /// A-class. Fire a desktop notification and/or ring the terminal bell that an
     /// agent pane changed to `Blocked` ("needs me") or `Done` — the P3-1 ping
     /// (`docs/archive/AGENT_AWARENESS_PLAN.md`). Emitted by `settle_agent_activity` on the
@@ -784,6 +788,7 @@ pub mod matchers {
             | Effect::SetTerminalTitle { .. }
             | Effect::EditProjectConfig { .. }
             | Effect::NameProject { .. }
+            | Effect::NameSession { .. }
             | Effect::Notify { .. }
             | Effect::ReadPaneText { .. }
             | Effect::ChangeDir { .. }

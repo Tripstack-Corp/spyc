@@ -151,6 +151,7 @@ mod tests {
     fn session(client: Option<i32>) -> Running {
         Running {
             name: "CORIANDER_CLOVE".into(),
+            address: "CORIANDER_CLOVE".into(),
             socket: "/run/spyc/sessions/CORIANDER_CLOVE.sock".into(),
             client,
         }
