@@ -282,9 +282,8 @@ pub struct PaneConfig {
     /// reaches the pane's program; from the file view it still arms the prefix.
     pub ctrl_w_prefix: bool,
     /// When true, a pane tab's program runs in a `spyc-jar`, which holds its
-    /// PTY and outlives spyc (#1099). Honoured only on a `-CURRENT` or rc
-    /// build ([`crate::pane::jar::honoured`]); only the user's own files
-    /// decide, else [`crate::pane::jar::BY_DEFAULT`]. False: no jars.
+    /// PTY and outlives spyc (#1099). Only the user's own files decide, else
+    /// [`crate::pane::jar::BY_DEFAULT`]. False: no jars.
     pub jars: bool,
     /// Home-configured opt-in strip below the active Codex pane.
     pub agent_hud: AgentHudMode,

@@ -208,8 +208,8 @@ spyc() {
 ## Background tasks
 
 Long-running captured commands (`!cargo test`, `!find ...`) don't have
-to lock you out of spyc. On development builds, with jars on, a capture's
-program runs in a jar, as a tab's does
+to lock you out of spyc. With jars on, a capture's program runs in a jar, as
+a tab's does
 ([Tabs in jars](pane.md#tabs-in-jars)): it outlives spyc, and the jar keeps
 what it printed until a spyc reads it. With no spyc running, a capture that
 has printed more than its jar holds (4 MB) waits to print more until a spyc

@@ -160,7 +160,10 @@ tag RELEASEs directly off `main` until a second major needs `stable/`.
    The release PR sets it, and `make release-tag` checks it. `release.yml` then
    builds + publishes a GitHub *pre-release* with full artifacts, and the
    Homebrew tap, apt and crates.io all take it. Soak (e.g., 3–7 days /
-   dogfood).
+   dogfood). An rc soaks the code its release ships, so no code may read the
+   version (its `-CURRENT` or `-rc.N`) to decide what a build does: the
+   release would run what no rc ran. `src/version_guard.rs` names every read
+   of the version, each printing or naming it whole, and fails on any other.
 3. Fix blockers on `main`, which stays at `N.M.0-rc.1` (§3); cut `-rc.2` the
    same way as needed.
 4. **Release — two steps, because `main` only takes PRs.** A single

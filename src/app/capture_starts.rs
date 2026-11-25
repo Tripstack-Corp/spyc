@@ -40,9 +40,7 @@ impl App {
         cmd: &str,
         dir: &Path,
     ) -> anyhow::Result<(PtyHost, Option<u64>)> {
-        let jars = self.state.active_project().config.pane.jars
-            && jar::honoured()
-            && !self.runtime.jarless.chosen;
+        let jars = self.state.active_project().config.pane.jars && !self.runtime.jarless.chosen;
         let env = self.state.active_project().env.pairs();
         if !jars {
             return Ok((spawn_capture(cmd, dir, None, &env)?, None));
@@ -180,8 +178,7 @@ fn start_in_jar(
     // SPYC-TRAP(jar-off-the-loop): a capture's jar is asked for only on this
     // worker.
     let name = uuid::Uuid::now_v7().to_string();
-    let mut spec = jar::spec_for(place, &name, None)?
-        .ok_or_else(|| anyhow::anyhow!("this build doesn't run programs in jars"))?;
+    let mut spec = jar::spec_for(place, &name, None)?;
     spec.exit_linger = Some(spyc_jar::cli::UNTIL_READ);
     spawn_capture(cmd, dir, Some(spec), env)
 }
@@ -191,14 +188,12 @@ fn start_in_jar(
 fn retake_jar(socket: std::path::PathBuf, place: Option<jar::Place>) -> anyhow::Result<PtyHost> {
     // SPYC-TRAP(jar-off-the-loop): only on this worker.
     let name = uuid::Uuid::now_v7().to_string();
-    // Taken back whatever this build or `[pane] jars` says of new ones.
+    // Taken back whatever `[pane] jars` says of new ones.
     let place = match place {
         Some(place) => place,
         None => jar::Place::for_this_user()?,
     };
-    let spec = jar::spec_for(Some(place), &name, None)?
-        .ok_or_else(|| anyhow::anyhow!("no place for the task's jar"))?
-        .retaking(socket);
+    let spec = jar::spec_for(Some(place), &name, None)?.retaking(socket);
     spawn_capture("", Path::new("/"), Some(spec), &[])
 }
 

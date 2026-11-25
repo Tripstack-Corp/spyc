@@ -73,9 +73,7 @@ impl App {
 
     /// Whether this session runs programs in jars.
     fn jars_wanted(&self) -> bool {
-        self.state.active_project().config.pane.jars
-            && crate::pane::jar::honoured()
-            && !self.runtime.jarless.chosen
+        self.state.active_project().config.pane.jars && !self.runtime.jarless.chosen
     }
 
     /// Whether a tab, capture or task of this spyc's is still starting or

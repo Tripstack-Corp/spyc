@@ -335,11 +335,11 @@ Multiple tabs, each running an independent pty:
 
 ### Tabs in jars
 
-On development (`-CURRENT`) and release-candidate builds, each tab's program
-runs in a `spyc-jar`: a small process that holds its terminal, so the program
-outlives spyc. After a crash, `spyc -r` takes each tab's program back, still
-running, with what it printed meanwhile. A tab whose jar can't start says why
-and ends `[not started]`, and `^a R` starts it again. When no `spyc-jar`
+Each tab's program runs in a `spyc-jar`: a small process that holds its
+terminal, so the program outlives spyc. After a crash, `spyc -r` takes each
+tab's program back, still running, with what it printed meanwhile. A tab
+whose jar can't start says why and ends `[not started]`, and `^a R` starts
+it again. When no `spyc-jar`
 beside spyc is usable, spyc says to check its installation and offers, once
 a session, to run tabs without jars. `[pane] jars = false` runs every tab
 without one. A tab sent to the background as a task (`:pane-to-task`) keeps

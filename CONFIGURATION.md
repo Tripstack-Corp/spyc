@@ -87,7 +87,7 @@ ctrl_w_prefix = true           # ^w is a pane prefix like ^a; false sends a focu
 agent_hud = "off"             # "off", "compact", or "full"; only your own files decide
 agent_hud_resets = "clock"    # when a plan window resets: "clock" (3:40pm, Thu 9am) or "countdown" (2h05m)
 jars = true                   # run each tab's program in a spyc-jar, which outlives spyc; false: none, programs end with spyc
-                              # (-CURRENT and rc builds only, your own files only; with no usable spyc-jar, spyc offers to run without)
+                              # (your own files only; with no usable spyc-jar, spyc offers to run without)
 
 [yank]
 include_pager_title = true     # prepend a source header to pager yanks (y/Y)
