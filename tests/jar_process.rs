@@ -1725,23 +1725,26 @@ fn a_programs_last_words_reach_a_slow_owner_before_it_is_detached() {
 /// Finding 5, in part: a lookup is answered once and closed.
 #[test]
 fn a_lookup_is_answered_once_and_closed() {
-    let jar = Jar::start(&[], &["/bin/cat"]);
+    // At once, not when its idle limit would close it: with that limit an
+    // hour (a debug build's `SPYC_JAR_STRETCH`), a lookup that ends inside
+    // the wait below ended for having its answer.
+    let stretch: &std::path::Path = "lookup".as_ref();
+    let jar = Jar::start_env(&[("SPYC_JAR_STRETCH", stretch)], &[], &["/bin/cat"]);
     let mut lookup = try_connect(&jar, Role::Lookup, b"").unwrap();
     lookup.send(&Msg::Describe).unwrap();
     assert!(matches!(
         lookup.recv(WAIT).unwrap(),
         Some(Msg::Description { .. })
     ));
-    // At once, not when its idle limit would close it: a second question,
-    // asked before that limit, is never answered.
-    let _ = lookup.send(&Msg::Describe);
-    match lookup.recv(WAIT) {
-        Err(_) => {}
-        Ok(m) => panic!("the jar kept the lookup open after its answer: {m:?}"),
-    }
+    let after = lookup.recv(WAIT);
+    assert!(
+        after.is_err(),
+        "the jar kept the lookup open after its answer: {after:?}"
+    );
     // One that asks nothing is closed too, when its idle limit is up (an
-    // `Ok(None)` is the wait running out first).
-    let mut idle = try_connect(&jar, Role::Lookup, b"").unwrap();
+    // `Ok(None)` is the wait running out first): a jar with its own limit.
+    let plain = Jar::start(&[], &["/bin/cat"]);
+    let mut idle = try_connect(&plain, Role::Lookup, b"").unwrap();
     let idled = idle.recv(Duration::from_secs(8));
     assert!(idled.is_err(), "the jar kept an idle lookup: {idled:?}");
 }

@@ -194,7 +194,7 @@ fn try_run(
         binary,
         &blob_now(shared),
         shared.cfg.instance,
-        FIRST_VALIDATION,
+        crate::limits::stretched(crate::limits::Stretch::Validation, FIRST_VALIDATION),
     )?;
     shared.upgrading.store(true, Ordering::SeqCst);
     shared.cv.notify_all();

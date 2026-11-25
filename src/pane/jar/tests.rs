@@ -2019,12 +2019,15 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         /// How long a jar keeps something for an owner that isn't there:
         /// running out drops it.
         Keep,
+        /// A debug build's stretch of a deadline, for a test that tells "at
+        /// once" from "at the deadline"; a release build has none.
+        DebugStretch,
     }
     use Kind::{
-        AfterExec, Command, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served, Start,
-        Unbounded,
+        AfterExec, Command, DebugStretch, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served,
+        Start, Unbounded,
     };
-    const TIMERS: [(&str, Kind); 44] = [
+    const TIMERS: [(&str, Kind); 45] = [
         ("ATTACH_WAIT", Command),
         ("ATTACH_PING", Poll),
         ("SIZE_POLL", Poll),
@@ -2069,6 +2072,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         ("SOCKET_CHECK", Poll),
         ("PARKED_AT_MOST", Limit),
         ("UPGRADE_AT_MOST", Limit),
+        ("STRETCHED", DebugStretch),
     ];
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src");
     let mut found = std::collections::BTreeSet::new();

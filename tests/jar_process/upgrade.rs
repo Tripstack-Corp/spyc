@@ -237,10 +237,13 @@ fn a_validator_that_prints_no_proof_is_refused() {
 /// A validator that exits while a child of its keeps its standard error: the
 /// refusal comes while the child still holds it, so the jar never waited for
 /// that standard error's end, and the program runs on. The child holds it
-/// until the test lets it go, after the answer.
+/// until the test lets it go, after the answer; the validation's deadline
+/// is an hour (a debug build's `SPYC_JAR_STRETCH`), so a refusal that waits
+/// on the child until that deadline never comes inside the wait.
 #[test]
 fn a_validators_child_holding_its_stderr_cannot_hold_the_jar() {
-    let mut jar = Jar::start(&[], &counter());
+    let stretch: &std::path::Path = "validation".as_ref();
+    let mut jar = Jar::start_env(&[("SPYC_JAR_STRETCH", stretch)], &[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
     let mut seen = read_while_it_comes(&mut owner, true, |s| {
