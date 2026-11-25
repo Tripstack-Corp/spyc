@@ -73,10 +73,22 @@ fn l_on_a_directory_shows_its_tree_and_z_keys_open_and_close_it() {
     cursor_to(&mut app, "tree");
     press(&mut app, "L");
     let (title, text) = walked(&mut app);
+    let mut lines = text.lines();
+    let header = lines.next().unwrap();
+    assert!(
+        header.starts_with("NAME") && header.contains("MODE"),
+        "{text}"
+    );
+    let own = lines.next().unwrap();
+    assert!(
+        own.starts_with("tree/") && own.contains("drwx"),
+        "the directory's own row comes first:\n{text}"
+    );
     assert!(title.contains("3 files"), "{title}");
     assert!(title.contains("depth 2"), "{title}");
     assert!(text.contains("a/") && text.contains("b/ ▸"), "{text}");
-    assert!(!text.contains("c/"), "depth 2 leaves b closed:\n{text}");
+    // Names on the tree's branches: the root's temporary path can hold "b/" or "c/".
+    assert!(!text.contains("─ c/"), "depth 2 leaves b closed:\n{text}");
     assert!(
         text.find("a/") < text.find("top.txt"),
         "largest first:\n{text}"
@@ -85,7 +97,10 @@ fn l_on_a_directory_shows_its_tree_and_z_keys_open_and_close_it() {
     press(&mut app, "zr");
     let (title, text) = shown(&app);
     assert!(title.contains("depth 3"), "{title}");
-    assert!(text.contains("c/") && !text.contains("deep.bin"), "{text}");
+    assert!(
+        text.contains("─ c/") && !text.contains("deep.bin"),
+        "{text}"
+    );
 
     press(&mut app, "zR");
     let (title, text) = shown(&app);
@@ -102,13 +117,13 @@ fn l_on_a_directory_shows_its_tree_and_z_keys_open_and_close_it() {
     let (_, text) = shown(&app);
     let pager = app.view.project().pager.as_ref().unwrap();
     assert!(
-        text.lines().nth(pager.scroll).unwrap().contains("c/"),
+        text.lines().nth(pager.scroll).unwrap().contains("─ c/"),
         "c takes deep.bin's place at the top:\n{text}"
     );
 
     press(&mut app, "zM");
     let (_, text) = shown(&app);
-    assert!(text.contains("a/ ▸") && !text.contains("b/"), "{text}");
+    assert!(text.contains("a/ ▸") && !text.contains("─ b/"), "{text}");
 
     // `za` opens the directory at the top of a view too short to hold it all.
     let line = text.lines().position(|l| l.contains("a/ ▸")).unwrap();

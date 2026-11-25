@@ -1,7 +1,9 @@
-//! `L` on a directory: the tree of sizes beneath it, in an overlay pager.
+//! `L` on a directory: the tree of sizes beneath it, in an overlay pager,
+//! under the directory's own long-listing row.
 //!
-//! A worker walks the directory ([`crate::fs::disk_tree::scan`]) into a tree
-//! it shares with [`DiskTreeStream`], waking the loop as it goes, and each
+//! A worker reads that row, then walks the directory
+//! ([`crate::fs::disk_tree::scan`]) into a tree it shares with
+//! [`DiskTreeStream`], waking the loop as it goes, and each
 //! drain lays the tree out again, so the sizes fill in while the walk runs. The
 //! stream outlives the walk to answer the fold keys: `zr` / `zm` open or
 //! close a level, `zR` / `zM` all of them, and `za` the directory at the top
@@ -18,14 +20,20 @@ use crate::ui::pager::PagerView;
 /// Levels open when the tree first shows.
 const FIRST_DEPTH: usize = 2;
 
-/// The header line sits above the first row.
-const HEADER_LINES: usize = 1;
+/// What the worker sends: the directory's own long-listing lines once, then
+/// a wake each time the tree has grown.
+enum Landed {
+    Listing(Vec<String>),
+    Grew,
+}
 
 /// The tree in a pager, laid out again as the walk adds to it or a fold key
 /// changes what is open.
 pub struct DiskTreeStream {
     id: u32,
-    rx: mpsc::Receiver<()>,
+    rx: mpsc::Receiver<Landed>,
+    /// The directory's own long-listing header and row.
+    listing: Vec<String>,
     tree: Arc<Mutex<DiskTree>>,
     folds: Folds,
     rows: Vec<Row>,
@@ -41,8 +49,18 @@ struct Anchor {
 }
 
 impl DiskTreeStream {
+    /// The line of the tree's first row: below the listing, a blank line and
+    /// the tree's header.
+    const fn first_row(&self) -> usize {
+        if self.listing.is_empty() {
+            1
+        } else {
+            self.listing.len() + 2
+        }
+    }
+
     fn anchor(&self, scroll: usize) -> Option<Anchor> {
-        let row = self.rows.get(scroll.checked_sub(HEADER_LINES)?)?;
+        let row = self.rows.get(scroll.checked_sub(self.first_row())?)?;
         let dir = match row.kind {
             RowKind::Dir { id, .. } => Some(id),
             _ => row.parent,
@@ -63,7 +81,7 @@ impl DiskTreeStream {
                 .iter()
                 .position(|r| matches!(r.kind, RowKind::Dir { id: d, .. } if d == id));
             if found.is_some() {
-                return found.map(|i| i + HEADER_LINES);
+                return found.map(|i| i + self.first_row());
             }
             dir = tree.parent_of(id);
         }
@@ -82,14 +100,14 @@ impl DiskTreeStream {
             self.folds.depth,
             self.done,
         );
-        view.lines = crate::ui::disk_tree::render(&self.rows, &ctx.theme);
+        view.lines = crate::ui::disk_tree::render(&self.listing, &self.rows, &ctx.theme);
         view.streaming = !self.done;
         if let Some(anchor) = anchor {
             let same = self
                 .rows
                 .iter()
                 .position(|r| r.parent == anchor.parent && r.name == anchor.name)
-                .map(|i| i + HEADER_LINES);
+                .map(|i| i + self.first_row());
             if let Some(line) = same.or_else(|| self.line_of_dir(&tree, anchor.dir)) {
                 view.scroll = line;
             }
@@ -113,7 +131,11 @@ impl PagerStream for DiskTreeStream {
         let mut ended = false;
         loop {
             match self.rx.try_recv() {
-                Ok(()) => grew = true,
+                Ok(Landed::Listing(listing)) => {
+                    self.listing = listing;
+                    grew = true;
+                }
+                Ok(Landed::Grew) => grew = true,
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     ended = !self.done;
@@ -152,7 +174,7 @@ impl PagerStream for DiskTreeStream {
             PagerStreamCmd::OpenAll => self.folds.open_all(),
             PagerStreamCmd::CloseAll => self.folds.close_all(),
             PagerStreamCmd::ToggleFold => {
-                // The header's line flips the root.
+                // Above the tree's rows, it flips the root.
                 let dir = anchor.as_ref().map_or(Some(0), |a| a.dir);
                 let Some(dir) = dir else {
                     return false;
@@ -185,13 +207,17 @@ impl App {
                 title,
                 line_count_hint: None,
             },
-            move |tx: crate::fs::WakingSender<()>| {
-                crate::fs::disk_tree::scan(&root, &walked, || tx.send(()).is_ok());
+            move |tx: crate::fs::WakingSender<Landed>| {
+                let listing = crate::fs::long_listing::format_long_listing(&[&root]);
+                if tx.send(Landed::Listing(listing)).is_ok() {
+                    crate::fs::disk_tree::scan(&root, &walked, || tx.send(Landed::Grew).is_ok());
+                }
             },
             move |id, rx| {
                 Box::new(DiskTreeStream {
                     id,
                     rx,
+                    listing: Vec::new(),
                     tree,
                     folds: Folds::new(FIRST_DEPTH),
                     rows: Vec::new(),
@@ -202,7 +228,6 @@ impl App {
         );
         if let Some(view) = self.view.project_mut().pager.as_mut() {
             view.show_line_numbers = false;
-            view.wrap = false;
         }
     }
 }

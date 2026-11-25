@@ -203,7 +203,8 @@ become `%` in shell expansion.
   bytes, blocks, inode, atime/ctime/birth. The row is wider than a
   terminal, so it wraps, and with the name first a wrap only pushes the
   rarely needed columns down. Pager height fits the wrapped content. (Also reachable as `:longlist`.)
-  On a single directory, `L` shows the tree of sizes beneath it instead:
+  On a single directory, `L` shows the directory's own row of that table,
+  and under it the tree of sizes beneath it:
   each entry's size and size on disk, its share of its parent, and how many
   files it holds, largest first, filling in while the walk runs. A file with
   several hard links counts once, links are not followed, and the walk stays
