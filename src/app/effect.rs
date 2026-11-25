@@ -192,6 +192,10 @@ pub enum Effect {
     /// unless another session that runs goes by it (`App::name_session`).
     NameSession { name: String },
 
+    /// `L` on a directory: walk it off-thread and show the tree of sizes
+    /// beneath it (`App::open_disk_tree`).
+    OpenDiskTree { root: PathBuf },
+
     /// A-class. Fire a desktop notification and/or ring the terminal bell that an
     /// agent pane changed to `Blocked` ("needs me") or `Done` — the P3-1 ping
     /// (`docs/archive/AGENT_AWARENESS_PLAN.md`). Emitted by `settle_agent_activity` on the
@@ -789,6 +793,7 @@ pub mod matchers {
             | Effect::EditProjectConfig { .. }
             | Effect::NameProject { .. }
             | Effect::NameSession { .. }
+            | Effect::OpenDiskTree { .. }
             | Effect::Notify { .. }
             | Effect::ReadPaneText { .. }
             | Effect::ChangeDir { .. }

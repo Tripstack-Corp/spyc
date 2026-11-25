@@ -336,6 +336,11 @@ impl PagerStream for GitViewStream {
                 self.render_into(view, ctx);
                 true
             }
+            PagerStreamCmd::Deeper
+            | PagerStreamCmd::Shallower
+            | PagerStreamCmd::OpenAll
+            | PagerStreamCmd::CloseAll
+            | PagerStreamCmd::ToggleFold => false,
         }
     }
 }

@@ -69,6 +69,9 @@ spyc.
   nested subsections with it — `##` swallows the `###`s beneath it and stops at
   the next `##`. Turns a long README or ARCHITECTURE.md into a table of contents
   you can open one branch at a time.
+- **Directory tree** — the tree of sizes `L` shows for a directory takes the
+  same keys, with `zr` / `zm` to open or close one level at a time
+  ([browsing](browsing.md)).
 - Page-up/down, half-page, and vi-style scrolling
 
 ## Pager buffer history

@@ -522,6 +522,7 @@ mod codex_questions;
 mod column_state;
 mod ctrl_w;
 mod cwd_file;
+mod disk_tree;
 mod esc_guard;
 mod focused_column;
 mod history_editor;

@@ -228,6 +228,14 @@ const PAGER_HELP_SECTIONS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Directory tree (L)",
+        &[
+            ("zr  zm", "open one more level / close one"),
+            ("zR  zM", "open every level / only the first"),
+            ("za", "open / close the directory at the top"),
+        ],
+    ),
+    (
         "Actions",
         &[
             ("v", "open in $EDITOR"),

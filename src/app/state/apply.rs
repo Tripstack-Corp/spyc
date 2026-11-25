@@ -334,34 +334,8 @@ impl AppState {
                 self.mode = Mode::Prompting(Prompt::simple(PromptKind::RemoveConfirm, prompt));
             }
 
-            // -- Long listing (pager) --
-            // Pure: collect the target paths + title and hand them to the
-            // off-thread `FileOp::LongList` worker. `format_long_listing` does
-            // a `symlink_metadata` + owner/group resolution per path — IO that
-            // must not run inside this pure dispatcher (nor block the input
-            // thread on a big selection). The worker opens the pager when done.
-            Action::LongList => {
-                let owned: Vec<PathBuf>;
-                let paths: Vec<&Path> = if self.selection_paths().is_empty() {
-                    owned = self
-                        .cur()
-                        .listing
-                        .entries
-                        .iter()
-                        .map(|e| e.path.clone())
-                        .collect();
-                    owned.iter().map(PathBuf::as_path).collect()
-                } else {
-                    self.selection_paths()
-                };
-                let op = FileOp::LongList {
-                    paths: paths.iter().map(|p| p.to_path_buf()).collect(),
-                    title: format!("long listing — {}", self.cur().listing.dir.display()),
-                };
-                let row_count = self.cur().rows.len();
-                self.cur_mut().cursor.clamp(row_count);
-                return ApplyResult::Post(vec![Effect::FileOp(op)]);
-            }
+            // -- Long listing (pager), or a directory's tree of sizes --
+            Action::LongList => return self.long_list(),
 
             // -- File type --
             // Pure: hand the selected paths to the off-thread `FileOp::FileType`
@@ -501,4 +475,45 @@ impl AppState {
     }
 
     // --- Command / prompt dispatch (pure-domain arms) ---
+}
+
+impl AppState {
+    /// `L`: one directory on its own opens the tree of sizes beneath it
+    /// (`Effect::OpenDiskTree`); anything else, or anything inside a mount,
+    /// the long-listing table, read off-thread by `FileOp::LongList`, since
+    /// each row costs an `lstat` and an owner lookup.
+    fn long_list(&mut self) -> ApplyResult {
+        let effect = self.long_list_effect();
+        let row_count = self.cur().rows.len();
+        self.cur_mut().cursor.clamp(row_count);
+        ApplyResult::Post(vec![effect])
+    }
+
+    fn long_list_effect(&self) -> Effect {
+        if let [one] = self.selection_pane_paths().as_slice()
+            && one.is_dir
+            && self.mounts.resolve(&self.cur().listing.dir).is_none()
+        {
+            return Effect::OpenDiskTree {
+                root: one.path.clone(),
+            };
+        }
+        let paths: Vec<PathBuf> = if self.selection_paths().is_empty() {
+            self.cur()
+                .listing
+                .entries
+                .iter()
+                .map(|e| e.path.clone())
+                .collect()
+        } else {
+            self.selection_paths()
+                .iter()
+                .map(|p| p.to_path_buf())
+                .collect()
+        };
+        Effect::FileOp(FileOp::LongList {
+            paths,
+            title: format!("long listing — {}", self.cur().listing.dir.display()),
+        })
+    }
 }

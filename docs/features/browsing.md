@@ -203,6 +203,14 @@ become `%` in shell expansion.
   bytes, blocks, inode, atime/ctime/birth. The row is wider than a
   terminal, so it wraps, and with the name first a wrap only pushes the
   rarely needed columns down. Pager height fits the wrapped content. (Also reachable as `:longlist`.)
+  On a single directory, `L` shows the tree of sizes beneath it instead:
+  each entry's size and size on disk, its share of its parent, and how many
+  files it holds, largest first, filling in while the walk runs. A file with
+  several hard links counts once, links are not followed, and the walk stays
+  on the directory's own file system. Each directory lists its 20 largest
+  entries and sums the rest on one line. It opens two levels deep: `zr` and
+  `zm` open or close a level, `zR` and `zM` all of them, and `za` the
+  directory at the top of the view.
 - **:filetype** run `file(1)` on the selection
 - **:chmod** chmod +x
 

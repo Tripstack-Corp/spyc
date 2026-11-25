@@ -79,6 +79,16 @@ pub enum PagerStreamCmd {
     /// side-by-side diff columns (plain-text pagers wrap at render time and
     /// don't need this).
     Rerender,
+    /// `zr`: open one more level of a tree.
+    Deeper,
+    /// `zm`: close the deepest open level.
+    Shallower,
+    /// `zR`: open every level.
+    OpenAll,
+    /// `zM`: close every level but the first.
+    CloseAll,
+    /// `za`: open or close the directory at the top of the view.
+    ToggleFold,
 }
 
 /// A background producer streaming styled content into a [`PagerView`].
