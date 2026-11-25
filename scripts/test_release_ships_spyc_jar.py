@@ -67,6 +67,40 @@ class ReleaseShipsSpycJar(unittest.TestCase):
             self.assertIn("./usr/bin/spyc\n", listing)
             self.assertIn("./usr/bin/spyc-jar\n", listing)
 
+    @unittest.skip("red until F8 (fix/deb-needs-jar) requires spyc-jar in a 3.x deb")
+    def test_a_deb_of_a_release_that_ships_spyc_jar_needs_it(self):
+        """From 3.0.0 every release ships spyc-jar, and spyc without it runs
+        no tab: a deb built without it fails rather than ship (the 3.0
+        review's F8)."""
+        for version in ("3.0.0-rc.1", "3.0.0", "3.1.2"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as d:
+                built = Path(d, "built")
+                built.mkdir()
+                Path(built, "spyc").write_text("#!/bin/sh\n", encoding="utf-8")
+                r = subprocess.run(["make", "--no-print-directory", "_deb", "ARCH=amd64",
+                                    f"SRC={built / 'spyc'}", f"VERSION={version}", f"DIST_DIR={d}/dist"],
+                                   cwd=ROOT, capture_output=True, text=True)
+                self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn("spyc-jar", r.stdout + r.stderr, "the failure names what's missing")
+                self.assertEqual(list(Path(d).glob("dist/*.deb")), [])
+
+    @unittest.skipUnless(shutil.which("dpkg-deb"), "needs dpkg-deb")
+    def test_a_release_from_before_the_jar_still_packages_without_it(self):
+        """apt.yml rebuilds every release's deb, those from before spyc-jar
+        shipped among them."""
+        with tempfile.TemporaryDirectory() as d:
+            built = Path(d, "built")
+            built.mkdir()
+            Path(built, "spyc").write_text("#!/bin/sh\n", encoding="utf-8")
+            r = subprocess.run(["make", "--no-print-directory", "_deb", "ARCH=amd64",
+                                f"SRC={built / 'spyc'}", "VERSION=2.4.0", f"DIST_DIR={d}/dist"],
+                               cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            listing = subprocess.run(["dpkg-deb", "-c", f"{d}/dist/spyc_2.4.0_amd64.deb"],
+                                     capture_output=True, text=True, check=True).stdout
+            self.assertIn("./usr/bin/spyc\n", listing)
+            self.assertNotIn("spyc-jar", listing)
+
 
 if __name__ == "__main__":
     unittest.main()
