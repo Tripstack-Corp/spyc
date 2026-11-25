@@ -35,7 +35,8 @@ pub fn jar_script(dir: &std::path::Path, name: &str, cases: &str) -> PathBuf {
 }
 
 /// Ask `owner` for an upgrade to `binary`; what the jar answers (`Upgraded`
-/// or `Refused`) and how long it took, acknowledging output meanwhile. `None`
+/// or `Refused`) and how long it took, pinging and acknowledging output
+/// meanwhile. `None`
 /// when the jar answers neither within `wait`, or the connection ends.
 pub fn upgrade_answer(
     owner: &mut Client,
@@ -49,22 +50,63 @@ pub fn upgrade_answer(
             binary: binary.display().to_string(),
         })
         .expect("upgrade");
+    let mut n = 1 << 40;
+    let mut pinged = at;
     while at.elapsed() < wait {
+        // Pinging once a second, as spyc's owner does while it waits: one
+        // silent past the jar's deadline loses its lease, and the answer.
+        if pinged.elapsed() >= Duration::from_secs(1) {
+            n += 1;
+            let _ = owner.send(&Msg::Ping { n });
+            pinged = Instant::now();
+        }
         match owner.recv(Duration::from_millis(200)) {
             Ok(Some(m @ (Msg::Upgraded { .. } | Msg::Refused { .. }))) => {
                 return (Some(m), at.elapsed());
             }
+            Ok(Some(Msg::Pong { .. }) | None) => {}
             Ok(Some(m)) => {
                 seen.take(m);
                 if let Some(next) = seen.next_offset {
                     let _ = owner.send(&Msg::Ack { offset: next });
                 }
             }
-            Ok(None) => {}
             Err(_) => return (None, at.elapsed()),
         }
     }
     (None, at.elapsed())
+}
+
+/// A shell loop that waits for `go` to exist: a step held until the test
+/// lets it go. It ends with the test's directory too, so a test that fails
+/// first leaves nothing waiting behind it.
+pub fn held_until(go: &std::path::Path) -> String {
+    format!(
+        "while [ -d {dir} ] && [ ! -e {go} ]; do sleep 0.05; done",
+        dir = go.parent().expect("a directory").display(),
+        go = go.display()
+    )
+}
+
+/// Read on `owner`, acknowledging, until `more` counts have come past the
+/// last one `seen` holds: the program runs and the jar serves it.
+pub fn count_on(owner: &mut Client, seen: &mut Seen, more: u64, what: &str) {
+    let from = counts(seen).last().copied().unwrap_or(0);
+    let until = Instant::now() + WAIT;
+    while counts(seen).last().is_none_or(|n| *n < from + more) {
+        assert!(
+            Instant::now() < until,
+            "{what}: the count stopped at {:?}, frames {:?}",
+            counts(seen).last(),
+            seen.frames
+        );
+        if let Some(m) = owner.recv(Duration::from_millis(200)).expect("recv") {
+            seen.take(m);
+            if let Some(next) = seen.next_offset {
+                owner.send(&Msg::Ack { offset: next }).expect("ack");
+            }
+        }
+    }
 }
 
 /// The program still counts and reads input, on `owner`'s connection or, if
@@ -115,7 +157,7 @@ fn an_upgrade_to_a_binary_that_cant_resume_leaves_the_program_running() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     let fake = jar_script(
@@ -123,7 +165,7 @@ fn an_upgrade_to_a_binary_that_cant_resume_leaves_the_program_running() {
         "jar-fake",
         "validate-handover) cat >/dev/null; exit 0;;\nresume-handover) exit 1;;",
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &fake, WAIT);
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &fake, UPGRADE_AT_MOST);
     assert!(
         matches!(answer, Some(Msg::Refused { .. })),
         "the requester hears a refusal: {answer:?}"
@@ -139,7 +181,7 @@ fn an_upgrade_runs_the_image_it_validated_though_the_file_is_replaced() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     let dir = jar.dir.path();
@@ -154,7 +196,7 @@ fn an_upgrade_runs_the_image_it_validated_though_the_file_is_replaced() {
             named = named.display()
         ),
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &named, WAIT);
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &named, UPGRADE_AT_MOST);
     assert!(
         matches!(answer, Some(Msg::Upgraded { .. })),
         "the image that was validated takes over: {answer:?}"
@@ -170,7 +212,7 @@ fn a_validator_that_prints_no_proof_is_refused() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     let silent = jar_script(
@@ -178,7 +220,7 @@ fn a_validator_that_prints_no_proof_is_refused() {
         "jar-silent",
         "validate-handover) cat >/dev/null; exit 0;;",
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &silent, WAIT);
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &silent, UPGRADE_AT_MOST);
     assert!(
         matches!(
             answer,
@@ -193,27 +235,31 @@ fn a_validator_that_prints_no_proof_is_refused() {
 }
 
 /// A validator that exits while a child of its keeps its standard error: the
-/// refusal still comes within the validator's deadline, and the program isn't
-/// held up meanwhile. Today the jar reads that standard error to its end,
-/// past the deadline, with every thread parked.
+/// refusal comes while the child still holds it, so the jar never waited for
+/// that standard error's end, and the program runs on. The child holds it
+/// until the test lets it go, after the answer; the validation's deadline
+/// is an hour (a debug build's `SPYC_JAR_STRETCH`), so a refusal that waits
+/// on the child until that deadline never comes inside the wait.
 #[test]
 fn a_validators_child_holding_its_stderr_cannot_hold_the_jar() {
-    let mut jar = Jar::start(&[], &counter());
+    let stretch: &std::path::Path = "validation".as_ref();
+    let mut jar = Jar::start_env(&[("SPYC_JAR_STRETCH", stretch)], &[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
+    let go = jar.dir.path().join("go");
     let holding = jar_script(
         jar.dir.path(),
         "jar-holding",
-        "validate-handover) sleep 12 & exit 1;;",
+        &format!("validate-handover) ( {} ) & exit 1;;", held_until(&go)),
     );
-    let (answer, took) = upgrade_answer(&mut owner, &mut seen, &holding, Duration::from_secs(20));
-    assert!(matches!(answer, Some(Msg::Refused { .. })), "{answer:?}");
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &holding, UPGRADE_AT_MOST);
+    std::fs::write(&go, "").expect("let the validator's child go");
     assert!(
-        took < Duration::from_secs(7),
-        "the refusal waited on the validator's child: {took:?}"
+        matches!(answer, Some(Msg::Refused { .. })),
+        "refused while the validator's child held its standard error: {answer:?}"
     );
     assert_program_survives(&mut jar, owner, "a held standard error");
 }
@@ -226,7 +272,7 @@ fn a_validator_past_its_deadline_is_ended_with_its_children() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     let pidfile = jar.dir.path().join("validator-child.pid");
@@ -275,7 +321,7 @@ fn a_proof_for_another_blob_is_refused() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     // The right length with another instance, and the real validator's
@@ -292,7 +338,7 @@ fn a_proof_for_another_blob_is_refused() {
     ];
     for (name, cases) in liars {
         let liar = jar_script(jar.dir.path(), name, cases);
-        let (answer, _) = upgrade_answer(&mut owner, &mut seen, &liar, WAIT);
+        let (answer, _) = upgrade_answer(&mut owner, &mut seen, &liar, UPGRADE_AT_MOST);
         assert!(
             matches!(
                 answer,
@@ -314,14 +360,14 @@ fn an_upgrade_to_a_relative_path_is_refused() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     let (answer, _) = upgrade_answer(
         &mut owner,
         &mut seen,
         std::path::Path::new("relative/spyc-jar"),
-        WAIT,
+        UPGRADE_AT_MOST,
     );
     assert!(
         matches!(
@@ -343,7 +389,7 @@ fn a_new_image_is_told_the_image_it_replaced() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
     let told = jar.dir.path().join("previous");
@@ -352,7 +398,7 @@ fn a_new_image_is_told_the_image_it_replaced() {
         "jar-telling",
         &format!("resume-handover) printf %s \"$2\" > {};;", told.display()),
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &telling, WAIT);
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &telling, UPGRADE_AT_MOST);
     assert!(matches!(answer, Some(Msg::Upgraded { .. })), "{answer:?}");
     assert_eq!(
         std::fs::read_to_string(&told).expect("the new image was told"),
@@ -404,21 +450,25 @@ fn a_captures_jar_still_loses_no_output_after_an_upgrade() {
 /// A new binary's first run is slow (about 263 ms on macOS for a new file):
 /// the jar pays it while it still serves the program, validating once before
 /// anything parks, and again, parked, on the real blob (decision L, part 7).
+/// The first validation is held until the program has counted on, so it is
+/// paid with the program served however long it takes.
 #[test]
 fn a_slow_first_validation_never_stalls_the_program() {
     let mut jar = Jar::start(&[], &counter());
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| {
+    let mut seen = read_while_it_comes(&mut owner, true, |s| {
         counts(s).last().is_some_and(|n| *n >= 5)
     });
-    let first = jar.dir.path().join("first-run-paid");
+    let began = jar.dir.path().join("first-run-began");
+    let go = jar.dir.path().join("go");
     let slow_once = jar_script(
         jar.dir.path(),
         "jar-slow-once",
         &format!(
-            "validate-handover) [ -e {first} ] || {{ sleep 2; touch {first}; }};;",
-            first = first.display()
+            "validate-handover) [ -e {began} ] || {{ touch {began}; {held}; }};;",
+            began = began.display(),
+            held = held_until(&go)
         ),
     );
     owner
@@ -426,56 +476,86 @@ fn a_slow_first_validation_never_stalls_the_program() {
             binary: slow_once.display().to_string(),
         })
         .expect("upgrade");
-    let mut last_output = Instant::now();
-    let mut longest = Duration::ZERO;
-    let until = Instant::now() + WAIT;
-    let answer = loop {
-        assert!(Instant::now() < until, "no answer to the upgrade");
-        match owner.recv(Duration::from_millis(50)).expect("recv") {
-            Some(m @ (Msg::Upgraded { .. } | Msg::Refused { .. })) => break m,
-            Some(m @ Msg::Output { .. }) => {
-                longest = longest.max(last_output.elapsed());
-                last_output = Instant::now();
-                seen.take(m);
-                if let Some(next) = seen.next_offset {
-                    owner.send(&Msg::Ack { offset: next }).expect("ack");
-                }
-            }
-            Some(m) => seen.take(m),
-            None => {}
-        }
+    let until = Instant::now() + UPGRADE_AT_MOST;
+    while !began.exists() {
+        assert!(Instant::now() < until, "the first validation never began");
+        count_on(&mut owner, &mut seen, 1, "before the first validation");
+    }
+    count_on(&mut owner, &mut seen, 20, "while the first validation runs");
+    std::fs::write(&go, "").expect("let the first validation end");
+    let answered = |s: &Seen| {
+        s.frames
+            .iter()
+            .any(|f| matches!(f, Msg::Upgraded { .. } | Msg::Refused { .. }))
     };
-    assert!(matches!(answer, Msg::Upgraded { .. }), "{answer:?}");
-    // The silence ends with the next output, which the new image sends after
-    // its notice.
-    loop {
-        assert!(Instant::now() < until, "no output after the upgrade");
-        if let Some(m) = owner.recv(Duration::from_millis(50)).expect("recv")
-            && let Msg::Output { offset, bytes } = m
-        {
-            longest = longest.max(last_output.elapsed());
-            owner
-                .send(&Msg::Ack {
-                    offset: offset + bytes.len() as u64,
-                })
-                .expect("ack");
-            break;
+    let until = Instant::now() + UPGRADE_AT_MOST;
+    while !answered(&seen) {
+        assert!(Instant::now() < until, "no answer to the upgrade");
+        if let Some(m) = owner.recv(Duration::from_millis(50)).expect("recv") {
+            seen.take(m);
+            if let Some(next) = seen.next_offset {
+                owner.send(&Msg::Ack { offset: next }).expect("ack");
+            }
         }
     }
     assert!(
-        longest < Duration::from_secs(1),
-        "the program went quiet for {longest:?} while the new binary's first run was paid"
+        seen.frames
+            .iter()
+            .any(|f| matches!(f, Msg::Upgraded { .. })),
+        "{:?}",
+        seen.frames
     );
+    assert_unbroken(&seen);
     assert_program_survives(&mut jar, owner, "a slow first validation");
 }
 
 /// A reader that takes a little every 0.9 s while the jar flushes its last
 /// frames before a handover gets one deadline for the whole flush, not one
-/// for each write or each wait: it can't keep the jar parked. It takes 4 KiB
+/// for each write or each wait: it can't keep the jar parked. The jar leaves
+/// it behind, closed, and the upgrade goes ahead without it. It takes 4 KiB
 /// at a time, which makes the socket writable each time (a byte at a time
 /// never does on macOS, which wakes a writer only once 2 KiB are free).
+///
+/// The reader guesses the park from a lookup's silence and must begin within
+/// the jar's own 3 s park deadline; when it doesn't, the jar refuses the
+/// upgrade as busy, the scenario never came about, and it is set up again,
+/// at most three times.
 #[test]
 fn a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked() {
+    let mut missed = Vec::new();
+    for _ in 0..3 {
+        match trickling_reader() {
+            None => return,
+            Some(why) => missed.push(why),
+        }
+    }
+    panic!("the reader never trickled through a flush: {missed:?}");
+}
+
+/// How a trickling reader's connection ended up.
+#[derive(Debug)]
+enum Trickled {
+    /// The jar closed it: left behind.
+    LeftBehind,
+    /// Still open once the upgrade was answered: carried.
+    Carried,
+    /// The jar refused the upgrade: what it said.
+    Refused(String),
+    /// Something else went wrong.
+    Broke(String),
+}
+
+/// What a reader's raw bytes say of a refusal of its upgrade, if anything.
+fn refusal_in(bytes: &[u8]) -> Option<String> {
+    let needle = b"upgrade refused";
+    let at = bytes.windows(needle.len()).position(|w| w == needle)?;
+    Some(String::from_utf8_lossy(&bytes[at..(at + 160).min(bytes.len())]).into_owned())
+}
+
+/// One go: `None` when the reader was left behind and the upgrade went
+/// ahead, what the jar said when it refused the upgrade (the park the
+/// scenario needs never came), and a panic for anything else.
+fn trickling_reader() -> Option<String> {
     use spyc_jar::proto::{self, VERSION};
     let mut jar = Jar::start(
         &["--deadline-ms", "60000"],
@@ -483,10 +563,11 @@ fn a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked() {
     );
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| s.text.len() >= 2_000_000);
+    let mut seen = read_while_it_comes(&mut owner, true, |s| s.text.len() >= 2_000_000);
     // A reader replaying the whole log, reading none of it: its writer blocks
     // in the middle of that batch, and the answers to its pings queue in its
-    // outbox meanwhile.
+    // outbox meanwhile. It asks for the upgrade after its pings, so every
+    // answer is queued before the upgrade begins.
     let mut sock = UnixStream::connect(&jar.socket).expect("connect");
     proto::write_msg(
         &mut sock,
@@ -502,81 +583,152 @@ fn a_reader_trickling_during_the_flush_cannot_keep_the_jar_parked() {
         "premise: the reader is welcomed"
     );
     proto::write_msg(&mut sock, &Msg::Replay { from: 0 }).expect("replay");
-    let pings: Vec<u8> = (0..20_000u64)
-        .flat_map(|n| proto::encode(&Msg::Ping { n }))
-        .collect();
-    (&sock).write_all(&pings).expect("pings");
-    std::thread::sleep(Duration::from_millis(300));
-    let stop = Arc::new(AtomicBool::new(false));
     let first = jar.dir.path().join("first-run-paid");
-    let trickle = {
-        let stop = Arc::clone(&stop);
-        let (first, socket) = (first.clone(), jar.socket.clone());
-        std::thread::spawn(move || {
-            // Once the jar has validated the new binary the first time and
-            // begun to park (its acceptor parks too, so a lookup goes
-            // unanswered): read the rest of the log's batch, which lets the
-            // writer park with its outbox full, until the first answer to a
-            // ping shows the flush has begun; then take 4 KiB every 0.9 s.
-            let until = Instant::now() + WAIT;
-            while !first.exists() || !parking(&socket) {
-                if Instant::now() > until {
-                    return false;
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            let mut sock = sock;
-            let mut flushing = false;
-            while !flushing {
-                match proto::read_msg(&mut sock) {
-                    Ok(Some(Msg::Pong { .. })) => flushing = true,
-                    Ok(_) => {}
-                    Err(_) => return false,
-                }
-            }
-            let mut some = [0u8; 4096];
-            while !stop.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(900));
-                let _ = (&sock).read(&mut some);
-            }
-            true
-        })
-    };
     let next = jar_script(
         jar.dir.path(),
         "jar-next",
         &format!(
-            "validate-handover) [ -e {first} ] || {{ sleep 1; touch {first}; }};;",
+            "validate-handover) [ -e {first} ] || echo $$ > {first};;",
             first = first.display()
         ),
     );
-    let (answer, took) = upgrade_answer(&mut owner, &mut seen, &next, Duration::from_secs(20));
+    let mut frames: Vec<u8> = (0..20_000u64)
+        .flat_map(|n| proto::encode(&Msg::Ping { n }))
+        .collect();
+    frames.extend(proto::encode(&Msg::Upgrade {
+        binary: next.display().to_string(),
+    }));
+    (&sock).write_all(&frames).expect("pings, then the upgrade");
+    let stop = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop);
+        std::thread::spawn(move || -> Trickled {
+            // Once the jar has validated the new binary the first time and
+            // begun to park (its acceptor parks too, so a lookup goes
+            // unanswered): read the rest of the log's batch, which lets the
+            // writer park with its outbox full, until an answer to a ping
+            // after the log shows the flush has begun; then take 4 KiB every
+            // 0.9 s.
+            let mut sock = sock;
+            let mut taken = Vec::new();
+            let mut some = [0u8; 4096];
+            let until = Instant::now() + UPGRADE_AT_MOST;
+            let mut parked = true;
+            while !first_validation_ended(&first) {
+                if Instant::now() > until {
+                    parked = false;
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            if parked {
+                let mut logged = 0;
+                loop {
+                    match proto::read_msg(&mut sock) {
+                        Ok(Some(Msg::Pong { .. })) if logged >= 2_000_000 => break,
+                        Ok(Some(Msg::Output { bytes, .. })) => logged += bytes.len(),
+                        Ok(Some(Msg::Refused { why, .. })) => return Trickled::Refused(why),
+                        Ok(Some(m @ Msg::Upgraded { .. })) => {
+                            return Trickled::Broke(format!("{m:?} before the flush began"));
+                        }
+                        Ok(Some(_)) => {}
+                        Ok(None) | Err(_) => {
+                            return Trickled::Broke(format!(
+                                "the connection ended after {logged} bytes of the log"
+                            ));
+                        }
+                    }
+                }
+                while !stop.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(900));
+                    if let Ok(n) = (&sock).read(&mut some) {
+                        taken.extend_from_slice(&some[..n]);
+                    }
+                }
+            } else {
+                while !stop.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+            // The upgrade is answered, or isn't coming: now read all that's
+            // left at once. A reader the jar left behind reaches the end of
+            // its connection; one it carried stays open, and goes quiet once
+            // it has its `upgraded`; a refusal is in what it read.
+            let _ = sock.set_read_timeout(Some(WAIT));
+            let ended = loop {
+                match (&sock).read(&mut some) {
+                    Ok(0) => break true,
+                    Ok(n) => taken.extend_from_slice(&some[..n]),
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                        ) =>
+                    {
+                        break false;
+                    }
+                    Err(_) => break true,
+                }
+            };
+            match (refusal_in(&taken), ended) {
+                (Some(why), _) => Trickled::Refused(why),
+                (None, true) => Trickled::LeftBehind,
+                (None, false) => Trickled::Carried,
+            }
+        })
+    };
+    let until = Instant::now() + UPGRADE_AT_MOST;
+    let answer = loop {
+        if Instant::now() >= until {
+            break None;
+        }
+        match owner.recv(Duration::from_millis(200)) {
+            Ok(Some(m @ (Msg::Upgraded { .. } | Msg::Refused { .. }))) => break Some(m),
+            Ok(Some(m)) => {
+                seen.take(m);
+                if let Some(next) = seen.next_offset {
+                    let _ = owner.send(&Msg::Ack { offset: next });
+                }
+            }
+            Ok(None) => {}
+            Err(e) => panic!("the owner's connection ended: {e:#}"),
+        }
+    };
     stop.store(true, Ordering::SeqCst);
-    assert!(
-        trickle.join().expect("the trickle"),
-        "premise: the reader saw the flush begin"
-    );
+    let trickled = trickle.join().expect("the trickle");
+    if answer.is_none()
+        && let Trickled::Refused(why) = &trickled
+        && why.contains("safe point")
+    {
+        return Some(why.clone());
+    }
+    if let Trickled::Broke(why) = &trickled {
+        panic!("the trickling reader: {why}; the upgrade: {answer:?}");
+    }
     assert!(
         matches!(answer, Some(Msg::Upgraded { .. })),
-        "the upgrade goes ahead without the trickling reader, in {took:?}: {answer:?}"
+        "the upgrade goes ahead without the trickling reader: {answer:?}; the reader: {trickled:?}"
     );
     assert!(
-        took < Duration::from_secs(8),
-        "the trickling reader held the jar parked for {took:?}"
+        matches!(trickled, Trickled::LeftBehind),
+        "the jar leaves the trickling reader behind: {trickled:?}"
     );
+    None
 }
 
-/// Whether the jar at `socket` has parked for a handover: a lookup's `hello`
-/// goes unanswered, its acceptor being parked with everything else.
-pub fn parking(socket: &std::path::Path) -> bool {
-    let Ok(mut s) = UnixStream::connect(socket) else {
-        return false;
-    };
-    let _ = s.set_read_timeout(Some(Duration::from_millis(300)));
-    if s.write_all(&LOOKUP_HELLO).is_err() {
-        return false;
-    }
-    spyc_jar::proto::read_msg(&mut s).is_err()
+/// Whether the first validation of an upgrade has ended, its validator
+/// having written its pid to `first` as it began. The jar parks the moment
+/// that validation returns, with nothing in between that takes time: no
+/// frame or description says a jar has parked, and a parked jar answers
+/// nothing, so the validator's end is the last state a test can see before
+/// the park. A reader that begins in the moment between leaves its writer
+/// mid-batch, and the jar says no thread reached a safe point.
+pub fn first_validation_ended(first: &std::path::Path) -> bool {
+    std::fs::read_to_string(first)
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .is_some_and(|pid| !running(pid))
 }
 
 // Decision M: a pane's jar starts its program when its first owner's `hello`
@@ -598,8 +750,9 @@ fn a_jar_started_on_owner_runs_its_program_once_the_owner_is_there() {
             mark.display()
         )),
     );
+    // A jar answers a lookup only once it serves, which is after it would
+    // have started a program it doesn't hold: `program_pid` is the fact.
     eventually("the jar's socket", || jar.socket.exists());
-    std::thread::sleep(Duration::from_millis(300));
     assert_eq!(
         described(&jar, "program_pid"),
         "0",
@@ -651,7 +804,7 @@ fn an_upgrade_before_the_program_starts_is_refused() {
             binary: next.display().to_string(),
         })
         .expect("upgrade");
-    let m = recv_matching(&mut reader, |m| {
+    let m = recv_matching_within(&mut reader, UPGRADE_AT_MOST, |m| {
         matches!(m, Msg::Refused { .. } | Msg::Upgraded { .. })
     });
     assert!(

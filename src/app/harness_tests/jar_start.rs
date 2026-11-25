@@ -42,15 +42,18 @@ pub(super) fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
 }
 
 /// A `spyc-jar` that marks `began` and waits for `go` before it runs: its
-/// start is as slow as the test makes it.
+/// start is as slow as the test makes it. It gives up once the test's
+/// directory has gone: a test that ends first never makes `go`, and a jar
+/// that hasn't bound its socket is one its `TestDir` can't find to end.
 pub(super) fn gated_jar(dir: &Path) -> PathBuf {
     script(
         dir,
         "gated-jar",
         &format!(
-            ": > '{began}'\nwhile [ ! -e '{go}' ]; do sleep 0.05; done\nexec '{jar}' \"$@\"\n",
+            ": > '{began}'\nwhile [ ! -e '{go}' ]; do [ -d '{dir}' ] || exit 1; sleep 0.05; done\nexec '{jar}' \"$@\"\n",
             began = dir.join("began").display(),
             go = dir.join("go").display(),
+            dir = dir.display(),
             jar = built_jar().display(),
         ),
     )

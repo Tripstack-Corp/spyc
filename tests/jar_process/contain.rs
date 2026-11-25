@@ -36,21 +36,22 @@ fn rounds(path: &Path) -> u64 {
 
 /// Upgrade a jar to its own binary, resumed with `SPYC_JAR_RESUME_FAULT` set
 /// to `fault`. Its program prints as fast as the PTY takes it, counting its
-/// rounds, until a stop file appears: a PTY nobody reads holds a few hundred
-/// of its rounds at most. It ignores `SIGHUP`, so only a kill ends it early.
+/// rounds (written down every hundredth, so a loaded disk doesn't pace it),
+/// until a stop file appears: a PTY nobody reads holds a few hundred of its
+/// rounds at most. It ignores `SIGHUP`, so only a kill ends it early.
 fn held_by(fault: &str) -> Held {
     let marks = tempfile::tempdir().expect("tempdir");
     let rounds_at = marks.path().join("rounds");
     let stop = marks.path().join("stop");
     let program = format!(
-        "trap '' HUP; i=0; while [ ! -e {stop} ]; do i=$((i+1)); echo $i > {rounds}; printf '%0500d\\n' 0; done",
+        "trap '' HUP; i=0; while [ ! -e {stop} ]; do i=$((i+1)); [ $((i % 100)) -ne 0 ] || echo $i > {rounds}; printf '%0500d\\n' 0; done",
         stop = stop.display(),
         rounds = rounds_at.display()
     );
     let mut jar = Jar::start(&[], &sh(&program));
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
-    let mut seen = read_until(&mut owner, true, |s| s.text.len() >= 4096);
+    let mut seen = read_while_it_comes(&mut owner, true, |s| s.text.len() >= 4096);
     let holder_pid = jar.dir.path().join("holder.pid");
     let faulty = jar_script(
         jar.dir.path(),
@@ -60,11 +61,11 @@ fn held_by(fault: &str) -> Held {
             holder_pid.display()
         ),
     );
-    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &faulty, WAIT);
+    let (answer, _) = upgrade_answer(&mut owner, &mut seen, &faulty, UPGRADE_AT_MOST);
     let holder = std::fs::read_to_string(&holder_pid)
         .ok()
         .and_then(|s| s.trim().parse().ok())
-        .expect("the holder ran");
+        .unwrap_or_else(|| panic!("the holder never ran; the upgrade: {answer:?}"));
     Held {
         jar,
         owner,
@@ -104,9 +105,11 @@ fn assert_held(h: &mut Held, what: &str) {
         "{what}: the holder outlived the failed resume"
     );
     let from = rounds(&h.rounds);
-    eventually(&format!("{what}: the program printing on"), || {
-        rounds(&h.rounds) >= from + 2000
-    });
+    while_it_grows(
+        &format!("{what}: the program printing on"),
+        || rounds(&h.rounds),
+        |n| n >= from + 2000,
+    );
     h.owner.send(&Msg::Ping { n: 9 }).expect("ping");
     recv_matching(&mut h.owner, |m| matches!(m, Msg::Pong { n: 9 }));
     h.owner

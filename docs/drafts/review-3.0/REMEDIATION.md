@@ -6,10 +6,10 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 
 | Finding | Slice | Red test | PR | Refuter's verdict | Status |
 |---|---|---|---|---|---|
-| B3 (jar tests red under load) | A | | | | open |
-| F5 (fixed waits that assume a state) | A | | | | open |
-| B13's remainder (the counter's echo) | A | | | | open |
-| B10 (tests leak processes) | A | | | | open |
+| B3 (jar tests red under load) | A | n/a (test-only slice; 25+ mutations caught, logs in the PR) | #1329 | confirmed after two rounds | in PR, Linux 20-in-a-row waits on slice B's B12 fix |
+| F5 (fixed waits that assume a state) | A | n/a (test-only slice; 25+ mutations caught, logs in the PR) | #1329 | confirmed after two rounds | in PR, Linux 20-in-a-row waits on slice B's B12 fix |
+| B13's remainder (the counter's echo) | A | n/a (test-only slice; 25+ mutations caught, logs in the PR) | #1329 | confirmed after two rounds | in PR, Linux 20-in-a-row waits on slice B's B12 fix |
+| B10 (tests leak processes) | A | n/a (test-only slice; 25+ mutations caught, logs in the PR) | #1329 | confirmed after two rounds | in PR, Linux 20-in-a-row waits on slice B's B12 fix |
 | F3 (macOS in CI), after the loaded runs are green | A | | | | waits on the four above |
 | C1 = G2 = H2 (restore with jars off runs a program twice) | B | | | | open; red test exists (`evidence/C/red-tests.patch`) |
 | C2, both halves, with P1 (`^a R` and the retake) | B | | | | open |
