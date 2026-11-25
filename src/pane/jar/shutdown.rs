@@ -6,6 +6,12 @@
 //! request says so rather than nothing. It saves the
 //! session and quits, ending its tabs. Its jar keeps the exit a while for an
 //! owner, so the wait is for the exit, not for the jar.
+//!
+//! Like `spyc attach`, it refuses to run inside spyc (a pane, or anything a
+//! spyc or a pane's program started), by the same check
+//! (`attach::inside_spyc_here`): from a tab, an agent would end its own
+//! session in one line. A program can clear its environment and run it
+//! anyway, so this is a speed bump, not a boundary.
 
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -25,6 +31,14 @@ const SHUTDOWN_POLL: Duration = Duration::from_millis(50);
 
 /// `spyc shutdown [NAME] [-y]`.
 pub fn run(name: Option<&str>, yes: bool) -> anyhow::Result<()> {
+    // As `spyc attach` does: from a tab, an agent ends its own session in one
+    // line. A speed bump, not a boundary (SECURITY.md).
+    if let Some(why) = super::attach::inside_spyc_here() {
+        anyhow::bail!(
+            "{why}: shutting down from here would end the spyc this runs in. \
+             Run `spyc shutdown` from a terminal outside spyc"
+        );
+    }
     let running = running_in(&this_users_sessions())?;
     let chosen = match choose(&running, name).map_err(anyhow::Error::msg)? {
         Some(one) => one.clone(),

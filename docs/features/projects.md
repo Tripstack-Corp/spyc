@@ -308,7 +308,8 @@ the rest.
 
 `Q`, `ZZ` and `:q` quit as before, ending the session's tabs. `spyc shutdown` does the same
 from outside the session, attached or not: it picks the session as `spyc attach` does, lists
-the tabs that end with it and asks first (`-y` doesn't ask). The session is saved, so `spyc -r`
+the tabs that end with it and asks first (`-y` doesn't ask). Like `spyc attach`, it refuses to run
+from inside spyc, a pane or a shell spyc started; run it from a terminal outside spyc. The session is saved, so `spyc -r`
 can bring it back, its programs started afresh. `^D` detaches too: most
 terminals send it as `^d`. A session renamed with `:name` while it runs in its own jar
 keeps the name it started as too: `spyc attach` finds it by either.

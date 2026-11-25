@@ -63,9 +63,7 @@ pub struct Running {
 /// `spyc attach [NAME]`: attach to the session `name`, or the one running,
 /// until this terminal detaches or spyc quits.
 pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
-    let pane = std::env::var_os("SPYC_PANE_ID");
-    let jar = std::env::var_os("SPYC_JAR_SOCKET").map(PathBuf::from);
-    if !force && let Some(why) = inside_spyc(pane.as_deref(), jar.as_deref()) {
+    if !force && let Some(why) = inside_spyc_here() {
         anyhow::bail!(
             "{why}: attaching here would show spyc inside itself. `spyc attach --force` attaches anyway"
         );
@@ -135,6 +133,15 @@ fn session_ended(socket: &Path) -> bool {
             Err(_) => std::thread::sleep(TAKEOVER_POLL),
         }
     }
+}
+
+/// Why this shell runs inside spyc, read from its environment: what
+/// `spyc attach` and `spyc shutdown` both refuse on, by this one check. A
+/// speed bump, not a boundary: a program can clear its environment.
+pub(super) fn inside_spyc_here() -> Option<String> {
+    let pane = std::env::var_os("SPYC_PANE_ID");
+    let jar = std::env::var_os("SPYC_JAR_SOCKET").map(PathBuf::from);
+    inside_spyc(pane.as_deref(), jar.as_deref())
 }
 
 /// Why this shell runs inside spyc, where attaching would nest a session in
