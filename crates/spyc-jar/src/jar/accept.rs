@@ -181,15 +181,10 @@ pub(super) fn queue_for_program(shared: &Shared, msg: &Msg) {
 /// One new connection, holding `ticket` among the tokenless: its `hello`,
 /// then [`run_conn`].
 pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
-    serve_as(shared, sock, ticket, rustix::process::geteuid().as_raw());
-}
-
-/// [`serve`], for a jar whose user is `uid`.
-fn serve_as(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64, uid: u32) {
     let ticket = Ticket(shared, ticket);
     // Another user's process is refused before a byte of it is read, whatever
     // token it holds; the jar's directory being `0700` is the first fence.
-    if !peer_is(&sock, uid) {
+    if !peer_is(&sock, shared.uid) {
         return;
     }
     let _ = sock.set_write_timeout(Some(LOOKUP_DEADLINE));
@@ -323,7 +318,7 @@ pub(super) fn same_token(want: &[u8], got: &[u8]) -> bool {
 }
 
 #[cfg(test)]
-mod peer_tests {
+mod tests {
     use super::*;
     use std::io::Write;
     use std::os::unix::net::UnixListener;
@@ -348,8 +343,8 @@ mod peer_tests {
         }
     }
 
-    /// A jar set up and nothing started: no thread, no program.
-    fn a_jar(dir: &Dir) -> Arc<Shared> {
+    /// A jar of user `uid` set up, nothing started: no thread, no program.
+    fn a_jar(dir: &Dir, uid: u32) -> Arc<Shared> {
         let cfg = crate::state::Config {
             socket: dir.0.join("j.sock"),
             argv: vec!["/bin/sh".into()],
@@ -391,29 +386,35 @@ mod peer_tests {
             token: b"0123456789abcdef".to_vec(),
             info: Vec::new(),
         };
-        super::super::prepare(cfg, state, (0, Some(slave)), master, listener, Vec::new())
-            .expect("a jar")
-            .shared
+        let mut ready =
+            super::super::prepare(cfg, state, (0, Some(slave)), master, listener, Vec::new())
+                .expect("a jar");
+        Arc::get_mut(&mut ready.shared)
+            .expect("a jar not yet shared")
+            .uid = uid;
+        ready.shared
     }
 
     /// Review finding F6 (R26): a connection is served only when its peer is
-    /// the jar's user. Served as a jar of another user, the test's own
-    /// connection must be closed before a byte of it is read; served as its
-    /// own, the same connection is welcomed. Without the check both are.
+    /// the jar's user, as `serve` reads it from the jar (`Shared::uid`, set
+    /// once as the jar is set up). A jar set up as another user's must close
+    /// the test's own connection before a byte of it is read; one set up as
+    /// the test's user welcomes the same connection. Without the check, or
+    /// with `serve` asking anything but the jar's user, both are welcomed.
     #[test]
     fn a_connection_from_another_user_is_closed_unheard() {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("after the epoch")
             .as_nanos();
-        let dir = Dir(PathBuf::from(format!(
-            "/tmp/jar-peer-{}-{nanos}",
-            std::process::id()
-        )));
-        std::fs::create_dir(&dir.0).expect("a directory");
-        let shared = a_jar(&dir);
         let me = rustix::process::geteuid().as_raw();
-        let ask = |uid: u32| {
+        let ask = |uid: u32, name: &str| {
+            let dir = Dir(PathBuf::from(format!(
+                "/tmp/jar-peer-{}-{nanos}-{name}",
+                std::process::id()
+            )));
+            std::fs::create_dir(&dir.0).expect("a directory");
+            let shared = a_jar(&dir, uid);
             let (mut client, jar) = UnixStream::pair().expect("socketpair");
             let hello = Msg::Hello {
                 version: 1,
@@ -427,20 +428,28 @@ mod peer_tests {
             client
                 .set_read_timeout(Some(Duration::from_secs(10)))
                 .expect("a timeout");
-            let shared = Arc::clone(&shared);
-            let serving = std::thread::spawn(move || serve_as(&shared, Arc::new(jar), 0, uid));
+            let serving = std::thread::spawn(move || serve(&shared, Arc::new(jar), 0));
             let answer = proto::read_msg(&mut client);
+            // A `serve` still reading ends once the test's side is gone.
+            drop(client);
             serving.join().expect("served");
             answer
         };
-        let own = ask(me);
+        let own = ask(me, "own");
         assert!(
             matches!(own, Ok(Some(Msg::Welcome { .. }))),
             "a connection of the jar's user is welcomed: {own:?}"
         );
-        let other = ask(me.wrapping_add(1));
+        let other = ask(me.wrapping_add(1), "other");
+        let closed = matches!(
+            &other,
+            Err(proto::ReadError::Io(e)) if matches!(
+                e.kind(),
+                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
+            )
+        );
         assert!(
-            !matches!(other, Ok(Some(_))),
+            closed,
             "one the jar's user didn't make is closed unheard: {other:?}"
         );
     }
