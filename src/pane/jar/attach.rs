@@ -525,6 +525,81 @@ mod tests {
         assert!(said.contains("GONE ended"), "{said}");
     }
 
+    /// A spyc's MCP socket at `<state>/mcp-<pid>.sock` that answers the one
+    /// request it gets with `error`, and a notification with nothing.
+    fn spyc_answering(state: &Path, pid: u32, error: serde_json::Value) {
+        use std::io::Read;
+        let listener =
+            std::os::unix::net::UnixListener::bind(state.join(format!("mcp-{pid}.sock"))).unwrap();
+        std::thread::spawn(move || {
+            let Ok((mut conn, _)) = listener.accept() else {
+                return;
+            };
+            let mut got = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !String::from_utf8_lossy(&got).contains('}') {
+                match conn.read(&mut buf) {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => got.extend_from_slice(&buf[..n]),
+                }
+            }
+            let text = String::from_utf8_lossy(&got).into_owned();
+            if !text.contains("\"id\"") {
+                return;
+            }
+            let body = serde_json::json!({ "jsonrpc": "2.0", "id": 1, "error": error }).to_string();
+            let _ = write!(conn, "Content-Length: {}\r\n\r\n{body}", body.len());
+            // Held open, as a spyc's socket is, until the client goes.
+            let _ = conn.read(&mut buf);
+        });
+    }
+
+    /// H7: a session's spyc that refuses the upgrade says why, and
+    /// `spyc attach` hears it at once, rather than waiting out its wait and
+    /// saying the upgrade is late.
+    #[test]
+    #[ignore = "red until H7: fix/upgrade-answers"]
+    fn a_refused_upgrade_is_heard_from_the_session_spyc() {
+        let dir = super::super::test_dir::TestDir::new("au");
+        crate::state::with_state_root(dir.path(), || {
+            let pid = 999_001;
+            spyc_answering(
+                dir.path(),
+                pid,
+                serde_json::json!({ "code": -32000, "message": "it won't upgrade: no newer spyc is installed" }),
+            );
+            let heard = upgrade_first("CUMIN_TEST", pid, b"tok");
+            let heard = heard.map_err(|e| format!("{e:#}"));
+            assert!(
+                heard
+                    .as_ref()
+                    .is_err_and(|why| why.contains("no newer spyc")),
+                "the refusal wasn't heard: {heard:?}"
+            );
+        });
+    }
+
+    /// A session's spyc that doesn't know the request answers "method not
+    /// found", and `spyc attach` says that.
+    #[test]
+    #[ignore = "red until H7: fix/upgrade-answers"]
+    fn an_upgrade_a_spyc_doesnt_know_is_reported_as_such() {
+        let dir = super::super::test_dir::TestDir::new("au");
+        crate::state::with_state_root(dir.path(), || {
+            let pid = 999_002;
+            spyc_answering(
+                dir.path(),
+                pid,
+                serde_json::json!({ "code": -32601, "message": "Method not found: spyc/upgrade" }),
+            );
+            let heard = upgrade_first("CUMIN_TEST", pid, b"tok").map_err(|e| format!("{e:#}"));
+            assert!(
+                heard.as_ref().is_err_and(|why| why.contains("predates")),
+                "an old spyc's silence taken for an upgrade: {heard:?}"
+            );
+        });
+    }
+
     #[test]
     fn a_pane_or_a_jar_that_runs_says_this_shell_is_inside_spyc() {
         let dir = tempfile::tempdir().unwrap();

@@ -570,6 +570,7 @@ mod tab_completion;
 mod tab_cwd;
 mod thinking_history;
 mod transcript_mermaid;
+mod upgrade_answers;
 mod view_chords;
 mod vsplit;
 mod why_status;
