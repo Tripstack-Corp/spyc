@@ -248,26 +248,14 @@ const WATCH_IDLE: Duration = Duration::from_secs(3600);
 /// How often a handover looks for the jar it started to be up.
 const START_POLL: Duration = Duration::from_millis(20);
 
-/// When a session's own jar starts its spyc.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Begin {
-    /// Once a terminal attaches, and never if none does within the jar's
-    /// hold: `^d`'s handover, whose terminal attaches next.
-    OnAttach,
-    /// At once, with no terminal: a detached project's spyc, which takes its
-    /// tabs back before anyone attaches (`app::project_move`).
-    Now,
-}
-
 /// Start the own jar of the session `name`: at `sessions/<name>.sock`,
-/// running `argv` in `cwd` when `begin` says. Its token is kept where
-/// `spyc attach` reads it.
+/// running `argv` in `cwd` at once, with no terminal until one attaches. Its
+/// token is kept where `spyc attach` reads it.
 pub fn start(
     name: &str,
     argv: Vec<String>,
     cwd: &Path,
     (rows, cols): (u16, u16),
-    begin: Begin,
 ) -> anyhow::Result<PathBuf> {
     use super::place::{Place, SocketState, socket_state};
     use std::io::Write;
@@ -310,7 +298,7 @@ pub fn start(
         cwd: Some(cwd.to_path_buf()),
         rows,
         cols,
-        hold: (begin == Begin::OnAttach).then_some(place.hold),
+        hold: None,
         exit_linger: None,
         argv,
     };
