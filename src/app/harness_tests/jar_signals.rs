@@ -373,6 +373,27 @@ fn ctrl_backslash_in_a_jarred_capture_kills_through_its_jar() {
     });
 }
 
+/// A host whose jar has gone signals nothing at all, once the jar can't be
+/// asked: the pid it reported may be anyone's now (the refuter on E3, whose
+/// fallback to the pid when the jar's send failed passed every other test).
+#[test]
+fn a_host_whose_jar_has_gone_signals_no_number() {
+    let mut other = Bystander::new();
+    let (jar, mut host) = host_in_fake_jar(other.pid());
+    jar.hang_up();
+    let until = std::time::Instant::now() + WAIT;
+    while host.signal(JarSignal::Stop).is_ok() {
+        assert!(
+            std::time::Instant::now() < until,
+            "the jar's going was never seen"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let _ = host.signal_foreground(JarSignal::Kill);
+    let _ = host.signal(JarSignal::Interrupt);
+    other.untouched();
+}
+
 /// Who in spyc may signal a process by its number. A jarred program's pid is
 /// its jar's report, so only the jar may signal it; spyc signals by number
 /// only what it started and reaps itself, and only where it is listed here
@@ -380,15 +401,55 @@ fn ctrl_backslash_in_a_jarred_capture_kills_through_its_jar() {
 /// scan must have read spyc's sources.
 #[test]
 fn no_number_is_signalled_outside_the_listed_sites() {
-    /// Files that may signal by number, and why.
-    const ALLOWED: &[(&str, &str)] = &[
+    /// The lines that may signal by number, each by its file, once, and why.
+    /// A program on spyc's own PTY is its child; a jarred host's branch
+    /// returns before these (`pane::jar::tests::every_signal_goes_through_the_jar`,
+    /// and `a_host_whose_jar_has_gone_signals_no_number` above).
+    const OWN_CHILD: &str = "a program on spyc's own PTY, its child, after the jarred branch";
+    const ALLOWED: &[(&str, &str, &str)] = &[
         (
             "src/pane/pty_host.rs",
-            "a program on spyc's own PTY, its child; a jarred host returns before it \
-             (`pane::jar::tests::every_signal_goes_through_the_jar`)",
+            "kill_group(pid, local_signal(signal));",
+            OWN_CHILD,
+        ),
+        (
+            "src/pane/pty_host.rs",
+            "kill_group_checked(pid, local_signal(signal))",
+            OWN_CHILD,
+        ),
+        (
+            "src/pane/pty_host.rs",
+            "kill_group_checked(pgrp, local_signal(signal))",
+            OWN_CHILD,
+        ),
+        (
+            "src/pane/pty_host.rs",
+            "rustix::process::kill_process_group(pgrp, sig)?;",
+            OWN_CHILD,
+        ),
+        (
+            "src/pane/pty_host.rs",
+            "fn kill_group(pid: u32, sig: rustix::process::Signal) {",
+            "the helper itself",
+        ),
+        (
+            "src/pane/pty_host.rs",
+            "let _ = rustix::process::kill_process_group(rpid, sig);",
+            "the helper itself",
+        ),
+        (
+            "src/pane/pty_host.rs",
+            "fn kill_group_checked(pid: u32, sig: rustix::process::Signal) -> anyhow::Result<()> {",
+            "the helper itself",
+        ),
+        (
+            "src/pane/pty_host.rs",
+            "rustix::process::kill_process_group(rpid, sig)",
+            "the helper itself",
         ),
         (
             "src/pane/jar/attach.rs",
+            "rustix::process::kill_process(target, rustix::process::Signal::TERM)",
             "`spyc attach` ends the attach client the session's jar names, never a jar's program",
         ),
     ];
@@ -397,6 +458,7 @@ fn no_number_is_signalled_outside_the_listed_sites() {
         "kill_process(",
         "kill_pg(",
         "kill_group(",
+        "kill_group_checked(",
         "killpg(",
         "libc::kill(",
     ];
@@ -420,7 +482,7 @@ fn no_number_is_signalled_outside_the_listed_sites() {
         files.len()
     );
     let mut offenders = Vec::new();
-    let mut seen = vec![false; ALLOWED.len()];
+    let mut seen = vec![0usize; ALLOWED.len()];
     for path in &files {
         let src = std::fs::read_to_string(root.join(path)).unwrap();
         let production = crate::guard_support::production_half(&src);
@@ -437,9 +499,12 @@ fn no_number_is_signalled_outside_the_listed_sites() {
             if !calls {
                 continue;
             }
-            match ALLOWED.iter().position(|(file, _)| file == path) {
-                Some(i) => seen[i] = true,
-                None => offenders.push(format!("{path}:{}: {}", n + 1, line.trim())),
+            match ALLOWED
+                .iter()
+                .position(|(file, allowed, _)| file == path && line.trim() == *allowed)
+            {
+                Some(i) if seen[i] == 0 => seen[i] = 1,
+                _ => offenders.push(format!("{path}:{}: {}", n + 1, line.trim())),
             }
         }
     }
@@ -452,11 +517,8 @@ fn no_number_is_signalled_outside_the_listed_sites() {
     let stale: Vec<_> = ALLOWED
         .iter()
         .zip(&seen)
-        .filter(|(_, seen)| !**seen)
-        .map(|((file, _), _)| *file)
+        .filter(|(_, seen)| **seen == 0)
+        .map(|((file, line, _), _)| format!("{file}: {line}"))
         .collect();
-    assert!(
-        stale.is_empty(),
-        "listed files that signal nothing: {stale:?}"
-    );
+    assert!(stale.is_empty(), "listed lines that are gone: {stale:?}");
 }
