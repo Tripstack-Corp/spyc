@@ -417,9 +417,10 @@ things a user may want of one:
 
 **Moving a project between spycs (U13).** Detach a project from one spyc and
 attach it to another, in another terminal or on another machine over SSH. For
-the jars it is many owner handovers (R22), one per pane jar of the project,
-together with the project's part of the manifest, which manifest v2 already
-keeps per project. Three things follow:
+the jars it is many changes of owner, one per pane jar of the project: the
+sending spyc lets each lease go and the receiving one takes it, with the
+token the jar already has (no `release`, R22, is sent). With them goes the
+project's part of the manifest, which manifest v2 already keeps per project. Three things follow:
 
 - **A jar's name can't belong to the spyc that spawned it** (R30): it moves.
 - **Its agents' MCP connections have to follow.** An agent's proxy learned its
