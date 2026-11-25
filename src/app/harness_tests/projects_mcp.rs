@@ -634,6 +634,8 @@ fn serve(app: &mut App, command: McpCommand, project: Option<state::ProjectId>) 
         command,
         reply,
         project,
+        pane_id: None,
+        conn: None,
     });
     rx.try_recv().expect("answered inline")
 }

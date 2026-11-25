@@ -122,6 +122,8 @@ pub(super) fn handle(
             },
             reply,
             project: None,
+            pane_id: None,
+            conn: None,
         });
     }
     send_result(w, id, json!({}))

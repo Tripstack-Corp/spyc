@@ -62,7 +62,9 @@ impl App {
             out
         });
         if let Some(mut flash) = raised {
-            flash.text = format!("{label}: {}", flash.text);
+            if !self.flash_names_its_tab() {
+                flash.text = format!("{label}: {}", flash.text);
+            }
             self.state.flash = Some(flash);
         }
         Some(out)
@@ -83,7 +85,9 @@ impl App {
         self.state.in_background = false;
         self.state.flash = match self.state.flash.take() {
             Some(mut flash) => {
-                if let Some(label) = self.state.label_of(origin) {
+                if let Some(label) = self.state.label_of(origin)
+                    && !self.flash_names_its_tab()
+                {
                     flash.text = format!("{label}: {}", flash.text);
                 }
                 Some(flash)
@@ -91,6 +95,16 @@ impl App {
             None => users,
         };
         out
+    }
+
+    /// Whether a flash raised now already leads with its tab's place, project
+    /// and all ([`super::state::Origin::leads_flash`]).
+    fn flash_names_its_tab(&self) -> bool {
+        self.state
+            .events
+            .source
+            .as_ref()
+            .is_some_and(super::state::Origin::leads_flash)
     }
 
     /// Tell the user a result from `origin` was dropped because it would have
@@ -118,9 +132,14 @@ impl App {
             command,
             reply,
             project,
+            pane_id,
+            conn,
         } = req;
         match self.mcp_target(&command, project) {
-            Some(target) => self.in_project(target, |app| app.serve_mcp(command, reply)),
+            Some(target) => self.in_project(target, |app| {
+                let origin = app.asker_origin(pane_id.as_deref(), conn);
+                app.noting_from(origin, |app| app.serve_mcp(command, reply));
+            }),
             None => {
                 let _ = reply.send(McpResponse::Error {
                     message: "the project this agent belongs to has closed".into(),

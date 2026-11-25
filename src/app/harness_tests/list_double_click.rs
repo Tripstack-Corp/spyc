@@ -2,7 +2,7 @@
 //! gone into and a file opens in the pager. Each case draws the listing and
 //! presses where a row is drawn, through `handle_mouse`, as the user would.
 
-use super::clicks::{click, double_click, drawn_at, listing, paged};
+use super::clicks::{click_at, double_click, drawn_at, listing, paged};
 use super::*;
 
 /// A double-click on a directory goes into it, as `Enter` does.
@@ -65,8 +65,9 @@ fn quick_clicks_on_two_rows_open_neither() {
         let docs = drawn_at(app, "docs");
         let notes = drawn_at(app, "notes.txt");
 
-        click(app, docs);
-        click(app, notes);
+        let now = std::time::Instant::now();
+        click_at(app, docs, now);
+        click_at(app, notes, now);
 
         assert_eq!(app.state.cur().listing.dir, work);
         assert_eq!(paged(app), None);
@@ -83,9 +84,11 @@ fn a_third_quick_click_after_going_into_a_directory_does_not_open_the_new_row() 
     listing(|app, work| {
         let docs = drawn_at(app, "docs");
 
-        double_click(app, docs);
+        let now = std::time::Instant::now();
+        click_at(app, docs, now);
+        click_at(app, docs, now);
         let inner = drawn_at(app, "inner");
-        click(app, inner);
+        click_at(app, inner, now);
 
         assert_eq!(
             app.state.cur().listing.dir,

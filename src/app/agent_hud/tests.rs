@@ -1186,13 +1186,18 @@ fn agent_hud_double_click_opens_the_dump_and_a_single_click_does_not() {
         app.cmd_agent_hud("full");
         let hud = paint(&mut app, 100, 32).0.agent_hud.unwrap();
         app.snapshot_pane_routing();
+        // One time for every press: a double-click is two presses close in time.
+        let now = std::time::Instant::now();
         let press = |app: &mut App, kind| {
-            app.handle_mouse(MouseEvent {
-                kind,
-                column: hud.x + 3,
-                row: hud.y + 1,
-                modifiers: KeyModifiers::NONE,
-            })
+            app.handle_mouse_at(
+                MouseEvent {
+                    kind,
+                    column: hud.x + 3,
+                    row: hud.y + 1,
+                    modifiers: KeyModifiers::NONE,
+                },
+                now,
+            )
         };
         let mut effects = press(&mut app, MouseEventKind::Down(MouseButton::Left));
         effects.extend(press(&mut app, MouseEventKind::Up(MouseButton::Left)));
