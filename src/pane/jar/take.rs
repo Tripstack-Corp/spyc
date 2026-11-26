@@ -9,6 +9,11 @@
 //! no token for, or one that refuses it leaves the tab detached, its screen
 //! saying which.
 //!
+//! A spyc a `^d` started in the session's own jar is told which spyc it took
+//! the session from (`took_over_from`). That spyc lets its jars go only once
+//! this one runs, so a jar it still holds is waited for in the same way: on
+//! the jar's own word that it has gone, never taken for another spyc's.
+//!
 //! A restart of a tab whose jar runs ends the program through the jar, and
 //! sees the jar go, before anything starts. A jar another spyc owns is never
 //! ended from here.
@@ -58,11 +63,24 @@ fn by_pid(pid: Option<u32>) -> String {
     pid.map_or_else(String::new, |p| format!(" (pid {p})"))
 }
 
+/// The spyc this one took its session from, by a `^d`'s handover: set once,
+/// at the start.
+static TOOK_OVER_FROM: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+
+/// Say this spyc took its session from the spyc `pid`, whose jars it waits
+/// for as that spyc lets them go.
+pub fn took_over_from(pid: u32) {
+    let _ = TOOK_OVER_FROM.set(pid);
+}
+
 /// Who owns a jar, as the jar says.
 #[derive(Debug, PartialEq, Eq)]
 enum Holder {
     /// A connection of this process: a tab's own, on its way out.
     This,
+    /// The spyc this one took its session from (`took_over_from`), which lets
+    /// its jars go once this one runs.
+    Predecessor(u32),
     /// Another spyc, by its pid when the jar knows it.
     Other(Option<u32>),
     Nobody,
@@ -81,10 +99,10 @@ fn holder(socket: &Path) -> Option<Holder> {
         return Some(Holder::Nobody);
     }
     let pid = field("owner_pid").and_then(|p| p.parse::<u32>().ok());
-    Some(if pid == Some(std::process::id()) {
-        Holder::This
-    } else {
-        Holder::Other(pid)
+    Some(match pid {
+        Some(p) if p == std::process::id() => Holder::This,
+        Some(p) if TOOK_OVER_FROM.get() == Some(&p) => Holder::Predecessor(p),
+        _ => Holder::Other(pid),
     })
 }
 
@@ -145,7 +163,7 @@ fn this_since_after(since: Option<Instant>, heard: Heard, now: Instant) -> Optio
 fn let_go_verdict(answer: Option<&Holder>, held: Duration, verdict: bool) -> Option<LetGo> {
     match answer {
         Some(Holder::This) if verdict && held >= LET_GO_RESTORING => Some(LetGo::StillThis),
-        Some(Holder::This) => None,
+        Some(Holder::This | Holder::Predecessor(_)) => None,
         Some(_) => Some(LetGo::Answered),
         None => Some(LetGo::Unanswered),
     }
@@ -252,6 +270,16 @@ pub(super) fn back(spec: &Spec, socket: &Path, size: (u16, u16)) -> anyhow::Resu
                         LetGo::Unanswered => Heard::Nothing,
                     };
                     this_since = this_since_after(this_since, heard, Instant::now());
+                }
+                Some(Holder::Predecessor(pid)) => {
+                    say(format!(
+                        "Its jar is still held by the spyc this session came from (pid {pid}); \
+                         taking it back once that lets it go."
+                    ));
+                    // That spyc lets go once this one runs, or its jar drops it
+                    // at the jar's deadline if it died: the jar says which.
+                    wait_let_go(socket, watch, Instant::now(), false);
+                    this_since = this_since_after(this_since, Heard::Other, Instant::now());
                 }
                 Some(Holder::Nobody) => {
                     this_since = this_since_after(this_since, Heard::Other, Instant::now());
@@ -490,6 +518,25 @@ fn end_through(mut client: Client, socket: &Path, until: Instant) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A jar the spyc this session came from still holds is waited for, however
+    /// long it holds it: that spyc lets go once this one runs, or the jar drops
+    /// it at the jar's deadline. No time concludes it holds the jar for good.
+    #[test]
+    fn a_jar_the_handing_over_spyc_holds_is_waited_for_never_given_up_on() {
+        let long = LET_GO_RESTORING * 10;
+        for verdict in [true, false] {
+            assert_eq!(
+                let_go_verdict(Some(&Holder::Predecessor(4242)), long, verdict),
+                None
+            );
+        }
+        assert_eq!(
+            let_go_verdict(Some(&Holder::Other(Some(4242))), Duration::ZERO, true),
+            Some(LetGo::Answered),
+            "another spyc's jar is answered at once"
+        );
+    }
 
     /// A restore concludes another tab of this spyc holds its jar only from
     /// the jar still naming this spyc past its deadline: silence concludes

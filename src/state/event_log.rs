@@ -13,12 +13,14 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// What the writer is told.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Write {
     /// The session is called this now.
     Session(String),
     /// Append these lines to the session's file.
     Append(Vec<String>),
+    /// Answer once everything told before this is written.
+    Flush(std::sync::mpsc::Sender<()>),
 }
 
 /// The most a session's file holds before it keeps its newer half.
@@ -62,6 +64,9 @@ fn run(dir: &Path, rx: &Receiver<Write>, earlier: &dyn Fn(Vec<String>)) {
                 if let Some(path) = &current {
                     let _ = append(dir, path, &lines);
                 }
+            }
+            Write::Flush(done) => {
+                let _ = done.send(());
             }
         }
     }
@@ -348,6 +353,23 @@ mod tests {
             read_lines(&events.join("CLOVE.log")),
             ["clove's", "old", "new"]
         );
+    }
+
+    /// A flush is answered once what was told before it is on disk, so a
+    /// handover's line is in the file before the next spyc writes to it.
+    #[test]
+    fn a_flush_is_answered_once_what_came_before_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join("events");
+        let (tx, thread) = spawn(events.clone(), |_| {});
+        tx.send(Write::Session("SAGE".into())).unwrap();
+        tx.send(Write::Append(vec!["detached".into()])).unwrap();
+        let (done, written) = channel();
+        tx.send(Write::Flush(done)).unwrap();
+        written.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(read_lines(&events.join("SAGE.log")), ["detached"]);
+        drop(tx);
+        thread.unwrap().join().unwrap();
     }
 
     #[test]

@@ -268,8 +268,10 @@ route them: through it over SSH, and with none attached, to this machine's notif
 
 The first `^d` moves spyc into a jar of its own and frees your terminal like any other,
 printing the name `spyc attach` takes. Your tabs come with it, their programs
-untouched, and each column's cursor, picks and filter come back, but what `spyc -r` doesn't keep
-(open pagers, a `/` search) starts afresh.
+untouched, an agent that was waiting on you still shows it, and each column's cursor, picks and
+filter come back, but what `spyc -r` doesn't keep (open pagers, a `/` search) starts afresh.
+When spyc can't save the session or start its jar, `^d` says why and spyc stays as it was, its
+tabs with it; `:upgrade` does the same when it can't save the session.
 After that, detaching and attaching don't change anything in spyc. Every tab must run in a jar
 to detach; spyc says which one doesn't.
 

@@ -15,6 +15,9 @@ use super::{App, Effect, Wake};
 use crate::state::event_log::Write;
 use crate::ui::pager::PagerView;
 
+/// How long a flush waits for the writer: an append to a local file.
+const FLUSH_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The writer, the session name it was last told, and its thread, which a
 /// spyc on its way out waits for so nothing noted is lost.
 pub(super) struct EventWriter {
@@ -58,6 +61,20 @@ impl App {
             if let Some(thread) = thread {
                 let _ = thread.join();
             }
+        }
+    }
+
+    /// Write what was noted so far, and wait for the writer to have written
+    /// it: another spyc about to write to the same file (a handover's) then
+    /// writes after it. The wait is bounded; the writer answers in order.
+    pub(crate) fn flush_events(&mut self) {
+        self.settle_events();
+        let Some(writer) = &self.runtime.event_writer else {
+            return;
+        };
+        let (done, written) = std::sync::mpsc::channel();
+        if writer.tx.send(Write::Flush(done)).is_ok() {
+            let _ = written.recv_timeout(FLUSH_WAIT);
         }
     }
 

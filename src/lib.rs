@@ -160,6 +160,12 @@ struct Cli {
     #[arg(long)]
     verbose: bool,
 
+    /// The spyc this one took its session from, by `^d`: its jars are waited
+    /// for as it lets them go (`pane::jar::take`). Given by the handover; not
+    /// for direct use.
+    #[arg(long, hide = true, value_name = "PID")]
+    handed_over_by: Option<u32>,
+
     /// Print a fully-commented default `.spycrc.toml` to stdout and exit.
     /// Pipe to a file to bootstrap your config:
     ///   spyc --print-config > ~/.spycrc.toml
@@ -489,6 +495,9 @@ pub fn run() -> Result<()> {
     }
     if let Some(p) = key_trace::init(cli.key_trace) {
         eprintln!("spyc: key trace → {p}");
+    }
+    if let Some(pid) = cli.handed_over_by {
+        pane::jar::took_over_from(pid);
     }
     if cli.status_trace {
         mcp::start_status_trace();
