@@ -200,7 +200,6 @@ fn read_by_2_4_0(saved: &Value) -> bool {
 /// one 2.4.0 skips by its own rule for a newer spyc's file, rather than
 /// restores by starting each program again beside its jar.
 #[test]
-#[ignore = "red until review 3.0 H1 is fixed: fix/manifest-v3"]
 fn a_saved_session_is_one_2_4_0_skips() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
@@ -221,10 +220,10 @@ fn a_saved_session_is_one_2_4_0_skips() {
     });
 }
 
-/// A save is a version 2 manifest: it names its process and lists the project
+/// A save is a manifest of this version: it names its process and lists the project
 /// with column `a`'s own directory, not just the project's home.
 #[test]
-fn a_save_writes_a_version_2_manifest() {
+fn a_save_writes_a_manifest_of_this_version() {
     let tmp = tempfile::tempdir().unwrap();
     let state_root = tmp.path().join("state");
     crate::state::with_state_root(&state_root, || {
@@ -242,8 +241,8 @@ fn a_save_writes_a_version_2_manifest() {
         let saved = read_manifest(&state_root, 9001);
         assert_eq!(
             saved["version"],
-            json!(2),
-            "a version 2 manifest: {saved:#}"
+            json!(crate::state::sessions::MANIFEST_VERSION),
+            "a manifest of this version: {saved:#}"
         );
         assert_eq!(saved["pid"], json!(std::process::id()));
         let projects = saved["projects"].as_array().cloned().unwrap_or_default();

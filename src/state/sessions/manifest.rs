@@ -1,7 +1,9 @@
 //! The recovery manifest: one file per spyc process, holding every project it
-//! has open (#99, `docs/archive/PROJECTS_PLAN.md` §3). This is version 2. A file
-//! with no `version` is a version 1 session, which reads as a manifest with one
-//! project.
+//! has open (#99, `docs/archive/PROJECTS_PLAN.md` §3). This is version 3, the
+//! shape of version 2 with the jar records (`jar_socket`, `tasks`, `live`)
+//! that a spyc with no jars must never read. A version 2 file reads as one of
+//! this version, and a file with no `version` is a version 1 session, which
+//! reads as a manifest with one project.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,11 +15,19 @@ use crate::config::AgentHudMode;
 use crate::project_id::ProjectId;
 use crate::state::scope_registry::ScopeClaim;
 
-/// The manifest version this build writes, and the only one besides version 1
-/// it reads. A file from a newer spyc is skipped, the way an older spyc skips
+/// The manifest version this build writes. It reads this one, version 2 and
+/// version 1. A file from a newer spyc is skipped, the way an older spyc skips
 /// this one: v1 requires `cwd`, `tabs` and the pane fields at the top level,
-/// and version 2 writes none of them.
-pub const MANIFEST_VERSION: u32 = 2;
+/// and versions 2 and 3 write none of them.
+///
+/// H1 (review 3.0): 2.4.0, the release before jars, reads version 2 and
+/// restores each tab by starting its program again. A file that may name a
+/// tab's jar is therefore never version 2, so 2.4.0 skips it rather than run
+/// every program a second time beside its jar.
+pub const MANIFEST_VERSION: u32 = 3;
+
+/// The version before jars, which this build still reads.
+const BEFORE_JARS: u32 = 2;
 
 /// How far a running process's start time may drift from the one its manifest
 /// recorded. Linux derives it from the boot time, which a clock step moves.
@@ -336,14 +346,24 @@ pub fn label_of(dir: &Path) -> String {
     )
 }
 
-/// Read a saved file of either version, or `None` for one this build can't.
+/// Read a saved file of any version this build knows, as one of
+/// [`MANIFEST_VERSION`], or `None` for one it can't.
 pub fn parse_manifest(value: serde_json::Value) -> Option<Manifest> {
     match value.get("version") {
         None => serde_json::from_value::<ManifestV1>(value)
             .ok()
             .map(Manifest::from_v1),
-        Some(version) if version.as_u64() == Some(u64::from(MANIFEST_VERSION)) => {
-            serde_json::from_value(value).ok()
+        Some(version)
+            if [MANIFEST_VERSION, BEFORE_JARS]
+                .iter()
+                .any(|v| version.as_u64() == Some(u64::from(*v))) =>
+        {
+            serde_json::from_value::<Manifest>(value)
+                .ok()
+                .map(|m| Manifest {
+                    version: MANIFEST_VERSION,
+                    ..m
+                })
         }
         Some(_) => None,
     }
@@ -554,14 +574,14 @@ mod tests {
     /// A manifest survives its own text, and an older spyc, which reads
     /// everything as version 1, skips it rather than restoring a half of it.
     #[test]
-    fn a_version_2_manifest_round_trips_and_is_no_version_1_session() {
+    fn a_manifest_round_trips_and_is_no_version_1_session() {
         let mut m = parse_manifest(v1()).unwrap();
         m.pid = Some(42);
         m.process_started = Some(1_000);
         m.projects[0].left_cwd = Some(PathBuf::from("/w/proj/src"));
         let text = serde_json::to_value(&m).unwrap();
-        assert_eq!(text["version"], json!(2));
-        let back = parse_manifest(text.clone()).expect("version 2 reads");
+        assert_eq!(text["version"], json!(MANIFEST_VERSION));
+        let back = parse_manifest(text.clone()).expect("its own version reads");
         assert_eq!(back.active_project, m.active_project);
         assert_eq!(back.projects[0].id, m.projects[0].id);
         assert_eq!(back.projects[0].left_cwd, m.projects[0].left_cwd);
@@ -572,11 +592,26 @@ mod tests {
         );
     }
 
+    /// A version 2 file, as 2.4.0 and the rcs before H1 wrote it, still
+    /// reads, jar records and all, and is saved again as this version.
+    #[test]
+    fn a_version_2_manifest_reads_as_this_version() {
+        let mut text = serde_json::to_value(parse_manifest(v1()).unwrap()).unwrap();
+        text["version"] = json!(2);
+        let m = parse_manifest(text).expect("version 2 reads");
+        assert_eq!(m.version, MANIFEST_VERSION);
+        assert_eq!(m.projects.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&m).unwrap()["version"],
+            json!(MANIFEST_VERSION)
+        );
+    }
+
     /// A file from a newer spyc is skipped, not misread.
     #[test]
     fn a_newer_version_is_skipped() {
         let mut m = serde_json::to_value(parse_manifest(v1()).unwrap()).unwrap();
-        m["version"] = json!(3);
+        m["version"] = json!(MANIFEST_VERSION + 1);
         assert!(parse_manifest(m.clone()).is_none());
         m["version"] = json!("2");
         assert!(parse_manifest(m).is_none());
@@ -628,5 +663,149 @@ mod tests {
         m.pid = Some(std::process::id());
         m.process_started = crate::proc_group::own_start_secs();
         assert!(!m.running(), "this spyc's own file");
+    }
+
+    /// H1: every manifest spyc writes is this version, which 2.4.0 skips:
+    /// each `Manifest` built in `src` (and each `Self` in its own `impl`)
+    /// sets `version` to [`MANIFEST_VERSION`], and nothing sets it to
+    /// anything else afterwards. Parsed, not read as text. Fails closed.
+    #[test]
+    fn every_manifest_written_is_this_version() {
+        use syn::visit::Visit;
+        /// Whether `attrs` hold `#[cfg(test)]`: the parsed form of
+        /// `guard_support::production_half`, whose text cut can leave a file syn can't read.
+        fn test_only(attrs: &[syn::Attribute]) -> bool {
+            attrs.iter().any(|a| {
+                a.path().is_ident("cfg") && a.parse_args::<syn::Ident>().is_ok_and(|i| i == "test")
+            })
+        }
+
+        /// An item's attributes, for the kinds that carry `#[cfg(test)]` here.
+        fn item_attrs(item: &syn::Item) -> &[syn::Attribute] {
+            match item {
+                syn::Item::Fn(i) => &i.attrs,
+                syn::Item::Mod(i) => &i.attrs,
+                syn::Item::Impl(i) => &i.attrs,
+                syn::Item::Const(i) => &i.attrs,
+                syn::Item::Static(i) => &i.attrs,
+                syn::Item::Use(i) => &i.attrs,
+                syn::Item::Struct(i) => &i.attrs,
+                syn::Item::Enum(i) => &i.attrs,
+                syn::Item::Trait(i) => &i.attrs,
+                syn::Item::Type(i) => &i.attrs,
+                syn::Item::Macro(i) => &i.attrs,
+                _ => &[],
+            }
+        }
+        #[derive(Default)]
+        struct Writers {
+            in_manifest_impl: bool,
+            built: usize,
+            wrong: Vec<String>,
+        }
+        fn is_version_constant(expr: &syn::Expr) -> bool {
+            matches!(expr, syn::Expr::Path(p) if p.path.segments.last().is_some_and(|s| s.ident == "MANIFEST_VERSION"))
+        }
+        impl<'a> Visit<'a> for Writers {
+            fn visit_item(&mut self, item: &'a syn::Item) {
+                if !test_only(item_attrs(item)) {
+                    syn::visit::visit_item(self, item);
+                }
+            }
+            fn visit_impl_item_fn(&mut self, f: &'a syn::ImplItemFn) {
+                if !test_only(&f.attrs) {
+                    syn::visit::visit_impl_item_fn(self, f);
+                }
+            }
+            fn visit_item_impl(&mut self, item: &'a syn::ItemImpl) {
+                let manifest = matches!(&*item.self_ty, syn::Type::Path(t) if t.path.segments.last().is_some_and(|s| s.ident == "Manifest"));
+                let was = std::mem::replace(&mut self.in_manifest_impl, manifest);
+                syn::visit::visit_item_impl(self, item);
+                self.in_manifest_impl = was;
+            }
+            fn visit_expr_struct(&mut self, expr: &'a syn::ExprStruct) {
+                let name = expr.path.segments.last().map(|s| s.ident.to_string());
+                let manifest = name.as_deref() == Some("Manifest")
+                    || (name.as_deref() == Some("Self") && self.in_manifest_impl);
+                if manifest {
+                    self.built += 1;
+                    let version = expr
+                        .fields
+                        .iter()
+                        .find(|f| matches!(&f.member, syn::Member::Named(n) if n == "version"));
+                    if !version.is_some_and(|f| is_version_constant(&f.expr)) {
+                        self.wrong.push(quote_line(expr));
+                    }
+                }
+                syn::visit::visit_expr_struct(self, expr);
+            }
+            fn visit_expr_assign(&mut self, expr: &'a syn::ExprAssign) {
+                if let syn::Expr::Field(field) = &*expr.left
+                    && matches!(&field.member, syn::Member::Named(n) if n == "version")
+                    && !is_version_constant(&expr.right)
+                {
+                    self.wrong.push("an assignment to `.version`".into());
+                }
+                syn::visit::visit_expr_assign(self, expr);
+            }
+        }
+        fn quote_line(expr: &syn::ExprStruct) -> String {
+            format!(
+                "a {} built at line {}",
+                expr.path
+                    .segments
+                    .last()
+                    .map_or_default(|s| s.ident.to_string()),
+                expr.path
+                    .segments
+                    .first()
+                    .map_or(0, |s| s.ident.span().start().line)
+            )
+        }
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut writers = Writers::default();
+        let mut dirs = vec![root];
+        let mut wrong = Vec::new();
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if path.is_dir() {
+                    if !matches!(name.as_str(), "harness_tests" | "tests") {
+                        dirs.push(path);
+                    }
+                    continue;
+                }
+                if path.extension().is_none_or(|x| x != "rs")
+                    || name == "tests.rs"
+                    || name.ends_with("_tests.rs")
+                {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).unwrap();
+                let file =
+                    syn::parse_file(&src).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+                if test_only(&file.attrs) {
+                    continue;
+                }
+                writers.wrong.clear();
+                writers.visit_file(&file);
+                wrong.extend(
+                    writers
+                        .wrong
+                        .iter()
+                        .map(|w| format!("{}: {w}", path.display())),
+                );
+            }
+        }
+        assert!(
+            writers.built >= 4,
+            "premise: the scan finds the writers ({})",
+            writers.built
+        );
+        assert!(
+            wrong.is_empty(),
+            "a manifest written at another version: {wrong:#?}"
+        );
     }
 }

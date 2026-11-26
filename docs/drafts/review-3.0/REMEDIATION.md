@@ -42,7 +42,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | E3 = G5 (tasks and captures signal through the jar) | F | | | | open |
 | E4 (`SECURITY.md` describes 3.0) | F | | | | open |
 | E7 (a session's token is forgotten with its jar) | F | | | | open |
-| H1 (2.4.0 restores a 3.0 session and runs every program twice) | B | | | | open; added to slice B at the owner's word, 2026-11-24 |
+| H1 (2.4.0 restores a 3.0 session and runs every program twice) | B | `a_saved_session_is_one_2_4_0_skips` (`test/manifest-v3-red`), `every_manifest_written_is_this_version` | | | fixed on `fix/manifest-v3` (manifest version 3; 2 and 3 read); refuter round 2 answered, awaiting its re-check; added to slice B at the owner's word, 2026-11-24 |
 | Handover fault hooks (Unit D's crash ordering, by test) | §4 | | | | open |
 
 ## Filed, not fixed (section 5)
