@@ -102,7 +102,7 @@ pub(super) fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-fn shows(app: &mut App, needle: &str) {
+pub(super) fn shows(app: &mut App, needle: &str) {
     let until = Instant::now() + WAIT;
     loop {
         app.drain_pane_output();
@@ -127,7 +127,7 @@ pub(super) fn land(app: &mut App) {
     assert!(app.apply_pane_starts());
 }
 
-fn type_into(app: &mut App, bytes: &[u8]) {
+pub(super) fn type_into(app: &mut App, bytes: &[u8]) {
     tabs(app).active_mut().send_bytes(bytes).unwrap();
 }
 

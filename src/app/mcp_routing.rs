@@ -191,7 +191,9 @@ impl App {
     /// a worker that replies once the main loop has re-applied refresh+context.
     /// Everything else is served synchronously, replying inline.
     fn serve_mcp(&mut self, command: McpCommand, reply: Sender<McpResponse>) {
-        if let McpCommand::WaitForScopeClear {
+        if let Some(refused) = self.mcp_refused_mid_handover(&command) {
+            let _ = reply.send(refused);
+        } else if let McpCommand::WaitForScopeClear {
             pane_id,
             pane,
             paths,
@@ -214,6 +216,23 @@ impl App {
         } else {
             let resp = self.execute_mcp_command(command);
             let _ = reply.send(resp);
+        }
+    }
+
+    /// `list_scopes`: every claim, as JSON.
+    pub(super) fn mcp_list_scopes(&self) -> crate::mcp_cmd::McpResponse {
+        let json =
+            serde_json::to_string(&self.state.scope_registry).unwrap_or_else(|_| "[]".to_string());
+        crate::mcp_cmd::McpResponse::Ok { message: json }
+    }
+
+    /// `release_scope`: drop the claim `id`, whoever holds it.
+    pub(super) fn mcp_release_scope(&mut self, id: u64) -> crate::mcp_cmd::McpResponse {
+        let before = self.state.scope_registry.len();
+        self.state.scope_registry.retain(|c| c.id != id);
+        let dropped = before - self.state.scope_registry.len();
+        crate::mcp_cmd::McpResponse::Ok {
+            message: format!("released {dropped} claim(s) with id {id}"),
         }
     }
 

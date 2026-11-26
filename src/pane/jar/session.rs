@@ -269,20 +269,20 @@ const START_POLL: Duration = Duration::from_millis(20);
 
 /// Start the own jar of the session `name`: at `sessions/<name>.sock`,
 /// running `argv` in `cwd` at once, with no terminal until one attaches. Its
-/// token is kept where `spyc attach` reads it.
+/// token is kept where `spyc attach` reads it. In `place`, else this
+/// user's, as a tab's jar is.
 pub fn start(
+    place: Option<super::place::Place>,
     name: &str,
     argv: Vec<String>,
     cwd: &Path,
     size: (u16, u16),
 ) -> anyhow::Result<PathBuf> {
-    start_in(
-        &super::place::Place::for_this_user()?,
-        name,
-        argv,
-        cwd,
-        size,
-    )
+    let place = match place {
+        Some(place) => place,
+        None => super::place::Place::for_this_user()?,
+    };
+    start_in(&place, name, argv, cwd, size)
 }
 
 /// [`start`], with the jar and its directories `place` names.

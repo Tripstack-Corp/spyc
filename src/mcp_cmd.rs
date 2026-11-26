@@ -243,6 +243,28 @@ pub enum McpCommand {
 }
 
 impl McpCommand {
+    /// Whether it changes what the session keeps (a column's directory,
+    /// filter or picks, the projects open, a worktree a column may be in, the
+    /// scope registry), so it waits while `^d`'s session jar starts: the
+    /// spyc there restores the session as saved before it.
+    pub const fn changes_the_session(&self) -> bool {
+        matches!(
+            self,
+            Self::NavigateTo { .. }
+                | Self::SetFilter { .. }
+                | Self::PickFiles { .. }
+                | Self::ClearPicks
+                | Self::CreateWorktree { .. }
+                | Self::RemoveWorktree { .. }
+                | Self::CleanWorktree { .. }
+                | Self::OpenWorktree { .. }
+                | Self::RegisterScope { .. }
+                | Self::ReleaseScope { .. }
+                | Self::Release
+                | Self::Shutdown
+        )
+    }
+
     /// A command that only records something: a connection's start or end, a
     /// tool call's tally, a statusline report, an older spyc's word.
     pub const fn is_notice(&self) -> bool {

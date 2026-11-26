@@ -525,6 +525,7 @@ mod cwd_file;
 mod disk_tree;
 mod esc_guard;
 mod focused_column;
+mod handover;
 mod history_editor;
 mod jar_captures;
 mod jar_orphans;

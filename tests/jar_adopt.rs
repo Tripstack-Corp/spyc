@@ -1097,7 +1097,6 @@ fn ctrl_d_leaves_no_tab_detached_and_runs_no_program_twice() {
 /// lets it go. The jar's `spyc-jar` waits for such a save (at most 10 s)
 /// before it starts, so a save would land mid-start whatever the timing.
 #[test]
-#[ignore = "red until saves wait for the session jar's start (fix/handover-autosave)"]
 fn an_autosave_due_while_the_session_jar_starts_leaves_the_session_to_it() {
     use std::os::unix::fs::PermissionsExt;
     let dirs = dirs();

@@ -4,7 +4,8 @@
 //! It saves the session as no running spyc's, synced (`prepare_handover`),
 //! and starts the session's own jar, with a spyc running there at once told
 //! this spyc's pid, on a worker so the loop runs on (`apply_handover_starts`
-//! takes its answer). Keys wait meanwhile, so the session the new spyc
+//! takes its answer). Meanwhile keys are dropped and nothing saves the
+//! session again (`session_out_of_hand`), so the session the new spyc
 //! restores is the one saved. When either fails it stays, and says why. Only
 //! then does it leave the loop, end each jar's connection as a crash would, and
 //! end, naming the session `spyc attach` takes (`hand_over`, from `lib.rs`).
@@ -146,9 +147,9 @@ impl App {
     /// running spyc's and start its own jar on a worker
     /// ([`Self::apply_handover_starts`] takes it from there). The loop runs on
     /// while a slow `spyc-jar` starts (SPYC-TRAP `jar-off-the-loop`), keys
-    /// held ([`Self::input_held_for_handover`]). When the save fails spyc
+    /// dropped ([`Self::input_held_for_handover`]). When the save fails spyc
     /// stays, its tabs its own, and says why.
-    fn prepare_handover(&mut self) {
+    pub(super) fn prepare_handover(&mut self) {
         let Some(name) = self.state.session_name.clone() else {
             return;
         };
@@ -187,11 +188,12 @@ impl App {
             .handover_starts
             .sender_waking(self.loop_waker(super::Wake::PaneStart));
         let (named, at, kept) = (name.clone(), exe.clone(), saved.clone());
+        let place = self.runtime.jar_place.clone();
         super::landing::spawn_worker(
             results,
             move || {
                 let started =
-                    crate::pane::jar::session::start(&named, handover_argv(&at), &cwd, size)
+                    crate::pane::jar::session::start(place, &named, handover_argv(&at), &cwd, size)
                         .map(drop)
                         .map_err(|e| format!("{e:#}"));
                 HandoverStart {
@@ -247,15 +249,29 @@ impl App {
         drawn
     }
 
-    /// Whether input waits for `^d`'s session jar to start: the spyc it starts
-    /// restores the session as saved, so nothing may change it meanwhile. The
-    /// loop still draws and answers agents.
+    /// Whether input is dropped while `^d`'s session jar starts: the spyc it
+    /// starts restores the session as saved, so nothing may change it
+    /// meanwhile. The loop still draws and answers agents.
     pub(super) fn input_held_for_handover(&mut self) -> bool {
         if self.runtime.handover_starting {
             self.state
-                .flash_progress("detach: starting the session's own jar; keys wait");
+                .flash_progress("detach: starting the session's own jar; keys are dropped");
         }
         self.runtime.handover_starting
+    }
+
+    /// An MCP call refused while `^d`'s session jar starts: one that changes
+    /// what the session keeps, which the spyc there restores as saved, or
+    /// ends it. The agent asks again once spyc is in its jar.
+    pub(super) fn mcp_refused_mid_handover(
+        &self,
+        command: &crate::mcp_cmd::McpCommand,
+    ) -> Option<crate::mcp_cmd::McpResponse> {
+        (self.runtime.handover_starting && command.changes_the_session()).then(|| {
+            crate::mcp_cmd::McpResponse::Error {
+                message: MID_HANDOVER.into(),
+            }
+        })
     }
 
     /// The session saved again as this spyc's, after a handover that stayed.
@@ -559,6 +575,11 @@ impl App {
 /// spyc it takes the session from (`pane::jar::take::took_over_from`).
 pub const HANDED_OVER_BY: &str = "--handed-over-by";
 
+/// What a quit, `spyc shutdown` or an MCP call that changes the session is
+/// told while `^d`'s session jar starts.
+pub(super) const MID_HANDOVER: &str =
+    "spyc is moving into its session's own jar: ask again once it has";
+
 /// The command line of the spyc a `^d` starts in the session's own jar: the
 /// binary installed, told this spyc's pid, whose jars it waits for.
 fn handover_argv(exe: &std::path::Path) -> Vec<String> {
@@ -646,7 +667,6 @@ mod tests {
     /// and `spyc shutdown` and another spyc's `:attach` (`spyc/release`)
     /// are refused rather than ending or giving away the tabs mid-handover.
     #[test]
-    #[ignore = "red until saves wait for the session jar's start (fix/handover-autosave)"]
     fn nothing_saves_or_ends_the_session_while_its_jar_starts() {
         use crate::mcp_cmd::{McpCommand, McpResponse};
         let tmp = tempfile::tempdir().unwrap();
@@ -677,7 +697,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "red until nothing ends or changes the session while its jar starts (fix/handover-autosave)"]
     fn no_quit_ends_spyc_while_its_session_jar_starts() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(&tmp.path().join("state"), || {
@@ -696,7 +715,6 @@ mod tests {
     /// starts: the spyc in the jar restores the session as saved, so the call
     /// is refused for the agent to make again there, and changes nothing.
     #[test]
-    #[ignore = "red until nothing ends or changes the session while its jar starts (fix/handover-autosave)"]
     fn mcp_calls_that_change_the_session_are_refused_while_its_jar_starts() {
         use crate::mcp_cmd::{McpCommand, McpResponse};
         use crate::state::scope_registry::{ScopeClaim, ScopeIntent};

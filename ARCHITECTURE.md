@@ -1109,7 +1109,11 @@ save that fails stops the move with nothing let go.
 they let a jar go: the session is saved as no running spyc's, synced to disk
 and with each tab's last status report, and for `^d` the session's own jar is
 started, on a worker so the loop runs on while a slow `spyc-jar` starts
-(`jar-off-the-loop`), keys held meanwhile so the session stays as saved; only
+(`jar-off-the-loop`). Meanwhile keys are dropped, nothing saves the session as
+this spyc's again (the autosave, an `:attach` landing), and a quit, `spyc
+shutdown`, MCP `release` and each MCP call that changes what the session keeps
+(`McpCommand::changes_the_session`) are refused: the spyc in the jar restores
+the session as saved, and a quit would end the tabs' programs under it; only
 then does spyc leave the loop, end its connection to every jar, and end (or
 `exec` the new binary). When the save or the jar's start fails, spyc stays in
 its loop with its tabs, saves the session as its own again, and says why. The
