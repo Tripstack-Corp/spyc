@@ -163,8 +163,10 @@ impl JarredLaunch {
                 if let Some(old) = replacing {
                     end_replaced(old)?;
                 }
-                jar::spec_for(place.clone(), tab, restoring.as_deref())?
-                    .map(|spec| spec.watched(Some(watch.clone())))
+                Some(
+                    jar::spec_for(place.clone(), tab, restoring.as_deref())?
+                        .watched(Some(watch.clone())),
+                )
             }
             Taking::Native(old) => {
                 end_replaced(old)?;
@@ -172,7 +174,6 @@ impl JarredLaunch {
             }
             Taking::Retake(socket) => Some(
                 jar::spec_for(place.clone(), tab, None)?
-                    .ok_or_else(|| anyhow::anyhow!("no place for the tab's jar"))?
                     .retaking(socket.clone())
                     .watched(Some(watch.clone())),
             ),
@@ -245,7 +246,7 @@ impl App {
         record: Record,
         wake: crate::pane::PaneWake,
     ) -> anyhow::Result<Pane> {
-        let jarred = jars && jar::honoured() && !self.runtime.jarless.chosen;
+        let jarred = jars && !self.runtime.jarless.chosen;
         // SPYC-TRAP(jar-never-twice): the jar the record names, asked before
         // any program starts.
         let held = jar::held(record.socket()).map(Path::to_path_buf);
@@ -273,12 +274,10 @@ impl App {
     /// What a restored tab whose jar at `socket` runs says when this spyc
     /// runs tabs without jars: why it wasn't started, and what to do.
     fn left_in_its_jar(&self, jars: bool, socket: &Path) -> String {
-        let cause = if !jars {
-            "`[pane] jars = false` runs tabs without jars"
-        } else if !jar::honoured() {
-            "this build doesn't run tabs in jars"
-        } else {
+        let cause = if jars {
             "this session runs tabs without jars, as you chose"
+        } else {
+            "`[pane] jars = false` runs tabs without jars"
         };
         format!(
             "This tab's program still runs in its jar at {}, so it wasn't started again here: \

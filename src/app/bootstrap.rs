@@ -342,7 +342,7 @@ impl App {
 
         // The jar binary store copies and checks its entry off the loop,
         // before a pane's jar needs it.
-        if app.state.active_project().config.pane.jars && crate::pane::jar::honoured() {
+        if app.state.active_project().config.pane.jars {
             let _ = crate::pane::jar::place::start_store();
         }
 

@@ -108,8 +108,7 @@
 # the strip each time it ticks over.
 # agent_hud_resets = "clock"
 # Run each pane tab's program in a spyc-jar, which holds its terminal and
-# outlives spyc. Read on development (-CURRENT) and release-candidate builds
-# only, and from your own config files, not a repo's. A tab opened while it's
+# outlives spyc. Read from your own config files only, not a repo's. A tab opened while it's
 # on keeps its jar until it closes, and if spyc dies, `spyc -r` takes the
 # running program back. false is spyc without jars: every program ends with
 # spyc. With no usable spyc-jar, spyc says to check its installation and

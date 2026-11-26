@@ -1138,9 +1138,9 @@ With `[pane] jars` on, a pane tab's program runs in a `spyc-jar`
 `PtyHost` drives it through `portable-pty`'s traits, as it drives a local
 program. Only pane tabs: overlays, tasks and captures run on a PTY of spyc's
 own. Jars are on by default, and `[pane] jars = false` is spyc without them:
-every program on a PTY of spyc's, ending with it. A `-CURRENT` or rc build
-reads the setting; a release runs every program as before until the release
-that turns jars on.
+every program on a PTY of spyc's, ending with it. Every build reads the
+setting alike: nothing decides what a build does by its version
+(`src/version_guard.rs`).
 
 - **A program runs in its jar or not at all** (the owner's decision of
   2026-11-15). A jar that can't be started, ends before it answers (one that

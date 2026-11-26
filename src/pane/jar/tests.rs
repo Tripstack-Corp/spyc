@@ -588,25 +588,6 @@ fn a_sweep_removes_only_old_sockets_whose_lock_is_free() {
 }
 
 #[test]
-fn only_a_current_or_rc_build_reads_the_setting() {
-    assert!(honoured_by("2.5.0-CURRENT"));
-    assert!(honoured_by("3.0.0-rc.1"));
-    assert!(!honoured_by("2.5.0"));
-    assert!(wanted(false, "0123", None).unwrap().is_none(), "off is off");
-}
-
-/// S6 (the 3.0 review's F1 and H2): a release reads `[pane] jars` as the rc
-/// before it did. Built as `3.0.0`, a gate on the version's suffix ran every
-/// tab outside a jar, refused `^d`, and restored an rc's session beside its
-/// live jars.
-#[test]
-#[ignore = "red until S6 (fix/jars-on-release) removes pane::jar::honoured()"]
-fn a_release_build_reads_the_setting() {
-    assert!(honoured_by("3.0.0"), "the release its rcs soaked");
-    assert!(honoured_by("3.0.1"));
-}
-
-#[test]
 fn jars_are_on_by_default_but_never_for_a_unit_test() {
     assert!(by_default(false), "a spyc runs tabs in jars unasked");
     assert!(!by_default(true), "a unit test's tabs start no jar");

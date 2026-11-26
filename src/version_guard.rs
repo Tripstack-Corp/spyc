@@ -361,7 +361,6 @@ fn test_only_modules(root: &Path, files: &[String]) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "red until S6 (fix/jars-on-release) removes pane::jar::honoured()"]
 fn no_build_tells_a_release_from_its_rc() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let in_crate = |f: &str, sub: &str| {

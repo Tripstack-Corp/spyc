@@ -166,43 +166,21 @@ pub fn warmed(binary: PathBuf) -> PathBuf {
     binary
 }
 
-/// Whether this build reads `[pane] jars`: until jars are on by default, a
-/// release runs every program as before, and only a `-CURRENT` or rc build
-/// may opt in.
-pub fn honoured() -> bool {
-    honoured_by(env!("CARGO_PKG_VERSION"))
-}
-
-fn honoured_by(version: &str) -> bool {
-    version.contains("-CURRENT") || version.contains("-rc.")
-}
-
-/// The jar for the tab `tab` when `[pane] jars` is `on`: `None` when it's
-/// off or this build doesn't read it, and an error when there's no jar to
-/// start ([`NoUsableJar`]) or nowhere to put one. `restoring` is the saved
-/// tab a restore opens, whose jar, still running, is taken back.
-pub fn wanted(
-    on: bool,
-    tab: &str,
-    restoring: Option<&crate::state::sessions::SavedTab>,
-) -> anyhow::Result<Option<Spec>> {
-    if !on || !honoured() {
-        return Ok(None);
-    }
-    Ok(Some(spec_in(Place::for_this_user()?, tab, restoring)))
-}
-
-/// [`wanted`] with jars on, for a worker: the store's check of the first jar
-/// may still be running. In `place`, or this user's when `None`.
+/// The jar for the tab `tab`, for a worker: the store's check of the first
+/// jar may still be running. In `place`, or this user's when `None`, and an
+/// error when there's no jar to start ([`NoUsableJar`]) or nowhere to put
+/// one. `restoring` is the saved tab a restore opens, whose jar, still
+/// running, is taken back.
 pub fn spec_for(
     place: Option<Place>,
     tab: &str,
     restoring: Option<&crate::state::sessions::SavedTab>,
-) -> anyhow::Result<Option<Spec>> {
-    match place {
-        Some(place) => Ok(Some(spec_in(place, tab, restoring))),
-        None => wanted(true, tab, restoring),
-    }
+) -> anyhow::Result<Spec> {
+    let place = match place {
+        Some(place) => place,
+        None => Place::for_this_user()?,
+    };
+    Ok(spec_in(place, tab, restoring))
 }
 
 fn spec_in(place: Place, tab: &str, restoring: Option<&crate::state::sessions::SavedTab>) -> Spec {
