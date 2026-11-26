@@ -36,7 +36,6 @@ def locked(name):
 
 
 class SpycJarTakesSpycsVersion(unittest.TestCase):
-    @unittest.skip("red until F2 (fix/jar-lockstep) puts spyc-jar in lockstep with spyc")
     def test_spyc_jar_carries_spycs_version(self):
         spyc = manifest(ROOT, SPYC)["package"]["version"]
         jar = manifest(ROOT, JAR)["package"]["version"]
@@ -44,7 +43,6 @@ class SpycJarTakesSpycsVersion(unittest.TestCase):
         self.assertEqual(jar, spyc, f"{JAR} is {jar} while spyc is {spyc}")
         self.assertEqual(locked("spyc-jar"), locked("spyc"), "Cargo.lock")
 
-    @unittest.skip("red until F2 (fix/jar-lockstep) puts spyc-jar in lockstep with spyc")
     def test_spyc_asks_for_exactly_its_own_jar(self):
         spyc = manifest(ROOT, SPYC)["package"]["version"]
         dep = manifest(ROOT, SPYC)["dependencies"]["spyc-jar"]
@@ -52,7 +50,6 @@ class SpycJarTakesSpycsVersion(unittest.TestCase):
                          "a caret requirement lets crates.io hand `cargo install` another jar")
         self.assertEqual(dep.get("path"), "crates/spyc-jar")
 
-    @unittest.skip("red until F2 (fix/jar-lockstep) puts spyc-jar in lockstep with spyc")
     def test_set_version_moves_both(self):
         with tempfile.TemporaryDirectory() as d:
             for path in (SPYC, JAR):
@@ -73,7 +70,6 @@ class SpycJarTakesSpycsVersion(unittest.TestCase):
                 self.assertEqual(len(before), len(after), path)
                 self.assertLessEqual(len(changed), 2, f"{path}: only version lines move: {changed}")
 
-    @unittest.skip("red until F2 (fix/jar-lockstep) puts spyc-jar in lockstep with spyc")
     def test_release_prep_sets_the_version_with_set_version(self):
         text = (ROOT / "Makefile").read_text(encoding="utf-8")
         recipe = text.split("\nrelease-prep:", 1)[1].split("\n\n", 1)[0]
@@ -143,7 +139,6 @@ class ReleaseChecksTheJarsVersion(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertEqual(tagged, "v9.9.9")
 
-    @unittest.skip("red until F2 (fix/jar-lockstep) puts spyc-jar in lockstep with spyc")
     def test_release_tag_refuses_a_jar_at_another_version(self):
         with tempfile.TemporaryDirectory() as d:
             r, tagged = self.release_tag(d, "9.9.9", "9.9.8")
@@ -183,7 +178,6 @@ class ReleaseChecksTheJarsVersion(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertEqual(published, ["spyc-vt-sys", "spyc-jar", "spyc"], "in dependency order")
 
-    @unittest.skip("red until F2 (fix/jar-lockstep) puts spyc-jar in lockstep with spyc")
     @unittest.skipUnless(shutil.which("jq"), "needs jq")
     def test_the_crates_job_refuses_a_jar_at_another_version(self):
         with tempfile.TemporaryDirectory() as d:

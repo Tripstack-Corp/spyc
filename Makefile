@@ -332,6 +332,20 @@ changelog: ## Preview the pending (unreleased) CHANGELOG section: commits since 
 	@command -v git-cliff >/dev/null 2>&1 || { echo "git-cliff MISSING — brew install git-cliff"; exit 1; }
 	@git cliff --config cliff.toml --unreleased
 
+# spyc-jar takes spyc's version, and spyc asks for exactly it (`=`), so an rc
+# publishes a prerelease of both and `cargo install spyc` builds its own
+# release's jar. This moves all three lines; release-prep runs it, and so does
+# the PR that opens the next `-CURRENT` (then `cargo update -p spyc -p
+# spyc-jar`). scripts/test_jar_version_lockstep.py fails while they differ.
+.PHONY: set-version
+set-version: ## Set spyc's and spyc-jar's version, VERSION=x.y.z[-pre] (then cargo update -p spyc -p spyc-jar)
+	@test "$(origin VERSION)" = "command line" || { echo "usage: make set-version VERSION=x.y.z[-pre]"; exit 1; }
+	@echo "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$$' || { echo "VERSION must be x.y.z or x.y.z-pre (got '$(VERSION)')"; exit 1; }
+	@tmp=$$(mktemp); sed -e 's/^version = ".*"/version = "$(VERSION)"/' \
+		-e 's/^$(JAR) = { version = "=[^"]*"/$(JAR) = { version = "=$(VERSION)"/' Cargo.toml > $$tmp && mv $$tmp Cargo.toml
+	@tmp=$$(mktemp); sed 's/^version = ".*"/version = "$(VERSION)"/' crates/$(JAR)/Cargo.toml > $$tmp && mv $$tmp crates/$(JAR)/Cargo.toml
+	@grep -q '^$(JAR) = { version = "=$(VERSION)"' Cargo.toml || { echo "Cargo.toml has no '$(JAR) = { version = \"=…\"' line to move"; exit 1; }
+
 # A release VERSION is `x.y.z`, or a prerelease `x.y.z-rc.N` (`-alpha.N` and
 # `-beta.N` too: the suffixes release.yml publishes as a GitHub pre-release). A
 # prerelease gets no CHANGELOG section of its own: cliff.toml's `tag_pattern`
@@ -345,14 +359,14 @@ release-prep: ## Step 1 of 2, on a release branch: VERSION=x.y.z or x.y.z-rc.N �
 	@test "$$(git rev-parse --abbrev-ref HEAD)" != "main" || { echo "refusing to prepare a release on main — main takes PRs only; branch first (e.g. chore/release-$(VERSION))"; exit 1; }
 	@git rev-parse "v$(VERSION)" >/dev/null 2>&1 && { echo "tag v$(VERSION) already exists"; exit 1; } || true
 	@echo "→ setting version to $(VERSION)…"
-	@tmp=$$(mktemp); sed 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml > $$tmp && mv $$tmp Cargo.toml
-	cargo update -p $(BINARY)
+	@$(MAKE) --no-print-directory set-version VERSION=$(VERSION)
+	cargo update -p $(BINARY) -p $(JAR)
 	@case "$(VERSION)" in \
 	  *-*) echo "→ a prerelease: no CHANGELOG section" ;; \
 	  *)   echo "→ prepending its CHANGELOG section…" && \
 	       git cliff --config cliff.toml --unreleased --tag v$(VERSION) --prepend CHANGELOG.md ;; \
 	esac
-	git add Cargo.toml Cargo.lock CHANGELOG.md
+	git add Cargo.toml crates/spyc-jar/Cargo.toml Cargo.lock CHANGELOG.md
 	git commit -m "chore(release): v$(VERSION)"
 	@echo "✓ prepared v$(VERSION) on $$(git rev-parse --abbrev-ref HEAD). Next:"
 	@echo "    git push -u origin HEAD && gh pr create --title 'chore(release): v$(VERSION)'"
@@ -368,6 +382,7 @@ release-tag: ## Step 2 of 2, on main after the release PR merged: VERSION=x.y.z 
 	@# The release PR is what sets the version, so a mismatch here means it has
 	@# not merged yet (or main is still on its -CURRENT suffix).
 	@test "$(VERSION)" = "$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')" || { echo "Cargo.toml says '$$(grep '^version' Cargo.toml | head -1 | sed 's/.*\"\(.*\)\".*/\1/')', not '$(VERSION)' — run release-prep on a branch and merge that PR first"; exit 1; }
+	@test "$(VERSION)" = "$$(sed -n 's/^version = "\(.*\)"/\1/p' crates/spyc-jar/Cargo.toml)" || { echo "crates/spyc-jar/Cargo.toml isn't at $(VERSION): spyc-jar takes spyc's version (make set-version)"; exit 1; }
 	@case "$(VERSION)" in *-*) ;; *) grep -q '^## \[$(VERSION)\]' CHANGELOG.md || { echo "CHANGELOG.md has no [$(VERSION)] section — merge the release-prep PR first"; exit 1; } ;; esac
 	@git fetch -q origin main && test "$$(git rev-parse HEAD)" = "$$(git rev-parse origin/main)" || { echo "HEAD is not origin/main — pull first so the tag lands on the merged commit"; exit 1; }
 	git tag v$(VERSION)
