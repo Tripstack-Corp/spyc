@@ -857,6 +857,403 @@ fn dirs_with_agent(rest: &str) -> Dirs {
     d
 }
 
+/// A directory's mode, set for a test and put back to `0700` however the
+/// test ends, so that its directory can still be removed.
+struct ModeFor(PathBuf);
+
+impl ModeFor {
+    fn set(dir: &Path, mode: u32) -> Self {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+        Self(dir.to_path_buf())
+    }
+}
+
+impl Drop for ModeFor {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
+    }
+}
+
+/// A spyc on `dirs` with its one tab running in a jar: the spyc, the tab's
+/// program and the tab's jar's socket, each left for `left` to end.
+fn spyc_with_a_jarred_tab(dirs: &Dirs, left: &mut Leftovers) -> (Spyc, i32, PathBuf) {
+    let first = Spyc::start(dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    let agent = noted(&dirs.pidfile)[0];
+    left.0.push(agent);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    (first, agent, tab_socket)
+}
+
+/// `spyc` stayed in its loop after a refused `^d` or `:upgrade`: it says
+/// `refused` on its screen, still runs, still owns the tab's jar, and
+/// started no session jar.
+fn stayed(first: &mut Spyc, tab_socket: &Path, agent: i32, refused: &str) {
+    first.eventually("spyc says why it stays", || {
+        squeezed(&first.since_last_screen()).contains(refused)
+    });
+    assert!(!first.exited(), "spyc left its loop");
+    assert_eq!(
+        described(tab_socket, "owner_pid"),
+        Some(first.pid().to_string()),
+        "the tab's jar was let go"
+    );
+    assert!(alive(agent), "the tab's program ended");
+}
+
+/// Every `jar_socket` the session files in `state` record.
+fn saved_jar_sockets(state: &Path) -> Vec<String> {
+    fn collect(v: &serde_json::Value, found: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(o) => {
+                if let Some(s) = o.get("jar_socket").and_then(|s| s.as_str()) {
+                    found.push(s.to_string());
+                }
+                o.values().for_each(|v| collect(v, found));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|v| collect(v, found)),
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for text in std::fs::read_dir(state.join("spyc").join("sessions"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+    {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            collect(&v, &mut found);
+        }
+    }
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// `^d`'s handover after #1337, its jar's spyc running at once: the jar
+/// starts before this spyc lets any jar go, so the spyc in it meets jars this
+/// one still holds. It takes each back once this spyc has let it go, never
+/// leaving one [detached] for another spyc's, and no program starts twice. The
+/// session jar's `spyc-jar` stops this spyc as it starts, so the new spyc
+/// asks while every jar is still held, whatever the machine's timing.
+#[test]
+fn ctrl_d_leaves_no_tab_detached_and_runs_no_program_twice() {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs = dirs();
+    let tab = format!(
+        "sh -c 'echo $$ >> {}; printf ready-mark; exec cat'",
+        dirs.pidfile.display()
+    );
+    std::fs::write(
+        dirs.home.join(".spycrc.toml"),
+        format!("[pane]\njars = true\ntabs = [\"{tab}\", \"{tab}\"]\n"),
+    )
+    .unwrap();
+    // A spyc of the test's own, beside a `spyc-jar` that, once told, stops
+    // its parent (the spyc starting it) before it runs.
+    let bin = dirs.root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let spyc = bin.join("spyc");
+    std::fs::copy(built, &spyc).unwrap();
+    let (told, stopped) = (
+        dirs.root.path().join("stop-parent"),
+        dirs.root.path().join("stopped"),
+    );
+    let stand_in = bin.join("spyc-jar");
+    std::fs::write(
+        &stand_in,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in --wire) ;; *) exec '{jar}' \"$@\";; esac\nif [ -e '{told}' ]; then rm -f '{told}'; echo $PPID > '{stopped}'; kill -STOP $PPID; fi\nexec '{jar}' \"$@\"\n",
+            jar = built.with_file_name("spyc-jar").display(),
+            told = told.display(),
+            stopped = stopped.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start_from(&spyc, &dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("both tabs' programs start", || {
+        noted(&dirs.pidfile).len() == 2
+    });
+    let programs = noted(&dirs.pidfile);
+    left.0.extend(&programs);
+    let mut sockets = Vec::new();
+    first.eventually("both tabs' jars run", || {
+        sockets = sockets_under(&dirs.runtime.join("spyc").join("jars"));
+        sockets.len() == 2
+    });
+    for socket in &sockets {
+        if let Some(jar) = described(socket, "pid").and_then(|p| p.parse().ok()) {
+            left.0.push(jar);
+        }
+    }
+    eventually("the session records both tabs' jars", || {
+        saved_jar_sockets(&dirs.state).len() == 2
+    });
+
+    std::fs::write(&told, "").unwrap();
+    first.type_keys(b"\x04");
+    eventually("the session jar stops this spyc as it starts", || {
+        stopped.exists()
+    });
+    let mut session = None;
+    eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let mut jar_spyc = None;
+    eventually("the session's spyc runs", || {
+        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        jar_spyc.is_some()
+    });
+    let jar_spyc = jar_spyc.unwrap();
+    left.0.push(jar_spyc.parse().unwrap());
+
+    // What the session's spyc made of a tab whose jar this spyc still holds.
+    let back = Spyc::start(&dirs, &["attach", &name]);
+    left.0.push(back.pid());
+    let owned_by = |pid: &str| {
+        sockets
+            .iter()
+            .all(|s| described(s, "owner_pid").as_deref() == Some(pid))
+    };
+    back.eventually("the session's spyc decides about its tabs", || {
+        let shown = squeezed(&back.since_last_screen());
+        shown.contains("camefrom") || shown.contains("foranotherspyc") || owned_by(&jar_spyc)
+    });
+    assert!(
+        !squeezed(&back.since_last_screen()).contains("foranotherspyc"),
+        "a tab was given up as another spyc's: {:?}",
+        squeezed(&back.since_last_screen())
+    );
+
+    // This spyc goes on, lets its jars go, and ends.
+    if let Some(p) = rustix::process::Pid::from_raw(first.pid()) {
+        let _ = rustix::process::kill_process(p, rustix::process::Signal::CONT);
+    }
+    eventually("the terminal's spyc ends", || first.exited());
+    eventually("the session's spyc owns both tabs' jars", || {
+        owned_by(&jar_spyc)
+    });
+    back.eventually("the session drawn, its tabs with it", || {
+        back.since_last_screen().contains("ready-mark")
+    });
+    assert!(
+        !squeezed(&back.since_last_screen()).contains("[detached]"),
+        "a tab came back detached: {:?}",
+        squeezed(&back.since_last_screen())
+    );
+    assert_eq!(
+        noted(&dirs.pidfile),
+        programs,
+        "a program was started again"
+    );
+    assert!(programs.iter().all(|p| alive(*p)), "a tab's program ended");
+}
+
+/// D2 and P3-9 of the 3.0 review: `^d` whose session jar can't start keeps
+/// spyc in its loop with its tabs, and says why, rather than letting every
+/// jar go and quitting with a message that its tabs run on in their jars.
+/// Here the sessions' directory is open to others, so no jar is trusted
+/// there.
+#[test]
+#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
+fn ctrl_d_with_no_place_for_the_sessions_jar_keeps_spyc_and_its_tabs() {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs = dirs();
+    let base = dirs.runtime.join("spyc");
+    std::fs::create_dir(&base).unwrap();
+    std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let sessions = base.join("sessions");
+    std::fs::create_dir(&sessions).unwrap();
+    let _open = ModeFor::set(&sessions, 0o755);
+    let mut left = Leftovers(Vec::new());
+    let (mut first, agent, tab_socket) = spyc_with_a_jarred_tab(&dirs, &mut left);
+    first.type_keys(b"\x04");
+    stayed(&mut first, &tab_socket, agent, "can'tdetach");
+    assert!(session_jar(&dirs).is_none(), "a session jar started");
+}
+
+/// D6 of the 3.0 review: `^d` whose save of the session fails keeps spyc
+/// in its loop with its tabs, and says why: the spyc a session jar starts
+/// would find nothing to restore, and offer the tabs as no spyc's.
+#[test]
+#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
+fn ctrl_d_whose_save_fails_keeps_spyc_and_its_tabs() {
+    let dirs = dirs();
+    let mut left = Leftovers(Vec::new());
+    let (mut first, agent, tab_socket) = spyc_with_a_jarred_tab(&dirs, &mut left);
+    let _unwritable = ModeFor::set(&dirs.state.join("spyc").join("sessions"), 0o500);
+    first.type_keys(b"\x04");
+    stayed(&mut first, &tab_socket, agent, "can'tdetach");
+    assert!(session_jar(&dirs).is_none(), "a session jar started");
+}
+
+/// D6 of the 3.0 review, in the session's own jar: `:upgrade` whose save
+/// fails keeps this spyc, its tabs with it, and says why.
+#[test]
+#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
+fn upgrade_whose_save_fails_keeps_the_session_in_its_jar() {
+    let dirs = dirs();
+    let bin = dirs.root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let spyc = bin.join("spyc");
+    std::fs::copy(built, &spyc).unwrap();
+    std::fs::copy(built.with_file_name("spyc-jar"), bin.join("spyc-jar")).unwrap();
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start_from(&spyc, &dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    let agent = noted(&dirs.pidfile)[0];
+    left.0.push(agent);
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let mut first = first;
+    let (name, _socket, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
+    eventually("the jar's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    let first = Spyc::start_from(&spyc, &dirs, &["attach", &name]);
+    left.0.push(first.pid());
+    first.eventually("the session drawn", || {
+        first.since_last_screen().contains(&name)
+            && first.since_last_screen().contains("ready-mark")
+    });
+
+    let _unwritable = ModeFor::set(&dirs.state.join("spyc").join("sessions"), 0o500);
+    let next = bin.join("spyc.new");
+    std::fs::copy(built, &next).unwrap();
+    std::fs::rename(&next, &spyc).unwrap();
+    let _ = std::process::Command::new(&spyc).arg("--version").output();
+    let screens = first.screens();
+    first.type_keys(b":upgrade\r");
+    first.eventually("spyc says why it stays", || {
+        squeezed(&first.since_last_screen()).contains("can'tupgrade")
+    });
+    assert_eq!(first.screens(), screens, "spyc restarted");
+    assert_eq!(
+        described(&tab_socket, "owner_pid").as_deref(),
+        Some(jar_spyc.as_str()),
+        "the tab's jar was let go"
+    );
+    assert!(alive(agent), "the tab's program ended");
+}
+
+/// D5 of the 3.0 review: `^d` carries each tab's last status report into
+/// the session's own jar, as a move does: a Claude blocked on a prompt
+/// reports nothing until it's answered, so the spyc the jar starts would
+/// otherwise show it as needing nothing.
+#[test]
+#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
+fn ctrl_d_keeps_a_tabs_last_status_report() {
+    let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
+    let env_file = probe.path().to_path_buf();
+    let dirs = dirs_with_agent(&format!(
+        "env > {}; printf ready-mark; exec cat",
+        env_file.display()
+    ));
+    let mut left = Leftovers(Vec::new());
+    let first = Spyc::start(&dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    first.eventually("the agent-wiring question", || {
+        squeezed(&first.since_last_screen()).contains("[y]yes[n]no")
+    });
+    first.type_keys(b"n");
+    let agent = noted(&dirs.pidfile)[0];
+    left.0.push(agent);
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let mut agent_env: Vec<(String, String)> = Vec::new();
+    eventually("the tab's program wrote its environment", || {
+        agent_env = std::fs::read_to_string(&env_file)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| l.split_once('='))
+            .filter(|(k, _)| matches!(*k, "SPYC_MCP_SOCK" | "SPYC_PANE_ID" | "SPYC_JAR_SOCKET"))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        agent_env.len() == 3
+    });
+    let blocked = std::process::Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["--report-status", "blocked"])
+        .current_dir(&dirs.home)
+        .env_clear()
+        .envs(dirs.env())
+        .envs(agent_env.iter().map(|(k, v)| (k, v)))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(blocked.status.success(), "{blocked:?}");
+    first.type_keys(b":activity dump\r");
+    first.eventually("the tab's dot is blocked before `^d`", || {
+        squeezed(&first.since_last_screen()).contains("dot=blocked")
+    });
+    // The dump's pager closed first.
+    first.type_keys(b"q");
+
+    let mut first = first;
+    let (name, _socket, jar_spyc) = detach_plain(&mut first, &dirs, &mut left);
+    eventually("the jar's spyc owns the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    let back = Spyc::start(&dirs, &["attach", &name]);
+    left.0.push(back.pid());
+    // The tab's carried `blocked` rings the visual bell, whose border tint
+    // splits the frame's text: what it reads is matched, not its bytes.
+    back.eventually("the session drawn, its tab with it", || {
+        let shown = squeezed(&back.since_last_screen());
+        shown.contains(&name) && shown.contains("ready-mark")
+    });
+    back.type_keys(b":activity dump\r");
+    back.eventually("the tab's dot is blocked after `^d`", || {
+        squeezed(&back.since_last_screen()).contains("dot=blocked")
+    });
+}
+
 /// S5: `:detach project NAME` moves a project into a session of its own. Its
 /// tab's program runs on, taken back by the spyc the new session's jar
 /// starts, and the spyc it left runs on without it. The agent's MCP proxy
