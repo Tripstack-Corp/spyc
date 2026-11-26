@@ -127,7 +127,6 @@ mod checks {
     /// can be taken as its owner and let go, and a description between the two
     /// names no pid.)
     #[test]
-    #[ignore = "red until a retake asks again of a jar that names no owner: fix/silent-jar-retake"]
     fn a_retake_asks_again_when_its_jar_names_no_owner() {
         let dir = TestDir::new("jo");
         let place = place_in(dir.path());
@@ -155,7 +154,6 @@ mod checks {
     /// `^a R` asks the jar who owns it: an owner the jar can't name is no other
     /// spyc's, so the restart isn't refused on it.
     #[test]
-    #[ignore = "red until a retake asks again of a jar that names no owner: fix/silent-jar-retake"]
     fn a_jar_that_names_no_owner_is_not_another_spycs() {
         let dir = TestDir::new("jo");
         let place = place_in(dir.path());

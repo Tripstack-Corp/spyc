@@ -81,8 +81,12 @@ enum Holder {
     /// The spyc this one took its session from (`took_over_from`), which lets
     /// its jars go once this one runs.
     Predecessor(u32),
-    /// Another spyc, by its pid when the jar knows it.
+    /// Another spyc, by the pid the jar gives.
     Other(Option<u32>),
+    /// A connection the jar names no pid for: it says so for a moment as an
+    /// owner it took leaves, so it is asked again, never taken for another
+    /// spyc's.
+    Unnamed,
     Nobody,
 }
 
@@ -98,11 +102,13 @@ fn holder(socket: &Path) -> Option<Holder> {
     if !field("owner").is_some_and(|o| o.starts_with("connected")) {
         return Some(Holder::Nobody);
     }
-    let pid = field("owner_pid").and_then(|p| p.parse::<u32>().ok());
+    let Some(pid) = field("owner_pid").and_then(|p| p.parse::<u32>().ok()) else {
+        return Some(Holder::Unnamed);
+    };
     Some(match pid {
-        Some(p) if p == std::process::id() => Holder::This,
-        Some(p) if TOOK_OVER_FROM.get() == Some(&p) => Holder::Predecessor(p),
-        _ => Holder::Other(pid),
+        p if p == std::process::id() => Holder::This,
+        p if TOOK_OVER_FROM.get() == Some(&p) => Holder::Predecessor(p),
+        _ => Holder::Other(Some(pid)),
     })
 }
 
@@ -281,7 +287,7 @@ pub(super) fn back(spec: &Spec, socket: &Path, size: (u16, u16)) -> anyhow::Resu
                     wait_let_go(socket, watch, Instant::now(), false);
                     this_since = this_since_after(this_since, Heard::Other, Instant::now());
                 }
-                Some(Holder::Nobody) => {
+                Some(Holder::Nobody | Holder::Unnamed) => {
                     this_since = this_since_after(this_since, Heard::Other, Instant::now());
                 }
                 None => this_since = this_since_after(this_since, Heard::Nothing, Instant::now()),
@@ -349,8 +355,8 @@ impl std::error::Error for NoToken {}
 pub struct OtherSpyc(pub Option<u32>);
 
 /// Another spyc that owns the jar at `socket`, as the jar says within
-/// `wait`; `None` when the jar names this spyc, no one, or doesn't answer
-/// in time.
+/// `wait`; `None` when the jar names this spyc, no one, an owner it gives
+/// no pid for, or doesn't answer in time.
 pub fn owned_elsewhere_now(socket: &Path, wait: Duration) -> Option<OtherSpyc> {
     let fields = spyc_jar::client::describe_within(socket, wait).ok()?;
     let field = |key: &str| {
@@ -362,8 +368,9 @@ pub fn owned_elsewhere_now(socket: &Path, wait: Duration) -> Option<OtherSpyc> {
     if !field("owner").is_some_and(|o| o.starts_with("connected")) {
         return None;
     }
-    let pid = field("owner_pid").and_then(|p| p.parse::<u32>().ok());
-    (pid != Some(std::process::id())).then_some(OtherSpyc(pid))
+    // An owner the jar names no pid for can't be told from this spyc's.
+    let pid = field("owner_pid").and_then(|p| p.parse::<u32>().ok())?;
+    (pid != std::process::id()).then_some(OtherSpyc(Some(pid)))
 }
 
 /// A jar that welcomed this spyc as its owner, taken: its snapshot chosen
