@@ -121,6 +121,9 @@ fn mcp_status(env: &Env) -> Part {
     }
 }
 
+/// The most of the claude CLI's errors read.
+const CLI_SAID_MAX: u64 = 64 * 1024;
+
 /// Run `claude <args>`, failing with the first line it printed to stderr.
 fn run_cli(env: &Env, args: &[&str]) -> Result<(), String> {
     let Some(cli) = &env.claude_cli else {
@@ -129,13 +132,17 @@ fn run_cli(env: &Env, args: &[&str]) -> Result<(), String> {
             entry_json(env)
         ));
     };
+    // A file, never a pipe: a pipe's end could wait on a child another
+    // thread spawned (`crate::child_io`).
+    let (mut said, theirs) =
+        crate::child_io::output().map_err(|e| format!("a file for claude's errors: {e}"))?;
     let mut command = Command::new(cli);
     command
         .args(args)
         .env("HOME", &env.home)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::piped());
+        .stderr(theirs);
     if let Some(dir) = &env.claude_config_dir {
         command.env("CLAUDE_CONFIG_DIR", dir);
     }
@@ -158,10 +165,9 @@ fn run_cli(env: &Env, args: &[&str]) -> Result<(), String> {
     if status.success() {
         return Ok(());
     }
-    let mut stderr = String::new();
-    if let Some(mut pipe) = child.stderr.take() {
-        let _ = std::io::Read::read_to_string(&mut pipe, &mut stderr);
-    }
+    let stderr = String::from_utf8_lossy_owned(
+        crate::child_io::written(&mut said, CLI_SAID_MAX).unwrap_or_default(),
+    );
     let said = stderr.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
     Err(format!(
         "`claude {}` failed ({status}): {said}",

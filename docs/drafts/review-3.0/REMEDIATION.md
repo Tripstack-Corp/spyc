@@ -43,6 +43,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | E4 (`SECURITY.md` describes 3.0) | F | | | | open |
 | E7 (a session's token is forgotten with its jar) | F | | | | open |
 | H1 (2.4.0 restores a 3.0 session and runs every program twice) | B | `a_saved_session_is_one_2_4_0_skips` (`test/manifest-v3-red`), `every_manifest_written_is_this_version` | | | fixed on `fix/manifest-v3` (manifest version 3; 2 and 3 read); refuter round 2 answered, awaiting its re-check; added to slice B at the owner's word, 2026-11-24 |
+| A jar's start on a pipe another child holds open (slice A's finding, macOS) | B | `a_jars_start_reaches_it_whatever_else_holds_this_spycs_pipes`, `a_sessions_jar_start_reaches_it_whatever_else_holds_this_spycs_pipes` (`test/jar-start-pipe-red`) | | | fixed on `fix/jar-start-pipe` (the start, and every child end a reader waits on, as a file; guard `no_reader_waits_for_the_end_of_a_pipe_another_spawn_can_hold`, which parses the code for every way to make a pipe; the clipboard sites filed as #1323; the pane PTY's `openpty`, the same race, written up, not fixed); refuter round 2 answered, awaiting its re-check; added to slice B at the owner's word, 2026-11-24 |
 | Handover fault hooks (Unit D's crash ordering, by test) | §4 | | | | open |
 
 ## Filed, not fixed (section 5)
