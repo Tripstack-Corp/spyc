@@ -1,0 +1,97 @@
+{
+ "meta": {
+  "clk_tck": 100,
+  "date": "2026-11-25T00:19:30Z",
+  "scope": "n/a",
+  "uid": 1000,
+  "uname": "Linux 6.19.7-200.fc43.aarch64 aarch64",
+  "versions": {
+   "bash": "GNU bash, version 5.2.15(1)-release (aarch64-unknown-linux-gnu)",
+   "cc": "cc (Debian 12.2.0-14+deb12u1) 12.2.0",
+   "fzf": "0.38.0 (debian)",
+   "git": "git version 2.39.5",
+   "gum": "",
+   "less": "less 590 (GNU regular expressions)",
+   "node": "v18.20.4",
+   "python3": "Python 3.11.2",
+   "ssh": "OpenSSH_9.2p1 Debian-2+deb12u10, OpenSSL 3.0.22 25 Aug 2026",
+   "sudo": "Sudo version 1.9.13p3",
+   "vim": "VIM - Vi IMproved 9.0 (2022 Jun 28, compiled Feb 16 2025 05:23:41)",
+   "zsh": "zsh 5.9 (aarch64-unknown-linux-gnu)"
+  },
+  "yama_ptrace_scope": "0"
+ },
+ "rows": [
+  {
+   "full_calls": 69,
+   "full_us_median": 184,
+   "full_us_p90": 235,
+   "members": 1,
+   "members_only_calls": 39,
+   "members_only_us_median": 88,
+   "members_only_us_p90": 125,
+   "n": 1,
+   "proc_entries_scanned": 6,
+   "strace_calls_unrelated_first_read": {
+    "by_syscall": {
+     "close": 20,
+     "getdents64": 6,
+     "ioctl": 3,
+     "newfstatat": 3,
+     "openat": 20,
+     "read": 32,
+     "readlinkat": 3
+    },
+    "total": 87
+   }
+  },
+  {
+   "full_calls": 456,
+   "full_us_median": 507,
+   "full_us_p90": 559,
+   "members": 10,
+   "members_only_calls": 390,
+   "members_only_us_median": 418,
+   "members_only_us_p90": 459,
+   "n": 10,
+   "proc_entries_scanned": 15,
+   "strace_calls_unrelated_first_read": {
+    "by_syscall": {
+     "brk": 2,
+     "close": 110,
+     "getdents64": 42,
+     "ioctl": 3,
+     "newfstatat": 21,
+     "openat": 110,
+     "read": 176,
+     "readlinkat": 30
+    },
+    "total": 494
+   }
+  },
+  {
+   "full_calls": 4326,
+   "full_us_median": 4231,
+   "full_us_p90": 4365,
+   "members": 100,
+   "members_only_calls": 3900,
+   "members_only_us_median": 3751,
+   "members_only_us_p90": 3860,
+   "n": 100,
+   "proc_entries_scanned": 105,
+   "strace_calls_unrelated_first_read": {
+    "by_syscall": {
+     "brk": 14,
+     "close": 1010,
+     "getdents64": 402,
+     "ioctl": 3,
+     "newfstatat": 201,
+     "openat": 1010,
+     "read": 1616,
+     "readlinkat": 300
+    },
+    "total": 4556
+   }
+  }
+ ]
+}
