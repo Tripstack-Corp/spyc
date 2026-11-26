@@ -202,3 +202,60 @@ fn a_jar_this_spyc_holds_is_not_offered() {
         end(&mut app);
     });
 }
+
+/// The refuter's finding on the orphan fix: ordinary typing at a normal pace,
+/// one key after each frame, into what looks like the session never ends a
+/// program. `body` has a `d` and then a `y`, and caps lock gives `BODY`.
+#[test]
+#[ignore = "red until the orphan pop-ups are typing-proof (fix/orphan-typing-proof)"]
+fn typing_a_word_at_the_offer_ends_nothing() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let (program, socket) = left_by_a_crash(dir.path());
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        look(&mut app);
+        assert!(offering(&app));
+        for word in ["body", " nobody", " tidy", " BODY"] {
+            for c in word.chars() {
+                drawn(&mut app);
+                typed(&mut app, c);
+            }
+            if !offering(&app) {
+                // Answered: end what the answer left running, then fail.
+                let _ = crate::pane::jar::orphans::discard(app.runtime.jar_place.clone(), &socket);
+                panic!("typing {word:?} answered the offer");
+            }
+        }
+        let ran = running(program);
+        let _ = crate::pane::jar::orphans::discard(app.runtime.jar_place.clone(), &socket);
+        assert!(ran, "typing ended the program no spyc owned");
+    });
+}
+
+/// The orphan pop-ups' answer is read against the reader's count taken once
+/// the frame that first shows them is on the terminal: a key read while that
+/// frame was built and written was typed before the pop-up was on the screen.
+/// `render_frame` is driven by no harness, so its source is read.
+#[test]
+#[ignore = "red until the orphan pop-ups are typing-proof (fix/orphan-typing-proof)"]
+fn a_pop_up_counts_keys_from_after_its_frame_is_written() {
+    let production = crate::guard_support::production_half(include_str!("../run.rs"));
+    let body = production
+        .split_once("fn render_frame(")
+        .expect("render_frame exists")
+        .1
+        .split_once("\n    }\n")
+        .expect("render_frame ends")
+        .0;
+    let at = |needle: &str| {
+        body.find(needle)
+            .unwrap_or_else(|| panic!("render_frame names {needle}"))
+    };
+    let written = at("EndSynchronizedUpdate)");
+    let counted = at("inputs_read");
+    let noted = at("note_frame_drawn(");
+    assert!(
+        written < counted && counted < noted,
+        "the reader's count is read before the frame is written"
+    );
+}
