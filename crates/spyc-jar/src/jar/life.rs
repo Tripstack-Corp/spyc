@@ -184,6 +184,7 @@ pub(super) fn reap(shared: &Shared) {
                 .is_some_and(|t| t.max(exited).elapsed() >= shared.cfg.linger_after_exit);
             if st.exit_acked || alone_too_long {
                 let _ = std::fs::remove_file(&shared.cfg.socket);
+                super::end::gap();
                 crate::lock::forget(&shared.cfg.socket);
                 std::process::exit(0);
             }
