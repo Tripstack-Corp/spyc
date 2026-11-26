@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use rustix::termios::{self, OptionalActions};
 
 use crate::client::{Client, Outbox, Receiver, Refusal};
@@ -131,8 +132,8 @@ fn relay(socket: &Path, token: &[u8]) -> anyhow::Result<&'static str> {
     let written = Arc::new(AtomicU64::new(head));
     let link: Link = Arc::default();
     let (ended_tx, ended) = mpsc::channel();
-    relay_input(&link, ended_tx.clone());
-    relay_size(&link);
+    relay_input(&link, ended_tx.clone())?;
+    relay_size(&link)?;
     for n in 0.. {
         let tx = start(client, n, &written, &ended_tx)?;
         *lock(&link) = Some(tx.clone());
@@ -177,7 +178,7 @@ fn start(
     // The jar tells its program this owner attached (`attached`), and the
     // program repaints for it; this terminal's size is all it needs from here.
     tx.send(&resize(size()))?;
-    relay_output(rx, tx.clone(), n, Arc::clone(written), ended.clone());
+    relay_output(rx, tx.clone(), n, Arc::clone(written), ended.clone())?;
     Ok(tx)
 }
 
@@ -189,8 +190,8 @@ fn relay_output(
     n: u64,
     written: Arc<AtomicU64>,
     ended: mpsc::Sender<Ended>,
-) {
-    std::thread::spawn(move || {
+) -> anyhow::Result<()> {
+    crate::threads::start("attach-output", move || {
         let mut out = std::io::stdout();
         let end = loop {
             match rx.recv(ATTACH_PING) {
@@ -212,14 +213,16 @@ fn relay_output(
             }
         };
         let _ = ended.send(end);
-    });
+    })
+    .context("a thread for the program's output")?;
+    Ok(())
 }
 
 /// Input to the program; `^\` detaches. Keys typed between connections
 /// were typed blind, and go nowhere.
-fn relay_input(link: &Link, ended: mpsc::Sender<Ended>) {
+fn relay_input(link: &Link, ended: mpsc::Sender<Ended>) -> anyhow::Result<()> {
     let link = Arc::clone(link);
-    std::thread::spawn(move || {
+    crate::threads::start("attach-input", move || {
         let mut stdin = std::io::stdin();
         let mut buf = [0u8; 4096];
         let why = loop {
@@ -241,13 +244,15 @@ fn relay_input(link: &Link, ended: mpsc::Sender<Ended>) {
             }
         };
         let _ = ended.send(Ended::Leave(why));
-    });
+    })
+    .context("a thread for the terminal's input")?;
+    Ok(())
 }
 
 /// Size changes, polled: a SIGWINCH handler would need `unsafe`.
-fn relay_size(link: &Link) {
+fn relay_size(link: &Link) -> anyhow::Result<()> {
     let link = Arc::clone(link);
-    std::thread::spawn(move || {
+    crate::threads::start("attach-size", move || {
         let mut last = size();
         loop {
             std::thread::sleep(SIZE_POLL);
@@ -259,7 +264,9 @@ fn relay_size(link: &Link) {
                 }
             }
         }
-    });
+    })
+    .context("a thread for the terminal's size")?;
+    Ok(())
 }
 
 /// A lost connection: attach again when the jar dropped this client for

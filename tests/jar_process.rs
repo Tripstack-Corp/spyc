@@ -1901,7 +1901,6 @@ mod ownership;
 #[path = "jar_process/lock.rs"]
 mod lock;
 
-#[cfg(target_os = "linux")]
 #[path = "jar_process/threads.rs"]
 mod threads;
 

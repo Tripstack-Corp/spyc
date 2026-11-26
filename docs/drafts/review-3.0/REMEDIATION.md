@@ -16,7 +16,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | B12 (`EINTR` ends a link on Linux) | B | `tests/jar_interrupted.rs` (Linux), `a_read_whose_poll_is_interrupted_reads_what_comes` (`spyc-jar`) | | | fixed on `fix/never-run-twice`; refuter round 2 answered, awaiting its re-check |
 | C12 (`[detached]` says why) | B | `a_tab_detached_for_another_spyc_says_so_on_its_screen`, `a_tab_whose_jar_has_no_token_here_says_so_and_restart_refuses`, `a_tab_whose_jar_cant_be_told_about_says_so_and_restart_refuses`, `a_detached_tabs_restart_whose_token_went_after_the_question_starts_nothing_and_says_why`, `a_connect_to_a_jar_that_has_gone_gives_up_at_once` (`spyc-jar`) | | | fixed on `fix/never-run-twice`; refuter round 2 answered, awaiting its re-check |
 | An ending jar leaves its socket behind, so its tab's restart is refused for good (found through a flake in `a_tab_whose_jar_still_runs_never_starts_its_program_twice`) | B | `an_ending_jar_leaves_no_socket_for_its_tab_to_be_refused_on` (`test/jar-end-race-red`) | | | fixed on `fix/jar-end-race` (every end and every socket check take the jar's address), awaiting its refuter; added to slice B at the owner's word, 2026-11-25 |
-| B1 (unchecked `thread::spawn`, upgrade path first) | C | | | | open |
+| B1 (unchecked `thread::spawn`, upgrade path first) | C | `tests/jar_process/threads.rs`: three Linux tests (`RLIMIT_NPROC` at 0), red at `origin/main` 1dfaac86 | `test/jar-thread-refusal-red`, `fix/jar-thread-refusal` | pending | fixed on the branch, awaiting the refuter |
 | A1 (`SIGPIPE` after a failed `exec`) | C | | | | open |
 | A2 (reason 6 where 5 is promised) | C | | | | open |
 | A3 (the copy step opens any path) | C | | | | open |

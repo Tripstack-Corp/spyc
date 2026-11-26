@@ -99,7 +99,7 @@ pub const PROOF: &str = "spyc-jar-handover-ok";
 /// Start an upgrade to `binary`, asked for on `reply`, which hears why if it
 /// fails. On success nothing is sent from here: the new image announces
 /// itself with `Upgraded` on every connection it carried.
-pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
+pub(crate) fn begin(shared: &Arc<Shared>, reply: &Arc<Conn>, binary: String) {
     if shared.upgrade_claimed.swap(true, Ordering::SeqCst) {
         reply.send(
             shared,
@@ -110,8 +110,29 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
         );
         return;
     }
-    let shared = Arc::clone(shared);
-    std::thread::spawn(move || {
+    let started = {
+        let shared = Arc::clone(shared);
+        let reply = Arc::clone(reply);
+        crate::threads::start("jar-upgrade", move || run_upgrade(&shared, &reply, &binary))
+    };
+    // No thread for the upgrade (review finding B1): it is busy, and the
+    // claim goes, so the next one may run.
+    if let Err(e) = started {
+        shared.upgrade_claimed.store(false, Ordering::SeqCst);
+        reply.send(
+            shared,
+            &Msg::Refused {
+                reason: reason::UPGRADE_BUSY,
+                why: format!("upgrade refused: no thread for it: {e}"),
+            },
+        );
+    }
+}
+
+/// An upgrade's own thread: run it, and on failure unpark everything, let
+/// the claim go and tell `reply` why.
+fn run_upgrade(shared: &Shared, reply: &Conn, binary: &str) {
+    {
         // The blob always has a program (decision M): nothing is copied or
         // run for an upgrade asked before it has started.
         let (why, err) = if shared.child_pid() == 0 {
@@ -120,8 +141,8 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
                 anyhow!("the program hasn't started: the jar waits for its first owner"),
             )
         } else {
-            match one_file(&shared, &binary) {
-                Ok(image) => run(&shared, &image),
+            match one_file(shared, binary) {
+                Ok(image) => run(shared, &image),
                 Err(e) => e,
             }
         };
@@ -130,13 +151,13 @@ pub(crate) fn begin(shared: &Arc<Shared>, reply: Arc<Conn>, binary: String) {
         shared.park_cv.notify_all();
         shared.cv.notify_all();
         reply.send(
-            &shared,
+            shared,
             &Msg::Refused {
                 reason: why,
                 why: format!("upgrade refused: {err:#}"),
             },
         );
-    });
+    }
 }
 
 /// The file this jar runs from: an entry of its store, its own copy, or for
@@ -560,14 +581,16 @@ pub fn hold_stdin() -> anyhow::Result<()> {
     }
     let pipe = std::fs::File::from(held.remove(0));
     let blob = read_blob(&mut &sock)?;
-    (&sock).write_all(b"k").context("answer")?;
     // The new image reads the blob as the holder writes it; a pipe holds far
-    // less than a blob.
-    std::thread::spawn(move || {
+    // less than a blob. The writer starts before the answer, so a holder
+    // with no thread for it (review finding B1) fails the upgrade unanswered.
+    crate::threads::start("jar-blob-out", move || {
         let mut pipe = pipe;
         let _ = pipe.write_all(&(blob.len() as u64).to_be_bytes());
         let _ = pipe.write_all(&blob);
-    });
+    })
+    .context("a thread to hand the blob on")?;
+    (&sock).write_all(b"k").context("answer")?;
     let parent = rustix::process::getppid();
     let until = Instant::now() + HOLD_BACKSTOP;
     while rustix::process::getppid() == parent && Instant::now() < until {
@@ -666,28 +689,41 @@ fn validate(
             let _ = rustix::process::kill_process_group(g, rustix::process::Signal::KILL);
         }
     };
+    // A thread the OS refuses (review finding B1) makes the upgrade busy,
+    // the validator ended with its group.
+    let no_thread = |child: &mut std::process::Child, e: std::io::Error| {
+        end_group();
+        let _ = child.wait();
+        busy(anyhow!("no thread to validate {}: {e}", binary.display()))
+    };
     let blob_owned = blob.to_vec();
-    std::thread::spawn(move || {
+    if let Err(e) = crate::threads::start("jar-blob-in", move || {
         let _ = (&ours).write_all(&blob_owned);
         let _ = ours.shutdown(std::net::Shutdown::Write);
-    });
+    }) {
+        return Err(no_thread(&mut child, e));
+    }
     // Read on threads of their own: a child of the validator may hold either
     // stream open long after the validator has gone.
     let (line_tx, line_rx) = std::sync::mpsc::channel();
-    if let Some(out) = child.stdout.take() {
-        std::thread::spawn(move || {
+    if let Some(out) = child.stdout.take()
+        && let Err(e) = crate::threads::start("jar-proof", move || {
             let mut first = String::new();
             let _ = std::io::BufReader::new(out.take(4096)).read_line(&mut first);
             let _ = line_tx.send(first);
-        });
+        })
+    {
+        return Err(no_thread(&mut child, e));
     }
     let (err_tx, err_rx) = std::sync::mpsc::channel();
-    if let Some(err) = child.stderr.take() {
-        std::thread::spawn(move || {
+    if let Some(err) = child.stderr.take()
+        && let Err(e) = crate::threads::start("jar-why", move || {
             let mut why = String::new();
             let _ = err.take(4096).read_to_string(&mut why);
             let _ = err_tx.send(why);
-        });
+        })
+    {
+        return Err(no_thread(&mut child, e));
     }
     let until = Instant::now() + deadline;
     let left = || until.saturating_duration_since(Instant::now());
@@ -811,10 +847,10 @@ pub fn resume() -> anyhow::Result<()> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| take_over(&blob, &crossed)))
             .unwrap_or_else(|p| Err(anyhow!("it panicked: {}", panic_text(p.as_ref()))))
     });
-    match taken {
-        Ok(ready) => {
+    match taken.and_then(crate::jar::Ready::launch) {
+        Ok(shared) => {
             drop(crossed);
-            ready.serve()
+            crate::jar::accept_loop(&shared)
         }
         Err(e) => crate::held::hold(crossed, &format!("{e:#}")),
     }
