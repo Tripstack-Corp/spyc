@@ -703,6 +703,9 @@ mod size_guard;
 mod style_guard;
 
 #[cfg(test)]
+mod version_guard;
+
+#[cfg(test)]
 mod pages_artifact_guards {
     use std::path::{Path, PathBuf};
 
