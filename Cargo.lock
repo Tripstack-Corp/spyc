@@ -4447,6 +4447,7 @@ dependencies = [
  "makefile-lossless",
  "mermaid-rs-renderer",
  "mlua",
+ "nix 0.32.0",
  "notify",
  "notify-rust",
  "nucleo-matcher",

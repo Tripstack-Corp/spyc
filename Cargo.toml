@@ -252,6 +252,11 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 syn = { version = "3", default-features = false, features = ["full", "parsing", "visit"] }
 
+# The jar tests that must order a jar's steps against another process's trace
+# it (`tests/jar_process/sigpipe.rs`); already built for spyc-jar on macOS.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { version = "0.32", default-features = false, features = ["ptrace", "process", "signal"] }
+
 # Line tables keep file:line in panics and backtraces; full debug info only
 # adds what lldb needs to print locals. `CARGO_PROFILE_DEV_DEBUG=full` brings
 # it back for a debugging session. `test` inherits this.

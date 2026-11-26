@@ -69,6 +69,7 @@ fn sources() -> Vec<Source> {
             "tests/jar_process/ownership.rs",
             include_str!("ownership.rs"),
         ),
+        whole("tests/jar_process/sigpipe.rs", include_str!("sigpipe.rs")),
         whole("tests/jar_process/timers.rs", include_str!("timers.rs")),
         whole("tests/jar_process/threads.rs", include_str!("threads.rs")),
         whole("tests/jar_process/upgrade.rs", include_str!("upgrade.rs")),
