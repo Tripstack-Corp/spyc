@@ -362,6 +362,10 @@ An agent in a jarred tab keeps spyc's tools when its spyc goes: after `spyc -r` 
 back, its next tool call reaches the new spyc, and a call made while no spyc has it waits for
 one, then fails without ending the agent's connection.
 
+A session saved by this version isn't one spyc 2.4.0 or older restores: going back to 2.4.0
+never starts a program a second time beside the jar that still runs it. `spyc -r` in this
+version still restores a session an older one saved.
+
 A spyc started after you install a new one moves each tab's jar to the new build in place: the
 same program, still running. It takes one tab at a time, each between an agent's turns, and the
 tab's output pauses for a few seconds while its jar switches over. A jar that can't switch says
