@@ -1106,12 +1106,14 @@ save that fails stops the move with nothing let go.
 
 <!-- SPYC-TRAP: handover-ready-before-release -->
 `^d` in a plain spyc and `:upgrade` (`src/app/detach.rs`) do the same before
-they let a jar go: in the loop, the session is saved as no running spyc's,
-synced to disk and with each tab's last status report, and for `^d` the
-session's own jar is started; only then does spyc leave the loop, end its
-connection to every jar, and end (or `exec` the new binary). When the save
-or the jar's start fails, spyc stays in its loop with its tabs and says why.
-The spyc in the session's jar runs at once, so it meets jars this spyc still
+they let a jar go: the session is saved as no running spyc's, synced to disk
+and with each tab's last status report, and for `^d` the session's own jar is
+started, on a worker so the loop runs on while a slow `spyc-jar` starts
+(`jar-off-the-loop`), keys held meanwhile so the session stays as saved; only
+then does spyc leave the loop, end its connection to every jar, and end (or
+`exec` the new binary). When the save or the jar's start fails, spyc stays in
+its loop with its tabs, saves the session as its own again, and says why. The
+spyc in the session's jar runs at once, so it meets jars this spyc still
 holds: it is started with `--handed-over-by PID` and takes each jar back once
 the jar says that spyc has let it go (`pane::jar::take`, `Holder::Predecessor`),
 the rule a retake follows for this spyc's own old connection. It waits on the
@@ -1120,8 +1122,9 @@ its owner deadline. The handover used to let the jars go before the jar had
 started, or whether or not the save had worked (D2, D6 and P3-9 of the 3.0
 review): a session whose jar couldn't start left every tab with no owner,
 quitting with a message that its tabs ran on in their jars, and one whose
-save failed came back empty beside jars no spyc owned. `release_jars` asserts, in a debug build,
-that the session was saved as released first.
+save failed came back empty beside jars no spyc owned. `release_jars` takes a
+`SavedReleased`, which only a successful `save_released` makes, so letting
+the jars go before that save doesn't compile.
 
 ## A pane in a jar
 

@@ -1272,7 +1272,6 @@ fn ctrl_d_keeps_a_tabs_last_status_report() {
 /// started, spyc goes on drawing and answering its agents; once the jar runs,
 /// the handover goes through.
 #[test]
-#[ignore = "red until the handover's jar start is off the loop (fix/handover-off-loop)"]
 fn ctrl_d_with_a_slow_session_jar_keeps_spyc_drawing_and_answering() {
     let dirs = dirs();
     std::fs::write(dirs.home.join(".spycrc.toml"), "[pane]\njars = true\n").unwrap();

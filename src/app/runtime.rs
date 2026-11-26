@@ -121,6 +121,10 @@ pub(super) struct Runtime {
     /// `^d` in a plain spyc, for the loop to save the session and start its
     /// jar before it hands over (`App::prepare_handover`).
     pub(super) handover_asked: bool,
+    /// `^d`'s session jar is starting on a worker (`App::prepare_handover`).
+    pub(super) handover_starting: bool,
+    /// Where that worker's start lands.
+    pub(super) handover_starts: Landing<super::detach::HandoverStart>,
     /// A handover, for `lib.rs` once the loop ends.
     pub(super) handover: Option<super::detach::Handover>,
     /// `:upgrade`, for the loop to look for the new binary.
@@ -436,6 +440,8 @@ impl Runtime {
             inputs_read: std::sync::Arc::default(),
             inputs_handled: 0,
             handover_asked: false,
+            handover_starting: false,
+            handover_starts: Landing::default(),
             handover: None,
             upgrade_pending: false,
             started_from: None,

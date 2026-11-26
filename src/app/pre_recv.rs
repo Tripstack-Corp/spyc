@@ -121,6 +121,7 @@ impl App {
             | self.apply_orphan_jars()
             | self.apply_jar_upgrades()
             | self.apply_moved_starts()
+            | self.apply_handover_starts()
             | self.apply_attach_releases()
             | self.apply_earlier_events()
         {

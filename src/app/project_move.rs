@@ -777,22 +777,22 @@ impl App {
                 message: format!("{what}, so it stays"),
             };
         }
-        let mut manifest = self.build_manifest();
-        manifest.pid = None;
-        manifest.process_started = None;
-        self.carry_live(&mut manifest);
-        if let Err(e) = crate::state::sessions::save_session_durably(&manifest) {
-            return McpResponse::Error {
-                message: format!("its session wasn't saved, so it stays: {e:#}"),
-            };
-        }
+        let saved = match self.save_released() {
+            Ok(saved) => saved,
+            Err(e) => {
+                return McpResponse::Error {
+                    message: format!("its session wasn't saved, so it stays: {e:#}"),
+                };
+            }
+        };
         self.runtime.released = true;
-        self.release_jars();
+        let id = saved.id();
+        self.release_jars(saved);
         self.state
             .note_event("released: another spyc takes this session's projects");
         self.state.should_quit = true;
         McpResponse::Ok {
-            message: serde_json::json!({ "session": manifest.id }).to_string(),
+            message: serde_json::json!({ "session": id }).to_string(),
         }
     }
 
