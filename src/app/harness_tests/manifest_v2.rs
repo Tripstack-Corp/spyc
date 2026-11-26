@@ -183,6 +183,44 @@ fn a_version_1_session_still_restores() {
     });
 }
 
+/// Whether spyc 2.4.0, the release an rc user rolls back to, reads a saved
+/// session file: its `parse_manifest`, pinned from `git show
+/// v2.4.0:src/state/sessions/manifest.rs` (lines 313-322). A file with no
+/// `version` it reads as version 1, and one with a `version` only when that
+/// is 2. 2.4.0 has no jars: what it reads, it restores by starting every
+/// tab's program again.
+fn read_by_2_4_0(saved: &Value) -> bool {
+    match saved.get("version") {
+        None => true,
+        Some(version) => version.as_u64() == Some(2),
+    }
+}
+
+/// H1: a session this build saves, whose tabs' programs may run in jars, is
+/// one 2.4.0 skips by its own rule for a newer spyc's file, rather than
+/// restores by starting each program again beside its jar.
+#[test]
+#[ignore = "red until review 3.0 H1 is fixed: fix/manifest-v3"]
+fn a_saved_session_is_one_2_4_0_skips() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state_root = tmp.path().join("state");
+    crate::state::with_state_root(&state_root, || {
+        let home = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        std::fs::create_dir_all(&home).unwrap();
+        let mut app = App::test_app(home.clone());
+        app.state.session_id = Some(9002);
+        app.state.active_project_mut().home = Some(home.clone());
+        app.open_pane_tab_in("cat", &home);
+        app.save_session();
+        let saved = read_manifest(&state_root, 9002);
+        assert!(
+            !read_by_2_4_0(&saved),
+            "2.4.0 would restore this file, starting every program again: version {}",
+            saved["version"]
+        );
+    });
+}
+
 /// A save is a version 2 manifest: it names its process and lists the project
 /// with column `a`'s own directory, not just the project's home.
 #[test]
