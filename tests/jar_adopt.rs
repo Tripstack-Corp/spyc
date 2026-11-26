@@ -902,7 +902,7 @@ fn spyc_with_a_jarred_tab(dirs: &Dirs, left: &mut Leftovers) -> (Spyc, i32, Path
 /// `spyc` stayed in its loop after a refused `^d` or `:upgrade`: it says
 /// `refused` on its screen, still runs, still owns the tab's jar, and
 /// started no session jar.
-fn stayed(first: &mut Spyc, tab_socket: &Path, agent: i32, refused: &str) {
+fn stayed(first: &mut Spyc, dirs: &Dirs, tab_socket: &Path, agent: i32, refused: &str) {
     first.eventually("spyc says why it stays", || {
         squeezed(&first.since_last_screen()).contains(refused)
     });
@@ -913,6 +913,23 @@ fn stayed(first: &mut Spyc, tab_socket: &Path, agent: i32, refused: &str) {
         "the tab's jar was let go"
     );
     assert!(alive(agent), "the tab's program ended");
+    let pid = i64::from(first.pid());
+    first.eventually("the session saved as this spyc's again", || {
+        saved_pids(&dirs.state).contains(&Some(pid))
+    });
+}
+
+/// The `pid` each session file in `state` names, `None` for one saved as no
+/// running spyc's.
+fn saved_pids(state: &Path) -> Vec<Option<i64>> {
+    std::fs::read_dir(state.join("spyc").join("sessions"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| std::fs::read_to_string(e.path()).ok())
+        .filter_map(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .map(|v| v["pid"].as_i64())
+        .collect()
 }
 
 /// Every `jar_socket` the session files in `state` record.
@@ -1092,7 +1109,7 @@ fn ctrl_d_with_no_place_for_the_sessions_jar_keeps_spyc_and_its_tabs() {
     let mut left = Leftovers(Vec::new());
     let (mut first, agent, tab_socket) = spyc_with_a_jarred_tab(&dirs, &mut left);
     first.type_keys(b"\x04");
-    stayed(&mut first, &tab_socket, agent, "can'tdetach");
+    stayed(&mut first, &dirs, &tab_socket, agent, "can'tdetach");
     assert!(session_jar(&dirs).is_none(), "a session jar started");
 }
 
@@ -1106,7 +1123,7 @@ fn ctrl_d_whose_save_fails_keeps_spyc_and_its_tabs() {
     let (mut first, agent, tab_socket) = spyc_with_a_jarred_tab(&dirs, &mut left);
     let _unwritable = ModeFor::set(&dirs.state.join("spyc").join("sessions"), 0o500);
     first.type_keys(b"\x04");
-    stayed(&mut first, &tab_socket, agent, "can'tdetach");
+    stayed(&mut first, &dirs, &tab_socket, agent, "can'tdetach");
     assert!(session_jar(&dirs).is_none(), "a session jar started");
 }
 
@@ -1248,6 +1265,102 @@ fn ctrl_d_keeps_a_tabs_last_status_report() {
     back.eventually("the tab's dot is blocked after `^d`", || {
         squeezed(&back.since_last_screen()).contains("dot=blocked")
     });
+}
+
+/// The refuter's finding on the handover fix (SPYC-TRAP `jar-off-the-loop`):
+/// `^d` starts the session's jar off the loop. While a slow `spyc-jar` hasn't
+/// started, spyc goes on drawing and answering its agents; once the jar runs,
+/// the handover goes through.
+#[test]
+#[ignore = "red until the handover's jar start is off the loop (fix/handover-off-loop)"]
+fn ctrl_d_with_a_slow_session_jar_keeps_spyc_drawing_and_answering() {
+    let dirs = dirs();
+    std::fs::write(dirs.home.join(".spycrc.toml"), "[pane]\njars = true\n").unwrap();
+    let bin = dirs.root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let spyc = bin.join("spyc");
+    std::fs::copy(built, &spyc).unwrap();
+    // A `spyc-jar` whose start waits for `go`: the store's check passes
+    // through, and so does the jar once `go` is made.
+    let (waiting, go) = (
+        dirs.root.path().join("waiting"),
+        dirs.root.path().join("go"),
+    );
+    let script = format!(
+        "#!/bin/sh\ncase \"$1\" in --wire) ;; *) exec '{jar}' \"$@\";; esac\necho $$ > '{waiting}'\nwhile [ ! -e '{go}' ]; do [ -d '{root}' ] || exit 1; sleep 0.05; done\nexec '{jar}' \"$@\"\n",
+        jar = built.with_file_name("spyc-jar").display(),
+        waiting = waiting.display(),
+        go = go.display(),
+        root = dirs.root.path().display(),
+    );
+    let stand_in = bin.join("spyc-jar");
+    std::fs::write(&stand_in, script).unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start_from(&spyc, &dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("spyc draws its directory", || first.shows(". menu"));
+    let mut proxy = Proxy::start(
+        &dirs,
+        &[(
+            "SPYC_MCP_SOCK".to_string(),
+            dirs.state
+                .join("spyc")
+                .join(format!("mcp-{}.sock", first.pid()))
+                .display()
+                .to_string(),
+        )],
+    );
+    proxy.send("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+    assert!(proxy.reply().is_some(), "the proxy initialized");
+    proxy.send("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
+
+    first.type_keys(b"\x04");
+    first.eventually("the session's jar is starting", || waiting.exists());
+    let stand_in_pid: i32 = std::fs::read_to_string(&waiting)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    left.0.push(stand_in_pid);
+    std::fs::write(dirs.project.join("slow-jar-marker"), "").unwrap();
+    first.eventually("spyc draws a new file while the jar starts", || {
+        first.shows("slow-jar-marker")
+    });
+    assert_eq!(
+        proxy.answering_spyc(2),
+        Ok(i64::from(first.pid())),
+        "spyc answers its agents while the jar starts"
+    );
+    assert!(
+        alive(stand_in_pid),
+        "spyc drew and answered only once the jar's start had been given up"
+    );
+
+    std::fs::write(&go, "").unwrap();
+    eventually("the terminal's spyc ends, the session handed over", || {
+        first.exited()
+    });
+    let mut session = None;
+    eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (name, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    if let Some(spyc) = described(&socket, "program_pid").and_then(|p| p.parse().ok()) {
+        left.0.push(spyc);
+    }
+    assert!(
+        first.shows(&format!("spyc attach {name}")),
+        "the terminal wasn't told how to come back"
+    );
 }
 
 /// S5: `:detach project NAME` moves a project into a session of its own. Its
