@@ -1618,14 +1618,16 @@ fn a_connection_from_another_user_is_refused_unread() {
     let me = rustix::process::geteuid().as_raw();
     for (expected, answered) in [(me, true), (me.wrapping_add(1), false)] {
         let (client, server) = UnixStream::pair().unwrap();
+        // Before the server runs: macOS refuses a timeout on a socket whose
+        // peer has closed, which the refused case does at once.
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
         let (cmd_tx, _cmd_rx) = std::sync::mpsc::channel();
         let path = ctx_path.clone();
         let served = std::thread::spawn(move || {
             handle_connection_of(expected, server, &path, &cmd_tx).unwrap_or(());
         });
-        client
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .unwrap();
         let mut reader = io::BufReader::new(client.try_clone().unwrap());
         let mut writer = client;
         let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}).to_string();
