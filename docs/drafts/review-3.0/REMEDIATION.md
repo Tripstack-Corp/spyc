@@ -32,7 +32,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | A8 = F4 (`jar_compat` and the first fixture) | D | | | | open |
 | F8 (a `.deb` without `spyc-jar`) | D | | | | open |
 | F9 (the release document) | D | | | | open |
-| D1 (connect at the given path; refuse a `:name` that can't fit) | E | | | | open |
+| D1 (connect at the given path; refuse a `:name` that can't fit) | E | `ctrl_d_hands_over_when_the_runtime_directory_is_a_link_to_a_long_path` (`tests/jar_adopt.rs`), `a_name_whose_session_socket_would_not_fit_is_refused` (`src/app/detach.rs`) | | refuter pending | fixed on the branch `fix/session-own-socket` |
 | D2, D6, and P3-9's low (start and save before release) | E | | | | open |
 | The orphan prompt (confirm a discard; no type-ahead) | E | | | | open |
 | D5 (`save_released` keeps the last report) | E | | | | open |

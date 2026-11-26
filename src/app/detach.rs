@@ -326,13 +326,22 @@ impl App {
         self.runtime.ssh_agent = Some(agent);
     }
 
-    /// Have the session go by `name`, already normalized.
+    /// Have the session go by `name`, already normalized. A name its jar's
+    /// socket couldn't be bound at is refused here, as it's given: a session
+    /// renamed in its own jar keeps its address, but its name is the address
+    /// of the next jar it starts, after `spyc -r`.
     pub(super) fn name_session(&mut self, name: String) {
         let own = self
             .runtime
             .own_jar
             .as_ref()
             .map(|j| j.address().to_string());
+        if let Some(sessions) = &self.runtime.sessions_dir
+            && let Err(e) = crate::pane::jar::session::socket_in(sessions, &name)
+        {
+            self.state.flash_error(format!("name: {e:#}"));
+            return;
+        }
         if let Some(sessions) = &self.runtime.sessions_dir
             && crate::pane::jar::attach::named_elsewhere(sessions, &name, own.as_deref())
         {
@@ -440,7 +449,6 @@ mod tests {
     /// the session keeps the name it had: `^d` would otherwise start its jar
     /// at a path no socket can have.
     #[test]
-    #[ignore = "red until D1 is fixed (fix/session-own-socket)"]
     fn a_name_whose_session_socket_would_not_fit_is_refused() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(&tmp.path().join("state"), || {

@@ -149,7 +149,8 @@ projects are open, their chips take the project's place) and persist across
   picker; `:project name` alone says its name, and `./name` reaches a
   directory named `name`. `:startdir` manages start dir.
   `:name <NEW>` renames the session (normalized to
-  `[A-Z0-9_]`), unless another running session goes by that name; a click
+  `[A-Z0-9_]`), unless another running session goes by that name or the name is too long
+  for the session's socket, which spyc then says; a click
   on the session's name on the status bar, or its menu's `:name`, opens the
   `:` line holding `name` and the current name, to edit. `:whoami` flashes `user@host`.
 - **New pane tabs** open in `PROJECT_HOME`, or the start dir when the

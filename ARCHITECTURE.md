@@ -1070,6 +1070,19 @@ the jar reads back. Getting this wrong fails silently: a spyc in a
 pane would set the pane's terminal up again whenever its spyc attached to that
 pane, and take the pane jar's name for its session's.
 
+<!-- SPYC-TRAP: own-jar-at-given-path -->
+The comparison above resolves both paths, so that a link anywhere in them
+counts alike; the connection does not. spyc links to its own jar at the path
+in `SPYC_JAR_SOCKET`, the one the jar was bound at, because a resolved path
+can be longer than a socket's path may be: `/tmp` is `/private/tmp` on
+macOS, and a runtime directory reached through a link can resolve anywhere.
+Connecting at the resolved path once failed for every such session (D1 of
+the 3.0 review): the spyc in the session's jar ran as another session, owned
+none of its tabs and offered them as jars no spyc owns. The same limit is why
+a session name whose socket couldn't be bound is refused when it is given
+(`session::socket_in`), and why `session::start` checks it before it starts
+anything.
+
 <!-- SPYC-TRAP: move-saved-before-release -->
 `:detach project` (`src/app/project_move.rs`) saves the project it moves as a
 session of its own, synced to disk, before it ends its connection to any of
