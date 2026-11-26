@@ -69,7 +69,10 @@ impl Drop for ReaderDeath {
 /// uncontended. On park it drains crossterm's buffered events to empty
 /// (dropping them) BEFORE acking, so nothing is stranded across the
 /// child's tty ownership.
-pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> ReaderHandle {
+pub(super) fn spawn_input_reader(
+    tx: std::sync::mpsc::Sender<Message>,
+    sent: std::sync::Arc<std::sync::atomic::AtomicU64>,
+) -> ReaderHandle {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering::{Acquire, Release};
@@ -122,6 +125,11 @@ pub(super) fn spawn_input_reader(tx: std::sync::mpsc::Sender<Message>) -> Reader
                         Ok(true) => match event::read() {
                             Ok(ev) => {
                                 let forward = reader_forwards(&ev);
+                                // Counted before it's sent, so the loop never
+                                // takes an input the count doesn't hold.
+                                if forward {
+                                    sent.fetch_add(1, Release);
+                                }
                                 if forward && tx.send(Message::Input(ev)).is_err() {
                                     reader_done.store(true, Release); // main loop gone
                                     return;

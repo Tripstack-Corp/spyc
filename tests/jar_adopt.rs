@@ -2565,7 +2565,6 @@ fn spyc_r_after_a_kill_takes_a_running_capture_back() {
 /// The orphan offer of the 3.0 review: discarding jars no spyc owns ends
 /// their programs, so `d` asks first, and only `y` ends them.
 #[test]
-#[ignore = "red until the orphan prompt is fixed (fix/orphan-discard-confirm)"]
 fn discarding_a_jar_no_spyc_owns_asks_first() {
     let dirs = dirs();
     let mut left = Leftovers(Vec::new());

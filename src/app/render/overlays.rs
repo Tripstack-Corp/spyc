@@ -14,6 +14,56 @@ use crate::app::{App, Mode, PromptKind};
 /// stands for.
 type ConsentAnswer = (&'static str, &'static str, KeyCode);
 
+/// A consent pop-up's title, widest width and answers, for each prompt that
+/// draws as one; `None` for any other.
+const fn consent_frame(kind: &PromptKind) -> Option<(&'static str, u16, &'static [ConsentAnswer])> {
+    Some(match kind {
+        PromptKind::HookConsent { .. } => (
+            " spyc — agent status ",
+            68,
+            &[
+                ("[y] ", "yes     ", KeyCode::Char('y')),
+                ("[n] ", "no", KeyCode::Char('n')),
+            ],
+        ),
+        PromptKind::ProjectTabsConsent { .. } => (
+            " spyc — project startup tabs ",
+            100,
+            &[
+                ("[y] ", "run them     ", KeyCode::Char('y')),
+                ("[n] ", "no     ", KeyCode::Char('n')),
+                ("[Esc] ", "not now", KeyCode::Esc),
+            ],
+        ),
+        PromptKind::OrphanJars => (
+            " spyc — jars no spyc owns ",
+            90,
+            &[
+                ("[r] ", "restore     ", KeyCode::Char('r')),
+                ("[d] ", "discard     ", KeyCode::Char('d')),
+                ("[Esc] ", "not now", KeyCode::Esc),
+            ],
+        ),
+        PromptKind::OrphanJarsDiscard => (
+            " spyc — end their programs? ",
+            90,
+            &[
+                ("[y] ", "end them     ", KeyCode::Char('y')),
+                ("[n] ", "no", KeyCode::Char('n')),
+            ],
+        ),
+        PromptKind::JarlessFallback => (
+            " spyc — no usable spyc-jar ",
+            76,
+            &[
+                ("[y] ", "run without jars     ", KeyCode::Char('y')),
+                ("[n] ", "no", KeyCode::Char('n')),
+            ],
+        ),
+        _ => return None,
+    })
+}
+
 impl App {
     /// P3-1 visual bell: paint spyc's spice-heat gradient border pulse over the
     /// outermost ring of cells — a non-destructive bg tint, no reflow / layout
@@ -376,42 +426,8 @@ impl App {
         };
         // A project's startup-tab list shares the pop-up: it asks at launch,
         // and every command it would run needs a row the user can read.
-        let (title, max_w, answers): (&str, u16, &[ConsentAnswer]) = match &prompt.kind {
-            PromptKind::HookConsent { .. } => (
-                " spyc — agent status ",
-                68,
-                &[
-                    ("[y] ", "yes     ", KeyCode::Char('y')),
-                    ("[n] ", "no", KeyCode::Char('n')),
-                ],
-            ),
-            PromptKind::ProjectTabsConsent { .. } => (
-                " spyc — project startup tabs ",
-                100,
-                &[
-                    ("[y] ", "run them     ", KeyCode::Char('y')),
-                    ("[n] ", "no     ", KeyCode::Char('n')),
-                    ("[Esc] ", "not now", KeyCode::Esc),
-                ],
-            ),
-            PromptKind::OrphanJars => (
-                " spyc — jars no spyc owns ",
-                90,
-                &[
-                    ("[r] ", "restore     ", KeyCode::Char('r')),
-                    ("[d] ", "discard     ", KeyCode::Char('d')),
-                    ("[Esc] ", "not now", KeyCode::Esc),
-                ],
-            ),
-            PromptKind::JarlessFallback => (
-                " spyc — no usable spyc-jar ",
-                76,
-                &[
-                    ("[y] ", "run without jars     ", KeyCode::Char('y')),
-                    ("[n] ", "no", KeyCode::Char('n')),
-                ],
-            ),
-            _ => return,
+        let Some((title, max_w, answers)) = consent_frame(&prompt.kind) else {
+            return;
         };
 
         let area = frame.area();

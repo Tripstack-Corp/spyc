@@ -48,6 +48,7 @@ impl App {
             PromptKind::LuaRunaway => Self::handle_lua_runaway_confirm_key,
             PromptKind::JarlessFallback => Self::handle_jarless_fallback_key,
             PromptKind::OrphanJars => Self::handle_orphan_jars_key,
+            PromptKind::OrphanJarsDiscard => Self::handle_orphan_jars_discard_key,
             PromptKind::PipeConfirm { .. } => Self::handle_pipe_confirm_key,
             PromptKind::PatternPick
             | PromptKind::ShellCmd

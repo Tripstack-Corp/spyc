@@ -345,8 +345,9 @@ a session, to run tabs without jars. `[pane] jars = false` runs every tab
 without one. A tab sent to the background as a task (`:pane-to-task`) keeps
 its jar. A spyc that starts and finds jars no spyc owns, left by a crash
 that no `spyc -r` took back, names them in a pop-up: `r` takes them back as
-tabs and tasks, still running, `d` ends them, and `Esc` leaves them
-running.
+tabs and tasks, still running, `d` asks whether to end them, which only
+`y` does, and `Esc` leaves them running. Keys you typed before the pop-up
+appeared don't answer it.
 
 A tab's program never runs twice. A tab whose jar still runs is taken back for as long as that
 jar runs: a jar that's busy or stopped is waited for, and the tab's screen says so. A tab left

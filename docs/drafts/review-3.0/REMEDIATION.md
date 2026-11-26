@@ -34,7 +34,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | F9 (the release document) | D | | | | open |
 | D1 (connect at the given path; refuse a `:name` that can't fit) | E | `ctrl_d_hands_over_when_the_runtime_directory_is_a_link_to_a_long_path` (`tests/jar_adopt.rs`), `a_name_whose_session_socket_would_not_fit_is_refused` (`src/app/detach.rs`) | | refuter pending | fixed on the branch `fix/session-own-socket` |
 | D2, D6, and P3-9's low (start and save before release) | E | `ctrl_d_with_no_place_for_the_sessions_jar_keeps_spyc_and_its_tabs`, `ctrl_d_whose_save_fails_keeps_spyc_and_its_tabs`, `upgrade_whose_save_fails_keeps_the_session_in_its_jar` (`tests/jar_adopt.rs`) | | refuter pending | fixed on the branch `fix/handover-before-release` |
-| The orphan prompt (confirm a discard; no type-ahead) | E | | | | open |
+| The orphan prompt (confirm a discard; no type-ahead) | E | `a_key_before_the_offer_is_drawn_doesnt_answer_it` (`src/app/harness_tests/jar_orphans.rs`), `discarding_a_jar_no_spyc_owns_asks_first` (`tests/jar_adopt.rs`) | | refuter pending | fixed on the branch `fix/orphan-discard-confirm` |
 | D5 (`save_released` keeps the last report) | E | `ctrl_d_keeps_a_tabs_last_status_report` (`tests/jar_adopt.rs`) | | refuter pending | fixed on the branch `fix/handover-before-release`, with D2 and D6 (the same function) |
 | D3 (`take_over` re-reads before it signals) | E | | | | open |
 | E1 (the control methods need the session's token) | F | | | | open |
