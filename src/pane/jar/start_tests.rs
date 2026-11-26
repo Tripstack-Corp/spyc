@@ -200,7 +200,6 @@ mod checks {
     /// another process holds a copy of every pipe writer this spyc held while
     /// starting it.
     #[test]
-    #[ignore = "red until slice A's jar-start pipe finding is fixed: fix/jar-start-pipe"]
     fn a_jars_start_reaches_it_whatever_else_holds_this_spycs_pipes() {
         let (passed, said) = leaked_start("tab");
         assert!(passed, "{said}");
@@ -209,7 +208,6 @@ mod checks {
     /// The same for a session's own jar, which `^d` and `:detach project`
     /// start.
     #[test]
-    #[ignore = "red until slice A's jar-start pipe finding is fixed: fix/jar-start-pipe"]
     fn a_sessions_jar_start_reaches_it_whatever_else_holds_this_spycs_pipes() {
         let (passed, said) = leaked_start("session");
         assert!(passed, "{said}");
@@ -381,10 +379,15 @@ mod checks {
     /// production halves only; [`pipe_makers`] says what counts. Fails closed:
     /// it must find the code it scans, and each exception must still be there.
     #[test]
-    #[ignore = "red until slice A's jar-start pipe finding is fixed: fix/jar-start-pipe"]
     fn no_reader_waits_for_the_end_of_a_pipe_another_spawn_can_hold() {
         /// Where a pipe stays, and why.
-        const EXCEPTIONS: [(&str, usize, &str); 5] = [
+        const EXCEPTIONS: [(&str, usize, &str); 6] = [
+            (
+                "src/clipboard.rs",
+                3,
+                "the clipboard helpers' three pipes (paste's stdout and stderr, copy's \
+                 stdin): filed as #1323",
+            ),
             (
                 "src/pane/pty_host.rs",
                 1,

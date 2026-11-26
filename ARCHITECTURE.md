@@ -967,6 +967,17 @@ tab's command can carry a prompt, and spyc's wrapper around it names files
 gone once spyc is. What `ps` shows is `spyc-jar`, the program's name (the
 jar's `argv[0]`, which an upgrade keeps) and `--wire`.
 
+The standard input is a file, never a pipe (`crate::child_io`): nameless and
+`0600` from the moment it is made, written whole before the jar starts.
+The jar reads its start to its end, which a pipe reaches only once every copy
+of its writer is closed, and Rust on macOS marks a pipe close-on-exec a moment
+after making it, so a child another thread spawned in that moment kept a
+writer, and the jar never started. A file spyc opens is close-on-exec from
+the first, and ends where its bytes do. The bytes the jar reads are the same.
+Every child whose input or output a reader waits on the end of gets a file
+the same way (`claude mcp`, a store jar's `build-info`); `no_reader_waits_for_the_end_of_a_pipe_another_spawn_can_hold`
+guards it and names the exceptions.
+
 ## A jar's threads never wait on a peer under a lock
 
 <!-- SPYC-TRAP: jar-one-writer -->

@@ -426,7 +426,6 @@ mod tests {
     /// argument and the input; without spyc, the original runs on the input.
     #[test]
     fn the_wrapper_runs_the_original_with_or_without_spyc() {
-        use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("fake-spyc");
@@ -437,21 +436,18 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let original = "printf 'out:'; cat";
+        // Files, not pipes: the suite spawns on many threads, and a pipe's
+        // writer another spawn inherits keeps its end away (`crate::child_io`).
         let run = |command: &str| {
-            let mut child = std::process::Command::new("/bin/sh")
+            let (mut out, theirs) = crate::child_io::output().unwrap();
+            std::process::Command::new("/bin/sh")
                 .arg("-c")
                 .arg(command)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
+                .stdin(crate::child_io::input(b"{\"x\":1}").unwrap())
+                .stdout(theirs)
+                .status()
                 .unwrap();
-            match child.stdin.take().unwrap().write_all(b"{\"x\":1}") {
-                // A wrapper that never reads its input (no original, no spyc)
-                // can exit before this write, as it may under Claude Code too.
-                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
-                other => other.unwrap(),
-            }
-            String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
+            String::from_utf8(crate::child_io::written(&mut out, 1 << 20).unwrap()).unwrap()
         };
         let present = run(&wrap(Some(original), fake.to_str().unwrap()));
         assert_eq!(
