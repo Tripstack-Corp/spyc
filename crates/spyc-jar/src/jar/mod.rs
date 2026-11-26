@@ -93,6 +93,8 @@ pub(crate) enum Who {
 }
 
 pub(crate) struct Shared {
+    /// The jar's user: the one user a connection is served for (R26).
+    pub(crate) uid: u32,
     pub(crate) state: Mutex<State>,
     pub(crate) cv: Condvar,
     pub(crate) master: OwnedFd,
@@ -373,6 +375,7 @@ pub(crate) fn prepare(
     let exited = state.exit.is_some();
     let pty_eof = state.pty_eof;
     let shared = Arc::new(Shared {
+        uid: rustix::process::geteuid().as_raw(),
         state: Mutex::new(state),
         cv: Condvar::new(),
         master,

@@ -34,6 +34,8 @@ pub struct Crossed {
 }
 
 struct Held {
+    /// The jar's user: the one user a connection is answered for (R26).
+    uid: u32,
     why: String,
     socket: Option<PathBuf>,
     master: Option<OwnedFd>,
@@ -67,6 +69,7 @@ pub fn hold(crossed: Crossed, cause: &str) -> ! {
         .and_then(|l| l.local_addr().ok())
         .and_then(|a| a.as_pathname().map(Path::to_path_buf));
     let held = Arc::new(Held {
+        uid: rustix::process::geteuid().as_raw(),
         why: format!(
             "the upgrade's new binary couldn't resume ({cause}); the jar holds its program and serves nothing else"
         ),
@@ -236,7 +239,7 @@ fn accept(held: &Arc<Held>, listener: &UnixListener) -> ! {
 
 /// A new connection: its `hello`, then one question if it is a lookup.
 fn lookup(held: &Held, sock: &UnixStream) {
-    if !crate::jar::peer_is(sock, rustix::process::geteuid().as_raw()) {
+    if !crate::jar::peer_is(sock, held.uid) {
         return;
     }
     crate::jar::no_sigpipe(sock);
@@ -374,4 +377,72 @@ fn finish(held: &Held) -> ! {
         crate::lock::forget(socket);
     }
     std::process::exit(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// A held jar of user `uid`, holding nothing.
+    fn held_by(uid: u32) -> Held {
+        Held {
+            uid,
+            why: "a test".into(),
+            socket: None,
+            master: None,
+            drained: AtomicU64::new(0),
+            open: Mutex::new(0),
+            childless: Mutex::new(false),
+            childless_cv: Condvar::new(),
+            lookups: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// Review finding F6, held mode's own check (R26): a held jar answers
+    /// a lookup only from its own user. Held as another user's, the test's
+    /// connection is closed before a byte of it is read; held as its own,
+    /// the same lookup is welcomed.
+    #[test]
+    fn a_held_jar_answers_no_other_user() {
+        let me = rustix::process::geteuid().as_raw();
+        let ask = |uid: u32| {
+            let (mut client, jar) = UnixStream::pair().expect("socketpair");
+            let hello = Msg::Hello {
+                version: 1,
+                role: Role::Lookup,
+                token: Vec::new(),
+            };
+            client.write_all(&proto::encode(&hello)).expect("hello");
+            client
+                .write_all(&proto::encode(&Msg::Ping { n: 1 }))
+                .expect("ping");
+            client
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .expect("a timeout");
+            let answering = std::thread::spawn(move || lookup(&held_by(uid), &jar));
+            let answer = proto::read_msg(&mut client);
+            // A lookup still reading ends once the test's side is gone.
+            drop(client);
+            answering.join().expect("answered");
+            answer
+        };
+        let own = ask(me);
+        assert!(
+            matches!(own, Ok(Some(Msg::Welcome { .. }))),
+            "a lookup of the jar's user is welcomed: {own:?}"
+        );
+        let other = ask(me.wrapping_add(1));
+        let closed = matches!(
+            &other,
+            Err(proto::ReadError::Io(e)) if matches!(
+                e.kind(),
+                std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::ConnectionReset
+            )
+        );
+        assert!(
+            closed,
+            "one the jar's user didn't make is closed unheard: {other:?}"
+        );
+    }
 }
