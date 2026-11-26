@@ -117,6 +117,10 @@ pub struct PtySpec<'a> {
     pub capture_launch_env: bool,
     /// Run the program in a jar, when one can be started.
     pub jar: Option<super::jar::Spec>,
+    /// The jar this start's record names (a restored tab's, or the one a
+    /// restart replaces): a program it may still hold is never started on a
+    /// PTY of spyc's beside it.
+    pub record: Option<&'a Path>,
 }
 
 pub use super::launch_env::LaunchEnvironment;
@@ -249,7 +253,7 @@ impl PtyHost {
                 (spec.rows, spec.cols),
                 &env,
             )?)?,
-            None => (None, spawn_native(&spec, &argv, &env)?),
+            None => (None, spawn_unless_held(&spec, &argv, &env)?),
         };
         let mut host = Self::running(spawned, (spec.rows, spec.cols), spec.debug_dump);
         host.launch_env = launch_env;
@@ -774,6 +778,21 @@ fn jar_parts(j: super::jar::Jarred) -> anyhow::Result<(Option<JarFields>, Spawne
     Ok((Some(fields), (j.master, reader, input, j.child)))
 }
 
+/// `argv` on a PTY of spyc's own, unless the jar the start's record names
+/// may still hold the program.
+fn spawn_unless_held(
+    spec: &PtySpec,
+    argv: &[String],
+    env: &[(String, String)],
+) -> anyhow::Result<Spawned> {
+    // SPYC-TRAP(jar-never-twice): a start whose record names a jar asks that
+    // jar first, and never runs the program here beside it.
+    if let Some(socket) = super::jar::held(spec.record) {
+        return Err(super::jar::StillRuns(socket.to_path_buf()).into());
+    }
+    spawn_native(spec, argv, env)
+}
+
 /// `argv` on a PTY of spyc's own.
 fn spawn_native(
     spec: &PtySpec,
@@ -882,6 +901,7 @@ mod tests {
             exec_replace: false,
             capture_launch_env: false,
             jar: None,
+            record: None,
         }
     }
 

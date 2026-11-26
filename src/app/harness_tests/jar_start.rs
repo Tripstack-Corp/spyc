@@ -275,7 +275,10 @@ fn a_tab_whose_jar_never_answers_fails_having_run_nothing_and_starts_again() {
 }
 
 /// A tab closed while its jar starts leaves nothing running: the pane that
-/// lands for it is ended, its program with it.
+/// lands for it is ended, its program with it. The program may be ended
+/// before it has run a line, so the test waits on the jar, which ends only
+/// once its program has: then no jar of the tab's runs, and a program that
+/// noted its pid no longer does.
 #[test]
 fn a_tab_closed_while_it_starts_leaves_nothing_running() {
     let dir = short_dir();
@@ -293,18 +296,27 @@ fn a_tab_closed_while_it_starts_leaves_nothing_running() {
         app.runtime.project_mut().pane_tabs = None;
         std::fs::write(dir.path().join("go"), "").unwrap();
         land(&mut app);
-        eventually("its program noted its pid", || {
-            std::fs::read_to_string(&pid).is_ok_and(|p| p.ends_with('\n'))
+        let jars = dir.path().join("spyc").join("jars");
+        eventually("the tab's jar ended, and its program with it", || {
+            std::fs::read_dir(&jars).is_ok_and(|d| {
+                d.filter_map(Result::ok)
+                    .filter(|e| e.path().extension().is_some_and(|x| x == "sock"))
+                    .all(|e| {
+                        crate::pane::jar::place::socket_state(&e.path())
+                            != crate::pane::jar::place::SocketState::Live
+                    })
+            })
         });
-        let pid: i32 = std::fs::read_to_string(&pid)
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        eventually("its program ended", || {
-            rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
-                .is_err()
-        });
+        if let Some(pid) = std::fs::read_to_string(&pid)
+            .ok()
+            .and_then(|p| p.trim().parse::<i32>().ok())
+        {
+            assert!(
+                rustix::process::test_kill_process(rustix::process::Pid::from_raw(pid).unwrap())
+                    .is_err(),
+                "its program still runs"
+            );
+        }
     });
 }
 
@@ -719,7 +731,6 @@ fn a_demoted_tab_keeps_its_jar_and_the_jar_hears_it_holds_a_task() {
 /// setting) `launch_tab_pane` starts the saved command on a PTY of spyc's
 /// while the jar's program runs on.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn review_c_a_restored_tab_whose_jar_runs_is_not_started_again_with_jars_off() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {

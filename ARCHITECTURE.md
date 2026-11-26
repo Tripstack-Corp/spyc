@@ -1142,6 +1142,28 @@ that turns jars on.
   nothing started in its place. Any other start that finds the tab's jar
   running waits up to two seconds for it to end, as a restart's does once
   its exit is acknowledged, and otherwise keeps the tab from opening.
+
+<!-- SPYC-TRAP: jar-never-twice -->
+- **Every start whose record names a jar asks that jar first** (review 3.0,
+  C1 and C2). The invariant above was once kept call site by call site, and
+  the sites without the check (a restore with jars off, `^a R` on a detached
+  tab, a restored tab whose id a live tab held) each ran a program twice. Now
+  a tab's start carries the jar its record names (a restored tab's saved one,
+  the one a restart replaces) to `jar::held`, which asks the jar's lock, and
+  `PtyHost::spawn` asks it again before any program reaches a PTY of spyc's.
+  The lock is asked before the socket file: a cleaner can delete a live
+  jar's socket, which the jar binds again, and a held lock still says it runs.
+  A held jar is taken back, or, for a restart, has its program ended through
+  it and is seen to go before anything starts; with jars off, a restored tab
+  whose jar runs is left `[detached]`, its screen saying why and what to do.
+  A retake waits on the jar, never on one welcome's clock: it closes the
+  tab's old connection first, asks again while the jar is silent, and waits
+  for the jar to say a connection of this spyc's has gone (P1). Only a jar
+  another spyc owns, or one this spyc has no token for, leaves the tab
+  detached, and `^a R` there is refused, naming the owner, whom it asks the
+  jar for at that moment. Guarded by
+  `with_jars_on_no_path_launches_the_program_outside_its_jar` and
+  `no_start_with_a_record_reaches_a_pty_around_its_jar`.
 - **Every jar starts from spyc's store of jar binaries** (decision L,
   `src/pane/jar/store.rs`): `<state>/jar-bin/<version>-<hash>/spyc-jar`,
   `<hash>` the first 12 hex digits of its SHA-256, copied

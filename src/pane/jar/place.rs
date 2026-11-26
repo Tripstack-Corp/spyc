@@ -226,10 +226,17 @@ pub enum SocketState {
 /// can't be undone.
 pub fn socket_state(socket: &Path) -> SocketState {
     use spyc_jar::lock::LockState;
+    let lock = spyc_jar::lock::state(socket);
+    // The lock first: a cleaner can remove a live jar's socket, which the jar
+    // binds again a moment later, its lock held throughout.
     if socket.symlink_metadata().is_err() {
-        return SocketState::Missing;
+        return if lock == LockState::Held {
+            SocketState::Live
+        } else {
+            SocketState::Missing
+        };
     }
-    match spyc_jar::lock::state(socket) {
+    match lock {
         LockState::Held => SocketState::Live,
         LockState::Free => SocketState::Stale,
         LockState::Unknown if spyc_jar::client::answers_now(socket) => SocketState::Live,

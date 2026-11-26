@@ -196,12 +196,43 @@ pub(super) fn readable(fd: impl AsFd, wait: Duration) -> bool {
 
 /// Whether `fd` is ready for `flags` within `wait`.
 pub(crate) fn ready(fd: impl AsFd, flags: rustix::event::PollFlags, wait: Duration) -> bool {
+    matches!(poll_once(fd, flags, wait), Ok(true))
+}
+
+/// One `poll` of `fd` for `flags`, up to `wait`: whether it's ready, or the
+/// poll's error, an interrupted one among them.
+fn poll_once(
+    fd: impl AsFd,
+    flags: rustix::event::PollFlags,
+    wait: Duration,
+) -> rustix::io::Result<bool> {
     let mut fds = [rustix::event::PollFd::new(&fd, flags)];
     let ts = rustix::event::Timespec {
         tv_sec: i64::try_from(wait.as_secs()).unwrap_or(i64::MAX),
         tv_nsec: i64::from(wait.subsec_nanos()),
     };
-    matches!(rustix::event::poll(&mut fds, Some(&ts)), Ok(n) if n > 0)
+    rustix::event::poll(&mut fds, Some(&ts)).map(|n| n > 0)
+}
+
+/// Wait until `until` for `poll`, given what's left, to say ready. B12: a
+/// poll a signal interrupts is asked again with what's left, never taken
+/// for a peer gone silent; any other failure is `TimedOut`, as running
+/// out of time is.
+fn ready_by(
+    until: Instant,
+    mut poll: impl FnMut(Duration) -> rustix::io::Result<bool>,
+) -> std::io::Result<()> {
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
+        match poll(left) {
+            Ok(true) => return Ok(()),
+            Err(rustix::io::Errno::INTR) => {}
+            Ok(false) | Err(_) => return Err(std::io::ErrorKind::TimedOut.into()),
+        }
+    }
 }
 
 pub(super) const TICK: Duration = Duration::from_millis(100);
@@ -217,25 +248,38 @@ pub(super) const FRAME_DEADLINE: Duration = Duration::from_secs(5);
 /// deadline however its bytes trickle, since a peer that sends a byte at a
 /// time would otherwise keep its reader from ever reaching a safe point.
 pub(super) struct By<'a> {
-    pub(super) sock: &'a UnixStream,
-    pub(super) until: Instant,
+    sock: &'a UnixStream,
+    until: Instant,
+    /// How the socket is polled: [`poll_once`], or a test's.
+    poll: Poll,
+}
+
+/// A poll of a socket for reading, up to a wait.
+type Poll = fn(&UnixStream, Duration) -> rustix::io::Result<bool>;
+
+/// [`poll_once`] for reading.
+fn poll_in(sock: &UnixStream, wait: Duration) -> rustix::io::Result<bool> {
+    poll_once(sock, rustix::event::PollFlags::IN, wait)
 }
 
 impl<'a> By<'a> {
     pub(super) fn frame(sock: &'a UnixStream) -> Self {
+        Self::until(sock, Instant::now() + FRAME_DEADLINE)
+    }
+
+    pub(super) fn until(sock: &'a UnixStream, until: Instant) -> Self {
         Self {
             sock,
-            until: Instant::now() + FRAME_DEADLINE,
+            until,
+            poll: poll_in,
         }
     }
 }
 
 impl Read for By<'_> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let left = self.until.saturating_duration_since(Instant::now());
-        if left.is_zero() || !readable(self.sock, left) {
-            return Err(std::io::ErrorKind::TimedOut.into());
-        }
+        let (sock, poll) = (self.sock, self.poll);
+        ready_by(self.until, |left| poll(sock, left))?;
         let mut sock = self.sock;
         sock.read(buf)
     }
@@ -477,5 +521,72 @@ fn keep_socket(shared: &Shared) {
             .listener
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = fresh;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// B12, the jar's half: a wait for an owner's frame that a signal
+    /// interrupts goes on to its deadline; a poll that finds nothing, or
+    /// fails any other way, ends it as the deadline does.
+    #[test]
+    fn an_interrupted_poll_is_asked_again_within_the_deadline() {
+        use std::io::ErrorKind::TimedOut;
+        let until = Instant::now() + Duration::from_secs(5);
+        let mut polls = 0;
+        let waited = ready_by(until, |_| {
+            polls += 1;
+            if polls < 3 {
+                Err(rustix::io::Errno::INTR)
+            } else {
+                Ok(true)
+            }
+        });
+        assert!(
+            waited.is_ok(),
+            "an interrupted poll ended the wait: {waited:?}"
+        );
+        assert_eq!(polls, 3, "asked again after each interruption");
+        let kind = |r: std::io::Result<()>| r.unwrap_err().kind();
+        assert_eq!(kind(ready_by(until, |_| Ok(false))), TimedOut);
+        assert_eq!(
+            kind(ready_by(until, |_| Err(rustix::io::Errno::BADF))),
+            TimedOut
+        );
+        assert_eq!(kind(ready_by(Instant::now(), |_| Ok(true))), TimedOut);
+    }
+
+    /// B12, the jar's half, through `By::read` itself: a read whose poll a
+    /// signal interrupts reads the frame's bytes once the poll answers,
+    /// rather than end as a deadline passed. The jar installs no handler, so
+    /// the interruption is a poll's of the test's.
+    #[test]
+    fn a_read_whose_poll_is_interrupted_reads_what_comes() {
+        use std::io::Write as _;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static POLLS: AtomicUsize = AtomicUsize::new(0);
+        fn interrupted_once(sock: &UnixStream, wait: Duration) -> rustix::io::Result<bool> {
+            if POLLS.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(rustix::io::Errno::INTR);
+            }
+            poll_in(sock, wait)
+        }
+        let (ours, mut theirs) = UnixStream::pair().unwrap();
+        theirs.write_all(b"frame").unwrap();
+        let mut by = By {
+            poll: interrupted_once,
+            ..By::until(&ours, Instant::now() + Duration::from_secs(5))
+        };
+        let mut buf = [0u8; 8];
+        let read = by.read(&mut buf).map_err(|e| e.kind());
+        assert_eq!(read, Ok(5), "an interrupted poll ended the read");
+        assert_eq!(&buf[..5], b"frame");
+        assert_eq!(
+            POLLS.load(Ordering::SeqCst),
+            2,
+            "asked again after the interruption"
+        );
     }
 }

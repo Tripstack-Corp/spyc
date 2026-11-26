@@ -25,8 +25,26 @@ impl App {
         let pane_id = tab.pane_id.as_str();
         // Any project's: an MCP call finds its tab by id across them all.
         let taken = self.runtime.project_of_pane(pane_id).is_some();
-        let reuse = (!pane_id.is_empty() && !taken).then_some(tab);
-        self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, reuse, tab.agent_hint)
+        // A tab given a new id keeps its record of the jar, which a start
+        // asks first (SPYC-TRAP `jar-never-twice`).
+        let renamed;
+        let restoring = if pane_id.is_empty() || taken {
+            renamed = crate::state::sessions::SavedTab {
+                pane_id: uuid::Uuid::now_v7().to_string(),
+                ..tab.clone()
+            };
+            &renamed
+        } else {
+            tab
+        };
+        self.spawn_pane_tab(
+            cmd,
+            cwd,
+            TabSlot::Append,
+            home,
+            Some(restoring),
+            tab.agent_hint,
+        )
     }
 
     /// For tabs that have a `pending_resume_send` armed (set by

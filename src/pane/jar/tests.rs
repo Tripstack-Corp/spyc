@@ -447,18 +447,34 @@ fn a_tab_whose_jar_doesnt_answer_fails_and_says_so() {
 }
 
 /// The rule's one door: the only launch on a PTY of spyc's own is a tab's
-/// with jars off. Fails closed.
+/// with jars off, and it asks first the jar the start's record names
+/// (SPYC-TRAP `jar-never-twice`). Fails closed.
 #[test]
 fn with_jars_on_no_path_launches_the_program_outside_its_jar() {
     let host = crate::guard_support::production_half(include_str!("../pty_host.rs"));
-    let calls: Vec<&str> = host
-        .lines()
-        .filter(|l| l.contains("spawn_native(") && !l.trim_start().starts_with("fn "))
-        .collect();
-    assert_eq!(calls.len(), 1, "spawn_native's callers: {calls:?}");
+    let callers = |name: &str| -> Vec<&str> {
+        host.lines()
+            .filter(|l| l.contains(&format!("{name}(")) && !l.trim_start().starts_with("fn "))
+            .collect()
+    };
+    let calls = callers("spawn_unless_held");
+    assert_eq!(calls.len(), 1, "spawn_unless_held's callers: {calls:?}");
     assert!(
         calls[0].trim_start().starts_with("None => "),
-        "spawn_native only for a tab with no jar asked for: {calls:?}"
+        "a PTY of spyc's only for a tab with no jar asked for: {calls:?}"
+    );
+    let native = callers("spawn_native");
+    assert_eq!(native.len(), 1, "spawn_native's callers: {native:?}");
+    let gate = host
+        .split("fn spawn_unless_held(")
+        .nth(1)
+        .and_then(|body| body.split("\nfn ").next())
+        .expect("premise: spawn_unless_held is there");
+    let asked = gate.find("super::jar::held(spec.record)");
+    let started = gate.find("spawn_native(");
+    assert!(
+        asked.is_some() && started.is_some() && asked < started,
+        "spawn_native only after the jar the record names was asked: {gate}"
     );
     let jar = crate::guard_support::production_half(include_str!("mod.rs"));
     assert!(
@@ -641,7 +657,9 @@ fn spawn_named(place: &Place, name: &str, command: &str, cwd: &Path) -> anyhow::
             adopt: None,
             retake: false,
             exit_linger: None,
+            watch: None,
         }),
+        record: None,
     })
 }
 
@@ -855,7 +873,9 @@ fn a_quiet_pane_leaves_both_snapshots_in_its_jar() {
                 adopt: None,
                 retake: false,
                 exit_linger: None,
+                watch: None,
             }),
+            record: None,
         },
         std::sync::Arc::new(|| {}),
     )
@@ -970,7 +990,9 @@ fn pane_in(place: &Place, command: &str, cwd: &Path, adopt: Option<PathBuf>) -> 
                 adopt,
                 retake: false,
                 exit_linger: None,
+                watch: None,
             }),
+            record: None,
         },
         std::sync::Arc::new(|| {}),
     )
@@ -1845,8 +1867,24 @@ fn tabs_made_together_have_sockets_of_their_own() {
 /// be shorter. A new one fails this until it is one or the other.
 #[test]
 fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
-    const OUTWAITS: [&str; 4] = ["ADOPT_WAIT", "LINK_WAIT", "TAKEOVER_WAIT", "WRITE_STALL"];
-    const SHORTER: [(&str, &str); 24] = [
+    const OUTWAITS: [&str; 5] = [
+        "ADOPT_WAIT",
+        "END_HELD_WAIT",
+        "LINK_WAIT",
+        "TAKEOVER_WAIT",
+        "WRITE_STALL",
+    ];
+    const SHORTER: [(&str, &str); 26] = [
+        (
+            "LET_GO_POLL",
+            "how often a retake asks a jar whether it let a connection go, not a wait",
+        ),
+        (
+            "LET_GO_RESTORING",
+            "a restore's wait for a connection of this spyc's to go, past the jar's \
+             deadline for a silent owner: running out leaves the tab detached, nothing \
+             started, and a parked jar, silent, is asked again",
+        ),
         (
             "SHUTDOWN_WAIT",
             "a session's spyc quitting, not a wait on a jar: running out says it hasn't ended, \
