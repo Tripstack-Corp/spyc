@@ -641,6 +641,139 @@ mod tests {
         );
     }
 
+    /// While `^d`'s session jar starts, its spyc restores the session as
+    /// saved, as no running spyc's: nothing writes it back as this spyc's,
+    /// and `spyc shutdown` and another spyc's `:attach` (`spyc/release`)
+    /// are refused rather than ending or giving away the tabs mid-handover.
+    #[test]
+    #[ignore = "red until saves wait for the session jar's start (fix/handover-autosave)"]
+    fn nothing_saves_or_ends_the_session_while_its_jar_starts() {
+        use crate::mcp_cmd::{McpCommand, McpResponse};
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(&tmp.path().join("state"), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.state.session_name = Some("ANISE".into());
+            let mut released = app.build_manifest();
+            released.pid = None;
+            released.process_started = None;
+            crate::state::sessions::save_session(&released).unwrap();
+            app.runtime.handover_starting = true;
+
+            app.save_session();
+            assert!(!app.autosave_session(), "an autosave wrote the session");
+            let pids: Vec<_> = crate::state::sessions::load_manifests()
+                .into_iter()
+                .map(|m| m.pid)
+                .collect();
+            assert_eq!(pids, [None], "the session was saved as this spyc's");
+
+            let shut = app.execute_mcp_command(McpCommand::Shutdown);
+            assert!(matches!(shut, McpResponse::Error { .. }), "{shut:?}");
+            assert!(!app.state.should_quit, "spyc shutdown ended the session");
+            let given = app.execute_mcp_command(McpCommand::Release);
+            assert!(matches!(given, McpResponse::Error { .. }), "{given:?}");
+            assert!(!app.runtime.released, "the session was given away");
+        });
+    }
+
+    #[test]
+    #[ignore = "red until nothing ends or changes the session while its jar starts (fix/handover-autosave)"]
+    fn no_quit_ends_spyc_while_its_session_jar_starts() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(&tmp.path().join("state"), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.runtime.handover_starting = true;
+            // A double quit, as a Lua `spyc.action("quit", 2)` sends it.
+            app.request_quit();
+            app.request_quit();
+            assert!(!app.state.should_quit, "a double quit ended spyc");
+            app.quit_command();
+            assert!(!app.state.should_quit, "`:q` ended spyc");
+        });
+    }
+
+    /// Each MCP call that changes what the session keeps, made while its jar
+    /// starts: the spyc in the jar restores the session as saved, so the call
+    /// is refused for the agent to make again there, and changes nothing.
+    #[test]
+    #[ignore = "red until nothing ends or changes the session while its jar starts (fix/handover-autosave)"]
+    fn mcp_calls_that_change_the_session_are_refused_while_its_jar_starts() {
+        use crate::mcp_cmd::{McpCommand, McpResponse};
+        use crate::state::scope_registry::{ScopeClaim, ScopeIntent};
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("sub")).unwrap();
+        crate::state::with_state_root(&tmp.path().join("state"), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.state.scope_registry.push(ScopeClaim {
+                id: 1,
+                owner: "owner".into(),
+                owner_label: "claude".into(),
+                paths: vec!["src/a.rs".into()],
+                intent: ScopeIntent::Merging,
+                pr: None,
+                note: None,
+                claimed_at_secs: 0,
+            });
+            let dir = app.state.cur().listing.dir.clone();
+            app.runtime.handover_starting = true;
+            let elsewhere = tmp.path().join("sub").display().to_string();
+            let changing = vec![
+                McpCommand::NavigateTo {
+                    path: elsewhere.clone(),
+                },
+                McpCommand::SetFilter {
+                    pattern: Some("x".into()),
+                },
+                McpCommand::PickFiles {
+                    patterns: vec!["*".into()],
+                },
+                McpCommand::ClearPicks,
+                McpCommand::OpenWorktree {
+                    path: elsewhere.clone(),
+                },
+                McpCommand::CreateWorktree {
+                    branch: "b".into(),
+                    base: None,
+                    open: true,
+                    pane_id: None,
+                    cwd: None,
+                },
+                McpCommand::RemoveWorktree {
+                    path: elsewhere.clone(),
+                },
+                McpCommand::CleanWorktree { path: elsewhere },
+                McpCommand::RegisterScope {
+                    pane_id: None,
+                    pane: None,
+                    paths: vec!["src/b.rs".into()],
+                    intent: "editing".into(),
+                    pr: None,
+                    note: None,
+                },
+                McpCommand::ReleaseScope { id: 1 },
+            ];
+            for command in changing {
+                let asked = format!("{command:?}");
+                match app.execute_mcp_command(command) {
+                    McpResponse::Error { message } if message.contains("own jar") => {}
+                    other => panic!("{asked} was answered as ever: {other:?}"),
+                }
+            }
+            assert_eq!(app.state.scope_registry.len(), 1, "a scope claim changed");
+            assert_eq!(app.state.cur().listing.dir, dir, "a column moved");
+            assert!(app.state.cur().temp_filter.is_none(), "a filter was set");
+            assert!(
+                app.state.active_project().right.is_none(),
+                "a worktree opened"
+            );
+            let read = app.execute_mcp_command(McpCommand::ListScopes);
+            assert!(
+                matches!(read, McpResponse::Ok { .. }),
+                "a read was refused: {read:?}"
+            );
+        });
+    }
+
     #[test]
     fn with_everything_in_jars_detach_asks_the_loop_for_a_handover() {
         let tmp = tempfile::tempdir().unwrap();
