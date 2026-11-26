@@ -58,11 +58,32 @@ impl Client {
         wait: Duration,
         token: &[u8],
     ) -> anyhow::Result<(Self, Msg)> {
+        Self::connect_waiting(socket, role, wait, wait.max(WELCOME_WAIT), token)
+    }
+
+    /// [`Self::connect`], with the welcome waited for no longer than `wait`
+    /// either: for a question whose asker can't wait, and asks again later.
+    pub fn connect_within(
+        socket: &Path,
+        role: Role,
+        wait: Duration,
+        token: &[u8],
+    ) -> anyhow::Result<(Self, Msg)> {
+        Self::connect_waiting(socket, role, wait, wait, token)
+    }
+
+    fn connect_waiting(
+        socket: &Path,
+        role: Role,
+        wait: Duration,
+        welcome: Duration,
+        token: &[u8],
+    ) -> anyhow::Result<(Self, Msg)> {
         let until = Instant::now() + wait;
         let stream = loop {
             match UnixStream::connect(socket) {
                 Ok(s) => break s,
-                Err(e) if Instant::now() >= until => {
+                Err(e) if Instant::now() >= until || gone(socket, &e) => {
                     return Err(anyhow::anyhow!("connect {}: {e}", socket.display()));
                 }
                 Err(_) => std::thread::sleep(CONNECT_RETRY),
@@ -78,7 +99,7 @@ impl Client {
             role,
             token: token.to_vec(),
         })?;
-        match client.recv(wait.max(WELCOME_WAIT))? {
+        match client.recv(welcome)? {
             Some(w @ Msg::Welcome { .. }) => Ok((client, w)),
             Some(Msg::Refused { reason, why }) => Err(Refusal { reason, why }.into()),
             other => Err(anyhow::anyhow!("expected a welcome, got {other:?}")),
@@ -104,6 +125,8 @@ impl Client {
     /// a wait that ran out partway through would lose what was read of it.
     pub fn recv(&mut self, wait: Duration) -> anyhow::Result<Option<Msg>> {
         use std::io::BufRead as _;
+        let until = Instant::now() + wait;
+        let mut left = wait;
         // SPYC-TRAP(jar-frame-whole): the wait bounds a frame's start, never
         // its rest; a timeout mid-frame loses what was read of it.
         loop {
@@ -111,7 +134,7 @@ impl Client {
                 // A socket takes no zero timeout: the least is a millisecond.
                 // macOS refuses any timeout on a socket its peer has closed
                 // (a lookup's ends with its answer), whose reads don't wait.
-                if let Err(e) = self.read_timeout(wait.max(crate::limits::SHORTEST_WAIT))
+                if let Err(e) = self.read_timeout(left.max(crate::limits::SHORTEST_WAIT))
                     && !self.reads_at_once()
                 {
                     return Err(e.into());
@@ -127,6 +150,17 @@ impl Client {
                     {
                         return Ok(None);
                     }
+                    // B12: Linux fails a read with a timeout that a signal
+                    // interrupts, `SA_RESTART` or not, and every one a stop
+                    // and continue finds waiting. The connection is as it
+                    // was: the wait goes on to its end, never past it.
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                        left = until.saturating_duration_since(Instant::now());
+                        if left.is_zero() {
+                            return Ok(None);
+                        }
+                        continue;
+                    }
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -135,7 +169,7 @@ impl Client {
             let _ = self.read_timeout(wait.max(REST_OF_FRAME));
             match proto::read_msg(&mut self.read) {
                 Ok(Some(m)) => return Ok(Some(m)),
-                Ok(None) => {}
+                Ok(None) => left = wait,
                 Err(e) => return Err(e.into()),
             }
         }
@@ -256,6 +290,13 @@ impl Outbox {
             let _ = self.sock.shutdown(std::net::Shutdown::Both);
         }
     }
+
+    /// End the connection now, as a crash would: nothing still queued is
+    /// written, and the jar sees it close however much was waiting.
+    pub fn abort(&self) {
+        let _ = self.sock.shutdown(std::net::Shutdown::Both);
+        let _ = self.queue.send(Queued::Close);
+    }
 }
 
 /// The writer: each queued frame in order, a ping after `idle` with none,
@@ -312,6 +353,14 @@ pub fn answers_now(socket: &Path) -> bool {
     rustix::net::connect(&sock, &addr).is_ok()
 }
 
+/// Whether a refused connect to `socket` means its jar has gone: nothing
+/// holds its lock, so no jar runs there, and trying again would only wait
+/// out the deadline. A jar still starting holds its lock before it listens.
+fn gone(socket: &Path, e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::ConnectionRefused
+        && crate::lock::state(socket) == crate::lock::LockState::Free
+}
+
 /// How long [`describe`] waits to reach a jar, and then for its answer.
 const DESCRIBE_WAIT: Duration = Duration::from_secs(2);
 /// How often [`describe`] looks for the answer.
@@ -331,6 +380,23 @@ pub fn describe(socket: &Path) -> anyhow::Result<Vec<(String, String)>> {
         }
     }
     anyhow::bail!("{} didn't describe itself", socket.display())
+}
+
+/// [`describe`], each wait bounded by `wait`: an error when the jar doesn't
+/// answer in time.
+pub fn describe_within(socket: &Path, wait: Duration) -> anyhow::Result<Vec<(String, String)>> {
+    let until = Instant::now() + wait;
+    let (mut c, _) = Client::connect_within(socket, Role::Lookup, wait, &[])?;
+    c.send(&Msg::Describe)?;
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            anyhow::bail!("{} didn't describe itself", socket.display());
+        }
+        if let Some(Msg::Description { fields }) = c.recv(left.min(DESCRIBE_POLL))? {
+            return Ok(fields);
+        }
+    }
 }
 
 /// The receiving half of a [`Client`].
@@ -399,6 +465,40 @@ mod tests {
     fn next(jar: &mut UnixStream) -> Option<Msg> {
         jar.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         proto::read_msg(jar).unwrap_or_default()
+    }
+
+    /// A refused connect to a jar whose lock is free gives up then: no jar
+    /// runs there, and retrying only waited out the deadline (20 s for a
+    /// tab taken back), so a tab whose jar died was marked `[jar lost]`
+    /// that much later, and under load past what a caller waits.
+    #[test]
+    fn a_connect_to_a_jar_that_has_gone_gives_up_at_once() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("jar-gone-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("g.sock");
+        // A jar that died: its socket's path and its lock file are left,
+        // nothing listens, and nothing holds the lock.
+        drop(std::os::unix::net::UnixListener::bind(&socket).unwrap());
+        std::fs::write(crate::lock::path(&socket), b"").unwrap();
+        assert_eq!(
+            crate::lock::state(&socket),
+            crate::lock::LockState::Free,
+            "premise"
+        );
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let tried = Client::connect(&socket, Role::Lookup, Duration::from_secs(3600), b"");
+            let _ = tx.send(tried.map(|_| ()).map_err(|e| format!("{e:#}")));
+        });
+        let tried = rx
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the connect to a jar that has gone still waits");
+        assert!(tried.is_err(), "{tried:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A jar that answered and closed before the client asked again (a
@@ -487,6 +587,34 @@ mod tests {
         assert_eq!(next(&mut jar), Some(Msg::Ack { offset: 1 }));
         assert_eq!(next(&mut jar), Some(Msg::Ack { offset: 2 }));
         assert_eq!(next(&mut jar), None, "then the connection ends");
+    }
+
+    /// An aborted connection ends at once, what was queued unwritten: the
+    /// jar hears it close, not the frames still waiting behind a full socket.
+    #[test]
+    fn abort_ends_the_connection_at_once() {
+        let (client, mut jar) = pair();
+        let (_rx, out) = client
+            .split_queued(Duration::from_secs(60), Duration::from_secs(60))
+            .unwrap();
+        for _ in 0..16 {
+            out.send(&Msg::Input {
+                bytes: vec![b'x'; 1 << 20],
+            })
+            .unwrap();
+        }
+        out.abort();
+        jar.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut read = 0usize;
+        let mut buf = vec![0u8; 1 << 16];
+        loop {
+            match std::io::Read::read(&mut jar, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => read += n,
+                Err(e) => panic!("the connection didn't end: {e}"),
+            }
+        }
+        assert!(read < 16 << 20, "what was queued was written: {read} bytes");
     }
 
     /// A jar that takes no bytes for `stall` loses the connection, and the

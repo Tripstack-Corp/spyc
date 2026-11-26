@@ -74,9 +74,16 @@ fn line(socket: &Path, now: u64) -> String {
             format!("{}h{:02}m", s / 3600, s / 60 % 60)
         },
     );
+    // C12: the jar's own pid, the one a user ends a hung jar by, and the
+    // owning spyc's.
+    let owner_pid = match get("owner_pid") {
+        "" => String::new(),
+        pid => format!(" (pid {pid})"),
+    };
     format!(
-        "{id}  {what}  pid {}  up {up}  build {}  owner {}  linger {}  log {}",
+        "{id}  {what}  pid {}  jar pid {}  up {up}  build {}  owner {}{owner_pid}  linger {}  log {}",
         get("program_pid"),
+        get("pid"),
         get("build"),
         get("owner"),
         get("linger"),

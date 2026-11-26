@@ -133,10 +133,7 @@ pub(super) fn run_conn(shared: &Arc<Shared>, id: u64, conn: &Arc<Conn>) {
         // lease's: one paused mid-frame is waited for as long as a silent one
         // (R21), and holds off an upgrade meanwhile, which is busy.
         let mut frame = if owner {
-            By {
-                sock: &conn.sock,
-                until: Instant::now() + shared.cfg.deadline,
-            }
+            By::until(&conn.sock, Instant::now() + shared.cfg.deadline)
         } else {
             By::frame(&conn.sock)
         };

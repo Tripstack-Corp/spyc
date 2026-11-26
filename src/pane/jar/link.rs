@@ -439,24 +439,36 @@ impl ChildKiller for JarKiller {
     }
 }
 
-/// A detached tab's stand-ins: its jar runs on for another spyc, so here
-/// there is no output, no input and no program, only the exit that labels
-/// the tab `[detached]`.
-pub(super) fn detached(socket: &std::path::Path, size: (u16, u16)) -> super::Jarred {
-    stand_in(b"", Some(socket), Some(Lost::Held), size)
+/// A detached tab's stand-ins: its jar runs on without this spyc, so here
+/// there is no output, no input and no program, only `why` on its screen
+/// and the exit that labels the tab `[detached]` (C12).
+pub(super) fn detached(socket: &std::path::Path, why: &str, size: (u16, u16)) -> super::Jarred {
+    stand_in(
+        super::as_screen(why).as_bytes(),
+        Some(socket),
+        Some(Lost::Held),
+        size,
+    )
+    .0
 }
 
 /// Stand-ins for a tab with no program here: its screen shows `note`, and
 /// what's typed goes nowhere. With `ended`, the tab ends at once, labelled
-/// by it; without, it stays open until spyc replaces it.
+/// by it; without, it stays open until spyc replaces it, and the [`Watch`]
+/// adds lines to its screen meanwhile.
 pub(super) fn stand_in(
     note: &[u8],
     socket: Option<&std::path::Path>,
     ended: Option<Lost>,
     (rows, cols): (u16, u16),
-) -> super::Jarred {
+) -> (super::Jarred, Watch) {
     let (open, held) = mpsc::channel();
-    super::Jarred {
+    let tab = Arc::new(());
+    let watch = Watch {
+        notes: open.clone(),
+        tab: Arc::downgrade(&tab),
+    };
+    let jarred = super::Jarred {
         master: Box::new(GoneMaster {
             size: Mutex::new(PtySize {
                 rows,
@@ -470,6 +482,7 @@ pub(super) fn stand_in(
                 held: ended.is_none().then_some(held),
             })),
             _open: open,
+            _tab: tab,
         }),
         child: Box::new(GoneChild(ended)),
         replies: Box::new(io::sink()),
@@ -477,25 +490,54 @@ pub(super) fn stand_in(
         snapshots: None,
         socket: socket.map(std::path::Path::to_path_buf),
         adoption: None,
+    };
+    (jarred, watch)
+}
+
+/// A starting tab's stand-in, as the worker starting it sees it: whether the
+/// tab still wants what's being started, and lines to add to its screen.
+#[derive(Clone, Debug)]
+pub struct Watch {
+    notes: mpsc::Sender<Vec<u8>>,
+    tab: std::sync::Weak<()>,
+}
+
+impl Watch {
+    /// Whether the tab's stand-in is still there: a tab closed or restarted
+    /// meanwhile wants nothing.
+    pub fn wanted(&self) -> bool {
+        self.tab.strong_count() > 0
+    }
+
+    /// Add `line` to the stand-in's screen.
+    pub fn say(&self, line: &str) {
+        let _ = self
+            .notes
+            .send(super::as_screen(&format!("\n{line}")).into_bytes());
     }
 }
 
-/// A stand-in's screen: its note, then, for one that stays open, nothing
-/// until its master is dropped.
+/// A stand-in's screen: its note, then, for one that stays open, each line
+/// its [`Watch`] adds, until its master and every watch are dropped.
 struct NoteReader {
     note: Vec<u8>,
     pos: usize,
-    held: Option<mpsc::Receiver<()>>,
+    held: Option<mpsc::Receiver<Vec<u8>>>,
 }
 
 impl Read for NoteReader {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        if self.pos >= self.note.len() {
-            // Ends once the master and its sender are dropped.
-            if let Some(held) = &self.held {
-                let _ = held.recv();
+        while self.pos >= self.note.len() {
+            let Some(held) = &self.held else {
+                return Ok(0);
+            };
+            match held.recv() {
+                Ok(more) => {
+                    self.note = more;
+                    self.pos = 0;
+                }
+                Err(_) => return Ok(0),
             }
-            return Ok(0);
         }
         let n = out.len().min(self.note.len() - self.pos);
         out[..n].copy_from_slice(&self.note[self.pos..self.pos + n]);
@@ -508,7 +550,9 @@ struct GoneMaster {
     size: Mutex<PtySize>,
     note: Mutex<Option<NoteReader>>,
     /// Keeps an open stand-in's reader waiting.
-    _open: mpsc::Sender<()>,
+    _open: mpsc::Sender<Vec<u8>>,
+    /// What a [`Watch`] sees go when the stand-in is dropped.
+    _tab: Arc<()>,
 }
 
 impl MasterPty for GoneMaster {

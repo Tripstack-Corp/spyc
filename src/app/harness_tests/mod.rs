@@ -534,6 +534,7 @@ mod kitty_keys;
 mod list_double_click;
 mod manifest_v2;
 mod mcp;
+mod never_twice;
 mod pager_click_away;
 mod pane;
 mod pane_fork;

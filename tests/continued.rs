@@ -2,14 +2,15 @@
 //! #1309: spyc stopped from outside (`kill -STOP`) and handed back by its
 //! shell's `fg` takes its terminal back: it redraws with no key typed, and
 //! reads keys one at a time again, though the shell put the terminal in its
-//! own line mode meanwhile. Driven through the binary, started from an
+//! own line mode meanwhile; and, its tabs' programs in jars, it keeps its
+//! link to each through the stop. Driven through the binary, started from an
 //! interactive `/bin/sh` on a PTY of the test's own, every directory the
 //! test's own.
 // Helpers outside `#[test]` fns, where `clippy.toml`'s test allowance stops.
 #![allow(clippy::unwrap_used)]
 
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -195,5 +196,177 @@ fn spyc_stopped_from_outside_and_handed_back_redraws_and_reads_keys_again() {
     shell.eventually("one key reaches spyc: its help", at, |s| {
         s.contains("Key tiers")
     });
+    signal(&job, "-KILL");
+}
+
+/// Every jar socket the sessions saved under `state` record.
+fn saved_jar_sockets(state: &Path) -> Vec<PathBuf> {
+    fn walk(v: &serde_json::Value, out: &mut Vec<PathBuf>) {
+        match v {
+            serde_json::Value::Object(o) => {
+                if let Some(s) = o.get("jar_socket").and_then(|s| s.as_str()) {
+                    out.push(PathBuf::from(s));
+                }
+                o.values().for_each(|v| walk(v, out));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|v| walk(v, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(state.join("spyc").join("sessions"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        if let Ok(v) = std::fs::read_to_string(entry.path())
+            .map_err(|_| ())
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).map_err(|_| ()))
+        {
+            walk(&v, &mut out);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn described(socket: &Path, key: &str) -> Option<String> {
+    spyc_jar::client::describe(socket)
+        .ok()?
+        .into_iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v)
+}
+
+/// Ends each jar it names, with its program, however the test ended: a
+/// pane's jar waits for an owner for ever.
+struct Jars(Vec<PathBuf>);
+
+impl Drop for Jars {
+    fn drop(&mut self) {
+        for socket in &self.0 {
+            let pid = |key| described(socket, key).and_then(|p| p.parse().ok());
+            if let Some(p) = pid("program_pid").and_then(rustix::process::Pid::from_raw) {
+                let _ = rustix::process::kill_process_group(p, rustix::process::Signal::KILL);
+            }
+            if let Some(p) = pid("pid").and_then(rustix::process::Pid::from_raw) {
+                let _ = rustix::process::kill_process(p, rustix::process::Signal::KILL);
+            }
+        }
+    }
+}
+
+/// What spyc's debug log says, in `state`.
+fn debug_log(state: &Path) -> String {
+    std::fs::read_dir(state.join("spyc"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("spyc-debug-"))
+        .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+        .collect()
+}
+
+/// P1 and B12: on Linux a stop and continue of spyc, however short, ended
+/// every jarred tab's link at once (each reader's wait failed with `EINTR`),
+/// and sent each tab through a retake that raced the connection it hadn't
+/// yet closed. A jarred tab's link outlasts a short stop: none ends, none is
+/// left `[detached]`, and spyc stays each jar's owner.
+#[test]
+fn a_short_stop_and_continue_leaves_every_jarred_tab_its_link() {
+    const TABS: usize = 3;
+    let spyc = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let _ = std::process::Command::new(spyc).arg("--version").output();
+    let home = tempfile::tempdir().unwrap();
+    let home = std::fs::canonicalize(home.path()).unwrap();
+    let project = home.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("marker-file.txt"), "x").unwrap();
+    let pids = home.join("pids");
+    let tab = format!("\"sh -c 'echo $$ >> {}; exec cat'\"", pids.display());
+    std::fs::write(
+        home.join(".spycrc.toml"),
+        format!(
+            "[pane]\njars = true\ntabs = [{}]\n",
+            vec![tab; TABS].join(", ")
+        ),
+    )
+    .unwrap();
+    let runtime = tempfile::Builder::new()
+        .prefix("sc")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let shell = Shell::start(&home, &project, runtime.path());
+    shell.eventually("the shell's prompt", 0, |s| s.contains("PROMPT> "));
+    let at = shell.printed();
+    shell.type_keys(format!("'{}' --debug\n", spyc.display()).as_bytes());
+    shell.eventually("spyc draws its listing", at, |s| {
+        s.contains("marker-file.txt")
+    });
+    let job = job_of(&shell);
+    let state = home.join("state");
+    let mut jars = Jars(Vec::new());
+    let until = Instant::now() + WAIT;
+    loop {
+        jars.0 = saved_jar_sockets(&state);
+        let owned = jars
+            .0
+            .iter()
+            .filter(|s| described(s, "owner_pid").as_deref() == Some(job.as_str()))
+            .count();
+        if jars.0.len() == TABS && owned == TABS {
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "never: spyc owns its {TABS} tabs' jars; it owns {owned} of {:?}",
+            jars.0
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let at = shell.printed();
+    signal(&job, "-STOP");
+    shell.eventually("the shell takes the terminal back", at, |s| {
+        s.contains("PROMPT> ")
+    });
+    // However short: a stop inside every jar's deadline.
+    let at = shell.printed();
+    shell.type_keys(b"fg\n");
+    shell.eventually("spyc redraws", at, |s| s.contains("marker-file.txt"));
+    let until = Instant::now() + WAIT;
+    let owned = |jars: &Jars| {
+        jars.0
+            .iter()
+            .all(|s| described(s, "owner_pid").as_deref() == Some(job.as_str()))
+    };
+    while !owned(&jars) {
+        assert!(
+            Instant::now() < until,
+            "a stop of spyc lost it a jar: {}",
+            debug_log(&state)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let ended: Vec<String> = debug_log(&state)
+        .lines()
+        .filter(|l| l.starts_with("jar ") && l.contains(" after "))
+        .map(str::to_string)
+        .collect();
+    assert!(
+        ended.is_empty(),
+        "a stop of spyc ended its tabs' links: {ended:#?}"
+    );
+    assert!(
+        !shell.since(at).contains("[detached]"),
+        "a stop of spyc left a tab detached"
+    );
+    let started = std::fs::read_to_string(&pids).unwrap();
+    assert_eq!(
+        started.lines().count(),
+        TABS,
+        "a program started twice: {started}"
+    );
     signal(&job, "-KILL");
 }

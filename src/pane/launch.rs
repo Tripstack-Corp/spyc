@@ -20,6 +20,8 @@ pub struct Launch<'a> {
     /// The tab's SSH agent link (`super::ssh_agent`), its `SSH_AUTH_SOCK`.
     pub ssh_agent: Option<&'a Path>,
     pub jar: Option<jar::Spec>,
+    /// The jar the tab's record names: see `PtySpec::record`.
+    pub record: Option<&'a Path>,
 }
 
 impl Pane {
@@ -65,6 +67,7 @@ impl Pane {
                 project_env: &[],
                 ssh_agent: None,
                 jar: None,
+                record: None,
             },
             wake,
         )
@@ -83,6 +86,7 @@ impl Pane {
             project_env,
             ssh_agent,
             jar,
+            record,
         } = launch;
         // Pane env: tell child processes (e.g. Claude CLI's MCP server)
         // where this spyc instance's context file lives, and advertise
@@ -118,6 +122,7 @@ impl Pane {
             exec_replace: true,
             capture_launch_env: !extra_env.is_empty(),
             jar,
+            record,
         })?;
         // A program taken back from its jar: its pane starts from the jar's
         // snapshot, and the replay brings it up to date.

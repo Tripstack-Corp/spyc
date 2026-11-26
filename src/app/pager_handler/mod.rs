@@ -355,6 +355,7 @@ impl App {
                 project_env: &project_env,
                 ssh_agent: None,
                 jar: None,
+                record: None,
             },
             wake,
         )

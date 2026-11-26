@@ -6,6 +6,7 @@
 //! `session_restore`), so they're `pub` (or `pub(super)` for those only a
 //! sibling needs).
 
+use super::pane_starts::Record;
 use super::{App, Effect, Mode, PaneTabs, Prompt, PromptKind, TabEntry, TabInfo, state};
 
 /// Where a freshly-spawned tab lands. `Replace` keeps the restarted tab's
@@ -116,7 +117,7 @@ impl App {
             .map_or_else(|| "pane".to_string(), |t| t.active_info().label.clone())
     }
 
-    fn active_tab_label(&self) -> String {
+    pub(super) fn active_tab_label(&self) -> String {
         self.runtime
             .project()
             .pane_tabs
@@ -206,7 +207,7 @@ impl App {
     /// injection) MUST gate on this, or they act on the wrong tab when the
     /// spawn fails. On failure this flashes the error and returns `false`.
     pub fn open_pane_tab_in(&mut self, cmd: &str, cwd: &std::path::Path) -> bool {
-        self.open_pane_tab_into(cmd, cwd, TabSlot::Append)
+        self.open_pane_tab_into(cmd, cwd, TabSlot::Append, Record::None)
     }
 
     /// [`Self::open_pane_tab_in`], with control over which slot the new tab
@@ -216,6 +217,7 @@ impl App {
         cmd: &str,
         cwd: &std::path::Path,
         slot: TabSlot,
+        record: Record,
     ) -> bool {
         let (home, hint, claude_home) = match slot {
             TabSlot::Append => (None, None, None),
@@ -233,7 +235,7 @@ impl App {
                     )
                 }),
         };
-        let spawned = self.spawn_pane_tab(cmd, cwd, slot, home.as_deref(), None, hint);
+        let spawned = self.spawn_tab_for(cmd, cwd, slot, home.as_deref(), record, hint);
         // The same command again, so the same Claude home until it reports.
         if spawned
             && let TabSlot::Replace(idx) = slot
@@ -270,13 +272,14 @@ impl App {
         self.spawn_pane_tab(cmd, cwd, TabSlot::Append, home, None, None)
     }
 
-    pub(super) fn spawn_pane_tab(
+    /// [`Self::spawn_pane_tab`], asking first the jar `record` names.
+    pub(super) fn spawn_tab_for(
         &mut self,
         cmd: &str,
         cwd: &std::path::Path,
         slot: TabSlot,
         home: Option<&std::path::Path>,
-        restoring: Option<&crate::state::sessions::SavedTab>,
+        record: Record,
         hint: Option<crate::state::sessions::AgentKind>,
     ) -> bool {
         // A new pane is meant to be used — if the file list is zoomed (the
@@ -301,7 +304,8 @@ impl App {
         // pane knows its session id immediately — pin it now so `^a v` is exact
         // from the first keypress (the spawn-time scan handles fresh codex panes).
         let mut info = TabInfo::new(cmd, cwd);
-        if let Some(saved) = restoring {
+        let restoring = matches!(record, Record::Restoring(_));
+        if let Record::Restoring(saved) = record {
             info.id.clone_from(&saved.pane_id);
         }
         info.agent_hint = hint;
@@ -355,8 +359,9 @@ impl App {
             project_env: &self.state.active_project().env.pairs(),
             ssh_agent: ssh_agent.as_deref(),
             jar: None,
+            record: None,
         };
-        match self.launch_tab_pane(launch, jars, &pane_id, restoring, wake) {
+        match self.launch_tab_pane(launch, jars, &pane_id, record, wake) {
             Ok(p) => {
                 if kind == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.map(std::path::Path::to_path_buf).or_else(|| {
@@ -376,7 +381,7 @@ impl App {
                 }
                 let origin = Some(self.tab_origin(&pane_id));
                 self.noting_from(origin, |app| {
-                    app.state.note_tab_started(cmd, restoring.is_some());
+                    app.state.note_tab_started(cmd, restoring);
                 });
                 // The first launch of an agent asks whether to wire it. After
                 // the tab exists, so the prompt doesn't cover a missing pane.
@@ -479,8 +484,11 @@ impl App {
             project_env: &self.state.active_project().env.pairs(),
             ssh_agent: ssh_agent.as_deref(),
             jar: None,
+            record: None,
         };
-        match self.launch_tab_pane(launch, jars, &pane_id, None, wake) {
+        let replaced = self.held_jar_of(tab_idx);
+        let record = replaced.as_deref().map_or(Record::None, Record::Replacing);
+        match self.launch_tab_pane(launch, jars, &pane_id, record, wake) {
             Ok(p) => {
                 if info.launched_agent().kind() == crate::state::sessions::AgentKind::Codex {
                     info.codex_home = home.clone().or_else(|| {
@@ -566,6 +574,9 @@ impl App {
             crate::agent::resume::command_without_resume(&cmd)
         };
 
+        if self.refuses_restart_beside_its_jar(tab_idx) {
+            return;
+        }
         if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
             && let Some(entry) = tabs.tabs_mut().get_mut(tab_idx)
         {
@@ -760,7 +771,7 @@ impl App {
     /// still running: a restart kills that session exactly as `^a x` would, and
     /// `R` sits one shift away from `r` (rename). An exited tab restarts silently.
     pub fn restart_active_tab(&mut self) {
-        if self.runtime.project().pane_tabs.is_none() {
+        if self.runtime.project().pane_tabs.is_none() || self.asked_to_restart_beside_its_jar() {
             return;
         }
         if self.needs_active_tab_confirm() {
@@ -805,6 +816,7 @@ impl App {
         let cwd = info.cwd.clone();
         let label = info.label.clone();
         let owner = info.claim_owner.clone();
+        let replaced = self.held_jar_of(idx);
         // Kill the outgoing child before its replacement spawns, so two agents
         // never briefly share the cwd; `replace_at` reaps the rest of the tree.
         if let Some(entry) = self
@@ -818,7 +830,8 @@ impl App {
         }
         // A failed spawn leaves the existing tab in place — keep
         // `open_pane_tab_into`'s error flash rather than claiming success.
-        if !self.open_pane_tab_into(&cmd, &cwd, TabSlot::Replace(idx)) {
+        let record = replaced.as_deref().map_or(Record::None, Record::Replacing);
+        if !self.open_pane_tab_into(&cmd, &cwd, TabSlot::Replace(idx), record) {
             return;
         }
         if let Some(entry) = self
