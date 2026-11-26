@@ -99,6 +99,15 @@ fn sources() -> Vec<Source> {
             "src/app/harness_tests/jar_orphans.rs",
             include_str!("../../src/app/harness_tests/jar_orphans.rs"),
         ),
+        whole(
+            "src/app/harness_tests/never_twice.rs",
+            include_str!("../../src/app/harness_tests/never_twice.rs"),
+        ),
+        whole(
+            "tests/jar_interrupted.rs",
+            include_str!("../jar_interrupted.rs"),
+        ),
+        whole("tests/continued.rs", include_str!("../continued.rs")),
         tests_of(
             "crates/spyc-jar/src/client.rs",
             include_str!("../../crates/spyc-jar/src/client.rs"),
