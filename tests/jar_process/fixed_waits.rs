@@ -144,6 +144,10 @@ fn sources() -> Vec<Source> {
             "src/pane/jar/shutdown.rs",
             include_str!("../../src/pane/jar/shutdown.rs"),
         ),
+        whole(
+            "src/pane/jar/start_tests.rs",
+            include_str!("../../src/pane/jar/start_tests.rs"),
+        ),
     ]
 }
 

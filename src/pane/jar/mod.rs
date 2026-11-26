@@ -51,6 +51,8 @@ mod take;
 mod tokens;
 
 #[cfg(test)]
+mod start_tests;
+#[cfg(test)]
 pub mod test_dir;
 #[cfg(test)]
 mod tests;

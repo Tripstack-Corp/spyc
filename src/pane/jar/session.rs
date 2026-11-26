@@ -255,12 +255,28 @@ pub fn start(
     name: &str,
     argv: Vec<String>,
     cwd: &Path,
+    size: (u16, u16),
+) -> anyhow::Result<PathBuf> {
+    start_in(
+        &super::place::Place::for_this_user()?,
+        name,
+        argv,
+        cwd,
+        size,
+    )
+}
+
+/// [`start`], with the jar and its directories `place` names.
+pub(super) fn start_in(
+    place: &super::place::Place,
+    name: &str,
+    argv: Vec<String>,
+    cwd: &Path,
     (rows, cols): (u16, u16),
 ) -> anyhow::Result<PathBuf> {
-    use super::place::{Place, SocketState, socket_state};
+    use super::place::{SocketState, socket_state};
     use std::io::Write;
     use std::os::unix::process::CommandExt;
-    let place = Place::for_this_user()?;
     let socket = place.prepare_sessions()?.join(format!("{name}.sock"));
     match socket_state(&socket) {
         SocketState::Live => anyhow::bail!("{name} already runs in a jar of its own"),
@@ -283,7 +299,7 @@ pub fn start(
         }
     }
     let token = super::tokens::new()?;
-    super::tokens::save(&place, &socket, &token)?;
+    super::tokens::save(place, &socket, &token)?;
     let mut jar = std::process::Command::new(&place.binary)
         .arg0(format!("spyc-jar {name}"))
         .args(["--wire", &spyc_jar::proto::VERSION.to_string()])
@@ -314,7 +330,7 @@ pub fn start(
         if Instant::now() >= until || jar.try_wait().is_ok_and(|exit| exit.is_some()) {
             let _ = jar.kill();
             let _ = jar.wait();
-            super::tokens::forget(&place, &socket);
+            super::tokens::forget(place, &socket);
             anyhow::bail!("{name}'s jar didn't start");
         }
         std::thread::sleep(START_POLL);
