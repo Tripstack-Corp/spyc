@@ -1091,6 +1091,98 @@ fn ctrl_d_leaves_no_tab_detached_and_runs_no_program_twice() {
     assert!(programs.iter().all(|p| alive(*p)), "a tab's program ended");
 }
 
+/// An autosave due while `^d`'s session jar starts (a `:cd` just before
+/// `^d`) writes nothing: the session stays saved as no running spyc's, so
+/// the spyc in the jar restores it and takes the tab's jar once this spyc
+/// lets it go. The jar's `spyc-jar` waits for such a save (at most 10 s)
+/// before it starts, so a save would land mid-start whatever the timing.
+#[test]
+#[ignore = "red until saves wait for the session jar's start (fix/handover-autosave)"]
+fn an_autosave_due_while_the_session_jar_starts_leaves_the_session_to_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs = dirs();
+    let bin = dirs.root.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_spyc"));
+    let spyc = bin.join("spyc");
+    std::fs::copy(built, &spyc).unwrap();
+    let told = dirs.root.path().join("told");
+    let stopped = dirs.root.path().join("stopped");
+    let sessions = dirs.state.join("spyc").join("sessions");
+    let stand_in = bin.join("spyc-jar");
+    std::fs::write(
+        &stand_in,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in --wire) ;; *) exec '{jar}' \"$@\";; esac\nif [ -e '{told}' ]; then\n rm -f '{told}'\n i=0\n while [ $i -lt 100 ]; do\n  grep -qs '\"pid\": [0-9]' '{sessions}'/*.json && break\n  i=$((i+1)); sleep 0.1\n done\n echo $PPID > '{stopped}'; kill -STOP $PPID\nfi\nexec '{jar}' \"$@\"\n",
+            jar = built.with_file_name("spyc-jar").display(),
+            told = told.display(),
+            stopped = stopped.display(),
+            sessions = sessions.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&stand_in, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut left = Leftovers(Vec::new());
+    let mut first = Spyc::start_from(&spyc, &dirs, &[]);
+    left.0.push(first.pid());
+    first.eventually("the tab's program starts", || {
+        !noted(&dirs.pidfile).is_empty()
+    });
+    let program = noted(&dirs.pidfile)[0];
+    left.0.push(program);
+    first.eventually("the tab's output shows", || first.shows("ready-mark"));
+    let mut tab_socket = None;
+    eventually("the session records the tab's jar", || {
+        tab_socket = saved_jar_socket(&dirs.state);
+        tab_socket.is_some()
+    });
+    let tab_socket = tab_socket.unwrap();
+    if let Some(jar) = described(&tab_socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    std::fs::write(&told, "").unwrap();
+    // A change just before `^d`: an autosave comes due within its debounce.
+    first.type_keys(b":cd ..\r");
+    first.type_keys(b"\x04");
+    eventually("the session jar stops this spyc as it starts", || {
+        stopped.exists()
+    });
+    assert_eq!(
+        saved_pids(&dirs.state),
+        [None],
+        "the session was saved as this spyc's while its jar started"
+    );
+    let mut session = None;
+    eventually("a session jar", || {
+        session = session_jar(&dirs);
+        session.is_some()
+    });
+    let (_, socket) = session.unwrap();
+    if let Some(jar) = described(&socket, "pid").and_then(|p| p.parse().ok()) {
+        left.0.push(jar);
+    }
+    let mut jar_spyc = None;
+    eventually("the session's spyc runs", || {
+        jar_spyc = described(&socket, "program_pid").filter(|p| p != "0");
+        jar_spyc.is_some()
+    });
+    let jar_spyc = jar_spyc.unwrap();
+    left.0.push(jar_spyc.parse().unwrap());
+    if let Some(p) = rustix::process::Pid::from_raw(first.pid()) {
+        let _ = rustix::process::kill_process(p, rustix::process::Signal::CONT);
+    }
+    eventually("the terminal's spyc ends", || first.exited());
+    eventually("the session's spyc takes the tab's jar", || {
+        described(&tab_socket, "owner_pid").as_deref() == Some(jar_spyc.as_str())
+    });
+    assert!(alive(program), "the tab's program ended");
+    assert_eq!(
+        noted(&dirs.pidfile),
+        [program],
+        "the program was started again"
+    );
+}
+
 /// D2 and P3-9 of the 3.0 review: `^d` whose session jar can't start keeps
 /// spyc in its loop with its tabs, and says why, rather than letting every
 /// jar go and quitting with a message that its tabs run on in their jars.
