@@ -21,10 +21,10 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | A2 (reason 6 where 5 is promised) | C | `tests/jar_process/answers.rs`: a late proof (both platforms), two Linux tests short of descriptors; red at `origin/main` 1dfaac86 | `test/jar-upgrade-answers-red`, `fix/jar-upgrade-answers` | pending | fixed on the branch, awaiting the refuter |
 | A3 (the copy step opens any path) | C | `an_upgrade_naming_a_fifo_is_refused_and_the_next_one_runs`, `a_refused_upgrade_leaves_no_copy_behind`; red at `origin/main` 1dfaac86 | `test/jar-upgrade-answers-red`, `fix/jar-upgrade-answers` | pending | fixed on the branch, awaiting the refuter |
 | A9 (a validator's process group) | C | `a_validators_children_end_with_the_validation`; red at `origin/main` 1dfaac86 | `test/jar-upgrade-answers-red`, `fix/jar-upgrade-answers` | pending | fixed on the branch, awaiting the refuter |
-| G9 (three jar-or-nothing sentences) | C | | | | open |
-| A13 (the specification's prose) | C | | | | open |
-| D7 (token rotation no code performs) | C | | | | open |
-| E6's sentence under "Who may connect" | C | | | | open |
+| G9 (three jar-or-nothing sentences) | C | none (texts) | `docs/jar-protocol-texts` | pending | fixed on the branch, awaiting the refuter |
+| A13 (the specification's prose) | C | none (texts) | `docs/jar-protocol-texts` | pending | fixed on the branch, awaiting the refuter |
+| D7 (token rotation no code performs) | C | none (texts) | `docs/jar-protocol-texts` | pending | fixed on the branch, awaiting the refuter |
+| E6's sentence under "Who may connect" | C | none (texts) | `docs/jar-protocol-texts` | pending | fixed on the branch, awaiting the refuter |
 | F6 (no test of the peer-user check) | C | `a_connection_from_another_user_is_closed_unheard` (unit, `accept.rs`), seen failing with M3 | `test/jar-peer-user` | pending | fixed on the branch, awaiting the refuter |
 | F7 (no test of `SO_NOSIGPIPE`) | C | `a_validator_gone_mid_blob_does_not_end_a_jar_whose_exec_failed`, seen failing on macOS with M12 | `fix/jar-sigpipe` | pending | fixed on the branch, awaiting the refuter |
 | S6: `honoured()` removed, with F1 and G1 | D | | | | open |

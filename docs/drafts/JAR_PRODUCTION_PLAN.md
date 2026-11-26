@@ -6,7 +6,7 @@ the upgrade step ("The upgrade step", below). The owner's decisions are at
 the end.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099), on
 the `3.0` milestone.
-**Builds:** [`JAR_PROTOCOL.md`](JAR_PROTOCOL.md), whose version 1 froze on
+**Builds:** [`JAR_PROTOCOL.md`](../JAR_PROTOCOL.md), whose version 1 froze on
 2026-11-12, froze again the same day with the review's changes, reopened
 on 2026-11-15 for the upgrade step (its decision L), and froze again on
 2026-11-24 (its decision N), from what
@@ -242,10 +242,10 @@ a spyc in an outer jar, which ends once it owns nothing.
   each tab's live status and a shell tab's running agent, and is kept until
   the receiving spyc's session is saved (stage 6), so a spyc that dies
   partway loses nothing. It is written and `fsync`ed **before** any jar is
-  released, and a detach that can't write it stops there; it keeps each old
-  token until the receiving spyc confirms, which tries the new token, then the
-  old (finding 6: the spike released first, so a sending spyc dying between
-  the two stranded every jar).
+  released, and a detach that can't write it stops there (finding 6: the
+  spike released first, so a sending spyc dying between the two stranded
+  every jar). No jar's token changes in a move: both spycs read it from the
+  one `jar-tokens/` directory, and neither sends `release`.
 - **An agent's MCP follows its jar** (R30a): its proxy asks the jar, as a
   lookup, where its owner is now (decision J).
 - **Tests:** the spike's `scopes.py` and `attn.py` become in-repo tests: a

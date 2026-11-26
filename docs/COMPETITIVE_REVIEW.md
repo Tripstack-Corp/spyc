@@ -314,7 +314,7 @@ nothing else, outlives spyc, and replaces its own binary in place by passing
 its descriptors across an `exec`, herdr's live handoff done per pane. spyc
 stays one process holding the Model, in a jar of its own when it has to outlive
 its terminal. The protocol froze at version 1 after a staged spike on macOS
-and Linux (`docs/drafts/JAR_PROTOCOL.md`, `docs/drafts/PANE_JAR_SPIKE.md`);
+and Linux (`docs/JAR_PROTOCOL.md`, `docs/drafts/PANE_JAR_SPIKE.md`);
 nothing of it has shipped. Until it does, herdr's lead in persistence stands.
 herdr's handoff bug ([#808](https://github.com/ogulcancelik/herdr/issues/808),
 macOS responsible-process loss) is one the spike checked: with the terminal

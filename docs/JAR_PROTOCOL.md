@@ -6,12 +6,12 @@ built every v1 verdict below. It reopened on 2026-11-12 for three changes an
 external review found it needed (decision K), and froze again with them made
 and tested. It reopened on 2026-11-15 for the upgrade step (decision L), and
 froze again once the conditions in
-[`JAR_PRODUCTION_PLAN.md`](JAR_PRODUCTION_PLAN.md) → "Refreezing" held. No
+[`JAR_PRODUCTION_PLAN.md`](drafts/JAR_PRODUCTION_PLAN.md) → "Refreezing" held. No
 byte of any frame and nothing in the blob's layout changed in that last
 reopening; [Version 1 on the wire](#version-1-on-the-wire) is the format, byte
 for byte.
 **Tracks:** [#1099](https://github.com/Tripstack-Corp/spyc/issues/1099).
-**Tested by:** [`PANE_JAR_SPIKE.md`](PANE_JAR_SPIKE.md), which builds a minimal
+**Tested by:** [`PANE_JAR_SPIKE.md`](drafts/PANE_JAR_SPIKE.md), which builds a minimal
 jar, measures it, and reports which of these requirements survive.
 
 A `spyc-jar` runs one pane's program, owns its PTY, and outlives spyc. A jar
@@ -59,8 +59,11 @@ stages measured, once they had all reported:
   - **jars exist only when there is a program to hold:** a session with no
     pane tabs has no jars, sockets or background processes;
   - **quitting** leaves no process, socket or file behind;
-  - **if the jar machinery fails,** spyc hosts the pane itself, as it does
-    today, and notes it in `:stderr` rather than prompting;
+  - **if the jar machinery fails,** the tab says why and ends
+    `[not started]`, and spyc offers, once a session, to run tabs without
+    jars; it never starts a program another way unasked (decision 6 of
+    [`JAR_PRODUCTION_PLAN.md`](drafts/JAR_PRODUCTION_PLAN.md), which this
+    line contradicted until 2026-11-24);
   - **the new verbs** (`spyc attach`, `:detach`, sharing) cost nothing until
     someone uses them.
 - **Mechanism in the jar, policy in spyc.** The jar does what it's told: how
@@ -414,9 +417,10 @@ things a user may want of one:
 
 **Moving a project between spycs (U13).** Detach a project from one spyc and
 attach it to another, in another terminal or on another machine over SSH. For
-the jars it is many owner handovers (R22), one per pane jar of the project,
-together with the project's part of the manifest, which manifest v2 already
-keeps per project. Three things follow:
+the jars it is many changes of owner, one per pane jar of the project: the
+sending spyc lets each lease go and the receiving one takes it, with the
+token the jar already has (no `release`, R22, is sent). With them goes the
+project's part of the manifest, which manifest v2 already keeps per project. Three things follow:
 
 - **A jar's name can't belong to the spyc that spawned it** (R30): it moves.
 - **Its agents' MCP connections have to follow.** An agent's proxy learned its
@@ -559,6 +563,14 @@ is decision D; the field is v1 either way.
 | **Reader** (any number) | Watch: the snapshot and the events after it, then the live stream. | As long as its connection. |
 | **Lookup** (a few at once) | Ask the jar to describe itself, or ping. Needs no token. | One question. At most sixteen connections that have shown no token are open at once, the oldest closed to admit another, and none crosses an upgrade. |
 
+**A version-1 jar has one token for its owner and every reader,** and a reader
+holding it may ask for an upgrade, which runs a binary the reader names with
+the jar's whole state on its standard input. So no party meant to hold less
+than the owner is ever given a version-1 jar's token: not a watcher that can
+never type (U6), not a read-only share (U15), not any later role. Such a party
+goes through a gateway that holds the token itself, or waits for a jar
+upgraded to a version that knows its role.
+
 In Rust terms the owner is ownership: it moves on an upgrade and drops on a
 crash. The keyboard is a non-lexical borrow, a `&mut` that ends at its last
 use. On spyc's side the roles are typestate (`Jar<Reader>`, `Jar<Writer>`), and
@@ -584,8 +596,10 @@ refuses the owner and keyboard roles without it. spyc keeps the tokens in
 memory and writes them, `0600`, into its state directory (`jar-tokens/`, not
 the runtime directory beside the sockets), so a spyc after a crash can reclaim
 its jars. Readers need the token too, because another agent's screen can hold
-secrets. A project move hands each jar a new token (R22), so the spyc it left
-can't come back in.
+secrets. A project move keeps each jar's token: the spyc it left and the one
+it goes to read it from the one `jar-tokens/` directory, as any process of
+the same user can. `release` (R22) can give a jar a new token, and no spyc
+sends it.
 
 **What it covers:** an agent that finds a socket and connects to it, whether by
 accident, curiosity, or a prompt injection that asks it to.
@@ -743,7 +757,8 @@ to upgrade to whatever came after (R33). Nothing else has to stay.
     count; each a sequence number, then `0`, an offset and bytes for output,
     or `1`, an offset, rows and columns for a resize);
   - the state: the owner (an option), what it acknowledged, the snapshots (a
-    count, each as in `store_snapshot`), the exit (a flag, then the code and
+    count, each as in `store_snapshot` but for its bytes, which a u32 length
+    precedes here where the frame runs them to its end), the exit (a flag, then the code and
     whether a signal ended it), whether the exit was collected, whether the
     PTY reached its end, rows and columns, the next connection id, how long
     the jar has had no owner (an option, in milliseconds), the foreground
@@ -767,9 +782,10 @@ Each direction has one rule:
   while spyc runs). spyc starts every jar from its own store copy, made and
   checked when spyc starts (decision L), so this arises only where the store
   can't be used. The start names `--wire N`; a jar that doesn't speak it
-  exits with 75 before anything starts, and spyc runs the program without a
-  jar rather than fail the tab. A jar speaks every version from 1 to its own
-  unless a release says it stopped.
+  exits with 75 before anything starts, and spyc fails the tab and offers,
+  once a session, to run tabs without jars: it never runs the program another
+  way unasked (decision 6 of the production plan). A jar speaks every version
+  from 1 to its own unless a release says it stopped.
 - **An older spyc, a newer jar** (a downgrade). The jar welcomes the older
   version if it still speaks it, and otherwise refuses with reason 3; spyc
   then marks the tab detached and starts nothing. A jar can't be upgraded back
@@ -973,7 +989,7 @@ compiles:
 
 | Limit | Value | What it bounds |
 |---|---|---|
-| `PARKED_AT_MOST` | 15 s | The longest a jar reads nothing and answers nothing, parked for an upgrade: reaching the park (3 s), the flush (1 s), the parked validation (5 s) and its output (1 s), and the holder's answer (5 s). It is their sum in `upgrade.rs`, so a longer step moves it. Frames queue meanwhile and are read after. |
+| `PARKED_AT_MOST` | 15 s | The longest a jar reads nothing and answers nothing, parked for an upgrade: reaching the park (3 s), the flush (1 s), the parked validation (5 s, its output included), the second for that output again (a margin: the jar reads it inside the 5 s), and the holder's answer (5 s). It is their sum in `upgrade.rs`, so a longer step moves it. Frames queue meanwhile and are read after. The `exec` and the new image's resume come after the holder's answer and are not in it: the new image waits on the holder for those (review finding A6). |
 | `UPGRADE_AT_MOST` | 46 s | The longest a jar takes to answer an upgrade with `upgraded` or `refused`: the first validation of the new binary (30 s) and its output (1 s), while the program is still served, then `PARKED_AT_MOST`. A requester waits past it, or reports a failed upgrade that then succeeds; `spyc-jar upgrade` does. |
 | `OWNER_DEADLINE` | 10 s | How long a jar goes without hearing from its owner before it ends the owner's lease, unless `--deadline-ms` says otherwise. An owner pings more often. |
 | The start's hold | as the start says | How long a jar holds its program for a first owner (decision M). A starter waits as long for its answer. |

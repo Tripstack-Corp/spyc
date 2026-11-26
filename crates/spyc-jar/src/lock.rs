@@ -1,4 +1,4 @@
-//! The jar's lock (R32b in `docs/drafts/JAR_PROTOCOL.md`): an `fcntl` lock on
+//! The jar's lock (R32b in `docs/JAR_PROTOCOL.md`): an `fcntl` lock on
 //! a file beside the socket, held for as long as the jar lives.
 //!
 //! A client reads it to tell a jar that is only busy (parked, stopped, its
