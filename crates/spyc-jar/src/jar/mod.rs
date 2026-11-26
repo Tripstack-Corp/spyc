@@ -38,6 +38,7 @@
 mod accept;
 mod conn;
 mod describe;
+mod end;
 mod input;
 mod life;
 mod outbox;
@@ -467,8 +468,10 @@ fn accept_loop(shared: &Arc<Shared>) -> ! {
         }
         if checked.elapsed() >= SOCKET_CHECK {
             checked = Instant::now();
+            end::check_begins();
             keep_socket(shared);
             crate::lock::keep(&shared.cfg.socket);
+            end::check_done();
         }
         let listener = shared
             .listener

@@ -761,6 +761,66 @@ fn a_tab_whose_jar_still_runs_never_starts_its_program_twice() {
     restarted.shutdown(END);
 }
 
+/// How long an ended program's jar takes to go, at most, here: its exit
+/// acked, then a debug build's end held for a socket check, every 2 s.
+const JAR_GOES: Duration = Duration::from_secs(30);
+
+/// An ending jar leaves nothing at its address, whenever its socket check
+/// runs. That check binds the socket again when a cleaner has removed it,
+/// and it can run while the jar ends, after its socket has gone and before
+/// its lock file goes. Then a socket stays with no lock file and nothing
+/// listening, which no spyc can tell from a running jar's: the tab's restart
+/// is refused, and a sweep never removes it. A debug build's
+/// `SPYC_JAR_END_GAP` holds the jar's end there until a socket check has run
+/// (the flake in `a_tab_whose_jar_still_runs_never_starts_its_program_twice`).
+#[test]
+#[ignore = "red until the jar end race is fixed: fix/jar-end-race"]
+fn an_ending_jar_leaves_no_socket_for_its_tab_to_be_refused_on() {
+    let dir = short_dir();
+    let held = dir.path().join("held-jar");
+    std::fs::write(
+        &held,
+        format!(
+            "#!/bin/sh\nSPYC_JAR_END_GAP=1 exec '{}' \"$@\"\n",
+            built_jar().display()
+        ),
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&held, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let place = place_in(dir.path(), held);
+    let socket = place.socket("0123456789abcdef");
+    // The program prints this itself, once it runs in its own process group
+    // (a tty echoes what's typed before then), so the kill below reaches it.
+    let mut first = spawn_in(&place, "printf started; exec cat", dir.path()).unwrap();
+    assert!(first.jarred());
+    read_until(&first, "started");
+
+    // As a tab's restart does: the kill, and the jar ends.
+    first.child.kill().unwrap();
+    let until = Instant::now() + JAR_GOES;
+    while socket_state(&socket) == SocketState::Live {
+        assert!(Instant::now() < until, "never: the jar went");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let left = socket_state(&socket);
+    place::sweep(&place, Duration::ZERO);
+    let restarted = spawn_in(&place, "exec cat", dir.path());
+    let refused = restarted.as_ref().err().map(|e| format!("{e:#}"));
+    if let Ok(mut restarted) = restarted {
+        restarted.shutdown(END);
+    }
+    assert_eq!(
+        refused,
+        None,
+        "the tab's restart was refused, after a sweep too: the jar left {left:?} at {}",
+        socket.display()
+    );
+    assert_eq!(left, SocketState::Missing, "the jar left its socket");
+}
+
 /// R17e: a snapshot follows a second of quiet, never a frame the program
 /// holds open, and isn't taken again until more is parsed.
 #[test]
@@ -2065,7 +2125,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         AfterExec, Command, DebugStretch, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served,
         Start, Unbounded,
     };
-    const TIMERS: [(&str, Kind); 45] = [
+    const TIMERS: [(&str, Kind); 46] = [
         ("ATTACH_WAIT", Command),
         ("ATTACH_PING", Poll),
         ("SIZE_POLL", Poll),
@@ -2108,6 +2168,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         ("PARENT_CHECK", Poll),
         ("TICK", Poll),
         ("SOCKET_CHECK", Poll),
+        ("GAP_POLL", Poll),
         ("PARKED_AT_MOST", Limit),
         ("UPGRADE_AT_MOST", Limit),
         ("STRETCHED", DebugStretch),
