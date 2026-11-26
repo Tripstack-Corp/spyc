@@ -125,15 +125,39 @@ fn peer_pid(_stream: &UnixStream) -> std::io::Result<u32> {
 
 /// Writing to a socket whose peer has gone answers `EPIPE` rather than raising
 /// `SIGPIPE`, whatever the jar's disposition: a failed `exec` leaves it at
-/// the default.
+/// the default (review finding A1).
+// SPYC-TRAP(jar-no-sigpipe): every socket the jar writes is made so here or
+// by std, and every `sendmsg` carries [`NO_SIGNAL`]; one write that isn't
+// ends the jar and its program after a failed upgrade.
 #[cfg(target_os = "macos")]
 pub fn no_sigpipe(stream: &UnixStream) {
     let _ = rustix::net::sockopt::set_socket_nosigpipe(stream, true);
 }
 
-/// Linux's std writes to a socket with `MSG_NOSIGNAL` already.
+/// Linux's std writes to a socket with `MSG_NOSIGNAL` already, and the jar's
+/// own `sendmsg` calls carry [`NO_SIGNAL`].
 #[cfg(not(target_os = "macos"))]
 pub const fn no_sigpipe(_stream: &UnixStream) {}
+
+/// What every `sendmsg` of the jar's carries: on Linux `MSG_NOSIGNAL`, which
+/// `rustix` adds only when asked. macOS has no such flag; [`no_sigpipe`] on
+/// the socket does it there.
+#[cfg(target_os = "linux")]
+pub const NO_SIGNAL: rustix::net::SendFlags = rustix::net::SendFlags::NOSIGNAL;
+
+/// What every `sendmsg` of the jar's carries: nothing, [`no_sigpipe`] on the
+/// socket does it.
+#[cfg(not(target_os = "linux"))]
+pub const NO_SIGNAL: rustix::net::SendFlags = rustix::net::SendFlags::empty();
+
+/// A connected pair of sockets that never raise `SIGPIPE`: std makes no
+/// socketpair so on macOS, as it does every other socket.
+pub fn pair() -> std::io::Result<(UnixStream, UnixStream)> {
+    let (a, b) = UnixStream::pair()?;
+    no_sigpipe(&a);
+    no_sigpipe(&b);
+    Ok((a, b))
+}
 
 /// Queue for every connection of the program's own (role `program`) that
 /// `msg` happened: an owner attached or went. The caller holds the state's

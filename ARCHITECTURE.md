@@ -995,6 +995,22 @@ blocked its owner's connection. Each is a test in `tests/jar_process.rs`:
 `a_stalled_reader_does_not_freeze_a_release` and
 `a_paste_the_program_never_reads_does_not_block_its_owner`.
 
+<!-- SPYC-TRAP: jar-no-sigpipe -->
+A failed upgrade `exec` leaves the jar's `SIGPIPE` at its default for the
+rest of its life: std's `exec` sets it so for the image it starts, and the
+jar can't set it back without `unsafe`. So no write of the jar's may raise
+it. On Linux std's `write` to a socket carries `MSG_NOSIGNAL`, and the
+jar's own `sendmsg` calls carry it as `jar::NO_SIGNAL`. On macOS std sets
+`SO_NOSIGPIPE` on every socket it makes but a socketpair (an accepted
+connection inherits it from the listener), and the jar's socketpairs come
+from `jar::pair`, which sets it. The jar writes to no pipe. Review finding
+A1 killed a Linux jar this way, with an upgrade whose holder had gone before
+the jar's handshake with it. In `tests/jar_process/sigpipe.rs`,
+`a_holder_gone_before_its_handshake_does_not_end_a_jar_whose_exec_failed`
+(Linux) and `a_validator_gone_mid_blob_does_not_end_a_jar_whose_exec_failed`
+(macOS) hold it, and `every_send_the_jar_makes_answers_a_gone_peer_with_epipe`
+keeps the sites to those.
+
 <!-- SPYC-TRAP: jar-program-hears-each-owner-once -->
 A program in its own jar (spyc in its session's) hears `attached` once for
 each owner and `detached` once as it goes, in the order the owners changed:
