@@ -121,7 +121,7 @@ fn a_discarded_jar_no_spyc_owns_ends_with_its_program() {
         assert!(asking_to_end(&app), "`d` asks before it ends anything");
         assert!(running(program), "`d` alone ended the program");
         drawn(&mut app);
-        typed(&mut app, 'y');
+        typed(&mut app, 'Y');
         eventually("the jar and its program ended", || {
             !running(program) && !socket.exists()
         });
@@ -138,29 +138,29 @@ fn keys_read_before_a_pop_up_was_drawn_answer_nothing() {
         let (program, socket) = left_by_a_crash(dir.path());
         let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
         look(&mut app);
-        // `d`, `d`, `y` read while the offer was being put up.
+        // `d`, `d`, `Y` read while the offer was being put up.
         app.runtime
             .inputs_read
             .fetch_add(3, std::sync::atomic::Ordering::SeqCst);
         drawn(&mut app);
-        for c in ['d', 'd', 'y'] {
+        for c in ['d', 'd', 'Y'] {
             taken(&mut app, c);
         }
         assert!(offering(&app), "keys typed before the offer answered it");
         typed(&mut app, 'd');
         assert!(asking_to_end(&app));
-        // `y` read before the question was drawn.
+        // `Y` read before the question was drawn.
         app.runtime
             .inputs_read
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         drawn(&mut app);
-        taken(&mut app, 'y');
+        taken(&mut app, 'Y');
         assert!(
             asking_to_end(&app),
             "a key typed before the question answered it"
         );
         typed(&mut app, 'u');
-        assert!(offering(&app), "anything but `y` goes back to the offer");
+        assert!(offering(&app), "anything but `Y` goes back to the offer");
         assert!(running(program), "the program was ended");
         let _ = crate::pane::jar::orphans::discard(app.runtime.jar_place.clone(), &socket);
     });
@@ -207,7 +207,6 @@ fn a_jar_this_spyc_holds_is_not_offered() {
 /// one key after each frame, into what looks like the session never ends a
 /// program. `body` has a `d` and then a `y`, and caps lock gives `BODY`.
 #[test]
-#[ignore = "red until the orphan pop-ups are typing-proof (fix/orphan-typing-proof)"]
 fn typing_a_word_at_the_offer_ends_nothing() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -237,7 +236,6 @@ fn typing_a_word_at_the_offer_ends_nothing() {
 /// frame was built and written was typed before the pop-up was on the screen.
 /// `render_frame` is driven by no harness, so its source is read.
 #[test]
-#[ignore = "red until the orphan pop-ups are typing-proof (fix/orphan-typing-proof)"]
 fn a_pop_up_counts_keys_from_after_its_frame_is_written() {
     let production = crate::guard_support::production_half(include_str!("../run.rs"));
     let body = production

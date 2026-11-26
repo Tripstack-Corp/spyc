@@ -109,7 +109,10 @@ rather than create a new modal type.
 - **Confirm** — typed-letter inline confirmation embedded in the
   prompt (`y`/`n`). Used by destructive operations (`R` remove,
   worktree delete) and interrupt-on-quit. Do not introduce a
-  separate dialog box — extend confirm.
+  separate dialog box — extend confirm. A confirm that comes up
+  unasked, while the user may be typing, and ends programs (the jars
+  no spyc owns) takes `Y`, shift-y, which no word typed by accident
+  gives.
 - **The prompt row is never hidden.** A full-screen `V` editor or `D`
   pager paints over it, so while it has something to show (a prompt, a
   flash, an armed chord) it borrows the pane's tab bar, spyc's own

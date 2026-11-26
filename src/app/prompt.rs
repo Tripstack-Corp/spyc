@@ -189,11 +189,12 @@ pub enum PromptKind {
     /// `[not started]`; any other key re-raises it.
     JarlessFallback,
     /// Jars no spyc owns were found at the start (`app::orphan_jars`): `r`
-    /// restores them, `d` asks [`Self::OrphanJarsDiscard`], `Esc` leaves
+    /// restores them, a lowercase `d` asks [`Self::OrphanJarsDiscard`], `Esc` leaves
     /// them running; any other key re-raises it.
     OrphanJars,
-    /// `d` at [`Self::OrphanJars`]: end their programs? Only `y`/`Y` does;
-    /// any other key goes back to the offer.
+    /// `d` at [`Self::OrphanJars`]: end their programs? Only `Y`, shift-y,
+    /// does, which no word typed by accident gives; any other key goes back to
+    /// the offer.
     OrphanJarsDiscard,
 }
 
