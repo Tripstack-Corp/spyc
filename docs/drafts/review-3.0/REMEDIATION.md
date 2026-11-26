@@ -28,7 +28,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | F6 (no test of the peer-user check) | C | `a_connection_from_another_user_is_closed_unheard` (unit, `accept.rs`), seen failing with M3 | `test/jar-peer-user` | pending | fixed on the branch, awaiting the refuter |
 | F7 (no test of `SO_NOSIGPIPE`) | C | `a_validator_gone_mid_blob_does_not_end_a_jar_whose_exec_failed`, seen failing on macOS with M12 | `fix/jar-sigpipe` | pending | fixed on the branch, awaiting the refuter |
 | S6: `honoured()` removed, with F1 and G1 | D | `a_release_build_reads_the_setting` (retired with the gate it tested) and the guard `no_build_tells_a_release_from_its_rc`, `src/version_guard.rs` | | refuter pending | fixed on the branch `fix/jars-on-release` |
-| F2 (`spyc-jar` in lockstep with spyc) | D | | | | open |
+| F2 (`spyc-jar` in lockstep with spyc) | D | `scripts/test_jar_version_lockstep.py` | | refuter pending | fixed on the branch `fix/jar-lockstep` |
 | A8 = F4 (`jar_compat` and the first fixture) | D | | | | open |
 | F8 (a `.deb` without `spyc-jar`) | D | | | | open |
 | F9 (the release document) | D | | | | open |

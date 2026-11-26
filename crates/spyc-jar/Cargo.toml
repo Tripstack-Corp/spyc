@@ -1,6 +1,8 @@
 [package]
 name = "spyc-jar"
-version = "0.1.0"
+# spyc's version, always: `make set-version` moves both (RELEASE_ENGINEERING.md
+# §5a), and scripts/test_jar_version_lockstep.py fails while they differ.
+version = "2.5.0-CURRENT"
 edition = "2024"
 rust-version = "1.100"
 description = "The process that holds one spyc pane's program and its PTY, and outlives spyc"

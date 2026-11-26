@@ -96,7 +96,8 @@ SemVer, with FreeBSD's patch-level mapping made explicit:
     `DEB_VERSION` tilde-forms it to `2.1.0~CURRENT`, which dpkg sorts *below*
     the real `2.1.0` — the same ordering rule the `2.0.0~rc.N` debs rely on.
   - After a minor ships, a follow-up PR opens the next cycle by setting `main`
-    to the following `-CURRENT`.
+    to the following `-CURRENT`: `make set-version VERSION=N.M.0-CURRENT`,
+    then `cargo update -p spyc -p spyc-jar`.
   - **During a release candidate's soak, `main` carries that rc's version**
     (`2.2.0-rc.1`). The rc's release PR sets it, a fix merged during the soak
     builds as `2.2.0-rc.1 (<sha>)`, and the next rc or the release itself is
@@ -238,7 +239,8 @@ release carrying `spyc-vt-sys` needed both fixed (#490):
 - **The crates are published first.** The `crates` job in `release.yml`
   publishes `spyc-vt-sys`, then `spyc-jar`, then spyc. Each step checks
   crates.io for that version first and skips it if it's there, so a re-run is
-  a no-op and a release that didn't move a library crate republishes nothing.
+  a no-op and a release that didn't move `spyc-vt-sys` republishes nothing
+  for it.
 
 By hand, the same order:
 
@@ -263,9 +265,26 @@ its trusted publisher. So, once per new crate:
 
 From then on the release job publishes it like spyc.
 
-**`spyc-jar` hasn't had its first publish yet.** The first release after it
-joined spyc's dependencies needs step 1 and step 2 above for it before the
-tag, or the `crates` job fails at `cargo publish -p spyc-jar`.
+**`spyc-jar` takes spyc's version, in lockstep.** spyc's `spyc-jar` binary is
+built from the `spyc-jar` crate, so `cargo install spyc` builds the jar
+crates.io holds at the version spyc asks for. Versioned apart, a jar
+version is published once and skipped by every release after it, so
+`cargo install` would build later releases' jars from an earlier one's code.
+So
+`make set-version` (which `release-prep` runs) moves spyc's version,
+`spyc-jar`'s and spyc's requirement on it, which is exact
+(`spyc-jar = { version = "=N.M.P", … }`), together. Every tag then publishes
+both, an rc's as prereleases. `make release-tag` and the `crates` job refuse
+a tag the jar's version doesn't match, and
+`scripts/test_jar_version_lockstep.py` fails CI while the versions differ.
+
+**`spyc-jar` hasn't had its first publish yet.** It is due at the first tag
+that carries the jar, `v3.0.0-rc.1`: once that release PR has merged, and
+before the tag is pushed, run step 1 above from the merged commit
+(`cargo publish -p spyc-jar`, which publishes `3.0.0-rc.1`) and step 2. The
+`crates` job then finds that version on crates.io, skips it, and publishes
+spyc against it. Without the first publish the job fails at
+`cargo publish -p spyc-jar`.
 
 **CI checks this on every PR.** `make package-check` (the `package` job) runs
 `cargo package --workspace`. That packages the three crates and builds each

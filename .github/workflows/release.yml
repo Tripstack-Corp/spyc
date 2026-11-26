@@ -225,8 +225,12 @@ jobs:
     # Independent of the GitHub release (only needs the tag's source), so a
     # crates.io hiccup never blocks shipping the binaries. Idempotent — a
     # re-run of an already-published version is a no-op, not a failure. rc/beta
-    # tags publish too: crates.io keeps prereleases out of the default
-    # `cargo install` resolution, so they can't poison the stable channel.
+    # tags publish too. crates.io keeps prereleases out of the default
+    # `cargo install` resolution, and an rc publishes spyc and spyc-jar as
+    # prereleases: both carry the tag's version (`make set-version`; the
+    # Publish step checks it), and spyc asks for exactly its own jar.
+    # spyc-vt-sys keeps a version of its own, which moves only with the
+    # libghostty-vt pin or the bindings (RELEASE_ENGINEERING.md §5a).
     #
     # Trusted Publishing (OIDC, no stored secret): crates-io-auth-action
     # exchanges this job's GitHub-issued OIDC token (`id-token: write`, below)
@@ -240,7 +244,7 @@ jobs:
     # Three crates, in dependency order: spyc's packaged manifest resolves
     # spyc-vt-sys and spyc-jar from crates.io, so both go first. Each version
     # is checked before publishing, which keeps a re-run a no-op and lets a
-    # release that didn't move a library crate skip it.
+    # release that didn't move spyc-vt-sys skip it.
     permissions:
       id-token: write # OIDC for crates.io Trusted Publishing
     steps:
@@ -275,6 +279,13 @@ jobs:
             cargo metadata --no-deps --format-version 1 \
               | jq -r --arg c "$1" '.packages[] | select(.name == $c) | .version'
           }
+          tag="${GITHUB_REF_NAME#v}"
+          for crate in spyc spyc-jar; do
+            if [ "$(version_of "$crate")" != "$tag" ]; then
+              echo "::error::$crate is at $(version_of "$crate"), not the tag's $tag: spyc-jar takes spyc's version (make set-version)"
+              exit 1
+            fi
+          done
           publish spyc-vt-sys "$(version_of spyc-vt-sys)"
-          publish spyc-jar "$(version_of spyc-jar)"
-          publish spyc "${GITHUB_REF_NAME#v}"
+          publish spyc-jar "$tag"
+          publish spyc "$tag"

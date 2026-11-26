@@ -1,5 +1,5 @@
 //! Each of a jar's upgrade timers sized by what its expiry costs (the
-//! owner's decision of 2026-11-15, before `spyc-jar` 0.1.0 is published): a
+//! owner's decision of 2026-11-15, before `spyc-jar`'s first publish): a
 //! jar starved by load defers an upgrade, and never loses its program, a
 //! connection or a byte, nor reports a good binary as rejected. Slowness is
 //! injected, never measured: a wrapper binary stalls at a chosen step of a

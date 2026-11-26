@@ -4494,7 +4494,7 @@ dependencies = [
 
 [[package]]
 name = "spyc-jar"
-version = "0.1.0"
+version = "2.5.0-CURRENT"
 dependencies = [
  "anyhow",
  "nix 0.32.0",
