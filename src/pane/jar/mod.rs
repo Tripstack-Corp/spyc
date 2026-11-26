@@ -51,6 +51,8 @@ mod take;
 mod tokens;
 
 #[cfg(test)]
+mod start_tests;
+#[cfg(test)]
 pub mod test_dir;
 #[cfg(test)]
 mod tests;
@@ -553,13 +555,34 @@ pub fn spawn(
     }
     let token = tokens::new()?;
     tokens::save(place, &socket, &token)?;
+    // SPYC-TRAP(jar-token-stdin): the token goes on the jar's standard input,
+    // never in its arguments or environment; as a file, never a pipe
+    // (`crate::child_io`).
+    let input = spyc_jar::cli::Start {
+        token: token.clone(),
+        socket: socket.clone(),
+        cwd: Some(cwd.to_path_buf()),
+        rows,
+        cols,
+        hold: Some(place.hold),
+        exit_linger: spec.exit_linger,
+        argv: argv.to_vec(),
+    }
+    .encode();
+    let input = match crate::child_io::input(&input) {
+        Ok(input) => input,
+        Err(e) => {
+            tokens::forget(place, &socket);
+            return Err(e).context("hand the tab's jar its start");
+        }
+    };
     let mut cmd = Command::new(&place.binary);
     // What `ps` shows: the program's name and the wire version. Everything
     // else goes on its standard input.
     cmd.arg0(jar_name(command, argv.first().map_or("", String::as_str)))
         .args(["--wire", &spyc_jar::proto::VERSION.to_string()])
         .envs(env.iter().map(|(k, v)| (k, v)))
-        .stdin(Stdio::piped())
+        .stdin(Stdio::from(input))
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut jar = match cmd.spawn() {
@@ -576,26 +599,6 @@ pub fn spawn(
             return Err(e).context(why);
         }
     };
-    // SPYC-TRAP(jar-token-stdin): the token goes on the jar's standard input,
-    // closed once written, never in its arguments or environment. A long
-    // program is written on a thread: a jar that never reads it can't hold
-    // this start past `answer`'s wait.
-    if let Some(mut stdin) = jar.stdin.take() {
-        let input = spyc_jar::cli::Start {
-            token: token.clone(),
-            socket: socket.clone(),
-            cwd: Some(cwd.to_path_buf()),
-            rows,
-            cols,
-            hold: Some(place.hold),
-            exit_linger: spec.exit_linger,
-            argv: argv.to_vec(),
-        }
-        .encode();
-        std::thread::spawn(move || {
-            let _ = stdin.write_all(&input);
-        });
-    }
     let (client, welcome) = match answer(&mut jar, &socket, &token, place.hold) {
         Ok(answered) => answered,
         Err(e) => {

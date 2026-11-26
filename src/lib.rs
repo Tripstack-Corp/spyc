@@ -20,6 +20,7 @@ mod app;
 /// which link the crate as a library — can drive a real archive all the way
 /// through index → listing → materialize.
 pub mod archive;
+mod child_io;
 mod clipboard;
 mod config;
 mod context;

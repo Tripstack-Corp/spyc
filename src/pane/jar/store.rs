@@ -210,12 +210,18 @@ fn copy_hashing(from: &mut impl Read, to: &mut impl Write) -> anyhow::Result<Str
     }))
 }
 
+/// The most of `build-info`'s answer read: two short lines.
+const BUILD_INFO_MAX: u64 = 4096;
+
 /// What `binary build-info` says it is: its commit and build time.
 fn build_info(binary: &Path) -> anyhow::Result<(String, String)> {
+    // A file, never a pipe: a pipe's end could wait on a child another
+    // thread spawned (`crate::child_io`).
+    let (mut said, theirs) = crate::child_io::output().context("a file for build-info")?;
     let mut child = std::process::Command::new(binary)
         .arg("build-info")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
+        .stdout(theirs)
         .stderr(std::process::Stdio::null())
         .spawn()
         .with_context(|| format!("run {}", binary.display()))?;
@@ -231,10 +237,9 @@ fn build_info(binary: &Path) -> anyhow::Result<(String, String)> {
         }
         std::thread::sleep(BUILD_INFO_POLL);
     };
-    let mut out = String::new();
-    if let Some(mut o) = child.stdout.take() {
-        let _ = o.read_to_string(&mut out);
-    }
+    let out = String::from_utf8_lossy_owned(
+        crate::child_io::written(&mut said, BUILD_INFO_MAX).context("read build-info")?,
+    );
     if !status.success() {
         bail!("{} build-info failed: {status}", binary.display());
     }
