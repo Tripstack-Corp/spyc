@@ -36,7 +36,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | D2, D6, and P3-9's low (start and save before release) | E | `ctrl_d_with_no_place_for_the_sessions_jar_keeps_spyc_and_its_tabs`, `ctrl_d_whose_save_fails_keeps_spyc_and_its_tabs`, `upgrade_whose_save_fails_keeps_the_session_in_its_jar` (`tests/jar_adopt.rs`) | | refuter pending | fixed on the branch `fix/handover-before-release` |
 | The orphan prompt (confirm a discard; no type-ahead) | E | `a_key_before_the_offer_is_drawn_doesnt_answer_it` (`src/app/harness_tests/jar_orphans.rs`), `discarding_a_jar_no_spyc_owns_asks_first` (`tests/jar_adopt.rs`) | | refuter pending | fixed on the branch `fix/orphan-discard-confirm` |
 | D5 (`save_released` keeps the last report) | E | `ctrl_d_keeps_a_tabs_last_status_report` (`tests/jar_adopt.rs`) | | refuter pending | fixed on the branch `fix/handover-before-release`, with D2 and D6 (the same function) |
-| D3 (`take_over` re-reads before it signals) | E | | | | open |
+| D3 (`take_over` re-reads before it signals) | E | `a_takeover_after_the_question_ends_the_client_attached_then` (`tests/session_jar.rs`) | | refuter pending | fixed on the branch `fix/attach-rereads-before-signal` |
 | E1 (the control methods need the session's token) | F | | | | open |
 | E2, high since P3-9 (one ownership check on every path) | F | | | | open |
 | E3 = G5 (tasks and captures signal through the jar) | F | | | | open |

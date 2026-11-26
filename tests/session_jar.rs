@@ -554,7 +554,6 @@ fn spyc_attach_shows_the_session_and_a_second_attach_takes_it_over() {
 /// question and takes it over from the terminal attached then, not the one
 /// attached when it asked, which may have gone and its pid with it.
 #[test]
-#[ignore = "red until D3 is fixed (fix/attach-rereads-before-signal)"]
 fn a_takeover_after_the_question_ends_the_client_attached_then() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
