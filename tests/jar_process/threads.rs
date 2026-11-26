@@ -212,16 +212,20 @@ fn an_upgrade_whose_threads_are_refused_is_busy_and_the_next_one_runs() {
     }
 }
 
-/// A holder whose thread for the blob is refused fails the upgrade (reason
-/// 7) before it says it holds, and the old jar runs on.
+/// A holder whose thread for the blob is refused says so before it goes,
+/// and the upgrade is busy (5), as any start the machine can't give now is
+/// (review finding A2, the owner's choice of 2026-11-25): it used to be read
+/// as the binary's failure (7), which stops upgrades for the session. The old
+/// jar runs on.
 #[test]
-fn a_holder_whose_thread_is_refused_fails_the_upgrade_and_the_jar_runs_on() {
+#[ignore = "red until A2 is fixed for a holder refused a thread (fix/jar-upgrade-answers)"]
+fn a_holder_whose_thread_is_refused_is_busy_and_the_jar_runs_on() {
     let mut jar = refusing("jar-blob-out", &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
     owner.send(&Msg::Replay { from: 0 }).expect("replay");
     let answer = upgrade(&jar, &mut owner);
     assert!(
-        answer.as_ref().is_err_and(|e| e.starts_with("refused (7)")),
+        answer.as_ref().is_err_and(|e| e.starts_with("refused (5)")),
         "{answer:?}"
     );
     owner.send(&Msg::Ping { n: 3 }).expect("ping");

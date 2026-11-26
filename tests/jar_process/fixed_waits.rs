@@ -62,6 +62,7 @@ fn whole(path: &'static str, src: &str) -> Source {
 fn sources() -> Vec<Source> {
     vec![
         whole("tests/jar_process.rs", include_str!("../jar_process.rs")),
+        whole("tests/jar_process/answers.rs", include_str!("answers.rs")),
         whole("tests/jar_process/contain.rs", include_str!("contain.rs")),
         whole("tests/jar_process/lock.rs", include_str!("lock.rs")),
         whole(
