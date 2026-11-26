@@ -1164,6 +1164,19 @@ that turns jars on.
   jar for at that moment. Guarded by
   `with_jars_on_no_path_launches_the_program_outside_its_jar` and
   `no_start_with_a_record_reaches_a_pty_around_its_jar`.
+<!-- SPYC-TRAP: jar-end-holds-its-address -->
+- **An ending jar holds its address until it has gone** (slice B, found
+  through a flake in `a_tab_whose_jar_still_runs_never_starts_its_program_twice`).
+  A jar's socket check binds its socket again, and makes its lock file again,
+  when a cleaner has removed them. Run while the jar ends, after its socket
+  went and before its lock file did, it left a socket with no lock file and
+  nothing listening. No spyc can tell that from a running jar's, so the tab's
+  restart was refused, and a sweep, which removes only sockets whose lock is
+  free, never cleared it. So every end of a jar (`jar/end.rs`) and every
+  socket check take one lock, the jar's address, and the end holds it from
+  its socket's going to the process's exit. A debug build's
+  `SPYC_JAR_END_GAP` holds an end in that gap until a socket check has run;
+  `an_ending_jar_leaves_no_socket_for_its_tab_to_be_refused_on` uses it.
 - **Every jar starts from spyc's store of jar binaries** (decision L,
   `src/pane/jar/store.rs`): `<state>/jar-bin/<version>-<hash>/spyc-jar`,
   `<hash>` the first 12 hex digits of its SHA-256, copied

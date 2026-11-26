@@ -220,9 +220,7 @@ pub(super) fn serve(shared: &Arc<Shared>, sock: Arc<UnixStream>, ticket: u64) {
             reason::UNSPECIFIED,
             format!("the program didn't start: {e:#}"),
         );
-        let _ = std::fs::remove_file(&shared.cfg.socket);
-        crate::lock::forget(&shared.cfg.socket);
-        std::process::exit(1);
+        super::end::end(&shared.cfg.socket, 1);
     }
     if role == Role::Owner {
         st.info.retain(|(k, _)| k != crate::state::OWNER_LEFT);

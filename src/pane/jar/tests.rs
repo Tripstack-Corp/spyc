@@ -765,6 +765,147 @@ fn a_tab_whose_jar_still_runs_never_starts_its_program_twice() {
 /// acked, then a debug build's end held for a socket check, every 2 s.
 const JAR_GOES: Duration = Duration::from_secs(30);
 
+/// How many ways `src` names to end a jar or take its address away: a path
+/// that names `exit`, `_exit` or `abort` (`std::process`'s, `libc`'s),
+/// `remove_file`, `lock::forget` or `lock::path`, called or bound to a name
+/// (`let quit = std::process::exit`), and a `use` that brings one in, renamed
+/// or by a glob of `process`, `lock` or `libc`. Parsed, test items left out.
+/// Not seen: a path built inside a macro's tokens, a name brought in by a
+/// `use` in another file and re-exported, and an end outside the files read.
+fn jar_enders(src: &str) -> usize {
+    use syn::visit::Visit;
+    fn ends(names: &[String]) -> bool {
+        match names {
+            [.., m, star] if star == "*" => matches!(m.as_str(), "process" | "lock" | "libc"),
+            [_, .., last] if matches!(last.as_str(), "exit" | "_exit" | "abort") => true,
+            [.., last] if last == "remove_file" => true,
+            [.., m, f] => m == "lock" && matches!(f.as_str(), "forget" | "path"),
+            _ => false,
+        }
+    }
+    fn test_only(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| {
+            a.path().is_ident("cfg") && a.parse_args::<syn::Ident>().is_ok_and(|i| i == "test")
+        })
+    }
+    /// Each path a `use` brings in, the name it is brought in by left out.
+    fn flatten(tree: &syn::UseTree, at: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        let one = |at: &[String], last: String| [at, &[last]].concat();
+        match tree {
+            syn::UseTree::Path(p) => {
+                at.push(p.ident.to_string());
+                flatten(&p.tree, at, out);
+                at.pop();
+            }
+            syn::UseTree::Name(n) => out.push(one(at, n.ident.to_string())),
+            syn::UseTree::Rename(r) => out.push(one(at, r.ident.to_string())),
+            syn::UseTree::Glob(_) => out.push(one(at, "*".into())),
+            syn::UseTree::Group(g) => g.items.iter().for_each(|t| flatten(t, at, out)),
+        }
+    }
+    struct Enders(usize);
+    impl<'a> Visit<'a> for Enders {
+        fn visit_item(&mut self, item: &'a syn::Item) {
+            let attrs = match item {
+                syn::Item::Fn(i) => &i.attrs,
+                syn::Item::Mod(i) => &i.attrs,
+                syn::Item::Impl(i) => &i.attrs,
+                syn::Item::Use(i) => &i.attrs,
+                syn::Item::Const(i) => &i.attrs,
+                syn::Item::Static(i) => &i.attrs,
+                _ => return syn::visit::visit_item(self, item),
+            };
+            if !test_only(attrs) {
+                syn::visit::visit_item(self, item);
+            }
+        }
+        fn visit_impl_item_fn(&mut self, f: &'a syn::ImplItemFn) {
+            if !test_only(&f.attrs) {
+                syn::visit::visit_impl_item_fn(self, f);
+            }
+        }
+        fn visit_item_use(&mut self, u: &'a syn::ItemUse) {
+            let mut out = Vec::new();
+            flatten(&u.tree, &mut Vec::new(), &mut out);
+            self.0 += out.iter().filter(|p| ends(p)).count();
+        }
+        fn visit_path(&mut self, path: &'a syn::Path) {
+            let names: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+            if ends(&names) {
+                self.0 += 1;
+            }
+            syn::visit::visit_path(self, path);
+        }
+    }
+    let file = syn::parse_file(src).unwrap();
+    let mut enders = Enders(0);
+    enders.visit_file(&file);
+    enders.0
+}
+
+/// The guard's reading: each way to end a jar counts, renamed or bound.
+#[test]
+fn every_way_to_end_a_jar_is_counted() {
+    for (src, n) in [
+        ("fn f() { std::process::exit(0); }", 1),
+        ("fn f() { let quit = std::process::exit; quit(0); }", 1),
+        ("use std::process::exit; fn f() { exit(0); }", 1),
+        ("use std::process::exit as quit; fn f() { quit(0); }", 1),
+        (
+            "use std::{fs, process::{self, exit}}; fn f() { exit(0); }",
+            1,
+        ),
+        ("use std::process::*; fn f() { exit(0); }", 1),
+        (
+            "fn f() { let _ = std::fs::remove_file(crate::lock::path(s)); }",
+            2,
+        ),
+        (
+            "fn f() { crate::lock::forget(s); unsafe { libc::_exit(0) } }",
+            2,
+        ),
+        ("fn f() { std::process::abort(); }", 1),
+        (
+            "fn f(st: &S) { if st.exit.is_some() { let exit = 1; drop(exit); } std::mem::forget(x); }",
+            0,
+        ),
+        (
+            "#[cfg(test)] mod tests { fn f() { std::process::exit(0); } }",
+            0,
+        ),
+    ] {
+        assert_eq!(jar_enders(src), n, "{src}");
+    }
+}
+
+/// SPYC-TRAP `jar-end-holds-its-address`: a jar ends only through
+/// `jar/end.rs`, which holds the jar's address from its socket's going to
+/// the process's exit. Nothing else under `crates/spyc-jar/src/jar/` names a
+/// way to end a jar or remove its address ([`jar_enders`], which says what it
+/// can't see); the upgrade containment (`held.rs`, outside it) runs no socket
+/// check. Fails closed: `end.rs` must name its three.
+#[test]
+fn a_jar_ends_only_through_its_end() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/spyc-jar/src/jar");
+    let mut found = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|x| x != "rs") {
+            continue;
+        }
+        let n = jar_enders(&std::fs::read_to_string(&path).unwrap());
+        if n > 0 {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            found.insert(name, n);
+        }
+    }
+    assert_eq!(
+        found,
+        [("end.rs".to_string(), 3)].into(),
+        "a jar that ends without holding its address can leave its socket behind"
+    );
+}
+
 /// An ending jar leaves nothing at its address, whenever its socket check
 /// runs. That check binds the socket again when a cleaner has removed it,
 /// and it can run while the jar ends, after its socket has gone and before
@@ -774,7 +915,6 @@ const JAR_GOES: Duration = Duration::from_secs(30);
 /// `SPYC_JAR_END_GAP` holds the jar's end there until a socket check has run
 /// (the flake in `a_tab_whose_jar_still_runs_never_starts_its_program_twice`).
 #[test]
-#[ignore = "red until the jar end race is fixed: fix/jar-end-race"]
 fn an_ending_jar_leaves_no_socket_for_its_tab_to_be_refused_on() {
     let dir = short_dir();
     let held = dir.path().join("held-jar");

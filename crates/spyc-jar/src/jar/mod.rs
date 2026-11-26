@@ -469,8 +469,10 @@ fn accept_loop(shared: &Arc<Shared>) -> ! {
         if checked.elapsed() >= SOCKET_CHECK {
             checked = Instant::now();
             end::check_begins();
+            let address = end::address();
             keep_socket(shared);
             crate::lock::keep(&shared.cfg.socket);
+            drop(address);
             end::check_done();
         }
         let listener = shared
