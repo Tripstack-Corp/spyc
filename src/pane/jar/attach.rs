@@ -466,6 +466,24 @@ fn take_over(session: &Running) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    /// The refuter's finding on D3's fix: a session whose jar ended while
+    /// `spyc attach` asked which to take says so, rather than that it can't
+    /// tell which terminal is attached.
+    #[test]
+    #[ignore = "red until spyc attach says a session that ended did (fix/attach-session-gone)"]
+    fn a_takeover_of_a_session_that_ended_meanwhile_says_it_ended() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = Running {
+            name: "GONE".into(),
+            address: "GONE".into(),
+            socket: dir.path().join("GONE.sock"),
+            client: None,
+        };
+        let said = take_over(&gone).map_err(|e| format!("{e:#}"));
+        let said = said.expect_err("a takeover of a session that ended");
+        assert!(said.contains("GONE ended"), "{said}");
+    }
+
     #[test]
     fn a_pane_or_a_jar_that_runs_says_this_shell_is_inside_spyc() {
         let dir = tempfile::tempdir().unwrap();
