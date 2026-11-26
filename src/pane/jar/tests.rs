@@ -2562,7 +2562,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         AfterExec, Command, DebugStretch, Ending, Floor, Keep, Limit, Parked, Peer, Poll, Served,
         Start, Unbounded,
     };
-    const TIMERS: [(&str, Kind); 46] = [
+    const TIMERS: [(&str, Kind); 47] = [
         ("ATTACH_WAIT", Command),
         ("ATTACH_PING", Poll),
         ("SIZE_POLL", Poll),
@@ -2603,6 +2603,7 @@ fn every_timer_in_the_jar_is_classified_by_what_running_out_costs() {
         ("READER_GRACE", Start),
         ("HANGUP_GRACE", Ending),
         ("PARENT_CHECK", Poll),
+        ("HOLDER_POLL", Poll),
         ("TICK", Poll),
         ("SOCKET_CHECK", Poll),
         ("GAP_POLL", Poll),

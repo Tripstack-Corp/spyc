@@ -64,7 +64,6 @@ fn copies(jar: &Jar) -> Vec<String> {
 /// busy, and the next one runs. The old image called it rejected (6), and
 /// spyc then stopped upgrading every jar for the session.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn a_proof_that_comes_after_the_deadline_is_busy_and_the_next_upgrade_runs() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -93,7 +92,6 @@ fn a_proof_that_comes_after_the_deadline_is_busy_and_the_next_upgrade_runs() {
 /// `open` with the jar's upgrade claimed for as long as nothing writes to it;
 /// the next upgrade runs.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn an_upgrade_naming_a_fifo_is_refused_and_the_next_one_runs() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -113,7 +111,6 @@ fn an_upgrade_naming_a_fifo_is_refused_and_the_next_one_runs() {
 
 /// A3: a copy the jar made for an upgrade that didn't happen is removed.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn a_refused_upgrade_leaves_no_copy_behind() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -149,7 +146,6 @@ fn alive(pid: u32) -> bool {
 /// process group once the validation is over, however it ended: only a
 /// validator that ran out of time had its group ended.
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn a_validators_children_end_with_the_validation() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -233,7 +229,6 @@ fn free_descriptors(jar: &Jar, n: usize) -> Vec<u64> {
 /// rejected; with descriptors again, the next one runs.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn an_upgrade_that_cant_copy_for_want_of_a_descriptor_is_busy() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -259,7 +254,6 @@ fn an_upgrade_that_cant_copy_for_want_of_a_descriptor_is_busy() {
 /// none.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "red until A2, A3 and A9 are fixed (fix/jar-upgrade-answers)"]
 fn an_upgrade_whose_validator_cant_start_for_want_of_a_descriptor_is_busy() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -312,7 +306,6 @@ fn give_back(jar: &Jar, resource: rustix::process::Resource) {
 /// construction (the refuter's test of slice C).
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "red until A2 is fixed for a handover or holder the machine can't start (fix/jar-upgrade-answers)"]
 fn a_handover_short_of_a_descriptor_is_busy() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -341,7 +334,6 @@ fn a_handover_short_of_a_descriptor_is_busy() {
 /// between the parked validation and the holder starts a thread.
 #[cfg(target_os = "linux")]
 #[test]
-#[ignore = "red until A2 is fixed for a handover or holder the machine can't start (fix/jar-upgrade-answers)"]
 fn a_holder_the_os_wont_start_is_busy() {
     let mut jar = Jar::start(&[], &sh("cat"));
     let mut owner = jar.connect(Role::Owner);
@@ -360,4 +352,70 @@ fn a_holder_the_os_wont_start_is_busy() {
     );
     let again = upgrade(&jar, &mut owner);
     assert!(again.is_ok(), "the next upgrade runs: {again:?}");
+}
+
+/// A2: a binary that can never run on this machine is rejected (6), not
+/// busy: asking again can't help, and spyc would ask three times more. A
+/// 64-bit Mach-O header for a PowerPC: macOS refuses it with `EBADARCH`,
+/// Linux with `ENOEXEC`.
+#[test]
+fn a_binary_for_another_machine_is_rejected() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut jar = Jar::start(&[], &sh("cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let foreign = jar.dir.path().join("jar-foreign");
+    let header: Vec<u8> = [0xfeed_facf_u32, 0x0100_0012, 0, 2, 0, 0, 0, 0]
+        .iter()
+        .flat_map(|w| w.to_le_bytes())
+        .collect();
+    std::fs::write(&foreign, header).expect("write the binary");
+    std::fs::set_permissions(&foreign, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let answer = upgrade_to(&mut owner, &foreign);
+    assert_eq!(
+        reason_of(&answer),
+        Ok(reason::UPGRADE_REJECTED),
+        "a binary for another machine is rejected: {answer:?}"
+    );
+}
+
+/// A2, the owner's choice: a holder that goes before it answers for a
+/// reason of its own (its binary's failure, here an exit of 3) still fails
+/// the upgrade (7). Only the holder that says the machine refused it (its
+/// exit status `HOLDER_BUSY`) makes it busy.
+#[test]
+fn a_holder_that_fails_on_its_own_fails_the_upgrade() {
+    let mut jar = Jar::start(&[], &sh("cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let failing = script(&jar, "jar-failing-holder", "hold-handover) exit 3 ;;");
+    let answer = upgrade_to(&mut owner, &failing);
+    assert_eq!(
+        reason_of(&answer),
+        Ok(reason::UPGRADE_FAILED),
+        "a holder that fails on its own fails the upgrade: {answer:?}"
+    );
+    owner.send(&Msg::Ping { n: 6 }).expect("ping");
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 6 }));
+}
+
+/// A2: a holder from a binary that doesn't know `hold-handover` (a later
+/// one that drops it) exits as any unknown subcommand does,
+/// `WIRE_NOT_SERVED`, and the upgrade fails (7). Were that status the
+/// holder's busy one, every jar of this build would read such a binary as
+/// busy and retry it for the session.
+#[test]
+fn a_holder_that_doesnt_know_its_subcommand_fails_the_upgrade() {
+    let mut jar = Jar::start(&[], &sh("cat"));
+    let mut owner = jar.connect(Role::Owner);
+    owner.send(&Msg::Replay { from: 0 }).expect("replay");
+    let later = script(
+        &jar,
+        "jar-without-hold",
+        "hold-handover) exec \"$REAL\" no-such-subcommand ;;",
+    );
+    let answer = upgrade_to(&mut owner, &later);
+    assert_eq!(reason_of(&answer), Ok(reason::UPGRADE_FAILED), "{answer:?}");
+    owner.send(&Msg::Ping { n: 8 }).expect("ping");
+    recv_matching(&mut owner, |m| matches!(m, Msg::Pong { n: 8 }));
 }
