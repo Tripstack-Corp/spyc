@@ -16,7 +16,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::state::ProjectId;
 use super::{App, Effect, Mode, Prompt, PromptKind};
-use crate::pane::jar::place::{SocketState, socket_state};
 
 /// This session's answer, and the tabs waiting on it.
 #[derive(Default)]
@@ -135,11 +134,8 @@ impl App {
     /// Start `waiting`'s tab again, without a jar. Whether it did: a
     /// restored tab whose jar may still run isn't, nor one closed meanwhile.
     fn start_without_jar(&mut self, waiting: &Waiting) -> bool {
-        if waiting
-            .socket
-            .as_deref()
-            .is_some_and(|s| matches!(socket_state(s), SocketState::Live | SocketState::Unknown))
-        {
+        // SPYC-TRAP(jar-never-twice): asked before the tab starts again.
+        if crate::pane::jar::held(waiting.socket.as_deref()).is_some() {
             return false;
         }
         let tab = waiting.tab.clone();

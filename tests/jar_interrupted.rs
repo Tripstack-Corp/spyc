@@ -64,7 +64,6 @@ fn connect(socket: &std::path::Path) -> Client {
 /// A handled signal on the reading thread, as spyc's own handlers can take
 /// one: the read goes on, and returns the frame the jar sends after.
 #[test]
-#[ignore = "red until review 3.0 slice B (P1, B12) is fixed: fix/never-run-twice (fails on Linux; passes on macOS)"]
 fn a_read_a_handled_signal_interrupts_goes_on_waiting() {
     use std::os::unix::thread::JoinHandleExt;
     let handled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -105,7 +104,6 @@ fn a_read_a_handled_signal_interrupts_goes_on_waiting() {
 /// This process stopped and continued from outside while the read waits:
 /// the read goes on, and returns the frame the jar sends after.
 #[test]
-#[ignore = "red until review 3.0 slice B (P1, B12) is fixed: fix/never-run-twice (fails on Linux; passes on macOS)"]
 fn a_read_through_a_stop_and_continue_goes_on_waiting() {
     let (socket, _dir, tell) = quiet_jar();
     let mut client = connect(&socket);

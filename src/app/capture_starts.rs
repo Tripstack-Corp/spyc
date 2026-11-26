@@ -24,6 +24,8 @@ pub(super) struct CaptureStart {
     /// The start's id, which its capture or task keeps until it lands.
     id: u64,
     host: anyhow::Result<PtyHost>,
+    /// The jar a restored task takes back.
+    socket: Option<std::path::PathBuf>,
 }
 
 /// How long a stand-in, or a host nothing will read, has to end.
@@ -47,7 +49,8 @@ impl App {
         }
         let (cmd, dir) = (cmd.to_string(), dir.to_path_buf());
         let place = self.runtime.jar_place.clone();
-        let (host, id) = self.start_on_worker(move || start_in_jar(&cmd, &dir, place, &env))?;
+        let (host, id) =
+            self.start_on_worker(None, move || start_in_jar(&cmd, &dir, place, &env))?;
         Ok((host, Some(id)))
     }
 
@@ -57,28 +60,36 @@ impl App {
     pub(super) fn retake_task_host(&mut self, socket: &Path) -> anyhow::Result<(PtyHost, u64)> {
         let socket = socket.to_path_buf();
         let place = self.runtime.jar_place.clone();
-        self.start_on_worker(move || retake_jar(socket, place))
+        let record = Some(socket.clone());
+        self.start_on_worker(record, move || retake_jar(socket, place))
     }
 
     /// A stand-in host, and the id of the start `start` makes on a worker.
     fn start_on_worker(
         &mut self,
+        socket: Option<std::path::PathBuf>,
         start: impl FnOnce() -> anyhow::Result<PtyHost> + Send + 'static,
     ) -> anyhow::Result<(PtyHost, u64)> {
         let size = capture_size();
-        let stand_in = PtyHost::around_jar(jar::starting("", None, size), size)?;
+        let stand_in = PtyHost::around_jar(jar::starting("", socket.as_deref(), size), size)?;
         self.runtime.capture_start_seq += 1;
         let id = self.runtime.capture_start_seq;
         let results = self
             .runtime
             .capture_starts
             .sender_waking(self.loop_waker(Wake::PaneStart));
+        let again = socket.clone();
         spawn_worker(
             results,
-            move || CaptureStart { id, host: start() },
+            move || CaptureStart {
+                id,
+                host: start(),
+                socket,
+            },
             move |panic| CaptureStart {
                 id,
                 host: Err(anyhow::anyhow!("the start stopped: {panic}")),
+                socket: again,
             },
         );
         Ok((stand_in, id))
@@ -95,7 +106,7 @@ impl App {
         any
     }
 
-    fn land_capture_start(&mut self, CaptureStart { id, host }: CaptureStart) {
+    fn land_capture_start(&mut self, CaptureStart { id, host, socket }: CaptureStart) {
         let size = capture_size();
         let host = match host {
             Ok(host) => host,
@@ -104,7 +115,14 @@ impl App {
                     self.capture_has_no_usable_jar(why);
                 }
                 let why = format!("spyc: {e:#}\n");
-                match PtyHost::around_jar(jar::ended(&why, jar::Lost::Unstarted, size), size) {
+                // A jar that may still hold the program keeps its record.
+                let held = jar::held(socket.as_deref());
+                let lost = if held.is_some() {
+                    jar::Lost::Held
+                } else {
+                    jar::Lost::Unstarted
+                };
+                match PtyHost::around_jar(jar::ended_at(&why, lost, held, size), size) {
                     Ok(host) => host,
                     Err(e) => {
                         self.state.flash_error(format!("capture: {e:#}"));
@@ -173,8 +191,13 @@ fn start_in_jar(
 fn retake_jar(socket: std::path::PathBuf, place: Option<jar::Place>) -> anyhow::Result<PtyHost> {
     // SPYC-TRAP(jar-off-the-loop): only on this worker.
     let name = uuid::Uuid::now_v7().to_string();
-    let spec = jar::spec_for(place, &name, None)?
-        .ok_or_else(|| anyhow::anyhow!("this build doesn't run programs in jars"))?
+    // Taken back whatever this build or `[pane] jars` says of new ones.
+    let place = match place {
+        Some(place) => place,
+        None => jar::Place::for_this_user()?,
+    };
+    let spec = jar::spec_for(Some(place), &name, None)?
+        .ok_or_else(|| anyhow::anyhow!("no place for the task's jar"))?
         .retaking(socket);
     spawn_capture("", Path::new("/"), Some(spec), &[])
 }
@@ -221,6 +244,9 @@ fn spawn_capture(
         // drop the tail. Captures are one-shot, not suspendable panes anyway.
         exec_replace: false,
         capture_launch_env: false,
+        // A capture started afresh has no record; a restored task's jar is
+        // taken back, never started.
+        record: None,
         jar,
     })
 }

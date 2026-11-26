@@ -274,7 +274,6 @@ fn debug_log(state: &Path) -> String {
 /// yet closed. A jarred tab's link outlasts a short stop: none ends, none is
 /// left `[detached]`, and spyc stays each jar's owner.
 #[test]
-#[ignore = "red until review 3.0 slice B (P1, B12) is fixed: fix/never-run-twice (fails on Linux; passes on macOS)"]
 fn a_short_stop_and_continue_leaves_every_jarred_tab_its_link() {
     const TABS: usize = 3;
     let spyc = Path::new(env!("CARGO_BIN_EXE_spyc"));

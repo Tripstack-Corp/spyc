@@ -15,6 +15,8 @@
 //! - [`session`]: a session's own jar, the one spyc itself runs in (S4).
 //! - [`snapshots`]: when a pane's engine is snapshotted, and its storing.
 //! - [`store`]: the jar binaries every jar starts from (decision L).
+//! - `take`: a running jar taken back, and a program ended in its jar before
+//!   its tab starts again.
 //!
 //! With jars on, a tab's program runs in a jar or not at all: a jar that
 //! can't be started, ends before it answers (one that doesn't speak this
@@ -28,8 +30,11 @@
 //! A restored tab whose jar still runs takes it back, its program untouched:
 //! the pane starts from the jar's snapshot and the jar replays what the
 //! program printed since. A jar that won't take it (another spyc owns it, or
-//! this one has no token for it) leaves the tab `[detached]`, and nothing is
-//! started in its place (finding 7).
+//! this one has no token for it) leaves the tab `[detached]`, its screen
+//! saying why, and nothing is started in its place (finding 7). Every start
+//! whose record names a jar asks [`held`] first: a program that jar may
+//! still hold is taken back or ended there, never started beside it
+//! (SPYC-TRAP `jar-never-twice`).
 
 pub mod attach;
 mod link;
@@ -42,6 +47,7 @@ pub mod session;
 pub mod shutdown;
 pub mod snapshots;
 pub mod store;
+mod take;
 mod tokens;
 
 #[cfg(test)]
@@ -63,10 +69,11 @@ use spyc_jar::proto::{JarSignal, Msg, Role, Snapshot};
 use std::path::PathBuf;
 
 use attach::TAKEOVER_WAIT;
-pub use link::Lost;
+pub use link::{Lost, Watch};
 pub use place::Place;
 use session::LINK_WAIT;
 pub use snapshots::{SnapshotSink, Snapshotter};
+pub use take::{NoToken, OtherSpyc, OwnedElsewhere, end_held, owned_elsewhere_now};
 
 use link::{JarChild, JarMaster, JarReader, JarReplies, Link, ReplayGate};
 use place::{SocketState, socket_state};
@@ -88,6 +95,34 @@ impl std::fmt::Display for NoUsableJar {
 }
 
 impl std::error::Error for NoUsableJar {}
+
+/// The jar a start's record names, when it may still hold that program: its
+/// lock is held, or nothing can tell. The one question every start of a tab,
+/// task or capture whose record names a jar asks before a program runs: one
+/// that gets `Some` takes the program back or ends it there, and never
+/// starts it beside it.
+// SPYC-TRAP(jar-never-twice): every start whose record names a jar asks here
+// first; no start of a program reaches a PTY around it.
+pub fn held(record: Option<&Path>) -> Option<&Path> {
+    record.filter(|s| matches!(socket_state(s), SocketState::Live | SocketState::Unknown))
+}
+
+/// A start refused because the jar its record names may still hold its
+/// program.
+#[derive(Debug)]
+pub struct StillRuns(pub PathBuf);
+
+impl std::fmt::Display for StillRuns {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "its program may still run in its jar at {}; it wasn't started twice",
+            self.0.display()
+        )
+    }
+}
+
+impl std::error::Error for StillRuns {}
 
 /// Why a tab's start failed for no usable jar, when it did.
 pub fn no_usable_jar(e: &anyhow::Error) -> Option<&str> {
@@ -171,6 +206,7 @@ fn spec_in(place: Place, tab: &str, restoring: Option<&crate::state::sessions::S
         adopt: None,
         retake: false,
         exit_linger: None,
+        watch: None,
     };
     match restoring {
         Some(saved) => spec.restoring(saved.jar_socket.clone()),
@@ -194,6 +230,9 @@ pub struct Spec {
     /// How long the jar keeps its program's output and exit for an owner
     /// that isn't there (`spyc_jar::cli::Start::exit_linger`).
     pub exit_linger: Option<Duration>,
+    /// The starting tab's stand-in: a jar taken back is waited for only
+    /// while the tab wants it, and says on its screen what it waits for.
+    pub watch: Option<Watch>,
 }
 
 impl Spec {
@@ -210,6 +249,13 @@ impl Spec {
     pub fn retaking(mut self, socket: PathBuf) -> Self {
         self.adopt = Some(socket);
         self.retake = true;
+        self
+    }
+
+    /// This spec for the tab whose stand-in `watch` watches.
+    #[must_use]
+    pub fn watched(mut self, watch: Option<Watch>) -> Self {
+        self.watch = watch;
         self
     }
 }
@@ -241,13 +287,46 @@ pub struct Adoption {
 /// screen, what's typed dropped, open until spyc replaces them. `socket` is a
 /// restored tab's jar, which a session saved meanwhile still records.
 pub fn starting(note: &str, socket: Option<&Path>, size: (u16, u16)) -> Jarred {
+    starting_watched(note, socket, size).0
+}
+
+/// [`starting`], and the [`Watch`] its worker sees it through.
+pub fn starting_watched(note: &str, socket: Option<&Path>, size: (u16, u16)) -> (Jarred, Watch) {
     link::stand_in(as_screen(note).as_bytes(), socket, None, size)
 }
 
 /// A tab with no program here: `why` on its screen, the tab ended as `lost`
 /// labels it.
 pub fn ended(why: &str, lost: Lost, size: (u16, u16)) -> Jarred {
-    link::stand_in(as_screen(why).as_bytes(), None, Some(lost), size)
+    ended_at(why, lost, None, size)
+}
+
+/// [`ended`], keeping the record of the jar at `socket`, which may still
+/// hold the program: a session saved meanwhile records it, and a restart
+/// asks it first.
+pub fn ended_at(why: &str, lost: Lost, socket: Option<&Path>, size: (u16, u16)) -> Jarred {
+    link::stand_in(as_screen(why).as_bytes(), socket, Some(lost), size).0
+}
+
+/// A tab whose jar at `socket` runs on without this spyc: `why` on its
+/// screen, the tab labelled `[detached]`, nothing started.
+pub fn detached(socket: &Path, why: &str, size: (u16, u16)) -> Jarred {
+    link::detached(socket, why, size)
+}
+
+/// Whether this spyc has the token of the jar at `socket`, kept in `place`
+/// (this user's when `None`): without it, it can neither take the jar back
+/// nor end its program.
+pub fn token_known(place: Option<&Place>, socket: &Path) -> bool {
+    match place {
+        Some(place) => tokens::load(place, socket).is_some(),
+        None => place::tokens_dir().is_ok_and(|dir| tokens::load_in(&dir, socket).is_some()),
+    }
+}
+
+/// The screen of a tab whose jar this spyc has no token for.
+pub fn no_token_screen(socket: &Path) -> String {
+    take::no_token(socket)
 }
 
 /// `text`'s lines as a terminal shows them.
@@ -343,9 +422,10 @@ impl Signals {
         self.0.signal(signal)
     }
 
-    /// End the connection as a crash would, signalling nothing.
+    /// End the connection now, as a crash would, signalling nothing: what is
+    /// still queued is never written, and the jar sees it close at once.
     pub fn sever(&self) {
-        self.0.out.close();
+        self.0.out.abort();
     }
 
     /// Tell the jar what it holds (R18): each key whose value it hasn't
@@ -396,6 +476,10 @@ fn ended_within(socket: &Path, wait: Duration) -> SocketState {
 /// How long a running jar has to welcome this spyc and list its snapshots:
 /// past the longest it answers nothing, parked for an upgrade.
 const ADOPT_WAIT: Duration = Duration::from_secs(20);
+/// How long a restart waits for the program its tab's jar holds to end, and
+/// the jar with it: past the longest the jar answers nothing. Running out
+/// starts nothing.
+const END_HELD_WAIT: Duration = ADOPT_WAIT;
 /// An owner with nothing to send pings this often, inside the jar's deadline.
 const PING_EVERY: Duration = Duration::from_secs(2);
 /// A jar whose socket takes no bytes for this long has stopped, and its
@@ -413,6 +497,7 @@ const fn outwaits_a_parked_jar(wait: Duration) -> bool {
 // jar's longest silence; an owner is heard from inside the jar's deadline.
 const _: () = {
     assert!(outwaits_a_parked_jar(ADOPT_WAIT));
+    assert!(outwaits_a_parked_jar(END_HELD_WAIT));
     assert!(outwaits_a_parked_jar(WRITE_STALL));
     assert!(outwaits_a_parked_jar(LINK_WAIT));
     assert!(outwaits_a_parked_jar(TAKEOVER_WAIT));
@@ -436,10 +521,10 @@ pub fn spawn(
     let place = &spec.place;
     place.prepare().context("no place for the tab's jar")?;
     sweep_once(place);
-    if let Some(at) = &spec.adopt
-        && socket_state(at) == SocketState::Live
+    if let Some(at) = held(spec.adopt.as_deref())
+        && let Some(jarred) = take::back(spec, at, (rows, cols))?
     {
-        return adopt(place, at, (rows, cols));
+        return Ok(jarred);
     }
     if spec.retake {
         anyhow::bail!("this tab's jar has gone, and its program with it");
@@ -537,75 +622,6 @@ pub fn spawn(
         gate: ReplayGate::open(),
     };
     connect(client, from, &socket, (rows, cols), place.repaint_hold)
-}
-
-/// Take back the running jar at `socket`, as a restored tab's. A jar that
-/// won't take this spyc leaves the tab detached.
-fn adopt(place: &Place, socket: &Path, (rows, cols): (u16, u16)) -> anyhow::Result<Jarred> {
-    let detached = |why: &str| {
-        eprintln!("spyc: a restored tab's jar runs on without it ({why}); the tab is detached");
-        Ok(link::detached(socket, (rows, cols)))
-    };
-    let Some(token) = tokens::load(place, socket) else {
-        return detached("this spyc has no token for it");
-    };
-    let (mut client, welcome) = match Client::connect(socket, Role::Owner, ADOPT_WAIT, &token) {
-        Ok(answered) => answered,
-        Err(e) => return detached(&format!("{e:#}")),
-    };
-    let Msg::Welcome {
-        child_pid,
-        base,
-        head,
-        rows: had_rows,
-        cols: had_cols,
-        ..
-    } = welcome
-    else {
-        return detached(&format!("expected a welcome, got {welcome:?}"));
-    };
-    client.send(&Msg::FetchSnapshot)?;
-    let mut fetched = Vec::new();
-    loop {
-        match client.recv(ADOPT_WAIT)? {
-            Some(Msg::Snapshot(Some(s))) => fetched.push(s),
-            Some(Msg::Snapshot(None)) => break,
-            Some(_) => {}
-            None => anyhow::bail!("{} listed no snapshots", socket.display()),
-        }
-    }
-    let snapshot = choose(&fetched, head, |blob| {
-        snapshots::unstamp(blob).is_some_and(crate::pane::engine_ghostty::snapshot_decodes)
-    })
-    .cloned();
-    // What the pane holds reaches the snapshot's offset; the jar holds bytes
-    // from `base`. Past a gap the first byte handed over follows a cut.
-    let from = snapshot.as_ref().map_or(base, |s| s.offset);
-    let offsets = if snapshot.is_none() && base > 0 {
-        offsets::Offsets::after_cut(base)
-    } else {
-        offsets::Offsets::new(from)
-    };
-    let replay = from.max(base);
-    let resume = Resume {
-        pid: child_pid,
-        replay,
-        offsets,
-        gate: ReplayGate::until(head),
-    };
-    let jarred = connect(client, resume, socket, (rows, cols), place.repaint_hold)?;
-    if (had_rows, had_cols) != (rows, cols) {
-        jarred.master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })?;
-    }
-    Ok(Jarred {
-        adoption: Some(Adoption { snapshot }),
-        ..jarred
-    })
 }
 
 /// R17b and R12c: the snapshot an adoption starts from. The newest this

@@ -135,7 +135,9 @@ mod tests {
                 adopt: None,
                 retake: false,
                 exit_linger: None,
+                watch: None,
             }),
+            record: None,
         })
         .unwrap();
         let socket = host.jar_socket().unwrap().to_path_buf();

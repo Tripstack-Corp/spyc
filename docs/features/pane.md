@@ -348,6 +348,16 @@ that no `spyc -r` took back, names them in a pop-up: `r` takes them back as
 tabs and tasks, still running, `d` ends them, and `Esc` leaves them
 running.
 
+A tab's program never runs twice. A tab whose jar still runs is taken back for as long as that
+jar runs: a jar that's busy or stopped is waited for, and the tab's screen says so. A tab left
+`[detached]` says why on its screen: another spyc owns its jar (naming its pid), this spyc has no
+token for it, nothing can tell whether its jar still runs, or this spyc runs tabs without jars.
+`^a R` on a tab whose jar still runs asks first, then ends the program in its jar and waits for
+the jar to go before it starts the tab again, with or without jars. It refuses, and says why,
+where another spyc owns the jar (asked at that moment, naming its pid), where this spyc has no
+token for it, and where nothing can tell whether it runs. With `[pane] jars = false`, `spyc -r`
+leaves a tab whose jar still runs `[detached]` rather than start it a second time.
+
 An agent in a jarred tab keeps spyc's tools when its spyc goes: after `spyc -r` takes the tab
 back, its next tool call reaches the new spyc, and a call made while no spyc has it waits for
 one, then fails without ending the agent's connection.
@@ -358,7 +368,8 @@ tab's output pauses for a few seconds while its jar switches over. A jar that ca
 why, and the rest stay on the build they run.
 
 `spyc --jars` lists your jars: each tab's label, whether it's a pane, a task or a `!` capture, its
-agent and project, its program's pid, the build its jar runs, and whether a spyc owns it.
+agent and project, its program's pid, its jar's pid, the build its jar runs, and whether a spyc
+owns it, with that spyc's pid.
 
 A spyc can also run in a jar of its own, so it outlives the terminal it was started in.
 `spyc attach NAME` attaches your terminal to such a session by its name (the one spyc shows,

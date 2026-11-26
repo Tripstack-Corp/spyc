@@ -234,7 +234,6 @@ fn restart_asked(app: &App) -> bool {
 /// connection has gone, and never left detached for having met it. The test
 /// holds that connection open, so the retake meets it whatever the order.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_retake_that_meets_this_spycs_old_connection_waits_for_it_to_go() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -275,7 +274,6 @@ fn a_retake_that_meets_this_spycs_old_connection_waits_for_it_to_go() {
 /// welcome is waited for (`ADOPT_WAIT`, 20 s) stays this spyc's to take
 /// back, and is taken back once the jar answers, the same program.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_tab_whose_jar_is_silent_past_one_welcome_is_taken_back_once_it_answers() {
     use rustix::process::{Pid, Signal, kill_process};
     let dir = short_dir();
@@ -327,7 +325,6 @@ fn a_tab_whose_jar_is_silent_past_one_welcome_is_taken_back_once_it_answers() {
 /// detached, its other spyc gone since) asks, and ends the program in the
 /// jar before it starts it again: two never run at once.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn restarting_a_tab_whose_jar_runs_ends_its_program_there_first() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -358,7 +355,6 @@ fn restarting_a_tab_whose_jar_runs_ends_its_program_there_first() {
 /// C2: `^a R` on a tab whose jar another spyc owns is refused, saying who,
 /// and nothing starts.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn restarting_a_tab_another_spyc_owns_is_refused_and_says_who() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -383,7 +379,6 @@ fn restarting_a_tab_another_spyc_owns_is_refused_and_says_who() {
 /// C12: a tab detached because another spyc owns its jar says so on its
 /// screen, naming that spyc.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_tab_detached_for_another_spyc_says_so_on_its_screen() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -400,7 +395,6 @@ fn a_tab_detached_for_another_spyc_says_so_on_its_screen() {
 /// already holds keeps its record of the jar, and isn't started again beside
 /// the program that jar still runs.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_restored_tab_whose_id_a_live_tab_holds_is_not_started_again() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -420,11 +414,48 @@ fn a_restored_tab_whose_id_a_live_tab_holds_is_not_started_again() {
     });
 }
 
+/// P1: a retake closes the tab's old connection itself. The test keeps the
+/// old link alive, as another of the pane's handles can, and ends the tab's
+/// reader with the connection still open, as an interrupted read leaves it:
+/// only the retake's own close lets the jar take the tab back.
+#[test]
+fn a_retake_closes_the_tabs_old_connection_itself() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let (program, _socket) = marked_tab(&mut app, dir.path());
+        let kept = tabs(&mut app).active().host.jar_signals();
+        assert!(kept.is_some(), "premise: the tab's link");
+        let host = &mut tabs(&mut app).active_mut().host;
+        host.closed = true;
+        host.exit_status = Some(portable_pty::ExitStatus::with_signal(
+            crate::pane::jar::Lost::Held.label(),
+        ));
+        assert!(
+            tabs(&mut app).active().lease_lapsed(),
+            "premise: the lease lapsed, the connection open"
+        );
+        assert!(app.retake_lapsed_tabs());
+        land(&mut app);
+        assert!(
+            tabs(&mut app).active().adopted(),
+            "the tab was taken back: {}",
+            tabs(&mut app).active_info().label
+        );
+        assert_eq!(
+            tabs(&mut app).active().process_id(),
+            u32::try_from(program).ok(),
+            "the same program"
+        );
+        drop(kept);
+        end(&mut app);
+    });
+}
+
 /// The owner's decision 1: a restore with jars off and a live jar brings the
 /// tab back `[detached]`, never started again, its screen saying why and
 /// what to do, and its record of the jar kept for the next save.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_restore_with_jars_off_leaves_the_tab_detached_saying_why() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -447,7 +478,6 @@ fn a_restore_with_jars_off_leaves_the_tab_detached_saying_why() {
 /// The owner's decision 2 with jars off: `^a R` on such a tab asks, ends the
 /// program in its jar and sees it gone, then starts it on a PTY of spyc's.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn restarting_with_jars_off_ends_the_program_in_its_jar_first() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -479,7 +509,6 @@ fn restarting_with_jars_off_ends_the_program_in_its_jar_first() {
 /// and never starts the program beside it. The jar is held stopped so it
 /// can't bind its socket again before the restore asks.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_restored_tab_whose_jar_lost_its_socket_file_is_not_started_again() {
     use rustix::process::{Pid, Signal, kill_process};
     let dir = short_dir();
@@ -540,7 +569,6 @@ fn left_in_its_jar_with_jars_off(app: &mut App, dir: &Path) -> (i32, PathBuf) {
 /// A tab whose jar this spyc has no token for says so, and `^a R` refuses
 /// rather than offer to end a program it can't reach: nothing starts.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_tab_whose_jar_has_no_token_here_says_so_and_restart_refuses() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -589,12 +617,33 @@ fn a_tab_whose_jar_has_no_token_here_says_so_and_restart_refuses() {
     });
 }
 
+/// A live tab's restart confirmed after its jar's token went still ends the
+/// program first, over the tab's own connection, and then starts it: the
+/// jar ending by itself needs no token.
+#[test]
+fn a_live_tabs_restart_whose_token_went_after_the_question_ends_then_starts() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+        let (first, socket) = marked_tab(&mut app, dir.path());
+        app.restart_active_tab();
+        assert!(restart_asked(&app), "premise: ^a R asks");
+        std::fs::remove_file(token_of(&app, &socket)).unwrap();
+        app.handle_key(key('y')).unwrap();
+        eventually("its program started again", || {
+            app.apply_pane_starts();
+            starts(dir.path()).len() == 2
+        });
+        assert!(!alive(first), "its program ran twice");
+        end(&mut app);
+    });
+}
+
 /// A detached tab's restart confirmed after its jar's token went (a
 /// cleaner, another spyc's `--remove`) can't end the program there: the tab
 /// stays `[detached]`, its screen says why and promises nothing `^a R`
 /// won't do, and nothing starts.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_detached_tabs_restart_whose_token_went_after_the_question_starts_nothing_and_says_why() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -631,7 +680,6 @@ fn a_detached_tabs_restart_whose_token_went_after_the_question_starts_nothing_an
 /// lock and nothing answering) isn't started, says so, and `^a R` refuses
 /// rather than start it beside a jar that may still run.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn a_tab_whose_jar_cant_be_told_about_says_so_and_restart_refuses() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
@@ -684,7 +732,6 @@ fn a_tab_whose_jar_cant_be_told_about_says_so_and_restart_refuses() {
 /// spyc that owned the tab's jar then and has let go since, though it still
 /// runs, no longer keeps `^a R` from asking.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn restarting_a_tab_whose_other_spyc_let_go_asks() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {

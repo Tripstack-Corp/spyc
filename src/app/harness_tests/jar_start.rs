@@ -719,7 +719,6 @@ fn a_demoted_tab_keeps_its_jar_and_the_jar_hears_it_holds_a_task() {
 /// setting) `launch_tab_pane` starts the saved command on a PTY of spyc's
 /// while the jar's program runs on.
 #[test]
-#[ignore = "red until review 3.0 slice B (C1, C2, P1, B12, C12) is fixed: fix/never-run-twice"]
 fn review_c_a_restored_tab_whose_jar_runs_is_not_started_again_with_jars_off() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
