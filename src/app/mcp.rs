@@ -209,6 +209,9 @@ impl App {
         cmd: crate::mcp_cmd::McpCommand,
     ) -> crate::mcp_cmd::McpResponse {
         use crate::mcp_cmd::{McpCommand, McpResponse};
+        if let Some(refused) = self.mcp_refused_mid_handover(&cmd) {
+            return refused;
+        }
         if cmd.is_notice() {
             return self.execute_notice(cmd);
         }
@@ -418,14 +421,7 @@ impl App {
                 }
             }
             McpCommand::ListScopes => self.mcp_list_scopes(),
-            McpCommand::ReleaseScope { id } => {
-                let before = self.state.scope_registry.len();
-                self.state.scope_registry.retain(|c| c.id != id);
-                let dropped = before - self.state.scope_registry.len();
-                McpResponse::Ok {
-                    message: format!("released {dropped} claim(s) with id {id}"),
-                }
-            }
+            McpCommand::ReleaseScope { id } => self.mcp_release_scope(id),
             // `wait_for_scope_clear` is intercepted + parked in
             // `drain_mcp_pending` (it can't reply inline), so it never reaches
             // here — answer defensively rather than panic if that ever changes.
@@ -455,13 +451,6 @@ impl App {
         crate::mcp_cmd::McpResponse::Ok {
             message: serde_json::json!({ "behind": self.newer_install().0 }).to_string(),
         }
-    }
-
-    /// `list_scopes`: every claim, as JSON.
-    fn mcp_list_scopes(&self) -> crate::mcp_cmd::McpResponse {
-        let json =
-            serde_json::to_string(&self.state.scope_registry).unwrap_or_else(|_| "[]".to_string());
-        crate::mcp_cmd::McpResponse::Ok { message: json }
     }
 
     /// `clear_picks`: in the focused column.

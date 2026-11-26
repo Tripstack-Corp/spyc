@@ -206,8 +206,7 @@ type ConversationClaims =
 
 impl App {
     pub fn save_session(&mut self) {
-        // A session let go to another spyc is that spyc's to save now.
-        if self.runtime.released {
+        if self.session_out_of_hand() {
             return;
         }
         // SPYC-TRAP(session-prune-by-last-save): every file holds a picker slot,
@@ -236,11 +235,19 @@ impl App {
     /// summary), returning whether the write succeeded. Called by
     /// [`Self::settle_autosave`] when the debounce window elapses.
     pub(super) fn autosave_session(&mut self) -> bool {
-        if self.runtime.released {
+        if self.session_out_of_hand() {
             return false;
         }
         let manifest = self.build_manifest();
         crate::state::sessions::save_session(&manifest).is_ok()
+    }
+
+    /// Whether this spyc's session is no longer its own to save: let go to
+    /// another spyc, or saved for `^d`'s session jar while it starts, whose
+    /// spyc restores the session as saved. A save then would name this spyc
+    /// as the session's again, and the spyc in the jar would restore nothing.
+    pub(super) const fn session_out_of_hand(&self) -> bool {
+        self.runtime.released || self.runtime.handover_starting
     }
 
     /// Build the [`Manifest`] from live state: every open project, in switcher
@@ -741,6 +748,13 @@ impl App {
     /// A confirmed quit: the session saved, the `--cwd-file` written, spyc
     /// gone.
     pub(super) fn quit_now(&mut self) {
+        // With `released` still false, the teardown would end every tab's
+        // program while the spyc in the session's jar restores them.
+        if self.runtime.handover_starting {
+            return self
+                .state
+                .flash_info(format!("quit: {}", super::detach::MID_HANDOVER));
+        }
         self.state
             .note_event("quit: the session saved, its tabs ended");
         self.end_session();

@@ -47,6 +47,11 @@ use crate::state::sessions::{Held, MANIFEST_VERSION, Manifest, SavedLive};
 
 /// `:detach`, `:detach project [name]` and `:detach tab [N]`.
 pub(super) fn cmd_detach(app: &mut App, args: &str) -> Vec<Effect> {
+    if app.runtime.handover_starting {
+        app.state
+            .flash_info("detach: the session's own jar is starting");
+        return Vec::new();
+    }
     match super::command_table::split_name_args(args.trim()) {
         ("", _) => app.detach(),
         ("project", name) => app.detach_project(name),
@@ -255,11 +260,12 @@ impl App {
             .moved_starts
             .sender_waking(self.loop_waker(Wake::PaneStart));
         let (for_work, named) = (label.clone(), name.clone());
+        let place = self.runtime.jar_place.clone();
         spawn_worker(
             results,
             move || {
                 let argv = vec![exe.display().to_string()];
-                let started = crate::pane::jar::session::start(&named, argv, &cwd, size)
+                let started = crate::pane::jar::session::start(place, &named, argv, &cwd, size)
                     .map(drop)
                     .map_err(|e| format!("{e:#}"));
                 MovedStart {
@@ -442,6 +448,11 @@ impl App {
 
 /// `:attach`, `:attach project NAME` and `:attach tab NAME`.
 pub(super) fn cmd_attach(app: &mut App, args: &str) -> Vec<Effect> {
+    if app.runtime.handover_starting {
+        app.state
+            .flash_info("attach: the session's own jar is starting");
+        return Vec::new();
+    }
     match super::command_table::split_name_args(args.trim()) {
         ("", _) => app.list_sessions(),
         ("project", name) if !name.is_empty() => app.attach_project(name),
@@ -632,6 +643,11 @@ impl App {
 
     /// What the asked spycs let go. Whether there is anything to draw.
     pub(crate) fn apply_attach_releases(&mut self) -> bool {
+        // Taken in, a session would be saved here as this spyc's: while `^d`'s
+        // jar starts it waits, and one let go after stays saved for `spyc -r`.
+        if self.session_out_of_hand() {
+            return false;
+        }
         let landed = self.runtime.attach_releases.drain();
         let drawn = !landed.is_empty();
         for Released {
