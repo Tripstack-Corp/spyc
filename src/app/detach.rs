@@ -1,12 +1,14 @@
 //! `^d` and `:detach` (S4): the terminal goes, and spyc stays. spyc in its
 //! own jar (`pane::jar::session`) writes its terminal's reset and has the jar
-//! end the client (`settle_detach`). A plain spyc hands itself over first: it
-//! leaves the loop, saves the session as no running spyc's, ends each jar's
-//! connection as a crash would, starts the session's own jar with a spyc
-//! running there before any terminal attaches, and ends, naming the session
-//! `spyc attach` takes (`hand_over`, from `lib.rs`). The spyc the jar starts
-//! restores the session by its name and takes the jars back
-//! (`restore_own_session`).
+//! end the client (`settle_detach`). A plain spyc hands itself over first.
+//! In the loop (`prepare_handover`) it saves the session as no running spyc's,
+//! synced, and starts the session's own jar with a spyc running there at once,
+//! told this spyc's pid; when either fails it stays, and says why. Only then
+//! does it leave the loop, end each jar's connection as a crash would, and end,
+//! naming the session `spyc attach` takes (`hand_over`, from `lib.rs`). The
+//! spyc the jar starts restores the session by its name and takes each jar back
+//! once this spyc has let it go (`restore_own_session`, `pane::jar::take`):
+//! until then it waits on each jar, never taking one for another spyc's.
 //!
 //! `:upgrade` is the same handover to a newly installed spyc. In a plain spyc
 //! it is `^d`'s, whose jar runs the binary now installed. In spyc's own jar
@@ -27,13 +29,16 @@ use super::proc::ForegroundExec;
 use super::tasks::TaskStatus;
 use crate::Tui;
 
-/// A handover, left for `lib.rs` once the loop ends.
+/// A handover, left for `lib.rs` once the loop ends: the session is saved
+/// and, for `^d`, its jar runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Handover {
     /// The session's name: its jar's.
     pub name: String,
     /// An upgrade in spyc's own jar: `exec` the new binary there.
     pub in_place: bool,
+    /// The spyc it becomes: the binary installed.
+    pub exe: std::path::PathBuf,
 }
 
 /// The binary spyc runs from, as it was when spyc started: an install puts a
@@ -98,19 +103,64 @@ impl App {
             ));
             return;
         }
-        let Some(name) = self.state.session_name.clone() else {
+        if self.state.session_name.is_none() {
             self.state
                 .flash_error("can't detach: the session has no name");
             return;
+        }
+        self.runtime.handover_asked = true;
+    }
+
+    /// `^d`'s handover in a plain spyc, in the loop: save the session as no
+    /// running spyc's and start its own jar, then leave the loop for
+    /// [`Self::hand_over`]. When either fails spyc stays, its tabs its own,
+    /// and says why.
+    fn prepare_handover(&mut self) {
+        let Some(name) = self.state.session_name.clone() else {
+            return;
         };
+        let refused =
+            |e: anyhow::Error| format!("can't detach: {e:#}; spyc stays, its tabs with it");
+        let ready = crate::paths::installed_spyc().and_then(|exe| {
+            let cwd = std::env::current_dir().context("spyc's directory")?;
+            Ok((exe, cwd))
+        });
+        let (exe, cwd) = match ready {
+            Ok(ready) => ready,
+            Err(e) => return self.state.flash_error(refused(e)),
+        };
+        // SPYC-TRAP(handover-ready-before-release): saved, synced, and its jar
+        // running before any jar is let go; a failure of either stays here.
+        if let Err(e) = self.save_released() {
+            let e = anyhow::Error::new(e).context(format!("{name} wasn't saved"));
+            return self.state.flash_error(refused(e));
+        }
+        // Noted before the jar starts, its spyc writing to the same log: the
+        // log tells the handover in the order it happens. A start that fails
+        // is noted after it, as spyc stays.
         self.state.note_event(&format!(
             "detached: spyc moves into {name}'s own jar, its tabs running on"
         ));
+        self.flush_events();
+        let size = crossterm::terminal::size().map_or((24, 80), |(cols, rows)| (rows, cols));
+        if let Err(e) = crate::pane::jar::session::start(&name, handover_argv(&exe), &cwd, size) {
+            self.keep_session();
+            return self.state.flash_error(refused(e));
+        }
+        self.runtime.released = true;
         self.runtime.handover = Some(Handover {
             name,
             in_place: false,
+            exe,
         });
         self.state.should_quit = true;
+    }
+
+    /// The session saved again as this spyc's, after a handover that stayed.
+    fn keep_session(&mut self) {
+        if self.autosave_session() {
+            self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+        }
     }
 
     /// `:upgrade`, with the loop: only to a binary installed since spyc
@@ -129,11 +179,21 @@ impl App {
                 at.path.display()
             ));
         }
-        match (&self.runtime.own_jar, self.state.session_name.clone()) {
-            (Some(_), Some(name)) => {
+        match (&self.runtime.own_jar, self.state.session_name.clone(), now) {
+            (Some(_), Some(name), Some(at)) => {
+                // SPYC-TRAP(handover-ready-before-release): saved, synced,
+                // before any jar is let go; a failed save stays here.
+                if let Err(e) = self.save_released() {
+                    self.state.flash_error(format!(
+                        "can't upgrade: {name} wasn't saved ({e:#}); spyc stays, its tabs with it"
+                    ));
+                    return;
+                }
+                self.runtime.released = true;
                 self.runtime.handover = Some(Handover {
                     name,
                     in_place: true,
+                    exe: at.path,
                 });
                 self.state.should_quit = true;
             }
@@ -177,63 +237,55 @@ impl App {
     }
 
     /// Hand the session over, once the loop has ended and the terminal is
-    /// restored: save it, leave every jar running, start the session's own jar
-    /// with its spyc running there with no terminal, and end, the terminal
-    /// freed as any detach frees it. Says what runs on when that fails.
+    /// restored: the session is saved and, for `^d`, its jar runs
+    /// (`prepare_handover`), its spyc waiting for this one to let each jar go.
+    /// Leave every jar running and end, the terminal freed as any detach frees
+    /// it; or in spyc's own jar `exec` the new binary, which keeps this pid and
+    /// so the jar, and restores the session. Says what runs on when the `exec`
+    /// fails.
     pub fn hand_over(&mut self, handover: &Handover) -> anyhow::Result<()> {
+        use std::os::unix::process::CommandExt;
         self.close_event_log();
-        let name = &handover.name;
-        if handover.in_place {
-            return self.upgrade_in_place(name);
-        }
-        self.save_released(name);
-        let exe = crate::paths::installed_spyc()?;
-        let cwd = std::env::current_dir().context("spyc's directory")?;
-        let size = crossterm::terminal::size().map_or((24, 80), |(cols, rows)| (rows, cols));
-        // Released first: the spyc the jar starts takes the jars back at once.
+        let Handover {
+            name,
+            in_place,
+            exe,
+        } = handover;
         self.release_jars();
-        crate::pane::jar::session::start(name, vec![exe.display().to_string()], &cwd, size)
-            .with_context(|| {
-                format!("{name}'s tabs run on in their jars: `spyc -r` takes them back")
-            })?;
+        if *in_place {
+            let err = std::process::Command::new(exe)
+                .args(upgrade_args(std::env::args_os().skip(1)))
+                .exec();
+            return Err(err).with_context(|| {
+                format!(
+                    "run {}; {name}'s tabs run on in their jars: `spyc -r` takes them back",
+                    exe.display()
+                )
+            });
+        }
         println!("[detached from {name}: `spyc attach {name}` brings it back]");
         Ok(())
     }
 
-    /// An upgrade in spyc's own jar: save, leave the jars running, and `exec`
-    /// the new binary, which keeps this pid and so the jar, and restores the
-    /// session. Returns only when the `exec` fails.
-    fn upgrade_in_place(&mut self, name: &str) -> anyhow::Result<()> {
-        use std::os::unix::process::CommandExt;
-        let exe = crate::paths::installed_spyc()?;
-        self.save_released(name);
-        self.release_jars();
-        let err = std::process::Command::new(&exe)
-            .args(std::env::args_os().skip(1))
-            .exec();
-        Err(err).with_context(|| {
-            format!(
-                "run {}; {name}'s tabs run on in their jars: `spyc -r` takes them back",
-                exe.display()
-            )
-        })
-    }
-
-    /// Save the session as no running spyc's: this process goes on as `spyc
-    /// attach` or as the next spyc, and a session whose spyc runs is restored
-    /// as a copy.
-    fn save_released(&mut self, name: &str) {
+    /// Save the session as no running spyc's, synced, each tab with the
+    /// status its agent last reported: the next spyc restores it, and a session
+    /// whose spyc runs is restored as a copy.
+    fn save_released(&mut self) -> std::io::Result<()> {
         let mut manifest = self.build_manifest();
         manifest.pid = None;
         manifest.process_started = None;
-        if let Err(e) = crate::state::sessions::save_session(&manifest) {
-            eprintln!("spyc: {name} wasn't saved ({e:#}); its tabs run on in their jars");
-        }
+        self.carry_live(&mut manifest);
+        crate::state::sessions::save_session_durably(&manifest)
     }
 
     /// Leave every jar running for the next spyc, its connection ended as a
-    /// crash would, and clear what this spyc kept for itself.
+    /// crash would, and clear what this spyc kept for itself. Only for a
+    /// session already saved as released.
     pub(super) fn release_jars(&mut self) {
+        debug_assert!(
+            self.runtime.released,
+            "SPYC-TRAP(handover-ready-before-release): jars let go before the session was saved as released"
+        );
         for (_, tabs) in self.runtime.every_tab_set() {
             for entry in tabs.tabs() {
                 entry.pane.host.sever_jar();
@@ -257,11 +309,16 @@ impl App {
         if upgrade {
             self.upgrade();
         }
+        let handover = std::mem::take(&mut self.runtime.handover_asked);
+        if handover {
+            self.prepare_handover();
+        }
+        let settled = upgrade || handover;
         if !std::mem::take(&mut self.runtime.detach_pending) {
-            return upgrade;
+            return settled;
         }
         let Some(jar) = &self.runtime.own_jar else {
-            return upgrade;
+            return settled;
         };
         let reset = crate::terminal::detach_reset(terminal);
         if !jar.detach_client() {
@@ -394,6 +451,38 @@ impl App {
     }
 }
 
+/// The flag that tells the spyc a `^d` starts in the session's own jar which
+/// spyc it takes the session from (`pane::jar::take::took_over_from`).
+pub const HANDED_OVER_BY: &str = "--handed-over-by";
+
+/// The command line of the spyc a `^d` starts in the session's own jar: the
+/// binary installed, told this spyc's pid, whose jars it waits for.
+fn handover_argv(exe: &std::path::Path) -> Vec<String> {
+    vec![
+        exe.display().to_string(),
+        HANDED_OVER_BY.to_string(),
+        std::process::id().to_string(),
+    ]
+}
+
+/// The arguments an `:upgrade` in place runs the new binary with: this
+/// spyc's, less the pid of the spyc it took the session from, which is no
+/// longer holding anything (and whose number may be another's by now).
+fn upgrade_args(mut args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    let mut out = Vec::new();
+    while let Some(arg) = args.next() {
+        if arg == HANDED_OVER_BY {
+            args.next();
+        } else if !arg
+            .to_string_lossy()
+            .starts_with(&format!("{HANDED_OVER_BY}="))
+        {
+            out.push(arg);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,21 +515,46 @@ mod tests {
         });
     }
 
+    /// `^d` asks the loop for the handover, which saves the session and
+    /// starts its jar before it leaves: the key alone neither quits nor hands
+    /// anything over.
     #[test]
-    fn with_everything_in_jars_detach_leaves_the_loop_for_a_handover() {
+    fn an_upgrade_in_place_drops_the_pid_it_was_handed_over_by() {
+        let args = ["-r", HANDED_OVER_BY, "4242", "--color", "never"].map(std::ffi::OsString::from);
+        assert_eq!(
+            upgrade_args(args.into_iter()),
+            ["-r", "--color", "never"].map(std::ffi::OsString::from)
+        );
+        let joined = [format!("{HANDED_OVER_BY}=4242"), "-r".into()].map(std::ffi::OsString::from);
+        assert_eq!(
+            upgrade_args(joined.into_iter()),
+            ["-r"].map(std::ffi::OsString::from)
+        );
+    }
+
+    #[test]
+    fn with_everything_in_jars_detach_asks_the_loop_for_a_handover() {
         let tmp = tempfile::tempdir().unwrap();
         crate::state::with_state_root(&tmp.path().join("state"), || {
             let mut app = App::test_app(tmp.path().to_path_buf());
             app.state.session_name = Some("ANISE".into());
             app.detach();
-            assert!(app.state.should_quit);
-            assert_eq!(
-                app.take_handover(),
-                Some(Handover {
-                    name: "ANISE".into(),
-                    in_place: false,
-                })
-            );
+            assert!(app.runtime.handover_asked);
+            assert!(!app.state.should_quit);
+            assert_eq!(app.take_handover(), None);
+        });
+    }
+
+    /// The guard on letting the jars go: a session not saved as released
+    /// keeps them.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "handover-ready-before-release")]
+    fn jars_are_let_go_only_from_a_session_saved_as_released() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::state::with_state_root(&tmp.path().join("state"), || {
+            let mut app = App::test_app(tmp.path().to_path_buf());
+            app.release_jars();
         });
     }
 

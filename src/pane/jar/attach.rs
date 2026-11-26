@@ -144,7 +144,7 @@ fn behind(socket: &Path) -> Option<(u32, PathBuf)> {
     };
     let pid: u32 = field("program_pid")?.parse().ok()?;
     let here = crate::paths::installed_spyc().ok()?;
-    if Path::new(field("program")?) != here {
+    if !runs_from(field("program")?, &here) {
         return None;
     }
     // The spyc knows what it runs: an upgrade in place keeps its pid, and so
@@ -163,6 +163,17 @@ fn behind(socket: &Path) -> Option<(u32, PathBuf)> {
         u64::try_from(meta.mtime().max(meta.ctime())).ok()?
     };
     replaced_since(started, installed).then_some((pid, here))
+}
+
+/// Whether a session jar's `program`, its command line joined by spaces,
+/// runs the spyc at `here`: that binary alone, or with the arguments a `^d`
+/// gives it (`--handed-over-by`).
+fn runs_from(program: &str, here: &Path) -> bool {
+    let here = here.display().to_string();
+    program == here
+        || program
+            .strip_prefix(&here)
+            .is_some_and(|rest| rest.starts_with(' '))
 }
 
 /// Whether a file modified at `installed` came after a process started at
@@ -525,6 +536,18 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn a_session_runs_the_installed_spyc_with_or_without_a_handovers_arguments() {
+        let here = Path::new("/home/u/.local/bin/spyc");
+        assert!(runs_from("/home/u/.local/bin/spyc", here));
+        assert!(runs_from(
+            "/home/u/.local/bin/spyc --handed-over-by 4242",
+            here
+        ));
+        assert!(!runs_from("/home/u/.local/bin/spyc-old", here));
+        assert!(!runs_from("/opt/spyc --handed-over-by 4242", here));
     }
 
     #[test]

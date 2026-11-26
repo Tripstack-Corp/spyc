@@ -1080,7 +1080,6 @@ fn ctrl_d_leaves_no_tab_detached_and_runs_no_program_twice() {
 /// Here the sessions' directory is open to others, so no jar is trusted
 /// there.
 #[test]
-#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
 fn ctrl_d_with_no_place_for_the_sessions_jar_keeps_spyc_and_its_tabs() {
     use std::os::unix::fs::PermissionsExt;
     let dirs = dirs();
@@ -1101,7 +1100,6 @@ fn ctrl_d_with_no_place_for_the_sessions_jar_keeps_spyc_and_its_tabs() {
 /// in its loop with its tabs, and says why: the spyc a session jar starts
 /// would find nothing to restore, and offer the tabs as no spyc's.
 #[test]
-#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
 fn ctrl_d_whose_save_fails_keeps_spyc_and_its_tabs() {
     let dirs = dirs();
     let mut left = Leftovers(Vec::new());
@@ -1115,7 +1113,6 @@ fn ctrl_d_whose_save_fails_keeps_spyc_and_its_tabs() {
 /// D6 of the 3.0 review, in the session's own jar: `:upgrade` whose save
 /// fails keeps this spyc, its tabs with it, and says why.
 #[test]
-#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
 fn upgrade_whose_save_fails_keeps_the_session_in_its_jar() {
     let dirs = dirs();
     let bin = dirs.root.path().join("bin");
@@ -1177,7 +1174,6 @@ fn upgrade_whose_save_fails_keeps_the_session_in_its_jar() {
 /// reports nothing until it's answered, so the spyc the jar starts would
 /// otherwise show it as needing nothing.
 #[test]
-#[ignore = "red until D2, D6 and D5 are fixed (fix/handover-before-release)"]
 fn ctrl_d_keeps_a_tabs_last_status_report() {
     let probe = tempfile::NamedTempFile::new_in("/tmp").unwrap();
     let env_file = probe.path().to_path_buf();

@@ -77,7 +77,7 @@ pub use link::{Lost, Watch};
 pub use place::Place;
 use session::LINK_WAIT;
 pub use snapshots::{SnapshotSink, Snapshotter};
-pub use take::{NoToken, OtherSpyc, OwnedElsewhere, end_held, owned_elsewhere_now};
+pub use take::{NoToken, OtherSpyc, OwnedElsewhere, end_held, owned_elsewhere_now, took_over_from};
 
 use link::{JarChild, JarMaster, JarReader, JarReplies, Link, ReplayGate};
 use place::{SocketState, socket_state};

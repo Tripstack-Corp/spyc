@@ -196,7 +196,7 @@ impl App {
     }
 
     /// Give each tab `manifest` saves the status its agent last reported here.
-    fn carry_live(&self, manifest: &mut Manifest) {
+    pub(super) fn carry_live(&self, manifest: &mut Manifest) {
         let now = Instant::now();
         let live: HashMap<String, SavedLive> = self
             .runtime
@@ -786,8 +786,8 @@ impl App {
                 message: format!("its session wasn't saved, so it stays: {e:#}"),
             };
         }
-        self.release_jars();
         self.runtime.released = true;
+        self.release_jars();
         self.state
             .note_event("released: another spyc takes this session's projects");
         self.state.should_quit = true;

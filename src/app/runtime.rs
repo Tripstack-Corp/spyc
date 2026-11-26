@@ -112,6 +112,9 @@ pub(super) struct Runtime {
     pub(super) terminal_noted: bool,
     /// A `^d` in spyc's own jar, for the loop to carry out with the terminal.
     pub(super) detach_pending: bool,
+    /// `^d` in a plain spyc, for the loop to save the session and start its
+    /// jar before it hands over (`App::prepare_handover`).
+    pub(super) handover_asked: bool,
     /// A handover, for `lib.rs` once the loop ends.
     pub(super) handover: Option<super::detach::Handover>,
     /// `:upgrade`, for the loop to look for the new binary.
@@ -424,6 +427,7 @@ impl Runtime {
             },
             terminal_noted: false,
             detach_pending: false,
+            handover_asked: false,
             handover: None,
             upgrade_pending: false,
             started_from: None,
