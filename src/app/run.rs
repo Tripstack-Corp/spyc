@@ -289,6 +289,16 @@ impl App {
         if matches!(effective, Ok(Message::Input(_))) {
             self.runtime.inputs_handled += 1;
         }
+        let held = matches!(
+            effective,
+            Ok(Message::Input(
+                Event::Key(_) | Event::Paste(_) | Event::Mouse(_)
+            ))
+        );
+        if held && self.input_held_for_handover() {
+            ctx.draw.mark(2);
+            return Ok(DispatchFlow::Proceed);
+        }
         match effective {
             // A release is no keypress and redraws nothing: it only reaches a
             // program that asked for releases.
