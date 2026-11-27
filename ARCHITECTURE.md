@@ -873,9 +873,11 @@ runs in, as a jar compares a `hello`'s, and a spyc in no session jar of its
 own takes none (the 3.0 review, E1). The callers, `spyc shutdown`,
 `spyc attach` and `:attach project`, read that token where `spyc attach`
 does. There is no prompt in the TUI: a detached spyc has no one to ask. A
-refusal is answered with why, and flashed and logged in the session;
-`spyc/upgrade` is a notification, so its sender learns of a refusal only by
-the session not coming back upgraded.
+refusal is answered with why, and flashed and logged in the session. All
+three are requests: `spyc/upgrade` is answered before anything starts, once
+spyc has checked what `:upgrade` needs (a newer install, a named session,
+every tab in a jar), so `spyc attach` says a refusal and attaches at once
+(H7). Its wait for the new spyc's socket then only bounds the wait.
 
 ## spyc outwaits a busy jar
 

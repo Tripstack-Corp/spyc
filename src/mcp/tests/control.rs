@@ -119,7 +119,6 @@ fn answer_to(msg: &Value, loop_answer: impl Fn(&str) -> McpResponse + Send + 'st
 /// `spyc/upgrade` is a request (H7): one whose token is refused is answered
 /// with why, so `spyc attach` hears the refusal rather than nothing.
 #[test]
-#[ignore = "red until H7: fix/upgrade-answers"]
 fn an_upgrade_request_with_a_refused_token_is_answered_why() {
     let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"nope"}});
     let reply = answer_to(&msg, |said| {
@@ -140,7 +139,6 @@ fn an_upgrade_request_with_a_refused_token_is_answered_why() {
 /// One the loop refuses for want of what an upgrade needs is answered with
 /// the loop's reason.
 #[test]
-#[ignore = "red until H7: fix/upgrade-answers"]
 fn an_upgrade_request_the_loop_refuses_is_answered_with_its_reason() {
     let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"tok"}});
     let reply = answer_to(&msg, |said| {
@@ -160,7 +158,6 @@ fn an_upgrade_request_the_loop_refuses_is_answered_with_its_reason() {
 
 /// One the loop accepts is answered `{"upgrading": true}`.
 #[test]
-#[ignore = "red until H7: fix/upgrade-answers"]
 fn an_upgrade_request_the_loop_accepts_is_answered_upgrading() {
     let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"tok"}});
     let reply = answer_to(&msg, |said| McpResponse::Ok {

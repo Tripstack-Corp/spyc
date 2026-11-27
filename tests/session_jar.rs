@@ -1222,31 +1222,36 @@ fn a_release_without_the_sessions_token_is_refused() {
     assert_eq!(jar.described("exit"), None, "the session ended");
 }
 
-/// `spyc/upgrade` is acted on only with the session's token (E1). It is a
-/// notification, so its sender hears nothing either way; the session's own
-/// screen says it was refused.
+/// `spyc/upgrade` is acted on only with the session's token (E1), and is
+/// answered either way (H7): without the token, refused for it; with it, by
+/// what `:upgrade` needs, here a newer spyc this test never installs.
 #[test]
 fn an_upgrade_without_the_sessions_token_is_refused() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
-    let terminal = Terminal::attach(&jar, (30, 100), PLAIN);
-    terminal.wait_for("the session drawn", NAME);
-    ask_spyc(
+    let reply = ask_spyc(
         &dirs,
         spyc_of(&jar),
         "spyc/upgrade",
         serde_json::json!({}),
-        false,
+        true,
+    )
+    .unwrap();
+    let why = reply["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        why.contains("token") && !why.contains("no newer spyc"),
+        "{reply}"
     );
-    let until = Instant::now() + WAIT;
-    while !terminal.text().contains("refused spyc/upgrade") {
-        assert!(
-            !terminal.text().contains("no newer spyc"),
-            "an upgrade looked for without the token"
-        );
-        assert!(Instant::now() < until, "never said: {:?}", terminal.text());
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    let reply = ask_spyc(
+        &dirs,
+        spyc_of(&jar),
+        "spyc/upgrade",
+        serde_json::json!({ "token": token_text() }),
+        true,
+    )
+    .unwrap();
+    let why = reply["error"]["message"].as_str().unwrap_or("");
+    assert!(why.contains("no newer spyc"), "{reply}");
 }
 
 /// A spyc that runs in no session jar of its own takes no control request,

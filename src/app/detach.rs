@@ -323,6 +323,44 @@ impl App {
         }
     }
 
+    /// `spyc/upgrade`, from `spyc attach`: answered before anything starts
+    /// (H7), `{"upgrading": true}` with the upgrade under way, or why it
+    /// won't be, which `spyc attach` says and attaches at once.
+    pub(super) fn accept_upgrade(&mut self) -> crate::mcp_cmd::McpResponse {
+        use crate::mcp_cmd::McpResponse;
+        if let Some(why) = self.upgrade_refusal() {
+            let said = format!("upgrade: {why}");
+            self.state
+                .note_event(&format!("refused spyc/upgrade: {why}"));
+            self.state.flash_error(said.clone());
+            return McpResponse::Error { message: said };
+        }
+        self.runtime.upgrade_pending = true;
+        McpResponse::Ok {
+            message: serde_json::json!({ "upgrading": true }).to_string(),
+        }
+    }
+
+    /// Why `:upgrade` can't start now, as [`Self::upgrade`] would find: no
+    /// newer spyc installed, or, outside a session jar of its own, a tab or
+    /// task outside a jar or a session with no name.
+    fn upgrade_refusal(&self) -> Option<String> {
+        let (newer, now) = self.newer_install();
+        if !newer {
+            let at = now.map_or_else(String::new, |n| format!(" at {}", n.path.display()));
+            return Some(format!("no newer spyc is installed{at}"));
+        }
+        if self.state.session_name.is_none() {
+            return Some("the session has no name".into());
+        }
+        if self.runtime.own_jar.is_none()
+            && let Some(what) = self.unjarred()
+        {
+            return Some(format!("{what} runs outside a jar and would end with spyc"));
+        }
+        None
+    }
+
     /// Whether a spyc newer than this one is installed where it runs from, and
     /// the file there now: `:upgrade`'s test, and what `spyc attach` asks.
     pub(super) fn newer_install(&self) -> (bool, Option<BinaryStamp>) {

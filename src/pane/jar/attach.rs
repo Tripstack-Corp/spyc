@@ -13,7 +13,9 @@
 //! A session whose spyc runs from the path this one does, and finds a newer
 //! spyc installed there, as `:upgrade` would, runs an install it hasn't
 //! taken: `spyc attach` asks it (`spyc/behind`) and offers to have it
-//! `:upgrade` first, by a notification on its MCP socket. Its start time
+//! `:upgrade` first, by a request on its MCP socket, which it answers before
+//! anything starts: a refusal, with why, is said and the terminal attaches
+//! at once. Its start time
 //! can't say, since an upgrade in place keeps the pid; it is only the answer
 //! for a spyc that predates the question.
 //!
@@ -94,7 +96,13 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
             &mut std::io::stderr(),
         )?
     {
-        upgrade_first(&chosen.name, program, &token)?;
+        // A refusal is said, and the terminal attaches to the session as it is.
+        if let Err(e) = upgrade_first(&chosen.name, program, &token) {
+            eprintln!(
+                "spyc: {} isn't upgrading: {e:#}; attaching as it is",
+                chosen.name
+            );
+        }
     }
     crate::terminal::restore_on_signal();
     let attached = super::place::attach(&chosen.socket, &token);
@@ -215,10 +223,13 @@ const fn replaced_since(started: u64, installed: u64) -> bool {
 }
 
 /// Have the session's spyc `:upgrade`, and wait for the new one before the
-/// terminal attaches, so no key is typed into a spyc as it restarts. The old
-/// spyc removes its MCP socket before its `exec` and the new one makes it
-/// again: a socket newer than the one there now, taking a connection, is the
-/// new spyc. One that doesn't come is attached to anyway, with a note.
+/// terminal attaches, so no key is typed into a spyc as it restarts. The spyc
+/// answers first (H7): a refusal, with why, is this function's error, and the
+/// caller attaches at once. Once it has said it is upgrading, the old spyc
+/// removes its MCP socket before its `exec` and the new one makes it again: a
+/// socket newer than the one there now, taking a connection, is the new spyc.
+/// The wait for it decides nothing: when it runs out, the terminal attaches,
+/// saying the upgrade was accepted and the new spyc hasn't shown yet.
 fn upgrade_first(name: &str, pid: u32, token: &[u8]) -> anyhow::Result<()> {
     let socket =
         crate::mcp::socket_path_for(pid).context("no state directory for spyc's socket")?;
@@ -240,7 +251,9 @@ fn upgrade_first(name: &str, pid: u32, token: &[u8]) -> anyhow::Result<()> {
             return Ok(());
         }
         if Instant::now() >= until {
-            eprintln!("spyc: {name}'s spyc hasn't come back upgraded yet; attaching anyway");
+            eprintln!(
+                "spyc: {name}'s spyc accepted the upgrade, and the new one hasn't shown yet; attaching"
+            );
             return Ok(());
         }
         std::thread::sleep(TAKEOVER_POLL);
@@ -558,7 +571,6 @@ mod tests {
     /// `spyc attach` hears it at once, rather than waiting out its wait and
     /// saying the upgrade is late.
     #[test]
-    #[ignore = "red until H7: fix/upgrade-answers"]
     fn a_refused_upgrade_is_heard_from_the_session_spyc() {
         let dir = super::super::test_dir::TestDir::new("au");
         crate::state::with_state_root(dir.path(), || {
@@ -582,7 +594,6 @@ mod tests {
     /// A session's spyc that doesn't know the request answers "method not
     /// found", and `spyc attach` says that.
     #[test]
-    #[ignore = "red until H7: fix/upgrade-answers"]
     fn an_upgrade_a_spyc_doesnt_know_is_reported_as_such() {
         let dir = super::super::test_dir::TestDir::new("au");
         crate::state::with_state_root(dir.path(), || {
