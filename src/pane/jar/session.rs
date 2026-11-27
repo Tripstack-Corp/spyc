@@ -89,6 +89,12 @@ impl OwnJar {
         OwnerLeft::from_word(word)
     }
 
+    /// Forget this session's token: spyc ends it for good, and its jar with
+    /// it ([`forget_token`]).
+    pub fn forget_token(&self) {
+        forget_token(&self.socket);
+    }
+
     /// Whether a terminal is attached.
     pub fn attached(&self) -> bool {
         self.attached.load(Ordering::SeqCst)
@@ -232,6 +238,16 @@ pub fn socket_in(sessions: &Path, name: &str) -> anyhow::Result<PathBuf> {
         );
     }
     Ok(socket)
+}
+
+/// Forget the token of the session whose jar is at `socket`, once its jar
+/// has ended or is ending (the 3.0 review, E7): it opens nothing any more,
+/// and a token kept for a name is what a socket planted under that name
+/// would collect.
+pub fn forget_token(socket: &Path) {
+    if let Ok(dir) = super::place::tokens_dir() {
+        super::tokens::forget_in(&dir, socket);
+    }
 }
 
 /// The file beside a session's socket holding the name it goes by, once

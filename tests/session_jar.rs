@@ -933,7 +933,6 @@ fn token_file(dirs: &Dirs, name: &str) -> PathBuf {
 /// A session shut down forgets its token (the 3.0 review, E7): once
 /// `spyc shutdown` has seen it end, no token file is left for it.
 #[test]
-#[ignore = "red until E7: fix/session-token-forgotten"]
 fn a_session_shut_down_forgets_its_token() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
@@ -964,7 +963,6 @@ fn a_session_shut_down_forgets_its_token() {
 
 /// A session quit from the terminal attached to it forgets its token.
 #[test]
-#[ignore = "red until E7: fix/session-token-forgotten"]
 fn a_session_quit_from_its_terminal_forgets_its_token() {
     let dirs = Dirs::new();
     let _jar = session(&dirs, NAME);
@@ -980,7 +978,6 @@ fn a_session_quit_from_its_terminal_forgets_its_token() {
 /// A session quit from a terminal that isn't `spyc attach` (a raw client of
 /// its jar) forgets its token by its own spyc, as it quits for good.
 #[test]
-#[ignore = "red until E7: fix/session-token-forgotten"]
 fn a_session_quit_by_its_own_spyc_forgets_its_token() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
@@ -1001,7 +998,6 @@ fn a_session_quit_by_its_own_spyc_forgets_its_token() {
 /// A session whose spyc died while a terminal was attached forgets its token
 /// once that terminal's `spyc attach` learns its jar holds only the exit.
 #[test]
-#[ignore = "red until E7: fix/session-token-forgotten"]
 fn a_session_whose_spyc_died_forgets_its_token_through_its_terminal() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);

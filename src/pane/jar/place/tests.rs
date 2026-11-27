@@ -28,7 +28,6 @@ fn stale_socket(path: &Path) {
 /// A session's jar that has gone is swept as a pane's is (the 3.0 review,
 /// E7): its socket, its lock file and its token.
 #[test]
-#[ignore = "red until E7: fix/session-token-forgotten"]
 fn a_gone_sessions_socket_and_token_are_swept() {
     let dir = super::super::test_dir::TestDir::new("ps");
     let place = place_in(dir.path());

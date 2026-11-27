@@ -742,6 +742,10 @@ impl App {
     pub(super) fn end_session(&mut self) {
         self.remember_pager_position();
         self.save_session();
+        // Its own jar ends with it: the token opens nothing any more.
+        if let Some(jar) = &self.runtime.own_jar {
+            jar.forget_token();
+        }
         self.state.should_quit = true;
     }
 

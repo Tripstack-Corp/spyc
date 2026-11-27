@@ -801,6 +801,11 @@ impl App {
                 };
             }
         };
+        // Its own jar ends as this spyc quits: the token opens nothing any
+        // more. The spyc that takes the session takes its tabs' jars only.
+        if let Some(jar) = &self.runtime.own_jar {
+            jar.forget_token();
+        }
         self.runtime.released = true;
         let id = saved.id();
         self.release_jars(saved);
