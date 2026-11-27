@@ -127,6 +127,33 @@ pub fn from_env() -> Option<anyhow::Result<PathBuf>> {
 mod tests {
     use super::*;
 
+    /// The links' directory goes through the one ownership check, the
+    /// directory above it included (the refuter on E2): where another user
+    /// made or can write in `<runtime>/spyc`, as `/tmp/spyc-<uid>` can be,
+    /// they could move the links away and put their own directory in its
+    /// place. Refused, with nothing made in their directory.
+    #[test]
+    #[ignore = "red until E2: fix/ssh-agents-trust"]
+    fn a_links_directory_under_one_open_to_others_is_refused() {
+        let root = private_dir();
+        let base = root.path().join("spyc");
+        std::fs::create_dir(&base).unwrap();
+        std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let dir = base.join("ssh-agents");
+        let made = prepare(&dir);
+        assert!(
+            made.is_err(),
+            "a links directory trusted under one open to others"
+        );
+        assert!(!dir.exists(), "made inside a directory open to others");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            prepare(&dir).is_err(),
+            "an existing one trusted under one open to others"
+        );
+    }
+
     fn private_dir() -> tempfile::TempDir {
         tempfile::Builder::new()
             .permissions(std::fs::Permissions::from_mode(0o700))
