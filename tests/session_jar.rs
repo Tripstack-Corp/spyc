@@ -1278,3 +1278,91 @@ fn a_spyc_outside_a_session_jar_takes_no_control_request() {
     );
     plain.quit_spyc();
 }
+
+/// A control request is checked against the session jar's own token, never
+/// the token file (the 3.0 review's refuter on E1): a token written into the
+/// file by another process of the user's opens nothing. The file is
+/// `spyc attach`'s only copy, so it locks the user out of attaching
+/// (SECURITY.md says how to get back in); the session runs on.
+#[test]
+#[ignore = "red until E1: fix/control-token-held"]
+fn a_token_written_into_the_token_file_is_refused() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let file = dirs.state.join("spyc/jar-tokens").join(NAME);
+    std::fs::write(&file, "forged-token-written-by-another-process").unwrap();
+    let reply = ask_spyc(
+        &dirs,
+        spyc_of(&jar),
+        "spyc/shutdown",
+        serde_json::json!({ "token": "forged-token-written-by-another-process" }),
+        true,
+    )
+    .unwrap();
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("token")),
+        "a forged token was accepted: {reply}"
+    );
+    assert_eq!(jar.described("exit"), None, "the session ended");
+    let mut term = Attached::start(&dirs, &["attach", NAME]);
+    let status = term.exit();
+    assert!(!status.success(), "attached with the rewritten file");
+    assert!(term.text().contains("wrong token"), "{:?}", term.text());
+    assert_eq!(jar.described("exit"), None, "the session ended");
+}
+
+/// The session jar is asked as a reader, which a terminal attached as its
+/// owner doesn't keep out: a control request with the right token is taken
+/// while a terminal is attached, and the terminal stays (the refuter on E1,
+/// whose mutation asking as the owner passed every other test).
+#[test]
+fn a_control_request_with_the_token_is_taken_while_a_terminal_is_attached() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let mut term = Attached::start(&dirs, &["attach", NAME]);
+    term.wait_drawn(NAME);
+    let reply = ask_spyc(
+        &dirs,
+        spyc_of(&jar),
+        "spyc/upgrade",
+        serde_json::json!({ "token": token_text() }),
+        true,
+    )
+    .unwrap();
+    let why = reply["error"]["message"].as_str().unwrap_or("");
+    assert!(why.contains("no newer spyc"), "{reply}");
+    assert!(
+        term.child.try_wait().unwrap().is_none(),
+        "the attached terminal was let go: {:?}",
+        term.text()
+    );
+    term.quit_spyc();
+}
+
+/// An empty token and a part of the right one are refused, as the jar
+/// refuses them: the comparison checks the length.
+#[test]
+fn an_empty_or_partial_token_is_refused() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let partial = String::from_utf8(TOKEN[..TOKEN.len() / 2].to_vec()).unwrap();
+    for token in [String::new(), partial] {
+        let reply = ask_spyc(
+            &dirs,
+            spyc_of(&jar),
+            "spyc/shutdown",
+            serde_json::json!({ "token": token }),
+            true,
+        )
+        .unwrap();
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("token")),
+            "{token:?} accepted: {reply}"
+        );
+    }
+    assert_eq!(jar.described("exit"), None, "the session ended");
+}
