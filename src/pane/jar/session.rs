@@ -89,11 +89,9 @@ impl OwnJar {
         OwnerLeft::from_word(word)
     }
 
-    /// Whether `token` is this session's, as its jar would compare it (the
-    /// 3.0 review, E1): what a control request on spyc's MCP socket must
-    /// carry. `false` when no token is kept for it.
-    pub fn admits(&self, token: &[u8]) -> bool {
-        token_of(&self.socket).is_some_and(|want| super::tokens::same(&want, token))
+    /// The session jar's socket.
+    pub fn socket(&self) -> &Path {
+        &self.socket
     }
 
     /// Forget this session's token: spyc ends it for good, and its jar with
@@ -245,6 +243,20 @@ pub fn socket_in(sessions: &Path, name: &str) -> anyhow::Result<PathBuf> {
         );
     }
     Ok(socket)
+}
+
+/// Whether `token` opens the session jar at `socket`, as the jar itself
+/// answers (the 3.0 review, E1): a control request on spyc's MCP socket must
+/// carry it. The jar compares it with the only copy that counts, its own, in
+/// time that doesn't depend on where they differ, and refuses an empty or
+/// partial one. Asked as a reader that closes at once. An error when the jar
+/// doesn't answer.
+pub fn admits(socket: &Path, token: &[u8], wait: Duration) -> anyhow::Result<bool> {
+    match super::place::connect(socket, Role::Reader, wait, token) {
+        Ok(_) => Ok(true),
+        Err(e) if e.downcast_ref::<spyc_jar::client::Refusal>().is_some() => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 /// The token kept for the session whose jar is at `socket`: what `spyc

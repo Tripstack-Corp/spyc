@@ -25,15 +25,42 @@ const AUTHORIZE_WAIT: Duration = Duration::from_secs(5);
 /// what spyc runs from and at its tabs, nothing started.
 const UPGRADE_ANSWER_WAIT: Duration = Duration::from_secs(5);
 
-/// Whether the loop lets `method` be acted on, carrying `params`' token;
-/// why not, when it doesn't.
+/// Whether `method` may be acted on, carrying `params`' token; why not,
+/// when it may not. The loop names its session jar, or refuses; the jar then
+/// says whether the token is its own (`session::admits`), never the token
+/// file, which another process of the user's may have written. A refusal by
+/// the jar is told to the loop, which says it.
 fn authorized(tx: &Sender<McpRequest>, method: &str, params: &Value) -> Result<(), String> {
     let token = params["token"].as_str().map(String::from);
     let ask = McpCommand::Authorize {
         method: method.into(),
-        token,
+        token: token.clone(),
+        refused: None,
     };
-    ask_within(tx, ask, AUTHORIZE_WAIT).map(|_| ())
+    let answer = ask_within(tx, ask, AUTHORIZE_WAIT)?;
+    let socket = answer["socket"]
+        .as_str()
+        .ok_or("spyc named no session jar")?;
+    let token = token.unwrap_or_default();
+    let refused = match crate::pane::jar::session::admits(
+        std::path::Path::new(socket),
+        token.as_bytes(),
+        AUTHORIZE_WAIT,
+    ) {
+        Ok(true) => return Ok(()),
+        Ok(false) => "its token isn't this session's".to_string(),
+        Err(e) => format!("the session's jar didn't answer: {e:#}"),
+    };
+    let tell_loop = McpCommand::Authorize {
+        method: method.into(),
+        token: None,
+        refused: Some(refused.clone()),
+    };
+    // The loop says it, and answers with what it said; refused either way.
+    match ask_within(tx, tell_loop, AUTHORIZE_WAIT) {
+        Err(said) => Err(said),
+        Ok(_) => Err(format!("refused {method}: {refused}")),
+    }
 }
 
 /// `spyc/shutdown`, `spyc/release` or `spyc/upgrade`, answered on `w`:

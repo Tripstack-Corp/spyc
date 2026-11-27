@@ -280,11 +280,13 @@ fn a_statusline_report_reaches_the_loop_bounded_and_unlisted() {
     assert!(!String::from_utf8(output).unwrap().contains("statusline"));
 }
 
-/// `spyc shutdown`'s request: a spyc that knows it asks its loop whether the
-/// token it carries is the session's (the 3.0 review, E1) and, told yes,
-/// answers and tells the loop; told no, answers why and tells it nothing. One
-/// that predates it answers "Method not found", and the command says that
-/// rather than waiting for a quit that never comes.
+/// `spyc shutdown`'s request: a spyc that knows it asks its loop for its
+/// session jar, and that jar whether the token is its own (the 3.0 review,
+/// E1); refused by either, or by a jar that doesn't answer, it answers why
+/// and tells the loop nothing more. One that predates it answers "Method not
+/// found", and the command says that rather than waiting for a quit that
+/// never comes. A token the jar takes is `tests/session_jar.rs`'s, with a
+/// real jar.
 #[test]
 fn a_shutdown_is_answered_and_an_old_spyc_says_it_cannot() {
     let (sender, receiver) = mpsc::channel::<McpRequest>();
@@ -293,11 +295,18 @@ fn a_shutdown_is_answered_and_an_old_spyc_says_it_cannot() {
     std::thread::spawn(move || {
         for request in receiver {
             let reply = match &request.command {
-                McpCommand::Authorize { token, .. } if token.as_deref() == Some("tok") => {
-                    McpResponse::Ok {
-                        message: "{}".into(),
-                    }
-                }
+                McpCommand::Authorize {
+                    token,
+                    refused: None,
+                    ..
+                } if token.as_deref() == Some("tok") => McpResponse::Ok {
+                    message: r#"{"socket": "/nonexistent/spyc/sessions/X.sock"}"#.into(),
+                },
+                McpCommand::Authorize {
+                    refused: Some(why), ..
+                } => McpResponse::Error {
+                    message: format!("refused: {why}"),
+                },
                 McpCommand::Authorize { .. } => McpResponse::Error {
                     message: "refused: its token isn't this session's".into(),
                 },
@@ -355,11 +364,16 @@ fn a_shutdown_is_answered_and_an_old_spyc_says_it_cannot() {
             got.push(one);
         }
     };
-    serve_once(false, b"tok").unwrap();
+    // The loop names its jar, here one that doesn't answer: refused for it.
+    let unanswered = serve_once(false, b"tok").unwrap_err();
+    assert!(
+        format!("{unanswered:#}").contains("didn't answer"),
+        "{unanswered:#}"
+    );
     let got = heard_until_now();
     assert!(
-        got.iter().any(|c| c == "Shutdown"),
-        "the loop is told: {got:?}"
+        !got.iter().any(|c| c == "Shutdown"),
+        "told with no jar's word: {got:?}"
     );
     let refused = serve_once(false, b"nope").unwrap_err();
     assert!(format!("{refused:#}").contains("token"), "{refused:#}");

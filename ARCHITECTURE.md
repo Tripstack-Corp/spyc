@@ -868,9 +868,12 @@ included, and three of its methods act on the whole session: `spyc/shutdown`
 ends spyc and every tab, `spyc/release` lets the session go, and
 `spyc/upgrade` hands spyc over to a newer install. Each carries
 `params.token`, and the socket thread asks the loop (`McpCommand::Authorize`)
-before it acts: the loop compares it with the token of the session jar spyc
-runs in, as a jar compares a `hello`'s, and a spyc in no session jar of its
-own takes none (the 3.0 review, E1). The callers, `spyc shutdown`,
+before it acts: a spyc in no session jar of its own takes none, and the loop
+names its session jar, which the socket thread then asks, as a reader with
+that token, whether the token is its own (`session::admits`). The jar holds
+the only copy that counts and compares it as it compares any `hello`'s;
+spyc never compares with the token file, which any process of the user's
+can rewrite (the 3.0 review, E1, and its refuter). The callers, `spyc shutdown`,
 `spyc attach` and `:attach project`, read that token where `spyc attach`
 does. There is no prompt in the TUI: a detached spyc has no one to ask. A
 refusal is answered with why, and flashed and logged in the session. All

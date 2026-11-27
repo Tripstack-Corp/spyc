@@ -63,12 +63,6 @@ pub(super) fn load_in(dir: &Path, socket: &Path) -> Option<Vec<u8>> {
     spyc_jar::client::read_token_file(&path_in(dir, socket)?).ok()
 }
 
-/// Whether `got` is `want`, compared as a jar compares a `hello`'s token: in
-/// time that doesn't depend on where they first differ.
-pub(super) fn same(want: &[u8], got: &[u8]) -> bool {
-    want.len() == got.len() && want.iter().zip(got).fold(0u8, |d, (a, b)| d | (a ^ b)) == 0
-}
-
 pub(super) fn forget(place: &Place, socket: &Path) {
     forget_in(&place.tokens, socket);
 }

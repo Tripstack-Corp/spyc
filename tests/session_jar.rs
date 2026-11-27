@@ -1285,7 +1285,6 @@ fn a_spyc_outside_a_session_jar_takes_no_control_request() {
 /// `spyc attach`'s only copy, so it locks the user out of attaching
 /// (SECURITY.md says how to get back in); the session runs on.
 #[test]
-#[ignore = "red until E1: fix/control-token-held"]
 fn a_token_written_into_the_token_file_is_refused() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);

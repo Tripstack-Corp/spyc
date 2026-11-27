@@ -616,9 +616,11 @@ impl App {
     ) -> crate::mcp_cmd::McpResponse {
         use crate::mcp_cmd::{McpCommand, McpResponse};
         match cmd {
-            McpCommand::Authorize { method, token } => {
-                self.authorize_control(&method, token.as_deref())
-            }
+            McpCommand::Authorize {
+                method,
+                token,
+                refused,
+            } => self.authorize_control(&method, token.as_deref(), refused.as_deref()),
             _ => McpResponse::Ok {
                 message: serde_json::json!({ "behind": self.newer_install().0 }).to_string(),
             },
@@ -629,23 +631,28 @@ impl App {
     /// spyc that runs in a session jar of its own, and only with that
     /// session's token (the 3.0 review, E1): any process of the user reaches
     /// the socket, and one request would otherwise end spyc and every tab.
-    /// No prompt: a detached spyc has no one to ask. A refusal is flashed and
-    /// logged, so the session shows who was turned away.
+    /// The token is checked by the jar itself, which holds the only copy
+    /// that counts (the socket thread asks it, `session::admits`), never by
+    /// the token file another process may have written. With the jar's
+    /// `refused`, this says so. No prompt: a detached spyc has no one to ask.
+    /// A refusal is flashed and logged, so the session shows who was turned
+    /// away.
     fn authorize_control(
         &mut self,
         method: &str,
         token: Option<&str>,
+        refused: Option<&str>,
     ) -> crate::mcp_cmd::McpResponse {
         use crate::mcp_cmd::McpResponse;
-        let why = match &self.runtime.own_jar {
-            None => "this spyc runs in no session jar of its own",
-            Some(jar) if token.is_some_and(|t| jar.admits(t.as_bytes())) => {
+        let why = match (&self.runtime.own_jar, refused) {
+            (None, _) => "this spyc runs in no session jar of its own",
+            (Some(_), Some(why)) => why,
+            (Some(_), None) if token.is_none() => "it carries no token",
+            (Some(jar), None) => {
                 return McpResponse::Ok {
-                    message: "{}".into(),
+                    message: serde_json::json!({ "socket": jar.socket() }).to_string(),
                 };
             }
-            Some(_) if token.is_none() => "it carries no token",
-            Some(_) => "its token isn't this session's",
         };
         let said = format!("refused {method} on spyc's MCP socket: {why}");
         self.state.note_event(&said);
