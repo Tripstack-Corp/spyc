@@ -241,3 +241,159 @@ fn a_restore_takes_a_captures_jar_back_as_a_task() {
             .shutdown(std::time::Duration::from_millis(500));
     });
 }
+
+/// A raw-mode program in its own job, as a capture's `zsh -i -c` runs a
+/// command: it prints its pid and process group. It ignores a hangup, as
+/// `nohup` or a daemon would. Without `hold` it reads its terminal, printing
+/// each byte, and says when an interrupt reaches it; with `hold` it ignores
+/// an interrupt too and only waits, so its terminal going ends nothing.
+fn raw_job(dir: &std::path::Path, hold: bool) -> String {
+    let script = dir.join(if hold { "held.py" } else { "raw.py" });
+    let ignore_int = if hold {
+        "signal.signal(signal.SIGINT, signal.SIG_IGN)\n"
+    } else {
+        ""
+    };
+    let body = if hold {
+        "import time\nwhile True:\n    time.sleep(1)\n"
+    } else {
+        "try:\n    while True:\n        b = os.read(0, 1)\n        \
+         sys.stdout.write('GOT%d\\r\\n' % b[0]); sys.stdout.flush()\n\
+         except KeyboardInterrupt:\n    sys.stdout.write('INTERRUPTED\\r\\n'); sys.stdout.flush()\n"
+    };
+    std::fs::write(
+        &script,
+        format!(
+            "import os, signal, sys, tty\n\
+             signal.signal(signal.SIGHUP, signal.SIG_IGN)\n{ignore_int}\
+             sys.stdout.write('JOB %d %d\\r\\n' % (os.getpid(), os.getpgrp()))\n\
+             tty.setraw(0)\n\
+             sys.stdout.write('RAW_READY\\r\\n'); sys.stdout.flush()\n{body}"
+        ),
+    )
+    .unwrap();
+    format!(
+        "/bin/zsh -f -i -c 'python3 -I {}; echo AFTER'",
+        script.display()
+    )
+}
+
+/// The job's pid and group, as it printed them.
+fn job_ids(app: &mut App) -> (u32, u32) {
+    let out = printed(app);
+    let ids: Vec<u32> = out
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("JOB "))
+        .map_or_default(|s| {
+            s.split_whitespace()
+                .filter_map(|n| n.parse().ok())
+                .collect()
+        });
+    (ids[0], ids[1])
+}
+
+/// Carry `fx` out as the loop does.
+fn run_capture_effects(app: &mut App, fx: Vec<Effect>) {
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::layout::Rect;
+    use ratatui::{Terminal, TerminalOptions, Viewport};
+    let mut terminal = Terminal::with_options(
+        CrosstermBackend::new(std::io::stdout()),
+        TerminalOptions {
+            viewport: Viewport::Fixed(Rect::new(0, 0, 100, 32)),
+        },
+    )
+    .unwrap();
+    let fg = crate::app::ForegroundExec {
+        park: std::sync::Arc::default(),
+        acked: std::sync::Arc::default(),
+        reader_done: std::sync::Arc::default(),
+        reader: std::thread::current(),
+    };
+    app.run_effects(fx, &mut terminal, &fg);
+}
+
+/// A capture of `hold`'s raw job, in a real jar, its job in the PTY's
+/// foreground; its pid and group.
+fn capture_of_a_raw_job(app: &mut App, dir: &std::path::Path, hold: bool) -> (u32, u32) {
+    app.start_capture(&raw_job(dir, hold), "x", "x");
+    land(app);
+    eventually("the job in raw mode", || printed(app).contains("RAW_READY"));
+    let (pid, group) = job_ids(app);
+    eventually("the jar reports the job in the foreground", || {
+        app.drain_pending_capture();
+        app.runtime
+            .pending_capture
+            .as_ref()
+            .and_then(|c| c.host.foreground_pgrp())
+            == Some(group)
+    });
+    (pid, group)
+}
+
+fn alive(pid: u32) -> bool {
+    rustix::process::Pid::from_raw(i32::try_from(pid).unwrap())
+        .is_some_and(|p| rustix::process::test_kill_process(p).is_ok())
+}
+
+/// `^C` in a capture in a jar interrupts its command where the capture's
+/// shell runs it as a job of its own, in raw mode, as a real `^C` does
+/// (the refuter on E3: the byte was read as data, `GOT3`).
+#[test]
+#[ignore = "red until E3: fix/capture-signals"]
+fn ctrl_c_interrupts_a_raw_reader_its_shell_runs_as_a_job() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        crate::shell::with_test_shell("/bin/zsh", || {
+            let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+            capture_of_a_raw_job(&mut app, dir.path(), false);
+            let fx = app
+                .handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+                .unwrap();
+            run_capture_effects(&mut app, fx);
+            let mut seen = String::new();
+            // The pager: the capture may finish between two looks, its output
+            // leaving the live buffer.
+            eventually("the job answers ^C", || {
+                seen = shown(&mut app);
+                seen.contains("INTERRUPTED") || seen.contains("GOT3")
+            });
+            assert!(
+                seen.contains("INTERRUPTED"),
+                "^C was read as data: {seen:?}"
+            );
+        });
+    });
+}
+
+/// `^\\` in a capture in a jar kills its command's job too, even one that
+/// ignores a hangup and an interrupt (the refuter on E3: it reached the job
+/// only by its shell's hangup, and the job outlived the capture).
+#[test]
+#[ignore = "red until E3: fix/capture-signals"]
+fn ctrl_backslash_kills_a_job_that_ignores_hangup() {
+    let dir = short_dir();
+    crate::state::with_state_root(dir.path(), || {
+        crate::shell::with_test_shell("/bin/zsh", || {
+            let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
+            let (pid, _) = capture_of_a_raw_job(&mut app, dir.path(), true);
+            let fx = app
+                .handle_key(KeyEvent::new(KeyCode::Char('\\'), KeyModifiers::CONTROL))
+                .unwrap();
+            run_capture_effects(&mut app, fx);
+            let until = std::time::Instant::now() + WAIT;
+            while alive(pid) && std::time::Instant::now() < until {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            let outlived = alive(pid);
+            if outlived {
+                // The test's own job, read from its own output a moment ago.
+                let _ = rustix::process::kill_process(
+                    rustix::process::Pid::from_raw(i32::try_from(pid).unwrap()).unwrap(),
+                    rustix::process::Signal::KILL,
+                );
+            }
+            assert!(!outlived, "the job outlived ^\\ (pid {pid})");
+        });
+    });
+}

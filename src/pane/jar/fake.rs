@@ -42,6 +42,12 @@ impl FakeJar {
         }
     }
 
+    /// The jar goes, as one that was killed does: its connection closes,
+    /// every end of it.
+    pub fn hang_up(self) {
+        let _ = self.to_owner.shutdown(std::net::Shutdown::Both);
+    }
+
     pub fn send(&mut self, msg: &Msg) {
         proto::write_msg(&mut self.to_owner, msg).expect("the owner is connected");
     }
