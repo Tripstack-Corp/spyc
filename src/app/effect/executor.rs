@@ -7,7 +7,7 @@ use crate::Tui;
 use crate::ui::pager::PagerView;
 
 use super::Effect;
-use crate::app::{App, ForegroundExec, PagerReturn, image_ops, kill_pg, mermaid_ops, worktree_ops};
+use crate::app::{App, ForegroundExec, PagerReturn, image_ops, mermaid_ops, worktree_ops};
 
 impl App {
     /// Execute a tick's worth of effects, in emission order. The **sole**
@@ -151,28 +151,24 @@ impl App {
                 // flash. Like the clipboard arm this never `?`-propagates;
                 // a failed signal flashes `on_err` and the loop survives.
                 #[cfg(unix)]
-                Effect::SignalGroup {
-                    pid,
-                    sig,
-                    on_ok,
-                    on_err,
-                } => match kill_pg(pid, sig) {
-                    Ok(()) => {
-                        // Re-find the task by id (same tick, so still
-                        // present) and toggle its paused flag, then flash.
-                        if let Some(t) = self
-                            .runtime
-                            .background_tasks
-                            .tasks
-                            .iter_mut()
-                            .find(|t| t.id == on_ok.task_id())
-                        {
+                Effect::SignalGroup { sig, on_ok, on_err } => {
+                    // Re-find the task by id (same tick, so still present),
+                    // signal its program through its host, and on success
+                    // toggle its paused flag, then flash.
+                    let task = self
+                        .runtime
+                        .background_tasks
+                        .tasks
+                        .iter_mut()
+                        .find(|t| t.id == on_ok.task_id());
+                    match task.map(|t| t.host.signal(sig).map(|()| t)) {
+                        Some(Ok(t)) => {
                             t.paused = on_ok.paused();
+                            self.state.flash_info(on_ok.message());
                         }
-                        self.state.flash_info(on_ok.message());
+                        Some(Err(_)) | None => self.state.flash_error(on_err),
                     }
-                    Err(_) => self.state.flash_error(on_err),
-                },
+                }
                 // Pane `^z` toggle: SIGTSTP (suspend) / SIGCONT (resume) to the
                 // pane's process group. The `suspended` flip + flash already ran
                 // in the producer; only signal here (a failed kill is rare — we
@@ -193,12 +189,15 @@ impl App {
                             .flash_error(format!("pane: signal failed: {e:#}"));
                     }
                 }
-                // Capture `^C`/`^\`: a real signal to the running command's
-                // foreground group. A stale group (child already gone) fails
-                // silently — the capture is finalizing on its own EOF anyway.
+                // Capture `^C`: a real signal to the running command's
+                // foreground job, through its jar when it runs in one. A failure
+                // (the command already gone) is silent: the capture is
+                // finalizing on its own EOF anyway.
                 #[cfg(unix)]
-                Effect::SignalCapture { pgrp, sig } => {
-                    let _ = kill_pg(pgrp, sig);
+                Effect::SignalCapture { sig } => {
+                    if let Some(capture) = self.runtime.pending_capture.as_mut() {
+                        let _ = capture.host.signal_foreground(sig);
+                    }
                 }
                 Effect::ForegroundExec {
                     program,

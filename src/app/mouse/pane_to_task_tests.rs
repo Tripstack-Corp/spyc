@@ -10,7 +10,7 @@ use super::pager_menu_tests::{menu_lines, right_click_the_pager, row_at, viewed_
 use super::tests::{click, press};
 use crate::app::{App, Effect, SigOk};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use rustix::process::Signal;
+use spyc_jar::proto::JarSignal;
 
 fn key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> Vec<Effect> {
     app.handle_key(KeyEvent::new(code, modifiers)).unwrap()
@@ -35,7 +35,7 @@ fn colon(app: &mut App, command: &str) -> Vec<Effect> {
 /// Whether `fx` would wake a stopped process.
 fn continues(fx: &[Effect]) -> bool {
     fx.iter().any(|e| match e {
-        Effect::SignalGroup { sig, .. } => *sig == Signal::CONT,
+        Effect::SignalGroup { sig, .. } => *sig == JarSignal::Continue,
         Effect::SignalPane { resume, .. } => *resume,
         _ => false,
     })
@@ -88,7 +88,7 @@ fn a_suspended_tab_moved_to_a_task_is_a_paused_task() {
             fx.iter().any(|e| matches!(
                 e,
                 Effect::SignalGroup { sig, on_ok: SigOk::Resume(task), .. }
-                    if *sig == Signal::CONT && *task == id
+                    if *sig == JarSignal::Continue && *task == id
             )),
             "continue sends the task a SIGCONT: {fx:?}"
         );

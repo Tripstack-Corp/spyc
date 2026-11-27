@@ -184,7 +184,6 @@ fn ctrl(c: char) -> KeyEvent {
 
 /// `:pause` on a task in a jar asks the jar to stop it.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn pausing_a_jarred_task_asks_its_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -204,7 +203,6 @@ fn pausing_a_jarred_task_asks_its_jar() {
 
 /// `:resume` on a paused task in a jar asks the jar to continue it.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn resuming_a_jarred_task_asks_its_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -225,7 +223,6 @@ fn resuming_a_jarred_task_asks_its_jar() {
 
 /// `^C` in the task viewer interrupts a task in a jar through its jar.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn interrupting_a_jarred_task_asks_its_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -244,7 +241,6 @@ fn interrupting_a_jarred_task_asks_its_jar() {
 
 /// A paused task in a jar moved to a tab is continued by its jar.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn a_paused_jarred_task_moved_to_a_tab_is_continued_by_its_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -269,7 +265,6 @@ fn a_paused_jarred_task_moved_to_a_tab_is_continued_by_its_jar() {
 
 /// `:fg` on a paused task in a jar continues it through its jar.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn a_paused_jarred_task_brought_to_the_foreground_is_continued_by_its_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -288,7 +283,6 @@ fn a_paused_jarred_task_brought_to_the_foreground_is_continued_by_its_jar() {
 
 /// `^C` in a live capture in a jar interrupts it through its jar.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn ctrl_c_in_a_jarred_capture_asks_its_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -311,7 +305,6 @@ fn ctrl_c_in_a_jarred_capture_asks_its_jar() {
 /// the terminal's own key does, by the byte the PTY turns into the signal,
 /// and the jar interrupts its program: no number is signalled.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn ctrl_c_with_another_job_in_the_foreground_types_the_key_and_asks_the_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -348,7 +341,6 @@ fn ctrl_c_with_another_job_in_the_foreground_types_the_key_and_asks_the_jar() {
 /// in its foreground included: neither number the jar reported is
 /// signalled.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn ctrl_backslash_in_a_jarred_capture_kills_through_its_jar() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
@@ -387,7 +379,6 @@ fn ctrl_backslash_in_a_jarred_capture_kills_through_its_jar() {
 /// with why. Fails closed: each listed file must still hold a site, and the
 /// scan must have read spyc's sources.
 #[test]
-#[ignore = "red until E3: fix/task-signals"]
 fn no_number_is_signalled_outside_the_listed_sites() {
     /// Files that may signal by number, and why.
     const ALLOWED: &[(&str, &str)] = &[

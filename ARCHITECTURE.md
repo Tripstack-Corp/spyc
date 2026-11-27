@@ -1336,12 +1336,21 @@ that.
 The pid a jar reports is its program's when the jar says so, and only the jar
 knows when that stops being true: after the exit is recorded the kernel may
 give it to anyone. So `PtyHost` sends every signal for a jarred program, the
-shutdown's `TERM` and `KILL`, a drop's `KILL` and `^z`'s `STOP` and `CONT`, as
-a frame to its jar, and never to the pid (finding 10). The pid stays for
-reading what the process is doing. A signal sent to it directly passes every
-test where the pid is still the program's, and kills a bystander the day it
-isn't: `pane::jar::tests::every_signal_goes_through_the_jar` gives the jar a
-bystander's pid to report.
+shutdown's `TERM` and `KILL`, a drop's `KILL`, `^z`'s `STOP` and `CONT`, and
+a task's and a `!` capture's (`:pause`, `:resume`, `^C`, `^\`, and the
+`CONT` that `:fg` and `:task-to-pane` give a paused task), as a frame to its
+jar, and never to the pid (finding 10, the 3.0 review's E3). Nothing in
+`src/app` signals a number: it asks the host (`PtyHost::signal`,
+`PtyHost::signal_foreground`). A capture's `^C` with another job in the jar's
+foreground also types the key's byte, which the PTY turns into the signal for
+that job as a real `^C` does, since a version-1 jar signals only its program's
+group. The pid stays for reading what the process is doing. A signal sent to
+it directly passes every test where the pid is still the program's, and kills
+a bystander the day it isn't: `pane::jar::tests::every_signal_goes_through_the_jar`
+gives the jar a bystander's pid to report, and
+`app::harness_tests::jar_signals` does the same for each task and capture
+key, beside a guard that lists the only places spyc signals a process by its
+number.
 
 ## A snapshot is stored at the jar's offset
 

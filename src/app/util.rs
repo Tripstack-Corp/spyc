@@ -269,24 +269,6 @@ pub fn buffer_to_lines(buffer: &[u8]) -> Vec<ratatui::text::Line<'static>> {
         .lines
 }
 
-/// `kill(-pid, sig)` — signal the process group leadered by `pid`.
-/// portable-pty calls `setsid` on spawn, so the child IS the group
-/// leader; negative-pid targets reach grandchildren too. Returns the
-/// underlying syscall result so background-task callers can flash
-/// the user-facing success/failure message.
-///
-/// `Pid::from_raw` rejects zero (which would mean "current process
-/// group" — a footgun if the child id was somehow 0); on that path
-/// we synthesize an `ESRCH` so the caller flashes the same "failed"
-/// branch as a real kill failure.
-#[cfg(unix)]
-pub fn kill_pg(pid: u32, sig: rustix::process::Signal) -> rustix::io::Result<()> {
-    match rustix::process::Pid::from_raw(pid as i32) {
-        Some(rpid) => rustix::process::kill_process_group(rpid, sig),
-        None => Err(rustix::io::Errno::SRCH),
-    }
-}
-
 /// Last segment of a path as a displayable String, falling back to the full
 /// display if the path has no terminating file-name component (root, `..`).
 pub fn path_basename_display(p: &std::path::Path) -> String {

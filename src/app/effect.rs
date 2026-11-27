@@ -99,19 +99,16 @@ pub enum Effect {
     /// `runtime.away_recaps` and wakes with `Message::Wake(Wake::AwayRecap)`.
     AwayRecap(super::away_recap::Absence),
 
-    /// A-class. Send `sig` to the task's process group (`kill_pg` applies
-    /// the negative-pid / group convention), then on success toggle the
-    /// task's `paused` flag and flash per `on_ok`, or flash `on_err` on
-    /// failure. `pid` is derived in the producer *after* its guards — the
-    /// executor cannot re-derive it (the host may have moved). The flash
+    /// A-class. Send `sig` to the program of the task `on_ok` names,
+    /// through `PtyHost::signal` (its jar's, when it runs in one: never the
+    /// pid a jar reported), then on success toggle the task's `paused` flag
+    /// and flash per `on_ok`, or flash `on_err` on failure. The flash
     /// always lands on the status bar (`state.flash_*`), never the pager
     /// footer — true for both `:pause`/`:resume` and the pager `S`/`C`
-    /// keys. `#[cfg(unix)]` because `rustix::process::Signal` is unix-only
-    /// (matches `kill_pg`).
+    /// keys. `#[cfg(unix)]`, as signals are.
     #[cfg(unix)]
     SignalGroup {
-        pid: u32,
-        sig: rustix::process::Signal,
+        sig: spyc_jar::proto::JarSignal,
         on_ok: SigOk,
         on_err: String,
     },
@@ -131,17 +128,14 @@ pub enum Effect {
     #[cfg(unix)]
     SignalPane { tab: String, resume: bool },
 
-    /// A-class. Send `sig` to a live `!`-capture's foreground process group —
-    /// the `^C` (SIGINT) / `^\` (SIGKILL) keys. A real signal, not the old
-    /// `0x03` byte, so it interrupts a raw-mode reader (e.g. `gh secret set`)
-    /// that ignores the byte. `pgrp` is the pty's foreground group — the actual
-    /// command under the `zsh -i -c` wrapper, not `process_id()` (the wrapper
-    /// shell) — derived in the producer. `#[cfg(unix)]`, like `SignalPane`.
+    /// A-class. Send `sig` to the live `!` capture's foreground job: `^C`'s
+    /// interrupt. A real signal, not the old `0x03` byte, so it interrupts a
+    /// raw-mode reader (e.g. `gh secret set`) that ignores the byte: locally
+    /// to the PTY's foreground group, the command under the `zsh -i -c`
+    /// wrapper; in a jar, through the jar (`PtyHost::signal_foreground`).
+    /// `#[cfg(unix)]`, like `SignalPane`.
     #[cfg(unix)]
-    SignalCapture {
-        pgrp: u32,
-        sig: rustix::process::Signal,
-    },
+    SignalCapture { sig: spyc_jar::proto::JarSignal },
 
     /// A-class. Deliver `input` (pre-encoded key or pre-built bytes) to a
     /// pane, then flash `on_ok` when accepted. Failures always show their cause,
@@ -751,7 +745,7 @@ pub mod matchers {
         fn typed_input(&self) -> Option<&Effect>;
         /// The signals sent to a `!` capture's process group, in order.
         #[cfg(unix)]
-        fn capture_signals(&self) -> Vec<rustix::process::Signal>;
+        fn capture_signals(&self) -> Vec<spyc_jar::proto::JarSignal>;
     }
 
     /// Whether running `effect` puts input in front of a pane's or a `!`
@@ -915,10 +909,10 @@ pub mod matchers {
         }
 
         #[cfg(unix)]
-        fn capture_signals(&self) -> Vec<rustix::process::Signal> {
+        fn capture_signals(&self) -> Vec<spyc_jar::proto::JarSignal> {
             self.iter()
                 .filter_map(|effect| match effect {
-                    Effect::SignalCapture { sig, .. } => Some(*sig),
+                    Effect::SignalCapture { sig } => Some(*sig),
                     _ => None,
                 })
                 .collect()
