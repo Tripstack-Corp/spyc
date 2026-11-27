@@ -1412,3 +1412,20 @@ fn spyc_shutdown_refuses_with_only_a_live_jar_socket_in_its_env() {
     assert!(said.contains("outside spyc"), "{said}");
     assert_eq!(jar.described("exit"), None, "the session ended");
 }
+
+/// A session left running keeps its token when `spyc attach` detaches from
+/// it (the refuter on E7: a forget on every return passed every test).
+#[test]
+fn a_session_left_running_keeps_its_token() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let mut term = Attached::start(&dirs, &["attach", NAME]);
+    term.wait_drawn(NAME);
+    term.type_keys(b"\x1c");
+    term.exit();
+    assert_eq!(jar.described("exit"), None, "premise: the session runs on");
+    assert!(
+        token_file(&dirs, NAME).exists(),
+        "a running session's token was forgotten"
+    );
+}

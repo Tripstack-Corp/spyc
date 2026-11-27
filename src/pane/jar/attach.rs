@@ -574,6 +574,40 @@ mod tests {
         });
     }
 
+    /// A session whose socket file a cleaner removed, its jar holding its
+    /// lock, has not ended: `spyc attach` keeps its token (the refuter on
+    /// E7, against SPYC-TRAP jar-gone-on-evidence). The lock is held by a
+    /// process of the test's own, as a jar holds it.
+    #[test]
+    fn a_session_whose_socket_file_went_but_whose_lock_is_held_has_not_ended() {
+        let dir = super::super::test_dir::TestDir::new("al");
+        let socket = dir.path().join("HELD_TEST.sock");
+        let lock = spyc_jar::lock::path(&socket);
+        let mut holder = std::process::Command::new("python3")
+            .args([
+                "-I",
+                "-c",
+                "import fcntl, sys\nf = open(sys.argv[1], 'w')\nfcntl.lockf(f, fcntl.LOCK_EX)\n\
+                 print('held', flush=True)\nsys.stdin.read()",
+            ])
+            .arg(&lock)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut said = String::new();
+        std::io::BufRead::read_line(
+            &mut std::io::BufReader::new(holder.stdout.take().unwrap()),
+            &mut said,
+        )
+        .unwrap();
+        assert_eq!(said.trim(), "held", "premise: the lock is held");
+        let ended = session_ended(&socket);
+        let _ = holder.kill();
+        let _ = holder.wait();
+        assert!(!ended, "a session whose lock is held was taken for ended");
+    }
+
     /// H7: a session's spyc that refuses the upgrade says why, and
     /// `spyc attach` hears it at once, rather than waiting out its wait and
     /// saying the upgrade is late.
