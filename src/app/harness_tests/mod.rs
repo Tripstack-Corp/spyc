@@ -529,6 +529,7 @@ mod handover;
 mod history_editor;
 mod jar_captures;
 mod jar_orphans;
+mod jar_signals;
 mod jar_start;
 mod jump_default;
 mod kitty_keys;

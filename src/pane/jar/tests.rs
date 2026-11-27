@@ -2170,7 +2170,11 @@ fn every_wait_on_a_jar_outlasts_it_or_says_why_not() {
     let mut found = std::collections::BTreeSet::new();
     for entry in std::fs::read_dir(&dir).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().is_none_or(|x| x != "rs") || path.ends_with("tests.rs") {
+        // `fake.rs` is a test-only module: a jar for tests, never waited on by spyc.
+        if path.extension().is_none_or(|x| x != "rs")
+            || path.ends_with("tests.rs")
+            || path.ends_with("fake.rs")
+        {
             continue;
         }
         let src = crate::guard_support::production_half(&std::fs::read_to_string(&path).unwrap());
