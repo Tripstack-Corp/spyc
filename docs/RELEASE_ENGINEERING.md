@@ -178,6 +178,16 @@ tag RELEASEs directly off `main` until a second major needs `stable/`.
       and that `HEAD` is `origin/main`, then tags. Push the tag →
       `release.yml` publishes the RELEASE.
    Then open a follow-up PR setting `main` to the next `-CURRENT`.
+   The release's `spyc-jar` is from then on a test fixture, kept where the
+   release keeps it: in its tarballs on the GitHub release, which nothing
+   prunes or changes (RC retention, below, deletes only rcs). CI's `test`
+   job runs `make test-jar-compat`: `scripts/jar_fixtures.py` lists every
+   stable release from 3.0.0 on, fetches each one's `spyc-jar` for the
+   runner's platform into `<build dir>/jar-fixtures/<tag>/`, and runs
+   `tests/jar_compat.rs` with `SPYC_JAR_OLD_BIN` naming it, failing on a
+   release it can't fetch. 3.0.0's jar is the first. After tagging, check
+   that the next CI run's "Released jars" step names the new tag, and run
+   `make test-jar-compat` once on the Mac, since CI drives the Linux jar.
 5. **Patch:** same two steps with `VERSION=N.M.(P+1)`. (Stage 2: cherry-pick
    onto `releng/N.M` first.)
 
@@ -381,6 +391,9 @@ are the source of truth — Actions *call them* so local and CI never drift.
   workflow lint, and is not a required context. Together the two lint jobs cover
   OS-gated code both ways; `make lint-linux` stays as the local check before a
   push.
+- The `test` job also runs `make test-jar-compat`: each released `spyc-jar`
+  from 3.0.0 on, fetched from its release, driven by this build's client
+  (§5, step 4).
 - **Follow-up:** extend the trigger to `stable/*` / `releng/*` once Stage 2
   branches exist.
 

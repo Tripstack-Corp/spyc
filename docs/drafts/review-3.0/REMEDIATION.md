@@ -29,7 +29,7 @@ Findings, sites and evidence are in [`SYNTHESIS.md`](SYNTHESIS.md), [`ADDENDUM.m
 | F7 (no test of `SO_NOSIGPIPE`) | C | `a_validator_gone_mid_blob_does_not_end_a_jar_whose_exec_failed`, seen failing on macOS with M12 | `fix/jar-sigpipe` | pending | fixed on the branch, awaiting the refuter |
 | S6: `honoured()` removed, with F1 and G1 | D | `a_release_build_reads_the_setting` (retired with the gate it tested) and the guard `no_build_tells_a_release_from_its_rc`, `src/version_guard.rs` | | refuter pending | fixed on the branch `fix/jars-on-release` |
 | F2 (`spyc-jar` in lockstep with spyc) | D | `scripts/test_jar_version_lockstep.py` | | refuter pending | fixed on the branch `fix/jar-lockstep` |
-| A8 = F4 (`jar_compat` and the first fixture) | D | | | | open |
+| A8 = F4 (`jar_compat` and the first fixture) | D | n/a (a test rewrite: the old test hangs on this crate's jar; mutations caught) | | refuter pending | fixed on the branch `test/jar-compat` |
 | F8 (a `.deb` without `spyc-jar`) | D | `test_a_deb_of_a_release_that_ships_spyc_jar_needs_it`, `scripts/test_release_ships_spyc_jar.py` | | refuter pending | fixed on the branch `fix/deb-needs-jar` |
 | F9 (the release document) | D | | | | open |
 | D1 (connect at the given path; refuse a `:name` that can't fit) | E | `ctrl_d_hands_over_when_the_runtime_directory_is_a_link_to_a_long_path` (`tests/jar_adopt.rs`), `a_name_whose_session_socket_would_not_fit_is_refused` (`src/app/detach.rs`), `a_name_too_long_for_a_socket_is_refused_in_the_sessions_own_jar` (`tests/session_jar.rs`, after the refuter's MD1b) | | refuter: holds; recheck pending | fixed on the branch `fix/session-own-socket` |
