@@ -1371,7 +1371,6 @@ fn an_empty_or_partial_token_is_refused() {
 /// finding): it says why, and that a terminal outside spyc can run it. The
 /// session runs on.
 #[test]
-#[ignore = "red until spyc shutdown inside spyc: fix/shutdown-inside-spyc"]
 fn spyc_shutdown_from_inside_spyc_is_refused() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
@@ -1397,7 +1396,6 @@ fn spyc_shutdown_from_inside_spyc_is_refused() {
 /// check is `spyc attach`'s own, not a copy reading one variable (the
 /// refuter on the owner's decision).
 #[test]
-#[ignore = "red until spyc shutdown inside spyc: fix/shutdown-inside-spyc"]
 fn spyc_shutdown_refuses_with_only_a_live_jar_socket_in_its_env() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);

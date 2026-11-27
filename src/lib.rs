@@ -247,7 +247,9 @@ enum Sub {
         force: bool,
     },
     /// End a session that runs in a jar of its own, as `:q` in it would,
-    /// its tabs with it. It says what ends and asks first.
+    /// its tabs with it. It says what ends and asks first. Run it from a
+    /// terminal outside spyc: from a spyc pane, or a shell a spyc started, it
+    /// refuses.
     Shutdown {
         /// The session's name. With none, the one running, or a choice.
         name: Option<String>,
