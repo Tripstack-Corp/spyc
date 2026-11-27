@@ -20,6 +20,7 @@ use super::*;
 
 mod attribution;
 mod coexistence;
+mod control;
 mod git_diff_base;
 mod slow_replies;
 mod status_events;
