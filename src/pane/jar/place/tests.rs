@@ -380,7 +380,6 @@ fn saved_session(name: &str, pid: u32, started: u64) {
 /// runtime directory. The evidence is the session's saved spyc, gone by its
 /// start time. One whose spyc runs, or with no saved session, keeps its token.
 #[test]
-#[ignore = "red until E7: fix/session-token-evidence"]
 fn a_gone_sessions_token_is_forgotten_though_its_jar_left_nothing() {
     let dir = super::super::test_dir::TestDir::new("pg");
     let state = dir.path().join("state");
