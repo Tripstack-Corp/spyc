@@ -13,7 +13,8 @@
 //! tabs' links there (`app::proc`).
 //!
 //! A link only ever names a socket of this user's, in a directory no one else
-//! can write to, and the links' directory is this user's alone (`0700`).
+//! can write to, and the links' directory, and the one above it, pass the
+//! jars' one ownership check (`jar::place::trusted_dir`).
 
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -69,8 +70,17 @@ pub fn checked(agent: &Path) -> anyhow::Result<PathBuf> {
     Ok(real)
 }
 
-/// Make the links' directory, this user's alone; refuse one that isn't.
+/// Make the links' directory, this user's alone; refuse one that isn't, or
+/// one whose directory, the runtime directory's `spyc`, isn't (the jars'
+/// one ownership check, `place::trusted_dir`): whoever can write there
+/// could move the links away. Nothing is made under a directory refused.
 pub fn prepare(dir: &Path) -> anyhow::Result<()> {
+    use super::jar::place;
+    if let Some(base) = dir.parent()
+        && base.symlink_metadata().is_ok()
+    {
+        place::private_dir(base)?;
+    }
     match std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -80,15 +90,7 @@ pub fn prepare(dir: &Path) -> anyhow::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e).with_context(|| format!("make {}", dir.display())),
     }
-    let meta = std::fs::symlink_metadata(dir).with_context(|| format!("read {}", dir.display()))?;
-    anyhow::ensure!(
-        meta.is_dir()
-            && meta.uid() == rustix::process::getuid().as_raw()
-            && meta.permissions().mode() & 0o777 == 0o700,
-        "{} isn't this user's alone",
-        dir.display()
-    );
-    Ok(())
+    place::trusted_dir(dir)
 }
 
 /// Point `link` at `agent`, already [`checked`], in one step: a program
@@ -133,7 +135,6 @@ mod tests {
     /// they could move the links away and put their own directory in its
     /// place. Refused, with nothing made in their directory.
     #[test]
-    #[ignore = "red until E2: fix/ssh-agents-trust"]
     fn a_links_directory_under_one_open_to_others_is_refused() {
         let root = private_dir();
         let base = root.path().join("spyc");
