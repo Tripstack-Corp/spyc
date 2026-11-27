@@ -92,3 +92,83 @@ fn a_release_with_a_refused_token_never_reaches_the_loop() {
         "told to release: {got:?}"
     );
 }
+
+/// What `dispatch` answered `msg` with, given `loop_answer` as the loop's
+/// reply to everything it is asked.
+fn answer_to(msg: &Value, loop_answer: impl Fn(&str) -> McpResponse + Send + 'static) -> Value {
+    let (sender, receiver) = mpsc::channel::<McpRequest>();
+    std::thread::spawn(move || {
+        for request in receiver {
+            let said = format!("{:?}", request.command);
+            let _ = request.reply.send(loop_answer(&said));
+        }
+    });
+    let mut output = Vec::new();
+    dispatch(
+        &mut output,
+        &msg.to_string(),
+        Path::new("/tmp"),
+        Some(&sender),
+    )
+    .unwrap();
+    let output = String::from_utf8(output).unwrap();
+    let body = output.split("\r\n\r\n").nth(1).unwrap_or("null");
+    serde_json::from_str(body).unwrap_or(Value::Null)
+}
+
+/// `spyc/upgrade` is a request (H7): one whose token is refused is answered
+/// with why, so `spyc attach` hears the refusal rather than nothing.
+#[test]
+#[ignore = "red until H7: fix/upgrade-answers"]
+fn an_upgrade_request_with_a_refused_token_is_answered_why() {
+    let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"nope"}});
+    let reply = answer_to(&msg, |said| {
+        if said.starts_with("Authorize") {
+            McpResponse::Error {
+                message: "refused spyc/upgrade: its token isn't this session's".into(),
+            }
+        } else {
+            McpResponse::Ok {
+                message: "{}".into(),
+            }
+        }
+    });
+    let why = reply["error"]["message"].as_str().unwrap_or("");
+    assert!(why.contains("token"), "{reply}");
+}
+
+/// One the loop refuses for want of what an upgrade needs is answered with
+/// the loop's reason.
+#[test]
+#[ignore = "red until H7: fix/upgrade-answers"]
+fn an_upgrade_request_the_loop_refuses_is_answered_with_its_reason() {
+    let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"tok"}});
+    let reply = answer_to(&msg, |said| {
+        if said == "Upgrade" {
+            McpResponse::Error {
+                message: "no newer spyc is installed".into(),
+            }
+        } else {
+            McpResponse::Ok {
+                message: "{}".into(),
+            }
+        }
+    });
+    let why = reply["error"]["message"].as_str().unwrap_or("");
+    assert!(why.contains("no newer spyc"), "{reply}");
+}
+
+/// One the loop accepts is answered `{"upgrading": true}`.
+#[test]
+#[ignore = "red until H7: fix/upgrade-answers"]
+fn an_upgrade_request_the_loop_accepts_is_answered_upgrading() {
+    let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/upgrade", "params":{"token":"tok"}});
+    let reply = answer_to(&msg, |said| McpResponse::Ok {
+        message: if said == "Upgrade" {
+            r#"{"upgrading": true}"#.into()
+        } else {
+            "{}".into()
+        },
+    });
+    assert_eq!(reply["result"]["upgrading"], json!(true), "{reply}");
+}
