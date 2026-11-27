@@ -1171,7 +1171,6 @@ fn token_text() -> String {
 /// review, E1): any process of this user's reaches spyc's MCP socket, and
 /// one request would otherwise end spyc and every tab.
 #[test]
-#[ignore = "red until E1: fix/control-token"]
 fn a_shutdown_without_the_sessions_token_is_refused() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
@@ -1203,7 +1202,6 @@ fn a_shutdown_without_the_sessions_token_is_refused() {
 
 /// `spyc/release` lets a session go only with the session's token (E1).
 #[test]
-#[ignore = "red until E1: fix/control-token"]
 fn a_release_without_the_sessions_token_is_refused() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
@@ -1228,7 +1226,6 @@ fn a_release_without_the_sessions_token_is_refused() {
 /// notification, so its sender hears nothing either way; the session's own
 /// screen says it was refused.
 #[test]
-#[ignore = "red until E1: fix/control-token"]
 fn an_upgrade_without_the_sessions_token_is_refused() {
     let dirs = Dirs::new();
     let jar = session(&dirs, NAME);
@@ -1255,7 +1252,6 @@ fn an_upgrade_without_the_sessions_token_is_refused() {
 /// A spyc that runs in no session jar of its own takes no control request,
 /// whatever it carries (E1).
 #[test]
-#[ignore = "red until E1: fix/control-token"]
 fn a_spyc_outside_a_session_jar_takes_no_control_request() {
     let dirs = Dirs::new();
     let mut plain = Attached::start(&dirs, &[]);

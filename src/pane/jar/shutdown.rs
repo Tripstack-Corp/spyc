@@ -50,7 +50,9 @@ pub fn run(name: Option<&str>, yes: bool) -> anyhow::Result<()> {
         eprintln!("spyc: {} runs on", chosen.name);
         return Ok(());
     }
-    crate::mcp::ask_shutdown(pid).with_context(|| format!("shut down {}", chosen.name))?;
+    let token = super::session::token_of(&chosen.socket)
+        .with_context(|| format!("no token kept for {}", chosen.name))?;
+    crate::mcp::ask_shutdown(pid, &token).with_context(|| format!("shut down {}", chosen.name))?;
     let until = Instant::now() + SHUTDOWN_WAIT;
     while socket_state(&chosen.socket) == SocketState::Live && !ended(&chosen.socket) {
         anyhow::ensure!(

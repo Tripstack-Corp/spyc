@@ -861,6 +861,22 @@ keeps it: a session whose spyc died with no terminal attached, whose jar then
 ended and took its socket and lock with it, leaves nothing for a sweep to read,
 and its token stays until a session of that name starts again.
 
+## A control request carries the session's token
+
+Every process of the user reaches spyc's MCP socket, a hosted agent's shell
+included, and three of its methods act on the whole session: `spyc/shutdown`
+ends spyc and every tab, `spyc/release` lets the session go, and
+`spyc/upgrade` hands spyc over to a newer install. Each carries
+`params.token`, and the socket thread asks the loop (`McpCommand::Authorize`)
+before it acts: the loop compares it with the token of the session jar spyc
+runs in, as a jar compares a `hello`'s, and a spyc in no session jar of its
+own takes none (the 3.0 review, E1). The callers, `spyc shutdown`,
+`spyc attach` and `:attach project`, read that token where `spyc attach`
+does. There is no prompt in the TUI: a detached spyc has no one to ask. A
+refusal is answered with why, and flashed and logged in the session;
+`spyc/upgrade` is a notification, so its sender learns of a refusal only by
+the session not coming back upgraded.
+
 ## spyc outwaits a busy jar
 
 <!-- SPYC-TRAP: jar-outwait -->

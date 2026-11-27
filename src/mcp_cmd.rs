@@ -202,6 +202,14 @@ pub enum McpCommand {
     /// go (`spyc/release`): saved as no running spyc's, its jars let go, and
     /// spyc gone. The answer names the session's file.
     Release,
+    /// Whether a control request (`spyc/shutdown`, `spyc/release`,
+    /// `spyc/upgrade`) may be acted on: `token`, the one it carried, is the
+    /// token of the session jar this spyc runs in (the 3.0 review, E1). A spyc
+    /// in no session jar of its own takes none. Asked before each.
+    Authorize {
+        method: String,
+        token: Option<String>,
+    },
     /// What Claude Code's statusline told `spyc --statusline` in a pane: the
     /// plan's rate-limit windows, the context window and the vim mode.
     /// Fire-and-forget.

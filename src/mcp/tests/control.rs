@@ -64,7 +64,6 @@ fn heard_for(msg: &Value) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "red until E1: fix/control-token"]
 fn an_upgrade_with_a_refused_token_never_reaches_the_loop() {
     let msg = json!({"jsonrpc":"2.0", "method":"spyc/upgrade", "params":{"token":"nope"}});
     let got = heard_for(&msg);
@@ -75,7 +74,6 @@ fn an_upgrade_with_a_refused_token_never_reaches_the_loop() {
 }
 
 #[test]
-#[ignore = "red until E1: fix/control-token"]
 fn a_shutdown_with_a_refused_token_never_reaches_the_loop() {
     let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/shutdown", "params":{"token":"nope"}});
     let got = heard_for(&msg);
@@ -86,7 +84,6 @@ fn a_shutdown_with_a_refused_token_never_reaches_the_loop() {
 }
 
 #[test]
-#[ignore = "red until E1: fix/control-token"]
 fn a_release_with_a_refused_token_never_reaches_the_loop() {
     let msg = json!({"jsonrpc":"2.0", "id":1, "method":"spyc/release", "params":{"token":"nope"}});
     let got = heard_for(&msg);

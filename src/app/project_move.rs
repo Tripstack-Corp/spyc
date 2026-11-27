@@ -839,7 +839,9 @@ fn release(socket: &std::path::Path) -> Result<u64, String> {
     let pid = crate::pane::jar::shutdown::program_pid(socket)
         .and_then(|p| u32::try_from(p).ok())
         .ok_or("its jar names no spyc")?;
-    crate::mcp::ask_release(pid).map_err(|e| format!("{e:#}"))
+    let token =
+        crate::pane::jar::session::token_of(socket).ok_or("no token is kept for it here")?;
+    crate::mcp::ask_release(pid, &token).map_err(|e| format!("{e:#}"))
 }
 
 /// A session name no running session and no saved one has, whose jar's

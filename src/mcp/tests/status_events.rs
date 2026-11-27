@@ -280,13 +280,36 @@ fn a_statusline_report_reaches_the_loop_bounded_and_unlisted() {
     assert!(!String::from_utf8(output).unwrap().contains("statusline"));
 }
 
-/// `spyc shutdown`'s request: a spyc that knows it answers and tells the loop;
-/// one that predates it answers "Method not found", and the command says that
+/// `spyc shutdown`'s request: a spyc that knows it asks its loop whether the
+/// token it carries is the session's (the 3.0 review, E1) and, told yes,
+/// answers and tells the loop; told no, answers why and tells it nothing. One
+/// that predates it answers "Method not found", and the command says that
 /// rather than waiting for a quit that never comes.
 #[test]
 fn a_shutdown_is_answered_and_an_old_spyc_says_it_cannot() {
     let (sender, receiver) = mpsc::channel::<McpRequest>();
-    let serve_once = |old: bool| {
+    // The loop: it lets the session's token through and says what it heard.
+    let (heard_tx, heard) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        for request in receiver {
+            let reply = match &request.command {
+                McpCommand::Authorize { token, .. } if token.as_deref() == Some("tok") => {
+                    McpResponse::Ok {
+                        message: "{}".into(),
+                    }
+                }
+                McpCommand::Authorize { .. } => McpResponse::Error {
+                    message: "refused: its token isn't this session's".into(),
+                },
+                _ => McpResponse::Ok {
+                    message: "{}".into(),
+                },
+            };
+            let _ = heard_tx.send(format!("{:?}", request.command));
+            let _ = request.reply.send(reply);
+        }
+    });
+    let serve_once = |old: bool, token: &[u8]| {
         let dir = tempfile::Builder::new()
             .prefix("sd")
             .tempdir_in("/tmp")
@@ -308,19 +331,45 @@ fn a_shutdown_is_answered_and_an_old_spyc_says_it_cannot() {
             let mut writer = stream;
             std::io::Write::write_all(&mut writer, &output).unwrap();
         });
-        let answered = super::super::request_shutdown(&sock);
+        let answered = super::super::request_shutdown(&sock, token);
         server.join().unwrap();
         answered
     };
-    serve_once(false).unwrap();
+    // Everything the loop heard up to a marker sent after the exchange.
+    let heard_until_now = || {
+        sender
+            .send(McpRequest {
+                command: McpCommand::Behind,
+                reply: mpsc::channel().0,
+                project: None,
+                pane_id: None,
+                conn: None,
+            })
+            .unwrap();
+        let mut got = Vec::new();
+        loop {
+            let one = heard.recv_timeout(Duration::from_secs(5)).unwrap();
+            if one == "Behind" {
+                return got;
+            }
+            got.push(one);
+        }
+    };
+    serve_once(false, b"tok").unwrap();
+    let got = heard_until_now();
     assert!(
-        matches!(receiver.try_recv().unwrap().command, McpCommand::Shutdown),
-        "the loop is told"
+        got.iter().any(|c| c == "Shutdown"),
+        "the loop is told: {got:?}"
     );
-    let old = serve_once(true).unwrap_err();
+    let refused = serve_once(false, b"nope").unwrap_err();
+    assert!(format!("{refused:#}").contains("token"), "{refused:#}");
+    let got = heard_until_now();
+    assert!(
+        !got.iter().any(|c| c == "Shutdown"),
+        "told without the token: {got:?}"
+    );
+    let old = serve_once(true, b"tok").unwrap_err();
     assert!(format!("{old:#}").contains("predates"), "{old:#}");
-    assert!(
-        receiver.try_recv().is_err(),
-        "an old spyc's loop hears nothing"
-    );
+    let got = heard_until_now();
+    assert!(got.is_empty(), "an old spyc's loop hears nothing: {got:?}");
 }
