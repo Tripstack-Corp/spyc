@@ -242,7 +242,20 @@ fn a_restore_takes_a_captures_jar_back_as_a_task() {
     });
 }
 
-/// A raw-mode program in its own job, as a capture's `zsh -i -c` runs a
+/// An interactive shell, which runs its command as a job of its own as a
+/// capture's `$SHELL -i -c` does, and the flags that keep its startup files
+/// out: zsh where it's installed, else bash (GitHub's Ubuntu runners have no
+/// zsh). The tests that need one say so when there's neither.
+fn job_shell() -> (&'static str, &'static str) {
+    let found =
+        |paths: [&'static str; 2]| paths.into_iter().find(|p| std::path::Path::new(p).exists());
+    found(["/bin/zsh", "/usr/bin/zsh"])
+        .map(|zsh| (zsh, "-f"))
+        .or_else(|| found(["/bin/bash", "/usr/bin/bash"]).map(|bash| (bash, "--norc --noprofile")))
+        .expect("these tests need zsh or bash: an interactive shell that runs its command as a job")
+}
+
+/// A raw-mode program in its own job, as a capture's `$SHELL -i -c` runs a
 /// command: it prints its pid and process group. It ignores a hangup, as
 /// `nohup` or a daemon would. Without `hold` it reads its terminal, printing
 /// each byte, and says when an interrupt reaches it; with `hold` it ignores
@@ -272,8 +285,9 @@ fn raw_job(dir: &std::path::Path, hold: bool) -> String {
         ),
     )
     .unwrap();
+    let (shell, quiet) = job_shell();
     format!(
-        "/bin/zsh -f -i -c 'python3 -I {}; echo AFTER'",
+        "{shell} {quiet} -i -c 'python3 -I {}; echo AFTER'",
         script.display()
     )
 }
@@ -340,11 +354,10 @@ fn alive(pid: u32) -> bool {
 /// shell runs it as a job of its own, in raw mode, as a real `^C` does
 /// (the refuter on E3: the byte was read as data, `GOT3`).
 #[test]
-#[ignore = "red until E3: fix/capture-signals"]
 fn ctrl_c_interrupts_a_raw_reader_its_shell_runs_as_a_job() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
-        crate::shell::with_test_shell("/bin/zsh", || {
+        crate::shell::with_test_shell(job_shell().0, || {
             let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
             capture_of_a_raw_job(&mut app, dir.path(), false);
             let fx = app
@@ -370,11 +383,10 @@ fn ctrl_c_interrupts_a_raw_reader_its_shell_runs_as_a_job() {
 /// ignores a hangup and an interrupt (the refuter on E3: it reached the job
 /// only by its shell's hangup, and the job outlived the capture).
 #[test]
-#[ignore = "red until E3: fix/capture-signals"]
 fn ctrl_backslash_kills_a_job_that_ignores_hangup() {
     let dir = short_dir();
     crate::state::with_state_root(dir.path(), || {
-        crate::shell::with_test_shell("/bin/zsh", || {
+        crate::shell::with_test_shell(job_shell().0, || {
             let mut app = jar_app(dir.path(), built_jar(), crate::pane::jar::place::HOLD);
             let (pid, _) = capture_of_a_raw_job(&mut app, dir.path(), true);
             let fx = app

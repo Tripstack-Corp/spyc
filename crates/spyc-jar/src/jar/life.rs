@@ -229,12 +229,19 @@ fn end_program(shared: &Shared) {
     shared.lock().exit_acked = true;
 }
 
-pub(super) fn deliver(pid: u32, signal: i32) {
+/// Deliver an owner's `signal` to the program. Most go to the program's
+/// process group. An interrupt goes to the PTY's foreground process group,
+/// as the terminal's own `^C` would: a job the program's shell runs apart,
+/// a raw-mode reader among them, is the one interrupted. A kill goes to
+/// both, so a job that ignores its shell's hangup doesn't outlive it. The
+/// foreground group is read from the PTY, which only this jar holds, so it
+/// is always one of the program's session, never a stranger's.
+pub(super) fn deliver(shared: &Shared, signal: i32) {
     use rustix::process::Signal;
-    let Some(sig) = JarSignal::from_wire(signal) else {
+    let Some(which) = JarSignal::from_wire(signal) else {
         return;
     };
-    let sig = match sig {
+    let sig = match which {
         JarSignal::Interrupt => Signal::INT,
         JarSignal::Terminate => Signal::TERM,
         JarSignal::Kill => Signal::KILL,
@@ -242,7 +249,18 @@ pub(super) fn deliver(pid: u32, signal: i32) {
         JarSignal::Continue => Signal::CONT,
         JarSignal::Hangup => Signal::HUP,
     };
-    if let Some(pid) = i32::try_from(pid).ok().and_then(Pid::from_raw) {
-        let _ = rustix::process::kill_process_group(pid, sig);
+    let program = i32::try_from(shared.child_pid())
+        .ok()
+        .and_then(Pid::from_raw);
+    let foreground = rustix::termios::tcgetpgrp(&shared.master)
+        .ok()
+        .filter(|fg| Some(*fg) != program);
+    let groups = match which {
+        JarSignal::Interrupt => [foreground.or(program), None],
+        JarSignal::Kill => [program, foreground],
+        _ => [program, None],
+    };
+    for group in groups.into_iter().flatten() {
+        let _ = rustix::process::kill_process_group(group, sig);
     }
 }

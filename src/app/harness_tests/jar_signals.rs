@@ -301,11 +301,11 @@ fn ctrl_c_in_a_jarred_capture_asks_its_jar() {
 }
 
 /// Where the jar reports another job in its PTY's foreground (a capture's
-/// shell runs its command as a job of its own), `^C` reaches that job as
-/// the terminal's own key does, by the byte the PTY turns into the signal,
-/// and the jar interrupts its program: no number is signalled.
+/// shell runs its command as a job of its own), `^C` asks the jar alone,
+/// which interrupts that job itself (`jar_captures`, with a real jar): no
+/// byte is typed for it, and no number is signalled.
 #[test]
-fn ctrl_c_with_another_job_in_the_foreground_types_the_key_and_asks_the_jar() {
+fn ctrl_c_with_another_job_in_the_foreground_asks_the_jar_alone() {
     let tmp = tempfile::tempdir().unwrap();
     crate::state::with_state_root(tmp.path(), || {
         let mut program = Bystander::new();
@@ -331,8 +331,8 @@ fn ctrl_c_with_another_job_in_the_foreground_types_the_key_and_asks_the_jar() {
         let frames = before_mark(&jar);
         assert_eq!(signals(&frames), [JarSignal::Interrupt], "{frames:?}");
         assert!(
-            frames.contains(&Msg::Input { bytes: vec![0x03] }),
-            "the terminal's own ^C: {frames:?}"
+            !frames.contains(&Msg::Input { bytes: vec![0x03] }),
+            "a byte typed for ^C, which a raw-mode reader takes as data: {frames:?}"
         );
     });
 }
@@ -379,7 +379,7 @@ fn ctrl_backslash_in_a_jarred_capture_kills_through_its_jar() {
 #[test]
 fn a_host_whose_jar_has_gone_signals_no_number() {
     let mut other = Bystander::new();
-    let (jar, mut host) = host_in_fake_jar(other.pid());
+    let (jar, host) = host_in_fake_jar(other.pid());
     jar.hang_up();
     let until = std::time::Instant::now() + WAIT;
     while host.signal(JarSignal::Stop).is_ok() {
