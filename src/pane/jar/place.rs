@@ -5,10 +5,18 @@
 //! The socket directory is `$XDG_RUNTIME_DIR/spyc/jars`, else
 //! `$TMPDIR/spyc/jars`, else `/tmp/spyc-<uid>/jars`, and each directory spyc
 //! makes there must be this user's, `0700` and not a link before a socket in
-//! it is trusted (finding 14): another user who made `/tmp/spyc` first could
-//! otherwise put a socket where spyc expects a jar. A pane's jar is found by
-//! the path spyc started it at, never worked out again from a changed
+//! it is trusted (finding 14): another user who made `/tmp/spyc-<uid>` first
+//! could otherwise put a socket where spyc expects a jar. A pane's jar is found
+//! by the path spyc started it at, never worked out again from a changed
 //! environment.
+//!
+//! Every client reaches a jar's socket through this one check (the 3.0
+//! review, E2): [`trusted_dir`] before a directory of sockets is read,
+//! [`trusted`] before a socket is reached, and the wrappers [`connect`],
+//! [`describe`] and [`attach`], the only places spyc connects to a jar.
+//! Spawn, adopt, retake, a session's start, `spyc attach`, `spyc shutdown`,
+//! `spyc --jars`, the orphan finder, the store's sweep and the MCP proxy that
+//! follows `SPYC_JAR_SOCKET` all pass through them.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -206,6 +214,114 @@ pub(super) fn private_dir(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The one check before a client trusts what a directory of jar sockets
+/// holds (finding 14, the 3.0 review's E2): `dir` and the directory it is in,
+/// the runtime directory's `spyc`, are this user's alone and not links. The
+/// one above matters too: whoever can write there can put another `dir` in
+/// its place.
+pub fn trusted_dir(dir: &Path) -> anyhow::Result<()> {
+    let base = dir
+        .parent()
+        .with_context(|| format!("{} is no directory of jars", dir.display()))?;
+    private_dir(base)?;
+    private_dir(dir)
+}
+
+/// [`trusted_dir`] for the directory `socket` is in, and `socket` itself a
+/// socket of this user's, not a link.
+pub fn trusted(socket: &Path) -> anyhow::Result<()> {
+    trusted_dir(
+        socket
+            .parent()
+            .with_context(|| format!("{} is in no directory", socket.display()))?,
+    )?;
+    let meta = socket
+        .symlink_metadata()
+        .with_context(|| format!("look at {}", socket.display()))?;
+    own_socket(&meta, socket)
+}
+
+/// `meta`, the file at `path`, is a socket of this user's, not a link.
+fn own_socket(meta: &std::fs::Metadata, path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    anyhow::ensure!(
+        meta.file_type().is_socket(),
+        "{} isn't a socket (a link?); no jar is trusted there",
+        path.display()
+    );
+    let uid = rustix::process::getuid().as_raw();
+    anyhow::ensure!(
+        meta.uid() == uid,
+        "{} belongs to uid {}, not this user's {uid}; no jar is trusted there",
+        path.display(),
+        meta.uid()
+    );
+    Ok(())
+}
+
+/// The jars' sockets in `dir`, sorted, once [`trusted_dir`] passes: each
+/// `*.sock` that is a socket of this user's. None when `dir` doesn't exist.
+pub fn sockets_in(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    if dir
+        .symlink_metadata()
+        .is_err_and(|e| e.kind() == io::ErrorKind::NotFound)
+    {
+        return Ok(Vec::new());
+    }
+    trusted_dir(dir)?;
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .with_context(|| format!("read {}", dir.display()))?
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.path().extension().is_some_and(|x| x == "sock")
+                && e.metadata()
+                    .is_ok_and(|m| own_socket(&m, &e.path()).is_ok())
+        })
+        .map(|e| e.path())
+        .collect();
+    found.sort();
+    Ok(found)
+}
+
+/// [`trusted`] for a client that may ask before its jar binds: the directory
+/// always, the socket once its file is there. A socket not made yet is left
+/// to `Client::connect`, which waits for it.
+pub fn trusted_now(socket: &Path) -> anyhow::Result<()> {
+    if socket.symlink_metadata().is_ok() {
+        return trusted(socket);
+    }
+    trusted_dir(
+        socket
+            .parent()
+            .with_context(|| format!("{} is in no directory", socket.display()))?,
+    )
+}
+
+/// Connect to the jar at `socket` as `role`, once [`trusted_now`].
+pub fn connect(
+    socket: &Path,
+    role: spyc_jar::proto::Role,
+    wait: std::time::Duration,
+    token: &[u8],
+) -> anyhow::Result<(spyc_jar::client::Client, spyc_jar::proto::Msg)> {
+    trusted_now(socket)?;
+    spyc_jar::client::Client::connect(socket, role, wait, token)
+}
+
+/// What the jar at `socket` says of itself, asked as a lookup, once
+/// [`trusted`].
+pub fn describe(socket: &Path) -> anyhow::Result<Vec<(String, String)>> {
+    trusted(socket)?;
+    spyc_jar::client::describe(socket)
+}
+
+/// Attach this terminal to the session's jar at `socket` with `token`, once
+/// [`trusted`] (`spyc attach`).
+pub fn attach(socket: &Path, token: &[u8]) -> anyhow::Result<()> {
+    trusted(socket)?;
+    spyc_jar::attach::run(socket, token)
+}
+
 /// Whether a jar runs at a socket's path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SocketState {
@@ -257,7 +373,8 @@ pub(super) fn sweep(place: &Place, age: std::time::Duration) -> usize {
 
 /// [`sweep`], in `dir`.
 fn sweep_dir(place: &Place, dir: &Path, age: std::time::Duration) -> usize {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    // Nothing is removed from a directory this user can't trust.
+    let Ok(sockets) = sockets_in(dir) else {
         return 0;
     };
     let old_enough = |p: &Path| {
@@ -265,10 +382,8 @@ fn sweep_dir(place: &Place, dir: &Path, age: std::time::Duration) -> usize {
             .and_then(|m| m.modified())
             .is_ok_and(|t| t.elapsed().is_ok_and(|old| old >= age))
     };
-    entries
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "sock"))
+    sockets
+        .into_iter()
         .filter(|p| old_enough(p))
         .filter(|p| socket_state(p) == SocketState::Stale && std::fs::remove_file(p).is_ok())
         .inspect(|p| {

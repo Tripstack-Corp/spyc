@@ -6,7 +6,6 @@
 use super::*;
 
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn a_jar_never_binds_its_socket_again_in_a_directory_open_to_others() {
     use std::os::unix::fs::PermissionsExt;
     let mut jar = Jar::start(&[], &sh("sleep 1000"));

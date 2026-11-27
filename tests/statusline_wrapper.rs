@@ -164,13 +164,14 @@ fn a_pane_forwards_the_projection_to_the_spyc_that_owns_its_jar_now() {
 
     use spyc_jar::client::Client;
     use spyc_jar::proto::{Msg, Role};
-    // A jar's socket lives in a private directory, or spyc won't trust it.
+    // A jar's socket lives in a private directory inside another, as spyc
+    // lays them out, or spyc won't trust it. The jar makes `jars` itself.
     let dir = tempfile::Builder::new()
         .prefix("spyc-sl-")
         .permissions(std::fs::Permissions::from_mode(0o700))
         .tempdir_in("/tmp")
         .unwrap();
-    let jar_socket = dir.path().join("j.sock");
+    let jar_socket = dir.path().join("jars").join("j.sock");
     let token = b"test-token-0123456789";
     let mut jar = Command::new(env!("CARGO_BIN_EXE_spyc-jar"))
         .args(["--wire", "1"])

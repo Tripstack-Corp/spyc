@@ -68,7 +68,7 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
             "{why}: attaching here would show spyc inside itself. `spyc attach --force` attaches anyway"
         );
     }
-    let running = running(&this_users_sessions());
+    let running = running_in(&this_users_sessions())?;
     let chosen = match choose(&running, name).map_err(anyhow::Error::msg)? {
         Some(one) => one.clone(),
         None => ask(
@@ -97,7 +97,7 @@ pub fn run(name: Option<&str>, force: bool) -> anyhow::Result<()> {
         upgrade_first(&chosen.name, program)?;
     }
     crate::terminal::restore_on_signal();
-    let attached = spyc_jar::attach::run(&chosen.socket, &token);
+    let attached = super::place::attach(&chosen.socket, &token);
     // The session's spyc may have ended without a quit of its own (killed,
     // crashed): its jar, holding only the exit, ends too.
     if session_ended(&chosen.socket) {
@@ -121,7 +121,7 @@ fn session_ended(socket: &Path) -> bool {
         if socket_state(socket) != SocketState::Live {
             return true;
         }
-        match spyc_jar::client::describe(socket) {
+        match super::place::describe(socket) {
             Ok(fields) => return fields.iter().any(|(k, _)| k == "exit"),
             Err(_) if Instant::now() >= until => return false,
             Err(_) => std::thread::sleep(TAKEOVER_POLL),
@@ -166,7 +166,7 @@ fn follow_this_agent(address: &str) {
 /// was replaced after it started: an install it hasn't taken. Only for one
 /// that runs from where this spyc does.
 fn behind(socket: &Path) -> Option<(u32, PathBuf)> {
-    let fields = spyc_jar::client::describe(socket).ok()?;
+    let fields = super::place::describe(socket).ok()?;
     let field = |key: &str| {
         fields
             .iter()
@@ -261,19 +261,24 @@ fn agrees(
     Ok(!line.trim_start().to_ascii_lowercase().starts_with('n'))
 }
 
-/// This user's sessions whose own jars run, by name.
+/// This user's sessions whose own jars run, by name: none from a sessions
+/// directory this user can't trust.
 pub fn running_here() -> Vec<Running> {
     running(&this_users_sessions())
 }
 
-/// The sessions whose own jars run in `sessions`, by name.
+/// The sessions whose own jars run in `sessions`, by name: none from a
+/// directory this user can't trust ([`running_in`] says why).
 pub fn running(sessions: &Path) -> Vec<Running> {
-    let mut found: Vec<Running> = std::fs::read_dir(sessions)
+    running_in(sessions).unwrap_or_default()
+}
+
+/// [`running`], or why `sessions` fails the ownership check
+/// (`place::sockets_in`).
+pub fn running_in(sessions: &Path) -> anyhow::Result<Vec<Running>> {
+    let mut found: Vec<Running> = super::place::sockets_in(sessions)?
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|entry| {
-            let socket = entry.path();
+        .filter_map(|socket| {
             let address = address_of(&socket)?;
             if socket_state(&socket) != SocketState::Live || ended(&socket) {
                 return None;
@@ -287,24 +292,22 @@ pub fn running(sessions: &Path) -> Vec<Running> {
         })
         .collect();
     found.sort_by(|a, b| a.name.cmp(&b.name));
-    found
+    Ok(found)
 }
 
 /// Whether the jar at `socket` holds only its program's exit: a session's jar
 /// keeps that a while for an owner, once its spyc has quit.
 pub(super) fn ended(socket: &Path) -> bool {
-    spyc_jar::client::describe(socket).is_ok_and(|fields| fields.iter().any(|(k, _)| k == "exit"))
+    super::place::describe(socket).is_ok_and(|fields| fields.iter().any(|(k, _)| k == "exit"))
 }
 
 /// Whether a session other than the one at `own` (an address) runs in
 /// `sessions` going by `name` or at that address. Reads no jar, so a jar
 /// that holds only its spyc's exit still counts.
 pub fn named_elsewhere(sessions: &Path, name: &str, own: Option<&str>) -> bool {
-    std::fs::read_dir(sessions)
+    super::place::sockets_in(sessions)
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .flatten()
-        .map(|entry| entry.path())
         .filter_map(|socket| Some((address_of(&socket)?, socket)))
         .filter(|(address, _)| Some(address.as_str()) != own)
         .filter(|(_, socket)| socket_state(socket) == SocketState::Live)
@@ -377,7 +380,7 @@ fn started_secs(pid: i32) -> Option<u64> {
 
 /// The pid of the client attached to the jar at `socket`, as it describes it.
 fn client_of(socket: &Path) -> anyhow::Result<Option<i32>> {
-    let fields = spyc_jar::client::describe(socket)?;
+    let fields = super::place::describe(socket)?;
     let field = |key: &str| {
         fields
             .iter()
@@ -574,15 +577,21 @@ mod tests {
 
     #[test]
     fn a_name_is_taken_by_another_live_session_by_its_name_or_address() {
-        let dir = tempfile::tempdir().unwrap();
+        use std::os::unix::fs::DirBuilderExt;
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("spyc").join("sessions");
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)
+            .unwrap();
         let live = |address: &str| {
-            std::os::unix::net::UnixListener::bind(dir.path().join(format!("{address}.sock")))
-                .unwrap()
+            std::os::unix::net::UnixListener::bind(dir.join(format!("{address}.sock"))).unwrap()
         };
         let (_anise, _clove) = (live("ANISE"), live("CLOVE"));
-        super::super::session::write_name(&dir.path().join("CLOVE.sock"), "GENERAL_WORK").unwrap();
-        std::fs::write(dir.path().join("GONE.sock"), "").unwrap();
-        let taken = |name: &str, own: Option<&str>| named_elsewhere(dir.path(), name, own);
+        super::super::session::write_name(&dir.join("CLOVE.sock"), "GENERAL_WORK").unwrap();
+        std::fs::write(dir.join("GONE.sock"), "").unwrap();
+        let taken = |name: &str, own: Option<&str>| named_elsewhere(&dir, name, own);
         assert!(taken("GENERAL_WORK", Some("ANISE")));
         assert!(taken("ANISE", Some("CLOVE")));
         assert!(taken("CLOVE", Some("ANISE")), "a renamed session's address");

@@ -2,7 +2,7 @@
 //! what it holds (R18), and the sockets whose jars are gone. It only reads:
 //! nothing is started, ended or removed.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::place::{SocketState, socket_dirs, socket_state};
 
@@ -16,7 +16,13 @@ pub fn print() {
     .pop()
     .unwrap_or_default();
     println!("jars in {}:", dir.display());
-    let sockets = sockets_in(&dir);
+    let sockets = match super::place::sockets_in(&dir) {
+        Ok(sockets) => sockets,
+        Err(e) => {
+            println!("  none read: {e:#}");
+            return;
+        }
+    };
     if sockets.is_empty() {
         println!("  none");
     }
@@ -28,18 +34,6 @@ pub fn print() {
     }
 }
 
-pub(super) fn sockets_in(dir: &Path) -> Vec<PathBuf> {
-    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "sock"))
-        .collect();
-    found.sort();
-    found
-}
-
 /// One jar's line, `now` in seconds since the epoch.
 fn line(socket: &Path, now: u64) -> String {
     let id = socket
@@ -48,7 +42,7 @@ fn line(socket: &Path, now: u64) -> String {
     if socket_state(socket) == SocketState::Stale {
         return format!("{id}  stale: its jar is gone");
     }
-    let fields = match spyc_jar::client::describe(socket) {
+    let fields = match super::place::describe(socket) {
         Ok(fields) => fields,
         Err(e) => return format!("{id}  no answer ({e:#})"),
     };

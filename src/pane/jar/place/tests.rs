@@ -107,7 +107,6 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
 /// no orphan of this spyc's (the 3.0 review, E2): the orphan finder reads
 /// it as it reads none.
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn the_orphan_finder_trusts_no_directory_open_to_others() {
     let dir = super::super::test_dir::TestDir::new("pt");
     let place = Place {
@@ -139,7 +138,6 @@ fn the_orphan_finder_trusts_no_directory_open_to_others() {
 /// ownership check's refusal is evidence about the socket, not a silence, so
 /// the retake doesn't ask it again for as long as the jar runs (#1399).
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn a_retake_under_a_directory_open_to_others_is_detached_at_once() {
     use std::io::Read;
     let dir = super::super::test_dir::TestDir::new("pr");
@@ -205,7 +203,6 @@ fn a_retake_under_a_directory_open_to_others_is_detached_at_once() {
 /// this user's alone, the runtime directory's `spyc` included, as spawn
 /// requires (the 3.0 review, E2).
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn the_mcp_proxy_follows_no_jar_under_a_directory_open_to_others() {
     let dir = super::super::test_dir::TestDir::new("pt");
     crate::state::with_state_root(dir.path(), || {
@@ -234,7 +231,6 @@ fn the_mcp_proxy_follows_no_jar_under_a_directory_open_to_others() {
 /// A link in the sessions directory names no session, whatever it points at:
 /// only a socket of this user's does (the 3.0 review, E2).
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn a_link_in_the_sessions_directory_names_no_session() {
     let dir = super::super::test_dir::TestDir::new("pt");
     let place = Place {
@@ -266,7 +262,6 @@ fn a_link_in_the_sessions_directory_names_no_session() {
 /// looks a jar up or attaches by itself. Fails closed: `place` must hold
 /// each call it wraps, and the scan must have read spyc's sources.
 #[test]
-#[ignore = "red until E2: fix/socket-trust"]
 fn every_jar_socket_is_reached_through_the_ownership_check() {
     const CALLS: &[&str] = &[
         "Client::connect(",
@@ -329,4 +324,41 @@ fn every_jar_socket_is_reached_through_the_ownership_check() {
         missing.is_empty(),
         "{PLACE} wraps none of {missing:?}: the guard checks nothing"
     );
+}
+
+/// A socket its jar hasn't made yet, in a directory this user holds alone,
+/// is waited for, as `Client::connect` waits, not refused at once: a jar's
+/// start and a retake ask before the jar binds (the refuter on E2's fix).
+#[test]
+fn a_socket_not_made_yet_in_a_trusted_directory_is_waited_for() {
+    use spyc_jar::proto::{self, Msg, Role};
+    let dir = super::super::test_dir::TestDir::new("pw");
+    let place = place_in(dir.path());
+    place.prepare().unwrap();
+    let socket = place.socket("ffff");
+    let at = socket.clone();
+    // The jar binds a moment after the client first asks.
+    let jar = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        let listener = std::os::unix::net::UnixListener::bind(&at).unwrap();
+        let (mut conn, _) = listener.accept().unwrap();
+        if let Ok(Some(Msg::Hello { .. })) = proto::read_msg(&mut conn) {
+            let _ = proto::write_msg(
+                &mut conn,
+                &Msg::Welcome {
+                    version: proto::VERSION,
+                    child_pid: std::process::id(),
+                    head: 0,
+                    base: 0,
+                    rows: 24,
+                    cols: 80,
+                },
+            );
+        }
+    });
+    let reached = connect(&socket, Role::Reader, Duration::from_secs(5), b"t")
+        .map(|_| ())
+        .map_err(|e| format!("{e:#}"));
+    assert!(reached.is_ok(), "refused before the jar bound: {reached:?}");
+    jar.join().unwrap();
 }

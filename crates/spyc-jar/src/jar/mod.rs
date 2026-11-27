@@ -580,8 +580,13 @@ const SOCKET_CHECK: Duration = Duration::from_secs(2);
 /// macOS removes what's left untouched in `$TMPDIR` for days, and a
 /// listening socket's file is never touched. A jar whose path has gone binds
 /// a new socket there; one whose path holds something else leaves it be.
+/// It binds only in a directory that is its user's alone, as at its start
+/// (finding 14, the 3.0 review's E2): one another user made where the jar's
+/// was, or can write in, could hold their socket at its address. It says so
+/// once, and looks again at the next check.
 fn keep_socket(shared: &Shared) {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    static SAID: AtomicBool = AtomicBool::new(false);
     let path = &shared.cfg.socket;
     if path.symlink_metadata().is_ok() {
         return;
@@ -591,6 +596,16 @@ fn keep_socket(shared: &Shared) {
             .recursive(true)
             .mode(0o700)
             .create(dir);
+        if let Err(e) = crate::store::private_dir(dir) {
+            if !SAID.swap(true, Ordering::SeqCst) {
+                eprintln!(
+                    "spyc-jar: not listening again at {}: its directory is open to others or \
+                     not this user's ({e:#})",
+                    path.display()
+                );
+            }
+            return;
+        }
     }
     let Ok(fresh) = UnixListener::bind(path) else {
         return;
