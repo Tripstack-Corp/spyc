@@ -28,13 +28,19 @@ The realistic threats are:
   socket exposes tool calls to whatever process can read
   `~/.local/state/spyc/mcp-<pid>.sock`. Filesystem permissions gate
   this; an attacker already running as your user can talk to any of
-  your spyc instances.
+  your spyc instances. The three requests that act on a whole session
+  need that session's token ("Control requests" below), which keeps out
+  a stray client, not a process of yours that reads the token file.
+- **Another user on a shared machine** — since 3.0 your tabs' programs
+  run in jars that listen on sockets in your runtime directory. Another
+  user must never reach them, nor put a socket of theirs where spyc
+  looks for yours ("Jars and sessions" below).
 - **MCP tool misuse by the connected agent** — distinct from the above
   and worth stating plainly, because it is the case people assume is
   covered. See "MCP is not a privilege boundary" below.
 
-spyc has no remote attack surface, no privilege boundary inside the
-binary, and handles no secrets of its own.
+spyc has no remote attack surface and no privilege boundary inside the
+binary. It keeps one kind of secret of its own: each jar's token, below.
 
 It does, however, **parse a great deal of untrusted input**: any file
 you open in the pager, ANSI/escape output from arbitrary child
@@ -131,6 +137,150 @@ answer from, and with it their allowed set. That is routing, not a
 boundary: a forged id reaches another of the same user's open projects,
 none of which is out of the agent's own shell's reach. Real containment needs OS-level isolation — a separate
 uid, a container — which is outside spyc's scope.
+
+## Jars and sessions
+
+From 3.0, each tab's program, each `!` capture and each task runs in a
+`spyc-jar`: a small process that holds the program and its terminal, and
+outlives spyc, so a crash, `^d` or an upgrade doesn't end your programs.
+After `^d`, spyc itself runs in a jar of its own, a session, which
+`spyc attach` brings back to a terminal. The protocol, and every rule
+below in detail, is in [`docs/JAR_PROTOCOL.md`](docs/JAR_PROTOCOL.md).
+
+### Where jars listen, and who may connect
+
+Each jar listens on a Unix socket in your runtime directory:
+`$XDG_RUNTIME_DIR/spyc`, else `$TMPDIR/spyc`, else `/tmp/spyc-<uid>`.
+
+- A jar asks the kernel who opened each connection, and closes one from
+  another user before reading anything from it.
+- spyc trusts a socket only in a directory that is yours, not a link and
+  closed to everyone else, with the directory above it the same, and only
+  a socket that is yours. Every path checks: starting a tab and taking one
+  back, `spyc attach`, `spyc shutdown`, `spyc --jars`, the look for jars no
+  spyc owns, an agent's MCP connection following its tab's jar, and the
+  directory of links each tab's `SSH_AUTH_SOCK` names. A jar whose socket a
+  cleaner deleted listens again only in such a directory.
+
+**The shared `/tmp` case.** On Linux with neither `XDG_RUNTIME_DIR` nor
+`TMPDIR` set, as in a login without systemd-logind, after `su`, in some
+containers and on CI, the directory is `/tmp/spyc-<uid>`, and another user
+can create it before you do. spyc then refuses it and says why, so nothing
+of yours reaches them. They can still stop you: while that directory is
+theirs, no tab of yours starts in a jar, `^d` can't detach, and your tabs
+get no SSH-agent link. Set
+`XDG_RUNTIME_DIR` or `TMPDIR` to a directory of your own, or have the
+other directory removed. On macOS `TMPDIR` is always yours.
+
+### The token, and what it doesn't cover
+
+Each jar has a random token, 32 bytes. spyc gives it to the jar on its
+standard input, never in its arguments or environment, where any process
+of yours could read it, and keeps it in `jar-tokens/` under spyc's state
+directory (`$XDG_STATE_HOME/spyc`, else `~/.local/state/spyc`), so a spyc
+started after a crash can take its tabs back. spyc makes that directory
+`0700` and each file `0600` when it creates them; a directory or file that
+already exists keeps the mode it has, so check it if you restored the state
+directory from a backup.
+
+- Without the token, a connection may only ask a jar to describe itself
+  (its pids, its program, its working directory, its tab's label) or check
+  that it answers. The jar's own program is the exception: without the
+  token it may also detach the jar's owner, ending spyc's connection to
+  that tab until spyc takes it back. With the token, a connection can type
+  into the program, see everything it prints, signal it, and upgrade the jar.
+- The same token admits the jar's owner and a reader. There is no
+  read-only access to a jar: never hand its token to anything you wouldn't
+  let type into it.
+- A session's token is control of the whole session: every key reaches
+  spyc, and through it every tab. spyc forgets it once the session has
+  ended on evidence: its jar's lock free, or the session's spyc gone by its
+  start time. A crash, a logout or a reboot is caught the next time spyc
+  starts a jar. A session spyc never saved and whose jar left nothing keeps
+  its token file, and so does one renamed with `:name` whose runtime
+  directory was emptied: its saved session goes by the new name, its token
+  file by the one it started with.
+
+The token stops a program that finds a socket and connects to it by
+accident or out of curiosity. It doesn't stop a process running as you that
+sets out to use it: one that reads the token file, attaches a debugger to
+spyc or edits your shell's startup files. An agent under a prompt injection
+that has a shell is such a process: it can read the file too. Where an
+agent runs in a sandbox, deny it spyc's runtime and state directories: that
+is the guard that holds.
+
+### Jar binaries and their upgrade
+
+Every jar starts from spyc's store of jar binaries, `jar-bin/` under the
+state directory: copies of the `spyc-jar` installed beside spyc, each
+checked to be this build's when spyc starts. The store is yours alone, and
+its copies read-only. A process running as you can replace a copy, as it
+could replace spyc itself.
+
+After you install a new spyc, it asks each jar to move to the new build in
+place: the jar runs the new binary once as a check, handing it the jar's
+state, its token included, then replaces itself with it, keeping its
+program running. Only a connection holding the token may ask, and that is
+why the token is full control: whoever holds it can have the jar run a
+file of their choosing, as you.
+
+### Attaching, and your SSH agent
+
+`spyc attach` reads the session's token from the state directory and
+attaches your terminal to the session's jar. A session attached in another
+terminal moves to yours: `spyc attach` ends the client attached there.
+
+That file is `spyc attach`'s only copy of the token. A process running as
+you that rewrites it gains nothing by it, since the jar checks its own copy,
+but it locks you out: `spyc attach` says `refused: wrong token`, and
+`spyc shutdown` is refused too. A terminal attached already stays attached, and the
+session runs on. To get back in, end the session's spyc as a crash would:
+`ps` shows it as the child of a `spyc-jar NAME` process, NAME being the
+name the session started with: for a session renamed with `:name`, a bare
+`spyc attach` shows that name in parentheses after the new one. Stop it with `kill -9`, then the `spyc-jar NAME` process with
+`kill`, which otherwise waits for an owner that can't come. The tabs'
+programs keep running in their own jars, and `spyc -r` lists the session:
+choosing it takes each tab's program back, still running, in a new spyc.
+
+When you attach from a terminal with an SSH agent, as over `ssh -A`, every
+tab of the session uses that agent while you stay attached. Any program in
+any tab, an agent among them, can ask it to sign. Attach without agent
+forwarding when you don't want that.
+
+### Control requests
+
+Three requests on spyc's MCP socket act on the whole session:
+`spyc/shutdown` saves it and ends spyc and every tab (`spyc shutdown` sends
+it), `spyc/release` lets the session go to another spyc (`:attach project`),
+and `spyc/upgrade` moves it to a newer install (`spyc attach` offers it).
+What this protects against, plainly: a spyc that doesn't run in a session
+jar of its own takes none of the three, whatever they carry, and a caller
+without the session's token is refused. The session's jar checks the token
+itself, so writing a token into the token file opens nothing (it locks
+`spyc attach` out, as above). It doesn't
+stop a process of yours that reads the token file and sends it, as
+`spyc shutdown` does. A refusal is shown and logged in the session. There
+is no prompt to approve a request: a detached spyc has no one to ask. Each
+is answered, a refusal with why: `spyc attach` says why the session won't
+upgrade (no newer spyc where it runs from, a tab outside a jar) and attaches
+to it as it is.
+
+`spyc shutdown` and `spyc attach` refuse to run inside spyc, in a tab or
+in anything a spyc or a tab's program started, which they tell by the
+environment spyc gives its tabs. That is a speed bump, not a boundary: a
+program can clear its environment and run either anyway.
+
+Three other requests need no token: `spyc/behind` says whether a newer
+spyc is installed, `spyc/statusline` lets any process of yours set the
+figures a tab's status line shows, and `spyc/disconnected` makes spyc show
+a message naming a process id.
+
+### Crash reports
+
+A spyc that panics writes a report, readable by you alone, to `crash/`
+under the state directory. Nothing is sent anywhere. The issue link it
+offers leaves out your home, your working directory and anything shaped
+like a path or a file name; the file itself keeps the message whole.
 
 ## Supply-chain controls (what we do)
 
@@ -326,7 +476,8 @@ the bump gate. `deny.toml` records the same.
   user's, or one the kernel can't name, is closed before a byte of it is
   read. But anyone running as your user on the same machine can still open
   it and exercise the MCP tool surface: we rely on user-process isolation,
-  not on stricter ACLs.
+  not on stricter ACLs. Only the three control requests also need the
+  session's token.
 - **Wiring an agent puts spyc in every session of it,** not only those spyc
   launches: saying yes at its first launch (or `spyc --install-agents`) adds
   spyc's status hooks and MCP entry to the agent's own configuration. The hooks
@@ -355,7 +506,11 @@ Update this document when any of the following change:
 - A new advisory is ignored in `deny.toml` (the reason should also
   be expanded here under "known caveats" if it's load-bearing).
 - spyc gains a network attack surface (HTTP client, RPC server,
-  remote config source).
+  remote config source). The jars' protocol is an RPC server on local
+  sockets; it is covered above, and a change to it belongs here too.
+- The jar protocol gains a role, a request or a version, a jar's token
+  reaches a new place, or a new request on the MCP socket acts on a
+  whole session.
 - A distribution channel is added or removed, or the signing chain
   changes (new key, a channel that stores a credential, a move away
   from keyless).
