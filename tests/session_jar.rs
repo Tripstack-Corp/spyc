@@ -924,3 +924,98 @@ fn a_spyc_in_a_panes_jar_takes_it_for_a_panes_not_its_own() {
         "named after a jar that isn't its own"
     );
 }
+
+/// Where `spyc attach` finds a session's token (`keep_token`).
+fn token_file(dirs: &Dirs, name: &str) -> PathBuf {
+    dirs.state.join("spyc/jar-tokens").join(name)
+}
+
+/// A session shut down forgets its token (the 3.0 review, E7): once
+/// `spyc shutdown` has seen it end, no token file is left for it.
+#[test]
+#[ignore = "red until E7: fix/session-token-forgotten"]
+fn a_session_shut_down_forgets_its_token() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    assert!(
+        token_file(&dirs, NAME).exists(),
+        "premise: the session's token is kept"
+    );
+    // The socket file is there before spyc listens on it, and `spyc shutdown`
+    // connects once: wait until it accepts.
+    let spyc = jar.described("program_pid").expect("the session's spyc");
+    let mcp = dirs.state.join(format!("spyc/mcp-{spyc}.sock"));
+    eventually("spyc's MCP socket accepts", || {
+        std::os::unix::net::UnixStream::connect(&mcp).is_ok()
+    });
+    let out = Command::new(env!("CARGO_BIN_EXE_spyc"))
+        .args(["shutdown", NAME, "-y"])
+        .env_clear()
+        .envs(dirs.env())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    assert!(
+        !token_file(&dirs, NAME).exists(),
+        "the ended session's token is still kept"
+    );
+}
+
+/// A session quit from the terminal attached to it forgets its token.
+#[test]
+#[ignore = "red until E7: fix/session-token-forgotten"]
+fn a_session_quit_from_its_terminal_forgets_its_token() {
+    let dirs = Dirs::new();
+    let _jar = session(&dirs, NAME);
+    let mut term = Attached::start(&dirs, &["attach", NAME]);
+    term.wait_drawn(NAME);
+    term.quit_spyc();
+    assert!(
+        !token_file(&dirs, NAME).exists(),
+        "the ended session's token is still kept"
+    );
+}
+
+/// A session quit from a terminal that isn't `spyc attach` (a raw client of
+/// its jar) forgets its token by its own spyc, as it quits for good.
+#[test]
+#[ignore = "red until E7: fix/session-token-forgotten"]
+fn a_session_quit_by_its_own_spyc_forgets_its_token() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let terminal = Terminal::attach(&jar, (30, 100), PLAIN);
+    terminal.wait_for("the session drawn", NAME);
+    quit_with_q(
+        "spyc quits when told to",
+        |keys| terminal.type_keys(keys),
+        || terminal.text().contains(QUIT_ASKS),
+        || jar.described("exit").is_some() || !jar.socket.exists(),
+    );
+    assert!(
+        !token_file(&dirs, NAME).exists(),
+        "the ended session's token is still kept"
+    );
+}
+
+/// A session whose spyc died while a terminal was attached forgets its token
+/// once that terminal's `spyc attach` learns its jar holds only the exit.
+#[test]
+#[ignore = "red until E7: fix/session-token-forgotten"]
+fn a_session_whose_spyc_died_forgets_its_token_through_its_terminal() {
+    let dirs = Dirs::new();
+    let jar = session(&dirs, NAME);
+    let mut term = Attached::start(&dirs, &["attach", NAME]);
+    term.wait_drawn(NAME);
+    let spyc = jar
+        .described("program_pid")
+        .and_then(|p| p.parse().ok())
+        .and_then(rustix::process::Pid::from_raw)
+        .expect("the session's spyc");
+    rustix::process::kill_process(spyc, rustix::process::Signal::KILL).unwrap();
+    term.exit();
+    assert!(
+        !token_file(&dirs, NAME).exists(),
+        "the ended session's token is still kept"
+    );
+}
