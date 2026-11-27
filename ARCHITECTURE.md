@@ -1164,6 +1164,15 @@ save failed came back empty beside jars no spyc owned. `release_jars` takes a
 `SavedReleased`, which only a successful `save_released` makes, so letting
 the jars go before that save doesn't compile.
 
+Both orders are checked by crashing spyc, not by reading the code: a debug
+build ends itself with `SIGKILL` at a named point after each write and each
+jar let go in these handovers when `SPYC_HANDOVER_FAULT` names it
+(`src/handover_fault.rs`, which lists the points). `tests/handover_faults.rs`
+crashes spyc at every point and finds each program still in its jar, none
+started twice, and the session back on the same jars by `spyc -r`, or by the
+spyc in the session's own jar. A guard keeps a new write or release from going
+in without a point.
+
 ## A pane in a jar
 
 <!-- SPYC-TRAP: jar-or-nothing -->

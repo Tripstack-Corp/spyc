@@ -388,6 +388,7 @@ pub(super) fn start_in(
     }
     let token = super::tokens::new()?;
     super::tokens::save(place, &socket, &token)?;
+    crate::handover_fault::reached(crate::handover_fault::Point::SessionTokenSaved);
     let start = spyc_jar::cli::Start {
         token,
         socket: socket.clone(),
