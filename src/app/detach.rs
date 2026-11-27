@@ -32,6 +32,7 @@ use super::App;
 use super::proc::ForegroundExec;
 use super::tasks::TaskStatus;
 use crate::Tui;
+use crate::handover_fault::{self, Point};
 
 /// A handover, left for `lib.rs` once the loop ends: the session is saved
 /// and, for `^d`, its jar runs.
@@ -168,7 +169,7 @@ impl App {
         };
         // SPYC-TRAP(handover-ready-before-release): saved, synced, and its jar
         // running before any jar is let go; a failure of either stays here.
-        let saved = match self.save_released() {
+        let saved = match self.save_released(Point::DetachSaved) {
             Ok(saved) => saved,
             Err(e) => {
                 let e = anyhow::Error::new(e).context(format!("{name} wasn't saved"));
@@ -196,6 +197,9 @@ impl App {
                     crate::pane::jar::session::start(place, &named, handover_argv(&at), &cwd, size)
                         .map(drop)
                         .map_err(|e| format!("{e:#}"));
+                if started.is_ok() {
+                    handover_fault::reached(Point::DetachJarStarted);
+                }
                 HandoverStart {
                     name: named,
                     exe: at,
@@ -279,6 +283,7 @@ impl App {
         if self.autosave_session() {
             self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
         }
+        handover_fault::reached(Point::DetachKept);
     }
 
     /// `:upgrade`, with the loop: only to a binary installed since spyc
@@ -301,7 +306,7 @@ impl App {
             (Some(_), Some(name), Some(at)) => {
                 // SPYC-TRAP(handover-ready-before-release): saved, synced,
                 // before any jar is let go; a failed save stays here.
-                let saved = match self.save_released() {
+                let saved = match self.save_released(Point::UpgradeSaved) {
                     Ok(saved) => saved,
                     Err(e) => {
                         self.state.flash_error(format!(
@@ -412,7 +417,12 @@ impl App {
             exe,
             saved,
         } = handover;
-        self.release_jars(saved.clone());
+        let released = if *in_place {
+            Point::UpgradeReleased
+        } else {
+            Point::DetachReleased
+        };
+        self.release_jars(saved.clone(), released);
         if *in_place {
             let err = std::process::Command::new(exe)
                 .args(upgrade_args(std::env::args_os().skip(1)))
@@ -430,27 +440,32 @@ impl App {
 
     /// Save the session as no running spyc's, synced, each tab with the
     /// status its agent last reported: the next spyc restores it, and a session
-    /// whose spyc runs is restored as a copy.
-    pub(super) fn save_released(&mut self) -> std::io::Result<SavedReleased> {
+    /// whose spyc runs is restored as a copy. `saved` is the handover's
+    /// fault point just after it (`handover_fault`).
+    pub(super) fn save_released(&mut self, saved: Point) -> std::io::Result<SavedReleased> {
         let mut manifest = self.build_manifest();
         manifest.pid = None;
         manifest.process_started = None;
         self.carry_live(&mut manifest);
         crate::state::sessions::save_session_durably(&manifest)?;
+        handover_fault::reached(saved);
         Ok(SavedReleased { id: manifest.id })
     }
 
     /// Leave every jar running for the next spyc, its connection ended as a
     /// crash would, and clear what this spyc kept for itself. Only for a
-    /// session `_saved` as released.
-    pub(super) fn release_jars(&mut self, _saved: SavedReleased) {
+    /// session `_saved` as released. `released` is the handover's fault
+    /// point after each jar let go (`handover_fault`).
+    pub(super) fn release_jars(&mut self, _saved: SavedReleased, released: Point) {
         for (_, tabs) in self.runtime.every_tab_set() {
             for entry in tabs.tabs() {
                 entry.pane.host.sever_jar();
+                handover_fault::reached(released);
             }
         }
         for task in &self.runtime.background_tasks.tasks {
             task.host.sever_jar();
+            handover_fault::reached(released);
         }
         for path in self.view.context_paths() {
             crate::context::remove_context_file(path);

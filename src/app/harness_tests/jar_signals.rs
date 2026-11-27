@@ -452,6 +452,11 @@ fn no_number_is_signalled_outside_the_listed_sites() {
             "rustix::process::kill_process(target, rustix::process::Signal::TERM)",
             "`spyc attach` ends the attach client the session's jar names, never a jar's program",
         ),
+        (
+            "src/handover_fault.rs",
+            "let _ = kill_process(getpid(), Signal::KILL);",
+            "a debug build's handover fault: spyc ends itself, as a crash would",
+        ),
     ];
     const CALLS: &[&str] = &[
         "kill_process_group(",

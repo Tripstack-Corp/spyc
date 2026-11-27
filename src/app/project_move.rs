@@ -41,6 +41,7 @@ use super::landing::spawn_worker;
 use super::message::Wake;
 use super::state::ProjectId;
 use super::{App, Effect};
+use crate::handover_fault::{self, Point};
 use crate::pane::{AgentActivity, ReportedStatus, TabInfo};
 use crate::state::scope_registry::ScopeClaim;
 use crate::state::sessions::{Held, MANIFEST_VERSION, Manifest, SavedLive};
@@ -100,6 +101,7 @@ impl App {
             ));
             return;
         }
+        handover_fault::reached(Point::MoveSaved);
         let cwd = manifest
             .projects
             .first()
@@ -229,6 +231,7 @@ impl App {
                 .iter()
                 .map(|e| {
                     e.pane.host.sever_jar();
+                    handover_fault::reached(Point::MoveReleased);
                     e.info.id.clone()
                 })
                 .collect()
@@ -239,6 +242,7 @@ impl App {
         if self.autosave_session() {
             self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
         }
+        handover_fault::reached(Point::MoveResaved);
     }
 
     /// Start session `name`'s own jar, its spyc running at once in `cwd`, on a
@@ -268,6 +272,9 @@ impl App {
                 let started = crate::pane::jar::session::start(place, &named, argv, &cwd, size)
                     .map(drop)
                     .map_err(|e| format!("{e:#}"));
+                if started.is_ok() {
+                    handover_fault::reached(Point::MoveJarStarted);
+                }
                 MovedStart {
                     label: for_work,
                     name: named,
@@ -345,6 +352,7 @@ impl App {
             ));
             return;
         }
+        handover_fault::reached(Point::MoveTabSaved);
         let cwd = manifest
             .projects
             .first()
@@ -426,6 +434,7 @@ impl App {
         let users = tabs.active_info().id.clone();
         tabs.switch_to(index);
         tabs.active().host.sever_jar();
+        handover_fault::reached(Point::MoveTabReleased);
         // Severed first, so what closing the tab sends its jar goes nowhere.
         self.close_active_tab_now();
         if let Some(tabs) = self.runtime.project_mut().pane_tabs.as_mut()
@@ -443,6 +452,7 @@ impl App {
         if self.autosave_session() {
             self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
         }
+        handover_fault::reached(Point::MoveTabResaved);
     }
 }
 
@@ -706,6 +716,7 @@ impl App {
         let kept = crate::state::sessions::save_session_durably(&own);
         if kept.is_ok() {
             self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+            handover_fault::reached(Point::TakeSaved);
         }
         if kept.is_ok()
             && stayed.is_empty()
@@ -713,6 +724,7 @@ impl App {
         {
             crate::spyc_debug!("attach: {name}'s file stays: {e:#}");
         }
+        handover_fault::reached(Point::TakeRemoved);
         let labels: Vec<&str> = opened.iter().map(|(_, l)| l.as_str()).collect();
         if stayed.is_empty() {
             self.state
@@ -754,10 +766,12 @@ impl App {
         self.carry_live(&mut own);
         if crate::state::sessions::save_session_durably(&own).is_ok() {
             self.runtime.autosave_last_saved_fp = Some(self.session_fingerprint());
+            handover_fault::reached(Point::TakeTabsSaved);
             if let Err(e) = crate::state::sessions::remove_session(manifest.id) {
                 crate::spyc_debug!("attach: {name}'s file stays: {e:#}");
             }
         }
+        handover_fault::reached(Point::TakeTabsRemoved);
         if unopened.is_empty() {
             self.state
                 .flash_info(format!("attached {name}'s tabs: {}", opened.join(", ")));
@@ -793,7 +807,7 @@ impl App {
                 message: format!("{what}, so it stays"),
             };
         }
-        let saved = match self.save_released() {
+        let saved = match self.save_released(Point::ReleaseSaved) {
             Ok(saved) => saved,
             Err(e) => {
                 return McpResponse::Error {
@@ -806,9 +820,10 @@ impl App {
         if let Some(jar) = &self.runtime.own_jar {
             jar.forget_token();
         }
+        handover_fault::reached(Point::ReleaseTokenForgotten);
         self.runtime.released = true;
         let id = saved.id();
-        self.release_jars(saved);
+        self.release_jars(saved, Point::ReleaseReleased);
         self.state
             .note_event("released: another spyc takes this session's projects");
         self.state.should_quit = true;

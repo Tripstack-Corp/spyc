@@ -83,6 +83,10 @@ fn sources() -> Vec<Source> {
         whole("tests/jar_compat.rs", include_str!("../jar_compat.rs")),
         whole("tests/session_jar.rs", include_str!("../session_jar.rs")),
         whole(
+            "tests/handover_faults.rs",
+            include_str!("../handover_faults.rs"),
+        ),
+        whole(
             "crates/spyc-jar/tests/wire_v1.rs",
             include_str!("../../crates/spyc-jar/tests/wire_v1.rs"),
         ),

@@ -33,6 +33,7 @@ mod fuzz_support;
 mod git;
 #[cfg(test)]
 mod guard_support;
+mod handover_fault;
 mod key_trace;
 mod keymap;
 mod lua;
