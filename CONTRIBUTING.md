@@ -89,6 +89,37 @@ We use GitHub pull requests. The target branch is `main`.
    separate approving review (the maintainer can't approve their own PR);
    external contributions are reviewed by the maintainer before merge.
 
+## Campaigns
+
+A campaign is a run of PRs toward one larger change, planned in slices: the jar's S1 to S6 (#1099) was one. Two rules come from what the pre-3.0 review cost. The jar work landed 195 commits in 15 days that only their authors had read; the review then found 4 highs and 31 mediums ([`SYNTHESIS.md`](docs/drafts/review-3.0/SYNTHESIS.md)), and closing them took 86 PRs. Most of those findings were of kinds that a check made while the code was written catches for less than a review at the end.
+
+### A refuter checks each risky PR
+
+Before a PR goes to the owner, someone who didn't write it, usually a fresh subagent with no part in the change, tries to break it against the tree:
+
+- **The red.** It runs the new test at the red commit (with `--include-ignored` if it landed ignored) and sees it fail for the reason the test states, then reverts the fix alone and sees it fail again.
+- **Mutations.** It breaks the fix the ways a later edit might (drops a check, flips a condition, skips one site) and sees a test catch each one.
+- **Every site.** For a fix to a pattern, it runs the search that found the sites again, checks each one, and breaks the guard left behind to see it fail closed.
+- **What else broke.** It reads what the change touches beyond its finding, waits first: a clock may bound a wait, never conclude a fact.
+
+Its verdict goes in the PR body under `## Refuter`: cleared, or each finding with what became of it, fixed on the branch and checked again or filed as an issue the PR names. The author doesn't edit the verdict.
+
+A refuter is required for every PR in a campaign, and for any PR that touches `crates/spyc-jar/`, `src/pane/jar/`, sessions and handovers (`src/state/sessions/`, `src/app/detach.rs`, `src/app/session.rs`, `src/app/session_restore.rs`, `src/app/project_move.rs`, `src/handover_fault.rs`), the `spyc/*` control methods in `src/mcp/`, or the release workflows. Elsewhere it is worth its cost on any fix to a reported finding.
+
+It runs per PR because the author's gate doesn't find these. In the 3.0 remediation, refuters found defects in fixes that were green on both platforms: a connect that spun on the socket-trust fix, a release that dropped the owner's connection before clearing the owner (#1398), a retake that asked a jar again in a tight loop (#1399), and handover fault cases that never checked the jars that stayed put.
+
+### A campaign builds its test tools first
+
+A campaign's first slice builds the tools its later tests need, before any feature slice relies on them:
+
+- **Fault points.** A debug-only hook that ends the process at a named point after each durable write and each release, a test that runs every point, and a guard that a new write or release gets one: `SPYC_HANDOVER_FAULT` with `tests/handover_faults.rs`, `SPYC_JAR_RESUME_FAULT` and `SPYC_JAR_THREAD_FAULT` are the models.
+- **The OS's refusals, as tests.** A thread or process refused (`RLIMIT_NPROC`), descriptors run out, a read interrupted (`EINTR`), a peer gone (`SIGPIPE`), a process stopped and continued. Each gets a test in the slice that first makes such a call.
+- **Waits on state.** A test waits for the state a deadline bounds, never a fixed sleep, and a guard like `no_fixed_wait_concludes_a_jar_test` covers the campaign's test files from the first one.
+- **Clean test processes.** Every process a test starts ends with its scratch directory, and a child's standard error is kept and printed when the test fails.
+- **A loaded run.** The campaign's tests also run under CPU load on both platforms, so a test that passes only on an idle machine is found when it lands. The review's scripts are the starting point: `docs/drafts/review-3.0/evidence/B/mac_load.sh` and `docs/drafts/review-3.0/evidence/B/linux/load.sh`.
+
+In 3.0 these tools came during the remediation (slice A and the handover fault tests), after the jar's code had been written without them, and 9 of the 26 issues the remediation filed were tests that failed intermittently, 7 of them under load.
+
 ## Code conventions
 
 ### Rust style
@@ -235,6 +266,8 @@ Moving or splitting a doc? `every_relative_markdown_link_resolves`
 pointing at nothing, and `every_section_reference_resolves` does the same
 for a prose reference to a section (`ARCHITECTURE.md → "MCP server"`,
 `RELEASE_ENGINEERING.md §8`), as long as the section's name is in quotes.
+
+The other guards on documents: hub links (`every_feature_and_config_page_is_linked_from_its_hub`), `:` commands (`every_command_is_documented_for_users`), default key bindings in `docs/KEYBINDINGS.md` and the `?` overlay (`every_default_binding_is_in_the_keymap_reference`, `every_default_binding_is_in_the_help_overlay`), module docs (`every_module_opens_with_a_module_doc`) and hub size (`hub_pages_stay_overviews`).
 
 ## Versioning
 
